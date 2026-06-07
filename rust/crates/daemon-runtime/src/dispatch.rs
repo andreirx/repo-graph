@@ -949,23 +949,9 @@ impl ServiceDispatcher {
             }
         };
 
-        // Find callers
+        // QUERY-AUTO-LAZY-SQLITE-1: the SQLite read is now LAZY -- a closure the engine_response calls ONLY
+        // when LiveGraph cannot serve (or for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
         let edge_types = ["CALLS"];
-        let callers = match repo_state.storage.find_direct_callers(
-            &snapshot.snapshot_uid,
-            &target.stable_key,
-            &edge_types,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        // LIVEGRAPH-INTEGRATION-1B: engine selector (default sqlite = byte-compatible above).
         let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
             &request.params,
             "engine",
@@ -977,11 +963,23 @@ impl ServiceDispatcher {
             engine,
             &repo_state,
             &target,
-            callers,
+            || {
+                repo_state.storage.find_direct_callers(
+                    &snapshot.snapshot_uid,
+                    &target.stable_key,
+                    &edge_types,
+                )
+            },
             symbol,
             &repo_root,
         );
-        DispatchResult::success(&request.id, value)
+        match value {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
     }
 
     fn handle_callees(&self, request: &Request) -> DispatchResult {
@@ -1044,23 +1042,9 @@ impl ServiceDispatcher {
             }
         };
 
-        // Find callees
+        // QUERY-AUTO-LAZY-SQLITE-1: LAZY SQLite read -- the closure runs ONLY when LiveGraph cannot serve (or
+        // for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
         let edge_types = ["CALLS"];
-        let callees = match repo_state.storage.find_direct_callees(
-            &snapshot.snapshot_uid,
-            &target.stable_key,
-            &edge_types,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        // LIVEGRAPH-INTEGRATION-1B: engine selector (default sqlite = byte-compatible above).
         let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
             &request.params,
             "engine",
@@ -1072,11 +1056,23 @@ impl ServiceDispatcher {
             engine,
             &repo_state,
             &target,
-            callees,
+            || {
+                repo_state.storage.find_direct_callees(
+                    &snapshot.snapshot_uid,
+                    &target.stable_key,
+                    &edge_types,
+                )
+            },
             symbol,
             &repo_root,
         );
-        DispatchResult::success(&request.id, value)
+        match value {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
     }
 
     fn handle_imports(&self, request: &Request) -> DispatchResult {
@@ -1602,29 +1598,10 @@ impl ServiceDispatcher {
         };
 
         // Shortest path: CALLS + IMPORTS, max depth 8
-        let path_result = match repo_state.storage.find_shortest_path(
-            &snapshot.snapshot_uid,
-            &from_sym.stable_key,
-            &to_sym.stable_key,
-            8,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        let sqlite_value = serde_json::json!({
-            "repo_uid": repo_uid,
-            "snapshot_uid": snapshot.snapshot_uid,
-            "path": path_result,
-            "found": path_result.found,
-        });
-        // PATH-CYCLES-LIVEGRAPH-1: engine branch. Path default = SQLite (Auto maps to SQLite — path does
-        // NOT auto-migrate this slice); --engine livegraph/compare select the LiveGraph BFS path.
+        // QUERY-AUTO-LAZY-SQLITE-1: the SQLite path read is LAZY -- the closure runs ONLY when LiveGraph cannot
+        // serve (or for --engine sqlite/compare). The LiveGraph-served default (incl. a no-path EXACT) SKIPS
+        // it. (PATH-LIVEGRAPH-DEFAULT-1 migrated path's Auto to LiveGraph-first; the prior "does NOT
+        // auto-migrate" comment was STALE.)
         let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
             &request.params,
             "engine",
@@ -1638,10 +1615,30 @@ impl ServiceDispatcher {
             &to_sym.stable_key,
             &repo_uid,
             &snapshot.snapshot_uid,
-            sqlite_value,
+            || {
+                let path_result = repo_state.storage.find_shortest_path(
+                    &snapshot.snapshot_uid,
+                    &from_sym.stable_key,
+                    &to_sym.stable_key,
+                    8,
+                )?;
+                let found = path_result.found;
+                Ok(serde_json::json!({
+                    "repo_uid": repo_uid,
+                    "snapshot_uid": snapshot.snapshot_uid,
+                    "path": path_result,
+                    "found": found,
+                }))
+            },
             repo_root,
         );
-        DispatchResult::success(&request.id, response)
+        match response {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
     }
 
     // ── Write operations ────────────────────────────────────────────

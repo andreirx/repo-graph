@@ -5,6 +5,7 @@
 use repo_graph_ir::CanonicalKey;
 use repo_graph_livegraph::{FileImportCyclesAnswer, LiveGraph, ModuleImportCyclesAnswer};
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
+use repo_graph_storage::error::StorageError;
 use repo_graph_storage::queries::{CalleeResult, CallerResult, ResolvedSymbol};
 use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
 use serde::Serialize;
@@ -433,34 +434,34 @@ pub fn callers_engine_response(
     engine: Engine,
     repo_state: &RepoState,
     target: &ResolvedSymbol,
-    sqlite_callers: Vec<CallerResult>,
+    sqlite_fetch: impl FnOnce() -> Result<Vec<CallerResult>, StorageError>,
     symbol: &str,
     repo_root: &str,
-) -> Value {
+) -> Result<Value, StorageError> {
     match engine {
-        Engine::Sqlite => callers_value(target, sqlite_callers, "sqlite", None),
+        // Explicit SQLite escape hatch: ALWAYS read (the closure is called).
+        Engine::Sqlite => callers_auto_or_sqlite(target, None, None, sqlite_fetch),
+        // DEFAULT (QUERY-AUTO-LAZY-SQLITE-1): LiveGraph-first; SQLite read LAZILY only on fallback.
         Engine::Auto => {
-            match auto_outcome(livegraph_callers_auto(repo_state, &target.stable_key)) {
-                Ok(keys) => {
-                    callers_value(target, caller_results_from_keys(&keys), "livegraph", None)
-                }
-                Err(reason) => callers_value(target, sqlite_callers, "sqlite", Some(reason)),
-            }
+            let (served, reason) =
+                match auto_outcome(livegraph_callers_auto(repo_state, &target.stable_key)) {
+                    Ok(keys) => (Some(keys), None),
+                    Err(reason) => (None, Some(reason)),
+                };
+            callers_auto_or_sqlite(target, served, reason, sqlite_fetch)
         }
-        Engine::LiveGraph => match livegraph_caller_keys(repo_state, &target.stable_key) {
-            Some((_class, keys)) => {
-                callers_value(target, caller_results_from_keys(&keys), "livegraph", None)
-            }
-            // Strict LiveGraph still falls back when the partition is unavailable (existing 1B
-            // behavior; NOT a new strict-failure mode in this slice).
-            None => callers_value(
-                target,
-                sqlite_callers,
-                "sqlite",
-                Some(FallbackReason::LiveGraphUnavailable),
-            ),
-        },
+        // Explicit LiveGraph: serve LiveGraph; SQLite LAZILY only on the unavailable fallback (existing 1B
+        // behavior; NOT a new strict-failure mode in this slice).
+        Engine::LiveGraph => {
+            let (served, reason) = match livegraph_caller_keys(repo_state, &target.stable_key) {
+                Some((_class, keys)) => (Some(keys), None),
+                None => (None, Some(FallbackReason::LiveGraphUnavailable)),
+            };
+            callers_auto_or_sqlite(target, served, reason, sqlite_fetch)
+        }
+        // Compare: ALWAYS reads SQLite (the served answer + the diagnostic compare report).
         Engine::Compare => {
+            let sqlite_callers = sqlite_fetch()?;
             let sqlite_keys: Vec<String> = sqlite_callers
                 .iter()
                 .map(|c| c.stable_key.clone())
@@ -474,8 +475,35 @@ pub fn callers_engine_response(
             if let Some(p) = sidecar {
                 v["livegraph_compare_sidecar"] = json!(p);
             }
-            v
+            Ok(v)
         }
+    }
+}
+
+/// QUERY-AUTO-LAZY-SQLITE-1: serve the LiveGraph keys (NO SQLite read) when `served` is `Some`, ELSE call
+/// `sqlite_fetch` LAZILY (Engine::Sqlite -> `served=None, reason=None`; a fallback -> `served=None,
+/// reason=Some`). The closure is STRUCTURALLY unreachable when `served` is `Some` -> the LiveGraph-served path
+/// never touches `nodes`/`edges`. Pure (no RepoState) -> a panicking-closure unit test proves the served path
+/// is lazy and the fallback path calls SQLite + propagates its error.
+fn callers_auto_or_sqlite(
+    target: &ResolvedSymbol,
+    served: Option<Vec<String>>,
+    fallback_reason: Option<FallbackReason>,
+    sqlite_fetch: impl FnOnce() -> Result<Vec<CallerResult>, StorageError>,
+) -> Result<Value, StorageError> {
+    match served {
+        Some(keys) => Ok(callers_value(
+            target,
+            caller_results_from_keys(&keys),
+            "livegraph",
+            None,
+        )),
+        None => Ok(callers_value(
+            target,
+            sqlite_fetch()?,
+            "sqlite",
+            fallback_reason,
+        )),
     }
 }
 
@@ -502,32 +530,33 @@ pub fn callees_engine_response(
     engine: Engine,
     repo_state: &RepoState,
     target: &ResolvedSymbol,
-    sqlite_callees: Vec<CalleeResult>,
+    sqlite_fetch: impl FnOnce() -> Result<Vec<CalleeResult>, StorageError>,
     symbol: &str,
     repo_root: &str,
-) -> Value {
+) -> Result<Value, StorageError> {
     match engine {
-        Engine::Sqlite => callees_value(target, sqlite_callees, "sqlite", None),
+        // Explicit SQLite escape hatch: ALWAYS read (the closure is called).
+        Engine::Sqlite => callees_auto_or_sqlite(target, None, None, sqlite_fetch),
+        // DEFAULT (QUERY-AUTO-LAZY-SQLITE-1): LiveGraph-first; SQLite read LAZILY only on fallback.
         Engine::Auto => {
-            match auto_outcome(livegraph_callees_auto(repo_state, &target.stable_key)) {
-                Ok(keys) => {
-                    callees_value(target, callee_results_from_keys(&keys), "livegraph", None)
-                }
-                Err(reason) => callees_value(target, sqlite_callees, "sqlite", Some(reason)),
-            }
+            let (served, reason) =
+                match auto_outcome(livegraph_callees_auto(repo_state, &target.stable_key)) {
+                    Ok(keys) => (Some(keys), None),
+                    Err(reason) => (None, Some(reason)),
+                };
+            callees_auto_or_sqlite(target, served, reason, sqlite_fetch)
         }
-        Engine::LiveGraph => match livegraph_callee_keys(repo_state, &target.stable_key) {
-            Some((_class, keys)) => {
-                callees_value(target, callee_results_from_keys(&keys), "livegraph", None)
-            }
-            None => callees_value(
-                target,
-                sqlite_callees,
-                "sqlite",
-                Some(FallbackReason::LiveGraphUnavailable),
-            ),
-        },
+        // Explicit LiveGraph: serve LiveGraph; SQLite LAZILY only on the unavailable fallback.
+        Engine::LiveGraph => {
+            let (served, reason) = match livegraph_callee_keys(repo_state, &target.stable_key) {
+                Some((_class, keys)) => (Some(keys), None),
+                None => (None, Some(FallbackReason::LiveGraphUnavailable)),
+            };
+            callees_auto_or_sqlite(target, served, reason, sqlite_fetch)
+        }
+        // Compare: ALWAYS reads SQLite (the served answer + the diagnostic compare report).
         Engine::Compare => {
+            let sqlite_callees = sqlite_fetch()?;
             let sqlite_keys: Vec<String> = sqlite_callees
                 .iter()
                 .map(|c| c.stable_key.clone())
@@ -540,8 +569,33 @@ pub fn callees_engine_response(
             if let Some(p) = sidecar {
                 v["livegraph_compare_sidecar"] = json!(p);
             }
-            v
+            Ok(v)
         }
+    }
+}
+
+/// QUERY-AUTO-LAZY-SQLITE-1: callees analogue of [`callers_auto_or_sqlite`]. Serve LiveGraph keys (no SQLite
+/// read) when `served` is `Some`; else call `sqlite_fetch` LAZILY. The closure is structurally unreachable on
+/// the served path.
+fn callees_auto_or_sqlite(
+    target: &ResolvedSymbol,
+    served: Option<Vec<String>>,
+    fallback_reason: Option<FallbackReason>,
+    sqlite_fetch: impl FnOnce() -> Result<Vec<CalleeResult>, StorageError>,
+) -> Result<Value, StorageError> {
+    match served {
+        Some(keys) => Ok(callees_value(
+            target,
+            callee_results_from_keys(&keys),
+            "livegraph",
+            None,
+        )),
+        None => Ok(callees_value(
+            target,
+            sqlite_fetch()?,
+            "sqlite",
+            fallback_reason,
+        )),
     }
 }
 
@@ -744,57 +798,26 @@ pub fn path_engine_response(
     to_key: &str,
     repo_uid: &str,
     snapshot_uid: &str,
-    sqlite_value: Value,
+    sqlite_fetch: impl FnOnce() -> Result<Value, StorageError>,
     repo_root: &str,
-) -> Value {
-    let sqlite_found = sqlite_value
-        .pointer("/path/found")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    // Compare by SYMBOL NAME: SQLite path node_ids are DB UUIDs while LiveGraph keys are stable keys —
-    // different key spaces. Name-based comparison normalizes them so a representation difference is NOT
-    // mistaken for a real path difference. (Approximation: a full cross-key-space alignment is a
-    // follow-up; `DifferentPath` then reflects a genuine route difference, e.g. SQLite's IMPORTS edges.)
-    let sqlite_names: Vec<String> = sqlite_value
-        .pointer("/path/path")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|s| s.get("symbol").and_then(|v| v.as_str()).map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut sqlite_response = sqlite_value;
+) -> Result<Value, StorageError> {
     match engine {
-        // `--engine sqlite` FORCES SQLite (the proven path), regardless of LiveGraph state.
-        Engine::Sqlite => {
-            sqlite_response["backend_used"] = json!("sqlite");
-            sqlite_response["fallback_reason"] = Value::Null;
-            sqlite_response
+        // `--engine sqlite` FORCES SQLite (always reads).
+        Engine::Sqlite => path_auto_or_sqlite(repo_uid, snapshot_uid, None, None, sqlite_fetch),
+        // DEFAULT (PATH-LIVEGRAPH-DEFAULT-1 + QUERY-AUTO-LAZY-SQLITE-1): serve LiveGraph when Exact + Fresh +
+        // TS-only (D3 no-path EXACT is served -- path() returns Exact only for a proven-complete found-OR-no-
+        // path); ELSE a LAZY labelled SQLite fallback. The served path does NOT read nodes/edges.
+        Engine::Auto => {
+            let (served, reason) =
+                match path_auto_outcome(livegraph_path(repo_state, from_key, to_key)) {
+                    Ok((found, nodes)) => (Some((found, nodes)), None),
+                    Err(reason) => (None, Some(reason)),
+                };
+            path_auto_or_sqlite(repo_uid, snapshot_uid, served, reason, sqlite_fetch)
         }
-        // DEFAULT (PATH-LIVEGRAPH-DEFAULT-1): serve LiveGraph only when Exact + Fresh + TS-only; else
-        // labelled SQLite fallback. The D3 no-path rule is encoded by `path()`'s class (Exact = proven
-        // complete found-OR-no-path; Partial = incomplete), so `path_auto_outcome` needs no special case.
-        // Mirrors the callers/callees `Auto` arm: served LiveGraph carries backend_used only (the explicit
-        // `--engine livegraph` branch keeps trust_class/freshness as a diagnostic surface).
-        Engine::Auto => match path_auto_outcome(livegraph_path(repo_state, from_key, to_key)) {
-            Ok((found, nodes)) => json!({
-                "repo_uid": repo_uid,
-                "snapshot_uid": snapshot_uid,
-                "found": found,
-                "path": livegraph_path_result(found, &nodes),
-                "backend_used": "livegraph",
-                "fallback_reason": Value::Null,
-            }),
-            Err(reason) => {
-                sqlite_response["backend_used"] = json!("sqlite");
-                sqlite_response["fallback_reason"] = json!(reason.as_str());
-                sqlite_response
-            }
-        },
+        // Explicit LiveGraph keeps trust_class/freshness as a diagnostic surface; SQLite LAZILY on fallback.
         Engine::LiveGraph => match livegraph_path(repo_state, from_key, to_key) {
-            Some(a) => json!({
+            Some(a) => Ok(json!({
                 "repo_uid": repo_uid,
                 "snapshot_uid": snapshot_uid,
                 "found": a.found,
@@ -803,16 +826,33 @@ pub fn path_engine_response(
                 "fallback_reason": Value::Null,
                 "trust_class": format!("{:?}", a.class),
                 "freshness": format!("{:?}", a.freshness),
-            }),
-            None => {
-                sqlite_response["backend_used"] = json!("sqlite");
-                sqlite_response["fallback_reason"] =
-                    json!(FallbackReason::LiveGraphUnavailable.as_str());
-                sqlite_response
-            }
+            })),
+            None => path_auto_or_sqlite(
+                repo_uid,
+                snapshot_uid,
+                None,
+                Some(FallbackReason::LiveGraphUnavailable),
+                sqlite_fetch,
+            ),
         },
+        // Compare: ALWAYS reads SQLite. The sqlite_found/sqlite_names extraction (compare-only) moves HERE.
         Engine::Compare => {
-            // Normalize LiveGraph keys to names for an apples-to-apples comparison (see above).
+            let mut sqlite_response = sqlite_fetch()?;
+            let sqlite_found = sqlite_response
+                .pointer("/path/found")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            // Compare by SYMBOL NAME (SQLite node_ids are DB UUIDs; LiveGraph keys are stable keys) so a
+            // representation difference is not mistaken for a real path difference.
+            let sqlite_names: Vec<String> = sqlite_response
+                .pointer("/path/path")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|s| s.get("symbol").and_then(|v| v.as_str()).map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
             let lg = livegraph_path(repo_state, from_key, to_key).map(|a| {
                 (
                     a.class,
@@ -836,7 +876,36 @@ pub fn path_engine_response(
             if let Some(p) = sidecar {
                 sqlite_response["livegraph_path_compare_sidecar"] = json!(p);
             }
-            sqlite_response
+            Ok(sqlite_response)
+        }
+    }
+}
+
+/// QUERY-AUTO-LAZY-SQLITE-1: serve the LiveGraph path (NO SQLite read) when `served` is `Some`, ELSE call
+/// `sqlite_fetch` LAZILY and stamp backend_used/fallback_reason. The closure is structurally unreachable on the
+/// served path -> a served `path` (incl. a no-path EXACT) does not read nodes/edges.
+fn path_auto_or_sqlite(
+    repo_uid: &str,
+    snapshot_uid: &str,
+    served: Option<(bool, Vec<PathNodeDisplay>)>,
+    fallback_reason: Option<FallbackReason>,
+    sqlite_fetch: impl FnOnce() -> Result<Value, StorageError>,
+) -> Result<Value, StorageError> {
+    match served {
+        Some((found, nodes)) => Ok(json!({
+            "repo_uid": repo_uid,
+            "snapshot_uid": snapshot_uid,
+            "found": found,
+            "path": livegraph_path_result(found, &nodes),
+            "backend_used": "livegraph",
+            "fallback_reason": Value::Null,
+        })),
+        None => {
+            let mut sqlite_response = sqlite_fetch()?;
+            sqlite_response["backend_used"] = json!("sqlite");
+            sqlite_response["fallback_reason"] =
+                fallback_reason.map_or(Value::Null, |r| json!(r.as_str()));
+            Ok(sqlite_response)
         }
     }
 }
@@ -2156,6 +2225,92 @@ mod tests {
         };
         let r5 = imports_auto_body("a.ts", &sqlite, &view, Some(&stale));
         assert_eq!(r5["fallback_reason"], "LiveGraphStale");
+    }
+
+    #[test]
+    fn callers_auto_or_sqlite_lazy_served_eager_fallback() {
+        use repo_graph_storage::queries::{CallerResult, ResolvedSymbol};
+        let target = ResolvedSymbol {
+            stable_key: "r:a#foo".to_string(),
+            name: "foo".to_string(),
+            qualified_name: None,
+            kind: "SYMBOL".to_string(),
+            subtype: None,
+            file: None,
+            line: None,
+            column: None,
+        };
+        let sentinel = || -> Result<Vec<CallerResult>, StorageError> {
+            Ok(vec![CallerResult {
+                stable_key: "r:s#sql".to_string(),
+                name: "sql".to_string(),
+                qualified_name: None,
+                kind: String::new(),
+                subtype: None,
+                file: None,
+                line: None,
+                column: None,
+                edge_type: "CALLS".to_string(),
+                resolution: "sqlite".to_string(),
+            }])
+        };
+        // SERVED: Some(keys) -> LiveGraph; the PANICKING closure is NEVER called.
+        let served = callers_auto_or_sqlite(
+            &target,
+            Some(vec!["r:b#bar".to_string()]),
+            None,
+            || -> Result<Vec<CallerResult>, StorageError> {
+                panic!("SQLite read on the LiveGraph-served path")
+            },
+        )
+        .unwrap();
+        assert_eq!(served["backend_used"], "livegraph");
+        assert!(served["fallback_reason"].is_null());
+        assert_eq!(served["callers"][0]["stable_key"], "r:b#bar");
+        // FALLBACK: None + reason -> the closure RUNS (its sentinel appears), backend=sqlite + reason.
+        let fb = callers_auto_or_sqlite(
+            &target,
+            None,
+            Some(FallbackReason::LiveGraphUnavailable),
+            sentinel,
+        )
+        .unwrap();
+        assert_eq!(fb["backend_used"], "sqlite");
+        assert_eq!(fb["fallback_reason"], "LiveGraphUnavailable");
+        assert_eq!(fb["callers"][0]["stable_key"], "r:s#sql");
+        // SQLITE (Engine::Sqlite): None + no reason -> the closure RUNS, no fallback_reason.
+        let sq = callers_auto_or_sqlite(&target, None, None, sentinel).unwrap();
+        assert_eq!(sq["backend_used"], "sqlite");
+        assert!(sq["fallback_reason"].is_null());
+    }
+
+    #[test]
+    fn path_auto_or_sqlite_lazy_on_served_including_no_path_exact() {
+        // SERVED no-path EXACT: Some((false, [])) -> LiveGraph; the PANICKING closure is NEVER called.
+        let served = path_auto_or_sqlite(
+            "r1",
+            "snap",
+            Some((false, vec![])),
+            None,
+            || -> Result<Value, StorageError> { panic!("SQLite read on the served no-path path") },
+        )
+        .unwrap();
+        assert_eq!(served["backend_used"], "livegraph");
+        assert_eq!(served["found"], false);
+        // FALLBACK: None + reason -> the closure RUNS (its sentinel sqlite_value is stamped + served).
+        let fb = path_auto_or_sqlite(
+            "r1",
+            "snap",
+            None,
+            Some(FallbackReason::LiveGraphPartial),
+            || -> Result<Value, StorageError> {
+                Ok(json!({"path": {"found": true}, "found": true}))
+            },
+        )
+        .unwrap();
+        assert_eq!(fb["backend_used"], "sqlite");
+        assert_eq!(fb["fallback_reason"], "LiveGraphPartial");
+        assert_eq!(fb["found"], true);
     }
 
     #[test]
