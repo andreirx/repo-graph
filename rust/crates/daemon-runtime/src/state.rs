@@ -197,6 +197,12 @@ pub struct RepoState {
     /// `livegraph_preload` method (`None` until preloaded). Interior mutability because `RepoState`
     /// is shared as `Arc<RepoState>` — preload write-locks, callers/callees read-lock.
     pub livegraph: parking_lot::RwLock<Option<repo_graph_livegraph::LiveGraph>>,
+
+    /// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1: the in-memory repo-level import NO-LOSS certificate (`None` until
+    /// lazily built on the first eligible default `imports` query). Keyed by the import-cert fingerprint; a
+    /// fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). Interior mutability:
+    /// the fastpath read-locks; the lazy build write-locks.
+    pub import_cert: parking_lot::RwLock<Option<crate::livegraph_feed::ImportNoLossCert>>,
 }
 
 impl RepoState {
@@ -234,6 +240,7 @@ impl RepoState {
             coordinator: RepoCoordinator::new(),
             storage,
             livegraph: parking_lot::RwLock::new(None),
+            import_cert: parking_lot::RwLock::new(None),
         })
     }
 

@@ -1566,34 +1566,185 @@ fn imports_auto_body(
     })
 }
 
-/// IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): the AUTO (default) `imports <file>` response -- compare-on-call. Reads
-/// the SQLite per-file imports (the no-loss baseline + the fallback answer) + the file's LiveGraph view +
-/// precondition (one lock), then the PURE `imports_auto_body`. SQLite is STILL read every call (the safety net;
-/// no decommission -- that is IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1).
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1: the in-memory repo-level import NO-LOSS certificate. `verdict` is the
+/// repo-wide compare verdict (`GREEN` = every TS file no-loss at the recorded fingerprint); `fingerprint` is the
+/// import-cert fingerprint it was built at. A GREEN cert at the CURRENT fingerprint lets the default serve
+/// LiveGraph WITHOUT reading SQLite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportNoLossCert {
+    /// The repo-wide compare verdict (`GREEN` / `YELLOW` / `RED`).
+    pub verdict: String,
+    /// The import-cert fingerprint this verdict was computed at (the invalidation key).
+    pub fingerprint: String,
+}
+
+/// The cert's status for the CURRENT fingerprint (FASTPATH-1 D4).
+enum ImportCertState {
+    /// A valid cert at the current fingerprint, verdict GREEN -> the fastpath may serve LiveGraph.
+    ValidGreen,
+    /// A valid cert at the current fingerprint, verdict != GREEN -> compare-on-call.
+    ValidNotGreen,
+    /// No cert, or a cert at a DIFFERENT fingerprint -> (re)build, else compare-on-call.
+    StaleOrMissing,
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D3): the SQLite-FREE import-cert fingerprint -- a digest over the
+/// resident partition snapshot (epoch / fresh / ts / source_inputs_hash / producer_fingerprint), the
+/// `snapshot_uid` (the repo index epoch -> SQLite-side changes), and the import-completeness policy version. Any
+/// import-relevant change (a refresh / swap / re-index / policy bump) yields a different fingerprint.
+fn import_cert_fingerprint(
+    partitions: &[repo_graph_livegraph::module_cycle_cert::LivePartition],
+    snapshot_uid: &str,
+) -> String {
+    let mut parts: Vec<String> = partitions
+        .iter()
+        .map(|p| {
+            format!(
+                "{}@{}:f{}:ts{}:{}:{}",
+                p.id,
+                p.epoch,
+                p.fresh as u8,
+                p.ts as u8,
+                p.source_inputs_hash,
+                p.producer_fingerprint
+            )
+        })
+        .collect();
+    parts.sort();
+    format!(
+        "imp|snap:{}|pol:{}|parts[{}]",
+        snapshot_uid,
+        crate::cycle_completeness_audit::IMPORT_COMPLETENESS_POLICY_VERSION,
+        parts.join(",")
+    )
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (the WIN): serve the LiveGraph import edges (mapped to the ImportEntry
+/// shape, WITH the alias/dynamic extras) WITHOUT reading SQLite -- the GREEN-cert fastpath. The `imports` array
+/// is byte-identical to compare-on-call's served-LiveGraph answer; `comparison.source` records the cert basis.
+fn serve_import_fastpath(
+    file_path: &str,
+    view: &repo_graph_livegraph::import_view::LiveImportView,
+) -> Value {
+    let imports: Vec<Value> = view.edges.iter().map(edge_to_import_entry).collect();
+    json!({
+        "file": file_path,
+        "imports": imports,
+        "count": imports.len(),
+        "backend_used": "livegraph",
+        "fallback_reason": Value::Null,
+        "comparison": { "source": "repo_no_loss_certificate" },
+    })
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D4): the PURE fastpath/compare ladder. precondition UNMET -> the SQLite
+/// fallback (the compare-on-call body via the find_imports closure) ; precondition met + GREEN cert -> serve
+/// LiveGraph WITHOUT calling find_imports ; cert RED/YELLOW/stale/missing/build-failed -> compare-on-call (calls
+/// find_imports). Pure (no RepoState) -> a panicking find_imports closure proves the GREEN fastpath skips SQLite;
+/// the build_cert closure is invoked ONLY on StaleOrMissing.
+fn imports_fastpath_or_compare(
+    file_path: &str,
+    view: &repo_graph_livegraph::import_view::LiveImportView,
+    precond: Option<&repo_graph_livegraph::import_view::FilePartitionStatus>,
+    cert: ImportCertState,
+    find_imports: impl FnOnce() -> Vec<repo_graph_storage::queries::ImportResult>,
+    build_cert: impl FnOnce() -> Option<bool>,
+) -> Value {
+    let precond_met = precond.is_some_and(|p| p.precondition_met());
+    if !precond_met {
+        // Non-TS / non-resident -> the SQLite fallback (imports_auto_body labels it).
+        return imports_auto_body(file_path, &find_imports(), view, precond);
+    }
+    let green = match cert {
+        ImportCertState::ValidGreen => true,
+        ImportCertState::ValidNotGreen => false,
+        ImportCertState::StaleOrMissing => build_cert().unwrap_or(false),
+    };
+    if green {
+        serve_import_fastpath(file_path, view)
+    } else {
+        // RED / YELLOW / build-failed -> the proven compare-on-call (reads SQLite, verifies no-loss).
+        imports_auto_body(file_path, &find_imports(), view, precond)
+    }
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D2 build): run the repo-wide compare -> verdict, STORE the cert keyed
+/// by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint -> the caller compare-on-calls). Reads
+/// SQLite ONCE (the bulk all_imports) per fingerprint; subsequent GREEN calls fastpath without SQLite.
+fn build_and_store_import_cert(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    fingerprint: Option<String>,
+) -> Option<bool> {
+    let fingerprint = fingerprint?;
+    let report = imports_readiness_response(repo_state, repo_uid, repo_uid, snapshot_uid);
+    let verdict = report
+        .get("verdict")
+        .and_then(|v| v.as_str())
+        .unwrap_or("RED")
+        .to_string();
+    let is_green = verdict == "GREEN";
+    *repo_state.import_cert.write() = Some(ImportNoLossCert {
+        verdict,
+        fingerprint,
+    });
+    Some(is_green)
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1=C / D4): the AUTO (default) `imports <file>` response. Tries the
+/// GREEN-cert FASTPATH (serve LiveGraph WITHOUT SQLite) ; else the proven compare-on-call (reads SQLite). The
+/// view + precondition + current fingerprint are SQLite-FREE; SQLite is read ONLY on the cert build + the
+/// compare-on-call / SQLite-fallback paths.
 pub fn imports_auto_response(
     repo_state: &RepoState,
     repo_uid: &str,
     snapshot_uid: &str,
     file_path: &str,
 ) -> Value {
-    let file_stable_key = format!("{repo_uid}:{file_path}:FILE");
-    let sqlite_imports = repo_state
-        .storage
-        .find_imports(snapshot_uid, &file_stable_key)
-        .unwrap_or_default();
+    // SQLite-FREE: the file's view + precondition + the current import-cert fingerprint.
     let guard = repo_state.livegraph.read();
-    let (view, precond) = match guard.as_ref() {
+    let (view, precond, current_fp) = match guard.as_ref() {
         Some(lg) => (
             lg.live_import_view(Some(file_path)),
             lg.file_partition_status(file_path),
+            Some(import_cert_fingerprint(&lg.live_partitions(), snapshot_uid)),
         ),
         None => (
             repo_graph_livegraph::import_view::LiveImportView::default(),
             None,
+            None,
         ),
     };
     drop(guard);
-    imports_auto_body(file_path, &sqlite_imports, &view, precond.as_ref())
+    // The cert's state for the CURRENT fingerprint.
+    let cert = {
+        let cached = repo_state.import_cert.read();
+        match (&current_fp, cached.as_ref()) {
+            (Some(fp), Some(c)) if &c.fingerprint == fp => {
+                if c.verdict == "GREEN" {
+                    ImportCertState::ValidGreen
+                } else {
+                    ImportCertState::ValidNotGreen
+                }
+            }
+            _ => ImportCertState::StaleOrMissing,
+        }
+    };
+    let file_stable_key = format!("{repo_uid}:{file_path}:FILE");
+    imports_fastpath_or_compare(
+        file_path,
+        &view,
+        precond.as_ref(),
+        cert,
+        || {
+            repo_state
+                .storage
+                .find_imports(snapshot_uid, &file_stable_key)
+                .unwrap_or_default()
+        },
+        || build_and_store_import_cert(repo_state, repo_uid, snapshot_uid, current_fp.clone()),
+    )
 }
 
 /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1 (D2/D3/D4): the PURE repo-wide aggregation -- run the per-file
@@ -2311,6 +2462,94 @@ mod tests {
         assert_eq!(fb["backend_used"], "sqlite");
         assert_eq!(fb["fallback_reason"], "LiveGraphPartial");
         assert_eq!(fb["found"], true);
+    }
+
+    #[test]
+    fn imports_fastpath_ladder() {
+        use repo_graph_livegraph::import_view::{
+            FilePartitionStatus, ImportEdgeView, LiveImportView,
+        };
+        use repo_graph_storage::queries::ImportResult;
+        let met = FilePartitionStatus {
+            partition_id: "app".to_string(),
+            resident: true,
+            fresh: true,
+            ts_primary: true,
+        };
+        let view = LiveImportView {
+            edges: vec![ImportEdgeView {
+                src_file: "a.ts".to_string(),
+                dst_file: "b.ts".to_string(),
+                basis: "AstImport".to_string(),
+                raw_specifier: None,
+            }],
+            observations: vec![],
+        };
+        let panic_sqlite = || -> Vec<ImportResult> { panic!("SQLite read on the GREEN fastpath") };
+        let empty_sqlite = Vec::<ImportResult>::new;
+        // GREEN cert + precondition met -> FASTPATH; the panicking find_imports + build are NEVER called.
+        let g = imports_fastpath_or_compare(
+            "a.ts",
+            &view,
+            Some(&met),
+            ImportCertState::ValidGreen,
+            panic_sqlite,
+            || panic!("build on a valid cert"),
+        );
+        assert_eq!(g["backend_used"], "livegraph");
+        assert_eq!(g["comparison"]["source"], "repo_no_loss_certificate");
+        assert_eq!(g["count"], 1);
+        // RED cert (ValidNotGreen) -> COMPARE-ON-CALL (find_imports runs -> per-call comparison, NOT the cert).
+        let r = imports_fastpath_or_compare(
+            "a.ts",
+            &view,
+            Some(&met),
+            ImportCertState::ValidNotGreen,
+            empty_sqlite,
+            || panic!("build on a valid cert"),
+        );
+        assert!(r["comparison"]["sqlite_resolved_local"].is_number());
+        assert!(r["comparison"]["source"].is_null());
+        // STALE/MISSING + build -> GREEN -> FASTPATH (find_imports NEVER called).
+        let s = imports_fastpath_or_compare(
+            "a.ts",
+            &view,
+            Some(&met),
+            ImportCertState::StaleOrMissing,
+            panic_sqlite,
+            || Some(true),
+        );
+        assert_eq!(s["comparison"]["source"], "repo_no_loss_certificate");
+        // STALE/MISSING + build -> RED -> compare-on-call.
+        let s2 = imports_fastpath_or_compare(
+            "a.ts",
+            &view,
+            Some(&met),
+            ImportCertState::StaleOrMissing,
+            empty_sqlite,
+            || Some(false),
+        );
+        assert!(s2["comparison"]["sqlite_resolved_local"].is_number());
+        // BUILD FAILURE (None) -> compare-on-call (safe fallback, NOT the cert).
+        let bf = imports_fastpath_or_compare(
+            "a.ts",
+            &view,
+            Some(&met),
+            ImportCertState::StaleOrMissing,
+            empty_sqlite,
+            || None,
+        );
+        assert!(bf["comparison"]["sqlite_resolved_local"].is_number());
+        // NON-TS (precondition unmet) -> SQLite fallback regardless of the GREEN cert; build NEVER called.
+        let nt = imports_fastpath_or_compare(
+            "a.cpp",
+            &view,
+            None,
+            ImportCertState::ValidGreen,
+            empty_sqlite,
+            || panic!("build on a non-TS file"),
+        );
+        assert_eq!(nt["backend_used"], "sqlite");
     }
 
     #[test]

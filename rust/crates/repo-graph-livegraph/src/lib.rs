@@ -1334,14 +1334,13 @@ impl LiveGraph {
         out
     }
 
-    /// CYCLES-COMPLETENESS-CERT-1: snapshot the certificate-relevant LiveGraph state (per-partition epoch /
-    /// freshness / language / producer fingerprint + the uncaptured import-class evidence). PURE read; the
-    /// cert evaluator consumes this + a baseline. `has_unresolved_after_overlay` EXCLUDES `StaticUnresolved`
-    /// observations the cross-partition overlay DID resolve (those are captured edges).
-    pub fn module_cycle_live_state(&self) -> module_cycle_cert::LiveCycleState {
-        use module_cycle_cert::{LiveCycleState, LivePartition, ObservationClassSummary};
-        let partitions: Vec<LivePartition> = self
-            .slots
+    /// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1: the resident partition snapshot ONLY (epoch / fresh / ts /
+    /// source_inputs_hash / producer_fingerprint) -- the SQLite-free invalidation inputs for the import
+    /// no-loss cert fingerprint, WITHOUT the observation-classification work. Shared with
+    /// [`Self::module_cycle_live_state`].
+    pub fn live_partitions(&self) -> Vec<module_cycle_cert::LivePartition> {
+        use module_cycle_cert::LivePartition;
+        self.slots
             .iter()
             .map(|(id, s)| {
                 let (source_inputs_hash, producer_fingerprint) = s
@@ -1365,7 +1364,16 @@ impl LiveGraph {
                     producer_fingerprint,
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    /// CYCLES-COMPLETENESS-CERT-1: snapshot the certificate-relevant LiveGraph state (per-partition epoch /
+    /// freshness / language / producer fingerprint + the uncaptured import-class evidence). PURE read; the
+    /// cert evaluator consumes this + a baseline. `has_unresolved_after_overlay` EXCLUDES `StaticUnresolved`
+    /// observations the cross-partition overlay DID resolve (those are captured edges).
+    pub fn module_cycle_live_state(&self) -> module_cycle_cert::LiveCycleState {
+        use module_cycle_cert::{LiveCycleState, ObservationClassSummary};
+        let partitions = self.live_partitions();
         // IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): ONE classification pass (`classified_observations`) feeds BOTH this
         // summary and the import read-model, so the summary booleans literally cannot drift from the
         // per-observation evidence the `imports --engine livegraph` surface shows.
