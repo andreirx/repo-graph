@@ -148,6 +148,10 @@ pub enum FallbackReason {
     /// IMPORTS-LIVEGRAPH-DEFAULT-1 (D5): the file has an AMBIGUOUS SQLite import (a FILE target that is neither
     /// resolved-local nor external) the harness cannot confidently bucket -> conservative SQLite fallback.
     LiveGraphImportUnknown,
+    /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1): the repo MODULE-cycle no-loss cert is NOT GREEN -- the compare
+    /// found a SQLite cycle the LiveGraph lacks (missing) or an over-claimed extra -> the DEFAULT serves SQLite
+    /// (never a silent cycle loss). EXPECTED for repo-graph (its excluded-fixture cycle) + non-TS repos.
+    LiveGraphCycleDivergence,
 }
 
 impl FallbackReason {
@@ -165,6 +169,7 @@ impl FallbackReason {
             FallbackReason::LiveGraphError => "LiveGraphError",
             FallbackReason::LiveGraphImportRegression => "LiveGraphImportRegression",
             FallbackReason::LiveGraphImportUnknown => "LiveGraphImportUnknown",
+            FallbackReason::LiveGraphCycleDivergence => "LiveGraphCycleDivergence",
         }
     }
 }
@@ -1969,30 +1974,42 @@ fn write_module_compare_sidecar(
     Ok(path.display().to_string())
 }
 
-/// MODULE-CYCLES-CLI-1 (D4=A): build the `--engine compare --kind module-import` response. PRIMARY = the
-/// SQLite MODULE cycles (unchanged shape); plus a STRUCTURAL compare of the LiveGraph derived module cycles
-/// (by qualified module-path sets, D5) against SQLite + a diagnostic sidecar. Missing -> UnknownDivergence,
-/// extra -> UnexpectedExtraInLiveGraph (no auto cause attribution this slice).
-pub fn module_cycle_compare_response(
+/// The shared MODULE-cycle comparison data — the SINGLE source of the compare verdict. Computed once from
+/// SQLite (`find_cycles` + `module_qualified_names`) + the LiveGraph (`module_import_cycles`), consumed by BOTH
+/// [`module_cycle_compare_response`] (the `--engine compare` surface) AND [`build_and_store_cycles_cert`] (the
+/// default fastpath cert). Sharing the computation makes a GREEN cert PROVABLY equal to the compare verdict —
+/// no drift, so the fastpath can never serve a repo the compare would have flagged missing/extra.
+struct ModuleCycleCompareData {
+    /// The structural comparison (matched / missing / extra) by qualified module-path SET.
+    comparison: repo_graph_livegraph::module_cycle_compare::ModuleCycleComparison,
+    /// The raw SQLite MODULE cycles (the compare's PRIMARY output shape — unchanged).
+    sqlite_cycles: Vec<repo_graph_storage::queries::CycleResult>,
+    /// SQLite MODULE cycle count.
+    sqlite_count: usize,
+    /// LiveGraph derived MODULE cycle count.
+    livegraph_count: usize,
+    /// The LiveGraph module-cycle answer's trust class (`Exact` / `Partial` / ... / `Unavailable`).
+    livegraph_class: String,
+    /// Per-module import observations (for the response's missing-cycle classification).
+    obs_by_module: std::collections::BTreeMap<
+        String,
+        Vec<repo_graph_livegraph::module_cycle_compare::ObservationView>,
+    >,
+    /// The resident MODULE identities (for classification).
+    lg_modules: std::collections::BTreeSet<String>,
+}
+
+/// Compute the shared [`ModuleCycleCompareData`] — the SQLite MODULE cycles mapped to QUALIFIED module paths vs
+/// the LiveGraph derived module cycles, compared by SET. Reads SQLite once + the LiveGraph once (one read lock).
+fn module_cycle_compare_data(
     repo_state: &RepoState,
-    repo_uid: &str,
-    display_name: &str,
     snapshot_uid: &str,
-    repo_root: &str,
-) -> Result<Value, String> {
-    use repo_graph_livegraph::module_cycle_compare::{
-        classify_missing_module_cycle, compare_module_cycles,
-    };
-    // SQLite MODULE cycles (the primary) + qualified module paths (D5: short name "src" collides).
-    let sqlite_cycles = repo_state
-        .storage
-        .find_cycles(snapshot_uid, "module")
-        .map_err(|e| e.to_string())?;
-    let qnames = repo_state
-        .storage
-        .module_qualified_names(snapshot_uid)
-        .map_err(|e| e.to_string())?;
+) -> Result<ModuleCycleCompareData, repo_graph_storage::error::StorageError> {
+    use repo_graph_livegraph::module_cycle_compare::compare_module_cycles;
+    let sqlite_cycles = repo_state.storage.find_cycles(snapshot_uid, "module")?;
+    let qnames = repo_state.storage.module_qualified_names(snapshot_uid)?;
     let sqlite_count = sqlite_cycles.len();
+    // D5: the SHORT module name ("src") collides across packages; the compare diffs by the QUALIFIED path.
     let sqlite_qualified: Vec<Vec<String>> = sqlite_cycles
         .iter()
         .map(|c| {
@@ -2007,8 +2024,7 @@ pub fn module_cycle_compare_response(
                 .collect()
         })
         .collect();
-    // LiveGraph derived MODULE cycles + trust class.
-    let (lg_cycles, lg_class, obs_by_module, lg_modules) = {
+    let (lg_cycles, livegraph_class, obs_by_module, lg_modules) = {
         let guard = repo_state.livegraph.read();
         match guard.as_ref() {
             Some(lg) => {
@@ -2032,7 +2048,33 @@ pub fn module_cycle_compare_response(
             ),
         }
     };
-    let cmp = compare_module_cycles(&lg_cycles, &sqlite_qualified);
+    let comparison = compare_module_cycles(&lg_cycles, &sqlite_qualified);
+    Ok(ModuleCycleCompareData {
+        comparison,
+        sqlite_cycles,
+        sqlite_count,
+        livegraph_count: lg_cycles.len(),
+        livegraph_class,
+        obs_by_module,
+        lg_modules,
+    })
+}
+
+/// MODULE-CYCLES-CLI-1 (D4=A): build the `--engine compare --kind module-import` response. PRIMARY = the
+/// SQLite MODULE cycles (unchanged shape); plus a STRUCTURAL compare of the LiveGraph derived module cycles
+/// (by qualified module-path sets, D5) against SQLite + a diagnostic sidecar. Missing -> UnknownDivergence,
+/// extra -> UnexpectedExtraInLiveGraph (no auto cause attribution this slice).
+pub fn module_cycle_compare_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    repo_root: &str,
+) -> Result<Value, String> {
+    use repo_graph_livegraph::module_cycle_compare::classify_missing_module_cycle;
+    // The SHARED comparison computation (identical basis to the fastpath cert -> no drift).
+    let data = module_cycle_compare_data(repo_state, snapshot_uid).map_err(|e| e.to_string())?;
+    let cmp = &data.comparison;
     // MODULE-CYCLES-COMPARE-CLASSIFY-1 (D2=A): classify each missing cycle from LiveGraph evidence
     // (replacing the blanket UnknownDivergence); evidence-backed or Unknown.
     let missing_in_livegraph: Vec<ModuleDivergenceEntry> = cmp
@@ -2040,7 +2082,8 @@ pub fn module_cycle_compare_response(
         .iter()
         .map(|c| {
             let cycle_set: std::collections::BTreeSet<String> = c.iter().cloned().collect();
-            let class = classify_missing_module_cycle(&cycle_set, &obs_by_module, &lg_modules);
+            let class =
+                classify_missing_module_cycle(&cycle_set, &data.obs_by_module, &data.lg_modules);
             ModuleDivergenceEntry {
                 cycle: c.clone(),
                 divergence: class.as_str().to_string(),
@@ -2056,9 +2099,9 @@ pub fn module_cycle_compare_response(
         })
         .collect();
     let report = ModuleCycleCompareReport {
-        sqlite_count,
-        livegraph_count: lg_cycles.len(),
-        livegraph_class: lg_class,
+        sqlite_count: data.sqlite_count,
+        livegraph_count: data.livegraph_count,
+        livegraph_class: data.livegraph_class.clone(),
         matched: cmp.matched.len(),
         livegraph_subset: cmp.is_livegraph_subset(),
         missing_in_livegraph,
@@ -2069,8 +2112,8 @@ pub fn module_cycle_compare_response(
         "repo_uid": repo_uid,
         "display_name": display_name,
         "snapshot_uid": snapshot_uid,
-        "cycles": sqlite_cycles,
-        "count": sqlite_count,
+        "cycles": data.sqlite_cycles,
+        "count": data.sqlite_count,
         "backend_used": "sqlite",
         "kind": "module-import",
         "livegraph_module_compare": serde_json::to_value(&report).unwrap_or(Value::Null),
@@ -2081,9 +2124,308 @@ pub fn module_cycle_compare_response(
     Ok(v)
 }
 
+/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the in-memory repo-level MODULE-cycle NO-LOSS certificate. `verdict`
+/// is `GREEN` iff the module-cycle compare is EXACT (no SQLite cycle missing from the LiveGraph, no extra);
+/// `fingerprint` is the SQLite-free fingerprint (SHARED with `import_cert`) it was built at. A GREEN cert at the
+/// CURRENT fingerprint lets the default `cycles` serve the LiveGraph module cycles WITHOUT `find_cycles`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleNoLossCert {
+    /// The module-cycle compare verdict (`GREEN` = no-loss / `RED` = a missing or extra cycle).
+    pub verdict: String,
+    /// The SQLite-free fingerprint this verdict was computed at (the invalidation key).
+    pub fingerprint: String,
+}
+
+/// The cycles cert's status for the CURRENT fingerprint (mirrors `ImportCertState`).
+enum CycleCertState {
+    /// Valid at the current fingerprint, GREEN -> the fastpath may serve LiveGraph.
+    ValidGreen,
+    /// Valid at the current fingerprint, not GREEN -> SQLite.
+    ValidNotGreen,
+    /// No cert, or a cert at a DIFFERENT fingerprint -> (re)build, else SQLite.
+    StaleOrMissing,
+}
+
+/// Serve the LiveGraph MODULE cycles in the CANONICAL, byte-identical output (`cycle_output`) WITHOUT reading
+/// SQLite -- the GREEN-cert fastpath. The `cycles` array is byte-identical to the SQLite default's canonical
+/// output (proven in CYCLES-OUTPUT-CONTRACT-1 on xpart + amodx). `backend_used=livegraph`, no fallback.
+fn serve_cycles_fastpath(
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    lg_cycles: &[Vec<String>],
+) -> Value {
+    let cycles = crate::cycle_output::livegraph_module_cycles_json(lg_cycles);
+    let count = cycles.len();
+    json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "cycles": cycles,
+        "count": count,
+        "backend_used": "livegraph",
+        "fallback_reason": Value::Null,
+    })
+}
+
+/// The SQLite default cycles answer (CANONICAL, CYCLES-OUTPUT-CONTRACT-1) + the fastpath metadata. Reads SQLite
+/// (`find_cycles` + `module_qualified_names`) -- the fallback / cert-not-green path.
+fn serve_cycles_sqlite(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    fallback_reason: FallbackReason,
+) -> Result<Value, repo_graph_storage::error::StorageError> {
+    let sqlite_cycles = repo_state.storage.find_cycles(snapshot_uid, "module")?;
+    let qualified = repo_state.storage.module_qualified_names(snapshot_uid)?;
+    let cycles = crate::cycle_output::sqlite_module_cycles_json(&sqlite_cycles, &qualified);
+    let count = cycles.len();
+    Ok(json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "cycles": cycles,
+        "count": count,
+        "backend_used": "sqlite",
+        "fallback_reason": fallback_reason.as_str(),
+    }))
+}
+
+/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (build): run the SHARED module-cycle compare -> verdict, STORE the cert
+/// keyed by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint / a storage error -> the caller
+/// falls back to SQLite). Reads SQLite ONCE per fingerprint via the SAME `module_cycle_compare_data` the
+/// `--engine compare` uses, so the GREEN verdict PROVABLY matches the compare (no drift -> no false GREEN).
+fn build_and_store_cycles_cert(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+    fingerprint: Option<String>,
+) -> Option<bool> {
+    let fingerprint = fingerprint?;
+    let data = module_cycle_compare_data(repo_state, snapshot_uid).ok()?;
+    let is_green = data.comparison.is_exact();
+    let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
+    *repo_state.cycles_cert.write() = Some(CycleNoLossCert {
+        verdict,
+        fingerprint,
+    });
+    Some(is_green)
+}
+
+/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1/D4): the PURE fastpath/SQLite ladder. precondition UNMET (the
+/// LiveGraph module-cycle answer is not `Exact` -- non-resident / non-TS / degraded) -> SQLite (the labelled
+/// `precondition_reason`) ; precondition met + GREEN cert -> serve LiveGraph WITHOUT find_cycles ; cert
+/// RED/stale/missing/build-failed -> SQLite (`LiveGraphCycleDivergence`). Pure (no I/O itself): a panicking
+/// `serve_sqlite` proves the GREEN path skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing.
+fn cycles_fastpath_or_sqlite(
+    precondition_met: bool,
+    precondition_reason: FallbackReason,
+    cert: CycleCertState,
+    serve_livegraph: impl FnOnce() -> Value,
+    serve_sqlite: impl FnOnce(FallbackReason) -> Value,
+    build_cert: impl FnOnce() -> Option<bool>,
+) -> Value {
+    if !precondition_met {
+        return serve_sqlite(precondition_reason);
+    }
+    let green = match cert {
+        CycleCertState::ValidGreen => true,
+        CycleCertState::ValidNotGreen => false,
+        CycleCertState::StaleOrMissing => build_cert().unwrap_or(false),
+    };
+    if green {
+        serve_livegraph()
+    } else {
+        serve_sqlite(FallbackReason::LiveGraphCycleDivergence)
+    }
+}
+
+/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1=A / D4): the AUTO (default) `cycles` response. Tries the GREEN-cert
+/// FASTPATH (serve the LiveGraph module cycles WITHOUT SQLite) ; else SQLite (canonical). The answer-class +
+/// the LiveGraph cycles + the current fingerprint are SQLite-FREE; SQLite is read ONLY on the cert build + the
+/// SQLite fallback. The served output is byte-identical either way (CYCLES-OUTPUT-CONTRACT-1).
+pub fn cycles_auto_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+) -> Result<Value, repo_graph_storage::error::StorageError> {
+    // SQLite-FREE: the module-cycle answer-class (the precondition), the LiveGraph cycles (the served answer),
+    // and the current fingerprint -- all from a single LiveGraph read lock.
+    let (precondition_met, precondition_reason, lg_cycles, current_fp) = {
+        let guard = repo_state.livegraph.read();
+        match guard.as_ref() {
+            Some(lg) => {
+                let env = lg.module_import_cycles();
+                let met = format!("{:?}", env.class()) == "Exact";
+                let cycles: Vec<Vec<String>> = env
+                    .data()
+                    .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect())
+                    .unwrap_or_default();
+                let reason = if met {
+                    FallbackReason::LiveGraphUnavailable // unused when met (defensive)
+                } else {
+                    FallbackReason::LiveGraphPartial
+                };
+                let fp = import_cert_fingerprint(&lg.live_partitions(), snapshot_uid);
+                (met, reason, cycles, Some(fp))
+            }
+            None => (
+                false,
+                FallbackReason::LiveGraphUnavailable,
+                Vec::new(),
+                None,
+            ),
+        }
+    };
+    // The cert's state for the CURRENT fingerprint.
+    let cert = {
+        let cached = repo_state.cycles_cert.read();
+        match (&current_fp, cached.as_ref()) {
+            (Some(fp), Some(c)) if &c.fingerprint == fp => {
+                if c.verdict == "GREEN" {
+                    CycleCertState::ValidGreen
+                } else {
+                    CycleCertState::ValidNotGreen
+                }
+            }
+            _ => CycleCertState::StaleOrMissing,
+        }
+    };
+    // The ladder. A storage error in the SQLite fallback surfaces as Err (the caller maps it).
+    let mut sqlite_err: Option<repo_graph_storage::error::StorageError> = None;
+    let result = cycles_fastpath_or_sqlite(
+        precondition_met,
+        precondition_reason,
+        cert,
+        || serve_cycles_fastpath(repo_uid, display_name, snapshot_uid, &lg_cycles),
+        |reason| match serve_cycles_sqlite(repo_state, repo_uid, display_name, snapshot_uid, reason)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                sqlite_err = Some(e);
+                Value::Null
+            }
+        },
+        || build_and_store_cycles_cert(repo_state, snapshot_uid, current_fp.clone()),
+    );
+    if let Some(e) = sqlite_err {
+        return Err(e);
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the PURE fastpath/SQLite ladder ──
+    // The ladder takes closures, so a PANICKING serve_sqlite/build_cert proves which path runs -- the GREEN
+    // cached path must serve LiveGraph WITHOUT touching SQLite or rebuilding the cert (rule 9).
+
+    #[test]
+    fn cycles_fastpath_green_cached_serves_livegraph_without_sqlite_or_build() {
+        let out = cycles_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            CycleCertState::ValidGreen,
+            || json!({"backend_used": "livegraph"}),
+            |_r| panic!("SQLite (find_cycles) must NOT be read on a GREEN cached cert"),
+            || panic!("the cert must NOT be rebuilt when ValidGreen"),
+        );
+        assert_eq!(out["backend_used"], "livegraph");
+    }
+
+    #[test]
+    fn cycles_fastpath_not_green_falls_back_to_sqlite() {
+        let out = cycles_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            CycleCertState::ValidNotGreen,
+            || panic!("must NOT serve LiveGraph when the cert is not GREEN"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || panic!("must NOT rebuild when ValidNotGreen"),
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphCycleDivergence");
+    }
+
+    #[test]
+    fn cycles_fastpath_precondition_unmet_falls_back_with_reason() {
+        let out = cycles_fastpath_or_sqlite(
+            false,
+            FallbackReason::LiveGraphPartial,
+            CycleCertState::ValidGreen, // ignored when the precondition is unmet
+            || panic!("must NOT serve LiveGraph when the precondition is unmet"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || panic!("must NOT build the cert when the precondition is unmet"),
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphPartial");
+    }
+
+    #[test]
+    fn cycles_fastpath_stale_build_green_serves_livegraph() {
+        let out = cycles_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            CycleCertState::StaleOrMissing,
+            || json!({"backend_used": "livegraph"}),
+            |_r| panic!("a GREEN build must serve LiveGraph, not SQLite"),
+            || Some(true),
+        );
+        assert_eq!(out["backend_used"], "livegraph");
+    }
+
+    #[test]
+    fn cycles_fastpath_stale_build_red_falls_back() {
+        let out = cycles_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            CycleCertState::StaleOrMissing,
+            || panic!("a RED build must fall back to SQLite"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || Some(false),
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphCycleDivergence");
+    }
+
+    #[test]
+    fn cycles_fastpath_build_failed_falls_back() {
+        let out = cycles_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            CycleCertState::StaleOrMissing,
+            || panic!("a build failure must fall back to SQLite"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || None,
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphCycleDivergence");
+    }
+
+    #[test]
+    fn serve_cycles_fastpath_emits_canonical_livegraph_cycles() {
+        // serve wraps the SAME canonical builder as the SQLite path -> byte-identical cycles; sorted by
+        // qualified name (a/y before b/x), backend_used=livegraph, no fallback.
+        let out = serve_cycles_fastpath(
+            "repo",
+            "disp",
+            "snap",
+            &[vec!["b/x".to_string(), "a/y".to_string()]],
+        );
+        assert_eq!(out["backend_used"], "livegraph");
+        assert!(out["fallback_reason"].is_null());
+        assert_eq!(out["count"], 1);
+        let names: Vec<&str> = out["cycles"][0]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["qualified_name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["a/y", "b/x"]);
+    }
 
     fn synthetic_root() -> String {
         format!(

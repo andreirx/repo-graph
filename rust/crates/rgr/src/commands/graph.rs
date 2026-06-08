@@ -907,7 +907,10 @@ pub fn run_imports(args: &[String]) -> ExitCode {
 /// params + the human renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CyclesRoute {
-    /// SQLite MODULE-import cycles (the default; `--engine sqlite [--kind module-import]`).
+    /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the DEFAULT (`auto`, no flags) -- the cert-gated LiveGraph-first
+    /// MODULE-cycle answer (the daemon serves LiveGraph on a GREEN repo cert, else a labelled SQLite fallback).
+    AutoModule,
+    /// Forced SQLite MODULE-import cycles (the explicit `--engine sqlite [--kind module-import]` escape hatch).
     SqliteModule,
     /// LiveGraph captured FILE-import cycles (`--engine livegraph --kind file-import`).
     LivegraphFile,
@@ -924,15 +927,14 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
     // (a DIFFERENT graph; NO SQLite fallback). Then parse --json from the remaining positionals.
     let (args, engine_raw) = extract_engine_flag(args.to_vec());
     let (args, kind) = extract_kind_flag(args);
-    // Absent engine == sqlite for cycles — the default stays SQLite (no `auto` migration).
-    let engine = if engine_raw == "auto" {
-        "sqlite"
-    } else {
-        engine_raw.as_str()
-    };
+    // CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: absent engine == `auto` -- the cert-gated LiveGraph-first default
+    // (the daemon serves LiveGraph module cycles when a GREEN repo no-loss certificate holds, else a labelled
+    // SQLite fallback -- BYTE-IDENTICAL either way). `--engine sqlite` forces the SQLite escape hatch
+    // (UNCHANGED); `--engine livegraph|compare` stay the explicit read-model / compare surfaces.
+    let engine = engine_raw.as_str();
 
     let usage =
-        "usage: rmap cycles [--engine sqlite|livegraph] [--kind file-import|module-import] [--json]";
+        "usage: rmap cycles [--engine auto|sqlite|livegraph|compare] [--kind file-import|module-import] [--json]";
     let mut json_mode = false;
     for arg in &args {
         match arg.as_str() {
@@ -953,8 +955,10 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
     // Validate the engine/kind combination (D2/D6/D7): reject invalid combos with a clear error rather
     // than silently computing a different graph.
     let route = match (engine, kind.as_str()) {
-        ("sqlite", "") => CyclesRoute::SqliteModule, // SQLite MODULE-import default (unchanged)
-        ("sqlite", "module-import") => CyclesRoute::SqliteModule, // D6: explicit spelling of the default
+        ("auto", "") => CyclesRoute::AutoModule, // the DEFAULT: cert-gated LiveGraph-first (FASTPATH-1)
+        ("auto", "module-import") => CyclesRoute::AutoModule, // explicit spelling of the default
+        ("sqlite", "") => CyclesRoute::SqliteModule, // forced SQLite escape hatch
+        ("sqlite", "module-import") => CyclesRoute::SqliteModule, // D6: explicit spelling of forced SQLite
         ("livegraph", "file-import") => CyclesRoute::LivegraphFile,
         ("livegraph", "module-import") => CyclesRoute::LivegraphModule,
         ("livegraph", _) => {
@@ -979,7 +983,9 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
         (e, "") => {
-            eprintln!("error: unknown --engine '{e}' (supported: sqlite, livegraph)");
+            eprintln!(
+                "error: unknown --engine '{e}' (supported: auto, sqlite, livegraph, compare)"
+            );
             return ExitCode::from(1);
         }
         (_, k) => {
@@ -1002,7 +1008,10 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
     };
 
     let params = match route {
-        CyclesRoute::SqliteModule => serde_json::json!({ "repo": repo_path }),
+        // FASTPATH-1: the default sends `engine:"auto"`; explicit `--engine sqlite` sends `"sqlite"` -- so the
+        // daemon distinguishes the cert-gated fastpath from the forced SQLite escape hatch (rule 7).
+        CyclesRoute::AutoModule => serde_json::json!({ "repo": repo_path, "engine": "auto" }),
+        CyclesRoute::SqliteModule => serde_json::json!({ "repo": repo_path, "engine": "sqlite" }),
         CyclesRoute::LivegraphFile => {
             serde_json::json!({ "repo": repo_path, "engine": "livegraph", "kind": "file-import" })
         }
@@ -1134,11 +1143,12 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                         let rendered = match route {
                             CyclesRoute::LivegraphFile => response.render_human_file_import(),
                             CyclesRoute::LivegraphModule => response.render_human_module_import(),
-                            // CompareModule serves the SQLite primary (generic MODULE renderer) + the
-                            // compare summary line below.
-                            CyclesRoute::SqliteModule | CyclesRoute::CompareModule => {
-                                response.render_human()
-                            }
+                            // The default (Auto), forced SQLite, and Compare all serve the generic MODULE
+                            // renderer (byte-identical canonical cycles; backend_used/fallback_reason are
+                            // ignored by CyclesResponse). Compare adds its summary line below.
+                            CyclesRoute::AutoModule
+                            | CyclesRoute::SqliteModule
+                            | CyclesRoute::CompareModule => response.render_human(),
                         };
                         println!("{}", rendered);
                         if let Some(summary) = compare_summary {

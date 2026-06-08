@@ -1,16 +1,15 @@
 # CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: cert-gated LiveGraph default for `rmap cycles`
 
 Slice ID: CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1
-Status: **BLOCKED / DEFERRED (2026-06-07) — superseded by CYCLES-OUTPUT-CONTRACT-1.** D1–D5 were ratified
-(D1=A compare-GREEN only), but the build HALTED at the D4 byte-compatibility gate BEFORE any fastpath code was
-written. The LiveGraph fastpath would change human-visible cycle IDENTITIES (short `src` -> qualified
-`packages/a/src`) and ORDERING (SQLite Tarjan discovery order -> LiveGraph derivation order) for the SAME cert-
-proven cycle SET. That is a user-visible OUTPUT MIGRATION, not a transparent fastpath, so it CANNOT satisfy this
-slice's scope (SQLite-dependency reduction WITH default compatibility). **D4 was NOT re-ratified** (ratified C:
-hold). `--engine sqlite` preserving byte-exact legacy is NOT sufficient license for a default flip absent a
-SEPARATE, ratified output-migration decision. NO raw-decommission credit for a cycles fastpath. Resolution
-deferred to CYCLES-OUTPUT-CONTRACT-1 (decide the default identity/order contract first); only then can a cycles
-default fastpath proceed. See "BLOCKED — output-contract discovery" below.
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-08) — resumed after CYCLES-OUTPUT-CONTRACT-1 unblocked it.**
+D1–D5 ratified (D1=A compare-GREEN only). The slice was BLOCKED at the D4 byte-compatibility gate (the LiveGraph
+fastpath would have changed human cycle identities/order vs the legacy SQLite default); CYCLES-OUTPUT-CONTRACT-1
+(D1=B/D2=B/D3=A) canonicalized BOTH backends to qualified+deterministic output and PROVED byte-identity, removing
+the blocker. This slice then implemented the cert-gated default. The DEFAULT (`auto`) serves the LiveGraph module
+cycles WITHOUT `find_cycles` on a valid GREEN repo no-loss cert; else the canonical SQLite answer (byte-identical,
+labelled). Gate green (build/fmt/clippy/`test --workspace` 0 failures); live: xpart/amodx -> fastpath
+(backend=livegraph), repo-graph -> SQLite fallback (LiveGraphCycleDivergence). NO raw decommission, NO deletion,
+NO non-TS support. See "Completion" below. (Historical block recorded in "BLOCKED — output-contract discovery".)
 
 (Original spec body RETAINED verbatim below for the eventual unblock.) Flip the DEFAULT
 `rmap cycles` (MODULE-import, SQLite `find_cycles` every call) to a cert-gated LiveGraph fastpath: serve the
@@ -178,6 +177,56 @@ Stop if: a GREEN cert would serve a file/repo the compare would have flagged mis
 NO raw decommission (SQLite read to BUILD the cert + on fallback) ; NO SQLite deletion ; NO non-TS support ; NO
 resolver / module-identity change ; NO file-import default change ; NO change to the explicit engines ; NO new
 cycle classes. repo-graph/non-TS FALLBACK is EXPECTED, not a regression.
+```
+
+## Completion (EXECUTED 2026-06-08 — resumed post-OUTPUT-CONTRACT-1)
+```text
+IMPLEMENTED (mirrors the imports FASTPATH-1; storage find_cycles UNCHANGED):
+  - state.rs: RepoState.cycles_cert (in-memory RwLock<Option<CycleNoLossCert{verdict,fingerprint}>>, S1).
+  - livegraph_feed.rs: extracted module_cycle_compare_data (the SHARED comparison computation) -> the
+    --engine compare response AND the cert BOTH derive the verdict from it (no drift -> no false GREEN);
+    CycleNoLossCert / CycleCertState ; build_and_store_cycles_cert (GREEN iff comparison.is_exact()) ;
+    serve_cycles_fastpath (livegraph_module_cycles_json -- the OUTPUT-CONTRACT-1 canonical builder) ;
+    serve_cycles_sqlite (sqlite_module_cycles_json) ; cycles_fastpath_or_sqlite (the PURE ladder) ;
+    cycles_auto_response. Reuses import_cert_fingerprint (the SHARED SQLite-free fingerprint, D2).
+    FallbackReason::LiveGraphCycleDivergence added.
+  - dispatch.rs handle_cycles: engine default `auto`; ("auto",_) -> cycles_auto_response (fastpath);
+    explicit ("sqlite",_) -> the forced SQLite canonical arm (rule 7: UNCHANGED, no backend_used).
+  - rgr graph.rs run_cycles: removed the auto->sqlite collapse; CyclesRoute::AutoModule (default, sends
+    engine:"auto"); SqliteModule now sends engine:"sqlite" (so the daemon distinguishes fastpath from the
+    forced escape hatch); AutoModule renders via render_human; --json prints the additive envelope.
+
+PREDICATE (D1=A): default `auto` + precondition met (module-cycle answer-class == Exact) + a cached/current
+  GREEN cert (compare missing=0 AND extra=0; an UnknownDivergence is a missing entry, so missing=0 => unknown=0)
+  -> serve LiveGraph. Else (precondition unmet / RED / stale / build-failed) -> SQLite fallback, labelled.
+  Cert: in-memory per repo, keyed by the shared fingerprint, lazily built on the first eligible call (reads
+  SQLite ONCE), rebuilt on fingerprint change, build-failure -> SQLite.
+
+GATE (EXECUTED): build clean ; fmt clean ; clippy --workspace --all-targets -D warnings PASS ; test --workspace
+  0 failures (220 result lines). 7 fastpath ladder unit tests incl. the PANICKING-SQLite-closure proof on the
+  GREEN cached path (rule 9) + RED/stale/build-fail/precondition-unmet fall back ; the compare refactor is
+  behavior-preserving (20 cycle tests).
+
+LIVE (EXECUTED, release rmapd, producer env):
+  - xpart-monorepo: default(auto) -> backend=livegraph, count=1 (FASTPATH) ; --engine sqlite -> forced SQLite
+    (no backend_used), count=1 ; --engine livegraph -> rich (answer_class=Exact) ; --engine compare ->
+    matched=1 missing=0 extra=0. Counts identical (no loss).
+  - amodx (GREEN, 8 partitions): default(auto) -> backend=livegraph, count=3 (FASTPATH) ; --engine sqlite ->
+    forced SQLite, count=3.
+  - repo-graph (self; 8 fixture partitions EXCLUDED -> the excluded a<->b fixture cycle is SQLite-only):
+    default(auto) -> backend=sqlite, fallback_reason=LiveGraphCycleDivergence, count=6 (RED -> SQLite fallback,
+    EXPECTED). No cycle lost.
+
+DIVERGENCE FROM PLAN (recorded): the plan said "handle_cycles default -> the ladder", but the daemon could NOT
+  distinguish the DEFAULT from explicit `--engine sqlite` (both arrived as engine=sqlite / no-engine -> the same
+  arm). Live validation CAUGHT this: `--engine sqlite` was incorrectly served by the fastpath (backend=livegraph),
+  violating rule 7. FIX (mirrors the imports auto/sqlite split): the default flips to `auto` end-to-end (CLI
+  sends engine:"auto"; SqliteModule sends engine:"sqlite"); daemon ("auto",_) -> fastpath, ("sqlite",_) ->
+  forced SQLite. This is the established imports/callers/path precedent, not a new decision.
+
+CONSEQUENCE: the cycles default common path is now SQLite-FREE on a GREEN repo (the cert build reads SQLite once
+  per fingerprint; subsequent GREEN calls serve LiveGraph with NO find_cycles). A future SQLITE-RAW-DECOMMISSION
+  readiness update should record cycles as the 5th default with a SQLite-free served path.
 ```
 
 ## References

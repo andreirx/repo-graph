@@ -1365,12 +1365,12 @@ impl ServiceDispatcher {
         };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
-        // CYCLES-LIVEGRAPH-CLI-1: engine/kind routing. Default (no flags / engine=sqlite, no kind) =
-        // SQLite MODULE-import cycles (unchanged below). `livegraph` + `file-import` = the LiveGraph
-        // captured FILE import-cycle graph (a DIFFERENT question; NO SQLite fallback — D7). The CLI
-        // validates combinations; the daemon is defensive and rejects unsupported combos rather than
-        // silently computing a different graph (D2/D6).
-        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("sqlite");
+        // CYCLES-LIVEGRAPH-CLI-1 + CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: engine/kind routing. DEFAULT
+        // (no flags == `auto`) = the cert-gated LiveGraph MODULE-cycle fastpath (`cycles_auto_response`).
+        // EXPLICIT `--engine sqlite` = the forced SQLite MODULE-import path below (rule 7: UNCHANGED escape
+        // hatch). `livegraph` + `file-import` = the LiveGraph captured FILE import-cycle graph (a DIFFERENT
+        // question; NO SQLite fallback — D7). The daemon rejects unsupported combos defensively (D2/D6).
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
         let kind = Self::get_optional_string_param(&request.params, "kind").unwrap_or("");
         match (engine, kind) {
             ("livegraph", "file-import") => {
@@ -1453,8 +1453,26 @@ impl ServiceDispatcher {
                     ),
                 );
             }
-            // sqlite / no-kind AND sqlite+module-import (D6: the SQLite MODULE default is the module-import
-            // graph) -> the SQLite MODULE-import path below (unchanged).
+            // CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the DEFAULT (`auto`, no kind or module-import) -> the
+            // cert-gated LiveGraph fastpath. Serves the LiveGraph module cycles WITHOUT `find_cycles` when a
+            // valid GREEN repo no-loss certificate holds at the current fingerprint; ELSE the canonical SQLite
+            // answer (byte-identical, CYCLES-OUTPUT-CONTRACT-1) with a labelled `fallback_reason`.
+            ("auto", "") | ("auto", "module-import") => {
+                return match crate::livegraph_feed::cycles_auto_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                };
+            }
+            // EXPLICIT `--engine sqlite` (no kind or module-import, D6) -> the forced SQLite MODULE-import path
+            // below (rule 7: UNCHANGED -- the canonical SQLite answer, no fastpath, no `backend_used`).
             _ => {}
         }
 
@@ -1465,10 +1483,10 @@ impl ServiceDispatcher {
             total: 1,
         });
 
-        // Module-level cycles (default). CYCLES-OUTPUT-CONTRACT-1 (D1=B/D2=B): the raw SCC cycles are mapped to
-        // the CANONICAL, qualified, deterministically-ordered output AT THE DAEMON BOUNDARY — `find_cycles`
-        // (the low-level SCC query) is UNCHANGED. `module_qualified_names` supplies the qualified module path
-        // per node_uid; `cycle_output` applies the sort/dedup + the additive `qualified_name` field.
+        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The forced
+        // SQLite MODULE-import answer: canonical, qualified, deterministically-ordered (CYCLES-OUTPUT-
+        // CONTRACT-1) -- UNCHANGED (rule 7). `find_cycles` (the SCC query) is unchanged; the qualified +
+        // canonical mapping is applied at the boundary by `cycle_output`. No fastpath, no `backend_used`.
         let query_start = Instant::now();
         let cycles = match repo_state
             .storage
@@ -1510,8 +1528,6 @@ impl ServiceDispatcher {
             query_ms
         );
 
-        // CLI-OUT-2B: Include display_name for human renderers. CYCLES-OUTPUT-CONTRACT-1: `cycles` is the
-        // canonical qualified+ordered output; `count` is the (unchanged) cycle count.
         DispatchResult::success(
             &request.id,
             serde_json::json!({
