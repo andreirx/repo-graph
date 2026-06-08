@@ -2,6 +2,18 @@
 
 ## Current Priority
 
+> **STATUS (2026-06-08): Stage D — SQLite raw decommission. Next build: STATS-LIVEGRAPH-1 (spec-first).**
+> Stages A–C are COMPLETE; Stage D (persistence + raw decommission) is in progress. Since this document's
+> body was last rewritten (2026-06-01), the warm-cache chain shipped (WARM-CACHE-1 + daemon-wiring +
+> valuefacts + producer-absent), the imports + cycles LiveGraph **default fastpaths** landed, callers/
+> callees/path went **lazy**, and the **SQLITE-RAW-DECOMMISSION-READINESS-1..7** audits ran. The
+> readiness-7 audit (today) names **STATS-LIVEGRAPH-1, spec-first** as the highest-value next slice:
+> `stats` is the last SQLite-only drilldown default with no LiveGraph served path, and cert-fastpath
+> leverage is exhausted for the already-migrated defaults. COHERENCE-LAYER (orient/check/explain/trust)
+> follows, design-first. [INFERRED priority; OBSERVED-backed — `docs/slices/sqlite-raw-decommission-readiness-7.md`
+> §Q5 + git HEAD=82da168 chain.] The running log below is historical narrative through 2026-06-01; for
+> the present state trust this banner and the **Stage D order** line further down.
+
 **EXTRACTION-SUBSTRATE-PIVOT** — SCIP-first L0/L1 substrate.
 
 Committed direction: `docs/architecture/adr/adr-extraction-substrate-scip-first.md`
@@ -17,7 +29,7 @@ FILE nodes + bubble-up caller resolution (no dangling endpoints), narrow
 constructor/getter name reconciliation. A 10-group off-target acceptance harness is
 green, plus an ignored engine regression. Closure evidence: `docs/slices/ingest-core-1.md`.
 
-**Current priority: Stage B probes.** CJOIN-PROVE-1 + **CJOIN-PROVE-2 EXECUTED → ST1
+**Stage B probes — COMPLETE (historical log; see the STATUS banner above for the present priority).** CJOIN-PROVE-1 + **CJOIN-PROVE-2 EXECUTED → ST1
 RETIRED.** Clean-C++ value attachment + macro-heavy nginx **95.9% name-confirmed**, under the
 **name-correspondence guard**: a C/C++ value fact attaches to SCIP identity only when range
 containment AND name correspondence agree; **range-only joining is forbidden** (silently
@@ -176,13 +188,25 @@ invalidates the graph cache); D8 cache-side mirror DTOs (**NO serde in `repo-gra
 key / manifest validation / atomic write / refresh interaction. Spec
 `docs/slices/partitioned-warm-cache-arch-1.md`.
 
-**Stage D order:** 1B ✓ → DATAFLOW ✓ → 1C ✓ → **WARM-CACHE-ARCH ✓** → **WARM-CACHE-1 (next — the
-`repo-graph-warm-cache` support crate: DTO round-trips, manifest, atomic write; no daemon wiring)** →
-RAW-DECOMMISSION.
+**Stage D order (updated 2026-06-08):** 1B ✓ → DATAFLOW ✓ → 1C ✓ → WARM-CACHE-ARCH ✓ → WARM-CACHE-1 ✓
+(support crate: DTO round-trips, manifest, atomic write) → WARM-CACHE-DAEMON-WIRING-1 ✓ →
+WARM-CACHE-VALUEFACTS-1 ✓ → WARM-CACHE-PRODUCER-ABSENT-1 ✓ → imports + cycles LiveGraph default
+fastpaths ✓ + lazy callers/callees/path ✓ → SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) →
+**STATS-LIVEGRAPH-1 (next — spec-first; the last SQLite-only drilldown default, a real build needing
+the IR degree graph + measurements)** → COHERENCE-LAYER (design-first) → SQLITE-RAW-DECOMMISSION-1.
+[OBSERVED: git HEAD chain + warm-cache slice docs IMPLEMENTED 2026-06-01; readiness-7 §Q5 for the
+STATS-LIVEGRAPH-1 recommendation.]
+
+The WARM-CACHE-1 slice doc header still reads "DESIGN — building"; that header is itself stale (the
+crate shipped and was extended — `repo_graph_version` key fix `7b0eb4c`, warm-cache schema bumps in the
+imports thread, and the IMPLEMENTED dependents above). Correcting that slice doc is out of scope here
+(slice docs are read-only for this reconciliation).
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
-M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and
-refresh model remain deferred until after the IR.
+M3, M4b) are validation tracks for the IR slice, not blockers. The IR shipped
+(INGEST-CORE-1), so "after the IR" has passed: the refresh model and warm-cache
+format are now DECIDED, not deferred (see REFRESH-PROBE-1 and
+PARTITIONED-WARM-CACHE-ARCH-1 above, and the status note below).
 
 Execution spine (risk-driven): `docs/architecture/scip-migration-plan.md`. Stages:
 A thin foundation (SCIP-INGEST-IR-1 design → INGEST-CORE-1) → B retire the four
@@ -191,9 +215,16 @@ cross-partition, REFRESH-PROBE-1 refresh-at-scale, RUST-INGEST-PROVE-1) → C ru
 (LiveGraph/query/value-join/trust) → D persistence + raw decommission. Each slice
 carries a go/no-go and a documented retreat that narrows scope, never kills the plan.
 
-Refresh model, partition granularity, and warm-cache format remain deferred to
-migration-plan Stages B–D. They were never gated on the viability spikes (TS/C/Rust),
-which are complete and retired the gate. Do not treat them as settled.
+Refresh model, partition granularity, and warm-cache format were resolved across
+migration-plan Stages B–D — they are now DECIDED, not deferred. They were never gated
+on the viability spikes (TS/C/Rust), which are complete and retired the gate.
+[OBSERVED — recorded above in this document and in `docs/ROADMAP.md` §"Honesty":]
+- Refresh model: REFRESH-PROBE-1 → two-speed Verdict B (serve last-good epoch + AST
+  fast delta, coalesce bursts; the refresh unit is the partition).
+- Warm-cache format: PARTITIONED-WARM-CACHE-ARCH-1 RATIFIED (2026-06-01) — bincode
+  under a validation envelope; WARM-CACHE-1 shipped and was extended in Stage D.
+- Partition granularity: the partition is the refresh unit (REFRESH-PROBE-1); the
+  exact coalescing window is runtime-tuned, not a remaining design gate.
 
 ---
 

@@ -104,7 +104,7 @@ Graph) from STORAGE-ARCH-1 stands. **Revised by
 `docs/architecture/adr/adr-extraction-substrate-scip-first.md`
 (EXTRACTION-SUBSTRATE-ADR-1):** L0/L1 facts now come from SCIP (external
 compiler-grade producer), not homegrown extraction; raw graph leaves SQLite for a
-partitioned binary warm cache (format pending spike evidence). SQLite raw-graph
+partitioned binary warm cache (format was pending spike evidence at the ADR; since ratified by PARTITIONED-WARM-CACHE-ARCH-1 → bincode under a validation envelope). SQLite raw-graph
 storage is now transitional, not strategic.
 See `agent_docs/storage-architecture-v2.md` for the tier specification.
 
@@ -115,14 +115,14 @@ See `agent_docs/storage-architecture-v2.md` for the tier specification.
 | **CACHE-SEMANTICS-1** | Retention classes, cache epoch, stale-epoch exclusion | COMPLETE |
 | **RETENTION-POLICY-1** | Retention lifecycle (classify + deferred prune) | AMENDED |
 | **STATE-ROOT-SEPARATION-1** | Authority vs sandbox-local state boundaries | COMPLETE |
-| **EXTRACTION-SUBSTRATE-ADR-1** | SCIP-first substrate decision (committed; operational decisions deferred) | ACCEPTED |
+| **EXTRACTION-SUBSTRATE-ADR-1** | SCIP-first substrate decision (committed; operational decisions were deferred at the ADR, since decided — REFRESH-PROBE-1 + PARTITIONED-WARM-CACHE-ARCH-1) | ACCEPTED |
 | **SCIP-TS-PARITY-SPIKE-1** | TS SCIP parity + operational spike | PARTIAL (GO for TS) |
 | **SCIP-CLANG-SPIKE-1** | C/C++ via scip-clang | PARTIAL (GO; leveldb 39 TUs->90 docs) |
 | **SCIP-RUST-SPIKE-1** | Rust via rust-analyzer SCIP; self-host | PARTIAL (GO w/ caveats; per-crate + dedup) |
-| **SCIP-INGEST-IR-1** | Canonical IR, SCIP ingestion, stable-key mapping, call-graph derivation | PLANNED (post-spike) |
-| **PARTITIONED-WARM-CACHE-ARCH-1** | Binary warm cache; format decision | PLANNED (post-spike) |
-| **QUERY-MIGRATION-1** | callers/callees/path/cycles on LiveGraph partitions | PLANNED (post-spike) |
-| **COHERENCE-LAYER-1** | orient/check/trust mixed live+persisted contract | PLANNED (post-spike) |
+| **SCIP-INGEST-IR-1** | Canonical IR, SCIP ingestion, stable-key mapping, call-graph derivation | IMPLEMENTED (design D1–D5 → INGEST-CORE-1; Stage A) |
+| **PARTITIONED-WARM-CACHE-ARCH-1** | Binary warm cache; format decision | RATIFIED 2026-06-01 (bincode under validation envelope; Stage D) |
+| **QUERY-MIGRATION-1** | callers/callees/path/cycles on LiveGraph partitions | IMPLEMENTED (Stage C; callers/callees headless, path deferred; cycles/imports default-migrated via Stage-D fastpaths) |
+| **COHERENCE-LAYER-1** | orient/check/trust mixed live+persisted contract | PLANNED (Stage D; design-first, after STATS-LIVEGRAPH-1) |
 | **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
 | **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
 | **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
@@ -131,24 +131,41 @@ See `agent_docs/storage-architecture-v2.md` for the tier specification.
 
 ### Track Priority
 
-This track is **active**, now centered on the SCIP-first extraction substrate
-pivot, not on SQLite raw-graph lifecycle polish.
+This track is **active**, centered on the SCIP-first extraction substrate pivot,
+not on SQLite raw-graph lifecycle polish. As of 2026-06-08 the pivot is in **Stage D
+(persistence + SQLite raw decommission)**; Stages A–C are complete. [OBSERVED: git
+HEAD chain + `CURRENT_SLICE.md` + slice docs.]
 
-Sequence: EXTRACTION-SUBSTRATE-ADR-1 (ACCEPTED) → SCIP-TS-PARITY-SPIKE-1 (gating
-evidence) → SCIP-INGEST-IR-1 → PARTITIONED-WARM-CACHE-ARCH-1 → QUERY-MIGRATION-1
-→ COHERENCE-LAYER-1.
+Sequence (migration-plan stages; ✓ = landed). **Stage A** — EXTRACTION-SUBSTRATE-ADR-1 ✓
+→ SCIP-INGEST-IR-1 design ✓ → INGEST-CORE-1 ✓. **Stage B** — CJOIN-PROVE-1/2 ✓,
+XPART-PROVE-1(+1B)+boundary decision ✓, REFRESH-PROBE-1 ✓ (Verdict B), RUST-INGEST-PROVE-1 ✓
+(GO-with-caveats). **Stage C** — TRUST-MODEL-REBASE-1 ✓ → LIVEGRAPH-RUNTIME-1 ✓ →
+QUERY-MIGRATION-1 ✓ → VALUE-JOIN-1 ✓. **Stage D (current)** — LIVEGRAPH-INTEGRATION-1A/1B/1C ✓
+→ PARTITIONED-WARM-CACHE-ARCH-1 ✓ → WARM-CACHE-1 (+ daemon-wiring / valuefacts /
+producer-absent) ✓ → imports + cycles LiveGraph default fastpaths + lazy callers/callees/path ✓
+→ SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) → **STATS-LIVEGRAPH-1 (next, spec-first)**
+→ COHERENCE-LAYER-1 → SQLITE-RAW-DECOMMISSION-1. Full Stage-B/C/D ledger: `CURRENT_SLICE.md`.
 
 **Honesty:** the viability spikes (TS/C/Rust) are complete and the gate is retired.
-Refresh model, partition granularity, and warm-cache format remain deferred to
-migration-plan Stages B–D — not gated on the spikes. See
-`docs/architecture/scip-migration-plan.md`.
+The refresh model (REFRESH-PROBE-1 → two-speed Verdict B) and warm-cache format
+(PARTITIONED-WARM-CACHE-ARCH-1 → bincode under a validation envelope) are now decided;
+the partition is the refresh unit (REFRESH-PROBE-1) and only the exact coalescing
+window remains runtime-tuned. See `docs/architecture/scip-migration-plan.md`.
 
 ### Current Priority
 
-**SCIP-INGEST-IR-1** — design the repo-graph-centered ingestion IR over SCIP. The
-multi-language substrate gate is retired (TS/C GO, Rust GO-with-caveats). Remaining
-spike measures are IR validation tracks, not blockers. See
-`docs/slices/scip-ingest-ir-1.md`.
+**STATS-LIVEGRAPH-1 (next build; spec-first).** Stage D, SQLite raw-decommission track.
+[INFERRED priority, OBSERVED-backed — `docs/slices/sqlite-raw-decommission-readiness-7.md`
+§Q5 + the git HEAD=82da168 chain.] `stats` is the last drilldown default that is SQLite-only
+with **no LiveGraph served path**; migrating it is a real build (it needs the IR degree graph +
+measurements the IR lacks), so the data dependency is specced first. Cert-fastpath leverage is
+exhausted for the already-migrated defaults (imports + cycles flipped; callers/callees/path
+lazy) — the next decommission step is breadth (stats), not another fastpath. After stats: the
+COHERENCE-LAYER design slice (orient/check/explain/trust; higher blast radius; design-first).
+
+SCIP-INGEST-IR-1 is **no longer current** — it shipped as INGEST-CORE-1 (Stage A);
+`docs/slices/scip-ingest-ir-1.md` holds the historical design. STATS-LIVEGRAPH-1 has no slice
+doc yet; authoring it is the next slice, not part of this reconciliation.
 
 ### Recently Completed
 
@@ -519,8 +536,14 @@ HOOK-1 delivered:
 21. ~~CLI-OUT-5 — Inventory/policy output~~ (COMPLETE)
 22. ~~CLI-OUT-6 — Quality/risk output~~ (COMPLETE)
 23. ~~CLI-OUT-7 — Governance output~~ (COMPLETE)
-24. **SMOKE-1 — Validation harness cleanup (CURRENT)**
+24. ~~SMOKE-1 — Validation harness cleanup~~ (COMPLETE 2026-05-20)
 25. CURSOR-1 — Cursor integration (QUEUED)
+
+**The active development track is no longer this Distribution/CLI-OUT program — it is the
+Storage Architecture / SCIP Stage-D program** (this track's CLI-OUT-1..7 and SMOKE-1 are all
+COMPLETE; CURSOR-1 remains queued). Genuine current priority: see the **Storage Architecture
+Track → Current Priority** above (STATS-LIVEGRAPH-1, spec-first) and `CURRENT_SLICE.md`.
+[OBSERVED: the git HEAD chain is entirely Stage-D storage work.]
 
 ### Artifact Matrix (REL-1)
 
