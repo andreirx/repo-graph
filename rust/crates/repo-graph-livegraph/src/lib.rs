@@ -17,7 +17,8 @@ use repo_graph_import_resolver::{
     ImportCandidate, PackageImportClass, ResolvedImportEdgeCandidate,
 };
 use repo_graph_ir::{
-    CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, PartitionIr, Provenance, SourceRange,
+    CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, IrVisibility, PartitionIr,
+    Provenance, SourceRange,
 };
 use repo_graph_trust_model::{
     classify_answer, AnswerClass, AnswerEnvelope, CompletenessInput, DegradationReason,
@@ -1235,16 +1236,14 @@ impl LiveGraph {
         (missing, worst, languages, epochs)
     }
 
-    /// MODULE import-cycle detection (MODULE-AGGREGATION-1): the SAME captured FILE import graph as
-    /// `file_import_cycles`, AGGREGATED to MODULE granularity. `module(file) = dirname(repo-relative path)`
-    /// (matching the SQLite `rmap cycles` identity; reuses the resolver's proven key parser); intra-module
-    /// (self) edges are SKIPPED and module edges DEDUPED before Tarjan. The answer INHERITS
-    /// file_import_cycles' completeness (D4) and is honestly scoped (`module_aggregated`; the captured FILE
-    /// graph it aggregated; NEVER "all module cycles" — the FILE-graph completeness caveat propagates up).
-    pub fn module_import_cycles(&self) -> AnswerEnvelope<ModuleImportCyclesAnswer> {
-        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+    /// The dirname-aggregated MODULE import edge set shared by `module_import_cycles` (SCC input) and
+    /// `module_stats` (degree input). Aggregates the captured FILE import graph to MODULE granularity:
+    /// `module(file) = dirname(repo-relative path)` (the SQLite identity, via the resolver's proven key
+    /// parser), SKIPS intra-module (self) edges, and DEDUPS pairs (`BTreeSet`). Returns the deduped
+    /// `(src_module, dst_module)` pairs plus the FILE-graph scope they were aggregated from. Extracted so
+    /// both consumers derive the SAME module graph (no drift between the cycle answer and the degree stats).
+    fn module_import_pairs(&self) -> (BTreeSet<(String, String)>, ImportCycleScope) {
         let (file_edges, file_scope) = self.file_import_edges();
-        // Aggregate FILE edges -> MODULE edges: dirname identity, SKIP self-module, DEDUP (BTreeSet).
         let mut module_pairs: BTreeSet<(String, String)> = BTreeSet::new();
         for (src_key, dst_key) in &file_edges {
             if let (Some(sm), Some(dm)) = (module_path_of(src_key), module_path_of(dst_key)) {
@@ -1253,6 +1252,18 @@ impl LiveGraph {
                 }
             }
         }
+        (module_pairs, file_scope)
+    }
+
+    /// MODULE import-cycle detection (MODULE-AGGREGATION-1): the SAME captured FILE import graph as
+    /// `file_import_cycles`, AGGREGATED to MODULE granularity. `module(file) = dirname(repo-relative path)`
+    /// (matching the SQLite `rmap cycles` identity; reuses the resolver's proven key parser); intra-module
+    /// (self) edges are SKIPPED and module edges DEDUPED before Tarjan. The answer INHERITS
+    /// file_import_cycles' completeness (D4) and is honestly scoped (`module_aggregated`; the captured FILE
+    /// graph it aggregated; NEVER "all module cycles" — the FILE-graph completeness caveat propagates up).
+    pub fn module_import_cycles(&self) -> AnswerEnvelope<ModuleImportCyclesAnswer> {
+        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+        let (module_pairs, file_scope) = self.module_import_pairs();
         let edges: Vec<DirectedEdge> = module_pairs
             .iter()
             .map(|(s, d)| DirectedEdge {
@@ -1270,6 +1281,124 @@ impl LiveGraph {
             .collect();
         let data = ModuleImportCyclesAnswer {
             cycles,
+            scope: ModuleImportCycleScope {
+                file_scope,
+                module_aggregated: true,
+            },
+            contributing_epochs: epochs,
+        };
+        capture_envelope(data, missing, worst, languages)
+    }
+
+    /// STATS-LIVEGRAPH-IMPL-1: per-module structural stats (the degree graph + the symbol-classification
+    /// counts) computed PURELY from the resident IR — the LiveGraph half of `rmap stats`, dirname-aggregated
+    /// to MODULE granularity so it can be cert-compared field-exact against the SQLite `compute_module_stats`.
+    ///
+    /// The answer carries RAW counts only (`fan_in`, `fan_out`, `file_count`, `symbol_count`,
+    /// `abstract_count`, `type_count`); the Martin metrics (`instability`/`abstractness`/`distance`) are
+    /// derived at the daemon boundary through `repo_graph_storage::queries::martin_metrics` (the SAME helper
+    /// the SQLite path uses), keeping this crate free of the storage DTO and giving rounding parity by
+    /// construction (RISK-5). The two halves:
+    ///
+    /// - **Degree** (`fan_in`/`fan_out`): in/out degree over `module_import_pairs` — the SAME dirname-
+    ///   aggregated, self-skipped, deduped MODULE import graph `module_import_cycles` runs SCC over.
+    /// - **Files + symbols** (`file_count` + the 3 symbol counts): folded over the resident IR nodes.
+    ///   `file_count` = distinct FILE-scope (`AstFileScope`) repo-relative paths per module. The symbol
+    ///   counts mirror the SQLite `file_stats` predicates EXACTLY, attributing each AST-adopted SYMBOL to
+    ///   `dirname(range.file)` (the ingest stamps a symbol's `range.file` with the SAME repo-relative
+    ///   `key_path` as its FILE node, so symbol and FILE modules agree). The three predicates:
+    ///   `symbol_count` += visibility == `export` (no top-level filter, matching SQLite); `abstract_count`
+    ///   += top-level ∧ kind ∈ {INTERFACE, TYPE_ALIAS}; `type_count` += top-level ∧ kind ∈ {INTERFACE,
+    ///   TYPE_ALIAS, CLASS, ENUM}.
+    ///
+    /// `ScipSynthesizedFallback` symbols carry NO producer attributes (unknown, not zero) and contribute
+    /// nothing — any resulting count divergence is caught by the field-exact cert (RED → SQLite), never
+    /// served wrong.
+    ///
+    /// Only modules with `file_count > 0` are emitted (matching SQLite's `WHERE file_count > 0`), in
+    /// module-path-ASCENDING order (`BTreeMap` iteration) so a GREEN cert renders byte-identically to the
+    /// SQLite default (the renderer's stable per-section re-sort resolves ties in this same order). The
+    /// completeness envelope is INHERITED from `whole_graph_completeness` (D4), exactly like the cycle
+    /// answers: all resident + Fresh + TS → `Exact`; a `missing` partition → `Partial`; else `Stale`.
+    pub fn module_stats(&self) -> AnswerEnvelope<ModuleStatsAnswer> {
+        // ── Degree: in/out degree over the shared dirname-aggregated MODULE import graph ──
+        let (module_pairs, file_scope) = self.module_import_pairs();
+        let mut fan_in: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut fan_out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (src, dst) in &module_pairs {
+            fan_out.entry(src.clone()).or_default().insert(dst.clone());
+            fan_in.entry(dst.clone()).or_default().insert(src.clone());
+        }
+
+        // ── Files + symbols: fold over the resident IR nodes ──
+        let mut file_paths: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut symbol_count: BTreeMap<String, i64> = BTreeMap::new();
+        let mut abstract_count: BTreeMap<String, i64> = BTreeMap::new();
+        let mut type_count: BTreeMap<String, i64> = BTreeMap::new();
+        for s in self.slots.values() {
+            let Some(ir) = &s.ir else { continue };
+            for n in &ir.nodes {
+                match n.identity_source {
+                    IdentitySource::AstFileScope => {
+                        // One FILE per repo-relative path -> file_count of its dirname module.
+                        if let Some(path) = file_key_path(n.key.as_str()) {
+                            let module = dirname(path);
+                            if !module.is_empty() {
+                                file_paths
+                                    .entry(module.to_string())
+                                    .or_default()
+                                    .insert(path.to_string());
+                            }
+                        }
+                    }
+                    IdentitySource::AstAdopted => {
+                        // AST-adopted SYMBOL: classify by its file's dirname module. `attributes` is `Some`
+                        // for exactly these nodes; `range` carries the repo-relative file (ingest invariant).
+                        let (Some(attrs), Some(range)) = (&n.attributes, &n.range) else {
+                            continue;
+                        };
+                        let module = dirname(&range.file);
+                        if module.is_empty() {
+                            continue;
+                        }
+                        if attrs.visibility == Some(IrVisibility::Export) {
+                            *symbol_count.entry(module.to_string()).or_default() += 1;
+                        }
+                        if attrs.is_top_level {
+                            if let Some(kind) = attrs.symbol_kind.as_deref() {
+                                if matches!(kind, "INTERFACE" | "TYPE_ALIAS") {
+                                    *abstract_count.entry(module.to_string()).or_default() += 1;
+                                }
+                                if matches!(kind, "INTERFACE" | "TYPE_ALIAS" | "CLASS" | "ENUM") {
+                                    *type_count.entry(module.to_string()).or_default() += 1;
+                                }
+                            }
+                        }
+                    }
+                    // No producer node -> no honest structural attributes (unknown, not zero).
+                    IdentitySource::ScipSynthesizedFallback => {}
+                }
+            }
+        }
+
+        // ── Assemble module-ascending rows (file_count > 0 by construction of `file_paths`) ──
+        let modules: Vec<ModuleStatRow> = file_paths
+            .iter()
+            .filter(|(_, files)| !files.is_empty())
+            .map(|(module, files)| ModuleStatRow {
+                module: module.clone(),
+                fan_in: fan_in.get(module).map(|s| s.len()).unwrap_or(0) as i64,
+                fan_out: fan_out.get(module).map(|s| s.len()).unwrap_or(0) as i64,
+                file_count: files.len() as i64,
+                symbol_count: *symbol_count.get(module).unwrap_or(&0),
+                abstract_count: *abstract_count.get(module).unwrap_or(&0),
+                type_count: *type_count.get(module).unwrap_or(&0),
+            })
+            .collect();
+
+        let (missing, worst, languages, epochs) = self.whole_graph_completeness();
+        let data = ModuleStatsAnswer {
+            modules,
             scope: ModuleImportCycleScope {
                 file_scope,
                 module_aggregated: true,
@@ -1797,6 +1926,42 @@ pub struct ModuleImportCyclesAnswer {
     /// Detected MODULE cycles (SCCs of size > 1) over the directory-aggregated FILE import graph.
     pub cycles: Vec<ModuleImportCycle>,
     /// The scope — the captured FILE graph + module aggregation; never "all module cycles".
+    pub scope: ModuleImportCycleScope,
+    /// Epoch per contributing partition (every slot, resident or not).
+    pub contributing_epochs: BTreeMap<String, u64>,
+}
+
+/// STATS-LIVEGRAPH-IMPL-1: the RAW per-module stats for one module (the LiveGraph half of `rmap stats`).
+/// Carries the degree + symbol-classification COUNTS only; the Martin metrics are derived at the daemon
+/// boundary via `repo_graph_storage::queries::martin_metrics` (so this crate stays free of the storage
+/// DTO). `abstract_count`/`type_count` are retained (not folded into `abstractness`) precisely so the
+/// daemon can run that shared derivation and a field-exact cert can compare bit-identical floats.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleStatRow {
+    /// Module identity (repo-relative directory path; the dirname module).
+    pub module: String,
+    /// Distinct MODULE importers of this module (in-degree over the dirname-aggregated import graph).
+    pub fan_in: i64,
+    /// Distinct MODULES this module imports (out-degree over the dirname-aggregated import graph).
+    pub fan_out: i64,
+    /// Distinct FILE-scope repo-relative paths whose dirname is this module.
+    pub file_count: i64,
+    /// Count of AST-adopted symbols in this module's files with visibility == `export`.
+    pub symbol_count: i64,
+    /// Count of top-level INTERFACE / TYPE_ALIAS symbols (the abstractness numerator).
+    pub abstract_count: i64,
+    /// Count of top-level INTERFACE / TYPE_ALIAS / CLASS / ENUM symbols (the abstractness denominator).
+    pub type_count: i64,
+}
+
+/// Answer for [`LiveGraph::module_stats`]: the per-module raw stats rows (module-ascending) + the scope
+/// they were aggregated from + epochs. Like the cycle answers, it makes NO claim beyond the captured FILE
+/// import graph + dirname aggregation; the trust class on the envelope carries residency/freshness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleStatsAnswer {
+    /// Per-module raw stats, module-path-ASCENDING (the byte-identity ordering for the SQLite-parity render).
+    pub modules: Vec<ModuleStatRow>,
+    /// The scope — the captured FILE graph + module aggregation (shared with the module-cycle answer).
     pub scope: ModuleImportCycleScope,
     /// Epoch per contributing partition (every slot, resident or not).
     pub contributing_epochs: BTreeMap<String, u64>,
@@ -3536,5 +3701,143 @@ mod tests {
         assert!(map["app/src/util.ts"].precondition_met());
         assert!(!map["cpp/main.cpp"].ts_primary);
         assert!(!map.contains_key("app/src/nonexistent.ts"));
+    }
+
+    // ── module_stats (STATS-LIVEGRAPH-IMPL-1) ─────────────────────────
+
+    /// An AST-adopted SYMBOL node carrying structural attributes + a repo-relative `range.file` (its module
+    /// is `dirname(range.file)`, exactly as the ingest stamps it).
+    fn sym(
+        key: &str,
+        file: &str,
+        visibility: Option<repo_graph_ir::IrVisibility>,
+        is_top_level: bool,
+        symbol_kind: Option<&str>,
+    ) -> IrNode {
+        IrNode {
+            range: Some(SourceRange {
+                file: file.into(),
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 1,
+            }),
+            attributes: Some(repo_graph_ir::SymbolAttributes {
+                visibility,
+                is_top_level,
+                symbol_kind: symbol_kind.map(|k| k.to_string()),
+            }),
+            ..node(key, IdentitySource::AstAdopted)
+        }
+    }
+
+    #[test]
+    fn module_stats_degree_files_and_symbol_classification() {
+        use repo_graph_ir::IrVisibility::{Export, Private};
+        // Two modules: src/a (2 files) imports src/b (1 file). Symbols exercise every predicate.
+        let p = ir(
+            "p",
+            vec![
+                file_node("repo:src/a/x.ts:FILE"),
+                file_node("repo:src/a/y.ts:FILE"),
+                file_node("repo:src/b/z.ts:FILE"),
+                // src/a/x.ts: exported top-level interface (abstract + type + symbol), exported top-level
+                // class (type + symbol), a private top-level function (none), an EXPORTED-but-NESTED
+                // interface (symbol only — abstract/type need top-level).
+                sym(
+                    "a.iface",
+                    "src/a/x.ts",
+                    Some(Export),
+                    true,
+                    Some("INTERFACE"),
+                ),
+                sym("a.class", "src/a/x.ts", Some(Export), true, Some("CLASS")),
+                sym("a.fn", "src/a/x.ts", Some(Private), true, Some("FUNCTION")),
+                sym(
+                    "a.nested",
+                    "src/a/x.ts",
+                    Some(Export),
+                    false,
+                    Some("INTERFACE"),
+                ),
+                // src/b/z.ts: exported top-level type-alias (abstract + type + symbol).
+                sym(
+                    "b.alias",
+                    "src/b/z.ts",
+                    Some(Export),
+                    true,
+                    Some("TYPE_ALIAS"),
+                ),
+            ],
+            // FILE -> FILE import: src/a/x.ts imports src/b/z.ts (a -> b).
+            vec![import_edge("repo:src/a/x.ts:FILE", "repo:src/b/z.ts:FILE")],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("p", p, LanguageSupport::TypeScriptPrimary);
+
+        let env = lg.module_stats();
+        assert_eq!(env.class(), AnswerClass::Exact, "all resident + Fresh + TS");
+        let rows = &env.data().unwrap().modules;
+        // Module-ASCENDING order (src/a before src/b) — the byte-identity ordering.
+        assert_eq!(rows.len(), 2);
+        let a = &rows[0];
+        assert_eq!(a.module, "src/a");
+        assert_eq!(a.fan_in, 0);
+        assert_eq!(a.fan_out, 1); // imports src/b
+        assert_eq!(a.file_count, 2); // x.ts + y.ts
+        assert_eq!(a.symbol_count, 3); // iface + class + nested (all exported); fn is private
+        assert_eq!(a.abstract_count, 1); // top-level INTERFACE only (nested one excluded)
+        assert_eq!(a.type_count, 2); // top-level INTERFACE + CLASS
+        let b = &rows[1];
+        assert_eq!(b.module, "src/b");
+        assert_eq!(b.fan_in, 1); // imported by src/a
+        assert_eq!(b.fan_out, 0);
+        assert_eq!(b.file_count, 1);
+        assert_eq!(b.symbol_count, 1); // exported alias
+        assert_eq!(b.abstract_count, 1); // top-level TYPE_ALIAS
+        assert_eq!(b.type_count, 1);
+    }
+
+    #[test]
+    fn module_stats_scip_fallback_symbol_contributes_nothing() {
+        // A ScipSynthesizedFallback symbol (attributes: None) must NOT be counted — unknown, not zero.
+        let p = ir(
+            "p",
+            vec![
+                file_node("repo:src/a/x.ts:FILE"),
+                node(
+                    "repo:src/a/x.ts#Foo:SYMBOL:Type",
+                    IdentitySource::ScipSynthesizedFallback,
+                ),
+            ],
+            vec![],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("p", p, LanguageSupport::TypeScriptPrimary);
+        let env = lg.module_stats();
+        let rows = &env.data().unwrap().modules;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].module, "src/a");
+        assert_eq!(rows[0].file_count, 1);
+        assert_eq!(
+            rows[0].symbol_count, 0,
+            "fallback symbol has no attributes -> not counted"
+        );
+        assert_eq!(rows[0].abstract_count, 0);
+        assert_eq!(rows[0].type_count, 0);
+    }
+
+    #[test]
+    fn module_stats_nonresident_partition_is_partial() {
+        // A non-resident contributing partition degrades the answer-class away from Exact (cert -> RED path).
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![file_node("repo:src/a/x.ts:FILE")], vec![]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.unload_partition("p");
+        let env = lg.module_stats();
+        assert_ne!(env.class(), AnswerClass::Exact);
     }
 }

@@ -210,6 +210,12 @@ pub struct RepoState {
     /// rebuilds. NOT durable (rebuilt on restart). Interior mutability: the fastpath read-locks; the lazy build
     /// write-locks.
     pub cycles_cert: parking_lot::RwLock<Option<crate::livegraph_feed::CycleNoLossCert>>,
+
+    /// STATS-LIVEGRAPH-IMPL-1: the in-memory repo-level STATS NO-LOSS certificate (`None` until lazily built on
+    /// the first eligible default `stats` query). Keyed by the SAME SQLite-free fingerprint as
+    /// `import_cert`/`cycles_cert`; a fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on
+    /// restart). Interior mutability: the fastpath read-locks; the lazy build write-locks.
+    pub stats_cert: parking_lot::RwLock<Option<crate::livegraph_feed::StatsNoLossCert>>,
 }
 
 impl RepoState {
@@ -249,6 +255,7 @@ impl RepoState {
             livegraph: parking_lot::RwLock::new(None),
             import_cert: parking_lot::RwLock::new(None),
             cycles_cert: parking_lot::RwLock::new(None),
+            stats_cert: parking_lot::RwLock::new(None),
         })
     }
 

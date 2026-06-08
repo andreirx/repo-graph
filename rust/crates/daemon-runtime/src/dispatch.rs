@@ -1276,6 +1276,61 @@ impl ServiceDispatcher {
         };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
+        // STATS-LIVEGRAPH-IMPL-1: engine routing. DEFAULT (no flags == `auto`) = the cert-gated LiveGraph
+        // module-stats FASTPATH (`stats_auto_response`): serves the LiveGraph stats WITHOUT
+        // `compute_module_stats` on a GREEN repo cert at the current fingerprint, else a labelled SQLite
+        // fallback (byte-identical human output). EXPLICIT `--engine sqlite` = the forced SQLite path below
+        // (rule 7: UNCHANGED escape hatch, no `backend_used`). `livegraph` = the forced LiveGraph diagnostic
+        // (no fallback); `compare` = SQLite primary + a field-exact divergence report + sidecar.
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
+        match engine {
+            "auto" => {
+                return match crate::livegraph_feed::stats_auto_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                };
+            }
+            "livegraph" => {
+                return DispatchResult::success(
+                    &request.id,
+                    crate::livegraph_feed::stats_livegraph_response(
+                        &repo_state,
+                        &repo_uid,
+                        &display_name,
+                        &snapshot.snapshot_uid,
+                    ),
+                );
+            }
+            "compare" => {
+                let repo_root = Self::get_optional_string_param(&request.params, "repo")
+                    .unwrap_or("")
+                    .to_string();
+                return match crate::livegraph_feed::stats_compare_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &repo_root,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                };
+            }
+            // EXPLICIT `--engine sqlite` (or any non-routed value) -> the forced SQLite path below (UNCHANGED).
+            _ => {}
+        }
+
         // RMAPD-PERF-1: Emit heartbeat before potentially long query
         let _ = emitter.emit(ProgressDetail {
             phase: "computing_module_stats".to_string(),
@@ -1283,7 +1338,8 @@ impl ServiceDispatcher {
             total: 1,
         });
 
-        // Compute module stats
+        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The forced
+        // SQLite module-stats answer -- UNCHANGED (rule 7): the canonical body with NO `backend_used`.
         let query_start = Instant::now();
         let stats = match repo_state
             .storage

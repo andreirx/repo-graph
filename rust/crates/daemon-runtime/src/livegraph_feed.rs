@@ -3,10 +3,14 @@
 //! discovery / refresh orchestration (that is LIVEGRAPH-INTEGRATION-1C).
 
 use repo_graph_ir::CanonicalKey;
-use repo_graph_livegraph::{FileImportCyclesAnswer, LiveGraph, ModuleImportCyclesAnswer};
+use repo_graph_livegraph::{
+    FileImportCyclesAnswer, LiveGraph, ModuleImportCyclesAnswer, ModuleStatRow,
+};
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use repo_graph_storage::error::StorageError;
-use repo_graph_storage::queries::{CalleeResult, CallerResult, ResolvedSymbol};
+use repo_graph_storage::queries::{
+    martin_metrics, CalleeResult, CallerResult, ModuleStatsResult, ResolvedSymbol,
+};
 use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -152,6 +156,11 @@ pub enum FallbackReason {
     /// found a SQLite cycle the LiveGraph lacks (missing) or an over-claimed extra -> the DEFAULT serves SQLite
     /// (never a silent cycle loss). EXPECTED for repo-graph (its excluded-fixture cycle) + non-TS repos.
     LiveGraphCycleDivergence,
+    /// STATS-LIVEGRAPH-IMPL-1 (D1): the repo STATS no-loss cert is NOT GREEN -- the field-exact compare found a
+    /// per-module divergence (a module only one side has, or a count/metric mismatch) -> the DEFAULT serves the
+    /// SQLite `compute_module_stats` answer (never a silent wrong stat). EXPECTED where the SQLite MODULE-node
+    /// identities do not correspond to the dirname aggregation (RISK-1) + non-TS repos.
+    LiveGraphStatsDivergence,
 }
 
 impl FallbackReason {
@@ -170,6 +179,7 @@ impl FallbackReason {
             FallbackReason::LiveGraphImportRegression => "LiveGraphImportRegression",
             FallbackReason::LiveGraphImportUnknown => "LiveGraphImportUnknown",
             FallbackReason::LiveGraphCycleDivergence => "LiveGraphCycleDivergence",
+            FallbackReason::LiveGraphStatsDivergence => "LiveGraphStatsDivergence",
         }
     }
 }
@@ -2315,6 +2325,436 @@ pub fn cycles_auto_response(
     Ok(result)
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// STATS-LIVEGRAPH-IMPL-1: the cert-gated LiveGraph fastpath for the default `rmap stats`. Mirrors the
+// imports/cycles fastpath EXACTLY: a repo-level field-exact STATS no-loss cert (keyed by the SHARED
+// SQLite-free fingerprint) gates serving the LiveGraph module stats WITHOUT `compute_module_stats`;
+// RED / stale / missing / precondition-unmet falls back to the proven SQLite answer (byte-identical
+// human output — the renderer's deterministic per-section re-sort + qualified_name-ascending rows).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// STATS-LIVEGRAPH-IMPL-1: the in-memory repo-level STATS NO-LOSS certificate (`None` until lazily built
+/// on the first eligible default `stats` query). `verdict` is the repo-wide field-exact compare verdict
+/// (`GREEN` = every module field-exact between the LiveGraph and SQLite answers); `fingerprint` is the
+/// SHARED SQLite-free fingerprint (the SAME one `import_cert`/`cycles_cert` use) it was built at — a
+/// fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on restart).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatsNoLossCert {
+    /// The repo-wide field-exact compare verdict (`GREEN` / `RED`).
+    pub verdict: String,
+    /// The SQLite-free fingerprint this verdict was computed at (the invalidation key).
+    pub fingerprint: String,
+}
+
+/// The stats cert's status for the CURRENT fingerprint (mirrors `CycleCertState`).
+enum StatsCertState {
+    /// A valid cert at the current fingerprint, verdict GREEN -> the fastpath may serve LiveGraph.
+    ValidGreen,
+    /// A valid cert at the current fingerprint, verdict != GREEN -> SQLite fallback.
+    ValidNotGreen,
+    /// No cert, or a cert at a DIFFERENT fingerprint -> (re)build, else SQLite fallback.
+    StaleOrMissing,
+}
+
+/// Map the LiveGraph raw per-module stat rows -> the SQLite-compatible `ModuleStatsResult` DTO, deriving
+/// the Martin metrics through the SHARED `martin_metrics` helper (the SAME one `compute_module_stats`
+/// uses). Identical code + identical integer inputs => bit-identical floats, so a field-exact compare of
+/// the two DTO vecs never spuriously REDs on float jitter (RISK-5). The rows arrive module-ascending
+/// (the LiveGraph guarantee) and that ordering is preserved here.
+fn livegraph_module_stats_dto(rows: &[ModuleStatRow]) -> Vec<ModuleStatsResult> {
+    rows.iter()
+        .map(|r| {
+            let (instability, abstractness, distance_from_main_sequence) =
+                martin_metrics(r.fan_in, r.fan_out, r.abstract_count, r.type_count);
+            ModuleStatsResult {
+                module: r.module.clone(),
+                fan_in: r.fan_in,
+                fan_out: r.fan_out,
+                instability,
+                abstractness,
+                distance_from_main_sequence,
+                file_count: r.file_count,
+                symbol_count: r.symbol_count,
+            }
+        })
+        .collect()
+}
+
+/// The shared STATS comparison data — the SINGLE source of the compare verdict. Computed once from SQLite
+/// (`compute_module_stats`) + the LiveGraph (`module_stats` mapped through the shared metric helper),
+/// consumed by BOTH [`stats_compare_response`] (the `--engine compare` surface) AND
+/// [`build_and_store_stats_cert`] (the default fastpath cert). Sharing the computation makes a GREEN cert
+/// PROVABLY equal to the compare verdict — no drift, so the fastpath can never serve a divergent stat.
+struct StatsCompareData {
+    /// The LiveGraph module stats mapped to the SQLite DTO shape (module-ascending).
+    livegraph_stats: Vec<ModuleStatsResult>,
+    /// The SQLite `compute_module_stats` answer (the proven primary).
+    sqlite_stats: Vec<ModuleStatsResult>,
+    /// The LiveGraph module-stats answer's trust class (`Exact` / `Partial` / ... / `Unavailable`).
+    livegraph_class: String,
+    /// True iff the repo-wide field-exact compare is EXACT (missing=0 ∧ extra=0 ∧ no field mismatch).
+    is_exact: bool,
+    /// Modules SQLite has that the LiveGraph lacks (a missing-module divergence).
+    missing_in_livegraph: Vec<String>,
+    /// Modules the LiveGraph has that SQLite lacks (an extra-module divergence).
+    extra_in_livegraph: Vec<String>,
+    /// Modules present in BOTH whose fields differ (a count/metric mismatch).
+    field_mismatches: Vec<String>,
+}
+
+/// Compute the shared [`StatsCompareData`] — the SQLite `compute_module_stats` answer vs the LiveGraph
+/// `module_stats` answer (mapped to the same DTO), compared per-module by module identity then field-
+/// exact (`ModuleStatsResult: PartialEq`; the floats are bit-identical by the shared `martin_metrics`).
+/// Reads SQLite once + the LiveGraph once (one read lock).
+fn stats_compare_data(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+) -> Result<StatsCompareData, StorageError> {
+    use std::collections::BTreeMap;
+    let sqlite_stats = repo_state.storage.compute_module_stats(snapshot_uid)?;
+    let (lg_rows, livegraph_class) = {
+        let guard = repo_state.livegraph.read();
+        match guard.as_ref() {
+            Some(lg) => {
+                let env = lg.module_stats();
+                let rows = env.data().map(|d| d.modules.clone()).unwrap_or_default();
+                (rows, format!("{:?}", env.class()))
+            }
+            None => (Vec::new(), "Unavailable".to_string()),
+        }
+    };
+    let livegraph_stats = livegraph_module_stats_dto(&lg_rows);
+    // Field-exact set+field compare by module identity.
+    let sq_map: BTreeMap<&str, &ModuleStatsResult> = sqlite_stats
+        .iter()
+        .map(|m| (m.module.as_str(), m))
+        .collect();
+    let lg_map: BTreeMap<&str, &ModuleStatsResult> = livegraph_stats
+        .iter()
+        .map(|m| (m.module.as_str(), m))
+        .collect();
+    let mut missing_in_livegraph = Vec::new();
+    let mut field_mismatches = Vec::new();
+    for (module, sq) in &sq_map {
+        match lg_map.get(module) {
+            None => missing_in_livegraph.push(module.to_string()),
+            // PartialEq over all 8 fields; the module field is equal by the key, so this checks the
+            // numeric fields (and the floats are bit-identical when the integer counts agree).
+            Some(lg) => {
+                if lg != sq {
+                    field_mismatches.push(module.to_string());
+                }
+            }
+        }
+    }
+    let extra_in_livegraph: Vec<String> = lg_map
+        .keys()
+        .filter(|m| !sq_map.contains_key(*m))
+        .map(|m| m.to_string())
+        .collect();
+    let is_exact = missing_in_livegraph.is_empty()
+        && extra_in_livegraph.is_empty()
+        && field_mismatches.is_empty();
+    Ok(StatsCompareData {
+        livegraph_stats,
+        sqlite_stats,
+        livegraph_class,
+        is_exact,
+        missing_in_livegraph,
+        extra_in_livegraph,
+        field_mismatches,
+    })
+}
+
+/// STATS-LIVEGRAPH-IMPL-1 (build): run the SHARED field-exact stats compare -> verdict, STORE the cert
+/// keyed by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint / a storage error -> the
+/// caller falls back to SQLite). Reads SQLite ONCE per fingerprint via the SAME `stats_compare_data` the
+/// `--engine compare` uses, so the GREEN verdict PROVABLY matches the compare (no drift -> no false GREEN).
+fn build_and_store_stats_cert(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+    fingerprint: Option<String>,
+) -> Option<bool> {
+    let fingerprint = fingerprint?;
+    let data = stats_compare_data(repo_state, snapshot_uid).ok()?;
+    let is_green = data.is_exact;
+    let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
+    *repo_state.stats_cert.write() = Some(StatsNoLossCert {
+        verdict,
+        fingerprint,
+    });
+    Some(is_green)
+}
+
+/// STATS-LIVEGRAPH-IMPL-1: the GREEN-cert fastpath body — serve the LiveGraph module stats WITHOUT
+/// `compute_module_stats`. The `stats` array is byte-identical to the SQLite default's output (same
+/// values via the GREEN field-exact cert; same module-ascending order). `backend_used=livegraph`.
+fn serve_stats_fastpath(
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    lg_stats: &[ModuleStatsResult],
+) -> Value {
+    json!({
+        "repo_uid": repo_uid,
+        "snapshot_uid": snapshot_uid,
+        "display_name": display_name,
+        "stats": lg_stats,
+        "count": lg_stats.len(),
+        "backend_used": "livegraph",
+        "fallback_reason": Value::Null,
+    })
+}
+
+/// STATS-LIVEGRAPH-IMPL-1: the SQLite stats answer + the fastpath metadata — the fallback / cert-not-green
+/// path. Reads SQLite (`compute_module_stats`). Distinct from the forced `--engine sqlite` arm, which
+/// returns the UNCHANGED body (no `backend_used`) per D4.
+fn serve_stats_sqlite(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    fallback_reason: FallbackReason,
+) -> Result<Value, StorageError> {
+    let stats = repo_state.storage.compute_module_stats(snapshot_uid)?;
+    Ok(json!({
+        "repo_uid": repo_uid,
+        "snapshot_uid": snapshot_uid,
+        "display_name": display_name,
+        "stats": stats,
+        "count": stats.len(),
+        "backend_used": "sqlite",
+        "fallback_reason": fallback_reason.as_str(),
+    }))
+}
+
+/// STATS-LIVEGRAPH-IMPL-1 (D3): the PURE fastpath/SQLite ladder (mirrors `cycles_fastpath_or_sqlite`).
+/// precondition UNMET (the LiveGraph module-stats answer is not `Exact` -- non-resident / non-TS /
+/// degraded) -> SQLite (the labelled `precondition_reason`) ; precondition met + GREEN cert -> serve
+/// LiveGraph WITHOUT `compute_module_stats` ; cert RED/stale/missing/build-failed -> SQLite
+/// (`LiveGraphStatsDivergence`). Pure (no I/O itself): a panicking `serve_sqlite` proves the GREEN path
+/// skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing.
+fn stats_fastpath_or_sqlite(
+    precondition_met: bool,
+    precondition_reason: FallbackReason,
+    cert: StatsCertState,
+    serve_livegraph: impl FnOnce() -> Value,
+    serve_sqlite: impl FnOnce(FallbackReason) -> Value,
+    build_cert: impl FnOnce() -> Option<bool>,
+) -> Value {
+    if !precondition_met {
+        return serve_sqlite(precondition_reason);
+    }
+    let green = match cert {
+        StatsCertState::ValidGreen => true,
+        StatsCertState::ValidNotGreen => false,
+        StatsCertState::StaleOrMissing => build_cert().unwrap_or(false),
+    };
+    if green {
+        serve_livegraph()
+    } else {
+        serve_sqlite(FallbackReason::LiveGraphStatsDivergence)
+    }
+}
+
+/// STATS-LIVEGRAPH-IMPL-1 (D3): the AUTO (default) `stats` response. Tries the GREEN-cert FASTPATH (serve
+/// the LiveGraph module stats WITHOUT SQLite) ; else SQLite (the proven answer). The answer-class + the
+/// LiveGraph stats + the current fingerprint are SQLite-FREE; SQLite is read ONLY on the cert build + the
+/// SQLite fallback. The served human output is byte-identical either way (the byte-preserving contract).
+pub fn stats_auto_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+) -> Result<Value, StorageError> {
+    // SQLite-FREE: the module-stats answer-class (precondition), the mapped LiveGraph stats (the served
+    // answer), and the current fingerprint -- all from a single LiveGraph read lock.
+    let (precondition_met, precondition_reason, lg_stats, current_fp) = {
+        let guard = repo_state.livegraph.read();
+        match guard.as_ref() {
+            Some(lg) => {
+                let env = lg.module_stats();
+                let met = format!("{:?}", env.class()) == "Exact";
+                let rows = env.data().map(|d| d.modules.clone()).unwrap_or_default();
+                let dto = livegraph_module_stats_dto(&rows);
+                let reason = if met {
+                    FallbackReason::LiveGraphUnavailable // unused when met (defensive)
+                } else {
+                    FallbackReason::LiveGraphPartial
+                };
+                let fp = import_cert_fingerprint(&lg.live_partitions(), snapshot_uid);
+                (met, reason, dto, Some(fp))
+            }
+            None => (
+                false,
+                FallbackReason::LiveGraphUnavailable,
+                Vec::new(),
+                None,
+            ),
+        }
+    };
+    // The cert's state for the CURRENT fingerprint.
+    let cert = {
+        let cached = repo_state.stats_cert.read();
+        match (&current_fp, cached.as_ref()) {
+            (Some(fp), Some(c)) if &c.fingerprint == fp => {
+                if c.verdict == "GREEN" {
+                    StatsCertState::ValidGreen
+                } else {
+                    StatsCertState::ValidNotGreen
+                }
+            }
+            _ => StatsCertState::StaleOrMissing,
+        }
+    };
+    // The ladder. A storage error in the SQLite fallback surfaces as Err (the caller maps it).
+    let mut sqlite_err: Option<StorageError> = None;
+    let result = stats_fastpath_or_sqlite(
+        precondition_met,
+        precondition_reason,
+        cert,
+        || serve_stats_fastpath(repo_uid, display_name, snapshot_uid, &lg_stats),
+        |reason| match serve_stats_sqlite(repo_state, repo_uid, display_name, snapshot_uid, reason)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                sqlite_err = Some(e);
+                Value::Null
+            }
+        },
+        || build_and_store_stats_cert(repo_state, snapshot_uid, current_fp.clone()),
+    );
+    if let Some(e) = sqlite_err {
+        return Err(e);
+    }
+    Ok(result)
+}
+
+/// STATS-LIVEGRAPH-IMPL-1: the explicit `--engine livegraph` diagnostic — serve the LiveGraph module
+/// stats DIRECTLY (no cert gate, no SQLite fallback), labelled with the trust class/freshness/scope so a
+/// non-`Exact` answer is never read as complete. Mirrors `module_import_cycles_response`. Lets an operator
+/// inspect exactly what the LiveGraph half computes (the input to the cert compare).
+pub fn stats_livegraph_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+) -> Value {
+    let guard = repo_state.livegraph.read();
+    let (class, freshness, missing, reasons, stats, scope) = match guard.as_ref() {
+        Some(lg) => {
+            let env = lg.module_stats();
+            let data = env.data();
+            let stats = data
+                .map(|d| livegraph_module_stats_dto(&d.modules))
+                .unwrap_or_default();
+            let scope = data
+                .map(|d| {
+                    json!({
+                        "captured_resolved_relative": d.scope.file_scope.captured_resolved_relative,
+                        "intra_partition": d.scope.file_scope.intra_partition,
+                        "cross_partition": d.scope.file_scope.cross_partition,
+                        "xpart_edge_count": d.scope.file_scope.xpart_edge_count,
+                        "module_aggregated": d.scope.module_aggregated,
+                        "aggregation_basis": "dirname",
+                    })
+                })
+                .unwrap_or_else(
+                    || json!({ "module_aggregated": true, "aggregation_basis": "dirname" }),
+                );
+            (
+                format!("{:?}", env.class()),
+                format!("{:?}", env.freshness()),
+                env.missing_partitions().to_vec(),
+                env.degradation_reasons()
+                    .iter()
+                    .map(|r| format!("{r:?}"))
+                    .collect::<Vec<_>>(),
+                stats,
+                scope,
+            )
+        }
+        None => (
+            "Unavailable".to_string(),
+            "Unavailable".to_string(),
+            Vec::new(),
+            vec!["LiveGraphUnavailable".to_string()],
+            Vec::new(),
+            json!({ "module_aggregated": true, "aggregation_basis": "dirname" }),
+        ),
+    };
+    json!({
+        "repo_uid": repo_uid,
+        "snapshot_uid": snapshot_uid,
+        "display_name": display_name,
+        "stats": stats,
+        "count": stats.len(),
+        "backend_used": "livegraph",
+        "scope": scope,
+        "answer_class": class,
+        "freshness": freshness,
+        "missing_partitions": missing,
+        "degradation_reasons": reasons,
+    })
+}
+
+/// Write the stats compare report to `<repo_root>/.rgr/livegraph-compare/stats-<ms>.json` (the cycles
+/// sidecar convention). Best-effort; the caller must not fail the query on error.
+fn write_stats_compare_sidecar(repo_root: &str, report: &Value) -> Result<String, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dir = std::path::Path::new(repo_root)
+        .join(".rgr")
+        .join("livegraph-compare");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create sidecar dir: {e}"))?;
+    let path = dir.join(format!("stats-{ts}.json"));
+    let body =
+        serde_json::to_string_pretty(report).map_err(|e| format!("serialize report: {e}"))?;
+    std::fs::write(&path, body).map_err(|e| format!("write sidecar: {e}"))?;
+    Ok(path.display().to_string())
+}
+
+/// STATS-LIVEGRAPH-IMPL-1: the `--engine compare` diagnostic. PRIMARY = the SQLite `compute_module_stats`
+/// answer (the unchanged shape the renderer already knows); plus a `livegraph_stats_compare` object (the
+/// field-exact divergence breakdown from the SHARED `stats_compare_data` — the SAME data the cert uses)
+/// + a sidecar path. The CLI prints the primary stats unchanged and one compare-summary line.
+pub fn stats_compare_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    repo_root: &str,
+) -> Result<Value, StorageError> {
+    let data = stats_compare_data(repo_state, snapshot_uid)?;
+    let compare = json!({
+        "sqlite_count": data.sqlite_stats.len(),
+        "livegraph_count": data.livegraph_stats.len(),
+        "livegraph_class": data.livegraph_class,
+        "is_exact": data.is_exact,
+        "matched": data.sqlite_stats.len() - data.missing_in_livegraph.len() - data.field_mismatches.len(),
+        "missing_in_livegraph": data.missing_in_livegraph,
+        "extra_in_livegraph": data.extra_in_livegraph,
+        "field_mismatches": data.field_mismatches,
+    });
+    let mut body = json!({
+        "repo_uid": repo_uid,
+        "snapshot_uid": snapshot_uid,
+        "display_name": display_name,
+        "stats": data.sqlite_stats,
+        "count": data.sqlite_stats.len(),
+        "backend_used": "sqlite",
+        "livegraph_stats_compare": compare.clone(),
+    });
+    // Best-effort sidecar (never fails the query).
+    if let Ok(path) = write_stats_compare_sidecar(repo_root, &compare) {
+        body["livegraph_stats_compare_sidecar"] = json!(path);
+    }
+    Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2425,6 +2865,144 @@ mod tests {
             .map(|n| n["qualified_name"].as_str().unwrap())
             .collect();
         assert_eq!(names, vec!["a/y", "b/x"]);
+    }
+
+    // ── STATS-LIVEGRAPH-IMPL-1: the PURE stats fastpath/SQLite ladder ──
+    // A PANICKING serve_sqlite/build_cert proves which path runs -- the GREEN cached path must serve
+    // LiveGraph WITHOUT touching SQLite or rebuilding the cert.
+
+    #[test]
+    fn stats_fastpath_green_cached_serves_livegraph_without_sqlite_or_build() {
+        let out = stats_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            StatsCertState::ValidGreen,
+            || json!({"backend_used": "livegraph"}),
+            |_r| panic!("SQLite (compute_module_stats) must NOT be read on a GREEN cached cert"),
+            || panic!("the cert must NOT be rebuilt when ValidGreen"),
+        );
+        assert_eq!(out["backend_used"], "livegraph");
+    }
+
+    #[test]
+    fn stats_fastpath_not_green_falls_back_to_sqlite() {
+        let out = stats_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            StatsCertState::ValidNotGreen,
+            || panic!("must NOT serve LiveGraph when the cert is not GREEN"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || panic!("must NOT rebuild when ValidNotGreen"),
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphStatsDivergence");
+    }
+
+    #[test]
+    fn stats_fastpath_precondition_unmet_falls_back_with_reason() {
+        let out = stats_fastpath_or_sqlite(
+            false,
+            FallbackReason::LiveGraphPartial,
+            StatsCertState::ValidGreen, // ignored when the precondition is unmet
+            || panic!("must NOT serve LiveGraph when the precondition is unmet"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || panic!("must NOT build the cert when the precondition is unmet"),
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphPartial");
+    }
+
+    #[test]
+    fn stats_fastpath_stale_build_green_serves_livegraph() {
+        let out = stats_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            StatsCertState::StaleOrMissing,
+            || json!({"backend_used": "livegraph"}),
+            |_r| panic!("a GREEN build must serve LiveGraph, not SQLite"),
+            || Some(true),
+        );
+        assert_eq!(out["backend_used"], "livegraph");
+    }
+
+    #[test]
+    fn stats_fastpath_stale_build_red_falls_back() {
+        let out = stats_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            StatsCertState::StaleOrMissing,
+            || panic!("a RED build must fall back to SQLite"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || Some(false),
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphStatsDivergence");
+    }
+
+    #[test]
+    fn stats_fastpath_build_failed_falls_back() {
+        let out = stats_fastpath_or_sqlite(
+            true,
+            FallbackReason::LiveGraphUnavailable,
+            StatsCertState::StaleOrMissing,
+            || panic!("a build failure must fall back to SQLite"),
+            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
+            || None,
+        );
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(out["reason"], "LiveGraphStatsDivergence");
+    }
+
+    #[test]
+    fn serve_stats_fastpath_shape_is_sqlite_compatible_plus_backend_metadata() {
+        let rows = vec![ModuleStatsResult {
+            module: "src/a".to_string(),
+            fan_in: 0,
+            fan_out: 1,
+            instability: 1.0,
+            abstractness: 0.5,
+            distance_from_main_sequence: 0.5,
+            file_count: 2,
+            symbol_count: 3,
+        }];
+        let out = serve_stats_fastpath("repo", "disp", "snap", &rows);
+        assert_eq!(out["backend_used"], "livegraph");
+        assert!(out["fallback_reason"].is_null());
+        assert_eq!(out["count"], 1);
+        assert_eq!(out["stats"][0]["module"], "src/a");
+        assert_eq!(out["stats"][0]["fan_out"], 1);
+        assert_eq!(out["stats"][0]["symbol_count"], 3);
+        // The DTO field names mirror the SQLite ModuleStatsResult exactly (the renderer is untouched).
+        assert!(out["stats"][0]["distance_from_main_sequence"].is_number());
+    }
+
+    #[test]
+    fn livegraph_module_stats_dto_derives_metrics_via_shared_helper() {
+        // The mapped DTO's floats MUST equal the shared `martin_metrics` on the same raw counts (RISK-5:
+        // the byte-identity / no-spurious-RED property). fan_in=1, fan_out=3 -> instability=0.75;
+        // abstract=1, type=4 -> abstractness=0.25; distance=|0.25+0.75-1|=0.
+        let rows = [ModuleStatRow {
+            module: "m".to_string(),
+            fan_in: 1,
+            fan_out: 3,
+            file_count: 5,
+            symbol_count: 9,
+            abstract_count: 1,
+            type_count: 4,
+        }];
+        let dto = livegraph_module_stats_dto(&rows);
+        let (i, a, d) = martin_metrics(1, 3, 1, 4);
+        assert_eq!(dto.len(), 1);
+        assert_eq!(dto[0].instability, i);
+        assert_eq!(dto[0].abstractness, a);
+        assert_eq!(dto[0].distance_from_main_sequence, d);
+        assert_eq!(dto[0].instability, 0.75);
+        assert_eq!(dto[0].abstractness, 0.25);
+        assert_eq!(dto[0].distance_from_main_sequence, 0.0);
+        // The integer fields pass through unchanged.
+        assert_eq!(dto[0].fan_in, 1);
+        assert_eq!(dto[0].file_count, 5);
+        assert_eq!(dto[0].symbol_count, 9);
     }
 
     fn synthetic_root() -> String {

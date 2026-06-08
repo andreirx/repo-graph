@@ -335,6 +335,45 @@ pub struct CycleNode {
     pub file: Option<String>,
 }
 
+/// STATS-LIVEGRAPH-IMPL-1: the SHARED Martin-metric derivation `(instability, abstractness,
+/// distance_from_main_sequence)` from the raw degree + symbol-classification counts, 2-dp rounded
+/// (mirrors TS `Math.round(x * 100) / 100`).
+///
+/// Used by BOTH backends: [`StorageConnection::compute_module_stats`] (the SQLite path) AND the
+/// LiveGraph stats fastpath (which maps its raw per-module counts through this exact helper). Sharing
+/// the arithmetic makes a GREEN field-exact stats cert compare BIT-IDENTICAL floats — no float jitter
+/// can force a spurious RED, and a GREEN cert provably equals what the SQLite path would have produced
+/// (the no-loss contract, RISK-5).
+///
+/// - `instability  = fan_out / (fan_in + fan_out)` (0 when the total degree is 0)
+/// - `abstractness = abstract_count / type_count`  (0 when `type_count` is 0)
+/// - `distance     = |abstractness + instability - 1.0|`
+pub fn martin_metrics(
+    fan_in: i64,
+    fan_out: i64,
+    abstract_count: i64,
+    type_count: i64,
+) -> (f64, f64, f64) {
+    let total = fan_in + fan_out;
+    let instability_raw = if total > 0 {
+        fan_out as f64 / total as f64
+    } else {
+        0.0
+    };
+    let abstractness_raw = if type_count > 0 {
+        abstract_count as f64 / type_count as f64
+    } else {
+        0.0
+    };
+    let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
+
+    // Round to 2 decimal places: mirrors TS Math.round(x * 100) / 100.
+    let instability = (instability_raw * 100.0).round() / 100.0;
+    let abstractness = (abstractness_raw * 100.0).round() / 100.0;
+    let distance = (distance_raw * 100.0).round() / 100.0;
+    (instability, abstractness, distance)
+}
+
 /// Per-module structural metrics.
 ///
 /// Field names match the TS CLI JSON output (snake_case).
@@ -1234,23 +1273,10 @@ impl StorageConnection {
             let (path, fan_in, fan_out, file_count, symbol_count, abstract_count, type_count) =
                 row.map_err(StorageError::from)?;
 
-            let total = fan_in + fan_out;
-            let instability_raw = if total > 0 {
-                fan_out as f64 / total as f64
-            } else {
-                0.0
-            };
-            let abstractness_raw = if type_count > 0 {
-                abstract_count as f64 / type_count as f64
-            } else {
-                0.0
-            };
-            let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
-
-            // Round to 2 decimal places: mirrors TS Math.round(x * 100) / 100.
-            let instability = (instability_raw * 100.0).round() / 100.0;
-            let abstractness = (abstractness_raw * 100.0).round() / 100.0;
-            let distance = (distance_raw * 100.0).round() / 100.0;
+            // STATS-LIVEGRAPH-IMPL-1: derive the Martin metrics through the SHARED helper so the
+            // LiveGraph fastpath (which calls the SAME `martin_metrics`) produces bit-identical floats.
+            let (instability, abstractness, distance) =
+                martin_metrics(fan_in, fan_out, abstract_count, type_count);
 
             results.push(ModuleStatsResult {
                 module: path,
@@ -2415,6 +2441,18 @@ mod tests {
     use super::*;
     use crate::crud::test_helpers::fresh_storage;
     use crate::StorageConnection;
+
+    // STATS-LIVEGRAPH-IMPL-1: lock the shared Martin-metric derivation (the LiveGraph fastpath calls the
+    // SAME helper, so these values are the byte-identity contract).
+    #[test]
+    fn martin_metrics_matches_the_inline_arithmetic() {
+        // instability = fan_out/(fan_in+fan_out); abstractness = abstract/type; distance = |a+i-1|, 2dp.
+        assert_eq!(martin_metrics(0, 0, 0, 0), (0.0, 0.0, 1.0)); // total=0 -> i=0; type=0 -> a=0; |0+0-1|=1
+        assert_eq!(martin_metrics(1, 3, 1, 4), (0.75, 0.25, 0.0)); // |0.25+0.75-1|=0
+        assert_eq!(martin_metrics(3, 1, 0, 2), (0.25, 0.0, 0.75)); // |0+0.25-1|=0.75
+                                                                   // Rounding to 2dp mirrors TS Math.round(x*100)/100: 1/3 -> 0.33.
+        assert_eq!(martin_metrics(2, 1, 0, 0).0, 0.33);
+    }
 
     /// Insert a minimal node directly so resolve_symbol can be tested
     /// without pulling in the full indexer stack.

@@ -1170,25 +1170,42 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
 // ── stats command (REG-1, CLI-OUT-2C) ────────────────────────────────
 
 pub fn run_stats(args: &[String]) -> ExitCode {
-    // ── Parse args ───────────────────────────────────────────
-    let mut json_mode = false;
+    // STATS-LIVEGRAPH-IMPL-1: extract --engine FIRST. Absent == `auto` -- the cert-gated LiveGraph-first
+    // default (the daemon serves LiveGraph module stats when a GREEN repo no-loss certificate holds at the
+    // current fingerprint, else a labelled SQLite fallback -- BYTE-IDENTICAL human output either way).
+    // `--engine sqlite` forces the SQLite escape hatch (UNCHANGED); `--engine livegraph|compare` are the
+    // diagnostic surfaces (forced LiveGraph serve / SQLite-primary + field-exact compare report).
+    let (args, engine_raw) = extract_engine_flag(args.to_vec());
+    let engine = engine_raw.as_str();
+    let usage = "usage: rmap stats [--engine auto|sqlite|livegraph|compare] [--json]";
 
-    for arg in args {
+    // ── Parse remaining args ───────────────────────────────────────────
+    let mut json_mode = false;
+    for arg in &args {
         match arg.as_str() {
             "--json" => {
                 json_mode = true;
             }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
-                eprintln!("usage: rmap stats [--json]");
+                eprintln!("{usage}");
                 return ExitCode::from(1);
             }
             other => {
                 eprintln!("error: unexpected argument: {}", other);
-                eprintln!("usage: rmap stats [--json]");
+                eprintln!("{usage}");
                 return ExitCode::from(1);
             }
         }
+    }
+
+    // Validate the engine value (reject unknown rather than silently defaulting).
+    if !matches!(engine, "auto" | "sqlite" | "livegraph" | "compare") {
+        eprintln!(
+            "error: unknown --engine '{engine}' (supported: auto, sqlite, livegraph, compare)"
+        );
+        eprintln!("{usage}");
+        return ExitCode::from(1);
     }
 
     let repo_path = match resolve_repo_from_cwd() {
@@ -1204,14 +1221,15 @@ pub fn run_stats(args: &[String]) -> ExitCode {
         Err(code) => return code,
     };
 
-    let params = serde_json::json!({
-        "repo": repo_path,
-    });
+    // The default sends `engine:"auto"`; explicit `--engine sqlite` sends `"sqlite"` -- so the daemon
+    // distinguishes the cert-gated fastpath from the forced SQLite escape hatch (rule 7).
+    let params = serde_json::json!({ "repo": repo_path, "engine": engine });
 
     match client.request("stats", Some(params)) {
         Ok(result) => {
             if json_mode {
-                // Machine mode: print full envelope
+                // Machine mode: print full envelope (includes backend_used/fallback_reason for the
+                // auto/livegraph paths; the livegraph_stats_compare report for compare).
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
@@ -1223,11 +1241,56 @@ pub fn run_stats(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render (CLI-OUT-2C)
                 use crate::presentation::stats::StatsResponse;
+                // Compare (STATS-LIVEGRAPH-IMPL-1): capture the diagnostic summary BEFORE `result` is
+                // consumed by from_value. The PRIMARY answer is SQLite (render_human, byte-identical);
+                // the compare metadata rides alongside as one summary line.
+                let compare_summary: Option<String> = if engine == "compare" {
+                    let cmp = result.get("livegraph_stats_compare");
+                    let n = |k: &str| {
+                        cmp.and_then(|c| c.get(k))
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0)
+                    };
+                    let u = |k: &str| {
+                        cmp.and_then(|c| c.get(k))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0)
+                    };
+                    let lg_class = cmp
+                        .and_then(|c| c.get("livegraph_class"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let is_exact = cmp
+                        .and_then(|c| c.get("is_exact"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let sidecar = result
+                        .get("livegraph_stats_compare_sidecar")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("<none>");
+                    Some(format!(
+                        "LiveGraph module-stats compare: {} matched, {} missing, {} extra, {} field-mismatch; \
+                         livegraph_count={} class={lg_class}; is_exact={is_exact}; sidecar={sidecar}",
+                        u("matched"),
+                        n("missing_in_livegraph"),
+                        n("extra_in_livegraph"),
+                        n("field_mismatches"),
+                        u("livegraph_count"),
+                    ))
+                } else {
+                    None
+                };
+                // Human mode: parse and render (CLI-OUT-2C). The renderer is UNTOUCHED (byte-preserving);
+                // backend_used/fallback_reason/livegraph_stats_compare are additive JSON-only fields the
+                // StatsResponse ignores.
                 match serde_json::from_value::<StatsResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
+                        if let Some(summary) = compare_summary {
+                            println!("{summary}");
+                        }
                         ExitCode::SUCCESS
                     }
                     Err(e) => {
