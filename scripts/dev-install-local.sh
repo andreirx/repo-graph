@@ -40,6 +40,14 @@ readonly SOCKET_PATH="${HOME}/Library/Application Support/repo-graph/daemon.sock
 readonly LAUNCHD_LABEL="com.repo-graph.rmapd"
 readonly LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 readonly LOG_FILE="${HOME}/Library/Logs/repo-graph/daemon.log"
+# Stable macOS code-signing identity. Each `cargo build` ad-hoc signs with a fresh content-hash signature, so
+# macOS sees every reinstall as a new app and re-prompts (firewall / privacy). Signing with ONE persistent
+# identity makes the one-time "Allow" stick across rebuilds. Override per-machine via env (e.g. point it at an
+# existing "Apple Development: ..." identity by its SHA-1 hash from `security find-identity -v -p codesigning`):
+#   export RMAP_CODESIGN_IDENTITY=<hash-or-name>
+# Default is a self-signed identity you create ONCE (see install_binaries). Personal identities are NOT
+# hardcoded here — this script is shared.
+readonly CODESIGN_IDENTITY="${RMAP_CODESIGN_IDENTITY:-rmapd-dev}"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -263,7 +271,37 @@ install_binaries_atomic() {
     mv -f "${tmp_rmapd}" "${INSTALL_DIR}/rmapd"
     mv -f "${tmp_rgistr}" "${INSTALL_DIR}/rgistr"
 
+    sign_binaries
+
     info "  Binaries installed"
+}
+
+# Re-sign the installed binaries with the STABLE self-signed identity so macOS stops re-prompting on every
+# reinstall (see CODESIGN_IDENTITY). If the identity is absent, leave the ad-hoc signatures in place and tell the
+# user how to create it ONCE — never fail the install over signing.
+sign_binaries() {
+    [[ "$(uname -s)" == "Darwin" ]] || return 0
+
+    if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "${CODESIGN_IDENTITY}"; then
+        warn "  Code-signing identity '${CODESIGN_IDENTITY}' not found — binaries left ad-hoc signed."
+        warn "  macOS will keep re-prompting on each install. Fix it ONE of two ways:"
+        warn "    (a) reuse an existing identity: security find-identity -v -p codesigning"
+        warn "        then: export RMAP_CODESIGN_IDENTITY=<hash>   (e.g. in your shell profile)"
+        warn "    (b) create a self-signed one: Keychain Access -> Certificate Assistant ->"
+        warn "        Create a Certificate... | Name: ${CODESIGN_IDENTITY} | Self Signed Root | Code Signing"
+        return 0
+    fi
+
+    # `--force` replaces the linker's ad-hoc signature. No hardened runtime (it needs entitlements and can break
+    # a local dev daemon). First run may prompt for keychain access to the signing key -> click "Always Allow".
+    local b
+    for b in rmap rmapd rgistr; do
+        if codesign --force --sign "${CODESIGN_IDENTITY}" "${INSTALL_DIR}/${b}" 2>/dev/null; then
+            info "  Signed ${b} (${CODESIGN_IDENTITY})"
+        else
+            warn "  codesign ${b} failed — left ad-hoc signed"
+        fi
+    done
 }
 
 start_daemon() {

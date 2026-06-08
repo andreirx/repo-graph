@@ -74,3 +74,6 @@ tools/rgistr/**/MAP.md
 # DATAFLOW-HOTPATH-MAP-1 is a TRACKED architecture doc, NOT an rgistr artifact — the *MAP.md rule
 # above catches it case-insensitively on macOS (APFS). Keep it tracked.
 !docs/architecture/dataflow-hotpath-map.md
+
+# agent-manager relay tooling (builder/reviewer target relay) — local-only working state, never committed.
+.agent-manager/

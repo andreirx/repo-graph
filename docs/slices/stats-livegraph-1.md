@@ -1,11 +1,16 @@
 # STATS-LIVEGRAPH-1: SQLite-free served path for the `rmap stats` default
 
 Slice ID: STATS-LIVEGRAPH-1
-Status: **SPEC-FIRST — DESIGN, NOT IMPLEMENTED. No code, no deletion, no migration.** This document ratifies the
-PLAN for migrating the `stats` default off its eager SQLite read onto a cert-gated LiveGraph served path
-(mirroring the IMPORTS / CYCLES fastpath precedent). The IMPLEMENTATION is a follow-up slice, gated on the D0
-architecture decision below (see **DECISION_REQUIRED**). Nothing here flips a default, deletes a table, or
-changes extraction.
+Status: **IMPLEMENTED + VALIDATED (2026-06-08 — commit `28ed216` STATS-LIVEGRAPH-IMPL-1; spec ratified
+`f6046ab`).** The `stats` default now serves from LiveGraph via a cert-gated fastpath built on the IR
+symbol-attributes substrate (IR-SYMBOL-ATTRIBUTES-IMPL `116fbb0`), with SQLite as the labelled fallback and
+BYTE-PRESERVING output — the 6th SQLite-free migrated default. Adds `stats` auto|sqlite|livegraph|compare
+routing, `stats_cert`, LiveGraph `module_stats`, the shared martin-metrics, the fastpath/fallback ladder, and
+the compare surface. Validation (EXECUTED, codex-reviewed): cargo build/test/fmt/clippy(-D warnings)/diff
+--check pass; `engine=auto -> backend_used=livegraph` (fallback_reason=null); `engine=compare is_exact=true`
+(byte-identical to SQLite); SQLite fallback intact; GREEN-cached fastpath skip-SQLite unit-tested. (This
+document was the ratified PLAN; the sections below are retained as the design of record. The original
+"DESIGN, NOT IMPLEMENTED / DECISION_REQUIRED" header was resolved by the ratified spec `f6046ab`.)
 
 Goal: plan a served path for the default `rmap stats` that does NOT read SQLite `nodes`/`edges` per call, so that
 `stats` joins callers/callees/path/imports/cycles as a default with a SQLite-free common path — advancing the

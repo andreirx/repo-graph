@@ -2,17 +2,17 @@
 
 ## Current Priority
 
-> **STATUS (2026-06-08): Stage D — SQLite raw decommission. Next build: STATS-LIVEGRAPH-1 (spec-first).**
+> **STATUS (2026-06-08): Stage D — SQLite raw decommission. Next build: COHERENCE-LAYER-1 (design-first).**
 > Stages A–C are COMPLETE; Stage D (persistence + raw decommission) is in progress. Since this document's
 > body was last rewritten (2026-06-01), the warm-cache chain shipped (WARM-CACHE-1 + daemon-wiring +
-> valuefacts + producer-absent), the imports + cycles LiveGraph **default fastpaths** landed, callers/
-> callees/path went **lazy**, and the **SQLITE-RAW-DECOMMISSION-READINESS-1..7** audits ran. The
-> readiness-7 audit (today) names **STATS-LIVEGRAPH-1, spec-first** as the highest-value next slice:
-> `stats` is the last SQLite-only drilldown default with no LiveGraph served path, and cert-fastpath
-> leverage is exhausted for the already-migrated defaults. COHERENCE-LAYER (orient/check/explain/trust)
-> follows, design-first. [INFERRED priority; OBSERVED-backed — `docs/slices/sqlite-raw-decommission-readiness-7.md`
-> §Q5 + git HEAD=82da168 chain.] The running log below is historical narrative through 2026-06-01; for
-> the present state trust this banner and the **Stage D order** line further down.
+> valuefacts + producer-absent), the imports + cycles + **stats** LiveGraph **default fastpaths** landed,
+> callers/callees/path went **lazy**, and the **SQLITE-RAW-DECOMMISSION-READINESS-1..7** audits ran.
+> **STATS-LIVEGRAPH-1 SHIPPED** (spec `f6046ab` + impl `28ed216`): `stats` serves from LiveGraph via a
+> cert-gated fastpath built on the IR symbol-attributes substrate (`116fbb0`), byte-preserving — the
+> **6th** SQLite-free migrated default. Cert-fastpath + breadth leverage is now exhausted for the
+> drilldown defaults; **COHERENCE-LAYER-1 (orient/check/explain/trust)** is next, design-first.
+> [INFERRED priority; OBSERVED-backed — git HEAD=`28ed216` chain.] The running log below is historical
+> narrative through 2026-06-01; for the present state trust this banner and the **Stage D order** line below.
 
 **EXTRACTION-SUBSTRATE-PIVOT** — SCIP-first L0/L1 substrate.
 
@@ -192,10 +192,10 @@ key / manifest validation / atomic write / refresh interaction. Spec
 (support crate: DTO round-trips, manifest, atomic write) → WARM-CACHE-DAEMON-WIRING-1 ✓ →
 WARM-CACHE-VALUEFACTS-1 ✓ → WARM-CACHE-PRODUCER-ABSENT-1 ✓ → imports + cycles LiveGraph default
 fastpaths ✓ + lazy callers/callees/path ✓ → SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) →
-**STATS-LIVEGRAPH-1 (next — spec-first; the last SQLite-only drilldown default, a real build needing
-the IR degree graph + measurements)** → COHERENCE-LAYER (design-first) → SQLITE-RAW-DECOMMISSION-1.
-[OBSERVED: git HEAD chain + warm-cache slice docs IMPLEMENTED 2026-06-01; readiness-7 §Q5 for the
-STATS-LIVEGRAPH-1 recommendation.]
+STATS-LIVEGRAPH-1 ✓ (spec `f6046ab` + impl `28ed216`; the 6th SQLite-free default — `stats` served from
+LiveGraph via the IR symbol-attributes substrate, SQLite fallback intact, byte-preserving) →
+**COHERENCE-LAYER-1 (next — design-first)** → SQLITE-RAW-DECOMMISSION-1.
+[OBSERVED: git HEAD=`28ed216` chain; `docs/slices/stats-livegraph-1.md` IMPLEMENTED.]
 
 The WARM-CACHE-1 slice doc header still reads "DESIGN — building"; that header is itself stale (the
 crate shipped and was extended — `repo_graph_version` key fix `7b0eb4c`, warm-cache schema bumps in the

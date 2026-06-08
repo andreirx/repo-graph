@@ -122,7 +122,7 @@ See `agent_docs/storage-architecture-v2.md` for the tier specification.
 | **SCIP-INGEST-IR-1** | Canonical IR, SCIP ingestion, stable-key mapping, call-graph derivation | IMPLEMENTED (design D1–D5 → INGEST-CORE-1; Stage A) |
 | **PARTITIONED-WARM-CACHE-ARCH-1** | Binary warm cache; format decision | RATIFIED 2026-06-01 (bincode under validation envelope; Stage D) |
 | **QUERY-MIGRATION-1** | callers/callees/path/cycles on LiveGraph partitions | IMPLEMENTED (Stage C; callers/callees headless, path deferred; cycles/imports default-migrated via Stage-D fastpaths) |
-| **COHERENCE-LAYER-1** | orient/check/trust mixed live+persisted contract | PLANNED (Stage D; design-first, after STATS-LIVEGRAPH-1) |
+| **COHERENCE-LAYER-1** | orient/check/trust mixed live+persisted contract | NEXT (Stage D; design-first; STATS-LIVEGRAPH-1 shipped `28ed216`) |
 | **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
 | **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
 | **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
@@ -143,8 +143,9 @@ XPART-PROVE-1(+1B)+boundary decision ✓, REFRESH-PROBE-1 ✓ (Verdict B), RUST-
 QUERY-MIGRATION-1 ✓ → VALUE-JOIN-1 ✓. **Stage D (current)** — LIVEGRAPH-INTEGRATION-1A/1B/1C ✓
 → PARTITIONED-WARM-CACHE-ARCH-1 ✓ → WARM-CACHE-1 (+ daemon-wiring / valuefacts /
 producer-absent) ✓ → imports + cycles LiveGraph default fastpaths + lazy callers/callees/path ✓
-→ SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) → **STATS-LIVEGRAPH-1 (next, spec-first)**
-→ COHERENCE-LAYER-1 → SQLITE-RAW-DECOMMISSION-1. Full Stage-B/C/D ledger: `CURRENT_SLICE.md`.
+→ SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) → STATS-LIVEGRAPH-1 ✓ (spec `f6046ab` + impl `28ed216`;
+6/10 SQLite-free defaults) → **COHERENCE-LAYER-1 (next, design-first)** → SQLITE-RAW-DECOMMISSION-1.
+Full Stage-B/C/D ledger: `CURRENT_SLICE.md`.
 
 **Honesty:** the viability spikes (TS/C/Rust) are complete and the gate is retired.
 The refresh model (REFRESH-PROBE-1 → two-speed Verdict B) and warm-cache format
@@ -154,18 +155,19 @@ window remains runtime-tuned. See `docs/architecture/scip-migration-plan.md`.
 
 ### Current Priority
 
-**STATS-LIVEGRAPH-1 (next build; spec-first).** Stage D, SQLite raw-decommission track.
-[INFERRED priority, OBSERVED-backed — `docs/slices/sqlite-raw-decommission-readiness-7.md`
-§Q5 + the git HEAD=82da168 chain.] `stats` is the last drilldown default that is SQLite-only
-with **no LiveGraph served path**; migrating it is a real build (it needs the IR degree graph +
-measurements the IR lacks), so the data dependency is specced first. Cert-fastpath leverage is
-exhausted for the already-migrated defaults (imports + cycles flipped; callers/callees/path
-lazy) — the next decommission step is breadth (stats), not another fastpath. After stats: the
-COHERENCE-LAYER design slice (orient/check/explain/trust; higher blast radius; design-first).
+**COHERENCE-LAYER-1 (next; design-first).** Stage D, SQLite raw-decommission track.
+[INFERRED priority, OBSERVED-backed — git HEAD=`28ed216`; the Stage-D order line above.]
+STATS-LIVEGRAPH-1 SHIPPED (spec `f6046ab` + impl `28ed216`): `stats` now serves from LiveGraph
+via a cert-gated fastpath built on the IR symbol-attributes substrate (`116fbb0`), SQLite fallback
+intact, output byte-preserving — the **6th** SQLite-free migrated default. Cert-fastpath + breadth
+leverage is now exhausted for the drilldown defaults (callers/callees/path lazy;
+imports/cycles/stats flipped). The remaining decommission work is the COHERENCE-LAYER
+(orient/check/explain/trust — SQLite-only, mixed live+persisted, higher blast radius), design-first.
 
 SCIP-INGEST-IR-1 is **no longer current** — it shipped as INGEST-CORE-1 (Stage A);
-`docs/slices/scip-ingest-ir-1.md` holds the historical design. STATS-LIVEGRAPH-1 has no slice
-doc yet; authoring it is the next slice, not part of this reconciliation.
+`docs/slices/scip-ingest-ir-1.md` holds the historical design. STATS-LIVEGRAPH-1 is IMPLEMENTED
+(`docs/slices/stats-livegraph-1.md`); COHERENCE-LAYER-1 has no slice doc yet — authoring it
+(design-first) is the next slice.
 
 ### Recently Completed
 
@@ -542,7 +544,7 @@ HOOK-1 delivered:
 **The active development track is no longer this Distribution/CLI-OUT program — it is the
 Storage Architecture / SCIP Stage-D program** (this track's CLI-OUT-1..7 and SMOKE-1 are all
 COMPLETE; CURSOR-1 remains queued). Genuine current priority: see the **Storage Architecture
-Track → Current Priority** above (STATS-LIVEGRAPH-1, spec-first) and `CURRENT_SLICE.md`.
+Track → Current Priority** above (COHERENCE-LAYER-1, design-first; STATS-LIVEGRAPH-1 shipped) and `CURRENT_SLICE.md`.
 [OBSERVED: the git HEAD chain is entirely Stage-D storage work.]
 
 ### Artifact Matrix (REL-1)
