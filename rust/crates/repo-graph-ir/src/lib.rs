@@ -287,6 +287,54 @@ pub struct SourceRange {
 
 // ── Nodes + edges + container ─────────────────────────────────────
 
+/// Visibility classification of a symbol, mirrored from the producer (IR-SYMBOL-ATTRIBUTES-1).
+///
+/// IR-owned: a CLOSED 5-variant set (DS3) carried as a type-safe enum, NOT a string — unlike
+/// [`SymbolAttributes::symbol_kind`], whose vocabulary is open and grows. The variant set mirrors the
+/// producer `Visibility`; if the producer's set grows, this grows in lockstep (a one-line mirror). The
+/// producer's lowercase serde spelling (`export`, `private`, …) is the SQLite `visibility`-column
+/// spelling; this enum preserves the FULL fact (not a lossy `is_export` bool), so a future consumer
+/// (dead-code, API-surface) can read private/protected/internal without re-extraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrVisibility {
+    /// `public`.
+    Public,
+    /// `private`.
+    Private,
+    /// `protected`.
+    Protected,
+    /// `internal`.
+    Internal,
+    /// `export`.
+    Export,
+}
+
+/// Structural per-symbol attributes sourced from the AST-adopted producer node (IR-SYMBOL-ATTRIBUTES-1).
+///
+/// Present (the containing `Option` is `Some`) ONLY for AST-adopted SYMBOL nodes — nodes that matched a
+/// producer `ExtractedNode`. Absent (`None`) on `ScipSynthesizedFallback` and `AstFileScope` nodes, which
+/// have NO producer node and therefore NO honest structural attributes (`None` = unknown, never conflated
+/// with a known zero — the architecture's explicit-degradation rule). The block's presence/absence is ONE
+/// fact (AST-producer present, as a unit, DS1); the subfields stay INDEPENDENTLY optional inside it,
+/// because the producer emits each independently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolAttributes {
+    /// Producer visibility. `None` when the producer emitted no visibility for the symbol.
+    pub visibility: Option<IrVisibility>,
+    /// True iff the producer's `parent_node_uid` is `None` (a top-level symbol). Mirrors the SQLite
+    /// `parent_node_uid IS NULL` predicate exactly (parity by construction); stats needs only the boolean,
+    /// not the parent identity, so no second identity model is imported into the IR (DS4).
+    pub is_top_level: bool,
+    /// Granular symbol kind: the producer `NodeSubtype`'s SCREAMING_SNAKE_CASE spelling
+    /// (`"INTERFACE"`, `"TYPE_ALIAS"`, `"CLASS"`, `"ENUM"`, `"FUNCTION"`, …). `None` when the producer
+    /// emitted no subtype. DISTINCT from [`IrNode::subtype`], which holds the COARSE SCIP terminal-
+    /// descriptor suffix (`Namespace`/`Type`/`Method`/`Term`); a SCIP `Type` covers class AND interface
+    /// AND type-alias AND enum, so it cannot supply this distinction — hence this granular AST-sourced
+    /// field. Kept as a string (DS2) to avoid coupling the IR to an extractor enum, matching the existing
+    /// `subtype` precedent and giving byte-parity with the SQLite string compare for free.
+    pub symbol_kind: Option<String>,
+}
+
 /// A node in the canonical IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IrNode {
@@ -305,6 +353,10 @@ pub struct IrNode {
     pub identity_source: IdentitySource,
     /// Provenance.
     pub provenance: Provenance,
+    /// Structural per-symbol attributes (IR-SYMBOL-ATTRIBUTES-1). `Some` for AST-adopted SYMBOL nodes
+    /// (`identity_source == AstAdopted`); `None` for `ScipSynthesizedFallback` + `AstFileScope` nodes,
+    /// which have no producer AST node (unknown, not zero). See [`SymbolAttributes`].
+    pub attributes: Option<SymbolAttributes>,
 }
 
 /// An edge in the canonical IR.
@@ -421,6 +473,7 @@ mod tests {
             partition_id: PartitionId::new("p"),
             identity_source: IdentitySource::AstAdopted,
             provenance: prov(),
+            attributes: None,
         });
         ir.nodes.push(IrNode {
             key: CanonicalKey::from_existing("k2"),
@@ -430,9 +483,54 @@ mod tests {
             partition_id: PartitionId::new("p"),
             identity_source: IdentitySource::ScipSynthesizedFallback,
             provenance: prov(),
+            attributes: None,
         });
         assert_eq!(ir.fallback_node_count(), 1);
         assert!(ir.node(&CanonicalKey::from_existing("k1")).is_some());
+    }
+
+    #[test]
+    fn symbol_attributes_carry_on_node_and_subfields_are_independent() {
+        // IR-SYMBOL-ATTRIBUTES-1: an AST-adopted SYMBOL node carries a populated attribute block; the
+        // block's presence is one fact, but the subfields stay INDEPENDENTLY optional (DS1) — a
+        // Some-visibility + None-symbol_kind state is LEGAL, not impossible.
+        let full = IrNode {
+            key: CanonicalKey::from_existing("k"),
+            subtype: "Type".into(), // coarse SCIP descriptor suffix (distinct from symbol_kind)
+            name: "Widget".into(),
+            range: None,
+            partition_id: PartitionId::new("p"),
+            identity_source: IdentitySource::AstAdopted,
+            provenance: prov(),
+            attributes: Some(SymbolAttributes {
+                visibility: Some(IrVisibility::Export),
+                is_top_level: true,
+                symbol_kind: Some("CLASS".into()),
+            }),
+        };
+        let attrs = full
+            .attributes
+            .as_ref()
+            .expect("AST-adopted node carries attributes");
+        assert_eq!(attrs.visibility, Some(IrVisibility::Export));
+        assert!(attrs.is_top_level);
+        assert_eq!(attrs.symbol_kind.as_deref(), Some("CLASS"));
+
+        // Legal mixed state: visibility known, kind unknown (independent producer optionals).
+        let mixed = SymbolAttributes {
+            visibility: Some(IrVisibility::Private),
+            is_top_level: false,
+            symbol_kind: None,
+        };
+        assert_ne!(attrs, &mixed);
+
+        // Fallback / FILE nodes carry None (unknown), never an empty/zeroed block.
+        let fallback = IrNode {
+            attributes: None,
+            identity_source: IdentitySource::ScipSynthesizedFallback,
+            ..full.clone()
+        };
+        assert!(fallback.attributes.is_none());
     }
 
     #[test]

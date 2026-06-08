@@ -1840,6 +1840,8 @@ mod tests {
             partition_id: PartitionId::new("p"),
             identity_source: src,
             provenance: prov(),
+            // IR-SYMBOL-ATTRIBUTES-1: these runtime tests exercise callers/callees, not attributes.
+            attributes: None,
         }
     }
     /// A node carrying a source range (for `node_location` display tests).

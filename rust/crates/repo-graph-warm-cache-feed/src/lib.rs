@@ -249,6 +249,8 @@ mod tests {
             partition_id: PartitionId::new("p"),
             identity_source: IdentitySource::AstAdopted,
             provenance: prov(),
+            // IR-SYMBOL-ATTRIBUTES-1: this test exercises the value-fact feed, not attributes.
+            attributes: None,
         });
         ir
     }

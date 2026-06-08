@@ -17,12 +17,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use protobuf::Message;
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::types::{
-    EdgeType as TsEdgeType, ImportObservation as TsImportObservation, NodeKind,
+    EdgeType as TsEdgeType, ImportObservation as TsImportObservation, NodeKind, NodeSubtype,
+    Visibility,
 };
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, EdgeType as IrEdgeType, IdentitySource, ImportEdgeMeta,
-    ImportObservation as IrImportObservation, ImportResolution, IrEdge, IrNode, Partition,
-    PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange, TsconfigAliasConfig,
+    ImportObservation as IrImportObservation, ImportResolution, IrEdge, IrNode, IrVisibility,
+    Partition, PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange, SymbolAttributes,
+    TsconfigAliasConfig,
 };
 use repo_graph_ts_extractor::TsExtractor;
 use scip::types::Index;
@@ -157,6 +159,11 @@ fn descriptors_info(symbol: &str) -> (String, String, String) {
 }
 
 /// An AST node reduced to identity + span. Span: lines 1-based, columns 0-based.
+///
+/// IR-SYMBOL-ATTRIBUTES-1 widens this reduction to ALSO carry the three structural producer fields it
+/// previously dropped (`subtype`, `visibility`, `is_top_level`); they ride onto the IR node the
+/// definition adopts (`build_partition_nodes`). A strict widening — no new producer call, no new SCIP
+/// decode.
 #[derive(Debug, Clone)]
 pub struct AstNodeLite {
     /// Canonical stable key emitted by `ts-extractor`.
@@ -169,6 +176,14 @@ pub struct AstNodeLite {
     /// node is a non-callable enclosing scope: any edge it sources is a
     /// `FileScopeReference`, never a `Calls`.
     pub is_file_scope: bool,
+    /// Granular producer subtype (`NodeSubtype`), if emitted (IR-SYMBOL-ATTRIBUTES-1). The source of the
+    /// IR node's `attributes.symbol_kind` (serialized to the producer's SCREAMING_SNAKE_CASE spelling).
+    pub subtype: Option<NodeSubtype>,
+    /// Producer visibility, if emitted (IR-SYMBOL-ATTRIBUTES-1). The source of `attributes.visibility`.
+    pub visibility: Option<Visibility>,
+    /// True iff the producer's `parent_node_uid` was `None` (a top-level symbol). The source of
+    /// `attributes.is_top_level` — mirrors the SQLite `parent_node_uid IS NULL` predicate.
+    pub is_top_level: bool,
     /// Span start line (1-based).
     pub line_start: i64,
     /// Span start column (0-based).
@@ -197,11 +212,19 @@ pub fn ast_nodes_for_source(source: &str, file_path: &str, repo_uid: &str) -> Ve
         .filter_map(|n| {
             let cyclomatic = metrics.get(&n.stable_key).map(|m| m.cyclomatic_complexity);
             let is_file_scope = matches!(n.kind, NodeKind::File);
+            // IR-SYMBOL-ATTRIBUTES-1: carry the three structural producer fields through the reduction.
+            // `subtype`/`visibility` are Copy enums; `is_top_level` mirrors `parent_node_uid IS NULL`.
+            let subtype = n.subtype;
+            let visibility = n.visibility;
+            let is_top_level = n.parent_node_uid.is_none();
             n.location.map(|loc| AstNodeLite {
                 stable_key: n.stable_key,
                 name: n.name,
                 cyclomatic,
                 is_file_scope,
+                subtype,
+                visibility,
+                is_top_level,
                 line_start: loc.line_start,
                 col_start: loc.col_start,
                 line_end: loc.line_end,
@@ -313,6 +336,33 @@ pub struct PartitionBuild {
     pub file_scope: usize,
 }
 
+/// Map the producer `Visibility` (a CLOSED 5-variant set) to the IR-owned `IrVisibility` (DS3). A CLOSED
+/// match by design: if the producer's `Visibility` ever grows, this fails to compile and `IrVisibility`
+/// must grow in lockstep — the deliberate, type-safe trade-off the spec accepts for the closed
+/// visibility vocabulary (vs the open, string-carried symbol-kind vocabulary).
+fn ir_visibility_from_producer(v: Visibility) -> IrVisibility {
+    match v {
+        Visibility::Public => IrVisibility::Public,
+        Visibility::Private => IrVisibility::Private,
+        Visibility::Protected => IrVisibility::Protected,
+        Visibility::Internal => IrVisibility::Internal,
+        Visibility::Export => IrVisibility::Export,
+    }
+}
+
+/// The producer `NodeSubtype`'s SCREAMING_SNAKE_CASE serde spelling (e.g. `Interface` -> `"INTERFACE"`,
+/// `TypeAlias` -> `"TYPE_ALIAS"`) — the EXACT string the SQLite stats path compares
+/// (`subtype IN ('INTERFACE','TYPE_ALIAS','CLASS','ENUM')`), giving parity by construction. The producer's
+/// OWN serde is the authority (DS2): a new producer subtype passes through with no edit here
+/// (forward-compatible). Returns `None` only if serialization does not yield a JSON string (it always does
+/// for a fieldless enum) — kept total-but-defensive rather than panicking.
+fn subtype_screaming_snake(subtype: NodeSubtype) -> Option<String> {
+    match serde_json::to_value(subtype) {
+        Ok(serde_json::Value::String(s)) => Some(s),
+        _ => None,
+    }
+}
+
 /// Build IR declaration nodes for one document. Matched defs adopt the AST canonical
 /// key (and attach complexity); unmatched defs get a labeled `ScipSynthesizedFallback`
 /// key synthesized from SCIP info. Locals and non-declaration kinds are skipped.
@@ -362,6 +412,14 @@ pub fn build_partition_nodes(
                     partition_id: pid.clone(),
                     identity_source: IdentitySource::AstAdopted,
                     provenance,
+                    // IR-SYMBOL-ATTRIBUTES-1: structural attributes ride on the ADOPTED AST node (the
+                    // facts are AST/producer facts, NOT SCIP — SCIP only triggers the join). Subfields
+                    // stay independently optional: the producer emits each as an independent `Option`.
+                    attributes: Some(SymbolAttributes {
+                        visibility: ast.visibility.map(ir_visibility_from_producer),
+                        is_top_level: ast.is_top_level,
+                        symbol_kind: ast.subtype.and_then(subtype_screaming_snake),
+                    }),
                 });
                 out.matched += 1;
                 if d.name.starts_with('<') {
@@ -380,6 +438,8 @@ pub fn build_partition_nodes(
                     partition_id: pid.clone(),
                     identity_source: IdentitySource::ScipSynthesizedFallback,
                     provenance,
+                    // No AST producer node -> no honest structural attributes (unknown, not zero).
+                    attributes: None,
                 });
                 out.fallback += 1;
             }
@@ -409,6 +469,8 @@ pub fn build_partition_nodes(
                 scip_symbol_id: None,
                 build_inputs_hash: build_inputs_hash.to_string(),
             },
+            // A FILE is not a SYMBOL: no visibility / kind / top-level meaning (unknown, not zero).
+            attributes: None,
         });
         out.file_scope += 1;
     }
@@ -498,11 +560,19 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
         .filter_map(|n| {
             let cyclomatic = metrics.get(&n.stable_key).map(|m| m.cyclomatic_complexity);
             let is_file_scope = matches!(n.kind, NodeKind::File);
+            // IR-SYMBOL-ATTRIBUTES-1: carry the three structural producer fields through the reduction.
+            // `subtype`/`visibility` are Copy enums; `is_top_level` mirrors `parent_node_uid IS NULL`.
+            let subtype = n.subtype;
+            let visibility = n.visibility;
+            let is_top_level = n.parent_node_uid.is_none();
             n.location.map(|loc| AstNodeLite {
                 stable_key: n.stable_key,
                 name: n.name,
                 cyclomatic,
                 is_file_scope,
+                subtype,
+                visibility,
+                is_top_level,
                 line_start: loc.line_start,
                 col_start: loc.col_start,
                 line_end: loc.line_end,
@@ -1229,6 +1299,130 @@ mod tests {
         assert_eq!(reconcile_scip_name(""), "");
         assert_eq!(reconcile_scip_name("<unknown>x"), "<unknown>x");
         assert_eq!(reconcile_scip_name("getter"), "getter");
+    }
+
+    // ── IR-SYMBOL-ATTRIBUTES-1: structural per-symbol attribute sourcing ──
+
+    #[test]
+    fn subtype_screaming_snake_matches_sqlite_spellings() {
+        // The producer's own serde spelling == the EXACT strings the SQLite stats path compares
+        // (`subtype IN ('INTERFACE','TYPE_ALIAS','CLASS','ENUM')`) — parity by construction (DS2).
+        assert_eq!(
+            subtype_screaming_snake(NodeSubtype::Interface).as_deref(),
+            Some("INTERFACE")
+        );
+        assert_eq!(
+            subtype_screaming_snake(NodeSubtype::TypeAlias).as_deref(),
+            Some("TYPE_ALIAS")
+        );
+        assert_eq!(
+            subtype_screaming_snake(NodeSubtype::Class).as_deref(),
+            Some("CLASS")
+        );
+        assert_eq!(
+            subtype_screaming_snake(NodeSubtype::Enum).as_deref(),
+            Some("ENUM")
+        );
+        assert_eq!(
+            subtype_screaming_snake(NodeSubtype::Function).as_deref(),
+            Some("FUNCTION")
+        );
+    }
+
+    #[test]
+    fn ir_visibility_mirrors_producer_visibility() {
+        // Closed 1:1 mirror (DS3). Export is the variant the stats export_count keys on.
+        assert_eq!(
+            ir_visibility_from_producer(Visibility::Export),
+            IrVisibility::Export
+        );
+        assert_eq!(
+            ir_visibility_from_producer(Visibility::Public),
+            IrVisibility::Public
+        );
+        assert_eq!(
+            ir_visibility_from_producer(Visibility::Private),
+            IrVisibility::Private
+        );
+        assert_eq!(
+            ir_visibility_from_producer(Visibility::Protected),
+            IrVisibility::Protected
+        );
+        assert_eq!(
+            ir_visibility_from_producer(Visibility::Internal),
+            IrVisibility::Internal
+        );
+    }
+
+    #[test]
+    fn synthetic_fixture_populates_symbol_attributes() {
+        // End-to-end on the committed real index.scip + sources: AST-adopted symbols carry real
+        // attributes; fallback/FILE nodes carry None (honest unknown). Proves the producer fields are
+        // threaded through the AstNodeLite reduction onto the IR node.
+        let root = format!("{}/tests/fixtures/synthetic", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(format!("{root}/index.scip")).expect("read index.scip");
+        let index = decode_index(&bytes).expect("decode index.scip");
+        let outcome = ingest_partition(
+            &index,
+            &root,
+            "synthetic",
+            "synthetic",
+            "scip-typescript",
+            "test",
+            "h",
+            "",
+        );
+
+        // Degradation invariant: attributes present IFF the node adopted a producer AST node.
+        for n in &outcome.ir.nodes {
+            match n.identity_source {
+                IdentitySource::AstAdopted => assert!(
+                    n.attributes.is_some(),
+                    "AST-adopted node {} must carry attributes",
+                    n.key.as_str()
+                ),
+                IdentitySource::ScipSynthesizedFallback | IdentitySource::AstFileScope => assert!(
+                    n.attributes.is_none(),
+                    "fallback/FILE node {} must carry NO attributes (unknown, not zero)",
+                    n.key.as_str()
+                ),
+            }
+            // Any populated symbol_kind is the producer's SCREAMING_SNAKE_CASE spelling.
+            if let Some(kind) = n.attributes.as_ref().and_then(|a| a.symbol_kind.as_deref()) {
+                assert!(
+                    !kind.is_empty() && kind.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
+                    "symbol_kind {kind:?} must be SCREAMING_SNAKE_CASE"
+                );
+            }
+        }
+
+        // Concrete parity: the exported top-level `report` function (main.ts) is EXPORT + top-level +
+        // kind FUNCTION — exactly the {visibility='export', parent IS NULL, subtype} the SQLite stats
+        // path counts (queries.rs:1142-1146).
+        let report = outcome
+            .ir
+            .nodes
+            .iter()
+            .find(|n| n.name == "report" && n.identity_source == IdentitySource::AstAdopted)
+            .expect("report function node present");
+        let attrs = report
+            .attributes
+            .as_ref()
+            .expect("report carries attributes");
+        assert_eq!(attrs.visibility, Some(IrVisibility::Export));
+        assert!(attrs.is_top_level, "top-level export function");
+        assert_eq!(attrs.symbol_kind.as_deref(), Some("FUNCTION"));
+
+        // A nested member (e.g. Circle.describe) is NOT top-level — the parity input for the
+        // abstract_count/type_count `parent_node_uid IS NULL` predicate.
+        let has_nested = outcome.ir.nodes.iter().any(|n| {
+            n.identity_source == IdentitySource::AstAdopted
+                && matches!(&n.attributes, Some(a) if !a.is_top_level)
+        });
+        assert!(
+            has_nested,
+            "at least one nested (non-top-level) symbol present"
+        );
     }
 
     // ── IMPORTS-MODULE-INGEST-1: node-resolved FILE -> FILE import edges (D4) ──

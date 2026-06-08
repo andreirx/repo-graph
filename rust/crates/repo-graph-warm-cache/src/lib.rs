@@ -36,8 +36,8 @@ use serde::{Deserialize, Serialize};
 
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, EdgeType, IdentitySource, ImportEdgeMeta, ImportObservation,
-    ImportResolution, IrEdge, IrNode, Partition, PartitionId, PartitionIr, PartitionKind,
-    Provenance, SourceRange,
+    ImportResolution, IrEdge, IrNode, IrVisibility, Partition, PartitionId, PartitionIr,
+    PartitionKind, Provenance, SourceRange, SymbolAttributes,
 };
 
 /// Magic marker for a repo-graph warm-cache file ("RGWC").
@@ -51,7 +51,13 @@ pub const MAGIC: u32 = 0x5247_5743;
 /// v6 (IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1): `CacheImportObservationDto` gained `external_node_modules` +
 /// `CachePartitionDto` gained package_name/declared_dependencies/tsconfig_aliases (PACKAGE-RESOLUTION-1 /
 /// TSCONFIG-PATHS-1 were serde(default)-compatible; this bump forces a clean re-ingest for the new evidence).
-pub const SCHEMA_VERSION: u32 = 6;
+/// v7 (IR-SYMBOL-ATTRIBUTES-1): `CacheIrNodeDto` gained `attributes` (`Option<CacheSymbolAttributesDto>` —
+/// structural per-symbol visibility / top-level / symbol-kind). bincode is positional + non-self-
+/// describing, so the payload LAYOUT changed. This is a HARD bump (NOT serde(default) backward-decode): a
+/// v6 cache is rejected at the manifest `schema_version` gate -> discarded -> re-ingested under v7, so the
+/// warm graph ALWAYS carries real attributes. A serde(default) backward-decode of a v6 cache would yield
+/// `attributes = None` for EVERY node — a silently all-unknown graph (a latent trust trap); rejected by design.
+pub const SCHEMA_VERSION: u32 = 7;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Errors (D4)
@@ -310,6 +316,34 @@ pub enum CachePartitionKindDto {
     TsPackage,
 }
 
+/// Mirror of `repo_graph_ir::IrVisibility` (IR-SYMBOL-ATTRIBUTES-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CacheIrVisibilityDto {
+    /// `Public`.
+    Public,
+    /// `Private`.
+    Private,
+    /// `Protected`.
+    Protected,
+    /// `Internal`.
+    Internal,
+    /// `Export`.
+    Export,
+}
+
+/// Mirror of `repo_graph_ir::SymbolAttributes` (IR-SYMBOL-ATTRIBUTES-1; schema v7). Present (`Some` on
+/// [`CacheIrNodeDto::attributes`]) only for AST-adopted SYMBOL nodes; the subfields are independently
+/// optional. The D8 boundary holds: this is the cache-side mirror (serde lives here, NOT in repo-graph-ir).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheSymbolAttributesDto {
+    /// Producer visibility, if known.
+    pub visibility: Option<CacheIrVisibilityDto>,
+    /// True iff the producer `parent_node_uid` was `None` (top-level).
+    pub is_top_level: bool,
+    /// Granular symbol kind (producer SCREAMING_SNAKE_CASE spelling), if known.
+    pub symbol_kind: Option<String>,
+}
+
 /// Mirror of `repo_graph_ir::IrNode`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheIrNodeDto {
@@ -327,6 +361,11 @@ pub struct CacheIrNodeDto {
     pub identity_source: CacheIdentitySourceDto,
     /// Provenance.
     pub provenance: CacheProvenanceDto,
+    /// Structural per-symbol attributes (IR-SYMBOL-ATTRIBUTES-1; schema v7). `Some` for AST-adopted
+    /// SYMBOL nodes, `None` for fallback/FILE nodes. NO `#[serde(default)]`: the schema-version gate (a
+    /// HARD v6->v7 bump) rejects old caches before decode, so no backward-decode path exists — and a
+    /// silent all-`None` decode of a v6 cache is exactly the trust trap the hard bump prevents.
+    pub attributes: Option<CacheSymbolAttributesDto>,
 }
 
 /// Mirror of `repo_graph_ir::IrEdge`.
@@ -594,6 +633,48 @@ impl From<CachePartitionKindDto> for PartitionKind {
     }
 }
 
+impl From<&IrVisibility> for CacheIrVisibilityDto {
+    fn from(v: &IrVisibility) -> Self {
+        match v {
+            IrVisibility::Public => Self::Public,
+            IrVisibility::Private => Self::Private,
+            IrVisibility::Protected => Self::Protected,
+            IrVisibility::Internal => Self::Internal,
+            IrVisibility::Export => Self::Export,
+        }
+    }
+}
+impl From<CacheIrVisibilityDto> for IrVisibility {
+    fn from(v: CacheIrVisibilityDto) -> Self {
+        match v {
+            CacheIrVisibilityDto::Public => Self::Public,
+            CacheIrVisibilityDto::Private => Self::Private,
+            CacheIrVisibilityDto::Protected => Self::Protected,
+            CacheIrVisibilityDto::Internal => Self::Internal,
+            CacheIrVisibilityDto::Export => Self::Export,
+        }
+    }
+}
+
+impl From<&SymbolAttributes> for CacheSymbolAttributesDto {
+    fn from(a: &SymbolAttributes) -> Self {
+        Self {
+            visibility: a.visibility.as_ref().map(CacheIrVisibilityDto::from),
+            is_top_level: a.is_top_level,
+            symbol_kind: a.symbol_kind.clone(),
+        }
+    }
+}
+impl From<CacheSymbolAttributesDto> for SymbolAttributes {
+    fn from(a: CacheSymbolAttributesDto) -> Self {
+        Self {
+            visibility: a.visibility.map(IrVisibility::from),
+            is_top_level: a.is_top_level,
+            symbol_kind: a.symbol_kind,
+        }
+    }
+}
+
 impl From<&IrNode> for CacheIrNodeDto {
     fn from(n: &IrNode) -> Self {
         Self {
@@ -604,6 +685,7 @@ impl From<&IrNode> for CacheIrNodeDto {
             partition_id: n.partition_id.as_str().to_string(),
             identity_source: CacheIdentitySourceDto::from(&n.identity_source),
             provenance: CacheProvenanceDto::from(&n.provenance),
+            attributes: n.attributes.as_ref().map(CacheSymbolAttributesDto::from),
         }
     }
 }
@@ -617,6 +699,7 @@ impl From<CacheIrNodeDto> for IrNode {
             partition_id: PartitionId::new(n.partition_id.as_str()),
             identity_source: IdentitySource::from(n.identity_source),
             provenance: Provenance::from(n.provenance),
+            attributes: n.attributes.map(SymbolAttributes::from),
         }
     }
 }
@@ -1022,6 +1105,13 @@ mod tests {
             partition_id: PartitionId::new("pkg"),
             identity_source: IdentitySource::AstAdopted,
             provenance: prov(),
+            // IR-SYMBOL-ATTRIBUTES-1 (v7): an AST-adopted SYMBOL node carries a populated attribute
+            // block; the round-trip below proves it survives PartitionIr -> DTO -> PartitionIr.
+            attributes: Some(SymbolAttributes {
+                visibility: Some(IrVisibility::Export),
+                is_top_level: true,
+                symbol_kind: Some("FUNCTION".to_string()),
+            }),
         });
         ir.nodes.push(IrNode {
             key: CanonicalKey::from_existing("repo:src/shapes.ts#Circle.describe"),
@@ -1031,6 +1121,8 @@ mod tests {
             partition_id: PartitionId::new("pkg"),
             identity_source: IdentitySource::ScipSynthesizedFallback,
             provenance: prov(),
+            // A fallback node carries NO attributes (unknown) — the None side of the round-trip.
+            attributes: None,
         });
         ir.edges.push(IrEdge {
             src: CanonicalKey::from_existing("repo:src/main.ts#report"),
