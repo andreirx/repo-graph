@@ -1,11 +1,14 @@
 # COHERENCE-LAYER-1: the mixed-source contract for orient / check / explain / trust
 
 Slice ID: COHERENCE-LAYER-1
-Status: **DESIGN / SPEC-FIRST — NOT IMPLEMENTED. CONTRACT RATIFIED (operator sign-off 2026-06-08).** This
+Status: **DESIGN / SPEC-FIRST — NOT IMPLEMENTED. CONTRACT RATIFIED (operator sign-off 2026-06-08); AMENDED 2026-06-09 (multi-source LEAF provenance, D8).** This
 document RATIFIES a contract; it produces NO source code, NO table deletion, NO schema/data migration, NO
 default flip. The two load-bearing boundary decisions are now RATIFIED (see §Ratified decisions):
 COHERENCE-ENVELOPE-SHAPE = **new `CoherenceEnvelope<T>` wrapper**; TRUST-DISPOSITION = **hybrid labelled
-model**. No open DECISION_REQUIRED remains. The per-command builds (ORIENT-LIVEGRAPH-1 → CHECK → EXPLAIN →
+model**. AMENDED 2026-06-09 (operator sign-off, CHECK-PROVENANCE-LEAF-SHAPE → D8): multi-source LEAF
+provenance — `Provenance.source` is a `BTreeSet<Source>` at BOTH leaf and root, resolving the prior
+leaf-single (~:397) / root-set (~:433) inconsistency; this is the SOLE amendment, the rest of the ratified
+contract is unchanged. No open DECISION_REQUIRED remains. The per-command builds (ORIENT-LIVEGRAPH-1 → CHECK → EXPLAIN →
 TRUST) are later slices that execute against THIS ratified contract.
 
 Goal: define how `orient` / `check` / `explain` / `trust` can serve from current-state **LiveGraph** facts
@@ -210,7 +213,9 @@ per-signal certainty):
     `SignalData` was fictional — no such type exists; `grep SignalData rust/` is empty. Resolved here.)
     `value` = the `Signal` record; its evidence payload is NOT widened with provenance (that is the contrast
     vs rejected Option A). The leaf's `provenance`/`trust`/`freshness` ride in the wrapper's SIBLING fields
-    and describe THAT signal's source. This is where per-signal certainty lives (D4). The one inner field
+    and describe THAT signal's source(s) — a SET (`BTreeSet<Source>`, D8): a SINGLETON for a single-source
+    signal, MULTIPLE for a derived/composite leaf such as check's verdict. This is where per-signal certainty
+    lives (D4). The one inner field
     that overlaps — `Signal.freshness: Option<FreshnessInfo>` — is the RISK-G reconciliation target, NOT a
     second source of truth: the OUTER envelope freshness is authoritative.
   - ROOT (per command): `CoherenceEnvelope<CoherentOrientResult>`. `value` is NOT the bare `OrientResult`;
@@ -394,7 +399,17 @@ here) [OBSERVED axes, first-hand: repo-graph-trust-model/src/lib.rs:26-208; Answ
     freshness:  FreshnessState // epoch axis, the trust-model enum verbatim
   }
   Provenance {
-    source:             Source,                // livegraph | sqlite | filesystem | declaration
+    source:             BTreeSet<Source>,      // SET of contributing sources {livegraph|sqlite|filesystem|
+                                               //   declaration}. AMENDED 2026-06-09 (CHECK-PROVENANCE-LEAF-
+                                               //   SHAPE → D8): a SET at BOTH leaf and root, resolving the
+                                               //   prior leaf-single/root-set inconsistency. A pristine
+                                               //   single-source leaf carries a SINGLETON; a DERIVED/composite
+                                               //   leaf (e.g. check's verdict = sqlite-operational +
+                                               //   sqlite-trust-core + declaration-authority) carries the SET
+                                               //   of all contributors; the root carries the set-UNION of its
+                                               //   leaves' sources (monotone union fold — only grows). Field
+                                               //   identifier source-vs-sources is a COHERENCE-ENVELOPE-1
+                                               //   cosmetic nicety, not re-opened.
     basis:              Vec<ProvenanceBasis>,  // reuse AnswerEnvelope.provenance (alias/reconciliation)
     missing_partitions: Vec<String>,           // reuse AnswerEnvelope.missing_partitions (residency gap)
     fallback_reason:    Option<FallbackReason> // set when source flipped LiveGraph→SQLite (cert ladder)
@@ -413,7 +428,11 @@ COMPOSITIONAL APPLICATION (two granularities; this is HOW per-signal certainty i
   - LEAF = CoherenceEnvelope<Signal>, one per Signal / explain section. `Signal` is the EXISTING shared DTO,
     NOT a new `SignalData` — that name was fictional (grep-empty); the leaf wraps the real `Signal`.
     Constructed by delegating to (or mirroring) the AnswerEnvelope smart constructors so the six invariants
-    hold AT THE LEAF. The inner `Signal` evidence is pristine; the leaf's provenance/trust/freshness live in
+    hold AT THE LEAF. A leaf's `provenance.source` is a SET (D8): usually a SINGLETON (a pristine single-source
+    structural signal, or a LiveGraph→SQLite-fallback leaf whose sole source is `sqlite`), but it MAY carry
+    MULTIPLE contributing sources when the leaf's `value` is DERIVED from facts of more than one source —
+    e.g. check's verdict leaf (sqlite-operational + sqlite-trust-core + declaration-authority) carries
+    `{sqlite, declaration}`. The inner `Signal` evidence is pristine; the leaf's provenance/trust/freshness live in
     the wrapper siblings (the inner `Signal.freshness: Option<FreshnessInfo>` is the RISK-G reconciliation
     target — the outer envelope freshness is authoritative).
   - ROOT = CoherenceEnvelope<CoherentOrientResult>. The root `value` is a NEW command-container DTO defined
@@ -430,8 +449,10 @@ COMPOSITIONAL APPLICATION (two granularities; this is HOW per-signal certainty i
 
     So the command CONTAINER shape changes (its `signals` slot now holds leaf envelopes) while each `Signal`
     payload stays pristine — both stated, no longer claimed mutually (the iteration-1 contradiction). Root
-    trust/freshness = the MEET fold of the leaves (Q7-2). Root provenance.source = the SET of contributing
-    sources. The CoherentOrientResult.confidence [OBSERVED: envelope.rs:313; Confidence{High,Medium,Low}
+    trust/freshness = the MEET fold of the leaves (Q7-2). Root provenance.source = the set-UNION of the
+    leaves' source sets (the same `BTreeSet<Source>` field, D8) — a monotone union fold: the root set ⊇ every
+    leaf set, never dropping a contributor (the provenance fold is set-UNION, distinct from the trust/freshness
+    MEET). The CoherentOrientResult.confidence [OBSERVED: envelope.rs:313; Confidence{High,Medium,Low}
     :216] is DERIVED from the root MEET — never exceeds the weakest contributor.
 
 ENVELOPE-LEVEL limits[] [OBSERVED base OrientResult: envelope.rs:300-339]: gains provenance-derived codes
@@ -582,6 +603,48 @@ already imply → decide and record"). Resolution of the iteration-1 contradicti
 slot (a distinct `CoherentOrientResult`). Both are now asserted together, not as mutually exclusive claims.
 The existing bare `OrientResult` is left intact for any legacy/non-coherent path; the coherent commands
 return `CoherenceEnvelope<CoherentOrientResult>`.
+```
+
+### D8 — Multi-source LEAF provenance = `Provenance.source` is a SET (RATIFIED 2026-06-09 — CHECK-PROVENANCE-LEAF-SHAPE)
+```text
+AMENDMENT (operator sign-off 2026-06-09). This is a targeted amendment to the ratified contract, NOT a re-open
+of D1/D2. It resolves an internal data-shape inconsistency the iteration-1 CHECK escalation surfaced
+(review-1.json, CHECK-LIVEGRAPH-1): the `Provenance` struct declared `source: Source` (SINGLE-valued, ~:397)
+while the ROOT description required "the SET of contributing sources" (~:433) — the two could not both hold.
+
+RATIFIED: `Provenance.source` is a `BTreeSet<Source>` (a SET) at BOTH the LEAF and the ROOT granularity.
+  - LEAF: a leaf's source set is usually a SINGLETON — a pristine single-source structural signal, or a
+    LiveGraph→SQLite-fallback leaf whose sole source is `sqlite`. It carries MULTIPLE sources when the leaf's
+    `value` is DERIVED from facts of more than one source. The motivating first case is check's verdict leaf,
+    which folds sqlite-operational (snapshot/index/stale-files) + sqlite-trust-core (reliability/enrichment) +
+    declaration-authority (gate) into ONE composite signal and therefore carries `{sqlite, declaration}`
+    (snapshot-present) / `{sqlite}` (no-snapshot). [OBSERVED, first-hand: check/mod.rs:81/84/87 — three
+    gathered inputs; gather_gate_outcome reads the `declarations` Authority table at mod.rs:173 BEFORE the
+    NotConfigured early-return at :178-180, so `declaration` contributes on EVERY snapshot-present verdict.]
+  - ROOT: the root source set is the set-UNION of its leaves' source sets (root ⊇ every leaf — monotone,
+    never drops a contributor). The provenance fold is set-UNION; it is DISTINCT from the trust/freshness MEET.
+
+This PRESERVES every other guarantee: the `Signal` evidence payload is still un-widened (the set rides in the
+wrapper SIBLING `provenance`, not in the inner value — Option B / D1); the AnswerEnvelope invariants are
+unchanged (provenance is not a class/freshness axis); the union fold is monotone like the MEET. The finer
+intra-`sqlite` distinction (operational vs trust-core vs which table) is NOT a new `Source` variant — it is
+carried in `basis: Vec<ProvenanceBasis>`; the `Source` axis stays {livegraph, sqlite, filesystem, declaration}.
+
+OPTION MATRIX (audit trail; the CHECK escalation's three options, every cell filled):
+| Option | Leaf shape | Verdict payload | Honest multi-source | Wire churn | Resolves :397/:433 | Verdict |
+|---|---|---|---|---|---|---|
+| A — `Provenance.source` carries a SET (singleton or multi) at leaf and root | one composite leaf | un-widened (Option B) | YES ({sqlite, declaration}) | minimal (field re-typed `Source`→`BTreeSet<Source>`) | YES (one shape both granularities) | **RATIFIED** |
+| B — keep leaf single-valued; decompose verdict into per-condition leaves | N leaves (one per condition) | RE-TYPED (conditions promoted to leaves) | YES but over-decomposed | larger (new nested-leaf wire shape) | NO (root still needs a set) | not chosen |
+| C — keep one verdict leaf, single coarse source (e.g. `sqlite`) | one composite leaf | un-widened | NO (Authority participation hidden) | minimal | NO (still single-valued) | REJECTED (false provenance — hides `declaration`) |
+
+RATIFIED: **Option A.** It preserves the un-widened `Signal` payload (D1) AND the single composite verdict
+leaf, makes mixed-source provenance HONEST (Authority `declaration` is never hidden, forbidding a check-shaped
+F5/F6), and unifies leaf+root on ONE field shape — eliminating the :397/:433 tension at the source. B
+over-decomposes sub-facts into top-level leaves (larger wire shape) and still leaves the root needing a set;
+C is false provenance (it would erase the gate's Authority origin from `GATE_STATUS`). The field identifier
+(`source` vs `sources`) is a COHERENCE-ENVELOPE-1 cosmetic nicety, not re-opened here. CONSEQUENCE: this is
+the SOLE amendment; Q1–Q7, the source map, the fallback ladder, the slice sequence, and D1–D7 are unchanged.
+The per-command application is in docs/slices/check-livegraph-1.md (§3a leaf, §3d RP-1, D-CHECK-1, D-CHECK-5).
 ```
 
 ---
