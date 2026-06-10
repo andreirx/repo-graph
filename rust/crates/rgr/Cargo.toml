@@ -161,6 +161,9 @@ jdtls-resolver = { path = "../jdtls-resolver" }
 repo-graph-agent = { path = "../agent" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
+# ORIENT-LIVEGRAPH-IMPL: the CLI deserializes orient's `CoherenceEnvelope<CoherentOrientResult>`
+# wire shape (the wrapper + per-signal leaf envelopes) for human rendering. Outer (CLI) -> inner edge.
+repo-graph-coherence = { path = "../repo-graph-coherence" }
 repo-graph-coverage = { path = "../coverage" }
 repo-graph-daemon-policy = { path = "../daemon-policy" }
 repo-graph-daemon-runtime = { path = "../daemon-runtime" }

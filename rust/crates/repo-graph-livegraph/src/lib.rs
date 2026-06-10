@@ -195,6 +195,32 @@ pub struct ValueFactsAnswer {
     pub contributing_epochs: BTreeMap<String, u64>,
 }
 
+/// One high-complexity symbol surfaced by the repo-wide [`LiveGraph::high_complexity`] read
+/// (ORIENT-LIVEGRAPH-IMPL): a symbol-owned `CyclomaticComplexity` value at or above the queried
+/// threshold. The `symbol` is the canonical key; `file` is the partition-relative source path when known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HighComplexityFact {
+    /// The canonical symbol key the complexity fact is attached to.
+    pub symbol: String,
+    /// The cyclomatic complexity value (>= the queried threshold).
+    pub complexity: u32,
+    /// The partition-relative source file, when the fact carries a source range.
+    pub file: Option<String>,
+}
+
+/// The payload of a repo-wide `high_complexity` answer (`AnswerEnvelope<HighComplexityAnswer>`;
+/// ORIENT-LIVEGRAPH-IMPL). Enumerates EVERY RESIDENT partition's symbol-owned `CyclomaticComplexity`
+/// facts at or above the threshold — the repo-wide set orient's HIGH_COMPLEXITY signal is cert-gated
+/// against. This is a READ over the SAME value-fact data `value_facts(symbol)` exposes per symbol
+/// (VALUE-JOIN-1): NO new producer, NO new extraction — the facts are loaded by `load_value_facts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HighComplexityAnswer {
+    /// The high-complexity symbol facts, symbol-key-ascending (deterministic for the no-loss compare).
+    pub symbols: Vec<HighComplexityFact>,
+    /// Contributing partition epochs (D3).
+    pub contributing_epochs: BTreeMap<String, u64>,
+}
+
 /// The in-memory LiveGraph runtime substrate.
 ///
 /// **callers/callees residency asymmetry (LIVEGRAPH-RUNTIME-1 + QUERY-MIGRATION-1):** the
@@ -1408,6 +1434,54 @@ impl LiveGraph {
         capture_envelope(data, missing, worst, languages)
     }
 
+    /// `high_complexity(threshold)` — the repo-wide cyclomatic-complexity read (ORIENT-LIVEGRAPH-IMPL).
+    /// Enumerates EVERY RESIDENT slot's `value_facts` for symbol-owned `CyclomaticComplexity` values at or
+    /// above `threshold`, returning the repo-wide set as a trust-labelled `AnswerEnvelope`. This is a READ
+    /// over the SAME value-fact data `value_facts(symbol)` exposes per-symbol (VALUE-JOIN-1) — NO new
+    /// producer, NO new extraction: the facts were loaded by `load_value_facts`.
+    ///
+    /// Only RESIDENT slots contribute (mirrors `module_stats`, which folds resident IR only), so the
+    /// answer DATA matches its completeness claim. The completeness envelope is INHERITED from
+    /// `whole_graph_completeness` exactly like `module_stats` / the cycle answers (all resident + Fresh +
+    /// TS → `Exact`; a non-resident/non-TS partition → `Partial`). This makes the envelope a NECESSARY
+    /// guard; the daemon's no-loss COMPLEXITY cert (a field-exact compare vs SQLite `measurements`) is the
+    /// SUFFICIENT value-equivalence proof that lets orient label HIGH_COMPLEXITY `livegraph` — never a
+    /// partition-incomplete count read as exhaustive (contract F1/F3).
+    pub fn high_complexity(&self, threshold: u32) -> AnswerEnvelope<HighComplexityAnswer> {
+        let mut symbols: Vec<HighComplexityFact> = Vec::new();
+        for s in self.slots.values() {
+            // Resident-only: a non-resident slot's retained facts are NOT counted (its partition is
+            // flagged `missing` by `whole_graph_completeness` → the answer is `Partial` → SQLite fallback).
+            if s.ir.is_none() {
+                continue;
+            }
+            for f in &s.value_facts {
+                if f.kind != ValueFactKind::CyclomaticComplexity || f.value < threshold {
+                    continue;
+                }
+                if let ValueSubject::Symbol(k) = &f.subject {
+                    symbols.push(HighComplexityFact {
+                        symbol: k.as_str().to_string(),
+                        complexity: f.value,
+                        file: f.source_range.as_ref().map(|r| r.file.clone()),
+                    });
+                }
+            }
+        }
+        // Deterministic order for stable serialization + a stable no-loss compare.
+        symbols.sort_by(|a, b| {
+            a.symbol
+                .cmp(&b.symbol)
+                .then(a.complexity.cmp(&b.complexity))
+        });
+        let (missing, worst, languages, epochs) = self.whole_graph_completeness();
+        let data = HighComplexityAnswer {
+            symbols,
+            contributing_epochs: epochs,
+        };
+        capture_envelope(data, missing, worst, languages)
+    }
+
     /// The resident MODULE paths (MODULE-CYCLES-COMPARE-CLASSIFY-1 D5): `module_path_of` each resident
     /// FILE-scope node key. These are the dirname module identities the LiveGraph actually has — the
     /// classifier uses them to tell a non-resident cycle module from an identity divergence.
@@ -2471,6 +2545,61 @@ mod tests {
         assert_eq!(a.data().unwrap().facts.len(), 1);
         assert_eq!(a.data().unwrap().facts[0].value, 7);
         assert_eq!(a.data().unwrap().facts[0].basis, IdentityBasis::AstAdopted);
+    }
+
+    // ── ORIENT-LIVEGRAPH-IMPL: repo-wide high_complexity read ──
+
+    #[test]
+    fn high_complexity_enumerates_repo_wide_above_threshold() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![
+                complexity_fact("engine.foo", 25, IdentityBasis::AstAdopted),
+                complexity_fact("engine.bar", 5, IdentityBasis::AstAdopted), // below threshold
+                complexity_fact("engine.baz", 40, IdentityBasis::AstAdopted),
+            ],
+        );
+        let a = lg.high_complexity(20);
+        // All resident + Fresh + TS → Exact (the precondition the daemon cert further gates).
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.freshness(), FreshnessState::Fresh);
+        let data = a.data().unwrap();
+        // Only the two >= 20 are surfaced, symbol-key-ascending (deterministic for the no-loss compare).
+        let keys: Vec<&str> = data.symbols.iter().map(|f| f.symbol.as_str()).collect();
+        assert_eq!(keys, vec!["engine.baz", "engine.foo"]);
+        assert_eq!(data.symbols[0].complexity, 40);
+        assert_eq!(data.symbols[1].complexity, 25);
+    }
+
+    #[test]
+    fn high_complexity_nonresident_partition_is_partial_never_exact() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 30, IdentityBasis::AstAdopted)],
+        );
+        // Unload → the value facts are RETAINED, but the partition is non-resident.
+        lg.unload_partition("engine");
+        let a = lg.high_complexity(20);
+        // Never a false-exhaustive Exact over a non-resident partition (contract F1/F3).
+        assert_ne!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.class(), AnswerClass::Partial);
+        // Resident-only: the non-resident slot's retained facts are NOT counted.
+        assert!(a.data().map(|d| d.symbols.is_empty()).unwrap_or(true));
+    }
+
+    #[test]
+    fn high_complexity_empty_when_none_above_threshold_is_exact() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 3, IdentityBasis::AstAdopted)],
+        );
+        let a = lg.high_complexity(20);
+        // Known-zero high-complexity symbols is a COMPLETE Exact answer (empty != unknown).
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert!(a.data().unwrap().symbols.is_empty());
     }
 
     #[test]

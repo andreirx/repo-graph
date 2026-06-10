@@ -24,9 +24,11 @@
 use std::process::ExitCode;
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
+use repo_graph_coherence::CoherenceEnvelope;
+
 use crate::presentation::check::CheckResponse;
 use crate::presentation::explain::ExplainResponse;
-use crate::presentation::orient::OrientResponse;
+use crate::presentation::orient::{render_orient_envelope, OrientResponse};
 
 // ── orient command (REG-1 + CLI-OUT-1) ───────────────────────────────
 //
@@ -180,10 +182,12 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render
-                match serde_json::from_value::<OrientResponse>(result) {
-                    Ok(response) => {
-                        println!("{}", response.render_human());
+                // Human mode: parse the CoherenceEnvelope<CoherentOrientResult> wrapper and render the
+                // inner value + the certainty footer (ORIENT-LIVEGRAPH-IMPL). The `--json` path above is
+                // unchanged: it prints the raw daemon JSON (now the wrapper) verbatim.
+                match serde_json::from_value::<CoherenceEnvelope<OrientResponse>>(result) {
+                    Ok(envelope) => {
+                        println!("{}", render_orient_envelope(&envelope));
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

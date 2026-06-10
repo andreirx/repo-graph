@@ -1047,6 +1047,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 name = "repo-graph-agent"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-coherence",
  "repo-graph-gate",
  "serde",
  "serde_json",
@@ -1101,6 +1102,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-coherence"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-trust-model",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "repo-graph-coverage"
 version = "0.1.0"
 dependencies = [
@@ -1143,6 +1153,7 @@ dependencies = [
  "repo-graph-agent",
  "repo-graph-boundary-interaction",
  "repo-graph-classification",
+ "repo-graph-coherence",
  "repo-graph-coverage",
  "repo-graph-daemon-policy",
  "repo-graph-daemon-transport",
@@ -1405,6 +1416,7 @@ dependencies = [
  "repo-graph-agent",
  "repo-graph-boundary-interaction",
  "repo-graph-classification",
+ "repo-graph-coherence",
  "repo-graph-coverage",
  "repo-graph-daemon-policy",
  "repo-graph-daemon-runtime",

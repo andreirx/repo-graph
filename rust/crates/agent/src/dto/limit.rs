@@ -77,6 +77,41 @@ pub enum LimitCode {
     /// at all) and from gate signals (which evaluate specific
     /// obligations).
     GateNotApplicableToFocus,
+
+    // ── Coherence ENVELOPE-level provenance-derived codes ─────────
+    //
+    // ORIENT-LIVEGRAPH-IMPL (COHERENCE-LAYER-1 contract :458; orient slice §ENVELOPE limits[] :546). These
+    // make the coherence degradation/provenance MACHINE-DISCOVERABLE at the envelope level, not only inside
+    // the per-leaf trust postures. They are DERIVED purely from the folded leaf provenance/freshness +
+    // the snapshot stale flag (`coherent::append_provenance_limits`) — emitted WHEN AND ONLY WHEN the
+    // matching condition occurred (validation E5). They are ADDITIVE: the pre-existing degradation limits
+    // above (GateNotConfigured / ModuleDataUnavailable / ComplexityUnavailable) are orthogonal
+    // known-zero/unavailable markers and are RETAINED unchanged (contract :549).
+    /// A LiveGraph-first leaf answered but was NOT `Exact` (e.g. a non-resident contributing partition),
+    /// so it fell back to the proven SQLite primary (`fallback_reason = LiveGraphPartial`). The answer is
+    /// complete (SQLite is the source of truth); this marks that the LiveGraph acceleration was declined
+    /// for partiality.
+    LivegraphPartial,
+
+    /// The backing SQLite index is STALE (`get_stale_files` non-empty) — the SQLite / Authority / FS leaves
+    /// are snapshot-`Stale`, so the answer reflects a superseded index epoch. The SAME staleness the
+    /// `TRUST_STALE_SNAPSHOT` signal reports, surfaced as an envelope-level provenance code.
+    SqliteSnapshotStale,
+
+    /// A user-authored Tier-A1 authority declaration (boundary / gate) contributed to this answer. Authority
+    /// OVERLAYS a computed structural fact; it never erases it (D-ORIENT-5 / contract D5). This marks that
+    /// the effective view is authority-shaped, so a consumer knows to reconcile against the computed view.
+    AuthorityOverlayApplied,
+
+    /// A LiveGraph-first leaf was served (or would serve) under an in-flight SCIP refresh — its freshness is
+    /// `PrecisionPending`. The MEET caps the root below `Exact`; this surfaces the precision-pending epoch at
+    /// the envelope level.
+    PrecisionPending,
+
+    /// A LiveGraph-first leaf found NO LiveGraph available for the repo/target (not preloaded/refreshed, or
+    /// `Unavailable`) and fell back to the proven SQLite primary (`fallback_reason = LiveGraphUnavailable`).
+    /// The LiveGraph producer never built a current-state graph for this answer.
+    ProducerUnavailable,
 }
 
 impl LimitCode {
@@ -87,6 +122,11 @@ impl LimitCode {
             Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
             Self::LanguageCoveragePartial => "LANGUAGE_COVERAGE_PARTIAL",
             Self::GateNotApplicableToFocus => "GATE_NOT_APPLICABLE_TO_FOCUS",
+            Self::LivegraphPartial => "LIVEGRAPH_PARTIAL",
+            Self::SqliteSnapshotStale => "SQLITE_SNAPSHOT_STALE",
+            Self::AuthorityOverlayApplied => "AUTHORITY_OVERLAY_APPLIED",
+            Self::PrecisionPending => "PRECISION_PENDING",
+            Self::ProducerUnavailable => "PRODUCER_UNAVAILABLE",
         }
     }
 
@@ -116,6 +156,31 @@ impl LimitCode {
             Self::GateNotApplicableToFocus => {
                 "Gate is configured but no obligations target the \
 				 focused area."
+            }
+            Self::LivegraphPartial => {
+                "A LiveGraph-first signal was not Exact (a non-resident \
+				 contributing partition) and fell back to the SQLite \
+				 primary."
+            }
+            Self::SqliteSnapshotStale => {
+                "The backing index is stale (some files changed since the \
+				 snapshot). SQLite-sourced signals reflect a superseded \
+				 index epoch."
+            }
+            Self::AuthorityOverlayApplied => {
+                "A user-authored authority declaration (boundary/gate) \
+				 contributed to this answer. Authority overlays a computed \
+				 fact; it never erases it."
+            }
+            Self::PrecisionPending => {
+                "A LiveGraph-first signal is served under an in-flight \
+				 SCIP refresh (PrecisionPending), so overall confidence is \
+				 capped below Exact."
+            }
+            Self::ProducerUnavailable => {
+                "No current-state LiveGraph was available for this answer \
+				 (not preloaded/refreshed); LiveGraph-first signals fell \
+				 back to the SQLite primary."
             }
         }
     }

@@ -53,6 +53,8 @@ pub mod handlers;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
+pub mod orient_coherence;
+pub mod orient_lg_decisions;
 pub mod partition_discovery;
 pub mod registry;
 pub mod state;

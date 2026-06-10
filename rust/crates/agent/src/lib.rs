@@ -73,6 +73,9 @@ pub use check::{
     ConditionStatus, GateOutcomeForCheck,
 };
 pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
+pub use dto::coherent::{
+    to_coherent, CoherentOrientResult, OrientLeafLabel, OrientLgDecisions, COHERENT_ORIENT_SCHEMA,
+};
 pub use dto::{
     budget::Budget,
     envelope::{
@@ -91,6 +94,7 @@ pub use dto::{
         CheckFailEvidence,
         CheckIncompleteEvidence,
         CheckPassEvidence,
+        ComplexSymbolEvidence,
         CycleEvidence,
         // DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
         ExplainBoundaryEvidence,
@@ -111,6 +115,7 @@ pub use dto::{
         ExplainSymbolItem,
         ExplainSymbolsEvidence,
         ExplainTrustEvidence,
+        HighComplexityEvidence,
         ImportCyclesEvidence,
         ModuleCountEvidence,
         ModuleKindBreakdown,

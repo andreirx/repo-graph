@@ -45,9 +45,40 @@
 //!   - rmap explain src/core/auth/session.ts
 //! ```
 
+use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
 use crate::presentation::{bullet, bullet_list, heading, kv_line, DisplaySeverity};
+
+/// Render orient's coherence-wrapped daemon response (ORIENT-LIVEGRAPH-IMPL).
+///
+/// The daemon now returns a `CoherenceEnvelope<CoherentOrientResult>` (the wrapper became the top level;
+/// D-ORIENT-6 = O2 / RISK-O-F). This renders the inner `value` exactly as before (so the body is
+/// text-equivalent to today) and appends a concise CERTAINTY footer from the ROOT axes (`trust` /
+/// `freshness` / `provenance.source`) — W4: the certainty axes render from `root.trust`, while the
+/// degradation section renders from `value.trust_briefing`.
+pub fn render_orient_envelope(env: &CoherenceEnvelope<OrientResponse>) -> String {
+    let mut out = env.value.render_human();
+    out.push_str("\n\n");
+    out.push_str(&heading("Certainty"));
+    out.push_str(&bullet(&format!(
+        "class {:?}, freshness {:?}",
+        env.trust.class, env.freshness
+    )));
+    let sources: Vec<String> = env
+        .provenance
+        .source
+        .iter()
+        .map(|s| format!("{s:?}").to_lowercase())
+        .collect();
+    if !sources.is_empty() {
+        out.push_str(&bullet(&format!("sources: {}", sources.join(", "))));
+    }
+    if let Some(reason) = env.provenance.fallback_reason {
+        out.push_str(&bullet(&format!("fallback: {}", reason.as_str())));
+    }
+    out.trim_end().to_string()
+}
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -70,17 +101,22 @@ pub struct OrientResponse {
     pub confidence: String,
     #[serde(default)]
     pub documentation: Option<DocumentationSection>,
+    /// ORIENT-LIVEGRAPH-IMPL: each signal is now a LEAF `CoherenceEnvelope<Signal>` (contract D7) — the
+    /// inner `Signal` is pristine; provenance/trust/freshness ride in the wrapper siblings. The renderer
+    /// reads each `.value`.
     #[serde(default)]
-    pub signals: Vec<Signal>,
+    pub signals: Vec<CoherenceEnvelope<Signal>>,
     #[serde(default)]
     pub limits: Vec<Limit>,
     #[serde(default)]
     pub next: Vec<NextAction>,
     #[serde(default)]
     pub truncated: bool,
-    /// Trust overlay — present when there is degradation.
+    /// D-ORIENT-6 = O2: the degraded-state trust briefing overlay, now carried on `value.trust_briefing`
+    /// (renamed from the old top-level `trust` key). Present only when degraded. The certainty AXES are
+    /// the envelope ROOT `trust` (rendered separately by [`render_orient_envelope`]).
     #[serde(default)]
-    pub trust: Option<TrustOverlay>,
+    pub trust_briefing: Option<TrustOverlay>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,8 +236,8 @@ impl OrientResponse {
             out.push('\n');
         }
 
-        // ── Degradation (from trust overlay) ───────────────────────
-        if let Some(trust) = &self.trust {
+        // ── Degradation (from value.trust_briefing) ────────────────
+        if let Some(trust) = &self.trust_briefing {
             let degradation = self.render_degradation(trust);
             if !degradation.is_empty() {
                 out.push_str(&degradation);
@@ -267,7 +303,9 @@ impl OrientResponse {
         let mut medium: Vec<&Signal> = Vec::new();
         let mut low: Vec<&Signal> = Vec::new();
 
-        for signal in &self.signals {
+        // Each signal is a leaf CoherenceEnvelope; the inner `.value` is the pristine Signal (D7).
+        for leaf in &self.signals {
+            let signal = &leaf.value;
             match DisplaySeverity::parse(&signal.severity) {
                 DisplaySeverity::High => high.push(signal),
                 DisplaySeverity::Medium => medium.push(signal),
@@ -521,8 +559,14 @@ mod tests {
             limits: vec![],
             next: vec![],
             truncated: false,
-            trust: None,
+            trust_briefing: None,
         }
+    }
+
+    /// Wrap a presentation `Signal` as a minimal leaf envelope (sqlite-sourced, Fresh) for render tests.
+    /// The renderer only reads `.value`, so the sibling metadata is incidental here.
+    fn leaf(sig: Signal) -> CoherenceEnvelope<Signal> {
+        CoherenceEnvelope::sqlite_leaf(sig, false)
     }
 
     #[test]
@@ -614,30 +658,30 @@ mod tests {
     fn render_shows_signals_grouped_by_severity() {
         let mut r = minimal_response();
         r.signals = vec![
-            Signal {
+            leaf(Signal {
                 code: "GATE_FAIL".to_string(),
                 severity: "high".to_string(),
                 category: "gate".to_string(),
                 summary: "Gate fails: 2 of 5 obligations failing.".to_string(),
                 scope: None,
                 evidence: None,
-            },
-            Signal {
+            }),
+            leaf(Signal {
                 code: "IMPORT_CYCLES".to_string(),
                 severity: "medium".to_string(),
                 category: "structure".to_string(),
                 summary: "3 import cycles detected.".to_string(),
                 scope: None,
                 evidence: None,
-            },
-            Signal {
+            }),
+            leaf(Signal {
                 code: "MODULE_SUMMARY".to_string(),
                 severity: "low".to_string(),
                 category: "informational".to_string(),
                 summary: "150 files, 1200 symbols indexed.".to_string(),
                 scope: None,
                 evidence: None,
-            },
+            }),
         ];
         let out = r.render_human();
         assert!(out.contains("Signals"));
@@ -653,7 +697,7 @@ mod tests {
     fn render_shows_degradation_from_trust_legacy() {
         // Test legacy TrustOverlay structure (backward compatibility)
         let mut r = minimal_response();
-        r.trust = Some(TrustOverlay {
+        r.trust_briefing = Some(TrustOverlay {
             reliability: None,
             call_graph_reliability: Some("medium".to_string()),
             call_resolution_rate: Some(0.78),
@@ -670,7 +714,7 @@ mod tests {
     fn render_shows_degradation_from_trust_new_structure() {
         // Test new TrustOverlay structure with reliability section
         let mut r = minimal_response();
-        r.trust = Some(TrustOverlay {
+        r.trust_briefing = Some(TrustOverlay {
             reliability: Some(ReliabilitySection {
                 call_graph: Some(ReliabilityAxis {
                     level: "LOW".to_string(),
@@ -703,7 +747,7 @@ mod tests {
     #[test]
     fn render_hides_degradation_when_trust_is_high() {
         let mut r = minimal_response();
-        r.trust = Some(TrustOverlay {
+        r.trust_briefing = Some(TrustOverlay {
             reliability: Some(ReliabilitySection {
                 call_graph: Some(ReliabilityAxis {
                     level: "HIGH".to_string(),
@@ -737,14 +781,14 @@ mod tests {
                 "modules": ["Auth", "User", "Session", "Config"]
             }]
         });
-        r.signals = vec![Signal {
+        r.signals = vec![leaf(Signal {
             code: "IMPORT_CYCLES".to_string(),
             severity: "medium".to_string(),
             category: "structure".to_string(),
             summary: "1 import cycle detected.".to_string(),
             scope: None,
             evidence: Some(evidence),
-        }];
+        })];
         let out = r.render_human();
         assert!(out.contains("Medium"));
         // Should show cycle anchor with modules (full chain for <= 4)
@@ -763,14 +807,14 @@ mod tests {
                 "modules": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
             }]
         });
-        r.signals = vec![Signal {
+        r.signals = vec![leaf(Signal {
             code: "IMPORT_CYCLES".to_string(),
             severity: "medium".to_string(),
             category: "structure".to_string(),
             summary: "1 import cycle detected.".to_string(),
             scope: None,
             evidence: Some(evidence),
-        }];
+        })];
         let out = r.render_human();
         // Should truncate: first 3 -> ... -> last -> first
         assert!(out.contains("A -> B -> C -> ..."));
@@ -843,5 +887,91 @@ mod tests {
         assert_eq!(r.repo, "my-app");
         assert_eq!(r.confidence, "high");
         assert!(r.focus.resolved);
+    }
+
+    // ── ORIENT-LIVEGRAPH-IMPL: the CoherenceEnvelope wrapper wire shape (W1/W4). ──
+
+    #[test]
+    fn wrapper_degraded_renders_body_certainty_and_degradation() {
+        // The full daemon wire shape: CoherenceEnvelope<CoherentOrientResult>. A LiveGraph-served cycles
+        // leaf, a root degraded MEET, and a `value.trust_briefing` (degraded-only).
+        let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1",
+                "command": "orient",
+                "repo": "my-app",
+                "snapshot": "snap-abc",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "medium",
+                "signals": [
+                    {
+                        "value": {
+                            "code": "IMPORT_CYCLES",
+                            "severity": "medium",
+                            "category": "structure",
+                            "summary": "1 import cycle detected."
+                        },
+                        "provenance": { "source": ["livegraph"] },
+                        "trust": { "class": "Exact", "completeness": "Complete" },
+                        "freshness": "Fresh"
+                    }
+                ],
+                "limits": [],
+                "next": [],
+                "truncated": false,
+                "trust_briefing": {
+                    "call_graph_reliability": "medium",
+                    "call_resolution_rate": 0.78,
+                    "caveats": ["Enrichment phase did not run."]
+                }
+            },
+            "provenance": { "source": ["livegraph", "sqlite"] },
+            "trust": { "class": "Partial", "completeness": "Degraded" },
+            "freshness": "PrecisionPending"
+        }"#;
+        let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+        let out = render_orient_envelope(&env);
+        // Body (unchanged shape).
+        assert!(out.contains("Repo: my-app"));
+        assert!(out.contains("1 import cycle"));
+        // Degradation renders from value.trust_briefing (W4).
+        assert!(out.contains("Degradation"));
+        assert!(out.contains("Call resolution rate: 78%"));
+        // Certainty footer renders from the ROOT axes (W4).
+        assert!(out.contains("Certainty"));
+        assert!(out.contains("class Partial"));
+        assert!(out.contains("freshness PrecisionPending"));
+        assert!(out.contains("sources: livegraph, sqlite"));
+    }
+
+    #[test]
+    fn wrapper_non_degraded_has_no_degradation_but_has_certainty() {
+        // Not degraded: no `trust_briefing`. The Degradation section is absent; the Certainty footer is
+        // still present (W2/W4).
+        let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1",
+                "command": "orient",
+                "repo": "clean-app",
+                "snapshot": "snap-1",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "high",
+                "signals": [],
+                "limits": [],
+                "next": [],
+                "truncated": false
+            },
+            "provenance": { "source": ["sqlite"] },
+            "trust": { "class": "Exact", "completeness": "Complete" },
+            "freshness": "Fresh"
+        }"#;
+        let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+        assert!(env.value.trust_briefing.is_none());
+        let out = render_orient_envelope(&env);
+        assert!(out.contains("Repo: clean-app"));
+        assert!(!out.contains("Degradation"));
+        assert!(out.contains("Certainty"));
+        assert!(out.contains("class Exact"));
+        assert!(out.contains("sources: sqlite"));
     }
 }

@@ -161,6 +161,17 @@ pub enum FallbackReason {
     /// SQLite `compute_module_stats` answer (never a silent wrong stat). EXPECTED where the SQLite MODULE-node
     /// identities do not correspond to the dirname aggregation (RISK-1) + non-TS repos.
     LiveGraphStatsDivergence,
+    /// ORIENT-LIVEGRAPH-IMPL: the repo COMPLEXITY no-loss cert is NOT GREEN -- the field-exact compare found
+    /// the LiveGraph repo-wide `high_complexity` set diverges from the SQLite `measurements` high-complexity
+    /// set (a missing/extra symbol or a value mismatch) -> orient's HIGH_COMPLEXITY leaf serves the SQLite
+    /// signal, labelled. EXPECTED where the LiveGraph value_facts do not mirror the durable measurements
+    /// (different index epoch / a partition never preloaded) + non-TS repos.
+    LiveGraphComplexityDivergence,
+    /// ORIENT-LIVEGRAPH-IMPL: a symbol-focus CALLERS/CALLEES per-symbol no-loss key compare found the
+    /// LiveGraph callgraph key set diverges from SQLite `find_symbol_callers`/`find_symbol_callees` -> orient's
+    /// summary leaf serves the SQLite value, labelled. The value-equivalence proof that gates the `livegraph`
+    /// label (never a bare relabel of a SQLite-built summary).
+    LiveGraphCallgraphDivergence,
 }
 
 impl FallbackReason {
@@ -180,6 +191,8 @@ impl FallbackReason {
             FallbackReason::LiveGraphImportUnknown => "LiveGraphImportUnknown",
             FallbackReason::LiveGraphCycleDivergence => "LiveGraphCycleDivergence",
             FallbackReason::LiveGraphStatsDivergence => "LiveGraphStatsDivergence",
+            FallbackReason::LiveGraphComplexityDivergence => "LiveGraphComplexityDivergence",
+            FallbackReason::LiveGraphCallgraphDivergence => "LiveGraphCallgraphDivergence",
         }
     }
 }
@@ -193,7 +206,7 @@ struct LgAuto {
     keys: Vec<String>,
 }
 
-fn ts_only(langs: &std::collections::BTreeSet<LanguageSupport>) -> bool {
+pub(crate) fn ts_only(langs: &std::collections::BTreeSet<LanguageSupport>) -> bool {
     !langs.is_empty()
         && langs
             .iter()
@@ -1596,7 +1609,7 @@ enum ImportCertState {
 /// resident partition snapshot (epoch / fresh / ts / source_inputs_hash / producer_fingerprint), the
 /// `snapshot_uid` (the repo index epoch -> SQLite-side changes), and the import-completeness policy version. Any
 /// import-relevant change (a refresh / swap / re-index / policy bump) yields a different fingerprint.
-fn import_cert_fingerprint(
+pub(crate) fn import_cert_fingerprint(
     partitions: &[repo_graph_livegraph::module_cycle_cert::LivePartition],
     snapshot_uid: &str,
 ) -> String {
@@ -2206,7 +2219,7 @@ fn serve_cycles_sqlite(
 /// keyed by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint / a storage error -> the caller
 /// falls back to SQLite). Reads SQLite ONCE per fingerprint via the SAME `module_cycle_compare_data` the
 /// `--engine compare` uses, so the GREEN verdict PROVABLY matches the compare (no drift -> no false GREEN).
-fn build_and_store_cycles_cert(
+pub(crate) fn build_and_store_cycles_cert(
     repo_state: &RepoState,
     snapshot_uid: &str,
     fingerprint: Option<String>,

@@ -2614,8 +2614,22 @@ impl ServiceDispatcher {
         // CLI-OUT-2B: Inject display_name for human renderers
         result.display_name = Some(display_name);
 
-        // Apply trust overlay (matches CLI contract)
-        let mut output = match serde_json::to_value(&result) {
+        // ORIENT-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response. This
+        // REPLACES the prior post-serialize top-level `trust` overlay injection: the degraded-state
+        // briefing now rides on `value.trust_briefing` (D-ORIENT-6 = O2), and the wrapper adds per-signal
+        // provenance/trust/freshness + the root MEET. The FOUR LG-first leaves (IMPORT_CYCLES /
+        // HIGH_COMPLEXITY / CALLERS_SUMMARY / CALLEES_SUMMARY) are each labelled by a daemon-side NO-LOSS
+        // proof (the cycles / complexity no-loss certs + the callers/callees `Auto` ladder with a per-symbol
+        // no-loss key compare); everything else is SQLite/Authority/FS.
+        let _ = emitter.emit(ProgressDetail {
+            phase: "assembling_coherence_envelope".to_string(),
+            current: 0,
+            total: 1,
+        });
+        let envelope_start = Instant::now();
+        let envelope =
+            crate::orient_coherence::build_orient_envelope(&repo_state, &repo_uid, result);
+        let output = match serde_json::to_value(&envelope) {
             Ok(v) => v,
             Err(e) => {
                 return DispatchResult::error(
@@ -2624,44 +2638,18 @@ impl ServiceDispatcher {
                 );
             }
         };
-
-        // RMAPD-PERF-1: Emit heartbeat before trust overlay computation
-        let _ = emitter.emit(ProgressDetail {
-            phase: "computing_trust_overlay".to_string(),
-            current: 0,
-            total: 1,
-        });
-
-        // Add trust section if degraded (briefing surface pattern)
-        let overlay_start = Instant::now();
-        if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
-            if let Some(trust) = compute_trust_overlay_for_snapshot(
-                &repo_state.storage,
-                &repo_uid,
-                &snapshot,
-                "CALLS+IMPORTS",
-            ) {
-                if trust.has_degradation() || !trust.caveats.is_empty() {
-                    if let serde_json::Value::Object(ref mut map) = output {
-                        if let Ok(trust_value) = serde_json::to_value(&trust) {
-                            map.insert("trust".to_string(), trust_value);
-                        }
-                    }
-                }
-            }
-        }
-        let overlay_ms = overlay_start.elapsed().as_millis();
+        let envelope_ms = envelope_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
 
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
-            "[PERF] orient: total={}ms resolve={}ms lock={}ms orient={}ms overlay={}ms",
+            "[PERF] orient: total={}ms resolve={}ms lock={}ms orient={}ms envelope={}ms",
             total_ms,
             resolve_ms,
             lock_ms,
             orient_ms,
-            overlay_ms
+            envelope_ms
         );
 
         DispatchResult::success(&request.id, output)

@@ -5,6 +5,7 @@
 //! indexer, or any adapter crate. These types are pure data.
 
 pub mod budget;
+pub mod coherent;
 pub mod envelope;
 pub mod limit;
 pub mod signal;

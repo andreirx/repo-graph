@@ -216,6 +216,15 @@ pub struct RepoState {
     /// `import_cert`/`cycles_cert`; a fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on
     /// restart). Interior mutability: the fastpath read-locks; the lazy build write-locks.
     pub stats_cert: parking_lot::RwLock<Option<crate::livegraph_feed::StatsNoLossCert>>,
+
+    /// ORIENT-LIVEGRAPH-IMPL: the in-memory repo-level COMPLEXITY NO-LOSS certificate (`None` until lazily
+    /// built on the first eligible `orient` repo-focus query that emits HIGH_COMPLEXITY). `verdict == GREEN`
+    /// iff the LiveGraph repo-wide `high_complexity` set is field-exact equal to the SQLite `measurements`
+    /// high-complexity set. Keyed by the SAME SQLite-free fingerprint as `import_cert`/`cycles_cert`/
+    /// `stats_cert`; a fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on restart).
+    /// Interior mutability: the orient decision read-locks; the lazy build write-locks.
+    pub complexity_cert:
+        parking_lot::RwLock<Option<crate::orient_lg_decisions::ComplexityNoLossCert>>,
 }
 
 impl RepoState {
@@ -256,6 +265,7 @@ impl RepoState {
             import_cert: parking_lot::RwLock::new(None),
             cycles_cert: parking_lot::RwLock::new(None),
             stats_cert: parking_lot::RwLock::new(None),
+            complexity_cert: parking_lot::RwLock::new(None),
         })
     }
 

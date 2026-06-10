@@ -401,6 +401,152 @@ fn index_then_query_end_to_end() {
 }
 
 #[test]
+fn orient_returns_coherence_envelope_shape() {
+    // ORIENT-LIVEGRAPH-IMPL: rmapd-level proof (real dispatch + serialization, in-process transport, no
+    // socket) that orient now serves a `CoherenceEnvelope<CoherentOrientResult>` — the wrapper top level,
+    // the per-signal leaf envelopes, the root axes, and the source map. No LiveGraph is preloaded in this
+    // harness, so the LG-first leaves take the honest SQLite path (source = {sqlite}); this exercises the
+    // degradation/fallback labelling end-to-end (the LG-served path is unit-tested in livegraph_feed).
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-orient-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"coh-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let orient_request = format!(
+        r#"{{"id":"coh-2","method":"orient","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level (RISK-O-F): value + provenance + trust + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env.get("trust").is_some(),
+        "wrapper has root trust (TrustPosture): {}",
+        results[0]
+    );
+    assert!(
+        env.get("freshness").is_some(),
+        "wrapper has root freshness: {}",
+        results[0]
+    );
+    // Root trust is the AXIS-typed posture, not the legacy briefing prose.
+    assert!(env["trust"].get("class").is_some(), "root trust has class");
+    assert!(
+        env["trust"].get("completeness").is_some(),
+        "root trust has completeness"
+    );
+    // Root provenance.source is the source SET (the source-map union).
+    assert!(
+        env["provenance"]["source"].is_array(),
+        "root provenance.source is a set"
+    );
+
+    // ── The inner value = CoherentOrientResult (signals re-typed to leaf envelopes, D7). ──
+    let value = &env["value"];
+    assert_eq!(value["schema"], "rgr.agent.v1");
+    assert_eq!(value["command"], "orient");
+    let signals = value["signals"]
+        .as_array()
+        .expect("value.signals is an array of leaf envelopes");
+    assert!(
+        !signals.is_empty(),
+        "repo focus emits SNAPSHOT_INFO + MODULE_SUMMARY at minimum: {}",
+        results[0]
+    );
+
+    // ── Each signal is a CoherenceEnvelope leaf: pristine inner Signal + provenance/trust/freshness. ──
+    for leaf in signals {
+        assert!(
+            leaf["value"].get("code").is_some(),
+            "leaf.value is the pristine Signal: {}",
+            leaf
+        );
+        assert!(
+            leaf.get("trust").is_some(),
+            "leaf carries a trust posture: {}",
+            leaf
+        );
+        let src = leaf["provenance"]["source"]
+            .as_array()
+            .expect("leaf provenance.source is a set");
+        assert!(
+            !src.is_empty(),
+            "leaf source set is non-empty (honest provenance, never silent): {}",
+            leaf
+        );
+    }
+
+    // Source map / honest fallback: with NO preloaded LiveGraph, NONE of the FOUR LG-first leaves
+    // (IMPORT_CYCLES / HIGH_COMPLEXITY / CALLERS_SUMMARY / CALLEES_SUMMARY) may claim `livegraph` — each is
+    // the proven SQLite primary or a labelled SQLite fallback. This proves the degradation labelling is
+    // honest uniformly across the source map (no leaf silently over-claims a current-state source).
+    let lg_first = [
+        "IMPORT_CYCLES",
+        "HIGH_COMPLEXITY",
+        "CALLERS_SUMMARY",
+        "CALLEES_SUMMARY",
+    ];
+    for leaf in signals {
+        let code = leaf["value"]["code"].as_str().unwrap_or("");
+        let src = leaf["provenance"]["source"].as_array().unwrap();
+        assert!(
+            !src.iter().any(|s| s == "livegraph"),
+            "no preloaded LiveGraph -> {} leaf must not be livegraph-sourced: {}",
+            code,
+            leaf
+        );
+        // An LG-first leaf, when emitted without a LiveGraph, is SQLite-sourced: either the proven SQLite
+        // primary or a labelled `LiveGraphUnavailable` fallback — never a `livegraph` claim.
+        if lg_first.contains(&code) {
+            assert!(
+                src.iter().any(|s| s == "sqlite"),
+                "LG-first {} leaf must be SQLite-sourced when no LiveGraph is preloaded: {}",
+                code,
+                leaf
+            );
+        }
+    }
+
+    // Root provenance.source is the UNION of the leaf sources; with SQLite/Authority/FS leaves present it
+    // must include `sqlite` (the source-map union, contract D8).
+    let root_src = env["provenance"]["source"].as_array().unwrap();
+    assert!(
+        root_src.iter().any(|s| s == "sqlite"),
+        "root provenance.source union includes sqlite: {}",
+        results[0]
+    );
+    assert!(
+        !root_src.iter().any(|s| s == "livegraph"),
+        "no preloaded LiveGraph -> root source union must not include livegraph: {}",
+        results[0]
+    );
+}
+
+#[test]
 fn stats_success_returns_module_metrics() {
     // Create isolated state root
     let state_temp = tempdir().unwrap();

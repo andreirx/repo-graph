@@ -1,0 +1,56 @@
+# ── repo-graph-coherence ─────────────────────────────────────────
+#
+# Support crate for the COHERENCE-LAYER. Realizes the shared
+# `CoherenceEnvelope<T>` answer-wrapper ratified by COHERENCE-LAYER-1
+# (contract docs/slices/coherence-layer-1.md) and first consumed by
+# `orient` (ORIENT-LIVEGRAPH-1); later by check / explain / trust.
+#
+# ── Architecture (Clean Architecture dependency rule) ──────────────
+#
+# This crate is a PURE DOMAIN / DTO layer. It is the home for the
+# generic, reusable coherence types and the two folds the contract
+# specifies:
+#   - the MEET fold (greatest-lower-bound over leaf trust + freshness;
+#     monotone — can only LOWER, never raise; the anti-false-
+#     completeness guarantee, contract §invariant-preservation), and
+#   - the set-UNION provenance fold (root source set ⊇ every leaf set).
+#
+# Dependency edges (decided + recorded for ORIENT-LIVEGRAPH-IMPL —
+# realizes COH-HOME = option A2):
+#   - repo-graph-coherence -> repo-graph-trust-model ONLY.
+#     trust-model is the most stable / abstract inner vocabulary crate
+#     (AnswerClass / FreshnessState / QueryCompleteness /
+#     DegradationReason / LanguageSupport / ProvenanceBasis). Coherence
+#     PROJECTS those axes into `TrustPosture` and reuses `FreshnessState`
+#     verbatim. This keeps trust-model minimal (it gains NO dependency
+#     on coherence — no reverse edge) and respects the Stable
+#     Dependencies / Stable Abstractions principles.
+#   - repo-graph-coherence has NO dependency on daemon-runtime,
+#     livegraph, storage, scip, or the agent crate. The daemon's
+#     LiveGraph `FallbackReason` is MIRRORED here as
+#     `CoherenceFallbackReason` and mapped at the daemon boundary
+#     (the daemon depends inward on coherence, never the reverse) —
+#     so no dependency-rule inversion is created.
+#
+# serde is REQUIRED here (this crate's types are the JSON wire shape
+# for orient/check/explain). It turns ON repo-graph-trust-model's
+# optional `serde` feature so the projected axis enums serialize.
+
+[package]
+name         = "repo-graph-coherence"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Shared CoherenceEnvelope answer-wrapper for the repo-graph coherence layer (orient/check/explain/trust)"
+publish      = false
+
+[dependencies]
+# The inner trust/freshness/identity vocabulary. serde feature ON:
+# coherence serializes the projected axis enums on the wire.
+repo-graph-trust-model = { path = "../repo-graph-trust-model", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Off-target serialization round-trip tests assert the JSON wire shape.
+serde_json = "1"
