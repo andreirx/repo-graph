@@ -9,10 +9,12 @@
 //! `AgentStorageRead` (agent port) and `GateStorageRead` (gate
 //! policy port), matching the orient pattern.
 
+pub mod coherent;
 pub mod evaluate;
 pub mod reduce;
 pub mod types;
 
+pub use coherent::check_to_coherent;
 pub use evaluate::evaluate_conditions;
 pub use reduce::{check, reduce_verdict};
 pub use types::*;

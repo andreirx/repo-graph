@@ -547,6 +547,180 @@ fn orient_returns_coherence_envelope_shape() {
 }
 
 #[test]
+fn check_returns_coherence_envelope_shape() {
+    // CHECK-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_check` dispatch + real serialization, in-process
+    // transport, no socket — the same path `rmapd` runs minus the accept loop) that `check` now serves a
+    // `CoherenceEnvelope<CoherentOrientResult>`. It pins, end-to-end through the daemon, the contract the
+    // review-0 dispatch tests lacked: the wrapper top level, the per-signal leaf envelopes
+    // (`value.signals[*].value`), the MULTI-SOURCE verdict provenance {sqlite, declaration}, honest root
+    // freshness/trust, the ABSENT `trust_briefing`, and the never-LiveGraph invariant (D-CHECK-2/4).
+    //
+    // Coverage map for the degradation trio: this is the snapshot-present FRESH case (an indexed repo has no
+    // stale files). The STALE case (authoritative `get_stale_files` read) and the no-snapshot UNAVAILABLE /
+    // single-source {sqlite} case are pinned with a real `RepoState` + real SQLite in
+    // daemon-runtime `check_coherence` tests, and the pure folds in agent `check::coherent` tests. The CLI
+    // exit-code parity (PASS=0/FAIL=1/INCOMPLETE=2/not-found=2) is pinned in rgr `presentation::check`.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-check-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"chk-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let check_request = format!(
+        r#"{{"id":"chk-2","method":"check","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&check_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level: value + provenance + trust + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env["trust"].get("class").is_some() && env["trust"].get("completeness").is_some(),
+        "root trust is the AXIS-typed posture (class + completeness): {}",
+        results[0]
+    );
+    // Root freshness is present and AUTHORITATIVE. A freshly-indexed repo has no stale files → Fresh; the
+    // snapshot exists so it is never Unavailable here (that is the no-snapshot case, covered elsewhere).
+    let root_freshness = env["freshness"]
+        .as_str()
+        .expect("root freshness is a state string");
+    assert_eq!(
+        root_freshness, "Fresh",
+        "freshly-indexed snapshot has no stale files → Fresh (honest, not minted): {}",
+        results[0]
+    );
+
+    // ── The inner value = CoherentOrientResult (signals re-typed to leaf envelopes, D7). ──
+    let value = &env["value"];
+    assert_eq!(value["schema"], "rgr.agent.v1");
+    assert_eq!(value["command"], "check");
+    // E5 / D-CHECK-2: check NEVER carries a trust briefing (orient's field stays absent on check's wire).
+    assert!(
+        value.get("trust_briefing").is_none(),
+        "check serializes NO trust_briefing key: {}",
+        results[0]
+    );
+    let signals = value["signals"]
+        .as_array()
+        .expect("value.signals is an array of leaf envelopes");
+    assert!(
+        !signals.is_empty(),
+        "check ALWAYS emits at least the verdict signal: {}",
+        results[0]
+    );
+
+    // ── Each signal is a CoherenceEnvelope leaf: pristine inner Signal + provenance/trust/freshness, and
+    //    NEVER a LiveGraph claim (check reads zero LiveGraph — D-CHECK-4). ──
+    for leaf in signals {
+        assert!(
+            leaf["value"].get("code").is_some(),
+            "leaf.value is the pristine Signal (value.signals[*].value nesting): {}",
+            leaf
+        );
+        assert!(
+            leaf.get("trust").is_some(),
+            "leaf carries a trust posture: {}",
+            leaf
+        );
+        let src = leaf["provenance"]["source"]
+            .as_array()
+            .expect("leaf provenance.source is a set");
+        assert!(
+            !src.is_empty(),
+            "leaf source set is non-empty (honest provenance): {}",
+            leaf
+        );
+        assert!(
+            !src.iter().any(|s| s == "livegraph"),
+            "check leaf must NEVER claim a livegraph source: {}",
+            leaf
+        );
+        assert!(
+            leaf["provenance"]
+                .get("fallback_reason")
+                .and_then(|v| v.as_str())
+                .is_none(),
+            "check makes no LiveGraph read → no leaf fallback_reason: {}",
+            leaf
+        );
+    }
+
+    // ── The VERDICT leaf is the MULTI-SOURCE composite (D-CHECK-1/5): snapshot-present → the gate ALWAYS
+    //    reads the `declarations` Authority table, so the honest source set is {sqlite, declaration}. ──
+    let verdict = signals
+        .iter()
+        .find(|leaf| {
+            matches!(
+                leaf["value"]["code"].as_str(),
+                Some("CHECK_PASS") | Some("CHECK_FAIL") | Some("CHECK_INCOMPLETE")
+            )
+        })
+        .unwrap_or_else(|| panic!("check ALWAYS emits a verdict signal: {}", results[0]));
+    let verdict_src: Vec<&str> = verdict["provenance"]["source"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        verdict_src.contains(&"sqlite") && verdict_src.contains(&"declaration"),
+        "snapshot-present verdict folds sqlite-operational + sqlite-trust-core + declaration-authority \
+         → multi-source {{sqlite, declaration}}, got {:?}: {}",
+        verdict_src,
+        results[0]
+    );
+
+    // ── Root provenance.source = the SET UNION of the leaf sources: includes sqlite + declaration, never
+    //    livegraph; no LiveGraph read can produce a fallback (E3). ──
+    let root_src: Vec<&str> = env["provenance"]["source"]
+        .as_array()
+        .expect("root provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        root_src.contains(&"sqlite") && root_src.contains(&"declaration"),
+        "root source union includes sqlite + declaration: {:?}",
+        root_src
+    );
+    assert!(
+        !root_src.contains(&"livegraph"),
+        "check reads zero LiveGraph → root source union excludes livegraph: {:?}",
+        root_src
+    );
+    assert!(
+        env["provenance"]
+            .get("fallback_reason")
+            .and_then(|v| v.as_str())
+            .is_none(),
+        "check makes no LiveGraph read → root fallback_reason is null: {}",
+        results[0]
+    );
+}
+
+#[test]
 fn stats_success_returns_module_metrics() {
     // Create isolated state root
     let state_temp = tempdir().unwrap();

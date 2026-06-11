@@ -69,8 +69,8 @@ pub mod storage_port;
 // ── Public surface (locked at Rust-42) ────────────────────────
 
 pub use check::{
-    run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode, ConditionResult,
-    ConditionStatus, GateOutcomeForCheck,
+    check_to_coherent, run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode,
+    ConditionResult, ConditionStatus, GateOutcomeForCheck,
 };
 pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
 pub use dto::coherent::{

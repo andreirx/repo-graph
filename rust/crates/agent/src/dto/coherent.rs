@@ -420,7 +420,11 @@ fn push_unique_limit(limits: &mut Vec<Limit>, code: LimitCode) {
 
 /// Map a root trust posture to a `Confidence` band: `Exact`+`Complete` → High; `Stale`/`Unavailable` or
 /// `Unknown` completeness → Low; otherwise (Partial / Degraded) → Medium. Monotone with the lattice.
-fn confidence_from_posture(trust: &TrustPosture) -> Confidence {
+///
+/// `pub(crate)` so the SHARED D3 confidence-from-MEET mapping is reused by `check`'s coherence assembly
+/// (`crate::check::coherent`, D-CHECK-3) — a single source of truth, not a duplicated mapping. Behavior
+/// is unchanged; only the visibility widened (orient's `to_coherent` still calls it identically).
+pub(crate) fn confidence_from_posture(trust: &TrustPosture) -> Confidence {
     match (trust.class, trust.completeness) {
         (AnswerClass::Exact, QueryCompleteness::Complete) => Confidence::High,
         (AnswerClass::Unavailable, _) | (_, QueryCompleteness::Unknown) => Confidence::Low,
@@ -439,7 +443,10 @@ fn confidence_rank(c: Confidence) -> u8 {
 
 /// The MEET of two confidence bands (the weaker wins) — used to cap the coherent confidence at the legacy
 /// value (D-ORIENT-4 / validation E1: coherent confidence ≤ legacy `derive_repo_confidence`).
-fn min_confidence(a: Confidence, b: Confidence) -> Confidence {
+///
+/// `pub(crate)` so `check`'s coherence assembly reuses the SAME legacy-cap rule (D-CHECK-3). Visibility
+/// widened only; orient's behavior is unchanged.
+pub(crate) fn min_confidence(a: Confidence, b: Confidence) -> Confidence {
     if confidence_rank(a) <= confidence_rank(b) {
         a
     } else {

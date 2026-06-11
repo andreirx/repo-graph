@@ -46,6 +46,7 @@
 //! }
 //! ```
 
+pub mod check_coherence;
 pub mod cycle_completeness_audit;
 pub mod cycle_output;
 pub mod dispatch;

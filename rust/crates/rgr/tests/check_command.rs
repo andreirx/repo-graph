@@ -106,3 +106,24 @@ fn check_unknown_flag_usage_error() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CHECK-LIVEGRAPH-IMPL — SUCCESS-PATH / COHERENCE-ENVELOPE COVERAGE MAP
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// The tests above drive the real `rmap` binary for the NO-DAEMON surfaces (usage errors → exit 1;
+// daemon-unavailable → exit 2). The success-path coherence contract requires a daemon, so — following the
+// established orient precedent (see orient_command.rs's trailer and `orient_returns_coherence_envelope_shape`)
+// and the slice's §5 guidance (off-target fixtures for the CLI-wrapper cases) — it is pinned where the daemon
+// and the wire shape are available, NOT via a flaky cross-process socket harness:
+//
+//   - rmapd-level envelope shape (top-level `CoherenceEnvelope`, `value.signals[*].value` nesting, the
+//     MULTI-SOURCE verdict provenance {sqlite, declaration}, root Fresh freshness/trust, ABSENT
+//     `trust_briefing`, never-LiveGraph): tests/daemon_dispatch.rs → `check_returns_coherence_envelope_shape`
+//     (real `handle_check` dispatch + real serialization through the in-process transport).
+//   - Stale / no-snapshot (Unavailable, single-source {sqlite}) degradation: daemon-runtime
+//     `check_coherence` tests (real `RepoState` + SQLite) and agent `check::coherent` tests (pure folds).
+//   - CLI exit-code parity (CHECK_PASS=0 / CHECK_FAIL=1 / CHECK_INCOMPLETE=2 / not-found=2) over the EXACT
+//     wrapped `value.signals[*].value.code` path + the anti-silent-break regression guard (§3e CRITICAL /
+//     §5 CW5): rgr `presentation::check` → `check_exit_code` tests. The human/`--json` render projection of
+//     the wrapped `value` (incl. the `Verdict: PASS@Fresh` freshness suffix) is pinned in the same module.

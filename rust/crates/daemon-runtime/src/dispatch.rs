@@ -2704,7 +2704,15 @@ impl ServiceDispatcher {
             Ok(mut result) => {
                 // CLI-OUT-2B: Inject display_name for human renderers
                 result.display_name = Some(display_name);
-                match serde_json::to_value(&result) {
+
+                // CHECK-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response,
+                // mirroring `handle_orient`. check has NO LiveGraph leaf, NO cert, and NO trust overlay
+                // (D-CHECK-2/4), so this is a THIN stale-read + delegate: the adapter reads the
+                // AUTHORITATIVE stale-index flag (`get_stale_files`) and labels the verdict with honest
+                // MEET freshness + the multi-source verdict provenance. The verdict VALUE is byte-identical
+                // to before; only the wrapper adds labels.
+                let envelope = crate::check_coherence::build_check_envelope(&repo_state, result);
+                match serde_json::to_value(&envelope) {
                     Ok(v) => DispatchResult::success(&request.id, v),
                     Err(e) => DispatchResult::error(
                         &request.id,

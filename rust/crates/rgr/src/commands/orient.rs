@@ -26,7 +26,7 @@ use std::process::ExitCode;
 use crate::daemon_client::{DaemonClient, DaemonClientError};
 use repo_graph_coherence::CoherenceEnvelope;
 
-use crate::presentation::check::CheckResponse;
+use crate::presentation::check::{check_exit_code, render_check_envelope, CheckResponse};
 use crate::presentation::explain::ExplainResponse;
 use crate::presentation::orient::{render_orient_envelope, OrientResponse};
 
@@ -278,23 +278,17 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
 
     match client.request("check", Some(params)) {
         Ok(result) => {
-            // Map verdict to exit code from the result signals
-            let exit_code = result["signals"]
-                .as_array()
-                .and_then(|signals| {
-                    signals.iter().find_map(|s| {
-                        s["code"].as_str().and_then(|code| match code {
-                            "CHECK_PASS" => Some(0),
-                            "CHECK_FAIL" => Some(1),
-                            "CHECK_INCOMPLETE" => Some(2),
-                            _ => None,
-                        })
-                    })
-                })
-                .unwrap_or(2);
+            // CHECK-LIVEGRAPH-IMPL §3e: the daemon now returns `CoherenceEnvelope<CoherentOrientResult>`,
+            // so `signals` moved UNDER `value` and each signal leaf carries its own `.value`. The exit code
+            // is read from `result["value"]["signals"][*]["value"]["code"]` — see `check_exit_code` for the
+            // anti-silent-break rationale (reading the now-dead top-level `result["signals"]` path would
+            // return exit 2 for EVERY check, INCLUDING a PASS). Computed ONCE here, before the mode branch,
+            // so the human and `--json` paths share the identical exit code; the value mapping is preserved
+            // verbatim: CHECK_PASS=0 / CHECK_FAIL=1 / CHECK_INCOMPLETE=2 / not-found=2.
+            let exit_code = check_exit_code(&result);
 
             if json_mode {
-                // Machine mode: print full envelope
+                // Machine mode: print full wrapped envelope verbatim
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
@@ -306,10 +300,12 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render
-                match serde_json::from_value::<CheckResponse>(result) {
-                    Ok(response) => {
-                        println!("{}", response.render_human());
+                // Human mode: parse the CoherenceEnvelope<CoherentOrientResult> wrapper and render the
+                // inner value + the verdict-line freshness suffix (§3e / §5 W2). The exit code is computed
+                // ABOVE, independent of mode, so it cannot drift from the rendered verdict.
+                match serde_json::from_value::<CoherenceEnvelope<CheckResponse>>(result) {
+                    Ok(envelope) => {
+                        println!("{}", render_check_envelope(&envelope));
                         ExitCode::from(exit_code)
                     }
                     Err(e) => {
