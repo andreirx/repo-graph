@@ -1688,7 +1688,11 @@ fn imports_fastpath_or_compare(
 /// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D2 build): run the repo-wide compare -> verdict, STORE the cert keyed
 /// by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint -> the caller compare-on-calls). Reads
 /// SQLite ONCE (the bulk all_imports) per fingerprint; subsequent GREEN calls fastpath without SQLite.
-fn build_and_store_import_cert(
+///
+/// `pub(crate)` so EXPLAIN-LIVEGRAPH-IMPL's `explain_imports_outcome` (`explain_coherence.rs`) reuses the
+/// SAME repo-wide import cert as the imports fastpath — mirroring how `orient_lg_decisions.rs` reuses
+/// `build_and_store_cycles_cert`. No new producer; the cert build is shared, not duplicated.
+pub(crate) fn build_and_store_import_cert(
     repo_state: &RepoState,
     repo_uid: &str,
     snapshot_uid: &str,

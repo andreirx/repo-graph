@@ -482,26 +482,51 @@ fn explain_json_mode_returns_valid_envelope() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("Output should be valid JSON");
 
-    // Should have envelope fields (the CLI extracts "result" from daemon response)
+    // EXPLAIN-LIVEGRAPH-IMPL: the top level is now the CoherenceEnvelope wrapper
+    // `{ value, provenance, trust, freshness }`; the explain command-container fields live under `value`
+    // (mirrors orient/check). The `--json` path prints the full wrapper verbatim.
     assert!(
-        parsed.get("command").is_some(),
-        "JSON output should have 'command' field. stdout:\n{}",
+        parsed.get("value").is_some(),
+        "JSON output should be the coherence wrapper with a 'value'. stdout:\n{}",
         stdout
     );
     assert!(
-        parsed.get("schema").is_some(),
-        "JSON output should have 'schema' field. stdout:\n{}",
-        stdout
-    );
-    // Explain-specific fields
-    assert!(
-        parsed.get("focus").is_some(),
-        "JSON output should have 'focus' field. stdout:\n{}",
+        parsed.get("provenance").is_some(),
+        "JSON output should have the root 'provenance'. stdout:\n{}",
         stdout
     );
     assert!(
-        parsed.get("signals").is_some(),
-        "JSON output should have 'signals' field. stdout:\n{}",
+        parsed.get("trust").is_some(),
+        "JSON output should have the root 'trust' (TrustPosture). stdout:\n{}",
+        stdout
+    );
+    assert!(
+        parsed.get("freshness").is_some(),
+        "JSON output should have the root 'freshness'. stdout:\n{}",
+        stdout
+    );
+
+    let value = parsed.get("value").expect("value present");
+    // The command-container fields are nested under `value`.
+    assert!(
+        value.get("command").is_some(),
+        "value should have 'command'. stdout:\n{}",
+        stdout
+    );
+    assert!(
+        value.get("schema").is_some(),
+        "value should have 'schema'. stdout:\n{}",
+        stdout
+    );
+    // Explain-specific fields.
+    assert!(
+        value.get("focus").is_some(),
+        "value should have 'focus'. stdout:\n{}",
+        stdout
+    );
+    assert!(
+        value.get("signals").is_some(),
+        "value should have 'signals' (each a leaf envelope). stdout:\n{}",
         stdout
     );
 }

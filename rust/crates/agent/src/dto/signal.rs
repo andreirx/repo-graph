@@ -1068,6 +1068,57 @@ impl Signal {
         self
     }
 
+    /// EXPLAIN-LIVEGRAPH-IMPL: adopt THIS signal's post-ranking `rank` + emission `scope` onto a
+    /// freshly-built `replacement` of the SAME code. The daemon serves an LG-first leaf's VALUE from the
+    /// LiveGraph (e.g. `EXPLAIN_IMPORTS` from `live_import_view`, `EXPLAIN_CYCLES` from
+    /// `module_import_cycles`), builds the replacement via the public constructor (which resets `rank` to 0
+    /// and `scope` to `Direct`), then calls this to restore the ranking pass's rank and the module-context
+    /// scope — so the swapped leaf is byte-identical to the original EXCEPT the served value. Panics in debug
+    /// if the codes differ (a programming error: only a same-code value-swap is valid).
+    pub fn adopt_rank_and_scope(&self, mut replacement: Signal) -> Signal {
+        debug_assert_eq!(
+            self.code, replacement.code,
+            "adopt_rank_and_scope is only valid for a same-code value swap"
+        );
+        replacement.rank = self.rank;
+        replacement.scope = self.scope;
+        replacement
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: a clone of this signal's `ExplainIdentityEvidence` iff it is an
+    /// `EXPLAIN_IDENTITY` signal (else `None`). The daemon reads the SQLite-built identity evidence, OVERRIDES
+    /// the `name`/`subtype` anchor fields with the current-state LiveGraph values (`LiveGraph::node_display`),
+    /// and rebuilds the leaf — the D8 multi-source `{livegraph, sqlite}` identity (anchor from LiveGraph,
+    /// coordinate fields from SQLite). Keeps the `SignalEvidence` matching INSIDE the agent crate.
+    pub fn explain_identity_evidence(&self) -> Option<ExplainIdentityEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainIdentity(ev) => Some(ev.clone()),
+            _ => None,
+        }
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: a clone of this signal's `ExplainCallersEvidence` iff it is an
+    /// `EXPLAIN_CALLERS` signal (else `None`). The daemon reads the SQLite-built caller evidence (its
+    /// SQL-ordered rendered item subset + `top_modules` grouping + full `count`) and rebuilds the leaf with
+    /// each item's LIVE name from current-state LiveGraph IR (`LiveGraph::node_display`), gated by the migrated
+    /// `callers` no-loss key compare — the multi-source `{livegraph, sqlite}` callgraph leaf (the caller
+    /// identity set + names from LiveGraph; the per-item module, which has no LiveGraph/IR home, from SQLite).
+    pub fn explain_callers_evidence(&self) -> Option<ExplainCallersEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainCallers(ev) => Some(ev.clone()),
+            _ => None,
+        }
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: the `EXPLAIN_CALLEES` dual of [`Signal::explain_callers_evidence`] — a clone of
+    /// this signal's `ExplainCalleesEvidence` iff it is an `EXPLAIN_CALLEES` signal (else `None`).
+    pub fn explain_callees_evidence(&self) -> Option<ExplainCalleesEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainCallees(ev) => Some(ev.clone()),
+            _ => None,
+        }
+    }
+
     // ── Named constructors (one per emitted code) ────────────
 
     pub fn check_pass(evidence: CheckPassEvidence) -> Self {

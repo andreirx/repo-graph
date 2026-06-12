@@ -37,6 +37,7 @@
 pub mod check;
 pub mod cycles;
 pub mod explain;
+pub mod explain_sections;
 pub mod graph_edges;
 pub mod imports;
 pub mod module_inventory;

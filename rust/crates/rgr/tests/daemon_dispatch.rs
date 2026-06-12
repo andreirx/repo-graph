@@ -721,6 +721,158 @@ fn check_returns_coherence_envelope_shape() {
 }
 
 #[test]
+fn explain_returns_coherence_envelope_shape() {
+    // EXPLAIN-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_explain` dispatch + real serialization,
+    // in-process transport, no socket) that explain now serves a `CoherenceEnvelope<CoherentOrientResult>`.
+    // No LiveGraph is preloaded in this harness, so the FOUR LG-first reuse leaves take the HONEST SQLite
+    // path (source = {sqlite}, never livegraph) — this exercises the labelled-fallback source map end-to-end.
+    // The LG-SERVED multi-source path is proven by `explain_coherence`'s synthetic-fixture e2e test + the
+    // agent-side `explain::coherent` unit tests.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-explain-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    // A symbol target exercises the richest explain path (a symbol focus adds EXPLAIN_CALLERS/CALLEES); the
+    // assertions below pin honest labelling for whatever leaves the resolved focus emits.
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"cohx-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let explain_request = format!(
+        r#"{{"id":"cohx-2","method":"explain","params":{{"repo":"{}","target":"hello"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level: value + provenance + trust + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env["trust"].get("class").is_some(),
+        "wrapper root trust is the axis-typed posture: {}",
+        results[0]
+    );
+    assert!(
+        env.get("freshness").is_some(),
+        "wrapper has root freshness: {}",
+        results[0]
+    );
+
+    // ── The inner value = CoherentOrientResult (command=explain; signals re-typed to leaf envelopes). ──
+    let value = &env["value"];
+    assert_eq!(value["schema"], "rgr.agent.v1");
+    assert_eq!(value["command"], "explain");
+    let signals = value["signals"]
+        .as_array()
+        .expect("value.signals is an array of leaf envelopes");
+    assert!(
+        !signals.is_empty(),
+        "a resolved symbol focus emits at least EXPLAIN_IDENTITY + EXPLAIN_TRUST: {}",
+        results[0]
+    );
+
+    // ── Each leaf is a CoherenceEnvelope: pristine inner Signal + provenance/trust/freshness. ──
+    // With NO preloaded LiveGraph, NO leaf may claim `livegraph` — the LG-first reuse leaves
+    // (EXPLAIN_CALLERS/CALLEES/IMPORTS/CYCLES) are the proven SQLite primary or a labelled SQLite fallback;
+    // EXPLAIN_IDENTITY is single-source {sqlite} (D-IMPL-1). This pins honest fallback labelling uniformly.
+    let lg_first = [
+        "EXPLAIN_CALLERS",
+        "EXPLAIN_CALLEES",
+        "EXPLAIN_IMPORTS",
+        "EXPLAIN_CYCLES",
+    ];
+    for leaf in signals {
+        let code = leaf["value"]["code"].as_str().unwrap_or("");
+        assert!(
+            !code.is_empty(),
+            "leaf.value is the pristine Signal: {}",
+            leaf
+        );
+        assert!(
+            leaf.get("trust").is_some(),
+            "leaf carries a trust posture: {}",
+            leaf
+        );
+        let src: Vec<&str> = leaf["provenance"]["source"]
+            .as_array()
+            .expect("leaf provenance.source is a set")
+            .iter()
+            .filter_map(|s| s.as_str())
+            .collect();
+        assert!(
+            !src.is_empty(),
+            "leaf source set is non-empty (honest, never silent): {}",
+            leaf
+        );
+        assert!(
+            !src.contains(&"livegraph"),
+            "no preloaded LiveGraph -> {} leaf must not be livegraph-sourced: {}",
+            code,
+            leaf
+        );
+        if lg_first.contains(&code) {
+            assert!(
+                src.contains(&"sqlite"),
+                "LG-first {} leaf is SQLite-sourced when no LiveGraph is preloaded: {}",
+                code,
+                leaf
+            );
+        }
+        // EXPLAIN_IDENTITY is single-source {sqlite} (D-IMPL-1).
+        if code == "EXPLAIN_IDENTITY" {
+            assert_eq!(
+                src,
+                vec!["sqlite"],
+                "EXPLAIN_IDENTITY is single-source sqlite: {}",
+                leaf
+            );
+        }
+    }
+    // NOTE: which LG-first leaves a focus emits depends on resolution (symbol -> CALLERS/CALLEES; file ->
+    // IMPORTS; path -> CYCLES), so this round-trip test asserts honest labelling for WHATEVER leaves are
+    // present (the loop above) rather than requiring a specific one — that would couple it to the extractor's
+    // symbol-name resolution. The DETERMINISTIC LG-served + SQLite-fallback callgraph proofs live in
+    // `daemon-runtime`'s `explain_coherence::explain_lg_served_e2e` (synthetic keys, resolution-independent).
+
+    // ── Root provenance.source union includes sqlite, never livegraph (no preloaded LG). ──
+    let root_src: Vec<&str> = env["provenance"]["source"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        root_src.contains(&"sqlite"),
+        "root source union includes sqlite: {:?}",
+        root_src
+    );
+    assert!(
+        !root_src.contains(&"livegraph"),
+        "no preloaded LiveGraph -> root source union excludes livegraph: {:?}",
+        root_src
+    );
+}
+
+#[test]
 fn stats_success_returns_module_metrics() {
     // Create isolated state root
     let state_temp = tempdir().unwrap();

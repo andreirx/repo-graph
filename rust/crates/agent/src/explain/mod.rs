@@ -7,6 +7,16 @@
 //!
 //! Focus resolution reuses `orient`'s resolution logic so the same
 //! target string resolves to the same entity in both commands.
+//!
+//! EXPLAIN-LIVEGRAPH-IMPL: the [`coherent`] submodule wraps this use case's
+//! bare [`OrientResult`] into a `CoherenceEnvelope<CoherentOrientResult>`
+//! (per-leaf provenance/trust/freshness + the root MEET). The section logic
+//! below is UNTOUCHED — the coherence layer wraps the answer, it does not
+//! re-aggregate it.
+
+pub mod coherent;
+
+pub use coherent::{explain_to_coherent, ExplainLgDecisions};
 
 use std::collections::HashMap;
 

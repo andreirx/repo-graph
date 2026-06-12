@@ -129,7 +129,12 @@ fn symbol_target(focus: &Focus) -> Option<&str> {
 
 /// Map a daemon LiveGraph outcome to the agent's leaf label (project the posture verbatim, or a labelled
 /// SQLite fallback with the mapped reason).
-fn map_outcome(outcome: OrientLgOutcome) -> OrientLeafLabel {
+///
+/// `pub(crate)` so EXPLAIN-LIVEGRAPH-IMPL (`explain_coherence.rs`) maps its reused outcome functions
+/// (`orient_callers_outcome`/`orient_callees_outcome`/`orient_cycles_outcome` + the explain-specific
+/// `explain_imports_outcome`) through the IDENTICAL daemon→agent label mapping — the `OrientLeafLabel` is
+/// the shared leaf-decision vocabulary, not forked per command.
+pub(crate) fn map_outcome(outcome: OrientLgOutcome) -> OrientLeafLabel {
     match outcome {
         OrientLgOutcome::Livegraph {
             class,
@@ -189,7 +194,13 @@ fn map_fallback(reason: FallbackReason) -> CoherenceFallbackReason {
 /// Compute the degraded-state trust briefing overlay as an opaque JSON value (D-ORIENT-6 = O2). PRESERVES
 /// the exact pre-existing gate: `compute_trust_overlay_for_snapshot(.., "CALLS+IMPORTS")`, attached only
 /// when `has_degradation() || !caveats.is_empty()`. `None` (absent on the wire) otherwise.
-fn compute_trust_briefing(
+///
+/// `pub(crate)` so EXPLAIN-LIVEGRAPH-IMPL (`explain_coherence.rs`) reuses the IDENTICAL briefing
+/// computation + degraded-only gate — explain injects the SAME `"CALLS+IMPORTS"` overlay as orient
+/// (verified first-hand: dispatch.rs handle_explain), so it is the SECOND populator of the shared
+/// `trust_briefing` field (D-EXPLAIN-TRUST-BRIEFING). The shared populate path must permit BOTH orient and
+/// explain (NOT orient-only — the cross-slice correction RISK-E-G); reusing this function realizes that.
+pub(crate) fn compute_trust_briefing(
     repo_state: &RepoState,
     repo_uid: &str,
     snapshot_uid: &str,

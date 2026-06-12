@@ -462,10 +462,15 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render
-                match serde_json::from_value::<ExplainResponse>(result) {
-                    Ok(response) => {
-                        println!("{}", response.render_human());
+                // Human mode: EXPLAIN-LIVEGRAPH-IMPL §3e — the daemon now returns
+                // `CoherenceEnvelope<CoherentOrientResult>`, so parse the wrapper and render its inner
+                // `value` (signals moved UNDER `value`, each a leaf with its own `.value`). The section TEXT
+                // is byte-identical to before. UNLIKE check, explain derives NO exit code from the verdict —
+                // both success arms return SUCCESS (explain is not CI-facing), so there is no exit-code remap
+                // and no silent-CI-break hazard; a stale deserialization fails LOUDLY (exit 2).
+                match serde_json::from_value::<CoherenceEnvelope<ExplainResponse>>(result) {
+                    Ok(envelope) => {
+                        println!("{}", envelope.value.render_human());
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

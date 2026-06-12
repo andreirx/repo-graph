@@ -1036,6 +1036,33 @@ impl LiveGraph {
             .and_then(|n| n.range.clone())
     }
 
+    /// Read-only DISPLAY-ANCHOR lookup (EXPLAIN-LIVEGRAPH-IMPL D-EXPLAIN-IDENTITY): the current-state
+    /// `(name, subtype)` of `key` from the resident IR — the SAME IR symbol-attributes substrate the `stats`
+    /// fastpath reads (`module_stats`), surfaced per-key. Mirrors [`node_location`] exactly (a read over the
+    /// already-ingested IR; NO new producer/extraction). Returns the live SYMBOL NAME and a GRANULAR subtype
+    /// (`SymbolAttributes::symbol_kind` when present — the AST kind `CLASS`/`INTERFACE`/`TYPE_ALIAS`/`ENUM`
+    /// — else the coarse SCIP descriptor `IrNode::subtype`), so explain's IDENTITY leaf can serve its anchor
+    /// from current-state LiveGraph while the snapshot-scoped coordinate fields stay SQLite (the D8
+    /// multi-source `{livegraph, sqlite}` identity leaf). `None` when no resident partition defines `key`.
+    ///
+    /// Like `node_location`, this is presentation/anchor metadata: it does NOT participate in callers/callees
+    /// traversal, completeness, or trust class. The daemon GATES its use on the symbol's partition being
+    /// resident + Fresh + TS (the identity cert ladder); otherwise the leaf collapses to `{sqlite}`.
+    pub fn node_display(&self, key: &CanonicalKey) -> Option<(String, String)> {
+        self.slots
+            .values()
+            .filter_map(|s| s.ir.as_ref())
+            .find_map(|ir| ir.node(key))
+            .map(|n| {
+                let subtype = n
+                    .attributes
+                    .as_ref()
+                    .and_then(|a| a.symbol_kind.clone())
+                    .unwrap_or_else(|| n.subtype.clone());
+                (n.name.clone(), subtype)
+            })
+    }
+
     /// Rebuild the cross-partition import overlay (IMPORTS-XPART-WIRING-1 D3). Pure + in-memory: build the
     /// repo-relative FILE inventory from ALL resident slots' FILE-scope node keys, turn each resident
     /// `StaticUnresolved` import observation into an `ImportCandidate` (its importing FILE key looked up
@@ -2046,7 +2073,7 @@ mod tests {
     use super::*;
     use repo_graph_ir::{
         CanonicalKey, EdgeBasis, EdgeType, ImportEdgeMeta, ImportObservation, ImportResolution,
-        IrEdge, IrNode, Partition, PartitionId, PartitionKind, Provenance,
+        IrEdge, IrNode, Partition, PartitionId, PartitionKind, Provenance, SymbolAttributes,
     };
 
     fn part(id: &str) -> Partition {
@@ -2187,6 +2214,57 @@ mod tests {
         let lg = both();
         assert!(lg
             .node_location(&CanonicalKey::from_existing("does.not.exist"))
+            .is_none());
+    }
+
+    // ── node_display (EXPLAIN-LIVEGRAPH-IMPL identity anchor lookup) ────
+
+    #[test]
+    fn node_display_returns_name_and_coarse_subtype_without_attributes() {
+        // `node()` sets name=key, subtype="FUNCTION", attributes=None -> the coarse subtype is used.
+        let lg = both();
+        let d = lg.node_display(&CanonicalKey::from_existing("engine.foo"));
+        assert_eq!(d, Some(("engine.foo".to_string(), "FUNCTION".to_string())));
+    }
+
+    #[test]
+    fn node_display_prefers_granular_symbol_kind_when_present() {
+        // When SymbolAttributes::symbol_kind is present, it overrides the coarse SCIP descriptor subtype.
+        let mut lg = LiveGraph::new();
+        let n = IrNode {
+            name: "Widget".into(),
+            subtype: "Type".into(), // coarse SCIP descriptor
+            attributes: Some(SymbolAttributes {
+                visibility: None,
+                is_top_level: true,
+                symbol_kind: Some("INTERFACE".into()), // granular AST kind
+            }),
+            ..node("p.Widget", IdentitySource::AstAdopted)
+        };
+        lg.load_partition(
+            "p",
+            ir("p", vec![n], vec![]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let d = lg.node_display(&CanonicalKey::from_existing("p.Widget"));
+        assert_eq!(d, Some(("Widget".to_string(), "INTERFACE".to_string())));
+    }
+
+    #[test]
+    fn node_display_none_when_partition_nonresident_or_unknown() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![node("p.foo", IdentitySource::AstAdopted)], vec![]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.unload_partition("p"); // IR dropped -> no resident node.
+        assert!(lg
+            .node_display(&CanonicalKey::from_existing("p.foo"))
+            .is_none());
+        let lg2 = both();
+        assert!(lg2
+            .node_display(&CanonicalKey::from_existing("does.not.exist"))
             .is_none());
     }
 

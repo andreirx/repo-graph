@@ -2779,39 +2779,32 @@ impl ServiceDispatcher {
             }
         };
 
-        // CLI-OUT-3: Inject display_name for human renderers (explain deferred to CLI-OUT-3)
+        // CLI-OUT-3: Inject display_name for human renderers.
         result.display_name = Some(display_name);
 
-        // Apply trust overlay (matches CLI contract)
-        let mut output = match serde_json::to_value(&result) {
-            Ok(v) => v,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        // Add trust section if degraded (briefing surface pattern)
-        if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
-            if let Some(trust) = compute_trust_overlay_for_snapshot(
-                &repo_state.storage,
-                &repo_uid,
-                &snapshot,
-                "CALLS+IMPORTS",
-            ) {
-                if trust.has_degradation() || !trust.caveats.is_empty() {
-                    if let serde_json::Value::Object(ref mut map) = output {
-                        if let Ok(trust_value) = serde_json::to_value(&trust) {
-                            map.insert("trust".to_string(), trust_value);
-                        }
-                    }
-                }
-            }
+        // EXPLAIN-LIVEGRAPH-IMPL (operator 2026-06-12): assemble the `CoherenceEnvelope<CoherentOrientResult>`
+        // response, mirroring `handle_orient`/`handle_check`. The adapter GENUINELY SERVES each green LG-first
+        // leaf's VALUE from the LiveGraph — it rebuilds EXPLAIN_IMPORTS / EXPLAIN_CYCLES from
+        // `live_import_view` / `module_import_cycles` and the EXPLAIN_IDENTITY anchor from `node_display`, and
+        // gates EXPLAIN_CALLERS / EXPLAIN_CALLEES by the live caller/callee key-set no-loss compare — with a
+        // labelled SQLite fallback per leaf when not green. It then folds the honest MEET freshness/provenance
+        // and `value.trust_briefing` (the SAME degraded-only `"CALLS+IMPORTS"` overlay this handler injected
+        // before, now on the shared container — explain is the SECOND populator after orient). The LG-first
+        // values come from the LiveGraph (or the proven SQLite primary on fallback), NOT a relabelled SQLite
+        // result.
+        let envelope = crate::explain_coherence::build_explain_envelope(
+            &repo_state,
+            &repo_uid,
+            result,
+            matches!(budget, Budget::Large),
+        );
+        match serde_json::to_value(&envelope) {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
         }
-
-        DispatchResult::success(&request.id, output)
     }
 
     // ── Trust and governance handlers ───────────────────────────────

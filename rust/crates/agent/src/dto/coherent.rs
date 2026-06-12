@@ -374,7 +374,12 @@ fn lg_first_leaf(
 /// leaves + the snapshot `stale` flag — NO new source read. Emitted WHEN AND ONLY WHEN the matching
 /// condition occurred (validation E5). Additive: orient's pre-existing degradation limits
 /// (MODULE_DATA_UNAVAILABLE / COMPLEXITY_UNAVAILABLE / GATE_NOT_CONFIGURED) are orthogonal and untouched.
-fn append_provenance_limits(
+///
+/// `pub(crate)` so `explain`'s coherence assembly (`crate::explain::coherent`) reuses the IDENTICAL
+/// provenance-limit derivation — EXPLAIN-LIVEGRAPH-1 §3b makes these limit codes net-new for explain (it
+/// has no pre-existing limits), so the single source of truth is shared, not duplicated. Behaviour is
+/// unchanged; only the visibility is widened (orient's `to_coherent` still calls it identically).
+pub(crate) fn append_provenance_limits(
     limits: &mut Vec<Limit>,
     leaves: &[CoherenceEnvelope<Signal>],
     stale: bool,
