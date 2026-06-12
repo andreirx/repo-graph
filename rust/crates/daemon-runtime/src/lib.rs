@@ -62,6 +62,7 @@ pub mod orient_lg_decisions;
 pub mod partition_discovery;
 pub mod registry;
 pub mod state;
+pub mod trust_coherence;
 pub mod util;
 
 pub use dispatch::ServiceDispatcher;

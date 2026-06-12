@@ -2899,7 +2899,17 @@ impl ServiceDispatcher {
             trust_ms
         );
 
-        match serde_json::to_value(&report) {
+        // TRUST-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentTrustReport>` response (the ratified
+        // hybrid), mirroring handle_orient/handle_check/handle_explain. The adapter adds the Half-A
+        // current-state posture leaf — GENUINELY SERVED from the LiveGraph (residency / per-partition
+        // freshness / language / producer / migrated-answer capability, projected from `live_partitions()` +
+        // the repo-wide `module_stats()` answer) — BESIDE the RETAINED v1 report (Half B, source=sqlite,
+        // payloads byte-identical, LABELLED outgoing-extractor), folds the honest MEET freshness/provenance,
+        // and labels the multi-source downgrade leaf `{sqlite, declaration}`. The v1 computation above is
+        // UNCHANGED; the wrapper adds labels + the posture, it never re-judges (F5: no axis is presented as
+        // current-state unless its leaf is source=livegraph).
+        let envelope = crate::trust_coherence::build_trust_envelope(&repo_state, report);
+        match serde_json::to_value(&envelope) {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(
                 &request.id,

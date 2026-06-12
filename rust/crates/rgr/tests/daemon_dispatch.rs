@@ -721,6 +721,155 @@ fn check_returns_coherence_envelope_shape() {
 }
 
 #[test]
+fn trust_returns_coherence_envelope_shape() {
+    // TRUST-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_trust` dispatch + real serialization, in-process
+    // transport, no socket) that trust now serves the ratified HYBRID `CoherenceEnvelope<CoherentTrustReport>`.
+    // No LiveGraph is preloaded in this harness, so Half A (the current-state posture) is the HONEST cold case
+    // (`Unavailable`, but still `source = livegraph`) and the root MEET degrades to Unavailable EVEN over a
+    // freshly-indexed (Fresh) snapshot (D-T6) — while Half B (the v1 report) is fully SERVED + sqlite-labelled.
+    // The WARM posture projection (REAL LiveGraph serving) is proven by daemon-runtime `trust_coherence`'s
+    // synthetic-fixture test; the pure hybrid folds by the trust-crate `coherent` unit tests.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-trust-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"coht-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let trust_request = format!(
+        r#"{{"id":"coht-2","method":"trust","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&trust_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level: value + provenance + trust(class+completeness) + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env["trust"].get("class").is_some() && env["trust"].get("completeness").is_some(),
+        "root trust is the AXIS-typed posture: {}",
+        results[0]
+    );
+    let value = &env["value"];
+
+    // ── Half A: the current-state posture leaf is the ONLY livegraph-sourced leaf; cold here → Unavailable
+    //    (F3 — unknown, NOT a Fresh known-zero; resident=false reported explicitly). ──
+    let posture = &value["current_state_posture"];
+    let posture_src: Vec<&str> = posture["provenance"]["source"]
+        .as_array()
+        .expect("posture provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert_eq!(
+        posture_src,
+        vec!["livegraph"],
+        "the current-state posture leaf is livegraph-sourced: {}",
+        results[0]
+    );
+    assert_eq!(
+        posture["trust"]["class"].as_str(),
+        Some("Unavailable"),
+        "no preload → cold LiveGraph → Unavailable posture (not a fabricated current-state Exact): {}",
+        results[0]
+    );
+    assert_eq!(
+        posture["value"]["resident"].as_bool(),
+        Some(false),
+        "the posture reports resident=false explicitly (F3): {}",
+        results[0]
+    );
+
+    // ── Half B: the v1 report is SERVED, every residual leaf sqlite-sourced (never livegraph, F5). The
+    //    reliability leaf carries the snapshot posture (Fresh — a freshly-indexed snapshot has no stale
+    //    files), so Half B is honest + available even though Half A is cold. ──
+    let reliability_src: Vec<&str> = value["reliability"]["provenance"]["source"]
+        .as_array()
+        .expect("reliability provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert_eq!(
+        reliability_src,
+        vec!["sqlite"],
+        "a Half-B residual leaf is sqlite-sourced, never livegraph (F5): {}",
+        results[0]
+    );
+    assert_eq!(
+        value["reliability"]["freshness"].as_str(),
+        Some("Fresh"),
+        "Half B is served Fresh over the freshly-indexed snapshot: {}",
+        results[0]
+    );
+
+    // ── The downgrade-triggers leaf is the MULTI-SOURCE composite {sqlite, declaration} (D-TRUST-4/D8): the
+    //    entrypoint Authority table is read on EVERY report. ──
+    let downgrades_src: Vec<&str> = value["triggered_downgrades"]["provenance"]["source"]
+        .as_array()
+        .expect("downgrades provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        downgrades_src.contains(&"sqlite") && downgrades_src.contains(&"declaration"),
+        "the downgrade-triggers leaf is multi-source {{sqlite, declaration}}, got {:?}: {}",
+        downgrades_src,
+        results[0]
+    );
+
+    // ── P2 / D-TRUST-5: the dead_code reliability axis NEVER appears on the wire. ──
+    assert!(
+        !results[0].contains("dead_code"),
+        "the dead_code axis must stay internal (skip_serializing): {}",
+        results[0]
+    );
+
+    // ── E3: root provenance = the SET UNION of all leaf sources = {livegraph, sqlite, declaration} (the
+    //    posture leaf is the livegraph contributor). Root MEET degrades to Unavailable over the cold
+    //    LiveGraph even with a Fresh snapshot (D-T6 — the honest hybrid). ──
+    let root_src: Vec<&str> = env["provenance"]["source"]
+        .as_array()
+        .expect("root provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        root_src.contains(&"livegraph")
+            && root_src.contains(&"sqlite")
+            && root_src.contains(&"declaration"),
+        "root source union = {{livegraph, sqlite, declaration}}, got {:?}: {}",
+        root_src,
+        results[0]
+    );
+    assert_eq!(
+        env["freshness"].as_str(),
+        Some("Unavailable"),
+        "a cold LiveGraph degrades the root MEET to Unavailable even over a Fresh snapshot (D-T6): {}",
+        results[0]
+    );
+}
+
+#[test]
 fn explain_returns_coherence_envelope_shape() {
     // EXPLAIN-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_explain` dispatch + real serialization,
     // in-process transport, no socket) that explain now serves a `CoherenceEnvelope<CoherentOrientResult>`.

@@ -1523,6 +1523,7 @@ name = "repo-graph-trust"
 version = "0.1.0"
 dependencies = [
  "repo-graph-classification",
+ "repo-graph-coherence",
  "serde",
  "serde_json",
  "walkdir",

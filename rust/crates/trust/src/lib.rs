@@ -136,6 +136,10 @@
 //!     DTO-completeness exception, not a general invitation to
 //!     port display helpers.
 
+// TRUST-LIVEGRAPH-IMPL: the coherence-wrapped trust report (the ratified hybrid). PURE policy that wraps
+// the v1 `TrustReport` (the `service`/`rules`/`types` computation is UNTOUCHED) into
+// `CoherenceEnvelope<CoherentTrustReport>` via the shared `repo-graph-coherence` crate.
+pub mod coherent;
 pub mod overlay;
 pub(crate) mod rules;
 pub mod service;
@@ -163,6 +167,14 @@ pub use service::{
     assemble_trust_report, compute_trust_report, TrustAssemblyError, TrustComputationInput,
 };
 pub use storage_port::TrustStorageRead;
+
+// TRUST-LIVEGRAPH-IMPL: the coherent (hybrid-wrapped) trust report surface. The daemon adapter
+// (`daemon-runtime/src/trust_coherence.rs`) builds the Half-A `LiveGraphPosture` leaf from real LiveGraph
+// state and calls `trust_to_coherent`; the CLI renderer deserializes `CoherentTrustReport`.
+pub use coherent::{
+    trust_to_coherent, CoherentTrustReport, DiagnosticsMeta, LiveGraphPartitionPosture,
+    LiveGraphPosture, ResolutionCounts,
+};
 
 // Trust overlay for query surfaces (inline trust in responses).
 //
