@@ -34,6 +34,13 @@ Baseline: SQLITE-RAW-DECOMMISSION-READINESS-9 (`56160bb`); ORIENT-LIVEGRAPH-1 (`
 > LiveGraph producer, so an orient fastpath built now is dead, fallback-only code (§4b). This spec stands as the
 > authoritative orient producer-gap map; DR-1..DR-5 (§8) remain OPEN, to be ratified when orient is resumed.
 
+> **PRODUCER UPDATE (2026-06-13): DR-1 (the shared trust-core producer) is REFUTED.** `TRUST-SUMMARY-LIVEGRAPH-1`
+> + `SCIP-UNRESOLVED-CALL-PROBE-1` proved SCIP cannot source a parity unresolved-call count (NO-GO); operator
+> ratified **Option A** — the trust contributor stays homegrown-`unresolved_edges` SQLite-LABELLED. Consequence
+> for orient: its trust leaf can NEVER be `edges`-free on green (gate-1 RED by design for that leaf). A future
+> `ORIENT-SQLITE-FREE-IMPL-1`, if pursued, can only serve the LG-DERIVABLE contributors (cycles/callgraph/module
+> counts) and must keep the trust contributor SQLite-labelled. DR-2..DR-5 (the non-trust leaves) are unaffected.
+
 ---
 
 ## 0. Spec-first note (read first)

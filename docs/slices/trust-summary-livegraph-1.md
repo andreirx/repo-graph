@@ -50,6 +50,13 @@ that TRUST-LIVEGRAPH-1 §D-TRUST-2 explicitly DEFERRED.
 > REJECTED (dead, always-RED code). DR-TS-1 / DR-TS-2 / DR-TS-CRATE-HOME stay OPEN, actionable only if the probe
 > is GO. This spec stands as the authoritative producer-gap + extension-sizing map.
 
+> **PROBE OUTCOME — the producer line is CLOSED (2026-06-13).** `SCIP-UNRESOLVED-CALL-PROBE-1` returned **NO-GO**
+> (paired empirical evidence: scip-typescript emits NO unresolved-call occurrence; SCIP count 0 != homegrown
+> `unresolved_edges` 3; structurally inverted). Operator ratified **DR-TS-0-POST-PROBE -> Option A**: keep the
+> homegrown `unresolved_edges` SQLite-LABELLED; do NOT build the SCIP-sourced producer. **DR-TS-1 A is REFUTED;
+> DR-TS-2 / DR-TS-CRATE-HOME are MOOT.** This spec is retained as the authoritative extension-sizing map the
+> probe closed.
+
 ---
 
 ## 0. Spec-first note (read first)

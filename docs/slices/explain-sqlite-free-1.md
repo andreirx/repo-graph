@@ -60,6 +60,13 @@ ORIENT-SQLITE-FREE-1 (`e10a455`, the precedent + producer-gap taxonomy this mirr
 > DR-E2/DR-4). This spec stands as the authoritative explain producer-gap map; DR-E1..DR-E5 (§8) remain OPEN
 > until the producer and the per-command impls are taken up.
 
+> **PRODUCER UPDATE (2026-06-13): DR-E1 (the shared trust-core producer) is REFUTED.** `TRUST-SUMMARY-LIVEGRAPH-1`
+> + `SCIP-UNRESOLVED-CALL-PROBE-1` proved SCIP cannot source a parity unresolved-call count (NO-GO); operator
+> ratified **Option A** — the trust contributor stays homegrown-`unresolved_edges` SQLite-LABELLED. Consequence
+> for explain: its trust leaf can NEVER be `edges`-free on green (gate-1 RED by design for that leaf). A future
+> `EXPLAIN-SQLITE-FREE-IMPL-1`, if pursued, can only serve the LG-DERIVABLE leaves (the 5 already served + any
+> other non-trust derivable fields) and must keep the trust leaf + focus-resolution (DR-E2) SQLite-sourced.
+
 ---
 
 ## 0. Spec-first note (read first)
