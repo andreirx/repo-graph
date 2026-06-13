@@ -2,17 +2,36 @@
 
 ## Current Priority
 
-> **STATUS (2026-06-08): Stage D — SQLite raw decommission. Next build: COHERENCE-LAYER-1 (design-first).**
+> **STATUS (2026-06-12): Stage D — SQLite raw decommission. COHERENCE-LAYER-1 DONE. Next build:
+> SQLITE-RAW-DECOMMISSION-1 readiness (terminal; GATED).**
 > Stages A–C are COMPLETE; Stage D (persistence + raw decommission) is in progress. Since this document's
 > body was last rewritten (2026-06-01), the warm-cache chain shipped (WARM-CACHE-1 + daemon-wiring +
 > valuefacts + producer-absent), the imports + cycles + **stats** LiveGraph **default fastpaths** landed,
-> callers/callees/path went **lazy**, and the **SQLITE-RAW-DECOMMISSION-READINESS-1..7** audits ran.
-> **STATS-LIVEGRAPH-1 SHIPPED** (spec `f6046ab` + impl `28ed216`): `stats` serves from LiveGraph via a
-> cert-gated fastpath built on the IR symbol-attributes substrate (`116fbb0`), byte-preserving — the
-> **6th** SQLite-free migrated default. Cert-fastpath + breadth leverage is now exhausted for the
-> drilldown defaults; **COHERENCE-LAYER-1 (orient/check/explain/trust)** is next, design-first.
-> [INFERRED priority; OBSERVED-backed — git HEAD=`28ed216` chain.] The running log below is historical
-> narrative through 2026-06-01; for the present state trust this banner and the **Stage D order** line below.
+> callers/callees/path went **lazy**, the **SQLITE-RAW-DECOMMISSION-READINESS-1..7** audits ran, and
+> **STATS-LIVEGRAPH-1 SHIPPED** (spec `f6046ab` + impl `28ed216`) as the **6th** SQLite-free migrated
+> default (`stats` served from LiveGraph via the IR symbol-attributes cert-fastpath, byte-preserving).
+> **THEN THE WHOLE COHERENCE LAYER LANDED:** the ratified `CoherenceEnvelope<T>` contract
+> (COHERENCE-LAYER-1 `6ed17b8` + multi-source-leaf amendment `5129f44`) and all four per-command builds —
+> **orient `2fd4478`** (+ the `repo-graph-coherence` support crate), **check `3e76271`**, **explain
+> `82b6557`**, **trust `dc55114`** (HEAD). orient/check/explain/trust now each serve a `CoherenceEnvelope`
+> with honest per-signal provenance/trust/freshness + labelled SQLite fallback (explain serves green leaf
+> VALUES from the LiveGraph; trust adds a LiveGraph posture beside the retained v1 hybrid; orient
+> no-loss-labels its 4 LG-first leaves; check folds a MEET-freshness verdict). This was the last command
+> class with NO LiveGraph path.
+> **HONEST SCOPE — coherence did NOT remove the eager SQLite read** [OBSERVED, first-hand: dispatch.rs base
+> use case unconditional in all four handlers]: the base use case still reads SQLite (incl. `nodes`/`edges`
+> for orient/explain/trust) every call; the envelope is assembled ON TOP. SQLite-FREE served count stays
+> **6/10**. So coherence is a SERVING + OUTPUT-HONESTY milestone, NOT an eager-read elimination.
+> **NEXT = SQLITE-RAW-DECOMMISSION-1 readiness** (the terminal Stage-D slice). `docs/slices/
+> sqlite-raw-decommission-readiness-9.md` recomputed the gate as **RED** — all five deletion gates still
+> FAIL (the four coherence eager reads; non-TS LiveGraph coverage = the structural ceiling; the drilldown
+> fallback paths + imports/cycles/stats cert builds; the 31 non-graph tables). The decommission cannot
+> proceed as a global drop until those close; readiness-9 carries the highest-value-next recommendation
+> (Option B: eliminate the coherence eager reads — incremental; vs Option A: non-TS coverage — the larger
+> unlock) as an open governance call.
+> [INFERRED priority; OBSERVED-backed — git HEAD=`dc55114` chain + readiness-9.] The running log below is
+> historical narrative through 2026-06-01; for the present state trust this banner and the **Stage D order**
+> line below.
 
 **EXTRACTION-SUBSTRATE-PIVOT** — SCIP-first L0/L1 substrate.
 
@@ -188,14 +207,18 @@ invalidates the graph cache); D8 cache-side mirror DTOs (**NO serde in `repo-gra
 key / manifest validation / atomic write / refresh interaction. Spec
 `docs/slices/partitioned-warm-cache-arch-1.md`.
 
-**Stage D order (updated 2026-06-08):** 1B ✓ → DATAFLOW ✓ → 1C ✓ → WARM-CACHE-ARCH ✓ → WARM-CACHE-1 ✓
+**Stage D order (updated 2026-06-12):** 1B ✓ → DATAFLOW ✓ → 1C ✓ → WARM-CACHE-ARCH ✓ → WARM-CACHE-1 ✓
 (support crate: DTO round-trips, manifest, atomic write) → WARM-CACHE-DAEMON-WIRING-1 ✓ →
 WARM-CACHE-VALUEFACTS-1 ✓ → WARM-CACHE-PRODUCER-ABSENT-1 ✓ → imports + cycles LiveGraph default
 fastpaths ✓ + lazy callers/callees/path ✓ → SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) →
 STATS-LIVEGRAPH-1 ✓ (spec `f6046ab` + impl `28ed216`; the 6th SQLite-free default — `stats` served from
 LiveGraph via the IR symbol-attributes substrate, SQLite fallback intact, byte-preserving) →
-**COHERENCE-LAYER-1 (next — design-first)** → SQLITE-RAW-DECOMMISSION-1.
-[OBSERVED: git HEAD=`28ed216` chain; `docs/slices/stats-livegraph-1.md` IMPLEMENTED.]
+COHERENCE-LAYER-1 ✓ (contract `6ed17b8` + amendment `5129f44`; four per-command impls: orient `2fd4478`
+[+ `repo-graph-coherence` support crate] / check `3e76271` / explain `82b6557` / trust `dc55114`) →
+SQLITE-RAW-DECOMMISSION-READINESS-9 ✓ (post-coherence recompute; gate RED) →
+**SQLITE-RAW-DECOMMISSION-1 (next — terminal; GATED, all five deletion gates FAIL per readiness-9)**.
+[OBSERVED: git HEAD=`dc55114` chain; `docs/slices/coherence-layer-1.md` + the four
+`{orient,check,explain,trust}-livegraph-1.md` specs + `docs/slices/sqlite-raw-decommission-readiness-9.md`.]
 
 The WARM-CACHE-1 slice doc header still reads "DESIGN — building"; that header is itself stale (the
 crate shipped and was extended — `repo_graph_version` key fix `7b0eb4c`, warm-cache schema bumps in the

@@ -122,7 +122,13 @@ See `agent_docs/storage-architecture-v2.md` for the tier specification.
 | **SCIP-INGEST-IR-1** | Canonical IR, SCIP ingestion, stable-key mapping, call-graph derivation | IMPLEMENTED (design D1–D5 → INGEST-CORE-1; Stage A) |
 | **PARTITIONED-WARM-CACHE-ARCH-1** | Binary warm cache; format decision | RATIFIED 2026-06-01 (bincode under validation envelope; Stage D) |
 | **QUERY-MIGRATION-1** | callers/callees/path/cycles on LiveGraph partitions | IMPLEMENTED (Stage C; callers/callees headless, path deferred; cycles/imports default-migrated via Stage-D fastpaths) |
-| **COHERENCE-LAYER-1** | orient/check/trust mixed live+persisted contract | NEXT (Stage D; design-first; STATS-LIVEGRAPH-1 shipped `28ed216`) |
+| **STATS-LIVEGRAPH-1** | stats served from LiveGraph (cert-gated fastpath; 6th SQLite-free default) | IMPLEMENTED (spec `f6046ab` + impl `28ed216`; Stage D) |
+| **COHERENCE-LAYER-1** | orient/check/explain/trust mixed live+persisted `CoherenceEnvelope` contract | DESIGNED + IMPLEMENTED (contract `6ed17b8` + multi-source-leaf amendment `5129f44`; Stage D) |
+| **ORIENT-LIVEGRAPH-1** | `rmap orient` served via `CoherenceEnvelope` (4 LG-first leaves no-loss-labelled + labelled SQLite fallback) | DESIGNED + IMPLEMENTED (spec `af49ea6` + impl `2fd4478`, with the `repo-graph-coherence` support crate) |
+| **CHECK-LIVEGRAPH-1** | `rmap check` served via `CoherenceEnvelope` (MEET-freshness verdict; no LiveGraph leaf) | DESIGNED + IMPLEMENTED (spec `ef30083` + impl `3e76271`) |
+| **EXPLAIN-LIVEGRAPH-1** | `rmap explain` served via `CoherenceEnvelope` (5 green leaf VALUES served from LiveGraph) | DESIGNED + IMPLEMENTED (spec `cb8a311` + impl `82b6557`) |
+| **TRUST-LIVEGRAPH-1** | `rmap trust` served via `CoherenceEnvelope` (hybrid: LiveGraph posture + retained v1) | DESIGNED + IMPLEMENTED (spec `9c18754` + impl `dc55114`) |
+| **SQLITE-RAW-DECOMMISSION-1** | retire raw `nodes`/`edges` substrate | NEXT (Stage D, terminal; GATED — readiness-9 gate RED, all five deletion gates FAIL) |
 | **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
 | **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
 | **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
@@ -144,7 +150,10 @@ QUERY-MIGRATION-1 ✓ → VALUE-JOIN-1 ✓. **Stage D (current)** — LIVEGRAPH-
 → PARTITIONED-WARM-CACHE-ARCH-1 ✓ → WARM-CACHE-1 (+ daemon-wiring / valuefacts /
 producer-absent) ✓ → imports + cycles LiveGraph default fastpaths + lazy callers/callees/path ✓
 → SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) → STATS-LIVEGRAPH-1 ✓ (spec `f6046ab` + impl `28ed216`;
-6/10 SQLite-free defaults) → **COHERENCE-LAYER-1 (next, design-first)** → SQLITE-RAW-DECOMMISSION-1.
+6/10 SQLite-free defaults) → COHERENCE-LAYER-1 ✓ (contract `6ed17b8` + amendment `5129f44`; four per-command
+impls orient `2fd4478` / check `3e76271` / explain `82b6557` / trust `dc55114`) →
+SQLITE-RAW-DECOMMISSION-READINESS-9 ✓ (post-coherence recompute; gate RED) →
+**SQLITE-RAW-DECOMMISSION-1 (next; GATED — all five deletion gates still FAIL per readiness-9)**.
 Full Stage-B/C/D ledger: `CURRENT_SLICE.md`.
 
 **Honesty:** the viability spikes (TS/C/Rust) are complete and the gate is retired.
@@ -155,19 +164,39 @@ window remains runtime-tuned. See `docs/architecture/scip-migration-plan.md`.
 
 ### Current Priority
 
-**COHERENCE-LAYER-1 (next; design-first).** Stage D, SQLite raw-decommission track.
-[INFERRED priority, OBSERVED-backed — git HEAD=`28ed216`; the Stage-D order line above.]
-STATS-LIVEGRAPH-1 SHIPPED (spec `f6046ab` + impl `28ed216`): `stats` now serves from LiveGraph
-via a cert-gated fastpath built on the IR symbol-attributes substrate (`116fbb0`), SQLite fallback
-intact, output byte-preserving — the **6th** SQLite-free migrated default. Cert-fastpath + breadth
-leverage is now exhausted for the drilldown defaults (callers/callees/path lazy;
-imports/cycles/stats flipped). The remaining decommission work is the COHERENCE-LAYER
-(orient/check/explain/trust — SQLite-only, mixed live+persisted, higher blast radius), design-first.
+**SQLITE-RAW-DECOMMISSION-1 readiness (next; GATED).** Stage D, SQLite raw-decommission track — the terminal
+slice. [INFERRED priority, OBSERVED-backed — git HEAD=`dc55114`; the Stage-D order line above; the
+`docs/slices/sqlite-raw-decommission-readiness-9.md` recompute.]
+
+**COHERENCE-LAYER-1 is DESIGNED + IMPLEMENTED.** The ratified mixed-source `CoherenceEnvelope<T>` contract
+(`6ed17b8`, multi-source-leaf amendment `5129f44`) and all four per-command builds shipped: orient (`2fd4478`,
+which also lands the `repo-graph-coherence` support crate), check (`3e76271`), explain (`82b6557`), trust
+(`dc55114`). orient/check/explain/trust no longer return a bare SQLite-only result — each serves a
+`CoherenceEnvelope` with honest per-signal provenance/trust/freshness + labelled SQLite fallback: explain
+genuinely serves its green structural leaf VALUES from the LiveGraph, trust adds a current-state LiveGraph
+posture beside the retained v1 (hybrid), orient no-loss-labels its four LG-first leaves, check folds a
+MEET-freshness verdict. This was the last command class with NO LiveGraph path.
+
+**Honest scope of what coherence did NOT do** [OBSERVED, first-hand: `dispatch.rs` handle_orient:2603 /
+handle_check:2689 / handle_explain:2766 / handle_trust:2870 — the base SQLite use case runs UNCONDITIONALLY in
+every handler; full evidence in readiness-9]: it did NOT eliminate the EAGER SQLite read for the four. The
+base use case (`repo_graph_agent::orient` / `run_check` / `run_explain` / `assemble_trust_report`) still reads
+SQLite — incl. `nodes`/`edges` for orient/explain/trust — on every call; the `CoherenceEnvelope` is assembled
+ON TOP. So the SQLite-FREE served count stays **6/10** (callers/callees/path/imports/cycles/stats); the four
+coherence defaults are a SERVING + OUTPUT-HONESTY advance, not an eager-read elimination.
+
+**NEXT: drive the SQLite-raw `nodes`/`edges` retirement.** readiness-9 recomputed the gate as RED — all five
+deletion gates still FAIL (the four coherence eager reads; non-TS LiveGraph coverage = the structural
+ceiling; the drilldown fallback paths + the imports/cycles/stats cert builds; the 31 non-graph tables).
+SQLITE-RAW-DECOMMISSION-1 cannot proceed as a global drop until those close. readiness-9 recommends the
+highest-value next build (Option B: eliminate the coherence eager reads, the incremental continuation;
+Option A: non-TS LiveGraph coverage, the larger strategic unlock) — the A-vs-B sequencing is an open
+governance call surfaced there, not silently chosen.
 
 SCIP-INGEST-IR-1 is **no longer current** — it shipped as INGEST-CORE-1 (Stage A);
 `docs/slices/scip-ingest-ir-1.md` holds the historical design. STATS-LIVEGRAPH-1 is IMPLEMENTED
-(`docs/slices/stats-livegraph-1.md`); COHERENCE-LAYER-1 has no slice doc yet — authoring it
-(design-first) is the next slice.
+(`docs/slices/stats-livegraph-1.md`); COHERENCE-LAYER-1 and the four per-command builds are IMPLEMENTED
+(`docs/slices/coherence-layer-1.md` + `{orient,check,explain,trust}-livegraph-1.md`).
 
 ### Recently Completed
 
@@ -544,7 +573,7 @@ HOOK-1 delivered:
 **The active development track is no longer this Distribution/CLI-OUT program — it is the
 Storage Architecture / SCIP Stage-D program** (this track's CLI-OUT-1..7 and SMOKE-1 are all
 COMPLETE; CURSOR-1 remains queued). Genuine current priority: see the **Storage Architecture
-Track → Current Priority** above (COHERENCE-LAYER-1, design-first; STATS-LIVEGRAPH-1 shipped) and `CURRENT_SLICE.md`.
+Track → Current Priority** above (SQLITE-RAW-DECOMMISSION-1 readiness; COHERENCE-LAYER-1 DESIGNED + IMPLEMENTED) and `CURRENT_SLICE.md`.
 [OBSERVED: the git HEAD chain is entirely Stage-D storage work.]
 
 ### Artifact Matrix (REL-1)
