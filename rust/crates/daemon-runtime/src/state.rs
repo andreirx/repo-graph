@@ -225,6 +225,17 @@ pub struct RepoState {
     /// Interior mutability: the orient decision read-locks; the lazy build write-locks.
     pub complexity_cert:
         parking_lot::RwLock<Option<crate::orient_lg_decisions::ComplexityNoLossCert>>,
+
+    /// FOCUS-RESOLUTION-LIVEGRAPH-IMPL: the in-memory repo-level FOCUS-RESOLUTION NO-LOSS certificate
+    /// (`None` until lazily built by `focus_resolution_cert::build_and_store_focus_resolution_cert`).
+    /// `verdict == GREEN` iff the LiveGraph focus resolution (`focus_resolver`) is field-exact equal
+    /// to the SQLite `resolve_*` resolution over the resident corpus. Keyed by the SAME SQLite-free
+    /// fingerprint as `import_cert`/`cycles_cert`/`stats_cert`/`complexity_cert`; a fingerprint
+    /// mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). The later
+    /// COHERENCE-LEAF-SERVE consumer reads this to gate its focused-orient/explain fastpath; this
+    /// slice builds + stores it standalone (no consumer wiring yet).
+    pub focus_resolution_cert:
+        parking_lot::RwLock<Option<crate::focus_resolution_cert::FocusResolutionNoLossCert>>,
 }
 
 impl RepoState {
@@ -266,6 +277,7 @@ impl RepoState {
             cycles_cert: parking_lot::RwLock::new(None),
             stats_cert: parking_lot::RwLock::new(None),
             complexity_cert: parking_lot::RwLock::new(None),
+            focus_resolution_cert: parking_lot::RwLock::new(None),
         })
     }
 

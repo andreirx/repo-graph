@@ -39,6 +39,13 @@ pub mod module_cycle_cert;
 /// `imports --engine livegraph` surface projects. Separate module (500-line guardrail).
 pub mod import_view;
 
+/// FOCUS-RESOLUTION-LIVEGRAPH-IMPL: the LiveGraph-native focus-resolution producer (the four
+/// `resolve_path`/`resolve_stable_key`/`resolve_symbol_name`/`symbol_context` reads mirroring the
+/// SQLite `resolve_*` functions, reading ONLY the resident IR). Separate module: it holds an
+/// `impl LiveGraph` block (a child module accesses the root's `LiveGraph` internals) so the
+/// 4000-line `lib.rs` does not grow a new responsibility (the 500-line structural guardrail).
+pub mod focus_resolver;
+
 use module_cycle_compare::{ObsResolution, ObservationView};
 
 /// Per-partition epoch (bumped on each swap; D3).

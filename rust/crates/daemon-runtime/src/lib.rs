@@ -53,6 +53,7 @@ pub mod dispatch;
 pub mod explain_coherence;
 pub mod explain_lg_identity;
 pub mod explain_lg_serve;
+pub mod focus_resolution_cert;
 pub mod handlers;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
