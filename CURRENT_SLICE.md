@@ -2,10 +2,13 @@
 
 ## Current Priority
 
-> **STATUS (2026-06-13): Stage D — SQLite raw decommission. COHERENCE-LAYER-1 DONE; the Option-B producer
-> investigation CLOSED (NO-GO → Option A). Next build: SQLITE-RAW-DECOMMISSION-1 readiness (terminal; GATED +
-> PARTIAL BY DESIGN — a FULL `nodes`/`edges`/`unresolved_edges` retirement is now PROVEN partially impossible:
-> the trust contributor's unresolved-call fields have no current-state SCIP source).**
+> **STATUS (2026-06-14): Stage D — SQLite raw decommission. COHERENCE-LAYER-1 DONE; the Option-B producer
+> investigation CLOSED (NO-GO → Option A); **SQLITE-RAW-DECOMMISSION-1 RATIFIED as a BOUNDED partial-decommission
+> CONTRACT** (Option A; `docs/slices/sqlite-raw-decommission-1.md`) — `unresolved_edges` + diagnostics retained
+> SQLite-labelled FOREVER, `nodes`/`edges` bounded-partial with the retirement IMPL **PARKED** on prerequisites;
+> a FULL `nodes`/`edges`/`unresolved_edges` retirement is PROVEN partially impossible (the trust contributor's
+> unresolved-call fields have no current-state SCIP source). Next BUILD: P1 marginal fastpaths and/or P2 non-TS
+> coverage — an OPEN governance call.**
 > Stages A–C are COMPLETE; Stage D (persistence + raw decommission) is in progress. Since this document's
 > body was last rewritten (2026-06-01), the warm-cache chain shipped (WARM-CACHE-1 + daemon-wiring +
 > valuefacts + producer-absent), the imports + cycles + **stats** LiveGraph **default fastpaths** landed,
@@ -236,8 +239,9 @@ TRUST-SUMMARY-LIVEGRAPH-1 ✓ (`94fc506`; the shared producer is NEEDS-EXTENSION
 (`7d4b3bb`; **NO-GO** — SCIP carries no unresolved-call disposition → operator ratified **Option A**, keep
 homegrown `unresolved_edges` SQLite-labelled) → SQLITE-RAW-DECOMMISSION-READINESS-10 ✓ (end-of-arc re-baseline;
 the SCIP unresolved-call boundary; supersedes readiness-9) →
-**SQLITE-RAW-DECOMMISSION-1 (next — terminal; GATED + PARTIAL BY DESIGN — the trust unresolved-call fields are
-RED-by-design per the probe; a FULL global drop is impossible, re-scoped to a BOUNDED partial per readiness-10)**.
+**SQLITE-RAW-DECOMMISSION-1 (terminal; bounded CONTRACT RATIFIED 2026-06-14, Option A —
+`docs/slices/sqlite-raw-decommission-1.md`; `unresolved_edges` + diagnostics retained-forever, `nodes`/`edges`
+bounded-partial, retirement IMPL PARKED on prereqs; gate 1 permanently-partial). Next BUILD: P1/P2 — OPEN)**.
 [OBSERVED: git HEAD=`7d4b3bb` chain; `docs/slices/{orient,explain}-sqlite-free-1.md` +
 `trust-summary-livegraph-1.md` + `scip-unresolved-call-probe-1.md` + `sqlite-raw-decommission-readiness-10.md`.]
 

@@ -133,7 +133,7 @@ See `agent_docs/storage-architecture-v2.md` for the tier specification.
 | **TRUST-SUMMARY-LIVEGRAPH-1** | spec: the shared LiveGraph-native trust-summary producer (orient DR-1 / explain DR-E1) | SPEC — NEEDS-EXTENSION (`94fc506`); `IrEdge` resolved-only, no `CallObservation`; 7/8 consumed fields need an IR/ingest/classifier extension. DR-TS-0 → S1 (probe first). |
 | **SCIP-UNRESOLVED-CALL-PROBE-1** | spike: does SCIP carry unresolved calls + reach `unresolved_edges` parity? | PROBE — **NO-GO** (`7d4b3bb`, HEAD); scip-typescript emits no unresolved-call occurrence; paired 0 ≠ 3, structurally inverted. **Producer line CLOSED → Option A** (homegrown `unresolved_edges` stays SQLite-labelled). |
 | **SQLITE-RAW-DECOMMISSION-READINESS-10** | end-of-arc re-baseline: the SCIP unresolved-call boundary + the gate partition | AUDIT (this reconcile) — the trust unresolved-call fields are RED BY DESIGN (no current-state SCIP source); a FULL decommission for that contributor is IMPOSSIBLE; goal re-bounded. |
-| **SQLITE-RAW-DECOMMISSION-1** | retire raw `nodes`/`edges` substrate (incl. `unresolved_edges`) | NEXT (Stage D, terminal; GATED + **PARTIAL BY DESIGN**) — the trust contributor's unresolved-call fields (`unresolved_edges` + diagnostics) are RED-by-design: no current-state SCIP source (SCIP-UNRESOLVED-CALL-PROBE-1 NO-GO → Option A), so a FULL global drop is impossible; re-scoped to a BOUNDED partial per readiness-10. Other gates still RED (non-TS ceiling, drilldown fallbacks, cert builds, 31 non-graph tables). [Was: "readiness-9 gate RED, all five deletion gates FAIL" — superseded by readiness-10's partition: gate 1 can never go fully GREEN.] |
+| **SQLITE-RAW-DECOMMISSION-1** | retire raw `nodes`/`edges` substrate (incl. `unresolved_edges`) | **CONTRACT RATIFIED** (Stage D, terminal; bounded, Option A — `sqlite-raw-decommission-1.md`, 2026-06-14; retirement IMPL **PARKED** on prereqs) — the trust contributor's unresolved-call fields (`unresolved_edges` + diagnostics) are RED-by-design: no current-state SCIP source (SCIP-UNRESOLVED-CALL-PROBE-1 NO-GO → Option A), so a FULL global drop is impossible; re-scoped to a BOUNDED partial per readiness-10. Other gates still RED (non-TS ceiling, drilldown fallbacks, cert builds, 31 non-graph tables). [Was: "readiness-9 gate RED, all five deletion gates FAIL" — superseded by readiness-10's partition: gate 1 can never go fully GREEN.] |
 | **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
 | **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
 | **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
@@ -220,11 +220,13 @@ marginal partial (serve the LG-derivable resolved/non-trust leaves, keep the tru
 flips NO deletion gate. The other gates remain RED-pending-work (non-TS LiveGraph coverage = the structural
 ceiling; the drilldown fallback paths + the imports/cycles/stats cert builds; the 31 non-graph tables).
 
-**NEXT is an OPEN governance call (recommend, not ratified).** readiness-10 §"Next priorities" lays out a P1–P4
-recommendation matrix (P1 marginal partial fastpaths; P2 non-TS coverage — the larger strategic unlock, which
-does NOT fix the unresolved-call gap; P3 a BOUNDED partial decommission that excludes the RED-by-design fields;
-P4 pivot off the decommission). The next track is NOT yet chosen here — the goal is recorded as bounded, not
-silently re-scoped.
+**P3 RATIFIED; the next BUILD is the OPEN call.** readiness-10's P1–P4 matrix is now partly resolved: **P3 (the
+BOUNDED partial decommission) is RATIFIED** as the terminal contract `docs/slices/sqlite-raw-decommission-1.md`
+(Option A, 2026-06-14) — `unresolved_edges` + diagnostics retained-forever, `nodes`/`edges` bounded-partial with
+the retirement IMPL **PARKED** on prerequisites (PREREQ-1 the (b) leaves served + PREREQ-2 the covered subset's
+(d) fallback/cert handling). What remains OPEN is the next BUILD: P1 (marginal partial fastpaths, flips no gate)
+and/or P2 (non-TS coverage — the larger strategic unlock, which does NOT fix the unresolved-call gap). P4 (pivot
+off) was not taken. The next track is NOT yet chosen.
 
 SCIP-INGEST-IR-1 is **no longer current** — it shipped as INGEST-CORE-1 (Stage A);
 `docs/slices/scip-ingest-ir-1.md` holds the historical design. STATS-LIVEGRAPH-1 is IMPLEMENTED
