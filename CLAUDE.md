@@ -106,6 +106,21 @@ After code changes that need testing against the installed daemon:
 
 This builds release binaries, restarts the daemon, and validates the installation. macOS only.
 
+## End-of-Slice Procedure
+
+When a slice's code work is done, run the three phases defined in
+`docs/testing/end-of-slice-procedure.md`: **Test → Install/deploy → Cleanup**.
+
+- **Test** (always, before handoff): `cargo build/fmt/clippy/test` in `rust/`, the
+  smoke scripts (`docs/testing/rmap-test-protocol.md`), AND the isolated live `rmap`
+  dogfood `./scripts/dogfood-isolated.sh` — runs `orient`/`explain`/`check` on a
+  fixture in a throwaway state root, never touching the operator's daemon/registry.
+- **Install / deploy** (`./scripts/dev-install-local.sh`): ONLY after reviewer approval.
+- **Cleanup** (`./scripts/clean-build.sh --all`): at slice end (debug artifacts reached 40+ GB).
+
+To run `rmap` when no repo is indexed (the `error: repo not indexed` case), use the
+isolated dogfood — never index into the operator's real registry to test.
+
 ## Persistence Completeness
 
 Persisted feature is incomplete without: write path, read path, refresh behavior, trust impact, CLI visibility, validation.
@@ -156,3 +171,4 @@ Stop and report if:
 - `agent_docs/validation.md` — evidence protocol
 - `agent_docs/architecture.md` — full architecture rules
 - `agent_docs/rmap-orientation.md` — CLI patterns
+- `docs/testing/end-of-slice-procedure.md` — Test → Install → Cleanup + isolated `rmap` dogfood
