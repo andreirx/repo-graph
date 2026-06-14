@@ -316,8 +316,28 @@ start_daemon() {
         error "Failed to start daemon service. Check: ${LOG_FILE}"
     fi
 
-    # Wait for startup
-    sleep 2
+    # Poll for the daemon to bind its socket. A fixed sleep races launchd: KeepAlive
+    # + ThrottleInterval can make a first-start flap take longer than the sleep, so
+    # validate_installation then false-fails ("daemon not running") while it is still
+    # settling. Wait up to ~20s for the socket (mirrors scripts/dogfood-isolated.sh).
+    local i
+    for i in $(seq 1 40); do
+        [[ -S "${SOCKET_PATH}" ]] && break
+        sleep 0.5
+    done
+
+    # bootstrap loads the job but, after repeated restarts (throttling) or if the job
+    # was already loaded, launchd may not actually (re)spawn the process. kickstart -k
+    # is the reliable lever: it force-(re)starts the loaded job. If the socket is still
+    # absent, kickstart and poll again.
+    if [[ ! -S "${SOCKET_PATH}" ]]; then
+        warn "  Socket not up after bootstrap; forcing 'launchctl kickstart -k'..."
+        launchctl kickstart -k "gui/${uid}/${LAUNCHD_LABEL}" 2>/dev/null || true
+        for i in $(seq 1 40); do
+            [[ -S "${SOCKET_PATH}" ]] && break
+            sleep 0.5
+        done
+    fi
 }
 
 # ── Validation ────────────────────────────────────────────────────────────────
