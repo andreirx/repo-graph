@@ -30,6 +30,22 @@ HEAD at authoring: `f9cfe23` (SQLITE-RAW-DECOMMISSION-1 contract ratified). Work
 > **NEXT BUILD: the focus-resolution producer (spec-first), THEN this COHERENCE-LEAF-SERVE impl** (whose IMPL is
 > gated on that producer + DR-CLS-2 A). The (c) trust boundary remains FIXED (Contract Clause 3 / Option A).
 
+> **DR-CLS-2 REVISED — `module_stats` CANNOT source MODULE_SUMMARY (operator re-ratified 2026-06-15, during
+> COHERENCE-LEAF-SERVE-IMPL-1).** First-hand reads (codex-confirmed) proved the original DR-CLS-2 conflated two
+> distinct SQLite surfaces: orient's `compute_{repo,path,file}_summary` count ALL files (incl. non-TS), ALL
+> `kind='SYMBOL'` nodes, and ALL languages; the TS-only `module_stats` counts only TS FILE-scope nodes
+> (root-excluded), EXPORTED symbols, and no languages — NOT equal (cert RED by construction on any repo with a
+> non-TS file / non-exported symbol / root file; the dogfood fixture itself: orient 4 files vs module_stats 2).
+> The shipped stats cert proves `module_stats == rmap stats`, NOT `== compute_*_summary`. **REVISED RESOLUTION →
+> Option A: MODULE_SUMMARY counts stay SQLite-LABELLED** (treated like the (c) trust leaf — honest SQLite read,
+> provenance.source = sqlite, NEVER LG-served). The LG-served (b) leaves are **focus-resolution (the producer),
+> cycles, and callers/callees** (the last needs a NEW cacheable repo-wide callgraph no-loss cert mirroring
+> cycles_cert — decide-and-record, no new SQLite surface). `resolved_calls` rides with the (c) trust read
+> (SQLite-labelled). **Achievable: SYMBOL-focus orient becomes `nodes`-free on green** (its pipeline emits no
+> MODULE_SUMMARY); REPO/PATH/FILE keep the `compute_*_summary` `nodes` read as a permanent SQLite contributor
+> (same posture as the (c) trust `edges` read). Output EXACT (no regression). Options B/C/D rejected
+> (no-win/regression / out-of-scope non-TS / dominated). The focus-resolution producer is confirmed sufficient.
+
 > **HEADLINE VERDICT (the load-bearing question, answered decisively, evidence-first):**
 > **Focus resolution (focus string → IR symbol/file/module identity) has NO LiveGraph producer — it is a
 > SECOND PRODUCER GAP.** [OBSERVED, first-hand: the LiveGraph is keyed EXCLUSIVELY by `CanonicalKey`; no
