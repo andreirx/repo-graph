@@ -46,6 +46,20 @@ HEAD at authoring: `f9cfe23` (SQLITE-RAW-DECOMMISSION-1 contract ratified). Work
 > (same posture as the (c) trust `edges` read). Output EXACT (no regression). Options B/C/D rejected
 > (no-win/regression / out-of-scope non-TS / dominated). The focus-resolution producer is confirmed sufficient.
 
+> **DR-CLS-CYCLES — cycles CANNOT be no-loss-served either (operator ratified CYCLES-A, 2026-06-15).** During
+> COHERENCE-LEAF-SERVE-IMPL-1, first-hand reads (codex-confirmed) proved the set-based `cycles_cert` (canonical
+> BTreeSet path-SETS, order/rotation-independent) does NOT license an ordered serve of orient's cycle output,
+> which is ORDER- and IDENTITY-sensitive (`take(3)` selection depends on list order; ring-order render;
+> basename vs qualified naming; the LG and SQLite Tarjan orders differ on the same set -> `take(3)` can pick
+> DIFFERENT cycles -> a different orient answer on green vs fallback). Same false-parity class as `module_stats`.
+> **RATIFIED -> CYCLES-A: cycles STAY SQLite-served, unchanged** (delegated to SQLite like MODULE_SUMMARY + the
+> (c) leaf). The LG-served (b) leaves are now ONLY **focus-resolution (the producer) + callers/callees
+> (callgraph cert)**. SYMBOL-focus orient stays `nodes`-free on green (cycles is an `edges` read that remains
+> alongside the (c) trust `edges` read). Output EXACT. CYCLES-B (canonicalize orient's cycle-output contract,
+> then serve cycles from the LiveGraph) is a DEFERRED follow-up (a visible wire change to a shipped signal);
+> CYCLES-C (ordered cert) rejected (RED by construction). Revise item: `build_orient_envelope`'s callgraph LABEL
+> path must route through the callgraph cert (zero-read on green), not the per-call SQLite gate (codex finding).
+
 > **HEADLINE VERDICT (the load-bearing question, answered decisively, evidence-first):**
 > **Focus resolution (focus string → IR symbol/file/module identity) has NO LiveGraph producer — it is a
 > SECOND PRODUCER GAP.** [OBSERVED, first-hand: the LiveGraph is keyed EXCLUSIVELY by `CanonicalKey`; no
