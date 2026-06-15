@@ -172,6 +172,15 @@ pub enum FallbackReason {
     /// summary leaf serves the SQLite value, labelled. The value-equivalence proof that gates the `livegraph`
     /// label (never a bare relabel of a SQLite-built summary).
     LiveGraphCallgraphDivergence,
+    /// COHERENCE-LEAF-SERVE-IMPL-1 (review-3 item 1): the BOUNDED orient (b)-leaf serve was DECLINED — the
+    /// bounded orient cert (focus-resolution ∧ callgraph no-loss) was not GREEN at this fingerprint, so
+    /// `handle_orient` ran the agent over the BARE SQLite storage (NOT the `OrientServeDecorator`). The
+    /// CALLERS_SUMMARY/CALLEES_SUMMARY value is therefore SQLite-sourced THIS call; the leaf is labelled
+    /// honestly and is NEVER re-certified `livegraph` from the callgraph cert state alone (the served-path
+    /// provenance follows the ACTUAL serve decision, not a hypothetical cert peek). Distinct from
+    /// `LiveGraphCallgraphDivergence` (the callgraph contributor itself may be GREEN here — a DIFFERENT
+    /// bounded contributor, e.g. focus-resolution, was RED).
+    LiveGraphBoundedServeDeclined,
 }
 
 impl FallbackReason {
@@ -193,6 +202,7 @@ impl FallbackReason {
             FallbackReason::LiveGraphStatsDivergence => "LiveGraphStatsDivergence",
             FallbackReason::LiveGraphComplexityDivergence => "LiveGraphComplexityDivergence",
             FallbackReason::LiveGraphCallgraphDivergence => "LiveGraphCallgraphDivergence",
+            FallbackReason::LiveGraphBoundedServeDeclined => "LiveGraphBoundedServeDeclined",
         }
     }
 }

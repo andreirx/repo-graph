@@ -98,6 +98,13 @@ pub enum CoherenceFallbackReason {
     /// SQLite `find_symbol_callers`/`find_symbol_callees` — serve the SQLite summary (labelled). The
     /// value-equivalence proof that lets orient label a summary `livegraph` only when LG == SQLite.
     LiveGraphCallgraphDivergence,
+    /// The BOUNDED orient (b)-leaf serve was DECLINED — the bounded orient cert (focus-resolution ∧
+    /// callgraph no-loss) was not GREEN, so the daemon served orient from the BARE SQLite read. The
+    /// CALLERS/CALLEES leaf is SQLite-sourced this call and labelled honestly, NEVER re-certified
+    /// `livegraph` from the callgraph cert state alone. Distinct from `LiveGraphCallgraphDivergence`: the
+    /// callgraph contributor itself may be GREEN; a DIFFERENT bounded contributor (e.g. focus-resolution)
+    /// was RED. COHERENCE-LEAF-SERVE-IMPL-1.
+    LiveGraphBoundedServeDeclined,
 }
 
 impl CoherenceFallbackReason {
@@ -121,6 +128,9 @@ impl CoherenceFallbackReason {
                 "LiveGraphComplexityDivergence"
             }
             CoherenceFallbackReason::LiveGraphCallgraphDivergence => "LiveGraphCallgraphDivergence",
+            CoherenceFallbackReason::LiveGraphBoundedServeDeclined => {
+                "LiveGraphBoundedServeDeclined"
+            }
         }
     }
 }

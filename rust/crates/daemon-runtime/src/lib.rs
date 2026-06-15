@@ -46,6 +46,7 @@
 //! }
 //! ```
 
+pub mod callgraph_cert;
 pub mod check_coherence;
 pub mod cycle_completeness_audit;
 pub mod cycle_output;
@@ -60,6 +61,7 @@ pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
 pub mod orient_coherence;
 pub mod orient_lg_decisions;
+pub mod orient_serve;
 pub mod partition_discovery;
 pub mod registry;
 pub mod state;

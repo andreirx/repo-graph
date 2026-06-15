@@ -27,7 +27,7 @@ use repo_graph_coherence::{CoherenceEnvelope, CoherenceFallbackReason};
 
 use crate::livegraph_feed::FallbackReason;
 use crate::orient_lg_decisions::{
-    orient_callees_outcome, orient_callers_outcome, orient_complexity_outcome,
+    orient_callees_outcome_served, orient_callers_outcome_served, orient_complexity_outcome,
     orient_cycles_outcome, OrientLgOutcome,
 };
 use crate::state::RepoState;
@@ -35,12 +35,21 @@ use crate::util::compute_trust_overlay_for_snapshot;
 
 /// Build orient's coherence-wrapped response from the agent's bare [`OrientResult`].
 ///
-/// `repo_uid` is the resolved repo uid; `display_name` is already set on `result` by the handler. The
-/// returned envelope is what the daemon serializes for `rmap orient`.
+/// `repo_uid` is the resolved repo uid; `display_name` is already set on `result` by the handler.
+/// `serve_from_lg` is `handle_orient`'s bounded-cert serve decision (`orient_bounded_cert_is_green`): the
+/// SINGLE authority for whether the (b) leaves were LiveGraph-served THIS call. It gates the CALLERS/CALLEES
+/// callgraph leaf LABEL (review-3 item 1): on `false` the daemon ran orient over BARE SQLite, so those leaves
+/// are SQLite-LABELLED, NEVER re-certified `livegraph` from the callgraph cert state alone (the provenance
+/// follows the ACTUAL serve, not a cert peek). The cycles + complexity leaves are NOT (b) serve leaves — their
+/// VALUE is always SQLite (CYCLES-A; the decorator delegates), and their hybrid `livegraph` LABEL is the
+/// SHIPPED corroboration-cert behavior (their OWN cycles/complexity cert), independent of `serve_from_lg`.
+///
+/// The returned envelope is what the daemon serializes for `rmap orient`.
 pub(crate) fn build_orient_envelope(
     repo_state: &RepoState,
     repo_uid: &str,
     result: OrientResult,
+    serve_from_lg: bool,
 ) -> CoherenceEnvelope<CoherentOrientResult> {
     let snapshot_uid = result.snapshot.clone();
 
@@ -94,21 +103,27 @@ pub(crate) fn build_orient_envelope(
         )));
     }
 
-    // CALLERS_SUMMARY / CALLEES_SUMMARY are symbol-focus only; the focus carries the symbol stable key.
-    // The per-symbol no-loss key compare needs the snapshot to read the SQLite caller/callee key set.
+    // CALLERS_SUMMARY / CALLEES_SUMMARY are symbol-focus only; the focus carries the symbol stable key. The
+    // SERVED-PATH variants gate the leaf LABEL on `serve_from_lg` (review-3 item 1): when dispatch SERVED
+    // (bounded cert GREEN) the cert-gated label peeks the GREEN callgraph cert -> `livegraph` with ZERO
+    // per-call SQLite read (matching the decorator's VALUE serve, review-1 item 1); when dispatch FELL BACK
+    // to bare SQLite (`serve_from_lg == false`) the value is SQLite-sourced, so the leaf is SQLite-LABELLED
+    // `LiveGraphBoundedServeDeclined` — NEVER re-certified `livegraph` from the callgraph cert state alone.
     if let Some(target) = symbol_target(&result.focus) {
         if present_callers {
-            decisions.callers_summary = Some(map_outcome(orient_callers_outcome(
+            decisions.callers_summary = Some(map_outcome(orient_callers_outcome_served(
                 repo_state,
                 target,
                 &snapshot_uid,
+                serve_from_lg,
             )));
         }
         if present_callees {
-            decisions.callees_summary = Some(map_outcome(orient_callees_outcome(
+            decisions.callees_summary = Some(map_outcome(orient_callees_outcome_served(
                 repo_state,
                 target,
                 &snapshot_uid,
+                serve_from_lg,
             )));
         }
     }
@@ -187,6 +202,9 @@ fn map_fallback(reason: FallbackReason) -> CoherenceFallbackReason {
         }
         FallbackReason::LiveGraphCallgraphDivergence => {
             CoherenceFallbackReason::LiveGraphCallgraphDivergence
+        }
+        FallbackReason::LiveGraphBoundedServeDeclined => {
+            CoherenceFallbackReason::LiveGraphBoundedServeDeclined
         }
     }
 }

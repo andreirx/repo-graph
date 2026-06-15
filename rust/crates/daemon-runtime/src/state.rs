@@ -236,6 +236,18 @@ pub struct RepoState {
     /// slice builds + stores it standalone (no consumer wiring yet).
     pub focus_resolution_cert:
         parking_lot::RwLock<Option<crate::focus_resolution_cert::FocusResolutionNoLossCert>>,
+
+    /// COHERENCE-LEAF-SERVE-IMPL-1: the in-memory repo-level CALLGRAPH NO-LOSS certificate (`None`
+    /// until lazily built by `callgraph_cert::build_and_store_callgraph_cert`). `verdict == GREEN`
+    /// iff the LiveGraph callers/callees rows (`callers`/`callees` + `symbol_context` enrichment) are
+    /// field-exact equal — as multisets — to the SQLite `find_symbol_callers`/`find_symbol_callees`
+    /// rows for EVERY symbol in the resident∪SQLite corpus. This is the cacheable, ZERO-read serve
+    /// mechanism the orient bounded (b)-leaf fastpath needs (the shipped per-call `gate_callgraph_no_loss`
+    /// reads SQLite EVERY call — disqualifying). Keyed by the SAME SQLite-free fingerprint as
+    /// `import_cert`/`cycles_cert`/`stats_cert`/`complexity_cert`/`focus_resolution_cert`; a fingerprint
+    /// mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). Interior mutability: the orient
+    /// serve decision read-locks; the lazy build write-locks.
+    pub callgraph_cert: parking_lot::RwLock<Option<crate::callgraph_cert::CallgraphNoLossCert>>,
 }
 
 impl RepoState {
@@ -278,6 +290,7 @@ impl RepoState {
             stats_cert: parking_lot::RwLock::new(None),
             complexity_cert: parking_lot::RwLock::new(None),
             focus_resolution_cert: parking_lot::RwLock::new(None),
+            callgraph_cert: parking_lot::RwLock::new(None),
         })
     }
 

@@ -2597,18 +2597,52 @@ impl ServiceDispatcher {
             total: 1,
         });
 
+        // COHERENCE-LEAF-SERVE-IMPL-1: orient bounded (b)-leaf SERVE-THEN-FALLBACK. Resolve the latest
+        // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the bounded
+        // orient cert (FOCUS-RESOLUTION ∧ CALLGRAPH no-loss) can be evaluated BEFORE the use case runs.
+        // GREEN -> run orient through the StoragePort decorator: focus resolution + callers/callees are
+        // served from the CURRENT-STATE LiveGraph with ZERO eager `nodes`/`edges` reads for those leaves.
+        // The (c) trust contributor and the MODULE_SUMMARY counts stay SQLite — delegated by the decorator
+        // and SQLite-LABELLED. Cycle VALUES also stay SQLite (the decorator delegates `find_module_cycles*`,
+        // RATIFIED CYCLES-A), but the IMPORT_CYCLES leaf LABEL is UNCHANGED shipped behavior: the hybrid
+        // cert-gated `orient_cycles_outcome` in `build_orient_envelope` labels it `livegraph` on a GREEN
+        // `cycles_cert`, else SQLite. Cycles are NOT in the bounded orient cert and are NOT LG-value-served
+        // here (CYCLES-B is the deferred follow-up). `build_orient_envelope`'s CALLGRAPH leaf LABEL follows
+        // this SAME `serve_from_lg` decision (review-3 item 1): on green the served callers/callees outcomes
+        // peek the GREEN callgraph cert so the full served path is zero per-call read for the callgraph leaf
+        // (not just the decorator's value serve); on RED they are SQLite-LABELLED. RED / non-resident /
+        // non-TS / no-snapshot -> the unchanged eager SQLite path. The cert build reads SQLite ONCE per
+        // fingerprint (the drilldown invariant).
+        let serve_from_lg = repo_state
+            .storage
+            .get_latest_snapshot(&repo_uid)
+            .ok()
+            .flatten()
+            .map(|s| {
+                crate::orient_serve::orient_bounded_cert_is_green(&repo_state, &s.snapshot_uid)
+            })
+            .unwrap_or(false);
+
         // Call the agent orient use case
         let orient_start = Instant::now();
-        let mut result =
-            match repo_graph_agent::orient(&repo_state.storage, &repo_uid, focus, budget, &now) {
-                Ok(r) => r,
-                Err(e) => {
-                    return DispatchResult::error(
-                        &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                    );
-                }
-            };
+        let orient_outcome = if serve_from_lg {
+            let decorator = crate::orient_serve::OrientServeDecorator::new(
+                &repo_state.livegraph,
+                &repo_state.storage,
+            );
+            repo_graph_agent::orient(&decorator, &repo_uid, focus, budget, &now)
+        } else {
+            repo_graph_agent::orient(&repo_state.storage, &repo_uid, focus, budget, &now)
+        };
+        let mut result = match orient_outcome {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
         let orient_ms = orient_start.elapsed().as_millis();
 
         // CLI-OUT-2B: Inject display_name for human renderers
@@ -2627,8 +2661,17 @@ impl ServiceDispatcher {
             total: 1,
         });
         let envelope_start = Instant::now();
-        let envelope =
-            crate::orient_coherence::build_orient_envelope(&repo_state, &repo_uid, result);
+        // COHERENCE-LEAF-SERVE-IMPL-1 (review-3 item 1): pass the bounded SERVE DECISION (`serve_from_lg`,
+        // computed above) into envelope assembly so the CALLERS/CALLEES callgraph leaf LABEL follows the
+        // ACTUAL serve. On `serve_from_lg == false` the agent ran over BARE SQLite, so those leaves are
+        // SQLite-LABELLED — never re-certified `livegraph` from the callgraph cert state alone (which could
+        // be GREEN even when a DIFFERENT bounded contributor, e.g. focus-resolution, forced the fallback).
+        let envelope = crate::orient_coherence::build_orient_envelope(
+            &repo_state,
+            &repo_uid,
+            result,
+            serve_from_lg,
+        );
         let output = match serde_json::to_value(&envelope) {
             Ok(v) => v,
             Err(e) => {
