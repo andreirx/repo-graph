@@ -2805,14 +2805,42 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
+        // COHERENCE-LEAF-SERVE-IMPL-2: explain bounded (b)-leaf SERVE-THEN-FALLBACK (the EXPLAIN consumer of
+        // the focus-resolution producer; sibling of handle_orient's IMPL-1 wiring). Resolve the latest
+        // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the SHARED bounded
+        // cert (FOCUS-RESOLUTION ∧ CALLGRAPH no-loss — the SAME `orient_bounded_cert_is_green` orient uses)
+        // can be evaluated BEFORE the use case runs. GREEN -> run explain through the SAME `OrientServeDecorator`:
+        // focus resolution (`resolve_path_focus`/`resolve_stable_key_focus`/`get_symbol_context`/
+        // `resolve_symbol_name`) is served from the CURRENT-STATE LiveGraph with ZERO eager `nodes` reads, so
+        // explain SYMBOL-focus is `nodes`-FREE on green (the `explain_symbol` pipeline emits no MODULE_SUMMARY;
+        // its only `nodes` reads ARE those four focus-resolution methods, all decorator-served). The (c) trust
+        // contributor (`get_trust_summary`, edges+unresolved_edges) and cycles (`find_cycles_involving_*`,
+        // edges) stay SQLite — delegated by the decorator (Contract Clause 3 + CYCLES-A); explain is NEVER
+        // `edges`-free. explain FILE/PATH keep their `compute_*_summary` / `list_*` `nodes` reads (delegated;
+        // the HONEST BOUND — the explain analogue of orient REPO/PATH/FILE's MODULE_SUMMARY; NOT `nodes`-free).
+        // RED / non-resident / non-TS / no-snapshot -> the unchanged eager bare-SQLite path. The cert build
+        // reads SQLite ONCE per fingerprint (the drilldown invariant); a cached GREEN/RED reads none.
+        let serve_from_lg = repo_state
+            .storage
+            .get_latest_snapshot(&repo_uid)
+            .ok()
+            .flatten()
+            .map(|s| {
+                crate::orient_serve::orient_bounded_cert_is_green(&repo_state, &s.snapshot_uid)
+            })
+            .unwrap_or(false);
+
         // Call the agent explain use case
-        let mut result = match repo_graph_agent::run_explain(
-            &repo_state.storage,
-            &repo_uid,
-            target,
-            budget,
-            &now,
-        ) {
+        let explain_outcome = if serve_from_lg {
+            let decorator = crate::orient_serve::OrientServeDecorator::new(
+                &repo_state.livegraph,
+                &repo_state.storage,
+            );
+            repo_graph_agent::run_explain(&decorator, &repo_uid, target, budget, &now)
+        } else {
+            repo_graph_agent::run_explain(&repo_state.storage, &repo_uid, target, budget, &now)
+        };
+        let mut result = match explain_outcome {
             Ok(r) => r,
             Err(e) => {
                 return DispatchResult::error(

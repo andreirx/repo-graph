@@ -14,11 +14,10 @@
 //! below is UNTOUCHED — the coherence layer wraps the answer, it does not
 //! re-aggregate it.
 
+mod call_ranking;
 pub mod coherent;
 
 pub use coherent::{explain_to_coherent, ExplainLgDecisions};
-
-use std::collections::HashMap;
 
 use repo_graph_gate::GateStorageRead;
 
@@ -293,7 +292,11 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // ── EXPLAIN_CALLERS ─────────────────────────────────────
     // Always emitted for symbol targets — "0 callers" is
     // meaningful positive information in a deep dive.
-    let callers = storage.find_symbol_callers(snapshot_uid, symbol_stable_key)?;
+    let mut callers = storage.find_symbol_callers(snapshot_uid, symbol_stable_key)?;
+    // COHERENCE-LEAF-SERVE-IMPL-2: rank the FULL caller set by relevance BEFORE truncation, so the
+    // budget-truncated `items` are a pure function of the (callgraph-cert-proven-equal) caller SET —
+    // byte-identical whether served from SQLite or the LiveGraph. See `call_ranking`.
+    call_ranking::rank_caller_rows(&mut callers);
     {
         let count = callers.len() as u64;
         let top_modules = group_by_module(callers.iter().map(|c| c.module_path.as_deref()));
@@ -317,7 +320,9 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_CALLEES ─────────────────────────────────────
     // Always emitted for symbol targets — same reasoning.
-    let callees = storage.find_symbol_callees(snapshot_uid, symbol_stable_key)?;
+    let mut callees = storage.find_symbol_callees(snapshot_uid, symbol_stable_key)?;
+    // Same relevance ranking as callers (the dual outgoing-edge set) — see `call_ranking`.
+    call_ranking::rank_callee_rows(&mut callees);
     {
         let count = callees.len() as u64;
         let top_modules = group_by_module(callees.iter().map(|c| c.module_path.as_deref()));
@@ -760,11 +765,9 @@ const TOP_MODULES_N: usize = 3;
 fn group_by_module<'a>(
     module_paths: impl Iterator<Item = Option<&'a str>>,
 ) -> Vec<ModuleCountEvidence> {
-    let mut counts: HashMap<String, u64> = HashMap::new();
-    for mp in module_paths {
-        let key = mp.unwrap_or("(unknown)").to_string();
-        *counts.entry(key).or_insert(0) += 1;
-    }
+    // Shared with `call_ranking`'s concentration so `top_modules` and the caller/callee ranking count
+    // identically (same per-row basis + `(unknown)` sentinel).
+    let counts = call_ranking::module_counts(module_paths);
     let mut entries: Vec<ModuleCountEvidence> = counts
         .into_iter()
         .map(|(module, count)| ModuleCountEvidence { module, count })

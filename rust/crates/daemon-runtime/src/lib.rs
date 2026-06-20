@@ -68,6 +68,12 @@ pub mod state;
 pub mod trust_coherence;
 pub mod util;
 
+// COHERENCE-LEAF-SERVE-IMPL-2: explain's consumer of the SHARED `OrientServeDecorator` + bounded cert
+// (the dispatch wiring lives in `dispatch::handle_explain`; these are its serve/no-eager-read/honest-bound/
+// RED-fallback proofs, kept out of the 500-line `orient_serve` per its "no behavior change" scope).
+#[cfg(test)]
+mod explain_serve_tests;
+
 pub use dispatch::ServiceDispatcher;
 pub use registry::{RegistryEntry, RegistryError, RepoRegistry};
 pub use state::{DaemonState, RepoKey, RepoState, StateRootMode};

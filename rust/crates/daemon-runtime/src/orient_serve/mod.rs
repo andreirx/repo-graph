@@ -83,6 +83,9 @@ mod storage_port_impl;
 /// - **cycles** — EXCLUDED (RATIFIED CYCLES-A `e363c55`): the set-based `cycles_cert` does not license a
 ///   byte-identical serve into orient's order-sensitive cycle output; cycles stay SQLite-served. See the
 ///   module header.
+///
+/// SHARED BY orient + explain (COHERENCE-LEAF-SERVE-IMPL-2): `handle_explain` reuses this SAME bounded
+/// cert to gate the SAME decorator (two consumers now; name kept orient-scoped — a rename is cosmetic).
 pub fn orient_bounded_cert_is_green(repo_state: &RepoState, snapshot_uid: &str) -> bool {
     focus_resolution_is_green(repo_state, snapshot_uid)
         && callgraph_is_green(repo_state, snapshot_uid)
@@ -91,6 +94,14 @@ pub fn orient_bounded_cert_is_green(repo_state: &RepoState, snapshot_uid: &str) 
 /// The orient bounded (b)-leaf serve decorator. `livegraph` is the daemon's resident LiveGraph (the
 /// (b)-leaf value source on green); `inner` is the SQLite read port everything else delegates to. Held
 /// by reference (no clone) for the lifetime of one orient request.
+///
+/// SHARED BY orient + explain (COHERENCE-LEAF-SERVE-IMPL-2): `handle_explain` wraps the SAME decorator
+/// around `run_explain` on a GREEN bounded cert so explain SYMBOL-focus is `nodes`-free too. The four
+/// focus-resolution methods serve explain's focus identically; the callgraph methods are multiset-no-loss.
+/// orient consumes them order-insensitively (count + `group_by_module`); explain — the FIRST order-sensitive
+/// consumer — RANKS the full caller/callee set by relevance before truncating (`agent::explain::call_ranking`,
+/// DR-EXPLAIN-CALLER-ORDER resolution `2d6d00d`), so the multiset cert SUFFICES for explain too: both stores
+/// rank the cert-proven-equal set to the SAME ordered top-N. No decorator change.
 pub struct OrientServeDecorator<'a, S: ?Sized> {
     livegraph: &'a parking_lot::RwLock<Option<LiveGraph>>,
     inner: &'a S,
