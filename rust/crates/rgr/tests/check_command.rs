@@ -107,6 +107,43 @@ fn check_unknown_flag_usage_error() {
     );
 }
 
+// ── TRUNCATION-AUDIT-1: --full is accepted as a documented no-op on check ────
+
+#[test]
+fn check_full_flag_accepted_as_noop() {
+    // check output is never budget-capped, but --full is accepted for invocation symmetry with
+    // orient/explain (documented no-op). Parse must succeed → daemon-unavailable (exit 2), not
+    // usage error (exit 1).
+    let output = run_cmd_isolated(&["check", "--full"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--full must parse on check (exit 2 daemon error), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ── TRUNCATION-AUDIT-1 review-1 #3: `check --help` exits 0 and documents `--full` ────
+
+#[test]
+fn check_help_flag_exits_zero_and_documents_full() {
+    // `rmap check --help` must succeed (exit 0) and document --full on stderr, short-circuiting before
+    // any daemon connection. Pre-fix this errored with exit 1 ("unknown flag: --help").
+    let output = run_cmd_isolated(&["check", "--help"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "check --help must exit 0. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--full"),
+        "check --help must document --full: {}",
+        stderr
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CHECK-LIVEGRAPH-IMPL — SUCCESS-PATH / COHERENCE-ENVELOPE COVERAGE MAP
 // ══════════════════════════════════════════════════════════════════════════════

@@ -16,6 +16,15 @@ pub const DEFAULT_COMPLEXITY_THRESHOLD: u64 = 20;
 /// Maximum number of complex symbols to include in evidence.
 const COMPLEXITY_TOP_N: usize = 5;
 
+/// "Fetch every above-threshold symbol" sentinel for the storage `limit` parameter.
+///
+/// TRUNCATION-AUDIT-1: `i64::MAX` is a valid SQLite `LIMIT` (no snapshot has 9.2e18 symbols), so
+/// the adapter returns the FULL above-threshold set; we then sort + cut to `COMPLEXITY_TOP_N` in
+/// the agent for a deterministic, source-independent top-N (see `aggregate_with_threshold`).
+/// `usize::MAX` is NOT usable as the sentinel: rusqlite binds the limit as `i64` and errors on the
+/// `u64::MAX` overflow, whereas `i64::MAX as usize` round-trips cleanly.
+const FETCH_ALL: usize = i64::MAX as usize;
+
 /// Aggregate complexity data and emit HIGH_COMPLEXITY if warranted.
 ///
 /// Returns a signal when at least one symbol exceeds the threshold.
@@ -40,9 +49,24 @@ pub fn aggregate_with_threshold<S: AgentStorageRead + ?Sized>(
         return Ok(AggregatorOutput::empty());
     }
 
-    // Get top N for evidence (sample, not full list)
-    let high_complexity =
-        storage.query_high_complexity_symbols(snapshot_uid, threshold, COMPLEXITY_TOP_N)?;
+    // TRUNCATION-AUDIT-1: fetch the FULL above-threshold set, then apply a TOTAL deterministic
+    // sort (complexity DESC, then the unique stable_key) and cut to COMPLEXITY_TOP_N HERE in the
+    // agent. We deliberately do NOT accept storage's `ORDER BY complexity DESC LIMIT N` cut: its
+    // ties at the cut boundary fall to SQLite rowid order, so the surviving sample would depend on
+    // storage row order rather than on the SET (the DR-EXPLAIN-CALLER-ORDER hazard). Owning the cut
+    // here makes the top-N sample a pure function of the above-threshold set — identical regardless
+    // of which store answered. Cost (honest): the table SCAN is already paid — `count_*` above passes
+    // over the same `cyclomatic_complexity` measurements. The added work is MATERIALISING the rows
+    // (`query_*` joins nodes+files and JSON-parses each, and filters the threshold in Rust, so it
+    // materialises every complexity row, not just the above-threshold minority) to pick the top-5.
+    // This is bounded and paid once per orient (not a hot loop); the cost-OPTIMAL fix — a total
+    // `ORDER BY complexity DESC, target_stable_key LIMIT N` in the storage SQL so the LIMIT cut is
+    // itself deterministic — lives in the storage adapter, outside this slice's file scope, and is
+    // recorded as the follow-up. Determinism here is required NOW and is achievable agent-side.
+    let mut high_complexity =
+        storage.query_high_complexity_symbols(snapshot_uid, threshold, FETCH_ALL)?;
+    crate::ordering::sort_complexity(&mut high_complexity);
+    high_complexity.truncate(COMPLEXITY_TOP_N);
 
     let top: Vec<ComplexSymbolEvidence> = high_complexity
         .into_iter()

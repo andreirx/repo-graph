@@ -1299,6 +1299,123 @@ fn explain_rejects_small_budget() {
     );
 }
 
+// ── TRUNCATION-AUDIT-1: --full (budget "full") at the daemon command boundary ────
+
+#[test]
+fn explain_full_budget_uncaps_over_cap_file_listing() {
+    // Over-cap full-output proof AT THE COMMAND BOUNDARY: the explain path-focus EXPLAIN_FILES
+    // section caps at items_cap (15 for medium). Index 16 files so the cap bites at `medium` and
+    // NOT at `full`; assert `full` emits every file (items.len() == count) with NO truncation flag.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("over-cap-repo");
+    std::fs::create_dir_all(repo_dir.join("src")).unwrap();
+    // 16 distinct TS files (> the 15-item cap), each with one exported function.
+    for i in 0..16 {
+        std::fs::write(
+            repo_dir.join(format!("src/f{i:02}.ts")),
+            format!("export function fn{i:02}() {{ return {i}; }}\n"),
+        )
+        .unwrap();
+    }
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"oc-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // medium budget (cap 15) over 16 files → the EXPLAIN_FILES section truncates.
+    let medium = format!(
+        r#"{{"id":"oc-2","method":"explain","params":{{"repo":"{}","target":"src","budget":"medium"}}}}"#,
+        canonical_path
+    );
+    let med_out = run_daemon_requests_with_state(vec![&medium], Arc::clone(&state))[0].clone();
+    assert!(
+        med_out.contains(r#""items_truncated":true"#),
+        "medium budget must truncate the 16-file listing (cap 15): {}",
+        med_out
+    );
+
+    // full budget → NOTHING truncates anywhere in the response.
+    let full = format!(
+        r#"{{"id":"oc-3","method":"explain","params":{{"repo":"{}","target":"src","budget":"full"}}}}"#,
+        canonical_path
+    );
+    let full_out = run_daemon_requests_with_state(vec![&full], Arc::clone(&state))[0].clone();
+    assert!(
+        full_out.contains(r#""schema":"rgr.agent.v1""#),
+        "--full explain must succeed: {}",
+        full_out
+    );
+    assert!(
+        !full_out.contains(r#""items_truncated":true"#),
+        "--full must not truncate ANY section: {}",
+        full_out
+    );
+
+    // count == total proof: the EXPLAIN_FILES section emits items.len() == count under --full.
+    let parsed: serde_json::Value = serde_json::from_str(full_out.lines().last().unwrap()).unwrap();
+    let signals = parsed["result"]["value"]["signals"]
+        .as_array()
+        .expect("value.signals is an array");
+    let files_sig = signals
+        .iter()
+        .find(|s| s["value"]["code"] == "EXPLAIN_FILES")
+        .expect("EXPLAIN_FILES signal present");
+    let ev = &files_sig["value"]["evidence"];
+    let count = ev["count"].as_u64().expect("count");
+    let items = ev["items"].as_array().expect("items array");
+    assert!(count >= 16, "all 16 indexed files counted: {}", count);
+    assert_eq!(
+        items.len() as u64,
+        count,
+        "--full emits EVERY file (items.len() == count): {}",
+        full_out
+    );
+}
+
+#[test]
+fn orient_accepts_full_budget() {
+    // The daemon must ACCEPT budget "full" for orient (map → Budget::Full), not reject it as an
+    // invalid budget. Proves the dispatch budget parse handles the --full tier end-to-end.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("orient-full-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"of-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let orient_request = format!(
+        r#"{{"id":"of-2","method":"orient","params":{{"repo":"{}","budget":"full"}}}}"#,
+        canonical_path
+    );
+    let out = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state))[0].clone();
+    assert!(
+        !out.contains(r#""code":"InvalidRequest""#),
+        "budget \"full\" must be accepted, not rejected: {}",
+        out
+    );
+    assert!(
+        out.contains(r#""schema":"rgr.agent.v1""#),
+        "orient --full must return a successful envelope: {}",
+        out
+    );
+}
+
 // ── Enrich tests (still uses db_path/repo_uid - admin operation) ────────
 
 #[test]

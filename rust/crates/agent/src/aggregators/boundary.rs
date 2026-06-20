@@ -38,6 +38,7 @@ use std::collections::HashSet;
 use super::AggregatorOutput;
 use crate::dto::signal::{BoundaryViolationEvidence, BoundaryViolationsEvidence, Signal};
 use crate::errors::AgentStorageError;
+use crate::ordering;
 use crate::storage_port::{AgentBoundaryDeclaration, AgentStorageRead};
 
 const VIOLATIONS_TOP_N: usize = 3;
@@ -88,15 +89,9 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
         return Ok(AggregatorOutput::empty());
     }
 
-    // Deterministic top-N ordering: sort descending by
-    // edge_count, tiebreak by source_module then target_module
-    // (lexicographic ascending). Then truncate to TOP_N.
-    per_rule.sort_by(|a, b| {
-        b.edge_count
-            .cmp(&a.edge_count)
-            .then_with(|| a.source_module.cmp(&b.source_module))
-            .then_with(|| a.target_module.cmp(&b.target_module))
-    });
+    // Deterministic top-N ordering (TRUNCATION-AUDIT-1 shared helper): edge_count DESC,
+    // tiebreak source then target (lexicographic ascending). Then truncate to TOP_N.
+    ordering::sort_boundary_violations(&mut per_rule);
     per_rule.truncate(VIOLATIONS_TOP_N);
 
     let evidence = BoundaryViolationsEvidence {
@@ -155,12 +150,7 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
         return Ok(AggregatorOutput::empty());
     }
 
-    per_rule.sort_by(|a, b| {
-        b.edge_count
-            .cmp(&a.edge_count)
-            .then_with(|| a.source_module.cmp(&b.source_module))
-            .then_with(|| a.target_module.cmp(&b.target_module))
-    });
+    ordering::sort_boundary_violations(&mut per_rule);
     per_rule.truncate(VIOLATIONS_TOP_N);
 
     let evidence = BoundaryViolationsEvidence {

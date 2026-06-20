@@ -19,6 +19,15 @@ pub enum Budget {
     Small,
     Medium,
     Large,
+    /// Uncapped tier (TRUNCATION-AUDIT-1, the `--full` escape hatch).
+    ///
+    /// Every cap returns `usize::MAX`, so NO list truncates and every
+    /// `*_truncated` flag is `false`. The meaningful pre-truncation
+    /// ordering still applies (it is independent of the cap), so `--full`
+    /// emits the COMPLETE list in the same deterministic order a capped
+    /// tier would have used for its surviving prefix. Intended for
+    /// `rmap <cmd> --full | grep <x>`.
+    Full,
 }
 
 impl Budget {
@@ -28,6 +37,7 @@ impl Budget {
             Self::Small => 5,
             Self::Medium => 15,
             Self::Large => 50,
+            Self::Full => usize::MAX,
         }
     }
 
@@ -37,6 +47,7 @@ impl Budget {
             Self::Small => 3,
             Self::Medium => 5,
             Self::Large => 20,
+            Self::Full => usize::MAX,
         }
     }
 
@@ -47,6 +58,7 @@ impl Budget {
             Self::Small => 3,
             Self::Medium => 5,
             Self::Large => 10,
+            Self::Full => usize::MAX,
         }
     }
 }
@@ -66,6 +78,19 @@ mod tests {
         assert_eq!(Budget::Large.max_signals(), 50);
         assert_eq!(Budget::Large.max_limits(), 20);
         assert_eq!(Budget::Large.max_next(), 10);
+    }
+
+    #[test]
+    fn full_is_uncapped() {
+        // TRUNCATION-AUDIT-1: the `--full` tier uncaps every list so nothing truncates.
+        assert_eq!(Budget::Full.max_signals(), usize::MAX);
+        assert_eq!(Budget::Full.max_limits(), usize::MAX);
+        assert_eq!(Budget::Full.max_next(), usize::MAX);
+    }
+
+    #[test]
+    fn full_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&Budget::Full).unwrap(), "\"full\"");
     }
 
     #[test]

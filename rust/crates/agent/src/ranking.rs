@@ -64,9 +64,30 @@ pub fn truncate_signals(signals: &mut Vec<Signal>, budget: Budget) -> Truncation
     truncate_vec(signals, budget.max_signals())
 }
 
-/// Truncate a limit list to the budget cap. Limits are sorted
-/// by their variant order (stable ordering is determined by the
-/// aggregator insertion order; limits are not rank-assigned).
+/// Truncate a limit list to the budget cap.
+///
+/// TRUNCATION-AUDIT-1 audit (`truncate_limits`): limits are NOT re-sorted before the cut, and
+/// — unlike signals — deliberately so. Signals carry a relevance rank (`sort_and_rank`:
+/// severity/category/tier); limits do NOT. A limit is an orthogonal capability-gap marker
+/// ("gate not configured", "complexity unavailable", "module data unavailable", …) with no
+/// severity to rank by. Re-sorting them is unnecessary AND inventing a relevance order would be
+/// a false-certainty claim the VISION forbids.
+///
+/// The pre-cut order is already deterministic, total, and SOURCE-INDEPENDENT — the property the
+/// DR-EXPLAIN-CALLER-ORDER fix protects:
+///   - DETERMINISTIC + TOTAL: every limit is a distinct `Limit::from_code(..)` pushed in a fixed
+///     code-path order (the aggregator pipeline order — structural → governance → capability).
+///     Distinct codes in fixed positions ⇒ no ties to break.
+///   - SOURCE-INDEPENDENT: each limit is derived from a boolean/count CONDITION on repo state
+///     (does a requirement exist? are complexity measurements present?), NEVER projected from a
+///     storage-row iteration. So the list is a pure function of repo STATE — identical whether
+///     SQLite or the LiveGraph answered. (Contrast the item lists in `ordering.rs`, which ARE
+///     read from storage rows and therefore DO need an explicit total sort.)
+///
+/// Truncation drops the trailing markers; the cut is reported by `limits_truncated` /
+/// `limits_omitted_count`, and `--full` (`Budget::Full`) uncaps it. NOTE: the coherence layer's
+/// envelope-level provenance limits are appended AFTER this cut (`coherent::append_provenance_limits`,
+/// itself deterministic), so they are never truncated here.
 pub fn truncate_limits(limits: &mut Vec<Limit>, budget: Budget) -> TruncationOutcome {
     truncate_vec(limits, budget.max_limits())
 }
@@ -177,5 +198,48 @@ mod tests {
         assert!(outcome.truncated);
         assert_eq!(outcome.omitted, 1);
         assert_eq!(s.len(), 5);
+    }
+
+    // ── TRUNCATION-AUDIT-1: limit truncation is deterministic ────────────
+    //
+    // Limits carry no relevance rank (audit decision: see `truncate_limits` doc). The cut keeps the
+    // leading construction-order prefix verbatim — no re-sort — and flags the omission. This pins
+    // that the cut is a deterministic prefix of the (source-independent) construction order.
+
+    #[test]
+    fn truncate_limits_keeps_construction_order_prefix() {
+        use crate::dto::limit::{Limit, LimitCode};
+        // A fixed-order limit list as the aggregator pipeline builds it, longer than the Small cap (3).
+        let mut limits = vec![
+            Limit::from_code(LimitCode::GateNotConfigured),
+            Limit::from_code(LimitCode::ComplexityUnavailable),
+            Limit::from_code(LimitCode::ModuleDataUnavailable),
+            Limit::from_code(LimitCode::LanguageCoveragePartial),
+        ];
+        let original: Vec<LimitCode> = limits.iter().map(|l| l.code).collect();
+        let outcome = truncate_limits(&mut limits, Budget::Small);
+        assert!(outcome.truncated, "4 limits > Small cap (3) ⇒ truncated");
+        assert_eq!(outcome.omitted, 1);
+        let kept: Vec<LimitCode> = limits.iter().map(|l| l.code).collect();
+        assert_eq!(
+            kept,
+            original[..3].to_vec(),
+            "truncate_limits keeps the leading construction-order prefix verbatim (no re-sort)"
+        );
+    }
+
+    #[test]
+    fn truncate_limits_full_budget_keeps_all() {
+        use crate::dto::limit::{Limit, LimitCode};
+        let mut limits = vec![
+            Limit::from_code(LimitCode::GateNotConfigured),
+            Limit::from_code(LimitCode::ComplexityUnavailable),
+            Limit::from_code(LimitCode::ModuleDataUnavailable),
+            Limit::from_code(LimitCode::LanguageCoveragePartial),
+        ];
+        let outcome = truncate_limits(&mut limits, Budget::Full);
+        assert!(!outcome.truncated, "--full uncaps the limit list");
+        assert_eq!(outcome.omitted, 0);
+        assert_eq!(limits.len(), 4);
     }
 }

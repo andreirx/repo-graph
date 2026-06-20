@@ -44,6 +44,7 @@ use crate::dto::signal::{
     CalleesSummaryEvidence, CallersSummaryEvidence, ModuleCountEvidence, Signal,
 };
 use crate::errors::OrientError;
+use crate::ordering;
 use crate::ranking;
 use crate::storage_port::{AgentSnapshot, AgentStorageRead, AgentSymbolContext};
 
@@ -271,12 +272,9 @@ fn aggregate_boundary_for_module<S: AgentStorageRead + ?Sized>(
         return Ok(AggregatorOutput::empty());
     }
 
-    per_rule.sort_by(|a, b| {
-        b.edge_count
-            .cmp(&a.edge_count)
-            .then_with(|| a.source_module.cmp(&b.source_module))
-            .then_with(|| a.target_module.cmp(&b.target_module))
-    });
+    // TRUNCATION-AUDIT-1: shared meaningful order (edge_count DESC, then source/target) — the
+    // comparator this site previously inlined, now centralised in `ordering`.
+    ordering::sort_boundary_violations(&mut per_rule);
     per_rule.truncate(3);
 
     let evidence = BoundaryViolationsEvidence {
@@ -299,12 +297,15 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
     snapshot_uid: &str,
     module_qualified_name: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    let cycles = storage.find_cycles_involving_module(snapshot_uid, module_qualified_name)?;
+    let mut cycles = storage.find_cycles_involving_module(snapshot_uid, module_qualified_name)?;
 
     if cycles.is_empty() {
         return Ok(AggregatorOutput::empty());
     }
 
+    // TRUNCATION-AUDIT-1: rank (length DESC, then ring members) BEFORE the top-3 cut so the
+    // surviving cycles are the biggest, deterministically — not a storage-order prefix.
+    ordering::sort_cycles(&mut cycles);
     let cycle_count = cycles.len() as u64;
     let top: Vec<CycleEvidence> = cycles
         .into_iter()

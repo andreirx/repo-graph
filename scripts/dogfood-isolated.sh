@@ -115,9 +115,12 @@ echo "binary version  : $("${RMAP_BIN}" --version 2>&1 || true)"
 echo "------------------------------------------------------------------"
 
 # ── Tiny self-contained TypeScript fixture (no node_modules, no network) ──────
-# 2 source files with a clear import + call graph so orient/explain/check have
-# real structure to report (IMPORTS edge; CALLS computeScore→{square,clamp},
-# main→computeScore, main→console.log[unresolved builtin]).
+# 3 source files. util.ts + main.ts give a clear import + call graph so
+# orient/explain/check have real structure to report (IMPORTS edge; CALLS
+# computeScore→{square,clamp}, main→computeScore, main→console.log[unresolved
+# builtin]). many.ts holds 20 symbols — OVER the default explain item cap (15 at
+# `medium`) — so the TRUNCATION-AUDIT-1 `--full` demonstration below can show the
+# cap BITE by default and VANISH under `--full` on live output.
 cat > "${FIXTURE}/package.json" <<'JSON'
 {
   "name": "rmap-dogfood-fixture",
@@ -166,6 +169,18 @@ export function main(): void {
 }
 TS
 
+# many.ts: 20 exported functions (manyFn00..manyFn19), one per line so the
+# extractor records 20 symbols with ascending line_start. 20 > the default explain
+# EXPLAIN_SYMBOLS item cap (15 at `medium`), so the list truncates by default and is
+# uncapped under `--full`. `sort_explain_symbols` orders by line_start ASC, so the
+# surviving default top-15 is manyFn00..manyFn14 and manyFn19 is the dropped tail —
+# the assertion below keys off manyFn19's presence/absence.
+{
+    for i in $(seq -w 0 19); do
+        printf 'export function manyFn%s(): number { return %d; }\n' "$i" "$((10#$i))"
+    done
+} > "${FIXTURE}/src/many.ts"
+
 # ── run(): echo the EXACT command, execute it, capture stdout to a file ────────
 # Commands that resolve the repo "from cwd" must run with cwd = the fixture dir.
 run() {
@@ -208,6 +223,79 @@ run "orient"  "${OUT_DIR}/orient.txt"  "${RMAP_BIN}" orient
 run "explain" "${OUT_DIR}/explain.txt" "${RMAP_BIN}" explain "src/main.ts"
 run "check"   "${OUT_DIR}/check.txt"   "${RMAP_BIN}" check
 
+# ── Phase 2b: TRUNCATION-AUDIT-1 — live `--full` capture + cap-bite proof ──────
+# many.ts has 20 symbols > the default explain item cap (15 at `medium`), so the
+# EXPLAIN_SYMBOLS list TRUNCATES by default and is UNCAPPED under `--full`. These
+# runs capture that end-to-end (the operator-required `--full` dogfood), and the
+# assertion proves `--full` truly uncaps: the 20th symbol (manyFn19) is OMITTED by
+# default and PRESENT under `--full`, and the `items_truncated` flag tracks the cut.
+run "explain many (default cap)"  "${OUT_DIR}/explain-many.txt"       "${RMAP_BIN}" explain "src/many.ts"
+run "explain many --full"         "${OUT_DIR}/explain-many-full.txt"  "${RMAP_BIN}" explain "src/many.ts" --full
+run "explain many --json"         "${OUT_DIR}/explain-many.json"      "${RMAP_BIN}" explain "src/many.ts" --json
+run "explain many --full --json"  "${OUT_DIR}/explain-many-full.json" "${RMAP_BIN}" explain "src/many.ts" --full --json
+run "orient --full"               "${OUT_DIR}/orient-full.txt"        "${RMAP_BIN}" orient --full
+run "check --full (no-op)"        "${OUT_DIR}/check-full.txt"         "${RMAP_BIN}" check --full
+
+echo ""
+echo "------------------------------------------------------------------"
+echo "TRUNCATION-AUDIT-1 --full proof (EXPLAIN_SYMBOLS: 20 symbols vs default cap 15):"
+MANY_DEF_JSON="${OUT_DIR}/explain-many.json"
+MANY_FULL_JSON="${OUT_DIR}/explain-many-full.json"
+
+# (1) --full emits the COMPLETE list: the 20th symbol survives.
+if grep -q "manyFn19" "${MANY_FULL_JSON}"; then
+    echo "  PASS: --full output includes manyFn19 (20th symbol) — the list is UNCAPPED"
+else
+    echo "  FAIL: --full output is missing manyFn19 — --full did NOT uncap" >&2
+    exit 1
+fi
+# (2) the default cut is LOAD-BEARING: the 20th symbol is omitted at cap 15.
+if grep -q "manyFn19" "${MANY_DEF_JSON}"; then
+    echo "  FAIL: default (cap 15) output unexpectedly includes manyFn19 — cap did not bite" >&2
+    exit 1
+else
+    echo "  PASS: default output OMITS manyFn19 — the 15-item cap truncated the list"
+fi
+# (3) the truncation flag tracks the cut honestly: present by default, absent under --full.
+if grep -q "items_truncated" "${MANY_DEF_JSON}"; then
+    echo "  PASS: default --json carries items_truncated (the cut is reported, not hidden)"
+else
+    echo "  FAIL: default --json lacks items_truncated despite a 20>15 cut" >&2
+    exit 1
+fi
+if grep -q "items_truncated" "${MANY_FULL_JSON}"; then
+    echo "  FAIL: --full --json still carries items_truncated — something truncated under --full" >&2
+    exit 1
+else
+    echo "  PASS: --full --json has NO items_truncated flag — nothing was cut"
+fi
+
+# ── HUMAN grep-path proof (TRUNCATION-AUDIT-1 review-1 #1/#4) ──────────────────
+# The JSON proof above only exercises the DATA layer (Budget::Full). The acceptance use case is
+# `rmap explain <target> --full | grep <x>` on the HUMAN render, which has a SECOND, independent
+# presentation cap (EXPLAIN_SYMBOLS: 15). review-1 OBSERVED `--full` human output still stopping at
+# manyFn14 with "... (5 more)". These assertions key off the HUMAN .txt files (not JSON): under
+# `--full` the 20th symbol must be present; by default the presentation cap must still bite.
+echo ""
+echo "TRUNCATION-AUDIT-1 --full HUMAN grep-path proof (presentation cap, not just JSON):"
+MANY_DEF_TXT="${OUT_DIR}/explain-many.txt"
+MANY_FULL_TXT="${OUT_DIR}/explain-many-full.txt"
+
+# (4) the HUMAN render under --full is UNCAPPED — grep on stdout sees the 20th symbol.
+if grep -q "manyFn19" "${MANY_FULL_TXT}"; then
+    echo "  PASS: --full HUMAN output includes manyFn19 — grep sees the COMPLETE list"
+else
+    echo "  FAIL: --full HUMAN output is missing manyFn19 — the presentation cap still truncates" >&2
+    exit 1
+fi
+# (5) the default HUMAN render is still capped (presentation cap bites without --full).
+if grep -q "manyFn19" "${MANY_DEF_TXT}"; then
+    echo "  FAIL: default HUMAN output unexpectedly includes manyFn19 — presentation cap did not bite" >&2
+    exit 1
+else
+    echo "  PASS: default HUMAN output OMITS manyFn19 — the presentation cap truncates by default"
+fi
+
 # ── Phase 3: prove the fixture lives in the ISOLATED registry ─────────────────
 run "repo list (isolated)" "${OUT_DIR}/repo-list-isolated.txt" "${RMAP_BIN}" repo list
 
@@ -244,6 +332,7 @@ echo "=================================================================="
 echo "OK — isolated dogfood complete."
 echo "  state root : ${STATE_ROOT}"
 echo "  outputs    : ${OUT_DIR}/<cmd>.{txt,stderr}  (cmd: index orient explain check repo-list-isolated)"
+echo "  --full cap : ${OUT_DIR}/explain-many{,-full}.{txt,json}, orient-full.txt, check-full.txt"
 echo "=================================================================="
 
 if [[ "${KEEP}" == "true" ]]; then

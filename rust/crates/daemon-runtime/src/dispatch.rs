@@ -2566,16 +2566,18 @@ impl ServiceDispatcher {
         // Parse optional focus
         let focus = Self::get_optional_string_param(&request.params, "focus");
 
-        // Parse optional budget (default: small)
+        // Parse optional budget (default: small).
+        // TRUNCATION-AUDIT-1: "full" (the `--full` escape hatch) maps to the uncapped tier.
         let budget = match request.params.get("budget").and_then(|v| v.as_str()) {
             None | Some("small") => Budget::Small,
             Some("medium") => Budget::Medium,
             Some("large") => Budget::Large,
+            Some("full") => Budget::Full,
             Some(other) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::invalid_request(format!(
-                        "invalid budget value: {} (expected small|medium|large)",
+                        "invalid budget value: {} (expected small|medium|large|full)",
                         other
                     )),
                 );
@@ -2784,15 +2786,17 @@ impl ServiceDispatcher {
         };
 
         // Parse optional budget (default: medium for explain)
-        // CLI contract: explain only accepts medium|large, not small
+        // CLI contract: explain accepts medium|large, plus "full" (TRUNCATION-AUDIT-1, the
+        // `--full` uncapped escape hatch); not small.
         let budget = match request.params.get("budget").and_then(|v| v.as_str()) {
             None | Some("medium") => Budget::Medium,
             Some("large") => Budget::Large,
+            Some("full") => Budget::Full,
             Some(other) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::invalid_request(format!(
-                        "invalid budget value: {} (expected medium|large)",
+                        "invalid budget value: {} (expected medium|large|full)",
                         other
                     )),
                 );

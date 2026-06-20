@@ -62,6 +62,7 @@ pub mod doc_relevance;
 pub mod dto;
 pub mod errors;
 pub mod explain;
+pub mod ordering;
 pub mod orient;
 pub mod ranking;
 pub mod storage_port;

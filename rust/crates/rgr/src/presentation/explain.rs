@@ -126,7 +126,13 @@ pub struct ExplainSignal {
 
 impl ExplainResponse {
     /// Render the explain response as human-readable plain text.
-    pub fn render_human(&self) -> String {
+    ///
+    /// `full` is the `--full` flag (TRUNCATION-AUDIT-1): when set, the per-section display cap in
+    /// [`render_signal_section`](Self::render_signal_section) is lifted so every item renders (the human
+    /// analogue of the daemon's `Budget::Full`, for `rmap explain <target> --full | grep <x>`). The default
+    /// (`full = false`) path is byte-identical to the pre-flag output. See `explain_sections.rs` for the
+    /// two-cap model.
+    pub fn render_human(&self, full: bool) -> String {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
@@ -153,15 +159,24 @@ impl ExplainResponse {
         // Each signal is a LEAF `CoherenceEnvelope<ExplainSignal>`; read the pristine inner `.value` (the
         // section TEXT is byte-identical to the pre-wrapper output).
         for signal in &self.signals {
-            if let Some(section) = self.render_signal_section(&signal.value) {
+            if let Some(section) = self.render_signal_section(&signal.value, full) {
                 out.push_str(&section);
                 out.push('\n');
             }
         }
 
         // ── Truncation warning ──────────────────────���──────────────
-        if self.truncated {
-            out.push_str("\n[Output truncated. Use --json for full results.]\n");
+        // Only the default (capped) path can truncate; `--full` (full == true) uncaps the daemon AND these
+        // renderers, so this notice never fires under `--full`. Guarding on `!full` keeps the message honest
+        // (no "truncated" claim when nothing was cut) even if a stale `truncated` flag slipped through.
+        if self.truncated && !full {
+            // TRUNCATION-AUDIT-1 review-2 #1: plain `--json` does NOT uncap — it is a transport
+            // format that preserves the selected budget (the daemon still emits `items_truncated:
+            // true`). Only `--full` (⇒ `Budget::Full`) lifts every cap. So the notice points to
+            // `--full` for complete output and `--full --json` for complete JSON, never bare `--json`.
+            out.push_str(
+                "\n[Output truncated. Use --full for complete output, or --full --json for complete JSON.]\n",
+            );
         }
 
         out.trim_end().to_string()
@@ -283,14 +298,14 @@ mod tests {
     #[test]
     fn render_shows_repo_name() {
         let r = minimal_response();
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Repo: test-repo"));
     }
 
     #[test]
     fn render_shows_file_target() {
         let r = minimal_response();
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Target: src/core/auth.ts (file)"));
     }
 
@@ -305,7 +320,7 @@ mod tests {
             reason: Some("no_match".to_string()),
             candidates: vec![],
         };
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Target: nonexistent (unresolved: no_match)"));
     }
 
@@ -331,7 +346,7 @@ mod tests {
                 },
             ],
         };
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Ambiguous target"));
         assert!(out.contains("AuthService.validate"));
         assert!(out.contains("UserService.validate"));
@@ -359,7 +374,7 @@ mod tests {
                 ]
             })),
         })];
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Callers (3)"));
         assert!(out.contains("handleLogin (src/controllers)"));
     }
@@ -376,7 +391,7 @@ mod tests {
                 "enrichment_state": "ran"
             })),
         })];
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Trust"));
         assert!(out.contains("Call resolution: 95%"));
         assert!(out.contains("Call graph reliability: high"));
@@ -385,7 +400,7 @@ mod tests {
     #[test]
     fn render_hides_internal_fields() {
         let r = minimal_response();
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(!out.contains("snap-123"), "snapshot should be hidden");
     }
 
@@ -468,7 +483,7 @@ mod tests {
 
         let env: CoherenceEnvelope<ExplainResponse> = serde_json::from_str(json).unwrap();
         assert_eq!(env.value.repo, "my-app");
-        let out = env.value.render_human();
+        let out = env.value.render_human(false);
         // Identity (read from the leaf's inner value) drives the symbol Target header.
         assert!(out.contains("Target: validate"));
         assert!(out.contains("Kind: symbol"));
@@ -478,5 +493,88 @@ mod tests {
         assert!(out.contains("handleLogin (src/ctl)"));
         // The internal snapshot uid stays hidden.
         assert!(!out.contains("snap-abc"));
+    }
+
+    // ── TRUNCATION-AUDIT-1 review-1 #1/#2: the SECOND (presentation) display cap ──
+    //
+    // The agent already emits EVERY item under `Budget::Full` (proven at the daemon boundary by
+    // `explain_full_budget_uncaps_over_cap_file_listing`). But these renderers cap the HUMAN output AGAIN
+    // at a fixed per-section N (EXPLAIN_SYMBOLS: 15). Before this fix `--full` uncapped the JSON yet the
+    // human render still truncated, so `rmap explain <target> --full | grep <x>` missed items past the
+    // display cap. These two tests pin both paths at the presentation seam (no daemon required).
+
+    /// Build a resolved file-target response carrying an over-cap EXPLAIN_SYMBOLS section of `n` symbols
+    /// named `sym00..sym{n-1}`, so a cap of 15 bites at n=20 (sym15..sym19 are the dropped tail).
+    fn symbols_response(n: usize) -> ExplainResponse {
+        let items: Vec<serde_json::Value> = (0..n)
+            .map(|i| serde_json::json!({ "name": format!("sym{:02}", i), "subtype": "function" }))
+            .collect();
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_SYMBOLS".to_string(),
+            summary: format!("{} symbols.", n),
+            evidence: Some(serde_json::json!({ "count": n, "items": items })),
+        })];
+        r
+    }
+
+    #[test]
+    fn render_full_uncaps_symbols_past_presentation_cap() {
+        // 20 > the EXPLAIN_SYMBOLS presentation cap (15). Under `--full` EVERY symbol must render and the
+        // "... (N more)" note must be ABSENT. This FAILS against the pre-fix `.take(15)` renderer, which
+        // dropped sym15..sym19 and printed "... (5 more)".
+        let out = symbols_response(20).render_human(true);
+        assert!(out.contains("sym00"), "first symbol present:\n{out}");
+        assert!(
+            out.contains("sym19"),
+            "--full must render the 20th symbol (past the cap of 15):\n{out}"
+        );
+        assert!(
+            !out.contains("more)"),
+            "--full must NOT emit a '... (N more)' truncation note:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_default_caps_symbols_at_presentation_limit() {
+        // The default (full == false) path is unchanged: cap 15, sym15..sym19 dropped, overflow note shown.
+        let out = symbols_response(20).render_human(false);
+        assert!(out.contains("sym00"));
+        assert!(
+            out.contains("sym14"),
+            "the 15th symbol is the last kept under the default cap:\n{out}"
+        );
+        assert!(
+            !out.contains("sym19"),
+            "default cap (15) must drop the 20th symbol:\n{out}"
+        );
+        assert!(
+            out.contains("... (5 more)"),
+            "default path reports the cut honestly:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_truncation_notice_points_to_full_not_bare_json() {
+        // TRUNCATION-AUDIT-1 review-2 #1: the `self.truncated` notice (distinct from the per-section
+        // "(N more)" overflow note) previously read "Use --json for full results." — false, because
+        // plain `--json` preserves the budget (the daemon still reports `items_truncated: true`); only
+        // `--full` ⇒ `Budget::Full` uncaps. The corrected notice points to `--full` / `--full --json`.
+        // The first two asserts FAIL against the old string; the third pins the old wording gone.
+        let mut r = minimal_response();
+        r.truncated = true;
+        let out = r.render_human(false);
+        assert!(
+            out.contains("--full for complete output"),
+            "notice must point to --full for complete output:\n{out}"
+        );
+        assert!(
+            out.contains("--full --json for complete JSON"),
+            "notice must show --full --json (not bare --json) for complete JSON:\n{out}"
+        );
+        assert!(
+            !out.contains("Use --json for full results"),
+            "the misleading bare-`--json` wording must be gone:\n{out}"
+        );
     }
 }

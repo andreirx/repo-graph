@@ -257,9 +257,12 @@ impl OrientResponse {
         }
 
         // ── Truncation notice ──────────────────────────────────────
-        // Budget-based truncation is transparent: user can adjust via --budget or get full data via --json
+        // Honest budget guidance (TRUNCATION-AUDIT-1 review-2 #1): --full uncaps every list (add
+        // --json for complete JSON) and --budget large raises the cap. Plain --json does NOT uncap —
+        // it is a transport format that preserves the selected budget, so the notice must not offer
+        // bare --json as "complete output".
         if self.truncated {
-            out.push_str("\n[Some signals omitted due to budget. Use --budget large or --json for complete output.]\n");
+            out.push_str("\n[Some signals omitted due to budget. Use --full for complete output, or --full --json for complete JSON; --budget large raises the cap.]\n");
         }
 
         out.trim_end().to_string()
@@ -863,6 +866,18 @@ mod tests {
         let out = r.render_human();
         assert!(out.contains("Some signals omitted due to budget"));
         assert!(out.contains("--budget large"));
+        // TRUNCATION-AUDIT-1 review-2 #1: the notice must direct the user to `--full` for complete
+        // output and `--full --json` for complete JSON. Plain `--json` preserves the budget (it does
+        // NOT uncap), so the old "... or --json for complete output" wording was false. These two
+        // assertions FAIL against that prior string (which had `--full,` and bare `--json`).
+        assert!(
+            out.contains("--full for complete output"),
+            "notice must point to --full for complete output:\n{out}"
+        );
+        assert!(
+            out.contains("--full --json for complete JSON"),
+            "notice must show --full --json (not bare --json) for complete JSON:\n{out}"
+        );
     }
 
     #[test]
