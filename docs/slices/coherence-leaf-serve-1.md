@@ -60,6 +60,25 @@ HEAD at authoring: `f9cfe23` (SQLITE-RAW-DECOMMISSION-1 contract ratified). Work
 > CYCLES-C (ordered cert) rejected (RED by construction). Revise item: `build_orient_envelope`'s callgraph LABEL
 > path must route through the callgraph cert (zero-read on green), not the per-call SQLite gate (codex finding).
 
+> **COHERENCE-LEAF-SERVE-IMPL-2 — explain consumer scope + honest bound (operator-directed 2026-06-20; first-hand
+> reads of `agent/src/explain/mod.rs` + `daemon-runtime/src/{orient_serve,dispatch.rs}`).** The orient consumer
+> (`765583b`) shipped a serve decorator that already overrides ALL FOUR focus-resolution methods
+> (`resolve_path_focus` / `resolve_stable_key_focus` / `resolve_symbol_name` / `get_symbol_context`) + callgraph —
+> MORE than orient alone exploits. explain resolves its focus through those SAME storage-port methods (`run_explain`
+> -> `resolve_path_focus` UNCONDITIONAL at mod.rs:86) and the `explain_symbol` pipeline emits NO MODULE_SUMMARY. So
+> wiring the SAME decorator + bounded cert (`focus_resolution ∧ callgraph`) into `handle_explain` on green makes
+> **explain SYMBOL-focus `nodes`-free on green** — the explain analogue of orient SYMBOL, the SECOND real eager-read
+> elimination of the arc. **HONEST BOUND (first-hand):** `explain_file` reads `compute_file_summary` +
+> `list_symbols_in_file`; `explain_path` reads `compute_path_summary` + `list_files_in_path` — ALL `nodes`, for
+> their identity/symbols/files leaves, NOT focus resolution, NOT decorator-served. FILE/PATH keep those `nodes`
+> reads as PERMANENT SQLite contributors (the explain analogue of orient REPO/PATH/FILE's MODULE_SUMMARY); they are
+> NOT `nodes`-free. The (c) trust read + cycles `edges` remain in EVERY explain pipeline (never `edges`-free; Clause
+> 3 + CYCLES-A). REUSE the decorator + cert as-is (two callers now — decide-and-record; NO rename this slice:
+> cosmetic + churn). `build_explain_envelope` already REBUILDS its leaf VALUES from the LiveGraph independent of the
+> use-case storage (the `82b6557` path), so its labels follow its own rebuild source — explain likely needs NO
+> envelope change (no orient review-3 desync); VERIFY first-hand, thread `serve_from_lg` ONLY if a real desync
+> exists. Output EXACT.
+
 > **HEADLINE VERDICT (the load-bearing question, answered decisively, evidence-first):**
 > **Focus resolution (focus string → IR symbol/file/module identity) has NO LiveGraph producer — it is a
 > SECOND PRODUCER GAP.** [OBSERVED, first-hand: the LiveGraph is keyed EXCLUSIVELY by `CanonicalKey`; no
