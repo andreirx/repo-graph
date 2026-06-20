@@ -64,6 +64,7 @@ pub mod orient_lg_decisions;
 pub mod orient_serve;
 pub mod partition_discovery;
 pub mod registry;
+pub mod resource_metrics;
 pub mod state;
 pub mod trust_coherence;
 pub mod util;
@@ -73,6 +74,11 @@ pub mod util;
 // RED-fallback proofs, kept out of the 500-line `orient_serve` per its "no behavior change" scope).
 #[cfg(test)]
 mod explain_serve_tests;
+
+// DOCTOR-RESOURCE-REPORT: proves `daemon_info` carries a real (non-zero) daemon RSS
+// + total `databases/` disk + repo count through the full dispatch path.
+#[cfg(test)]
+mod daemon_info_resource_tests;
 
 pub use dispatch::ServiceDispatcher;
 pub use registry::{RegistryEntry, RegistryError, RepoRegistry};

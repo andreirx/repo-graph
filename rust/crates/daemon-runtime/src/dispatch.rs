@@ -352,6 +352,8 @@ impl ServiceDispatcher {
     /// Return daemon-level diagnostic information.
     ///
     /// STATE-ROOT-SEPARATION-1: Reports state root mode and authority write policy.
+    /// DOCTOR-RESOURCE-REPORT: Reports the daemon's own resident memory (RSS) and the
+    /// total on-disk size of its `databases/` state root across all repos.
     ///
     /// Request: `{"method": "daemon_info", "params": {}}`
     ///
@@ -360,9 +362,18 @@ impl ServiceDispatcher {
     /// {
     ///   "state_root": "/path/to/state",
     ///   "state_root_mode": "global" | "sandbox-local",
-    ///   "authority_writes_allowed": true | false
+    ///   "authority_writes_allowed": true | false,
+    ///   "rss_bytes": 47448064,            // current RSS (live footprint), or null
+    ///   "rss_peak_bytes": 81788928,       // peak RSS high-water mark, or null
+    ///   "databases_total_bytes": 31244288,// sum of databases/ (all repos), or null
+    ///   "repo_count": 3                   // registered repos
     /// }
     /// ```
+    ///
+    /// The three byte metrics are `null` (UNKNOWN) when the platform/filesystem read
+    /// is genuinely unavailable; `databases_total_bytes` is `0` (known-zero) for an
+    /// empty-but-readable dir. `repo_count` is always known. `rmap doctor` renders
+    /// these and must keep the health verdict green when a metric is unavailable.
     fn handle_daemon_info(&self, request: &Request) -> DispatchResult {
         let state_root = self
             .state
@@ -372,12 +383,29 @@ impl ServiceDispatcher {
             .to_string();
         let mode = self.state.state_root_mode();
 
+        // DOCTOR-RESOURCE-REPORT: the daemon measures ITSELF — its live resident memory
+        // (did the in-memory LiveGraph substrate balloon?) and the total disk its
+        // warm state occupies. Mechanism lives in `resource_metrics` (kept out of this
+        // oversized file per the structural guardrail); each read degrades to `None`.
+        let rss_bytes = crate::resource_metrics::current_rss_bytes();
+        let rss_peak_bytes = crate::resource_metrics::peak_rss_bytes();
+        let registry = self.state.registry();
+        let repo_count = registry.list().len() as u64;
+        let db_dir = registry.db_dir().to_path_buf();
+        drop(registry);
+        let databases_total_bytes = crate::resource_metrics::directory_size_bytes(&db_dir);
+
         DispatchResult::success(
             &request.id,
             serde_json::json!({
                 "state_root": state_root,
                 "state_root_mode": mode.as_str(),
-                "authority_writes_allowed": mode.allows_authority_writes()
+                "authority_writes_allowed": mode.allows_authority_writes(),
+                // DOCTOR-RESOURCE-REPORT additive fields (Option -> number | null):
+                "rss_bytes": rss_bytes,
+                "rss_peak_bytes": rss_peak_bytes,
+                "databases_total_bytes": databases_total_bytes,
+                "repo_count": repo_count,
             }),
         )
     }
