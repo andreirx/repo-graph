@@ -103,6 +103,28 @@ HEAD at authoring: `f9cfe23` (SQLITE-RAW-DECOMMISSION-1 contract ratified). Work
 > modules) rather than concentration — a one-comparator tweak if the operator prefers; concentration chosen now as
 > it reuses the existing model.
 
+> **PREREQ-1 FOCUS-RESOLUTION LEVER — CLOSED + DECOMMISSION CHECKPOINTED (operator-directed 2026-06-20, after
+> COHERENCE-LEAF-SERVE-IMPL-2; first-hand reads of `agent/src/check/mod.rs` + `crates/trust/src/service.rs`).**
+> The focus-resolution producer (`ccaad68`)'s REACHABLE consumers are EXACTLY the two coherence commands that
+> resolve a focus: orient (IMPL-1, `765583b`) + explain (IMPL-2, `9e6077c`) — both SYMBOL-focus `nodes`-free on
+> green. VERIFIED FIRST-HAND that the other two resolve NO focus, so the producer offers them NOTHING:
+> · **check** (`run_check`, check/mod.rs:47) reads `get_repo` / `get_latest_snapshot` / `get_stale_files` /
+>   `get_trust_summary` ((c)) / gate Authority — NO `resolve_*_focus`, NO `nodes` read at all. check is ALREADY
+>   `nodes`-free; its only graph touch is the (c) trust summary (permanent, Clause 3).
+> · **trust** (`assemble_trust_report`, trust/service.rs:591) reads the (c) data (`extraction_diagnostics` +
+>   `unresolved_edges` classification/samples) + `resolved_calls` (`count_edges_by_type(CALLS)`, its lone (b) leaf,
+>   entangled with (c) in Half-B) + `compute_module_stats` + `find_path_prefix_module_cycles` + file paths +
+>   Authority — NO `resolve_*_focus`. trust is repo-wide; the producer does not apply.
+> **DECOMMISSION CHECKPOINT (honest):** the achievable `nodes`-free-on-green surface is now BANKED — the 6
+> drilldowns (prior arc, cert-fastpaths) + orient SYMBOL + explain SYMBOL. The PERMANENT SQLite floor (by design,
+> NOT a gap): orient REPO/PATH/FILE + explain FILE/PATH `compute_*_summary` / `list_*` `nodes` reads (MODULE_SUMMARY
+> has no no-loss LG producer — DR-CLS-2 REVISED); the (c) trust `edges`/`unresolved_edges` read everywhere (Clause
+> 3); cycles `edges` (CYCLES-A); non-TS (gate 2). The `nodes`/`edges` TABLES CANNOT be dropped — they were never
+> going to be (the floor is permanent). PREREQ-2 (the (d) fallback/cert-build handling) + the bounded retirement
+> IMPL remain DEFERRED (sharply diminishing returns: check/trust are no-ops for the lever, and the tables persist
+> regardless). PREREQ-1's focus-resolution lever is COMPLETE; the arc's two clean wins are committed; the track is
+> at a clean stopping point.
+
 > **HEADLINE VERDICT (the load-bearing question, answered decisively, evidence-first):**
 > **Focus resolution (focus string → IR symbol/file/module identity) has NO LiveGraph producer — it is a
 > SECOND PRODUCER GAP.** [OBSERVED, first-hand: the LiveGraph is keyed EXCLUSIVELY by `CanonicalKey`; no
