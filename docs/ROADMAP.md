@@ -131,9 +131,10 @@ See `agent_docs/storage-architecture-v2.md` for the tier specification.
 | **ORIENT-SQLITE-FREE-1** | spec: eliminate orient's eager `nodes`/`edges` base read (Option B, command 1) | SPEC — DEFERRED (`e10a455`); orient producer-gated on a shared trust-core producer (DR-1); composite cert RED by construction. DR-0 → S3 (explain leads). Producer REFUTED downstream (see probe). |
 | **EXPLAIN-SQLITE-FREE-1** | spec: eliminate explain's eager `nodes`/`edges` base read (Option B lead) | SPEC — PRODUCER-GATED (`f3237f9`); same trust-core blocker as orient (DR-E1 = DR-1) + focus-resolution gap; producer-light hypothesis refuted. DR-0 → S1 (shared producer first). |
 | **TRUST-SUMMARY-LIVEGRAPH-1** | spec: the shared LiveGraph-native trust-summary producer (orient DR-1 / explain DR-E1) | SPEC — NEEDS-EXTENSION (`94fc506`); `IrEdge` resolved-only, no `CallObservation`; 7/8 consumed fields need an IR/ingest/classifier extension. DR-TS-0 → S1 (probe first). |
-| **SCIP-UNRESOLVED-CALL-PROBE-1** | spike: does SCIP carry unresolved calls + reach `unresolved_edges` parity? | PROBE — **NO-GO** (`7d4b3bb`, HEAD); scip-typescript emits no unresolved-call occurrence; paired 0 ≠ 3, structurally inverted. **Producer line CLOSED → Option A** (homegrown `unresolved_edges` stays SQLite-labelled). |
+| **SCIP-UNRESOLVED-CALL-PROBE-1** | spike: does SCIP carry unresolved calls + reach `unresolved_edges` parity? | PROBE — **NO-GO** (`7d4b3bb`); scip-typescript emits no unresolved-call occurrence; paired 0 ≠ 3, structurally inverted. **Producer line CLOSED → Option A** (homegrown `unresolved_edges` stays SQLite-labelled). |
 | **SQLITE-RAW-DECOMMISSION-READINESS-10** | end-of-arc re-baseline: the SCIP unresolved-call boundary + the gate partition | AUDIT (this reconcile) — the trust unresolved-call fields are RED BY DESIGN (no current-state SCIP source); a FULL decommission for that contributor is IMPOSSIBLE; goal re-bounded. |
-| **SQLITE-RAW-DECOMMISSION-1** | retire raw `nodes`/`edges` substrate (incl. `unresolved_edges`) | **CONTRACT RATIFIED** (Stage D, terminal; bounded, Option A — `sqlite-raw-decommission-1.md`, 2026-06-14; retirement IMPL **PARKED** on prereqs) — the trust contributor's unresolved-call fields (`unresolved_edges` + diagnostics) are RED-by-design: no current-state SCIP source (SCIP-UNRESOLVED-CALL-PROBE-1 NO-GO → Option A), so a FULL global drop is impossible; re-scoped to a BOUNDED partial per readiness-10. Other gates still RED (non-TS ceiling, drilldown fallbacks, cert builds, 31 non-graph tables). [Was: "readiness-9 gate RED, all five deletion gates FAIL" — superseded by readiness-10's partition: gate 1 can never go fully GREEN.] |
+| **SQLITE-RAW-DECOMMISSION-1** | retire raw `nodes`/`edges` substrate (incl. `unresolved_edges`) | **CONTRACT RATIFIED** (Stage D, terminal; bounded, Option A — `sqlite-raw-decommission-1.md`, 2026-06-14; retirement IMPL **DEFERRED** on prereqs; PREREQ-1's focus-resolution lever has since SHIPPED + CLOSED at HEAD `7fff04e` — see COHERENCE-LEAF-SERVE-1) — the trust contributor's unresolved-call fields (`unresolved_edges` + diagnostics) are RED-by-design: no current-state SCIP source (SCIP-UNRESOLVED-CALL-PROBE-1 NO-GO → Option A), so a FULL global drop is impossible; re-scoped to a BOUNDED partial per readiness-10. Other gates still RED (non-TS ceiling, drilldown fallbacks, cert builds, 31 non-graph tables). [Was: "readiness-9 gate RED, all five deletion gates FAIL" — superseded by readiness-10's partition: gate 1 can never go fully GREEN.] |
+| **COHERENCE-LEAF-SERVE-1** | PREREQ-1: serve the (b) leaves from the LiveGraph + close the focus-resolution lever | IMPLEMENTED + CLOSED (Stage D; focus-resolution producer `ccaad68` → orient IMPL-1 `765583b` SYMBOL-focus nodes-free → explain IMPL-2 `9e6077c` SYMBOL-focus nodes-free + relevance-ranked callers → PREREQ-1 CLOSED + decommission CHECKPOINTED `7fff04e` (HEAD); PREREQ-2 + retirement IMPL DEFERRED) |
 | **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
 | **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
 | **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
@@ -163,8 +164,11 @@ deferred) → EXPLAIN-SQLITE-FREE-1 ✓ (`f3237f9`; explain producer-gated, same
 TRUST-SUMMARY-LIVEGRAPH-1 ✓ (`94fc506`; the shared producer is NEEDS-EXTENSION) → SCIP-UNRESOLVED-CALL-PROBE-1 ✓
 (`7d4b3bb`; **NO-GO** — SCIP carries no unresolved-call disposition → operator ratified **Option A**, the honest
 hybrid) → SQLITE-RAW-DECOMMISSION-READINESS-10 ✓ (end-of-arc re-baseline; the SCIP unresolved-call boundary) →
-**SQLITE-RAW-DECOMMISSION-1 (next; GATED + PARTIAL BY DESIGN — the trust unresolved-call fields are RED-by-design
-per the probe; a FULL global drop is impossible, re-scoped to a BOUNDED partial per readiness-10)**.
+**SQLITE-RAW-DECOMMISSION-1 (CONTRACT RATIFIED; GATED + PARTIAL BY DESIGN — the trust unresolved-call fields are
+RED-by-design per the probe; a FULL global drop is impossible, re-scoped to a BOUNDED partial per readiness-10)** →
+**PREREQ-1 COHERENCE-LEAF-SERVE arc** (focus-resolution producer `ccaad68` → orient IMPL-1 `765583b` → explain
+IMPL-2 `9e6077c` → PREREQ-1 lever CLOSED + decommission CHECKPOINTED **`7fff04e`, HEAD**; orient/explain
+SYMBOL-focus `nodes`-free on green; PREREQ-2 + retirement IMPL DEFERRED).
 Full Stage-B/C/D ledger: `CURRENT_SLICE.md`.
 
 **Honesty:** the viability spikes (TS/C/Rust) are complete and the gate is retired.
@@ -175,12 +179,19 @@ window remains runtime-tuned. See `docs/architecture/scip-migration-plan.md`.
 
 ### Current Priority
 
-**SQLITE-RAW-DECOMMISSION-1 readiness (next; GATED + PARTIAL BY DESIGN).** Stage D, SQLite raw-decommission
-track — the terminal slice, now re-bounded: the Option-B producer investigation CLOSED NO-GO and proved a FULL
+**Stage D — SQLite raw decommission: the readiness arc is COMPLETE, PREREQ-1 is CLOSED, and the retirement IMPL
+is DEFERRED — the next BUILD is an OPEN governance call.** The readiness arc closed at the readiness-10
+end-of-arc re-baseline: the Option-B producer investigation returned NO-GO and proved a FULL
 `nodes`/`edges`/`unresolved_edges` retirement is partially IMPOSSIBLE (the trust unresolved-call fields have no
-current-state SCIP source — RED by design). [INFERRED priority, OBSERVED-backed — git HEAD=`7d4b3bb`; the
-Stage-D order line above; the `docs/slices/sqlite-raw-decommission-readiness-10.md` end-of-arc re-baseline,
-which supersedes the readiness-9 recompute.]
+current-state SCIP source — RED by design). SQLITE-RAW-DECOMMISSION-1 is RATIFIED as the BOUNDED
+partial-decommission contract (Option A), with the retirement IMPL DEFERRED on prerequisites. **PREREQ-1's
+focus-resolution lever has since SHIPPED + CLOSED at HEAD `7fff04e`** — the COHERENCE-LEAF-SERVE arc (orient +
+explain SYMBOL-focus `nodes`-free on green); PREREQ-2 + the bounded retirement IMPL stay DEFERRED (diminishing
+returns / a permanent SQLite floor). What remains is the next BUILD — P1 (marginal partial fastpaths) and/or P2
+(non-TS coverage), an OPEN call, NOT yet chosen (detailed in "P3 RATIFIED; the next BUILD is the OPEN call"
+below). [INFERRED priority, OBSERVED-backed — git HEAD=`7fff04e`; the Stage-D order line above; the
+`docs/slices/sqlite-raw-decommission-readiness-10.md` end-of-arc re-baseline, which supersedes the readiness-9
+recompute.]
 
 **COHERENCE-LAYER-1 is DESIGNED + IMPLEMENTED.** The ratified mixed-source `CoherenceEnvelope<T>` contract
 (`6ed17b8`, multi-source-leaf amendment `5129f44`) and all four per-command builds shipped: orient (`2fd4478`,
@@ -223,8 +234,12 @@ ceiling; the drilldown fallback paths + the imports/cycles/stats cert builds; th
 **P3 RATIFIED; the next BUILD is the OPEN call.** readiness-10's P1–P4 matrix is now partly resolved: **P3 (the
 BOUNDED partial decommission) is RATIFIED** as the terminal contract `docs/slices/sqlite-raw-decommission-1.md`
 (Option A, 2026-06-14) — `unresolved_edges` + diagnostics retained-forever, `nodes`/`edges` bounded-partial with
-the retirement IMPL **PARKED** on prerequisites (PREREQ-1 the (b) leaves served + PREREQ-2 the covered subset's
-(d) fallback/cert handling). What remains OPEN is the next BUILD: P1 (marginal partial fastpaths, flips no gate)
+the retirement IMPL **DEFERRED** on prerequisites. **PREREQ-1 (the (b)-leaf serve / focus-resolution lever) has
+since SHIPPED + CLOSED** — the COHERENCE-LEAF-SERVE arc (focus-resolution producer `ccaad68` → orient IMPL-1
+`765583b` → explain IMPL-2 `9e6077c` → PREREQ-1 CLOSED + decommission CHECKPOINTED at HEAD `7fff04e`): orient +
+explain SYMBOL-focus are now `nodes`-free on green, the achievable `nodes`-free surface is BANKED, and PREREQ-2 +
+the bounded retirement IMPL stay DEFERRED (diminishing returns / a permanent SQLite floor). What remains OPEN is
+the next BUILD: P1 (marginal partial fastpaths, flips no gate)
 and/or P2 (non-TS coverage — the larger strategic unlock, which does NOT fix the unresolved-call gap). P4 (pivot
 off) was not taken. The next track is NOT yet chosen.
 

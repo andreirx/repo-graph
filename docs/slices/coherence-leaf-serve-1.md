@@ -1,7 +1,14 @@
-# COHERENCE-LEAF-SERVE-1: bounded (b)-leaf serve-then-fallback for the coherence commands — SPEC (PREREQ-1)
+# COHERENCE-LEAF-SERVE-1: bounded (b)-leaf serve-then-fallback for the coherence commands — SPEC + IMPL SHIPPED (PREREQ-1)
 
 Slice ID: COHERENCE-LEAF-SERVE-1
-Status: **SPEC ONLY (spec-first; no code, no deletion, no migration, no default flip).** This document SPECS
+Status: **SPEC + IMPL SHIPPED.** The spec was ratified, then IMPLEMENTED — see the appended decision banners
+below (the ratification record), which this header now AGREES with: COHERENCE-LEAF-SERVE-IMPL-1 (`765583b`)
+made orient SYMBOL-focus `nodes`-free on green; COHERENCE-LEAF-SERVE-IMPL-2 (`9e6077c`) made explain
+SYMBOL-focus `nodes`-free on green + relevance-ranked its caller/callee lists; PREREQ-1's focus-resolution
+lever is CLOSED at HEAD `7fff04e` (the focus-resolution producer `ccaad68`, consumed by orient + explain).
+PREREQ-2 + the bounded `nodes`/`edges` retirement IMPL remain DEFERRED (diminishing returns / a permanent
+SQLite floor). The original SPEC text below is preserved verbatim as spec-time narrative (e.g. "It STARTS NO
+IMPL." describes the spec at its authoring HEAD `f9cfe23`). This document SPECS
 PREREQ-1 of the ratified SQLITE-RAW-DECOMMISSION-1 contract (Option A, `f9cfe23`): the BOUNDED serve-then-
 fallback that makes the LG-DERIVABLE resolved/non-trust leaves (class (b), readiness-10 §191–202) of the
 coherence commands (orient / explain / trust) servable from the LiveGraph on GREEN, while the (c) trust

@@ -2,13 +2,17 @@
 
 ## Current Priority
 
-> **STATUS (2026-06-14): Stage D — SQLite raw decommission. COHERENCE-LAYER-1 DONE; the Option-B producer
+> **STATUS (2026-06-20): Stage D — SQLite raw decommission. COHERENCE-LAYER-1 DONE; the Option-B producer
 > investigation CLOSED (NO-GO → Option A); **SQLITE-RAW-DECOMMISSION-1 RATIFIED as a BOUNDED partial-decommission
 > CONTRACT** (Option A; `docs/slices/sqlite-raw-decommission-1.md`) — `unresolved_edges` + diagnostics retained
-> SQLite-labelled FOREVER, `nodes`/`edges` bounded-partial with the retirement IMPL **PARKED** on prerequisites;
+> SQLite-labelled FOREVER, `nodes`/`edges` bounded-partial with the retirement IMPL **DEFERRED** on prerequisites;
 > a FULL `nodes`/`edges`/`unresolved_edges` retirement is PROVEN partially impossible (the trust contributor's
-> unresolved-call fields have no current-state SCIP source). Next BUILD: P1 marginal fastpaths and/or P2 non-TS
-> coverage — an OPEN governance call.**
+> unresolved-call fields have no current-state SCIP source). **PREREQ-1's focus-resolution lever is now CLOSED at
+> HEAD `7fff04e`:** the COHERENCE-LEAF-SERVE arc shipped — focus-resolution producer `ccaad68`, consumed by orient
+> (`765583b`; SYMBOL-focus `nodes`-free on green) + explain (`9e6077c`; SYMBOL-focus `nodes`-free + relevance-ranked
+> callers). The achievable `nodes`-free-on-green surface is BANKED (the 6 drilldowns + orient SYMBOL + explain
+> SYMBOL); the PERMANENT SQLite floor + PREREQ-2 + the bounded retirement IMPL are DEFERRED (diminishing returns).
+> Next BUILD: P1 marginal fastpaths and/or P2 non-TS coverage — still an OPEN governance call.**
 > Stages A–C are COMPLETE; Stage D (persistence + raw decommission) is in progress. Since this document's
 > body was last rewritten (2026-06-01), the warm-cache chain shipped (WARM-CACHE-1 + daemon-wiring +
 > valuefacts + producer-absent), the imports + cycles + **stats** LiveGraph **default fastpaths** landed,
@@ -18,7 +22,7 @@
 > **THEN THE WHOLE COHERENCE LAYER LANDED:** the ratified `CoherenceEnvelope<T>` contract
 > (COHERENCE-LAYER-1 `6ed17b8` + multi-source-leaf amendment `5129f44`) and all four per-command builds —
 > **orient `2fd4478`** (+ the `repo-graph-coherence` support crate), **check `3e76271`**, **explain
-> `82b6557`**, **trust `dc55114`** (then HEAD; HEAD is now `7d4b3bb` after the Option-B investigation). orient/check/explain/trust now each serve a `CoherenceEnvelope`
+> `82b6557`**, **trust `dc55114`** (then the Option-B investigation `7d4b3bb`, then the COHERENCE-LEAF-SERVE arc → **HEAD `7fff04e`**). orient/check/explain/trust now each serve a `CoherenceEnvelope`
 > with honest per-signal provenance/trust/freshness + labelled SQLite fallback (explain serves green leaf
 > VALUES from the LiveGraph; trust adds a LiveGraph posture beside the retained v1 hybrid; orient
 > no-loss-labels its 4 LG-first leaves; check folds a MEET-freshness verdict). This was the last command
@@ -45,8 +49,11 @@
 > fallbacks; imports/cycles/stats cert builds; the 31 non-graph tables).
 > **NEXT is an OPEN governance call** (recommend, not ratified): `docs/slices/
 > sqlite-raw-decommission-readiness-10.md` §"Next priorities" lays out a P1–P4 matrix (marginal partial
-> fastpaths / non-TS coverage / a BOUNDED partial decommission / pivot off). The next track is NOT chosen here.
-> [INFERRED priority; OBSERVED-backed — git HEAD=`7d4b3bb` chain + readiness-10, which supersedes readiness-9.]
+> fastpaths / non-TS coverage / a BOUNDED partial decommission / pivot off). P3 (the bounded contract) is RATIFIED
+> and PREREQ-1 (the (b)-leaf serve / focus-resolution lever) has since SHIPPED + CLOSED (`7fff04e`); P1/P2 remain
+> unchosen. The next track is NOT chosen here.
+> [INFERRED priority; OBSERVED-backed — git HEAD=`7fff04e` chain (the COHERENCE-LEAF-SERVE arc) + readiness-10,
+> which supersedes readiness-9.]
 > The running log below is historical narrative through 2026-06-01; for the present state trust this banner and
 > the **Stage D order** line below.
 
@@ -224,7 +231,7 @@ invalidates the graph cache); D8 cache-side mirror DTOs (**NO serde in `repo-gra
 key / manifest validation / atomic write / refresh interaction. Spec
 `docs/slices/partitioned-warm-cache-arch-1.md`.
 
-**Stage D order (updated 2026-06-13):** 1B ✓ → DATAFLOW ✓ → 1C ✓ → WARM-CACHE-ARCH ✓ → WARM-CACHE-1 ✓
+**Stage D order (updated 2026-06-20):** 1B ✓ → DATAFLOW ✓ → 1C ✓ → WARM-CACHE-ARCH ✓ → WARM-CACHE-1 ✓
 (support crate: DTO round-trips, manifest, atomic write) → WARM-CACHE-DAEMON-WIRING-1 ✓ →
 WARM-CACHE-VALUEFACTS-1 ✓ → WARM-CACHE-PRODUCER-ABSENT-1 ✓ → imports + cycles LiveGraph default
 fastpaths ✓ + lazy callers/callees/path ✓ → SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) →
@@ -241,9 +248,15 @@ homegrown `unresolved_edges` SQLite-labelled) → SQLITE-RAW-DECOMMISSION-READIN
 the SCIP unresolved-call boundary; supersedes readiness-9) →
 **SQLITE-RAW-DECOMMISSION-1 (terminal; bounded CONTRACT RATIFIED 2026-06-14, Option A —
 `docs/slices/sqlite-raw-decommission-1.md`; `unresolved_edges` + diagnostics retained-forever, `nodes`/`edges`
-bounded-partial, retirement IMPL PARKED on prereqs; gate 1 permanently-partial). Next BUILD: P1/P2 — OPEN)**.
-[OBSERVED: git HEAD=`7d4b3bb` chain; `docs/slices/{orient,explain}-sqlite-free-1.md` +
-`trust-summary-livegraph-1.md` + `scip-unresolved-call-probe-1.md` + `sqlite-raw-decommission-readiness-10.md`.]
+bounded-partial, retirement IMPL DEFERRED on prereqs; gate 1 permanently-partial)** →
+**PREREQ-1 COHERENCE-LEAF-SERVE arc** (`docs/slices/coherence-leaf-serve-1.md`): FOCUS-RESOLUTION-LIVEGRAPH-IMPL
+`ccaad68` (LiveGraph focus resolver + no-loss cert) → COHERENCE-LEAF-SERVE-IMPL-1 `765583b` (orient SYMBOL-focus
+`nodes`-free on green) → COHERENCE-LEAF-SERVE-IMPL-2 `9e6077c` (explain SYMBOL-focus `nodes`-free + relevance-
+ranked callers) → **PREREQ-1 focus-resolution lever CLOSED + decommission CHECKPOINTED `7fff04e` (HEAD)**
+(PREREQ-2 + the retirement IMPL DEFERRED; the permanent SQLite floor stands). Next BUILD: P1/P2 — OPEN.
+[OBSERVED: git HEAD=`7fff04e` chain; `git show -s` subjects for `ccaad68`/`765583b`/`9e6077c`/`7fff04e`;
+`docs/slices/{orient,explain}-sqlite-free-1.md` + `trust-summary-livegraph-1.md` +
+`scip-unresolved-call-probe-1.md` + `sqlite-raw-decommission-readiness-10.md` + `coherence-leaf-serve-1.md`.]
 
 The WARM-CACHE-1 slice doc header still reads "DESIGN — building"; that header is itself stale (the
 crate shipped and was extended — `repo_graph_version` key fix `7b0eb4c`, warm-cache schema bumps in the
