@@ -79,6 +79,30 @@ HEAD at authoring: `f9cfe23` (SQLITE-RAW-DECOMMISSION-1 contract ratified). Work
 > envelope change (no orient review-3 desync); VERIFY first-hand, thread `serve_from_lg` ONLY if a real desync
 > exists. Output EXACT.
 
+> **DR-EXPLAIN-CALLER-ORDER — RESOLVED BY THE VISION (operator-ratified 2026-06-20, during COHERENCE-LEAF-SERVE-
+> IMPL-2; the FIFTH false-parity premise of the arc caught — this one in the OPERATOR's own packet, flagged
+> independently by BOTH the builder and codex).** The packet asserted explain's `find_symbol_callers/callees` serve
+> was "Output EXACT." FIRST-HAND (codex + builder): it is NOT. `callgraph_cert` proves MULTISET (set) equality
+> (built for orient, whose caller render is order-INSENSITIVE: `count + group_by_module`), but `explain_symbol`
+> emits an ORDERED, budget-TRUNCATED `items` list (cap 15/50, no pre-sort, mod.rs:308). SQLite `find_symbol_callers`
+> has NO `ORDER BY` (rowid order); the LiveGraph orders by partition then edge order. So serving callers/callees
+> from the LiveGraph changes WHICH callers a high-fan-in SYMBOL shows on green (a different truncated SUBSET) —
+> the same set-vs-order class as CYCLES-A. **RESOLUTION (operator, BY THE VISION — not "match SQLite"):** matching
+> SQLite is POINTLESS when SQLite's truncation is arbitrary-order. RANK callers/callees by RELEVANCE before
+> truncation, in the agent (`agent/src/explain`, now IN-SCOPE for IMPL-2): module-concentration DESC (callers from
+> the modules that call this symbol MOST — reusing the shipped `top_modules` relevance model), then `module_path`
+> ASC, `name` ASC, `stable_key` ASC (a TOTAL deterministic order), applied to the FULL caller set BEFORE
+> `truncate_items`. Because the rank is a PURE FUNCTION of the caller SET (cert-proven equal SQLite-vs-LiveGraph),
+> BOTH paths produce the SAME ranked top-N -> the multiset cert NOW SUFFICES, the LiveGraph callgraph serve is
+> Output-EXACT, AND the truncated view is MORE RELEVANT than today's rowid-arbitrary subset. **SHIPPED-SIGNAL CHANGE
+> (sanctioned): explain's caller/callee item order is now relevance-ranked, not SQLite rowid order** — a strict
+> orientation improvement (CYCLES-B-class wire change, but to a BETTER output). The focus-resolution `nodes`-free
+> win is UNAFFECTED + fully exact (its cert is order-proven). REJECTED: preserve SQLite (pointless — keeps the
+> broken order); accept raw LiveGraph partition order (also not relevance); an ordered cert (RED on most repos —
+> SQLite has no defined order). FOLLOW-UP noted: "most relevant" could later mean caller DIVERSITY (breadth across
+> modules) rather than concentration — a one-comparator tweak if the operator prefers; concentration chosen now as
+> it reuses the existing model.
+
 > **HEADLINE VERDICT (the load-bearing question, answered decisively, evidence-first):**
 > **Focus resolution (focus string → IR symbol/file/module identity) has NO LiveGraph producer — it is a
 > SECOND PRODUCER GAP.** [OBSERVED, first-hand: the LiveGraph is keyed EXCLUSIVELY by `CanonicalKey`; no
