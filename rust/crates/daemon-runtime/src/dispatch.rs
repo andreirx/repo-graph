@@ -39,21 +39,24 @@ use crate::handlers::inventory::classify_retention_only;
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
-/// RMAPD-PERF-1: Performance tracing macro.
-/// Enabled with `--features perf-trace`. No-op otherwise.
+/// RMAPD-PERF-1 / PERF-INSTRUMENTATION-1: performance tracing macro.
 ///
-/// Build with: `cargo build --features perf-trace`
-/// Or for release: `cargo build --release --features perf-trace`
-#[cfg(feature = "perf-trace")]
+/// Emits to stderr (the daemon log) when EITHER the compile-time `perf-trace`
+/// feature is built (force-on, unchanged legacy behavior) OR the RUNTIME gate
+/// `RMAP_PERF` is at level >= 1 — so an already-installed daemon binary can emit
+/// `[PERF]` markers without a `--features` rebuild, just by relaunching with
+/// `RMAP_PERF=1` in its environment.
+///
+/// When off, the only cost is a single relaxed atomic load (`perf_enabled`); the
+/// `cfg!` constant short-circuits so a force-on build pays nothing. The shared
+/// process-global gate lives in `repo-graph-repo-index` (the lowest crate both
+/// this crate's `perf_trace!` and repo-index's `perf_log!` already reach).
 macro_rules! perf_trace {
     ($($arg:tt)*) => {
-        eprintln!($($arg)*);
+        if cfg!(feature = "perf-trace") || repo_graph_repo_index::perf::perf_enabled() {
+            eprintln!($($arg)*);
+        }
     };
-}
-
-#[cfg(not(feature = "perf-trace"))]
-macro_rules! perf_trace {
-    ($($arg:tt)*) => {};
 }
 
 /// Dispatcher that routes requests to real services.
@@ -77,6 +80,20 @@ impl ServiceDispatcher {
     /// Get an optional string parameter.
     fn get_optional_string_param<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
         params.get(key).and_then(|v| v.as_str())
+    }
+
+    /// PERF-INSTRUMENTATION-1: best-effort repo label for the per-request marker.
+    ///
+    /// Read methods usually resolve from cwd and may carry no repo in params
+    /// (`-`); write/index methods carry `repo_path`/`alias`. This is a log label
+    /// only — never a trust, freshness, or ownership signal.
+    fn perf_repo_label(params: &Value) -> &str {
+        params
+            .get("repo_path")
+            .or_else(|| params.get("alias"))
+            .or_else(|| params.get("repo_uid"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("-")
     }
 
     /// Parse stable_keys into structured match data for ambiguous symbol errors.
@@ -217,7 +234,13 @@ impl ServiceDispatcher {
 
 impl Dispatcher for ServiceDispatcher {
     fn dispatch(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
-        match request.method.as_str() {
+        // PERF-INSTRUMENTATION-1: per-request wall-clock. dispatch() is the single
+        // choke point every request (socket + stdio) flows through, so timing it
+        // here makes the SERIAL daemon's per-request cost — and any slow op like a
+        // kernel-scale `index` — self-identify in the log instead of timing out
+        // silently. When RMAP_PERF is off this is one relaxed atomic load + branch.
+        let req_start = Instant::now();
+        let result = match request.method.as_str() {
             // ── Test methods ────────────────────────────────────────
             "ping" => DispatchResult::success(&request.id, serde_json::json!({"pong": true})),
 
@@ -342,7 +365,15 @@ impl Dispatcher for ServiceDispatcher {
 
             // ── Unknown method ──────────────────────────────────────
             _ => DispatchResult::unknown_method(&request.id, &request.method),
-        }
+        };
+
+        perf_trace!(
+            "[PERF] req {} {}: {}ms",
+            request.method,
+            Self::perf_repo_label(&request.params),
+            req_start.elapsed().as_millis()
+        );
+        result
     }
 }
 

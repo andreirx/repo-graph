@@ -53,6 +53,10 @@ pub mod compose;
 pub mod config;
 pub mod express_detector;
 pub mod impact_propagation;
+// PERF-INSTRUMENTATION-1: runtime perf-trace gate (RMAP_PERF). Shared by this
+// crate's `perf_log!` and daemon-runtime's `perf_trace!` (which reaches it via
+// the pre-existing daemon-runtime -> repo-index dependency).
+pub mod perf;
 pub mod react_detector;
 pub mod refresh_policy;
 pub mod scanner;

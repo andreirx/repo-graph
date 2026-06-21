@@ -632,6 +632,15 @@ pub struct IndexResult {
     /// for unchanged files. Only present on refresh operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_copy_forward: Option<ArtifactCopyForward>,
+    /// PERF-INSTRUMENTATION-1: real per-phase index durations.
+    ///
+    /// Layer-0 mechanical timing measured at the real pipeline boundaries
+    /// (extraction / storage writes / resolution / finalization). Ephemeral
+    /// diagnostic data: `#[serde(skip)]` keeps it out of the serialized DTO and
+    /// the parity boundary — it is consumed only by the `repo-index` perf
+    /// summary, never persisted, never a trust/freshness/ownership signal.
+    #[serde(skip)]
+    pub phase_timings: crate::index_timing::PhaseTimings,
 }
 
 /// Diagnostics from copying forward derived artifacts during refresh.

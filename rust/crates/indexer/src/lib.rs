@@ -98,6 +98,7 @@ pub mod grpc_link;
 pub mod grpc_registration_proof;
 pub mod hook;
 pub mod include_resolver;
+pub mod index_timing;
 pub mod inferred_modules;
 pub mod invalidation;
 pub mod java_code_mapper;
@@ -132,6 +133,7 @@ pub use grpc_impl_hint::{
 };
 pub use grpc_link::{find_grpc_links, run_grpc_link_detection, GrpcLink, GrpcLinkResult};
 pub use grpc_registration_proof::{run_grpc_registration_proof, GrpcRegistrationProofResult};
+pub use index_timing::PhaseTimings;
 pub use inferred_modules::{
     detect_inferred_modules, generate_evidence_uid as generate_inferred_evidence_uid,
     generate_module_key as generate_inferred_module_key,
