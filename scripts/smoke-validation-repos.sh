@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # smoke-validation-repos.sh — smoke test rmap on all validation repos with daemon-based execution
 #
-# Version: 2 (REG-1 daemon-based CLI)
+# Version: 3 (REG-1; full command surface at full output)
+#
+# Capture harness for docs/testing/end-to-end-usefulness-protocol.md: indexes the
+# validation repos and runs the COMPREHENSIVE repo-wide command set at FULL output
+# (orient --full, all repo-wide commands). An agent then evaluates the captures in
+# smoke-runs/<ts>/ against known ground truth (the usefulness judgment is not a
+# script assertion — see the protocol's rubric).
 #
 # Usage:
 #   ./scripts/smoke-validation-repos.sh <task> [commands...]
@@ -228,9 +234,18 @@ fi
 TASK="$1"
 shift
 
-# Default commands if none specified
+# Default commands: the comprehensive repo-wide command surface at FULL output
+# (the End-to-End Usefulness Protocol capture set), not a historical few. Each may
+# be multi-word (subcommand + flags). Target-requiring commands (explain/callers/
+# path/imports/modules show) need a per-repo symbol/file — pass them explicitly.
 if [[ $# -eq 0 ]]; then
-    COMMANDS=("trust" "modules" "check")
+    COMMANDS=(
+        "orient --full" "check --full" "trust"
+        "modules list" "stats" "cycles"
+        "churn" "hotspots" "risk"
+        "dead" "violations" "gate" "assess"
+        "surfaces list" "docs list" "inferences list" "deps list"
+    )
 else
     COMMANDS=("$@")
 fi
@@ -390,30 +405,14 @@ EOF
         CMD_EXIT=0
         START_TIME=$(date +%s)
 
-        # Run command from repo directory
+        # Run command from repo directory. CMD may be multi-word (e.g.
+        # "orient --full", "modules list", "surfaces list") — split into argv so
+        # subcommands + flags pass through. The FULL command surface, not a
+        # hardcoded few (End-to-End Usefulness Protocol).
+        read -ra CMD_ARGS <<< "$CMD"
         pushd "$REPO_PATH" > /dev/null
-        case "$CMD" in
-            trust)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    trust || CMD_EXIT=$?
-                ;;
-            modules)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    modules list || CMD_EXIT=$?
-                ;;
-            check)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    check || CMD_EXIT=$?
-                ;;
-            orient)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    orient --budget small || CMD_EXIT=$?
-                ;;
-            *)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    "$CMD" || CMD_EXIT=$?
-                ;;
-        esac
+        run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+            "${CMD_ARGS[@]}" || CMD_EXIT=$?
         popd > /dev/null
 
         END_TIME=$(date +%s)
