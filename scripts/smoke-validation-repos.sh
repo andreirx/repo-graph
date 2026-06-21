@@ -79,6 +79,13 @@ INTERNAL_PATHS=(
     "$PARENT_DIR/FRAKTAG"
 )
 
+# Giant repos to run LAST so a huge index does not head-of-line-block the batch on
+# the serial daemon (e.g. the Linux kernel). Override: SMOKE_DEFER_LAST="a b".
+DEFER_LAST=(${SMOKE_DEFER_LAST:-linux})
+# Optional: run ONLY these repos (space-separated names), e.g.
+#   SMOKE_ONLY="mempalace nginx" ./scripts/smoke-validation-repos.sh <task> ...
+SMOKE_ONLY="${SMOKE_ONLY:-}"
+
 usage() {
     echo "usage: $0 [--retain] [--adhoc] <task> [commands...]" >&2
     echo "" >&2
@@ -103,13 +110,24 @@ discover_legacy_repos() {
         return
     fi
 
-    # Find directories, skip hidden, sort lexicographically
+    # Find directories, skip hidden, sort lexicographically. Defer DEFER_LAST
+    # giants (e.g. linux) to the end so they don't head-of-line-block the batch.
+    local deferred_names=() deferred_paths=()
     while IFS= read -r dir; do
         local name
         name=$(basename "$dir")
-        LEGACY_NAMES+=("$name")
-        LEGACY_PATHS+=("$dir")
+        if [[ " ${DEFER_LAST[*]} " == *" $name "* ]]; then
+            deferred_names+=("$name")
+            deferred_paths+=("$dir")
+        else
+            LEGACY_NAMES+=("$name")
+            LEGACY_PATHS+=("$dir")
+        fi
     done < <(find "$LEGACY_BUCKET" -mindepth 1 -maxdepth 1 -type d -not -name '.*' | sort)
+    if [[ ${#deferred_names[@]} -gt 0 ]]; then
+        LEGACY_NAMES+=("${deferred_names[@]}")
+        LEGACY_PATHS+=("${deferred_paths[@]}")
+    fi
 }
 
 # Run a command and capture output without head truncation issues
@@ -232,6 +250,26 @@ done
 for _ in "${LEGACY_NAMES[@]}"; do
     ALL_CATEGORIES+=("legacy")
 done
+
+# Optional subset: SMOKE_ONLY="n1 n2 ..." runs only those repos (order preserved;
+# DEFER_LAST giants stay last). Non-matching names are skipped.
+if [[ -n "$SMOKE_ONLY" ]]; then
+    only_names=(); only_paths=(); only_cats=()
+    for idx in "${!ALL_NAMES[@]}"; do
+        if [[ " $SMOKE_ONLY " == *" ${ALL_NAMES[$idx]} "* ]]; then
+            only_names+=("${ALL_NAMES[$idx]}")
+            only_paths+=("${ALL_PATHS[$idx]}")
+            only_cats+=("${ALL_CATEGORIES[$idx]}")
+        fi
+    done
+    if [[ ${#only_names[@]} -eq 0 ]]; then
+        echo "error: SMOKE_ONLY matched no known repos: '$SMOKE_ONLY'" >&2
+        exit 1
+    fi
+    ALL_NAMES=("${only_names[@]}")
+    ALL_PATHS=("${only_paths[@]}")
+    ALL_CATEGORIES=("${only_cats[@]}")
+fi
 
 # State isolation paths (REG-1 daemon model)
 STATE_ROOT="$TEST_ROOT/$TASK"
