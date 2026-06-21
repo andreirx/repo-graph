@@ -61,6 +61,45 @@ impl Budget {
             Self::Full => usize::MAX,
         }
     }
+
+    /// Maximum number of NAMED complexity centers carried in the
+    /// `HIGH_COMPLEXITY` evidence (ORIENT-DENSITY-1 §5).
+    ///
+    /// This is the DEPTH knob the slice's review-1 #2 fix turns: before,
+    /// the complexity evidence was hard-capped at 5 rows regardless of
+    /// budget, so even `--full` rendered "(+338 more above threshold)".
+    /// Now the EVIDENCE itself scales — `small` carries a lean headline
+    /// set, `large`/`--full` carry EVERY above-threshold center so the
+    /// `--full` breakdown is genuinely complete (§5: "all hotspots").
+    /// `high_complexity_count` always reports the true total, so a capped
+    /// tier never overclaims completeness.
+    pub fn max_complexity_centers(self) -> usize {
+        match self {
+            Self::Small => 5,
+            Self::Medium => 15,
+            // large / --full = the complete detail (DoD: "large/`--full` =
+            // complete"). The presentation still renders a DENSE top-N
+            // headline line; the full SET rides the breakdown section.
+            Self::Large | Self::Full => usize::MAX,
+        }
+    }
+
+    /// Maximum number of NAMED modules carried in the `MODULE_SUMMARY`
+    /// evidence (`top_modules`) for the dense structure headline
+    /// (ORIENT-DENSITY-1 §5).
+    ///
+    /// Mirrors `max_complexity_centers`: `small`/`medium` carry a bounded
+    /// headline set (each ≥ the presentation's display cap, so the named
+    /// structure line is never under-fed), `large`/`--full` carry the FULL
+    /// module list so the `--full` "Modules (by size)" breakdown is
+    /// complete. `discovered_module_count` always reports the true total.
+    pub fn max_modules(self) -> usize {
+        match self {
+            Self::Small => 12,
+            Self::Medium => 24,
+            Self::Large | Self::Full => usize::MAX,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -86,6 +125,40 @@ mod tests {
         assert_eq!(Budget::Full.max_signals(), usize::MAX);
         assert_eq!(Budget::Full.max_limits(), usize::MAX);
         assert_eq!(Budget::Full.max_next(), usize::MAX);
+    }
+
+    #[test]
+    fn density_depth_caps_scale_with_budget() {
+        // ORIENT-DENSITY-1 review-1 #2: the EVIDENCE depth (not just the rendered
+        // display) scales with budget, so `--full` carries the complete set.
+        assert_eq!(Budget::Small.max_complexity_centers(), 5);
+        assert_eq!(Budget::Medium.max_complexity_centers(), 15);
+        assert_eq!(Budget::Large.max_complexity_centers(), usize::MAX);
+        assert_eq!(Budget::Full.max_complexity_centers(), usize::MAX);
+
+        assert_eq!(Budget::Small.max_modules(), 12);
+        assert_eq!(Budget::Medium.max_modules(), 24);
+        assert_eq!(Budget::Large.max_modules(), usize::MAX);
+        assert_eq!(Budget::Full.max_modules(), usize::MAX);
+    }
+
+    #[test]
+    fn density_depth_caps_are_monotonic_and_feed_the_display() {
+        // small ⊆ medium ⊆ large/full — the budget trades DEPTH, never inverts it.
+        // And each tier's evidence cap is ≥ the presentation's display cap (modules:
+        // 8/16, complexity: 3/5) so the named headline is never under-fed.
+        assert!(Budget::Small.max_complexity_centers() <= Budget::Medium.max_complexity_centers());
+        assert!(Budget::Medium.max_complexity_centers() <= Budget::Large.max_complexity_centers());
+        assert!(Budget::Small.max_modules() <= Budget::Medium.max_modules());
+        assert!(Budget::Medium.max_modules() <= Budget::Large.max_modules());
+        assert!(
+            Budget::Small.max_modules() >= 8,
+            "feeds the 8-name small display"
+        );
+        assert!(
+            Budget::Small.max_complexity_centers() >= 3,
+            "feeds the 3-center small display"
+        );
     }
 
     #[test]

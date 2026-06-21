@@ -536,6 +536,16 @@ pub struct ModuleKindBreakdown {
     pub inferred: u64,
 }
 
+/// One named module with its owned-file count, for the dense
+/// structure headline (ORIENT-DENSITY-1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModuleSizeEvidence {
+    /// Module canonical root path (e.g. `src/http`).
+    pub path: String,
+    /// Files this module owns in the snapshot.
+    pub file_count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleSummaryEvidence {
     // ── Snapshot totals (always present) ──────────────────────────
@@ -552,6 +562,13 @@ pub struct ModuleSummaryEvidence {
     /// `None` when module discovery data is unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module_kinds: Option<ModuleKindBreakdown>,
+    /// Top modules by size, NAMED — the data the dense structure
+    /// headline leads with (ORIENT-DENSITY-1). Additive, within the
+    /// existing signal-evidence payload (NO `CoherenceEnvelope`
+    /// shape change). Empty (and omitted from JSON) when module
+    /// discovery data is unavailable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_modules: Vec<ModuleSizeEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1703,6 +1720,7 @@ mod tests {
             languages: vec!["rust".into()],
             discovered_module_count: None,
             module_kinds: None,
+            top_modules: Vec::new(),
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert_eq!(s.category, SignalCategory::Informational);
@@ -1723,10 +1741,34 @@ mod tests {
                 operational: 1,
                 inferred: 1,
             }),
+            top_modules: vec![
+                ModuleSizeEvidence {
+                    path: "src/http".into(),
+                    file_count: 30,
+                },
+                ModuleSizeEvidence {
+                    path: "src/core".into(),
+                    file_count: 12,
+                },
+            ],
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert!(s.summary.contains("50 files"));
         assert!(s.summary.contains("5 discovered modules"));
+        // ORIENT-DENSITY-1: the NAMED modules ride in the evidence, carried
+        // verbatim into the serialized payload (the dense structure headline
+        // reads them; the summary string is unchanged).
+        match s.evidence() {
+            SignalEvidence::ModuleSummary(e) => {
+                assert_eq!(e.top_modules.len(), 2);
+                assert_eq!(e.top_modules[0].path, "src/http");
+                assert_eq!(e.top_modules[0].file_count, 30);
+            }
+            other => panic!(
+                "expected ModuleSummary evidence, got {}",
+                other.variant_name()
+            ),
+        }
     }
 
     #[test]

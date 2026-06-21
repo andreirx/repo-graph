@@ -140,8 +140,8 @@ pub use orient::orient;
 pub use storage_port::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
-    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-    AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentTrustSummary, EnrichmentState,
+    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSize,
+    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
+    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageRead,
+    AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };

@@ -201,6 +201,23 @@ pub struct AgentModuleSummary {
     pub inferred_count: u64,
 }
 
+/// One discovered module with its owned-file count.
+///
+/// ORIENT-DENSITY-1: the per-module size breakdown that lets `orient` LEAD
+/// with the NAMED structure ("modules: core, http, event, …") instead of a
+/// bare count. `path` is the module's `canonical_root_path`; `file_count` is
+/// the number of files it owns in this snapshot. Both are Layer-1 extracted
+/// facts (module discovery), the SAME `module_candidates` /
+/// `module_file_ownership` surface `get_module_summary` already reads — this
+/// projection just carries the names + sizes the count alone discards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentModuleSize {
+    /// The module's canonical root path (e.g. `src/http`).
+    pub path: String,
+    /// Number of files this module owns in the snapshot.
+    pub file_count: u64,
+}
+
 // ── Complexity measurement ──────────────────────────────────────
 
 /// A symbol with high cyclomatic complexity.
@@ -719,6 +736,34 @@ pub trait AgentStorageRead {
         &self,
         snapshot_uid: &str,
     ) -> Result<Option<AgentModuleSummary>, AgentStorageError>;
+
+    /// List discovered modules with their owned-file counts, ordered
+    /// by size descending (then path, then uid — a total, source-
+    /// independent order), capped at `limit` rows.
+    ///
+    /// ORIENT-DENSITY-1: feeds the NAMED structure headline. Returns
+    /// only modules that own at least one file in the snapshot. Empty
+    /// when module discovery data is unavailable (same condition that
+    /// makes `get_module_summary` return `None`). A read of the same
+    /// Layer-1 module-discovery surface — no new architectural boundary.
+    ///
+    /// `limit` is the budget-derived cap (ORIENT-DENSITY-1 §5, review-1
+    /// #2): `small`/`medium` request a bounded headline set, `large`/
+    /// `--full` request the COMPLETE list (`usize::MAX`) so the `--full`
+    /// breakdown is genuinely full. The adapter clamps `usize::MAX` to a
+    /// SQLite-safe `LIMIT` (rusqlite binds `i64`); the caller's
+    /// `discovered_module_count` still reports the true total, so a
+    /// bounded cap never overclaims completeness.
+    ///
+    /// Default impl returns empty so the many `AgentStorageRead` test
+    /// fakes need no stub; the real adapter overrides it.
+    fn list_module_sizes(
+        &self,
+        _snapshot_uid: &str,
+        _limit: usize,
+    ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
+        Ok(Vec::new())
+    }
 
     // ── Boundary links freshness (ACR-6) ────────────────────────────
 

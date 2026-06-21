@@ -19,8 +19,9 @@
 //! the limit says "module discovery layer is unavailable".
 
 use super::AggregatorOutput;
+use crate::dto::budget::Budget;
 use crate::dto::limit::{DegradationInfo, Limit, LimitCode};
-use crate::dto::signal::{ModuleKindBreakdown, ModuleSummaryEvidence, Signal};
+use crate::dto::signal::{ModuleKindBreakdown, ModuleSizeEvidence, ModuleSummaryEvidence, Signal};
 use crate::errors::AgentStorageError;
 use crate::storage_port::AgentStorageRead;
 
@@ -41,6 +42,7 @@ fn module_data_unavailable_limit() -> Limit {
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
+    budget: Budget,
 ) -> Result<AggregatorOutput, AgentStorageError> {
     // Always get raw snapshot totals.
     let summary = storage.compute_repo_summary(snapshot_uid)?;
@@ -51,6 +53,21 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     let (evidence, limits) = match module_summary {
         Some(ms) => {
             // Module discovery data exists — include it, no limit.
+            // ORIENT-DENSITY-1 §5: pull the NAMED top modules by size for the
+            // dense structure headline. The budget drives DEPTH — `small`/
+            // `medium` request a bounded headline set, `large`/`--full` request
+            // the COMPLETE list so the `--full` "Modules (by size)" breakdown is
+            // genuinely full. The storage read applies the cap (a total,
+            // source-independent prefix); `discovered_module_count` below still
+            // reports the true total, so a bounded cap never overclaims.
+            let top_modules = storage
+                .list_module_sizes(snapshot_uid, budget.max_modules())?
+                .into_iter()
+                .map(|m| ModuleSizeEvidence {
+                    path: m.path,
+                    file_count: m.file_count,
+                })
+                .collect();
             let evidence = ModuleSummaryEvidence {
                 file_count: summary.file_count,
                 symbol_count: summary.symbol_count,
@@ -61,6 +78,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                     operational: ms.operational_count,
                     inferred: ms.inferred_count,
                 }),
+                top_modules,
             };
             (evidence, Vec::new())
         }
@@ -72,6 +90,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 languages: summary.languages,
                 discovered_module_count: None,
                 module_kinds: None,
+                top_modules: Vec::new(),
             };
             let limits = vec![module_data_unavailable_limit()];
             (evidence, limits)
@@ -105,6 +124,7 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
         languages: summary.languages,
         discovered_module_count: None,
         module_kinds: None,
+        top_modules: Vec::new(),
     };
 
     Ok(AggregatorOutput {
@@ -134,6 +154,7 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
         languages: summary.languages,
         discovered_module_count: None,
         module_kinds: None,
+        top_modules: Vec::new(),
     };
 
     Ok(AggregatorOutput {

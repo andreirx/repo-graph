@@ -47,6 +47,8 @@ pub mod modules_list;
 pub mod modules_show;
 pub mod modules_violations;
 pub mod orient;
+pub mod orient_reliability;
+pub mod orient_sections;
 pub mod path;
 pub mod stats;
 pub mod surfaces;

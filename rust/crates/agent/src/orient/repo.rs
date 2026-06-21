@@ -36,10 +36,36 @@ use crate::dto::envelope::{
     DocumentationSection, Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use crate::dto::limit::{Limit, LimitCode};
-use crate::dto::signal::Signal;
+use crate::dto::signal::{Signal, SignalCode};
 use crate::errors::OrientError;
 use crate::ranking;
 use crate::storage_port::AgentStorageRead;
+
+/// Load-bearing signal codes the dense `orient` headline is built
+/// from — pinned through budget truncation (ORIENT-DENSITY-1 §2/§3).
+///
+/// These are the NAMED orientation facts the headline leads with:
+/// the structure (`MODULE_SUMMARY`), the complexity centers
+/// (`HIGH_COMPLEXITY`), the import cycles (`IMPORT_CYCLES`), and the
+/// high-severity governance alerts (`GATE_FAIL` / `GATE_INCOMPLETE` /
+/// `BOUNDARY_VIOLATIONS`) the truth-audit established and which must
+/// not silently vanish under a small budget. Every one is a Layer-0/1
+/// extracted fact (or a governance verdict over them) — pinning them
+/// is density on top of the honest surface, never an overclaim.
+///
+/// Why a fixed list (the simpler rejected alternative): we could pin
+/// "every signal above some severity," but the headline set is a
+/// deliberate, named contract (it maps 1:1 to the headline lines), and
+/// a severity rule would also pin volatile low-value codes. An explicit
+/// list keeps the protected set legible and reviewable.
+const HEADLINE_SIGNAL_CODES: &[SignalCode] = &[
+    SignalCode::ModuleSummary,
+    SignalCode::HighComplexity,
+    SignalCode::ImportCycles,
+    SignalCode::GateFail,
+    SignalCode::GateIncomplete,
+    SignalCode::BoundaryViolations,
+];
 
 /// Repo-level orient pipeline.
 ///
@@ -115,8 +141,10 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
         aggregators::dead_code::aggregate(storage, &snapshot_uid, repo_uid, &trust_result.summary)?;
     merge(&mut all_signals, &mut all_limits, dead_out);
 
-    // module_summary
-    let mod_out = aggregators::module_summary::aggregate(storage, &snapshot_uid)?;
+    // module_summary — budget drives how many NAMED modules ride in the
+    // evidence (ORIENT-DENSITY-1 §5: small/medium = headline set, large/full =
+    // the complete list for the `--full` breakdown).
+    let mod_out = aggregators::module_summary::aggregate(storage, &snapshot_uid, budget)?;
     merge(&mut all_signals, &mut all_limits, mod_out);
 
     // gate — emits at most one of GATE_PASS / GATE_FAIL /
@@ -136,7 +164,10 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // emit COMPLEXITY_UNAVAILABLE limit so the agent knows
     // the surface is unknown rather than known-zero.
     if storage.has_complexity_measurements(&snapshot_uid)? {
-        let complexity_out = aggregators::complexity::aggregate(storage, &snapshot_uid)?;
+        // budget drives how many NAMED complexity centers ride in the evidence
+        // (ORIENT-DENSITY-1 §5: small/medium = lean headline, large/full = every
+        // above-threshold center for the `--full` complexity breakdown).
+        let complexity_out = aggregators::complexity::aggregate(storage, &snapshot_uid, budget)?;
         merge(&mut all_signals, &mut all_limits, complexity_out);
     } else {
         all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));
@@ -146,7 +177,16 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     ranking::sort_and_rank(&mut all_signals);
 
     // ── 8. Truncate. ─────────────────────────────────────────
-    let sig_tx = ranking::truncate_signals(&mut all_signals, budget);
+    // ORIENT-DENSITY-1 §2: budget trades DEPTH, not the load-bearing
+    // facts. The dense headline is synthesized from the structure /
+    // complexity / cycles signals (and surfaces gate/boundary alerts);
+    // those MUST survive every budget so a `small` orient is the dense
+    // headline, not thin meta. We pin them and cap only the remaining
+    // tail. The reliability caveat + docs ride on separate envelope
+    // fields (`trust_briefing` / `documentation`), so they are already
+    // truncation-immune.
+    let sig_tx =
+        ranking::truncate_signals_protecting(&mut all_signals, budget, HEADLINE_SIGNAL_CODES);
     let lim_tx = ranking::truncate_limits(&mut all_limits, budget);
 
     // ── 9. Confidence. ───────────────────────────────────────

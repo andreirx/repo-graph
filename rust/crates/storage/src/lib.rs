@@ -157,6 +157,7 @@
 //! R24:  `get_active_requirement_declarations`.
 
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
+mod agent_orient_reads; // ORIENT-DENSITY-1: dense-orient discovery reads (module sizes + doc inventory)
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)

@@ -23,15 +23,13 @@
 //!      agent crate does NOT depend on `repo-graph-trust`; trust
 //!      policy lives on the adapter side of this boundary.
 
-use std::path::Path;
-
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
-    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-    AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-    AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSize,
+    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
+    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
+    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
 use repo_graph_trust::types::{
@@ -68,7 +66,12 @@ use crate::types::RepoRef;
 /// the error's `Display` output — storage crate diagnostics are
 /// stringified at this boundary and never parsed by the agent
 /// layer.
-fn map_err<E: std::fmt::Display>(operation: &'static str) -> impl FnOnce(E) -> AgentStorageError {
+///
+/// `pub(crate)` so the extracted `agent_orient_reads` discovery reads map
+/// errors identically (ORIENT-DENSITY-1 review-1 #3 split).
+pub(crate) fn map_err<E: std::fmt::Display>(
+    operation: &'static str,
+) -> impl FnOnce(E) -> AgentStorageError {
     move |e| AgentStorageError::new(operation, e.to_string())
 }
 
@@ -1144,45 +1147,10 @@ impl AgentStorageRead for StorageConnection {
     // ── Documentation inventory (docs-primary pivot) ───────────────
 
     fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
-        // 1. Look up root_path from the repos table.
-        let conn = self.connection();
-        let repo_path: Option<String> = conn
-            .query_row(
-                "SELECT root_path FROM repos WHERE repo_uid = ?",
-                rusqlite::params![repo_uid],
-                |row| row.get(0),
-            )
-            .map_err(map_err("get_doc_inventory"))?;
-
-        let repo_path = match repo_path {
-            Some(p) => p,
-            None => return Ok(Vec::new()), // No repo_path → empty inventory.
-        };
-
-        // 2. Call discover_doc_inventory from doc-facts crate.
-        let path = Path::new(&repo_path);
-        if !path.is_dir() {
-            // Path is not a directory → graceful empty result.
-            return Ok(Vec::new());
-        }
-
-        let result = match repo_graph_doc_facts::discover_doc_inventory(path, false) {
-            Ok(r) => r,
-            Err(_) => return Ok(Vec::new()), // Discovery failed → empty.
-        };
-
-        // 3. Map entries to AgentDocEntry.
-        let entries = result
-            .entries
-            .into_iter()
-            .map(|e| AgentDocEntry {
-                path: e.path,
-                kind: e.kind,
-                generated: e.generated,
-            })
-            .collect();
-
-        Ok(entries)
+        // ORIENT-DENSITY-1 review-1 #1+#3: the body (incl. the DB-parent-relative
+        // root_path resolution FIX that made orient show docs) lives in the
+        // extracted `agent_orient_reads` discovery module.
+        crate::agent_orient_reads::doc_inventory(self.connection(), repo_uid)
     }
 
     // ── Complexity measurements ─────────────────────────────────────
@@ -1346,6 +1314,17 @@ impl AgentStorageRead for StorageConnection {
             // module detection rather than silently falling back to MODULE nodes.
             Ok(None)
         }
+    }
+
+    fn list_module_sizes(
+        &self,
+        snapshot_uid: &str,
+        limit: usize,
+    ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
+        // ORIENT-DENSITY-1 review-1 #2+#3: the body (incl. the budget-derived,
+        // bind-safe LIMIT that lets `--full` carry the COMPLETE module list)
+        // lives in the extracted `agent_orient_reads` discovery module.
+        crate::agent_orient_reads::module_sizes(self.connection(), snapshot_uid, limit)
     }
 
     fn get_boundary_links_freshness(

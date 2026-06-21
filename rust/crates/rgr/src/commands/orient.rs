@@ -33,7 +33,7 @@ use repo_graph_coherence::CoherenceEnvelope;
 
 use crate::presentation::check::{check_exit_code, render_check_envelope, CheckResponse};
 use crate::presentation::explain::ExplainResponse;
-use crate::presentation::orient::{render_orient_envelope, OrientResponse};
+use crate::presentation::orient::{render_orient_envelope, OrientDepth, OrientResponse};
 
 // ── orient command (REG-1 + CLI-OUT-1) ───────────────────────────────
 //
@@ -214,7 +214,12 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                 // unchanged: it prints the raw daemon JSON (now the wrapper) verbatim.
                 match serde_json::from_value::<CoherenceEnvelope<OrientResponse>>(result) {
                     Ok(envelope) => {
-                        println!("{}", render_orient_envelope(&envelope));
+                        // ORIENT-DENSITY-1: the budget the daemon answered under also drives the
+                        // human-render DEPTH (the dense headline is the same at every tier; budget
+                        // trades how much detail is appended). `budget` is the validated token
+                        // (`small|medium|large|full`) selected above.
+                        let depth = OrientDepth::from_budget(budget);
+                        println!("{}", render_orient_envelope(&envelope, depth));
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

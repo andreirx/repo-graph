@@ -10,7 +10,7 @@
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
+    AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSize, AgentModuleSummary,
     AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
     AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
 };
@@ -326,6 +326,19 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
     ) -> Result<Option<AgentModuleSummary>, AgentStorageError> {
         self.inner.get_module_summary(snapshot_uid)
+    }
+
+    // ORIENT-DENSITY-1: the NAMED structure headline reads per-module sizes here.
+    // It is a (c)-class SQLite read (module discovery, no LiveGraph home), so —
+    // like get_module_summary above — DELEGATE to the inner port. Without this
+    // the decorator would fall back to the trait's empty default and the dense
+    // headline would lose its module names on the LiveGraph-served path.
+    fn list_module_sizes(
+        &self,
+        snapshot_uid: &str,
+        limit: usize,
+    ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
+        self.inner.list_module_sizes(snapshot_uid, limit)
     }
 
     fn get_boundary_links_freshness(
