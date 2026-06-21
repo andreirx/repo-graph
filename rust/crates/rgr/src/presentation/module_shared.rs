@@ -56,11 +56,22 @@ pub fn format_files_compact(owned: usize, test: usize) -> String {
     }
 }
 
-/// Format dead symbol count for list view (compact).
+/// Format the unreferenced-symbol count for the `modules list` compact column
+/// (OUTPUT-DOC-TRUTH-AUDIT-1).
 ///
-/// Example: "25 dead"
+/// The input is the daemon's `dead_symbol_count` — a SYNTACTIC graph-orphan
+/// estimate (symbols with no inbound reference in the modeled graph), a
+/// LOW-reliability Layer-2 inference, NOT a Layer-0 "safe to delete" fact (the
+/// public `rmap dead` surface was withdrawn for exactly this reason). The label
+/// is the honest `unref?` (not the bare, overclaiming `dead`): `unref` =
+/// unreferenced, `?` = uncertain/syntactic. `modules list` prints a caveat
+/// footnote defining it; `modules show` renders the same count as the full word
+/// "unreferenced". The function name tracks the `dead_symbol_count` data field
+/// (unchanged daemon contract); only the user-facing label is corrected.
+///
+/// Example: "25 unref?"
 pub fn format_dead_compact(dead: usize) -> String {
-    format!("{} dead", dead)
+    format!("{} unref?", dead)
 }
 
 #[cfg(test)]
@@ -104,6 +115,7 @@ mod tests {
 
     #[test]
     fn format_dead_compact_value() {
-        assert_eq!(format_dead_compact(25), "25 dead");
+        // OUTPUT-DOC-TRUTH-AUDIT-1: honest `unref?` label, not the overclaiming `dead`.
+        assert_eq!(format_dead_compact(25), "25 unref?");
     }
 }

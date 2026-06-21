@@ -84,11 +84,12 @@ rmap enrich <db_path> <repo_uid> [options]                       # commands/enri
 rmap modules boundary <db_path> <repo_uid> <source> [options]    # commands/modules/boundary.rs
 ```
 
-> **Follow-up (PRIORITY-DOCS-RECONCILE-6).** Deeper per-command signature blocks later in this
-> file still show pre-REG-1 `<db_path> <repo_uid>` forms — `policy` (whose handler is in fact
-> cwd-migrated, so the later block is stale doc residue), `boundaries`, and `contracts`. That
-> residue is orthogonal to the SCIP/LiveGraph reconcile and is doc-wide, so it is flagged for a
-> follow-up doc-currency pass rather than corrected here. **`rmap <cmd> --help` is NOT a reliable
+> **Reconciled (OUTPUT-DOC-TRUTH-AUDIT-1, was PRIORITY-DOCS-RECONCILE-6).** The deeper per-command
+> signature blocks later in this file (`policy`, `boundaries`, `contracts`) previously still showed
+> pre-REG-1 `<db_path> <repo_uid>` forms — `policy`'s handler was already cwd-migrated, so its block
+> was stale doc residue. They have now been corrected to the cwd-resolved (REG-1) shape, each verified
+> against the command's handler usage string (`commands/policy.rs`, `commands/boundaries/mod.rs`,
+> `commands/contracts.rs`). **`rmap <cmd> --help` is NOT a reliable
 > verification surface:** most commands have no `--help` handler — `rmap churn --help` /
 > `rmap cycles --help` print usage only as a side effect of the unknown-flag path
 > (`error: unknown flag: --help`), and symbol-taking commands like `rmap callers --help` treat
@@ -520,7 +521,7 @@ automatically during `rmap index` / `rmap refresh`.
 **Usage:**
 
 ```
-rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <kind>]
+rmap policy [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <kind>] [--json]
 ```
 
 **Supported kinds:**
@@ -705,9 +706,9 @@ are populated automatically during `rmap index` / `rmap refresh`.
 **Commands:**
 
 ```
-rmap boundaries list <db_path> <repo_uid> [filters...]
-rmap boundaries show <db_path> <repo_uid> <surface_uid>
-rmap boundaries summary <db_path> <repo_uid>
+rmap boundaries list [filters...]
+rmap boundaries show <surface_uid>
+rmap boundaries summary
 ```
 
 **List filters:**
@@ -872,10 +873,10 @@ are populated automatically during `rmap index` / `rmap refresh`.
 **Commands:**
 
 ```
-rmap contracts list <db_path> <repo_uid> [--kind protobuf]
-rmap contracts show <db_path> <repo_uid> <file_path>
-rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]
-rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]
+rmap contracts list [--kind protobuf]
+rmap contracts show <file_path>
+rmap contracts elements [--kind message|enum|service|method|field] [--file <path>]
+rmap contracts usages [--element <element_uid>] [--min-confidence <0.0-1.0>]
 ```
 
 **List filters:**

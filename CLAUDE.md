@@ -116,7 +116,7 @@ When a slice's code work is done, run the three phases defined in
   dogfood `./scripts/dogfood-isolated.sh` — runs `orient`/`explain`/`check` on a
   fixture in a throwaway state root, never touching the operator's daemon/registry.
 - **Install / deploy** (`./scripts/dev-install-local.sh`): ONLY after reviewer approval.
-- **Cleanup** (`./scripts/clean-build.sh --all`): at slice end (debug artifacts reached 40+ GB).
+- **Cleanup** (`./scripts/clean-build.sh --all`): at slice end (debug artifacts measured ~14 GB).
 
 To run `rmap` when no repo is indexed (the `error: repo not indexed` case), use the
 isolated dogfood — never index into the operator's real registry to test.

@@ -9,21 +9,28 @@ Do not use raw SQL as a shortcut.
 
 ## Command Pattern
 
+The daemon owns repo state. Read/query commands resolve the repo from the current
+working directory — there is no `<db_path>` / `<repo_uid>` to supply (REG-1):
+
 ```bash
-rmap <command> <db_path> <repo_uid> [options]
+rmap <command> [options]
 ```
+
+Run `rmap` from inside the repo you indexed (`rmap index .`). A few legacy
+write/governance commands still take explicit `<db_path> <repo_uid>` positionals;
+those are called out where they appear below.
 
 ## Orientation Commands
 
 ### Orient
 ```bash
-rmap orient ./repo-graph.db repo-graph --focus "src/core"
+rmap orient --focus "src/core"
 ```
 Get a high-level view of the codebase or a specific area.
 
 ### Trust
 ```bash
-rmap trust ./repo-graph.db repo-graph
+rmap trust
 ```
 Check what the system knows vs. what it doesn't. Reports:
 - unresolved edge classification counts
@@ -33,13 +40,13 @@ Check what the system knows vs. what it doesn't. Reports:
 
 ### Check
 ```bash
-rmap check ./repo-graph.db repo-graph
+rmap check
 ```
 Structural and quality check after changes.
 
 ### Explain
 ```bash
-rmap explain ./repo-graph.db repo-graph "src/core/auth/session.ts"
+rmap explain "src/core/auth/session.ts"
 ```
 Deep-dive on a specific file.
 
@@ -47,62 +54,81 @@ Deep-dive on a specific file.
 
 ### Callers
 ```bash
-rmap callers ./repo-graph.db repo-graph "AuthService.validate"
+rmap callers "AuthService.validate"
 ```
 
 ### Callees
 ```bash
-rmap callees ./repo-graph.db repo-graph "AuthService.validate"
+rmap callees "AuthService.validate"
 ```
 
 ### Imports
 ```bash
-rmap imports ./repo-graph.db repo-graph "src/core/auth/session.ts"
+rmap imports "src/core/auth/session.ts"
 ```
 
 ## Indexing
 
 ### Full Index
 ```bash
-rmap index ./path/to/repo ./repo.db
+rmap index .
 ```
+Index the current directory; the daemon allocates storage. Pass an explicit
+`rmap index <repo_path>` to index a different directory.
 
 ### Incremental Refresh
 ```bash
-rmap refresh ./path/to/repo ./repo.db
+rmap refresh
 ```
 
 ## Boundary Commands
 
 ```bash
-rmap boundaries list ./repo.db repo-uid
-rmap boundaries show ./repo.db repo-uid <boundary-id>
-rmap boundaries summary ./repo.db repo-uid
+rmap boundaries list
+rmap boundaries show <surface_uid>
+rmap boundaries summary
 ```
 
 ## Governance Commands
 
+`assess` and `gate` resolve the repo from cwd (REG-1):
+
 ```bash
-rmap declare quality-policy ./repo.db repo-uid QP-001 \
+rmap assess [--baseline <snapshot>]
+rmap gate
+```
+
+`declare *` has **not** migrated to REG-1: the handlers still require explicit
+`<db_path> <repo_uid>` positionals. (The top-level `rmap --help` summary prints a
+cwd-style `declare` form, but the handler rejects it and prints the positional
+usage below — the handler is the shipped contract. See `docs/cli/rmap-contracts.md`.)
+
+```bash
+rmap declare quality-policy <db_path> <repo_uid> QP-001 \
   --policy-kind absolute_max \
   --measurement cyclomatic_complexity \
   --threshold 15 \
   --severity fail
-
-rmap assess ./repo.db repo-uid
-rmap gate ./repo.db repo-uid
 ```
 
 ## Output Format
 
-`rmap` outputs JSON (the CLI transport contract).
+`rmap` defaults to **human-readable** plain text. Pass `--json` for the full
+machine envelope (CLI-OUT-1):
 
-For human reading in shell (not agent execution):
 ```bash
-rmap trust ./repo-graph.db repo-graph | jq .
+rmap trust            # human-readable (default)
+rmap trust --json     # full machine envelope
 ```
 
-For agent execution, run command without pipe and inspect JSON output directly. Compound commands trigger permission friction.
+For human inspection of the JSON in a shell, pipe to `jq`:
+```bash
+rmap trust --json | jq .
+```
+
+For agent execution, run the command and inspect the output directly (default
+human text, or `--json` when you need to parse fields). Compound commands trigger
+permission friction.
 
 ## Completeness Protocol
 
@@ -124,21 +150,23 @@ Never conflate structural centrality with runtime cost.
 
 #### Step 0: Verify Target
 
-Before any query:
-- Verify correct binary path (build if needed)
-- Verify correct db path exists
-- Verify correct repo_uid
-- Verify snapshot exists and is current (check `rmap trust` output)
+Before any query (REG-1 resolves the repo from cwd — there is no `db_path` /
+`repo_uid` to supply):
+- Run from inside the indexed repo; confirm it is registered (`rmap repo info`)
+- Verify the daemon is reachable — a query that errors with `repo not indexed`
+  means index it first (`rmap index .`)
+- Verify the snapshot exists and is current (check `rmap trust` output)
 
 #### Step 1: Run Trust
 
 Check reliability tier before trusting graph output.
 
 ```bash
-rmap trust <db> <repo>
+rmap trust
 ```
 
-(Shell example. For agent execution, run without pipe, inspect JSON directly.)
+(For agent execution, read the default human output, or add `--json` and inspect
+the envelope directly.)
 
 #### Step 2: Interpret Reliability
 
@@ -187,7 +215,7 @@ Separate concerns:
 #### Step 5: Query Callers for Shared Core Functions
 
 ```bash
-rmap callers <db> <repo> <function_name>
+rmap callers <function_name>
 ```
 
 #### Step 6: Handle Zero Results
