@@ -63,6 +63,17 @@ A command can be honest (passes layering) yet useless (fails usefulness/density)
   rubric, with the concrete evidence (quote the output, compare to the known truth).
 - One product follow-up per gap (overclaim, mis-layer, thin/non-dense output, missing signal).
 
+## First run (arch/scip-substrate-pivot)
+
+The first application of this protocol surfaced nine findings — consolidated in
+[`../TECH-DEBT.md`](../TECH-DEBT.md) § *Pre-Merge Hardening + E2E Usefulness
+Findings*. Two came straight from the rubric on spring-petclinic: `orient` reports
+`1 module` where `stats` reports `11` (TRUE / DIRECTIONALLY-CORRECT fail — a
+structurally wrong model on the primary surface), and `stats total_symbols: 0` vs
+`orient`'s `290` (HONESTLY-LAYERED fail — an unpopulated metric rendered as a fact).
+Both coexisted with a green `cargo test` and a passing smoke — which is exactly why
+this protocol exists.
+
 ## Relationship to the other procedures
 
 - **Per slice** → [`end-of-slice-procedure.md`](end-of-slice-procedure.md): Test → Install/deploy →

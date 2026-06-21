@@ -1,5 +1,198 @@
 # Technical Debt and Known Limitations
 
+> The first section below — **Pre-Merge Hardening + E2E Usefulness Findings** — is
+> the newest, cross-cutting backlog (placed first deliberately: these are
+> first-class product/VISION problems, not per-subsystem notes). The per-subsystem
+> catalogue follows, starting at *Extraction — TypeScript*.
+
+## Pre-Merge Hardening + E2E Usefulness Findings (arch/scip-substrate-pivot)
+
+Items surfaced during the pre-merge hardening pass and the **first run of the
+End-to-End Usefulness Protocol** (`docs/testing/end-to-end-usefulness-protocol.md`)
+on the `arch/scip-substrate-pivot` branch. Evidence: the smoke captures under
+`smoke-runs/2026-06-21T15-55-40Z/`, the `RMAP_PERF` index instrumentation, the
+manual nginx capture, and direct source reads (cited per item). Each was
+**observed**, not imagined.
+
+These are recorded as **first-class problems** because each one does one of three
+things the VISION forbids: it makes the *primary orientation surface* tell an agent
+something structurally wrong (#3, #4); it renders an *unknown as a fact*, violating
+the Fact-Certainty layer model "outer layers must surface unknowns" (#5, #6); or it
+*contradicts the daemon architecture* the VISION commits to (#1, #2). None is a
+regression introduced by this branch, so none blocks its merge — they are the
+product's standing honesty-and-robustness debt and the natural next track. Tracked
+here so they do not drift (CLAUDE.md Hard Constraint #5), following the
+*Operational Dependency Seam Slice (deferred items)* precedent below.
+
+Severity matches the rest of this file: **P1** = high blast radius on core value or
+core architecture; **P2** = real defect on a secondary surface, or a compounding
+robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
+
+### 1. Daemon is strictly serial — head-of-line blocking (P1)
+
+- **OBSERVED (`rust/crates/daemon-transport/src/socket.rs:257-288`):** `run_socket`
+  is a single accept loop that calls `handle_connection` **inline** (line 274) — no
+  per-connection `thread::spawn` or async task. The client stream is set back to
+  blocking (271); the non-blocking mode exists only so the loop can poll the
+  shutdown flag. `handle_connection` (147-186) reads line-delimited requests and
+  `parse_and_dispatch`es each **synchronously**. A long request — an index/refresh
+  (Linux kernel: tens of minutes) or any heavy query — blocks `listener.accept()`
+  for its full duration; every other client waits behind it. The only `thread::spawn`
+  on this path is the test harness spawning the whole server.
+- **Impact (VISION — Operational Architecture + "Daemon purpose clarified"):** the
+  VISION commits to a long-lived daemon that "enables **concurrent queries**" and is
+  "the future **multi-agent coordination authority** for shared repo databases, with
+  many readers, fewer writers." A serial loop is the direct contradiction: one heavy
+  write freezes orientation for every other agent, and the headline promise of
+  "orientation in milliseconds" becomes unbounded behind any concurrent heavy
+  request. This is the gap between the *shipped* daemon and the *VISION* daemon.
+- **Required fix:** concurrent connection handling (thread-per-connection or an async
+  runtime) with explicit reader/writer coordination over SQLite + LiveGraph (many
+  readers, serialized writers). An architecture change, not a parameter tune —
+  comparable in kind to the all-in-memory indexer redesign under *Large-Repo
+  Scalability*.
+
+### 2. No cancellation on the query paths (P2)
+
+- **OBSERVED:** cancellation today is coupled to **progress emission**. Per *Daemon —
+  Progress abort checkpoint granularity* (D5b), a transport-write failure during a
+  progress callback aborts index/refresh at the next checkpoint. But a query
+  (`orient`/`stats`/`cycles`/`trust`/…) writes only its **final** response
+  (`socket.rs:185`) — it emits nothing mid-computation, so a peer disconnect is
+  invisible until the work is already done. RMAPD-PERF-2 recorded the same shape
+  ("Daemon continued processing after client disconnect"). So a disconnected or
+  timed-out client (e.g. the relay's `--timeout`) leaves a heavy query running to
+  completion.
+- **Impact:** wasted compute, and — combined with #1 — actively harmful: an abandoned
+  heavy query keeps the serial loop blocked for its full duration with no consumer.
+  Cooperative cancellation is a prerequisite for the daemon being a trustworthy
+  shared multi-agent authority.
+- **Required fix:** cooperative cancellation checkpoints on the long query paths
+  (not just progress-emitting index/refresh), keyed off peer-disconnect detection.
+  Couples to #1's concurrency rework. Extends D5b from index/refresh to queries.
+
+### 3. orient under-segments deeply-nested package layouts (P1)
+
+- **OBSERVED (spring-petclinic, `smoke-runs/2026-06-21T15-55-40Z/`):** `orient --full`
+  reports `1 module: .` and `Modules (by size): . — 47 files`, while `stats`
+  enumerates **11** module-sized units (`…/owner` 12 files, `…/vet` 6, `…/system` 5,
+  …). The repo has obvious `owner`/`vet`/`system` package separation; orient
+  flattens it to a single root module.
+- **Root cause (HYPOTHESIS — needs confirmation):** the inferred-module
+  umbrella-splitting heuristic (see *Inferred Module Identity Evolution →
+  Umbrella-directory splitting*) keys on umbrella prefixes (`src`, `packages`,
+  `apps`, …) with ≥2 children of 5+ source files. A Java
+  `src/main/java/org/…/petclinic/*` layout presents a single child (`main`) at the
+  `src` umbrella, so the heuristic never reaches the real package boundary and
+  collapses to root.
+- **Impact (VISION — Primary Use Case + Discovery clarity):** `orient` is THE primary
+  orientation surface, and "what modules exist and what they own" is named as the
+  first thing an agent needs. "1 module: ." is not merely thin — it is a
+  *structurally wrong* model the agent carries into every later decision. It fails
+  the Protocol-Surface Layer-2 test ("can an agent learn the truth from the output
+  alone?") in the worst way: it learns something false.
+- **Related:** ORIENT-BUG-1 fixed an earlier orient/trust module-**count** mismatch
+  by sharing `module_candidates`. This is distinct: under-segmentation of the
+  inferred-module model itself on nested layouts.
+- **Required fix:** extend inferred-module discovery to descend through single-child
+  umbrella chains (`src/main/java/…`) to the first directory with real sibling
+  fan-out, OR reconcile orient's module model with the directory grouping stats uses
+  (see #4). Confirm the root cause first.
+
+### 4. "module" denotes different things across orient/modules vs stats (P2)
+
+- **OBSERVED:** same run — `orient`/`modules list` count **inferred/declared
+  modules** (1); `stats` counts **directory-prefix groups** (11). The word "module"
+  names two different things across the command surface, with no marker telling the
+  agent which notion it is reading.
+- **Impact (VISION — Protocol Surface Standard):** the surface must be a coherent
+  machine protocol. Two commands answering "modules?" with 1 vs 11, unlabelled,
+  forces the consumer to reverse-engineer which notion each means. At minimum each
+  count must be self-labelling (inferred-module vs directory-group); ideally they
+  share one model.
+- **Required fix:** pick the single canonical "module" notion for the discovery
+  surface (the VISION's Layer-1/2 inferred/declared module) and either align stats
+  to it or rename stats' unit (e.g. "directories"). Pairs with #3.
+
+### 5. stats reports `total_symbols: 0` on rmap-indexed repos — false zero (P2)
+
+- **OBSERVED (spring-petclinic):** `stats` prints `total_symbols: 0` and `symbols=0`
+  per directory, while `orient` on the same snapshot reports **290 symbols**. The
+  symbols demonstrably exist; stats shows zero.
+- **Root cause (HYPOTHESIS — needs confirmation):** likely the Rust-path
+  module-metadata gap under *Module Resolution Dual-Path Model* — the `rmap` (Rust)
+  indexer does not populate the per-module symbol metadata the stats path reads, so
+  it defaults to `0` rather than "not populated."
+- **Impact (VISION — Layer model / Fact-Certainty):** a **false zero rendered as a
+  fact** is worse than a missing value. "Outer layers must surface unknowns";
+  presenting an unpopulated metric as `0` is exactly the overclaim the layer model
+  forbids — an agent can read "total_symbols: 0" as "empty/dead area" and act on it.
+- **Required fix:** populate the metric on the Rust path, or render "not measured"
+  (never `0`) when the source table is unpopulated. Confirm the source first.
+
+### 6. stats fan-in / fan-out / distance overclaim under low import resolution (P2)
+
+- **OBSERVED:** `stats` reports Martin-style fan-in/fan-out and "distance from main
+  sequence" as bare numbers. On C/C++ indexed syntax-only (no `compile_commands.json`;
+  `#include` largely unresolved — see *Extraction — C/C++ → Shared limitations*), the
+  underlying import graph is highly incomplete, so these ratios are computed on a
+  fraction of the real edges yet presented with no reliability marker.
+- **Impact (VISION — "outer layers must surface unknowns"):** the layer model's own
+  worked example is this: "raw counts without coverage or confidence markers are
+  overclaims." Post ORIENT-DENSITY-IMPL-1, `orient` surfaces an import-graph
+  reliability caveat in its Reliability/Degradation section; `stats` does not — so
+  the same incomplete graph is honest in one command and overclaimed in another.
+- **Required fix:** attach an import-resolution reliability marker to stats'
+  dependency-derived metrics (mirror orient's reliability line), or suppress
+  distance/instability when resolution is below the reliability threshold.
+
+### 7. REG-1 protocol-surface drift: stale `--help` for governance/write commands (P2)
+
+- **OBSERVED:** `declare`/`policy`/`boundaries`/`contracts` still take the pre-REG-1
+  positional `<db_path> <repo_uid>` form (write/governance migration was
+  intentionally deferred — ROADMAP → REG-1 "Explicitly deferred"), but the top-level
+  `rmap --help` does not reflect the **mixed** contract: it is stale for `declare`,
+  so an agent reading help constructs the wrong invocation.
+- **Impact (VISION — Protocol Surface Standard, Layers 1 + 3):** repo-graph "is a
+  machine-readable engineering protocol for agents"; `--help` is part of that
+  protocol. Help that shows the wrong invocation form actively misdirects — worse
+  than silence. The deferred *migration* is already tracked (ROADMAP REG-1); the
+  **help/protocol drift** is the new, separately-actionable finding (Hard
+  Constraint #5: silent drift).
+- **Required fix:** make `--help` tell the truth about the mixed contract — mark the
+  still-positional governance/write commands explicitly — independent of when the
+  migration itself lands.
+
+### 8. Postpass ≈ 50% of full-index time (P3)
+
+- **OBSERVED (`RMAP_PERF` instrumentation, validation sweep):** the postpass phase is
+  roughly half of total index wall-clock across the smoke repos. This instrumentation
+  is itself the closure of RMAPD-PERF-1's remaining-debt item *"Indexing phase timing
+  not instrumented"*; the ≈50% share is its first result.
+- **Impact (VISION — fast orientation / cheap incremental maintenance):** a lead, not
+  a defect. Complements the refresh-side note already recorded ("Postpasses are
+  conservative: run on all files … erodes refresh win"); the new datum is the ~50%
+  share on a *full* index.
+- **Required fix (lead):** profile which postpasses dominate and whether they can be
+  scoped, batched, or folded into extraction. Set a quantified target before any
+  rework.
+
+### 9. Peripheral command output-words not yet truth-audited (P3)
+
+- **OBSERVED:** OUTPUT-DOC-TRUTH-AUDIT-1 audited the high-traffic surfaces (`orient` /
+  `trust` / `check` / `modules` / `explain`) and corrected real overclaims (e.g.
+  `dead` → `unref?`). The long tail (`surfaces` / `boundaries` / `contracts` /
+  `policy` / `resource` / `inferences` / `deps` / `coverage` / `metrics` / `churn` /
+  `risk` / `assess` detail wording) was **not** audited for output-word truth.
+- **Impact (VISION — Protocol Surface Standard, Layer 2):** the output contract must
+  be honest across the *whole* surface; an un-audited peripheral command can carry
+  the same class of overclaim `dead` did and misdirect an agent. This is a **coverage
+  gap**, not a proven defect.
+- **Required fix:** extend the OUTPUT-DOC-TRUTH-AUDIT rubric across the remaining
+  command surface; relabel any metric whose words claim more than its layer supports.
+
+---
+
 ## Extraction — TypeScript
 
 - Call graph resolution: 33% on self-index with import-binding-assisted resolution
