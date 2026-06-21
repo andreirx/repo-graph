@@ -121,6 +121,19 @@ impl ModulesListResponse {
             ));
         }
 
+        // ── Unreferenced-symbol caveat (OUTPUT-DOC-TRUTH-AUDIT-1) ───
+        // The `unref?` column is dead_symbol_count: a SYNTACTIC graph-orphan
+        // estimate (no inbound reference in the modeled graph), a low-reliability
+        // Layer-2 inference — NOT a Layer-0 "safe to delete" fact. The bare label
+        // "dead" overclaimed it; this footnote keeps the (useful) count while
+        // making its certainty class honest and pointing at the trust surface.
+        out.push('\n');
+        out.push_str(
+            "note: unref? = symbols with no inbound reference in the indexed graph \
+             (syntactic estimate); over-counts under low call-graph resolution; \
+             run `rmap trust` for reliability.\n",
+        );
+
         // ── Cross-module dependency summary ────────────────────────
         let total_outbound: usize = self
             .results
@@ -260,5 +273,37 @@ mod tests {
         let output = resp.render_human();
         assert!(output.contains("No modules detected"));
         assert!(output.contains("hint:"));
+    }
+
+    #[test]
+    fn list_render_relabels_dead_as_unref_with_caveat() {
+        // OUTPUT-DOC-TRUTH-AUDIT-1: dead_symbol_count is a low-reliability Layer-2
+        // graph-orphan inference, not a Layer-0 fact. The column must read `unref?`
+        // (never the overclaiming bare `dead`) and carry a caveat that points at the
+        // reliability surface and never claims the count is safe-to-delete.
+        let resp = sample_list_response();
+        let output = resp.render_human();
+
+        // Honest relabel present on the rows (25 -> "25 unref?", 3 -> "3 unref?").
+        assert!(
+            output.contains("unref?"),
+            "honest column label present:\n{output}"
+        );
+
+        // The overclaiming bare label is GONE from the whole surface.
+        assert!(
+            !output.contains("dead"),
+            "the overclaiming `dead` label must be absent:\n{output}"
+        );
+
+        // Caveat footnote present, scoped honestly, and routes to `rmap trust`.
+        assert!(
+            output.contains("note: unref? = symbols with no inbound reference"),
+            "caveat footnote present:\n{output}"
+        );
+        assert!(
+            output.contains("run `rmap trust` for reliability."),
+            "caveat routes to the reliability surface:\n{output}"
+        );
     }
 }

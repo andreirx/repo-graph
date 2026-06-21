@@ -158,3 +158,73 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
 
     DispatchResult::success(&request.id, response)
 }
+
+/// Cheap storage HEALTH summary for `rmap doctor` (DEV-INSTALL-DOCTOR-WAIT-1). Returns ONLY what the
+/// doctor storage probe needs — DB file size + snapshot counts — WITHOUT the expensive per-table
+/// row/size scan that `perf` (`collect_database_metrics`, a `COUNT(*)` over every table + `dbstat`)
+/// performs. `db_size_bytes` is filesystem metadata on the SQLite DB file; `total_snapshots` and
+/// `prunable_snapshots` are cheap `COUNT(*)`s on the small `snapshots` table. Does NOT call
+/// `collect_database_metrics`; `rmap perf` is unchanged. Health validation, not performance diagnostics.
+pub fn handle_storage_health(state: &DaemonState, request: &Request) -> DispatchResult {
+    let path: &str = match request.params.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::invalid_request("missing or invalid 'path' parameter"),
+            )
+        }
+    };
+
+    // Resolve path to repo entry (same "not indexed" contract as `perf`, so doctor's existing
+    // "no repo indexed in cwd" handling is preserved).
+    let entry = match state.resolve_alias_or_path(path) {
+        Some(e) => e,
+        None => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::RepoNotFound,
+                    format!("repo not indexed: {} (run: rmap index {})", path, path),
+                ),
+            )
+        }
+    };
+
+    let db_path = Path::new(&entry.db_path);
+    let repo_uid = &entry.repo_uid;
+
+    // db_size_bytes: filesystem metadata on the SQLite DB file (NOT a per-table calculation).
+    let db_size_bytes = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+
+    let repo_state = match state.load_repo(db_path, repo_uid) {
+        Ok(rs) => rs,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+    let _read_guard = repo_state.coordinator.acquire_read();
+
+    // Cheap COUNT(*)s on the small `snapshots` table (no node/edge scan) — total + prunable.
+    let stats = match repo_state.storage.get_retention_stats(repo_uid) {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, format!("{}", e)),
+            )
+        }
+    };
+
+    DispatchResult::success(
+        &request.id,
+        json!({
+            "db_size_bytes": db_size_bytes,
+            "total_snapshots": stats.total,
+            "prunable_snapshots": stats.prunable,
+        }),
+    )
+}

@@ -229,6 +229,18 @@ impl RepoRegistry {
         &self.state_root
     }
 
+    /// Returns the daemon-managed databases directory (`<state_root>/databases`).
+    ///
+    /// Single source of truth for the db-dir path (the field set by `new` /
+    /// `with_state_root`). DOCTOR-RESOURCE-REPORT sums this directory for the
+    /// `rmap doctor` total-storage line. Exposing the field (rather than letting
+    /// callers rebuild `state_root().join("databases")`) keeps the path authoritative
+    /// — notably for `empty_non_persistent`, where `db_dir` is empty but
+    /// `state_root` is too, so a `join` would diverge.
+    pub fn db_dir(&self) -> &Path {
+        &self.db_dir
+    }
+
     // ── Path Resolution ─────────────────────────────────────────────────
 
     /// Resolve a path to a registry entry.

@@ -202,6 +202,7 @@ impl ExtractorPort for JavaExtractor {
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
             resolved_callsites: ctx.resolved_callsites,
+            import_observations: Vec::new(),
         })
     }
 }

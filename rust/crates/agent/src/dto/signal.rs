@@ -536,6 +536,16 @@ pub struct ModuleKindBreakdown {
     pub inferred: u64,
 }
 
+/// One named module with its owned-file count, for the dense
+/// structure headline (ORIENT-DENSITY-1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModuleSizeEvidence {
+    /// Module canonical root path (e.g. `src/http`).
+    pub path: String,
+    /// Files this module owns in the snapshot.
+    pub file_count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleSummaryEvidence {
     // ── Snapshot totals (always present) ──────────────────────────
@@ -552,6 +562,13 @@ pub struct ModuleSummaryEvidence {
     /// `None` when module discovery data is unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module_kinds: Option<ModuleKindBreakdown>,
+    /// Top modules by size, NAMED — the data the dense structure
+    /// headline leads with (ORIENT-DENSITY-1). Additive, within the
+    /// existing signal-evidence payload (NO `CoherenceEnvelope`
+    /// shape change). Empty (and omitted from JSON) when module
+    /// discovery data is unavailable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_modules: Vec<ModuleSizeEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1066,6 +1083,57 @@ impl Signal {
     pub(crate) fn with_freshness(mut self, freshness: FreshnessInfo) -> Self {
         self.freshness = Some(freshness);
         self
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: adopt THIS signal's post-ranking `rank` + emission `scope` onto a
+    /// freshly-built `replacement` of the SAME code. The daemon serves an LG-first leaf's VALUE from the
+    /// LiveGraph (e.g. `EXPLAIN_IMPORTS` from `live_import_view`, `EXPLAIN_CYCLES` from
+    /// `module_import_cycles`), builds the replacement via the public constructor (which resets `rank` to 0
+    /// and `scope` to `Direct`), then calls this to restore the ranking pass's rank and the module-context
+    /// scope — so the swapped leaf is byte-identical to the original EXCEPT the served value. Panics in debug
+    /// if the codes differ (a programming error: only a same-code value-swap is valid).
+    pub fn adopt_rank_and_scope(&self, mut replacement: Signal) -> Signal {
+        debug_assert_eq!(
+            self.code, replacement.code,
+            "adopt_rank_and_scope is only valid for a same-code value swap"
+        );
+        replacement.rank = self.rank;
+        replacement.scope = self.scope;
+        replacement
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: a clone of this signal's `ExplainIdentityEvidence` iff it is an
+    /// `EXPLAIN_IDENTITY` signal (else `None`). The daemon reads the SQLite-built identity evidence, OVERRIDES
+    /// the `name`/`subtype` anchor fields with the current-state LiveGraph values (`LiveGraph::node_display`),
+    /// and rebuilds the leaf — the D8 multi-source `{livegraph, sqlite}` identity (anchor from LiveGraph,
+    /// coordinate fields from SQLite). Keeps the `SignalEvidence` matching INSIDE the agent crate.
+    pub fn explain_identity_evidence(&self) -> Option<ExplainIdentityEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainIdentity(ev) => Some(ev.clone()),
+            _ => None,
+        }
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: a clone of this signal's `ExplainCallersEvidence` iff it is an
+    /// `EXPLAIN_CALLERS` signal (else `None`). The daemon reads the SQLite-built caller evidence (its
+    /// SQL-ordered rendered item subset + `top_modules` grouping + full `count`) and rebuilds the leaf with
+    /// each item's LIVE name from current-state LiveGraph IR (`LiveGraph::node_display`), gated by the migrated
+    /// `callers` no-loss key compare — the multi-source `{livegraph, sqlite}` callgraph leaf (the caller
+    /// identity set + names from LiveGraph; the per-item module, which has no LiveGraph/IR home, from SQLite).
+    pub fn explain_callers_evidence(&self) -> Option<ExplainCallersEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainCallers(ev) => Some(ev.clone()),
+            _ => None,
+        }
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL: the `EXPLAIN_CALLEES` dual of [`Signal::explain_callers_evidence`] — a clone of
+    /// this signal's `ExplainCalleesEvidence` iff it is an `EXPLAIN_CALLEES` signal (else `None`).
+    pub fn explain_callees_evidence(&self) -> Option<ExplainCalleesEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainCallees(ev) => Some(ev.clone()),
+            _ => None,
+        }
     }
 
     // ── Named constructors (one per emitted code) ────────────
@@ -1652,6 +1720,7 @@ mod tests {
             languages: vec!["rust".into()],
             discovered_module_count: None,
             module_kinds: None,
+            top_modules: Vec::new(),
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert_eq!(s.category, SignalCategory::Informational);
@@ -1672,10 +1741,34 @@ mod tests {
                 operational: 1,
                 inferred: 1,
             }),
+            top_modules: vec![
+                ModuleSizeEvidence {
+                    path: "src/http".into(),
+                    file_count: 30,
+                },
+                ModuleSizeEvidence {
+                    path: "src/core".into(),
+                    file_count: 12,
+                },
+            ],
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert!(s.summary.contains("50 files"));
         assert!(s.summary.contains("5 discovered modules"));
+        // ORIENT-DENSITY-1: the NAMED modules ride in the evidence, carried
+        // verbatim into the serialized payload (the dense structure headline
+        // reads them; the summary string is unchanged).
+        match s.evidence() {
+            SignalEvidence::ModuleSummary(e) => {
+                assert_eq!(e.top_modules.len(), 2);
+                assert_eq!(e.top_modules[0].path, "src/http");
+                assert_eq!(e.top_modules[0].file_count, 30);
+            }
+            other => panic!(
+                "expected ModuleSummary evidence, got {}",
+                other.variant_name()
+            ),
+        }
     }
 
     #[test]

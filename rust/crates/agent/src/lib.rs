@@ -62,6 +62,7 @@ pub mod doc_relevance;
 pub mod dto;
 pub mod errors;
 pub mod explain;
+pub mod ordering;
 pub mod orient;
 pub mod ranking;
 pub mod storage_port;
@@ -69,10 +70,13 @@ pub mod storage_port;
 // ── Public surface (locked at Rust-42) ────────────────────────
 
 pub use check::{
-    run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode, ConditionResult,
-    ConditionStatus, GateOutcomeForCheck,
+    check_to_coherent, run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode,
+    ConditionResult, ConditionStatus, GateOutcomeForCheck,
 };
 pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
+pub use dto::coherent::{
+    to_coherent, CoherentOrientResult, OrientLeafLabel, OrientLgDecisions, COHERENT_ORIENT_SCHEMA,
+};
 pub use dto::{
     budget::Budget,
     envelope::{
@@ -91,6 +95,7 @@ pub use dto::{
         CheckFailEvidence,
         CheckIncompleteEvidence,
         CheckPassEvidence,
+        ComplexSymbolEvidence,
         CycleEvidence,
         // DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
         ExplainBoundaryEvidence,
@@ -111,6 +116,7 @@ pub use dto::{
         ExplainSymbolItem,
         ExplainSymbolsEvidence,
         ExplainTrustEvidence,
+        HighComplexityEvidence,
         ImportCyclesEvidence,
         ModuleCountEvidence,
         ModuleKindBreakdown,
@@ -129,13 +135,13 @@ pub use dto::{
     source::SourceRef,
 };
 pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
-pub use explain::run_explain;
+pub use explain::{explain_to_coherent, run_explain, ExplainLgDecisions};
 pub use orient::orient;
 pub use storage_port::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
-    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-    AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentTrustSummary, EnrichmentState,
+    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSize,
+    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
+    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageRead,
+    AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };

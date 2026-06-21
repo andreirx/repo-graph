@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # smoke-validation-repos.sh — smoke test rmap on all validation repos with daemon-based execution
 #
-# Version: 2 (REG-1 daemon-based CLI)
+# Version: 3 (REG-1; full command surface at full output)
+#
+# Capture harness for docs/testing/end-to-end-usefulness-protocol.md: indexes the
+# validation repos and runs the COMPREHENSIVE repo-wide command set at FULL output
+# (orient --full, all repo-wide commands). An agent then evaluates the captures in
+# smoke-runs/<ts>/ against known ground truth (the usefulness judgment is not a
+# script assertion — see the protocol's rubric).
 #
 # Usage:
 #   ./scripts/smoke-validation-repos.sh <task> [commands...]
@@ -66,6 +72,8 @@ INTERNAL_NAMES=(
     "glamCRM"
     "hexmanos"
     "zap-engine"
+    "zap-squad"
+    "FRAKTAG"
 )
 INTERNAL_PATHS=(
     "$REPO_ROOT"
@@ -73,7 +81,16 @@ INTERNAL_PATHS=(
     "$PARENT_DIR/glamCRM"
     "$PARENT_DIR/hexmanos"
     "$PARENT_DIR/zap-engine"
+    "$PARENT_DIR/zap-squad"
+    "$PARENT_DIR/FRAKTAG"
 )
+
+# Giant repos to run LAST so a huge index does not head-of-line-block the batch on
+# the serial daemon (e.g. the Linux kernel). Override: SMOKE_DEFER_LAST="a b".
+DEFER_LAST=(${SMOKE_DEFER_LAST:-linux})
+# Optional: run ONLY these repos (space-separated names), e.g.
+#   SMOKE_ONLY="mempalace nginx" ./scripts/smoke-validation-repos.sh <task> ...
+SMOKE_ONLY="${SMOKE_ONLY:-}"
 
 usage() {
     echo "usage: $0 [--retain] [--adhoc] <task> [commands...]" >&2
@@ -99,13 +116,24 @@ discover_legacy_repos() {
         return
     fi
 
-    # Find directories, skip hidden, sort lexicographically
+    # Find directories, skip hidden, sort lexicographically. Defer DEFER_LAST
+    # giants (e.g. linux) to the end so they don't head-of-line-block the batch.
+    local deferred_names=() deferred_paths=()
     while IFS= read -r dir; do
         local name
         name=$(basename "$dir")
-        LEGACY_NAMES+=("$name")
-        LEGACY_PATHS+=("$dir")
+        if [[ " ${DEFER_LAST[*]} " == *" $name "* ]]; then
+            deferred_names+=("$name")
+            deferred_paths+=("$dir")
+        else
+            LEGACY_NAMES+=("$name")
+            LEGACY_PATHS+=("$dir")
+        fi
     done < <(find "$LEGACY_BUCKET" -mindepth 1 -maxdepth 1 -type d -not -name '.*' | sort)
+    if [[ ${#deferred_names[@]} -gt 0 ]]; then
+        LEGACY_NAMES+=("${deferred_names[@]}")
+        LEGACY_PATHS+=("${deferred_paths[@]}")
+    fi
 }
 
 # Run a command and capture output without head truncation issues
@@ -206,9 +234,18 @@ fi
 TASK="$1"
 shift
 
-# Default commands if none specified
+# Default commands: the comprehensive repo-wide command surface at FULL output
+# (the End-to-End Usefulness Protocol capture set), not a historical few. Each may
+# be multi-word (subcommand + flags). Target-requiring commands (explain/callers/
+# path/imports/modules show) need a per-repo symbol/file — pass them explicitly.
 if [[ $# -eq 0 ]]; then
-    COMMANDS=("trust" "modules" "check")
+    COMMANDS=(
+        "orient --full" "check --full" "trust"
+        "modules list" "stats" "cycles"
+        "churn" "hotspots" "risk"
+        "dead" "violations" "gate" "assess"
+        "surfaces list" "docs list" "inferences list" "deps list"
+    )
 else
     COMMANDS=("$@")
 fi
@@ -228,6 +265,26 @@ done
 for _ in "${LEGACY_NAMES[@]}"; do
     ALL_CATEGORIES+=("legacy")
 done
+
+# Optional subset: SMOKE_ONLY="n1 n2 ..." runs only those repos (order preserved;
+# DEFER_LAST giants stay last). Non-matching names are skipped.
+if [[ -n "$SMOKE_ONLY" ]]; then
+    only_names=(); only_paths=(); only_cats=()
+    for idx in "${!ALL_NAMES[@]}"; do
+        if [[ " $SMOKE_ONLY " == *" ${ALL_NAMES[$idx]} "* ]]; then
+            only_names+=("${ALL_NAMES[$idx]}")
+            only_paths+=("${ALL_PATHS[$idx]}")
+            only_cats+=("${ALL_CATEGORIES[$idx]}")
+        fi
+    done
+    if [[ ${#only_names[@]} -eq 0 ]]; then
+        echo "error: SMOKE_ONLY matched no known repos: '$SMOKE_ONLY'" >&2
+        exit 1
+    fi
+    ALL_NAMES=("${only_names[@]}")
+    ALL_PATHS=("${only_paths[@]}")
+    ALL_CATEGORIES=("${only_cats[@]}")
+fi
 
 # State isolation paths (REG-1 daemon model)
 STATE_ROOT="$TEST_ROOT/$TASK"
@@ -348,30 +405,14 @@ EOF
         CMD_EXIT=0
         START_TIME=$(date +%s)
 
-        # Run command from repo directory
+        # Run command from repo directory. CMD may be multi-word (e.g.
+        # "orient --full", "modules list", "surfaces list") — split into argv so
+        # subcommands + flags pass through. The FULL command surface, not a
+        # hardcoded few (End-to-End Usefulness Protocol).
+        read -ra CMD_ARGS <<< "$CMD"
         pushd "$REPO_PATH" > /dev/null
-        case "$CMD" in
-            trust)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    trust || CMD_EXIT=$?
-                ;;
-            modules)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    modules list || CMD_EXIT=$?
-                ;;
-            check)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    check || CMD_EXIT=$?
-                ;;
-            orient)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    orient --budget small || CMD_EXIT=$?
-                ;;
-            *)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
-                    "$CMD" || CMD_EXIT=$?
-                ;;
-        esac
+        run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+            "${CMD_ARGS[@]}" || CMD_EXIT=$?
         popd > /dev/null
 
         END_TIME=$(date +%s)

@@ -61,9 +61,10 @@ pub fn print_usage() {
     eprintln!("  rmap repo remove <repo> [--delete-db]  Remove from registry");
     eprintln!();
     eprintln!("Agent orientation (resolve repo from cwd):");
-    eprintln!("  rmap orient [--focus <path>] [--budget small|medium|large]");
-    eprintln!("  rmap check");
-    eprintln!("  rmap explain <target> [--budget medium|large]");
+    eprintln!("  rmap orient [--focus <path>] [--budget small|medium|large] [--full]");
+    eprintln!("  rmap check [--full]");
+    eprintln!("  rmap explain <target> [--budget medium|large] [--full]");
+    eprintln!("    --full   uncap output for grep (no budget truncation; no-op on check)");
     eprintln!();
     eprintln!("Graph queries (resolve repo from cwd):");
     eprintln!("  rmap callers <symbol> [--edge-types <types>]");

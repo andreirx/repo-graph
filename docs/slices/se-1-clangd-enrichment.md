@@ -1,6 +1,6 @@
 # SE-1: Clangd Semantic Enrichment
 
-Status: PLANNED (LOW PRIORITY)
+Status: FRAMING SUPERSEDED — see `docs/architecture/adr/adr-extraction-substrate-scip-first.md` (EXTRACTION-SUBSTRATE-ADR-1). This slice framed compiler tooling (clangd) as optional enrichment over tree-sitter primary; the SCIP-first ADR promotes compiler-grade tooling to the primary L0/L1 producer (C/C++ via `scip-clang` + BC-1 build context). The LSP-client design below is retained as prior art for the deferred live-consumption path (spike M6). Original status: PLANNED (LOW PRIORITY)
 Depends: TC-1, BC-1 (build context required), C/C++ extraction maturity
 Unblocks: High-fidelity C/C++ call graph, receiver type resolution
 Track: Toolchain-Aware Evidence Import

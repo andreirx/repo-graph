@@ -45,9 +45,125 @@
 //!   - rmap explain src/core/auth/session.ts
 //! ```
 
+use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
-use crate::presentation::{bullet, bullet_list, heading, kv_line, DisplaySeverity};
+use crate::presentation::{bullet, heading, kv_line};
+
+/// How much DEPTH the dense `orient` renders (ORIENT-DENSITY-1 §5).
+///
+/// A budget is a density contract: every tier leads with the same
+/// dense, load-bearing HEADLINE (named structure, complexity centers,
+/// cycles, docs, and one reliability caveat); the tier only trades how
+/// much DEPTH is appended below it. It NEVER strips the headline down
+/// to thin meta. Mirrors the CLI `--budget` / `--full` selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrientDepth {
+    Small,
+    Medium,
+    Large,
+    Full,
+}
+
+impl OrientDepth {
+    /// Map the CLI budget token (`small|medium|large|full`) to a depth.
+    /// Unknown tokens fall back to `Small` (the safe dense default).
+    pub fn from_budget(budget: &str) -> Self {
+        match budget {
+            "medium" => Self::Medium,
+            "large" => Self::Large,
+            "full" => Self::Full,
+            _ => Self::Small,
+        }
+    }
+
+    /// `true` for the tiers that append the full detail breakdown
+    /// (per-axis reliability, module file-counts, the COMPLETE complexity
+    /// centers, the remaining signals, the full certainty/provenance block).
+    /// `large` and `--full` both render the complete detail. `pub(super)` so the
+    /// `orient_sections` renderers can drop the headline's "+N more" pointer when
+    /// the full breakdown section follows.
+    pub(super) fn shows_full_detail(self) -> bool {
+        matches!(self, Self::Large | Self::Full)
+    }
+
+    /// `true` for tiers above `small`, where the mid-depth sections
+    /// (limits, next steps) are appended below the headline.
+    fn shows_detail(self) -> bool {
+        !matches!(self, Self::Small)
+    }
+
+    /// How many NAMED modules the structure headline lists.
+    /// `pub(super)` so the `orient_sections` renderers can read it.
+    pub(super) fn module_name_cap(self) -> usize {
+        match self {
+            Self::Small => 8,
+            Self::Medium => 16,
+            Self::Large | Self::Full => usize::MAX,
+        }
+    }
+
+    /// How many complexity-center files the HEADLINE line names. This stays
+    /// BOUNDED at every tier — a headline is a dense one-liner, never a dump of
+    /// hundreds of symbols. At `large`/`--full` the COMPLETE above-threshold set
+    /// rides the dedicated `complexity_breakdown_section` instead (review-1 #2),
+    /// so the headline cap does not need to grow to MAX.
+    /// `pub(super)` so the `orient_sections` renderers can read it.
+    pub(super) fn complexity_center_cap(self) -> usize {
+        match self {
+            Self::Small => 3,
+            Self::Medium | Self::Large | Self::Full => 5,
+        }
+    }
+}
+
+/// Render orient's coherence-wrapped daemon response, DENSE (ORIENT-DENSITY-1).
+///
+/// The body (`render_human`) now LEADS with the dense, NAMED, load-bearing
+/// orientation and trades DEPTH by budget. This wrapper appends the CERTAINTY
+/// footer from the ROOT axes (`trust` / `freshness` / `provenance.source`) —
+/// W4: certainty axes render from `root.trust`, the degradation from
+/// `value.trust_briefing`. The footer is COMPRESSED to one honest line at
+/// small/medium budget and expands to the full provenance block at
+/// large/`--full` (§5: budget trades depth, the provenance is never dropped,
+/// only condensed).
+pub fn render_orient_envelope(
+    env: &CoherenceEnvelope<OrientResponse>,
+    depth: OrientDepth,
+) -> String {
+    let mut out = env.value.render_human(depth);
+
+    let class = format!("{:?}", env.trust.class).to_lowercase();
+    let freshness = format!("{:?}", env.freshness).to_lowercase();
+    let sources: Vec<String> = env
+        .provenance
+        .source
+        .iter()
+        .map(|s| format!("{s:?}").to_lowercase())
+        .collect();
+
+    if depth.shows_full_detail() {
+        // Full provenance block (large / --full).
+        out.push_str("\n\n");
+        out.push_str(&heading("Certainty"));
+        out.push_str(&bullet(&format!("class {class}, freshness {freshness}")));
+        if !sources.is_empty() {
+            out.push_str(&bullet(&format!("sources: {}", sources.join(", "))));
+        }
+        if let Some(reason) = env.provenance.fallback_reason {
+            out.push_str(&bullet(&format!("fallback: {}", reason.as_str())));
+        }
+    } else {
+        // Compressed one-line certainty (small / medium) — honest, not dropped.
+        let src = if sources.is_empty() {
+            String::new()
+        } else {
+            format!(" · sources: {}", sources.join(", "))
+        };
+        out.push_str(&format!("\n\nCertainty: {class}/{freshness}{src}"));
+    }
+    out.trim_end().to_string()
+}
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -70,17 +186,22 @@ pub struct OrientResponse {
     pub confidence: String,
     #[serde(default)]
     pub documentation: Option<DocumentationSection>,
+    /// ORIENT-LIVEGRAPH-IMPL: each signal is now a LEAF `CoherenceEnvelope<Signal>` (contract D7) — the
+    /// inner `Signal` is pristine; provenance/trust/freshness ride in the wrapper siblings. The renderer
+    /// reads each `.value`.
     #[serde(default)]
-    pub signals: Vec<Signal>,
+    pub signals: Vec<CoherenceEnvelope<Signal>>,
     #[serde(default)]
     pub limits: Vec<Limit>,
     #[serde(default)]
     pub next: Vec<NextAction>,
     #[serde(default)]
     pub truncated: bool,
-    /// Trust overlay — present when there is degradation.
+    /// D-ORIENT-6 = O2: the degraded-state trust briefing overlay, now carried on `value.trust_briefing`
+    /// (renamed from the old top-level `trust` key). Present only when degraded. The certainty AXES are
+    /// the envelope ROOT `trust` (rendered separately by [`render_orient_envelope`]).
     #[serde(default)]
-    pub trust: Option<TrustOverlay>,
+    pub trust_briefing: Option<TrustOverlay>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,59 +292,91 @@ pub struct ReliabilityAxis {
     pub reasons: Vec<String>,
 }
 
-// ── Human Rendering ──────────────────────────────────────────────────────────
-
 impl OrientResponse {
-    /// Render the orient response as human-readable plain text.
-    pub fn render_human(&self) -> String {
+    /// Render the DENSE orient response (ORIENT-DENSITY-1).
+    ///
+    /// Leads with the load-bearing, NAMED orientation (§3): high-severity
+    /// alerts, then structure (repo · files · named modules), complexity
+    /// centers (named files), cycles + docs, and ONE compressed
+    /// reliability caveat. Budget trades DEPTH below that — `small` is the
+    /// dense headline alone; `medium` adds limits + next steps; `large` /
+    /// `--full` add the per-module breakdown, per-axis reliability, and the
+    /// remaining signals. The headline is NEVER stripped to thin meta.
+    pub fn render_human(&self, depth: OrientDepth) -> String {
         let mut out = String::new();
 
-        // ── Header ─────────────────────────────────────────────────
-        // CLI-OUT-2B: prefer display_name (human-readable) over internal repo UID
-        let repo_display = self.display_name.as_deref().unwrap_or(&self.repo);
-        out.push_str(&kv_line("Repo", repo_display));
-        out.push_str(&self.render_focus());
-        out.push_str(&kv_line("Confidence", &self.confidence));
+        // Non-repo / unresolved focus keeps an explicit line so the agent
+        // sees what scope (or failure) it is looking at. Repo focus stays
+        // implicit — the structure line names the repo.
+        let focus_line = self.render_focus();
+        if !focus_line.is_empty() {
+            out.push_str(&focus_line);
+        }
+
+        // ── HEADLINE (every budget — the dense load-bearing set) ────
+        for alert in self.headline_alerts() {
+            out.push_str(&alert);
+            out.push('\n');
+        }
+        out.push_str(&self.structure_line(depth));
         out.push('\n');
-
-        // ── Documentation ──────────────────────────────────────────
-        if let Some(docs) = &self.documentation {
-            if !docs.relevant_files.is_empty() {
-                out.push_str(&self.render_documentation(docs));
-                out.push('\n');
-            }
+        if let Some(line) = self.complexity_line(depth) {
+            out.push_str(&line);
+            out.push('\n');
         }
-
-        // ── Signals ────────────────────────────────────────────────
-        if !self.signals.is_empty() {
-            out.push_str(&self.render_signals());
+        if let Some(line) = self.cycles_docs_line() {
+            out.push_str(&line);
+            out.push('\n');
+        }
+        if let Some(line) = self.reliability_caveat_line() {
+            out.push_str(&line);
             out.push('\n');
         }
 
-        // ── Degradation (from trust overlay) ───────────────────────
-        if let Some(trust) = &self.trust {
-            let degradation = self.render_degradation(trust);
-            if !degradation.is_empty() {
-                out.push_str(&degradation);
+        // ── DEPTH: mid sections (medium and up) ────────────────────
+        if depth.shows_detail() {
+            if !self.limits.is_empty() {
                 out.push('\n');
+                out.push_str(&self.render_limits());
+            }
+            if !self.next.is_empty() {
+                out.push('\n');
+                out.push_str(&self.render_next_steps());
             }
         }
 
-        // ── Limits ─────────────────────────────────────────────────
-        if !self.limits.is_empty() {
-            out.push_str(&self.render_limits());
-            out.push('\n');
-        }
-
-        // ── Next steps ─────────────────────────────────────────────
-        if !self.next.is_empty() {
-            out.push_str(&self.render_next_steps());
-        }
-
-        // ── Truncation notice ──────────────────────────────────────
-        // Budget-based truncation is transparent: user can adjust via --budget or get full data via --json
-        if self.truncated {
-            out.push_str("\n[Some signals omitted due to budget. Use --budget large or --json for complete output.]\n");
+        // ── DEPTH: full detail (large / --full) ────────────────────
+        if depth.shows_full_detail() {
+            let breakdown = self.module_breakdown_section();
+            if !breakdown.is_empty() {
+                out.push('\n');
+                out.push_str(&breakdown);
+            }
+            // The COMPLETE complexity centers (review-1 #2): the agent now
+            // carries every above-threshold center in the evidence at
+            // large/--full, so this section is the full set — no "+N more".
+            let complexity = self.complexity_breakdown_section();
+            if !complexity.is_empty() {
+                out.push('\n');
+                out.push_str(&complexity);
+            }
+            if let Some(trust) = &self.trust_briefing {
+                let degradation = self.render_degradation(trust);
+                if !degradation.is_empty() {
+                    out.push('\n');
+                    out.push_str(&degradation);
+                }
+            }
+            let others = self.other_signals_section();
+            if !others.is_empty() {
+                out.push('\n');
+                out.push_str(&others);
+            }
+        } else {
+            // Small / medium: the headline is complete; point to the depth.
+            out.push_str(
+                "\n[--full for the complete breakdown; rmap hotspots / modules / cycles to drill down]\n",
+            );
         }
 
         out.trim_end().to_string()
@@ -249,599 +402,8 @@ impl OrientResponse {
             }
         }
     }
-
-    fn render_documentation(&self, docs: &DocumentationSection) -> String {
-        let mut out = heading("Documentation");
-        for doc in &docs.relevant_files {
-            let marker = if doc.generated { " (generated)" } else { "" };
-            out.push_str(&bullet(&format!("{}{}", doc.path, marker)));
-        }
-        out
-    }
-
-    fn render_signals(&self) -> String {
-        let mut out = heading("Signals");
-
-        // Group signals by severity
-        let mut high: Vec<&Signal> = Vec::new();
-        let mut medium: Vec<&Signal> = Vec::new();
-        let mut low: Vec<&Signal> = Vec::new();
-
-        for signal in &self.signals {
-            match DisplaySeverity::parse(&signal.severity) {
-                DisplaySeverity::High => high.push(signal),
-                DisplaySeverity::Medium => medium.push(signal),
-                DisplaySeverity::Low => low.push(signal),
-            }
-        }
-
-        // Render each severity group
-        if !high.is_empty() {
-            out.push_str("  High\n");
-            for s in high {
-                out.push_str(&self.render_signal_line(s));
-            }
-        }
-        if !medium.is_empty() {
-            out.push_str("  Medium\n");
-            for s in medium {
-                out.push_str(&self.render_signal_line(s));
-            }
-        }
-        if !low.is_empty() {
-            out.push_str("  Low\n");
-            for s in low {
-                out.push_str(&self.render_signal_line(s));
-            }
-        }
-
-        out
-    }
-
-    /// Render a single signal line, with cycle anchor for IMPORT_CYCLES.
-    fn render_signal_line(&self, signal: &Signal) -> String {
-        if signal.code == "IMPORT_CYCLES" {
-            // Extract cycle anchor from evidence
-            if let Some(evidence) = &signal.evidence {
-                if let Some(cycles) = evidence.get("cycles").and_then(|c| c.as_array()) {
-                    if let Some(first_cycle) = cycles.first() {
-                        let length = first_cycle
-                            .get("length")
-                            .and_then(|l| l.as_u64())
-                            .unwrap_or(0);
-                        let modules = first_cycle.get("modules").and_then(|m| m.as_array());
-
-                        if let Some(mods) = modules {
-                            let cycle_count = cycles.len();
-                            let anchor = self.format_cycle_anchor(mods, length as usize);
-
-                            if cycle_count == 1 {
-                                return format!(
-                                    "    - 1 import cycle ({} modules): {}\n",
-                                    length, anchor
-                                );
-                            } else {
-                                // Multiple cycles - show largest
-                                return format!(
-                                    "    - {} import cycles (largest: {} modules): {}\n",
-                                    cycle_count, length, anchor
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Default: just the summary
-        format!("    - {}\n", signal.summary)
-    }
-
-    /// Format cycle anchor as "A -> B -> C -> ... -> A"
-    fn format_cycle_anchor(&self, modules: &[serde_json::Value], _length: usize) -> String {
-        let names: Vec<&str> = modules.iter().filter_map(|m| m.as_str()).collect();
-
-        if names.is_empty() {
-            return "(empty cycle)".to_string();
-        }
-
-        if names.len() <= 4 {
-            // Show full chain
-            let mut chain = names.join(" -> ");
-            chain.push_str(&format!(" -> {}", names[0]));
-            chain
-        } else {
-            // Truncate: first 3 -> ... -> last -> first
-            let mut chain = names[..3].join(" -> ");
-            chain.push_str(" -> ...");
-            chain.push_str(&format!(" -> {} -> {}", names[names.len() - 1], names[0]));
-            chain
-        }
-    }
-
-    fn render_degradation(&self, trust: &TrustOverlay) -> String {
-        let mut items: Vec<String> = Vec::new();
-
-        // Render from new reliability structure if present
-        if let Some(reliability) = &trust.reliability {
-            if let Some(cg) = &reliability.call_graph {
-                if cg.level != "HIGH" {
-                    items.push(self.format_reliability_axis("Call-graph", cg));
-                }
-            }
-            if let Some(ig) = &reliability.import_graph {
-                if ig.level != "HIGH" {
-                    items.push(self.format_reliability_axis("Import-graph", ig));
-                }
-            }
-            if let Some(ci) = &reliability.change_impact {
-                if ci.level != "HIGH" {
-                    items.push(self.format_reliability_axis("Change-impact", ci));
-                }
-            }
-        } else {
-            // Legacy fallback: use old fields
-            if let Some(rate) = trust.call_resolution_rate {
-                if rate < 0.95 {
-                    items.push(format!("Call resolution rate: {:.0}%", rate * 100.0));
-                }
-            }
-            if let Some(reliability) = &trust.call_graph_reliability {
-                if reliability != "high" {
-                    items.push(format!("Call graph reliability: {}", reliability));
-                }
-            }
-            // Caveats from legacy path
-            for caveat in &trust.caveats {
-                items.push(caveat.clone());
-            }
-        }
-
-        if items.is_empty() {
-            return String::new();
-        }
-
-        let mut out = heading("Degradation");
-        out.push_str(&bullet_list(&items));
-        out
-    }
-
-    /// Format a reliability axis as human-readable prose.
-    ///
-    /// Converts machine tokens like "call_resolution_rate=33.5%_below_50%"
-    /// into "33% call resolution (below 50% threshold)".
-    fn format_reliability_axis(&self, name: &str, axis: &ReliabilityAxis) -> String {
-        let level = &axis.level;
-
-        if axis.reasons.is_empty() {
-            return format!("{} reliability is {} on this repo. Do not use for safety-critical decisions without verification.", name, level);
-        }
-
-        // Convert machine reasons to human prose
-        let human_reasons: Vec<String> = axis
-            .reasons
-            .iter()
-            .map(|r| self.humanize_reason(r))
-            .collect();
-
-        format!(
-            "{} reliability is {} ({})",
-            name,
-            level,
-            human_reasons.join("; ")
-        )
-    }
-
-    /// Convert a machine-format reason to human-readable prose.
-    fn humanize_reason(&self, reason: &str) -> String {
-        // Pattern: "call_resolution_rate=33.5%_below_50%"
-        if reason.starts_with("call_resolution_rate=") {
-            if let Some(rest) = reason.strip_prefix("call_resolution_rate=") {
-                // Extract rate and threshold
-                // Format: "33.5%_below_50%"
-                let parts: Vec<&str> = rest.split("_below_").collect();
-                if parts.len() == 2 {
-                    let rate = parts[0].trim_end_matches('%');
-                    let threshold = parts[1].trim_end_matches('%');
-                    if let (Ok(r), Ok(t)) = (rate.parse::<f64>(), threshold.parse::<f64>()) {
-                        return format!("{:.0}% call resolution, below {}% threshold", r, t);
-                    }
-                }
-            }
-        }
-
-        // Pattern: "unresolved_imports=944"
-        if reason.starts_with("unresolved_imports=") {
-            if let Some(count) = reason.strip_prefix("unresolved_imports=") {
-                if let Ok(n) = count.parse::<u64>() {
-                    return format!("{} unresolved imports", n);
-                }
-            }
-        }
-
-        // Pattern: "alias_resolution_suspicion"
-        if reason == "alias_resolution_suspicion" {
-            return "alias resolution suspected".to_string();
-        }
-
-        // Pattern: "missing_entrypoint_declarations"
-        if reason == "missing_entrypoint_declarations" {
-            return "no entrypoints declared".to_string();
-        }
-
-        // Pattern: "registry_pattern_suspicion"
-        if reason == "registry_pattern_suspicion" {
-            return "registry/factory patterns detected".to_string();
-        }
-
-        // Unknown pattern - return as-is but cleaned up
-        reason.replace('_', " ")
-    }
-
-    fn render_limits(&self) -> String {
-        let mut out = heading("Limits");
-        for limit in &self.limits {
-            out.push_str(&bullet(&limit.summary));
-        }
-        out
-    }
-
-    fn render_next_steps(&self) -> String {
-        let mut out = heading("Next steps");
-        for action in &self.next {
-            let cmd = match &action.target {
-                Some(target) => format!("rmap {} {}", action.kind, target),
-                None => format!("rmap {}", action.kind),
-            };
-            out.push_str(&bullet(&cmd));
-        }
-        out
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn minimal_response() -> OrientResponse {
-        OrientResponse {
-            repo: "test-repo".to_string(),
-            display_name: None,
-            snapshot: "snap-123".to_string(),
-            focus: Focus {
-                input: None,
-                resolved: true,
-                resolved_kind: Some("repo".to_string()),
-                resolved_path: None,
-                reason: None,
-            },
-            confidence: "high".to_string(),
-            documentation: None,
-            signals: vec![],
-            limits: vec![],
-            next: vec![],
-            truncated: false,
-            trust: None,
-        }
-    }
-
-    #[test]
-    fn render_shows_repo_name() {
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(out.contains("Repo: test-repo"));
-    }
-
-    #[test]
-    fn render_shows_confidence() {
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(out.contains("Confidence: high"));
-    }
-
-    #[test]
-    fn render_hides_internal_fields() {
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(!out.contains("snap-123"), "snapshot should be hidden");
-        assert!(!out.contains("schema"), "schema should be hidden");
-        assert!(!out.contains("command\":"), "command should be hidden");
-    }
-
-    #[test]
-    fn render_omits_focus_at_repo_level() {
-        // Repo-level focus adds no information - omit the line entirely
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(!out.contains("Focus:"));
-    }
-
-    #[test]
-    fn render_shows_focus_with_path() {
-        let mut r = minimal_response();
-        r.focus = Focus {
-            input: Some("src/core".to_string()),
-            resolved: true,
-            resolved_kind: Some("module".to_string()),
-            resolved_path: Some("src/core".to_string()),
-            reason: None,
-        };
-        let out = r.render_human();
-        assert!(out.contains("Focus: src/core (module)"));
-    }
-
-    #[test]
-    fn render_shows_unresolved_focus() {
-        let mut r = minimal_response();
-        r.focus = Focus {
-            input: Some("nonexistent/path".to_string()),
-            resolved: false,
-            resolved_kind: None,
-            resolved_path: None,
-            reason: Some("no_match".to_string()),
-        };
-        let out = r.render_human();
-        assert!(out.contains("Focus: nonexistent/path (unresolved: no_match)"));
-    }
-
-    #[test]
-    fn render_shows_documentation() {
-        let mut r = minimal_response();
-        r.documentation = Some(DocumentationSection {
-            relevant_files: vec![
-                RelevantDoc {
-                    path: "README.md".to_string(),
-                    kind: "readme".to_string(),
-                    generated: false,
-                    reason: "repo_root_doc".to_string(),
-                },
-                RelevantDoc {
-                    path: "docs/MAP.md".to_string(),
-                    kind: "map".to_string(),
-                    generated: true,
-                    reason: "generated_map_for_target".to_string(),
-                },
-            ],
-            count: 2,
-        });
-        let out = r.render_human();
-        assert!(out.contains("Documentation"));
-        assert!(out.contains("README.md"));
-        assert!(out.contains("docs/MAP.md (generated)"));
-    }
-
-    #[test]
-    fn render_shows_signals_grouped_by_severity() {
-        let mut r = minimal_response();
-        r.signals = vec![
-            Signal {
-                code: "GATE_FAIL".to_string(),
-                severity: "high".to_string(),
-                category: "gate".to_string(),
-                summary: "Gate fails: 2 of 5 obligations failing.".to_string(),
-                scope: None,
-                evidence: None,
-            },
-            Signal {
-                code: "IMPORT_CYCLES".to_string(),
-                severity: "medium".to_string(),
-                category: "structure".to_string(),
-                summary: "3 import cycles detected.".to_string(),
-                scope: None,
-                evidence: None,
-            },
-            Signal {
-                code: "MODULE_SUMMARY".to_string(),
-                severity: "low".to_string(),
-                category: "informational".to_string(),
-                summary: "150 files, 1200 symbols indexed.".to_string(),
-                scope: None,
-                evidence: None,
-            },
-        ];
-        let out = r.render_human();
-        assert!(out.contains("Signals"));
-        assert!(out.contains("High"));
-        assert!(out.contains("Gate fails:"));
-        assert!(out.contains("Medium"));
-        assert!(out.contains("3 import cycles"));
-        assert!(out.contains("Low"));
-        assert!(out.contains("150 files"));
-    }
-
-    #[test]
-    fn render_shows_degradation_from_trust_legacy() {
-        // Test legacy TrustOverlay structure (backward compatibility)
-        let mut r = minimal_response();
-        r.trust = Some(TrustOverlay {
-            reliability: None,
-            call_graph_reliability: Some("medium".to_string()),
-            call_resolution_rate: Some(0.78),
-            caveats: vec!["Enrichment phase did not run.".to_string()],
-        });
-        let out = r.render_human();
-        assert!(out.contains("Degradation"));
-        assert!(out.contains("Call resolution rate: 78%"));
-        assert!(out.contains("Call graph reliability: medium"));
-        assert!(out.contains("Enrichment phase did not run."));
-    }
-
-    #[test]
-    fn render_shows_degradation_from_trust_new_structure() {
-        // Test new TrustOverlay structure with reliability section
-        let mut r = minimal_response();
-        r.trust = Some(TrustOverlay {
-            reliability: Some(ReliabilitySection {
-                call_graph: Some(ReliabilityAxis {
-                    level: "LOW".to_string(),
-                    reasons: vec!["call_resolution_rate=33.5%_below_50%".to_string()],
-                }),
-                import_graph: Some(ReliabilityAxis {
-                    level: "LOW".to_string(),
-                    reasons: vec!["unresolved_imports=944".to_string()],
-                }),
-                change_impact: Some(ReliabilityAxis {
-                    level: "LOW".to_string(),
-                    reasons: vec!["alias_resolution_suspicion".to_string()],
-                }),
-            }),
-            call_graph_reliability: None,
-            call_resolution_rate: None,
-            caveats: vec![],
-        });
-        let out = r.render_human();
-        assert!(out.contains("Degradation"));
-        // Check humanized reasons
-        assert!(out.contains("Call-graph reliability is LOW"));
-        assert!(out.contains("34% call resolution")); // 33.5 rounds to 34
-        assert!(out.contains("Import-graph reliability is LOW"));
-        assert!(out.contains("944 unresolved imports"));
-        assert!(out.contains("Change-impact reliability is LOW"));
-        assert!(out.contains("alias resolution suspected"));
-    }
-
-    #[test]
-    fn render_hides_degradation_when_trust_is_high() {
-        let mut r = minimal_response();
-        r.trust = Some(TrustOverlay {
-            reliability: Some(ReliabilitySection {
-                call_graph: Some(ReliabilityAxis {
-                    level: "HIGH".to_string(),
-                    reasons: vec![],
-                }),
-                import_graph: Some(ReliabilityAxis {
-                    level: "HIGH".to_string(),
-                    reasons: vec![],
-                }),
-                change_impact: Some(ReliabilityAxis {
-                    level: "HIGH".to_string(),
-                    reasons: vec![],
-                }),
-            }),
-            call_graph_reliability: None,
-            call_resolution_rate: None,
-            caveats: vec![],
-        });
-        let out = r.render_human();
-        assert!(!out.contains("Degradation"));
-    }
-
-    #[test]
-    fn render_shows_cycle_anchor_in_signal() {
-        let mut r = minimal_response();
-        // Create cycle evidence JSON with 4 modules (shows full chain)
-        let evidence = serde_json::json!({
-            "cycle_count": 1,
-            "cycles": [{
-                "length": 4,
-                "modules": ["Auth", "User", "Session", "Config"]
-            }]
-        });
-        r.signals = vec![Signal {
-            code: "IMPORT_CYCLES".to_string(),
-            severity: "medium".to_string(),
-            category: "structure".to_string(),
-            summary: "1 import cycle detected.".to_string(),
-            scope: None,
-            evidence: Some(evidence),
-        }];
-        let out = r.render_human();
-        assert!(out.contains("Medium"));
-        // Should show cycle anchor with modules (full chain for <= 4)
-        assert!(out.contains("1 import cycle (4 modules)"));
-        assert!(out.contains("Auth -> User -> Session -> Config -> Auth"));
-    }
-
-    #[test]
-    fn render_shows_large_cycle_truncated() {
-        let mut r = minimal_response();
-        // Create cycle evidence with >4 modules
-        let evidence = serde_json::json!({
-            "cycle_count": 1,
-            "cycles": [{
-                "length": 10,
-                "modules": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
-            }]
-        });
-        r.signals = vec![Signal {
-            code: "IMPORT_CYCLES".to_string(),
-            severity: "medium".to_string(),
-            category: "structure".to_string(),
-            summary: "1 import cycle detected.".to_string(),
-            scope: None,
-            evidence: Some(evidence),
-        }];
-        let out = r.render_human();
-        // Should truncate: first 3 -> ... -> last -> first
-        assert!(out.contains("A -> B -> C -> ..."));
-        assert!(out.contains("-> J -> A"));
-    }
-
-    #[test]
-    fn render_shows_limits() {
-        let mut r = minimal_response();
-        r.limits = vec![Limit {
-            code: "MODULE_DATA_UNAVAILABLE".to_string(),
-            summary: "Module discovery data unavailable.".to_string(),
-        }];
-        let out = r.render_human();
-        assert!(out.contains("Limits"));
-        assert!(out.contains("Module discovery data unavailable."));
-    }
-
-    #[test]
-    fn render_shows_next_steps() {
-        let mut r = minimal_response();
-        r.next = vec![
-            NextAction {
-                kind: "check".to_string(),
-                repo: "test-repo".to_string(),
-                target: None,
-                reason: "Verify current state.".to_string(),
-            },
-            NextAction {
-                kind: "explain".to_string(),
-                repo: "test-repo".to_string(),
-                target: Some("src/core/auth.ts".to_string()),
-                reason: "Deep dive on auth module.".to_string(),
-            },
-        ];
-        let out = r.render_human();
-        assert!(out.contains("Next steps"));
-        assert!(out.contains("rmap check"));
-        assert!(out.contains("rmap explain src/core/auth.ts"));
-    }
-
-    #[test]
-    fn render_shows_truncation_notice() {
-        let mut r = minimal_response();
-        r.truncated = true;
-        let out = r.render_human();
-        assert!(out.contains("Some signals omitted due to budget"));
-        assert!(out.contains("--budget large"));
-    }
-
-    #[test]
-    fn deserialize_from_daemon_json() {
-        let json = r#"{
-            "schema": "rgr.agent.v1",
-            "command": "orient",
-            "repo": "my-app",
-            "snapshot": "snap-abc",
-            "focus": {
-                "resolved": true,
-                "resolved_kind": "repo"
-            },
-            "confidence": "high",
-            "signals": [],
-            "limits": [],
-            "next": [],
-            "truncated": false
-        }"#;
-
-        let r: OrientResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(r.repo, "my-app");
-        assert_eq!(r.confidence, "high");
-        assert!(r.focus.resolved);
-    }
-}
+#[path = "orient_tests.rs"]
+mod tests;

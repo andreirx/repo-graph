@@ -192,6 +192,62 @@ pub struct RepoState {
 
     /// Storage connection (owned by daemon, not opened per-request).
     pub storage: StorageConnection,
+
+    /// LIVEGRAPH-INTEGRATION-1B: optional in-memory LiveGraph, populated by the dev-only
+    /// `livegraph_preload` method (`None` until preloaded). Interior mutability because `RepoState`
+    /// is shared as `Arc<RepoState>` — preload write-locks, callers/callees read-lock.
+    pub livegraph: parking_lot::RwLock<Option<repo_graph_livegraph::LiveGraph>>,
+
+    /// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1: the in-memory repo-level import NO-LOSS certificate (`None` until
+    /// lazily built on the first eligible default `imports` query). Keyed by the import-cert fingerprint; a
+    /// fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). Interior mutability:
+    /// the fastpath read-locks; the lazy build write-locks.
+    pub import_cert: parking_lot::RwLock<Option<crate::livegraph_feed::ImportNoLossCert>>,
+
+    /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the in-memory repo-level MODULE-cycle NO-LOSS certificate (`None`
+    /// until lazily built on the first eligible default `cycles` query). Keyed by the SAME SQLite-free
+    /// fingerprint as `import_cert` (partitions + snapshot + policy); a fingerprint mismatch invalidates +
+    /// rebuilds. NOT durable (rebuilt on restart). Interior mutability: the fastpath read-locks; the lazy build
+    /// write-locks.
+    pub cycles_cert: parking_lot::RwLock<Option<crate::livegraph_feed::CycleNoLossCert>>,
+
+    /// STATS-LIVEGRAPH-IMPL-1: the in-memory repo-level STATS NO-LOSS certificate (`None` until lazily built on
+    /// the first eligible default `stats` query). Keyed by the SAME SQLite-free fingerprint as
+    /// `import_cert`/`cycles_cert`; a fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on
+    /// restart). Interior mutability: the fastpath read-locks; the lazy build write-locks.
+    pub stats_cert: parking_lot::RwLock<Option<crate::livegraph_feed::StatsNoLossCert>>,
+
+    /// ORIENT-LIVEGRAPH-IMPL: the in-memory repo-level COMPLEXITY NO-LOSS certificate (`None` until lazily
+    /// built on the first eligible `orient` repo-focus query that emits HIGH_COMPLEXITY). `verdict == GREEN`
+    /// iff the LiveGraph repo-wide `high_complexity` set is field-exact equal to the SQLite `measurements`
+    /// high-complexity set. Keyed by the SAME SQLite-free fingerprint as `import_cert`/`cycles_cert`/
+    /// `stats_cert`; a fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on restart).
+    /// Interior mutability: the orient decision read-locks; the lazy build write-locks.
+    pub complexity_cert:
+        parking_lot::RwLock<Option<crate::orient_lg_decisions::ComplexityNoLossCert>>,
+
+    /// FOCUS-RESOLUTION-LIVEGRAPH-IMPL: the in-memory repo-level FOCUS-RESOLUTION NO-LOSS certificate
+    /// (`None` until lazily built by `focus_resolution_cert::build_and_store_focus_resolution_cert`).
+    /// `verdict == GREEN` iff the LiveGraph focus resolution (`focus_resolver`) is field-exact equal
+    /// to the SQLite `resolve_*` resolution over the resident corpus. Keyed by the SAME SQLite-free
+    /// fingerprint as `import_cert`/`cycles_cert`/`stats_cert`/`complexity_cert`; a fingerprint
+    /// mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). The later
+    /// COHERENCE-LEAF-SERVE consumer reads this to gate its focused-orient/explain fastpath; this
+    /// slice builds + stores it standalone (no consumer wiring yet).
+    pub focus_resolution_cert:
+        parking_lot::RwLock<Option<crate::focus_resolution_cert::FocusResolutionNoLossCert>>,
+
+    /// COHERENCE-LEAF-SERVE-IMPL-1: the in-memory repo-level CALLGRAPH NO-LOSS certificate (`None`
+    /// until lazily built by `callgraph_cert::build_and_store_callgraph_cert`). `verdict == GREEN`
+    /// iff the LiveGraph callers/callees rows (`callers`/`callees` + `symbol_context` enrichment) are
+    /// field-exact equal — as multisets — to the SQLite `find_symbol_callers`/`find_symbol_callees`
+    /// rows for EVERY symbol in the resident∪SQLite corpus. This is the cacheable, ZERO-read serve
+    /// mechanism the orient bounded (b)-leaf fastpath needs (the shipped per-call `gate_callgraph_no_loss`
+    /// reads SQLite EVERY call — disqualifying). Keyed by the SAME SQLite-free fingerprint as
+    /// `import_cert`/`cycles_cert`/`stats_cert`/`complexity_cert`/`focus_resolution_cert`; a fingerprint
+    /// mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). Interior mutability: the orient
+    /// serve decision read-locks; the lazy build write-locks.
+    pub callgraph_cert: parking_lot::RwLock<Option<crate::callgraph_cert::CallgraphNoLossCert>>,
 }
 
 impl RepoState {
@@ -228,6 +284,13 @@ impl RepoState {
             key,
             coordinator: RepoCoordinator::new(),
             storage,
+            livegraph: parking_lot::RwLock::new(None),
+            import_cert: parking_lot::RwLock::new(None),
+            cycles_cert: parking_lot::RwLock::new(None),
+            stats_cert: parking_lot::RwLock::new(None),
+            complexity_cert: parking_lot::RwLock::new(None),
+            focus_resolution_cert: parking_lot::RwLock::new(None),
+            callgraph_cert: parking_lot::RwLock::new(None),
         })
     }
 

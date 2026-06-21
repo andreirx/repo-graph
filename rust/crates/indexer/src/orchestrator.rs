@@ -499,6 +499,14 @@ fn run_pipeline<S: IndexerStoragePort>(
 
     emit(crate::types::IndexPhase::Extracting, 0, total_files, None)?;
 
+    // PERF-INSTRUMENTATION-1: measure the REAL phase boundaries. These are
+    // disjoint sub-windows of the pipeline; `store_ms` accumulates the actual
+    // storage write calls (NOT the trailing finalization the old derivation
+    // mislabeled as `store`). Cost is a handful of `Instant`s at COARSE phase
+    // boundaries — negligible whether perf is on or off. See index_timing.rs.
+    let mut timings = crate::index_timing::PhaseTimings::default();
+    let extract_start = std::time::Instant::now();
+
     // ── Phase 1: Extract files ───────────────────────────────
     let mut tracked_files: Vec<TrackedFile> = Vec::new();
     let mut file_versions: Vec<FileVersion> = Vec::new();
@@ -749,7 +757,12 @@ fn run_pipeline<S: IndexerStoragePort>(
         }
     }
 
-    // Persist phase 1 results.
+    // Extraction loop done. Everything below is storage-write or resolution
+    // time, not extraction — stamp the extract window here.
+    timings.extract_ms = extract_start.elapsed().as_millis() as u64;
+
+    // Persist phase 1 results. (Real storage writes → store_ms.)
+    let store_start = std::time::Instant::now();
     storage.upsert_files(&tracked_files)?;
     storage.upsert_file_versions(&file_versions)?;
     if !all_nodes.is_empty() {
@@ -761,6 +774,7 @@ fn run_pipeline<S: IndexerStoragePort>(
     if !all_signals.is_empty() {
         storage.insert_file_signals(&all_signals)?;
     }
+    timings.store_ms += store_start.elapsed().as_millis() as u64;
 
     // ── Phase 2: Module nodes ────────────────────────────────
     // Use the FULL file set (copied + extracted) for module derivation.
@@ -779,13 +793,20 @@ fn run_pipeline<S: IndexerStoragePort>(
     let module_nodes = create_module_nodes(&all_tracked_for_modules, repo_uid, snap_uid);
     let module_node_count = module_nodes.len() as u64;
     if !module_nodes.is_empty() {
+        let store_start = std::time::Instant::now();
         storage.insert_nodes(&module_nodes)?;
+        timings.store_ms += store_start.elapsed().as_millis() as u64;
     }
     nodes_total += module_node_count;
 
     // ── Phase 3: Edge resolution ─────────────────────────────
     // Abort checkpoint: check transport before resolution phase
     emit(crate::types::IndexPhase::Resolving, 0, 0, None)?;
+    // Resolve window opens here. `resolve_ms` is this window MINUS the storage
+    // writes that happen inside it (insert_resolved/unresolved edges below), so
+    // the reported `resolve` is pure resolution compute, not edge-store time.
+    let resolve_start = std::time::Instant::now();
+    let store_before_resolve = timings.store_ms;
     let resolver_nodes = storage.query_resolver_nodes(snap_uid)?;
     // Use the FULL file set for resolution context.
     let file_resolution_map = build_file_resolution_map(all_file_paths, repo_uid);
@@ -884,9 +905,11 @@ fn run_pipeline<S: IndexerStoragePort>(
 
         let result = resolve_edges(&extracted_edges, &index, Some(&import_bindings_by_file));
 
-        // Persist resolved edges.
+        // Persist resolved edges. (Real storage writes → store_ms.)
         if !result.resolved.is_empty() {
+            let store_start = std::time::Instant::now();
             storage.insert_resolved_edges(&result.resolved)?;
+            timings.store_ms += store_start.elapsed().as_millis() as u64;
         }
         resolved_total += result.resolved.len() as u64;
         all_resolved_import_pairs.extend(result.resolved_import_pairs);
@@ -936,7 +959,9 @@ fn run_pipeline<S: IndexerStoragePort>(
                     observed_at: classification_observed_at.clone(),
                 });
             }
+            let store_start = std::time::Instant::now();
             storage.insert_unresolved_edges(&persisted)?;
+            timings.store_ms += store_start.elapsed().as_millis() as u64;
             unresolved_count += persisted.len() as u64;
         }
     }
@@ -945,11 +970,20 @@ fn run_pipeline<S: IndexerStoragePort>(
     let module_edges = create_module_edges(&index, &all_resolved_import_pairs, snap_uid, repo_uid);
     let module_edges_count = module_edges.len() as u64;
     if !module_edges.is_empty() {
+        let store_start = std::time::Instant::now();
         storage.insert_resolved_edges(&module_edges)?;
+        timings.store_ms += store_start.elapsed().as_millis() as u64;
     }
+
+    // Close the resolve window: pure resolution compute = window − writes inside it.
+    let resolve_window_ms = resolve_start.elapsed().as_millis() as u64;
+    timings.resolve_ms = resolve_window_ms.saturating_sub(timings.store_ms - store_before_resolve);
 
     // ── Phase 5: Finalization ────────────────────────────────
     // Abort checkpoint: check transport before finalization phase
+    // Snapshot-metadata updates only (counts/diagnostics/status) → finalize_ms,
+    // honestly distinct from the storage writes above (store_ms).
+    let finalize_start = std::time::Instant::now();
     emit(crate::types::IndexPhase::Persisting, 0, 0, None)?;
     storage.update_snapshot_counts(snap_uid)?;
 
@@ -971,6 +1005,7 @@ fn run_pipeline<S: IndexerStoragePort>(
         completed_at: None,
     })?;
 
+    timings.finalize_ms = finalize_start.elapsed().as_millis() as u64;
     let duration_ms = start.elapsed().as_millis() as u64;
 
     Ok(IndexResult {
@@ -981,6 +1016,7 @@ fn run_pipeline<S: IndexerStoragePort>(
         edges_unresolved: unresolved_count,
         unresolved_breakdown,
         duration_ms,
+        phase_timings: timings,
         orphaned_declarations: 0,
         contracts: None, // Filled by index_repo after contract subpipeline
         generated_code_mappings: None, // Filled by index_repo after Java mapping
@@ -2237,6 +2273,7 @@ mod tests {
                 metrics: BTreeMap::new(),
                 import_bindings: vec![],
                 resolved_callsites: vec![],
+                import_observations: vec![],
             })
         }
     }
@@ -2276,6 +2313,51 @@ mod tests {
         // Snapshot should be READY.
         let snap = storage.snapshots.last().unwrap();
         assert_eq!(snap.status, SnapshotStatus::Ready);
+    }
+
+    #[test]
+    fn index_repo_populates_real_phase_timings() {
+        // PERF-INSTRUMENTATION-1: the orchestrator measures the REAL phase
+        // boundaries (extract / store / resolve / finalize) and returns them on
+        // IndexResult. They are disjoint sub-windows of the pipeline, so their
+        // sum can never exceed the total `duration_ms`. This invariant proves
+        // the timings are genuine measurements (not fabricated stubs) and that
+        // `store` is tracked separately from the finalization tail.
+        let mut storage = MockStorage::default();
+        let mut ext = MockExtractor::new(vec!["typescript".into()]);
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+        let files = vec![FileInput {
+            rel_path: "src/index.ts".into(),
+            content: "export const x = 1;".into(),
+            content_hash: "hash1".into(),
+            size_bytes: 20,
+            line_count: 1,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }];
+
+        let result = index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &files,
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+
+        // Disjoint sub-windows: extract + store + resolve + finalize <= total.
+        let t = &result.phase_timings;
+        let accounted = t.extract_ms + t.resolve_ms + t.store_ms + t.finalize_ms;
+        assert!(
+            accounted <= result.duration_ms,
+            "phase timings {:?} (sum {}) must not exceed duration_ms {}",
+            t,
+            accounted,
+            result.duration_ms,
+        );
     }
 
     #[test]

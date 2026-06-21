@@ -40,12 +40,49 @@ readonly SOCKET_PATH="${HOME}/Library/Application Support/repo-graph/daemon.sock
 readonly LAUNCHD_LABEL="com.repo-graph.rmapd"
 readonly LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 readonly LOG_FILE="${HOME}/Library/Logs/repo-graph/daemon.log"
+# Stable macOS code-signing identity. Each `cargo build` ad-hoc signs with a fresh content-hash signature, so
+# macOS sees every reinstall as a new app and re-prompts (firewall / privacy). Signing with ONE persistent
+# identity makes the one-time "Allow" stick across rebuilds. Override per-machine via env (e.g. point it at an
+# existing "Apple Development: ..." identity by its SHA-1 hash from `security find-identity -v -p codesigning`):
+#   export RMAP_CODESIGN_IDENTITY=<hash-or-name>
+# Default is a self-signed identity you create ONCE (see install_binaries). Personal identities are NOT
+# hardcoded here — this script is shared.
+readonly CODESIGN_IDENTITY="${RMAP_CODESIGN_IDENTITY:-rmapd-dev}"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 info()  { echo "==> $*"; }
 warn()  { echo "WARN: $*" >&2; }
 error() { echo "ERROR: $*" >&2; exit 1; }
+
+# ── Phase timing (MEASUREMENT ONLY — does not change build profile or validation) ──
+# Identifies where wall-clock goes (cargo release vs rgistr/SEA vs daemon lifecycle vs validation).
+# `timed "<name>" <cmd...>` records the phase duration; `print_timing_summary` prints the breakdown.
+declare -a PHASE_NAMES=()
+declare -a PHASE_SECS=()
+
+timed() {
+    local name="$1"; shift
+    local start end
+    start=$(date +%s)
+    "$@"
+    end=$(date +%s)
+    PHASE_NAMES+=("${name}")
+    PHASE_SECS+=("$((end - start))")
+    info "  [timing] ${name}: $((end - start))s"
+}
+
+print_timing_summary() {
+    echo ""
+    echo "── Phase timing (seconds) ──────────────────────────"
+    local i total=0
+    for i in "${!PHASE_NAMES[@]}"; do
+        printf "  %-26s %6ss\n" "${PHASE_NAMES[$i]}" "${PHASE_SECS[$i]}"
+        total=$((total + PHASE_SECS[i]))
+    done
+    printf "  %-26s %6ss\n" "TOTAL (timed phases)" "${total}"
+    echo "────────────────────────────────────────────────────"
+}
 
 check_platform() {
     if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -123,16 +160,20 @@ build_rgistr() {
     cd "${REPO_ROOT}/tools/rgistr"
 
     # Install dependencies (pinned postject required for SEA injection)
+    local t0 t1
     info "  Installing npm dependencies..."
-    npm ci --silent
+    t0=$(date +%s); npm ci --silent; t1=$(date +%s)
+    info "  [timing] npm ci: $((t1 - t0))s"
 
     # Bundle TypeScript to single CJS file
     info "  Bundling..."
-    npm run bundle --silent
+    t0=$(date +%s); npm run bundle --silent; t1=$(date +%s)
+    info "  [timing] npm bundle: $((t1 - t0))s"
 
     # Build SEA binary
     info "  Building SEA..."
-    ./scripts/build-sea.sh
+    t0=$(date +%s); ./scripts/build-sea.sh; t1=$(date +%s)
+    info "  [timing] build-sea: $((t1 - t0))s"
 
     # Determine output binary name
     local platform arch output_binary
@@ -230,7 +271,37 @@ install_binaries_atomic() {
     mv -f "${tmp_rmapd}" "${INSTALL_DIR}/rmapd"
     mv -f "${tmp_rgistr}" "${INSTALL_DIR}/rgistr"
 
+    sign_binaries
+
     info "  Binaries installed"
+}
+
+# Re-sign the installed binaries with the STABLE self-signed identity so macOS stops re-prompting on every
+# reinstall (see CODESIGN_IDENTITY). If the identity is absent, leave the ad-hoc signatures in place and tell the
+# user how to create it ONCE — never fail the install over signing.
+sign_binaries() {
+    [[ "$(uname -s)" == "Darwin" ]] || return 0
+
+    if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "${CODESIGN_IDENTITY}"; then
+        warn "  Code-signing identity '${CODESIGN_IDENTITY}' not found — binaries left ad-hoc signed."
+        warn "  macOS will keep re-prompting on each install. Fix it ONE of two ways:"
+        warn "    (a) reuse an existing identity: security find-identity -v -p codesigning"
+        warn "        then: export RMAP_CODESIGN_IDENTITY=<hash>   (e.g. in your shell profile)"
+        warn "    (b) create a self-signed one: Keychain Access -> Certificate Assistant ->"
+        warn "        Create a Certificate... | Name: ${CODESIGN_IDENTITY} | Self Signed Root | Code Signing"
+        return 0
+    fi
+
+    # `--force` replaces the linker's ad-hoc signature. No hardened runtime (it needs entitlements and can break
+    # a local dev daemon). First run may prompt for keychain access to the signing key -> click "Always Allow".
+    local b
+    for b in rmap rmapd rgistr; do
+        if codesign --force --sign "${CODESIGN_IDENTITY}" "${INSTALL_DIR}/${b}" 2>/dev/null; then
+            info "  Signed ${b} (${CODESIGN_IDENTITY})"
+        else
+            warn "  codesign ${b} failed — left ad-hoc signed"
+        fi
+    done
 }
 
 start_daemon() {
@@ -245,8 +316,28 @@ start_daemon() {
         error "Failed to start daemon service. Check: ${LOG_FILE}"
     fi
 
-    # Wait for startup
-    sleep 2
+    # Poll for the daemon to bind its socket. A fixed sleep races launchd: KeepAlive
+    # + ThrottleInterval can make a first-start flap take longer than the sleep, so
+    # validate_installation then false-fails ("daemon not running") while it is still
+    # settling. Wait up to ~20s for the socket (mirrors scripts/dogfood-isolated.sh).
+    local i
+    for i in $(seq 1 40); do
+        [[ -S "${SOCKET_PATH}" ]] && break
+        sleep 0.5
+    done
+
+    # bootstrap loads the job but, after repeated restarts (throttling) or if the job
+    # was already loaded, launchd may not actually (re)spawn the process. kickstart -k
+    # is the reliable lever: it force-(re)starts the loaded job. If the socket is still
+    # absent, kickstart and poll again.
+    if [[ ! -S "${SOCKET_PATH}" ]]; then
+        warn "  Socket not up after bootstrap; forcing 'launchctl kickstart -k'..."
+        launchctl kickstart -k "gui/${uid}/${LAUNCHD_LABEL}" 2>/dev/null || true
+        for i in $(seq 1 40); do
+            [[ -S "${SOCKET_PATH}" ]] && break
+            sleep 0.5
+        done
+    fi
 }
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -328,17 +419,19 @@ main() {
     check_launchd_service_exists
 
     echo ""
-    build_release
-    build_rgistr
+    timed "cargo release build" build_release
+    timed "rgistr SEA build"    build_rgistr
 
     echo ""
-    stop_daemon_graceful
-    remove_stale_socket
-    install_binaries_atomic
-    start_daemon
+    timed "stop daemon"         stop_daemon_graceful
+    timed "remove socket"       remove_stale_socket
+    timed "install binaries"    install_binaries_atomic
+    timed "start daemon"        start_daemon
 
     echo ""
-    validate_installation
+    timed "validate"            validate_installation
+
+    print_timing_summary
 
     echo ""
     echo "====================================================="

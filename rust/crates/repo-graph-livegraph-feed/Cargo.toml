@@ -1,0 +1,18 @@
+# ── repo-graph-livegraph-feed ──────────────────────────────────────
+# LIVEGRAPH-INTEGRATION-1A (Stage D integration): the outer adapter that feeds REAL
+# repo-graph-scip-ingest output into the repo-graph-livegraph runtime. The ONLY crate that depends on
+# BOTH the ingester and the runtime — the dependency direction the runtime must never invert. No
+# daemon / CLI / warm cache / persistence. See docs/slices/livegraph-integration-1a.md.
+[package]
+name = "repo-graph-livegraph-feed"
+version = "0.1.0"
+edition = "2021"
+description = "Ingestion→runtime adapter: feeds scip-ingest output into LiveGraph (LIVEGRAPH-INTEGRATION-1A). Non-production."
+license = "MIT"
+publish = false
+
+[dependencies]
+repo-graph-ir = { path = "../repo-graph-ir" }
+repo-graph-trust-model = { path = "../repo-graph-trust-model" }
+repo-graph-livegraph = { path = "../repo-graph-livegraph" }
+repo-graph-scip-ingest = { path = "../repo-graph-scip-ingest" }

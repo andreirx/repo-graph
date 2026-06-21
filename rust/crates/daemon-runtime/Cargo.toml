@@ -48,6 +48,24 @@ repo-graph-module-queries = { path = "../module-queries" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
 
+# LiveGraph runtime + ingestion feed (LIVEGRAPH-INTEGRATION-1B: flag-gated serving from preloaded state).
+# The daemon may DECODE a supplied .scip and feed it; it must NOT run scip-typescript (that is 1C).
+# Pure domain IR (PartitionIr) — named directly by the warm-cache seam (WARM-CACHE-DAEMON-WIRING-1).
+repo-graph-ir = { path = "../repo-graph-ir" }
+repo-graph-livegraph = { path = "../repo-graph-livegraph" }
+repo-graph-livegraph-feed = { path = "../repo-graph-livegraph-feed" }
+repo-graph-scip-ingest = { path = "../repo-graph-scip-ingest" }
+repo-graph-trust-model = { path = "../repo-graph-trust-model" }
+# ORIENT-LIVEGRAPH-IMPL: the coherence answer-wrapper. The daemon assembles orient's
+# CoherenceEnvelope<CoherentOrientResult> response (orient_coherence.rs): it maps the LiveGraph
+# fastpath FallbackReason -> CoherenceFallbackReason and supplies per-leaf decisions to the agent's
+# pure `to_coherent`. Outer (daemon) -> inner (pure DTO) edge.
+repo-graph-coherence = { path = "../repo-graph-coherence" }
+# WARM-CACHE-DAEMON-WIRING-1: validated PartitionIr cache on the refresh path (non-authoritative).
+repo-graph-warm-cache = { path = "../repo-graph-warm-cache" }
+# WARM-CACHE-VALUEFACTS-1: ValueFact <-> CacheValueFactDto adapter + value-facts warm-load feed.
+repo-graph-warm-cache-feed = { path = "../repo-graph-warm-cache-feed" }
+
 # Git operations (churn, hotspots, risk)
 repo-graph-git = { path = "../git" }
 

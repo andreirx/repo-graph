@@ -29,7 +29,7 @@
 //! - display_name rendering
 //! - module_kind with confidence
 //! - ownership rollups (files, test files)
-//! - dead symbol counts
+//! - unreferenced-symbol counts (the honest `unref?` column)
 //! - cross-module dependency detection
 //! - empty/isolated module hints
 //!
@@ -286,9 +286,12 @@ fn modules_list_human_mode_shows_catalog() {
         "Human output should show 'files' column. stdout:\n{}",
         stdout
     );
+    // OUTPUT-DOC-TRUTH-AUDIT-1: the dead_symbol_count column is rendered as the
+    // honest `unref?` (unreferenced, syntactic estimate), not the overclaiming
+    // bare `dead`.
     assert!(
-        stdout.contains("dead"),
-        "Human output should show 'dead' column. stdout:\n{}",
+        stdout.contains("unref?"),
+        "Human output should show the 'unref?' (unreferenced) column. stdout:\n{}",
         stdout
     );
     assert!(

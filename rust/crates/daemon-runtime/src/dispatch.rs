@@ -39,21 +39,24 @@ use crate::handlers::inventory::classify_retention_only;
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
-/// RMAPD-PERF-1: Performance tracing macro.
-/// Enabled with `--features perf-trace`. No-op otherwise.
+/// RMAPD-PERF-1 / PERF-INSTRUMENTATION-1: performance tracing macro.
 ///
-/// Build with: `cargo build --features perf-trace`
-/// Or for release: `cargo build --release --features perf-trace`
-#[cfg(feature = "perf-trace")]
+/// Emits to stderr (the daemon log) when EITHER the compile-time `perf-trace`
+/// feature is built (force-on, unchanged legacy behavior) OR the RUNTIME gate
+/// `RMAP_PERF` is at level >= 1 — so an already-installed daemon binary can emit
+/// `[PERF]` markers without a `--features` rebuild, just by relaunching with
+/// `RMAP_PERF=1` in its environment.
+///
+/// When off, the only cost is a single relaxed atomic load (`perf_enabled`); the
+/// `cfg!` constant short-circuits so a force-on build pays nothing. The shared
+/// process-global gate lives in `repo-graph-repo-index` (the lowest crate both
+/// this crate's `perf_trace!` and repo-index's `perf_log!` already reach).
 macro_rules! perf_trace {
     ($($arg:tt)*) => {
-        eprintln!($($arg)*);
+        if cfg!(feature = "perf-trace") || repo_graph_repo_index::perf::perf_enabled() {
+            eprintln!($($arg)*);
+        }
     };
-}
-
-#[cfg(not(feature = "perf-trace"))]
-macro_rules! perf_trace {
-    ($($arg:tt)*) => {};
 }
 
 /// Dispatcher that routes requests to real services.
@@ -77,6 +80,20 @@ impl ServiceDispatcher {
     /// Get an optional string parameter.
     fn get_optional_string_param<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
         params.get(key).and_then(|v| v.as_str())
+    }
+
+    /// PERF-INSTRUMENTATION-1: best-effort repo label for the per-request marker.
+    ///
+    /// Read methods usually resolve from cwd and may carry no repo in params
+    /// (`-`); write/index methods carry `repo_path`/`alias`. This is a log label
+    /// only — never a trust, freshness, or ownership signal.
+    fn perf_repo_label(params: &Value) -> &str {
+        params
+            .get("repo_path")
+            .or_else(|| params.get("alias"))
+            .or_else(|| params.get("repo_uid"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("-")
     }
 
     /// Parse stable_keys into structured match data for ambiguous symbol errors.
@@ -217,7 +234,13 @@ impl ServiceDispatcher {
 
 impl Dispatcher for ServiceDispatcher {
     fn dispatch(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
-        match request.method.as_str() {
+        // PERF-INSTRUMENTATION-1: per-request wall-clock. dispatch() is the single
+        // choke point every request (socket + stdio) flows through, so timing it
+        // here makes the SERIAL daemon's per-request cost — and any slow op like a
+        // kernel-scale `index` — self-identify in the log instead of timing out
+        // silently. When RMAP_PERF is off this is one relaxed atomic load + branch.
+        let req_start = Instant::now();
+        let result = match request.method.as_str() {
             // ── Test methods ────────────────────────────────────────
             "ping" => DispatchResult::success(&request.id, serde_json::json!({"pong": true})),
 
@@ -239,6 +262,9 @@ impl Dispatcher for ServiceDispatcher {
             // ── Read operations ─────────────────────────────────────
             "callers" => self.handle_callers(request),
             "callees" => self.handle_callees(request),
+            "livegraph_preload" => self.handle_livegraph_preload(request),
+            "livegraph_refresh" => self.handle_livegraph_refresh(request),
+            "cycle_completeness_audit" => self.handle_cycle_completeness_audit(request),
             "imports" => self.handle_imports(request),
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "stats" => self.handle_stats(request, emitter),
@@ -285,6 +311,11 @@ impl Dispatcher for ServiceDispatcher {
             // ── Metrics (PERF-OBS-1) ────────────────────────────────
             // Storage performance observability
             "perf" => crate::handlers::metrics::handle_perf(&self.state, request),
+            // DEV-INSTALL-DOCTOR-WAIT-1: cheap storage health summary for `rmap doctor` (no per-table
+            // scan); distinct from the heavy `perf` diagnostic.
+            "storage_health" => {
+                crate::handlers::metrics::handle_storage_health(&self.state, request)
+            }
 
             // ── Documentation ───────────────────────────────────────
             "docs_list" => self.handle_docs_list(request),
@@ -334,7 +365,15 @@ impl Dispatcher for ServiceDispatcher {
 
             // ── Unknown method ──────────────────────────────────────
             _ => DispatchResult::unknown_method(&request.id, &request.method),
-        }
+        };
+
+        perf_trace!(
+            "[PERF] req {} {}: {}ms",
+            request.method,
+            Self::perf_repo_label(&request.params),
+            req_start.elapsed().as_millis()
+        );
+        result
     }
 }
 
@@ -344,6 +383,8 @@ impl ServiceDispatcher {
     /// Return daemon-level diagnostic information.
     ///
     /// STATE-ROOT-SEPARATION-1: Reports state root mode and authority write policy.
+    /// DOCTOR-RESOURCE-REPORT: Reports the daemon's own resident memory (RSS) and the
+    /// total on-disk size of its `databases/` state root across all repos.
     ///
     /// Request: `{"method": "daemon_info", "params": {}}`
     ///
@@ -352,9 +393,18 @@ impl ServiceDispatcher {
     /// {
     ///   "state_root": "/path/to/state",
     ///   "state_root_mode": "global" | "sandbox-local",
-    ///   "authority_writes_allowed": true | false
+    ///   "authority_writes_allowed": true | false,
+    ///   "rss_bytes": 47448064,            // current RSS (live footprint), or null
+    ///   "rss_peak_bytes": 81788928,       // peak RSS high-water mark, or null
+    ///   "databases_total_bytes": 31244288,// sum of databases/ (all repos), or null
+    ///   "repo_count": 3                   // registered repos
     /// }
     /// ```
+    ///
+    /// The three byte metrics are `null` (UNKNOWN) when the platform/filesystem read
+    /// is genuinely unavailable; `databases_total_bytes` is `0` (known-zero) for an
+    /// empty-but-readable dir. `repo_count` is always known. `rmap doctor` renders
+    /// these and must keep the health verdict green when a metric is unavailable.
     fn handle_daemon_info(&self, request: &Request) -> DispatchResult {
         let state_root = self
             .state
@@ -364,12 +414,29 @@ impl ServiceDispatcher {
             .to_string();
         let mode = self.state.state_root_mode();
 
+        // DOCTOR-RESOURCE-REPORT: the daemon measures ITSELF — its live resident memory
+        // (did the in-memory LiveGraph substrate balloon?) and the total disk its
+        // warm state occupies. Mechanism lives in `resource_metrics` (kept out of this
+        // oversized file per the structural guardrail); each read degrades to `None`.
+        let rss_bytes = crate::resource_metrics::current_rss_bytes();
+        let rss_peak_bytes = crate::resource_metrics::peak_rss_bytes();
+        let registry = self.state.registry();
+        let repo_count = registry.list().len() as u64;
+        let db_dir = registry.db_dir().to_path_buf();
+        drop(registry);
+        let databases_total_bytes = crate::resource_metrics::directory_size_bytes(&db_dir);
+
         DispatchResult::success(
             &request.id,
             serde_json::json!({
                 "state_root": state_root,
                 "state_root_mode": mode.as_str(),
-                "authority_writes_allowed": mode.allows_authority_writes()
+                "authority_writes_allowed": mode.allows_authority_writes(),
+                // DOCTOR-RESOURCE-REPORT additive fields (Option -> number | null):
+                "rss_bytes": rss_bytes,
+                "rss_peak_bytes": rss_peak_bytes,
+                "databases_total_bytes": databases_total_bytes,
+                "repo_count": repo_count,
             }),
         )
     }
@@ -690,6 +757,197 @@ impl ServiceDispatcher {
         )
     }
 
+    /// LIVEGRAPH-INTEGRATION-1B (dev-only): decode a SUPPLIED `index.scip`, ingest it, and feed the
+    /// resulting partition + value facts into the repo's in-memory LiveGraph. The daemon does NOT run
+    /// scip-typescript / package discovery / refresh (that is 1C) — it only decodes + ingests the
+    /// supplied file. Additive: changes no existing serving behavior.
+    fn handle_livegraph_preload(&self, request: &Request) -> DispatchResult {
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let partition_id = match Self::get_string_param(&request.params, "partition_id") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let scip = match Self::get_string_param(&request.params, "scip") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let source_root = match Self::get_string_param(&request.params, "source_root") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        // KEY-NAMESPACE-REPO-RELATIVE-1: the partition's repo-relative prefix = source_root relative to the
+        // repo path (the `repo` param). Empty for a repo-root package (keys stay doc-relative, byte-stable).
+        let repo_path = Self::get_optional_string_param(&request.params, "repo").unwrap_or("");
+        let partition_prefix = crate::livegraph_feed::repo_relative_prefix(repo_path, &source_root);
+        match crate::livegraph_feed::preload_partition(
+            &repo_state,
+            &repo_uid,
+            &partition_id,
+            &scip,
+            &source_root,
+            &partition_prefix,
+        ) {
+            Ok(summary) => DispatchResult::success(&request.id, summary),
+            Err(e) => {
+                DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
+            }
+        }
+    }
+
+    /// LIVEGRAPH-INTEGRATION-1C (steps 2–3, dev-only): discover the SCIP producer (D0) and return a
+    /// STRUCTURED result. No background worker / subprocess / SCIP generation yet (step 4). Absent
+    /// producer → `ProducerUnavailable` (D6); the LiveGraph last-good + the sqlite default are
+    /// untouched. Read-only — this handler changes no runtime state.
+    fn handle_livegraph_refresh(&self, request: &Request) -> DispatchResult {
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_path = match Self::get_string_param(&request.params, "repo") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        // CYCLES-COMPLETENESS-ENUMERATION-1 (D2): `--all-discovered` loads the SHARED discovery's INCLUDED
+        // roots (the SAME function the read-only audit's EXPECTED set uses -> they cannot drift). Best-effort
+        // multi-refresh; the load step that lets the audit advance past IncompleteMissingPartitions. The
+        // mutation lives HERE (refresh), never in the audit. Reports what it excluded (fixtures) + included.
+        let all_discovered = request
+            .params
+            .get("all_discovered")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if all_discovered {
+            let include_fixtures = request
+                .params
+                .get("include_fixtures")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let discovered =
+                crate::partition_discovery::discover_partition_roots(&repo_path, include_fixtures);
+            let mut body = crate::livegraph_refresh::run_refresh_multi(
+                &repo_state,
+                &repo_uid,
+                &repo_path,
+                &discovered.included,
+            );
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert(
+                    "discovered_included".to_string(),
+                    serde_json::json!(discovered.included),
+                );
+                obj.insert(
+                    "excluded_fixture_partitions".to_string(),
+                    serde_json::json!(discovered
+                        .excluded
+                        .iter()
+                        .map(|(d, r)| serde_json::json!({ "dir": d, "reason": r }))
+                        .collect::<Vec<_>>()),
+                );
+            }
+            return DispatchResult::success(&request.id, body);
+        }
+        // IMPORTS-XPART-ENUMERATION-1 (D4): repeated `--source-root` arrives as a `source_roots` array.
+        // Present + non-empty -> multi-partition BEST-EFFORT refresh (per-partition + aggregate, D5);
+        // absent/empty -> the single-partition path below (byte-stable; 0/1 root preserves behaviour).
+        let source_roots: Vec<String> = request
+            .params
+            .get("source_roots")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !source_roots.is_empty() {
+            let body = crate::livegraph_refresh::run_refresh_multi(
+                &repo_state,
+                &repo_uid,
+                &repo_path,
+                &source_roots,
+            );
+            return DispatchResult::success(&request.id, body);
+        }
+        let partition = Self::get_optional_string_param(&request.params, "partition")
+            .unwrap_or("default")
+            .to_string();
+        // 1C step 4: SYNCHRONOUS daemon-owned refresh (producer runs inline; single-threaded daemon,
+        // DAEMON-ASYNC-REFRESH-1 is the non-blocking follow-up). Absent producer → structured
+        // ProducerUnavailable (steps 2-3 behavior preserved); on any failure the last-good is untouched.
+        match crate::livegraph_refresh::run_refresh(
+            &repo_state,
+            &repo_uid,
+            &partition,
+            &repo_path,
+            "",
+        ) {
+            Ok(body) => DispatchResult::success(&request.id, body),
+            Err(failure) => DispatchResult::success(
+                &request.id,
+                serde_json::json!({
+                    "status": failure.code(),
+                    "detail": failure.detail(),
+                    "partition": partition,
+                    "refreshed": false,
+                    "warmed_from_cache": false,
+                    "producer_unavailable": false,
+                    "value_facts_warmed": false,
+                }),
+            ),
+        }
+    }
+
+    /// CYCLES-COMPLETENESS-AUDIT-1 (dev-only, READ-ONLY): build the module-cycle completeness BASELINE
+    /// (filesystem tsconfig discovery + the SQLite language inventory, AT THE AUDIT BOUNDARY) and report the
+    /// SQLite-free certificate for the CURRENT in-memory LiveGraph. Does NOT refresh/load partitions (the
+    /// caller loads them first via `livegraph_refresh`) and changes NO default. Mirrors the ratified
+    /// boundary: the audit reads SQLite; the certificate evaluator never does.
+    fn handle_cycle_completeness_audit(&self, request: &Request) -> DispatchResult {
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_root = Self::get_optional_string_param(&request.params, "repo")
+            .unwrap_or("")
+            .to_string();
+        // ENUMERATION-1 (D3): opt-in to certify a fixture corpus (disables the fixture-segment exclusion).
+        let include_fixtures = request
+            .params
+            .get("include_fixtures")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        match crate::cycle_completeness_audit::cycle_completeness_audit_response(
+            &repo_state,
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            &repo_root,
+            include_fixtures,
+        ) {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => {
+                DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
+            }
+        }
+    }
+
     fn handle_callers(&self, request: &Request) -> DispatchResult {
         // REG-1: resolve repo from path/alias and auto-load
         let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
@@ -750,30 +1008,37 @@ impl ServiceDispatcher {
             }
         };
 
-        // Find callers
+        // QUERY-AUTO-LAZY-SQLITE-1: the SQLite read is now LAZY -- a closure the engine_response calls ONLY
+        // when LiveGraph cannot serve (or for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
         let edge_types = ["CALLS"];
-        let callers = match repo_state.storage.find_direct_callers(
-            &snapshot.snapshot_uid,
-            &target.stable_key,
-            &edge_types,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "target": target,
-                "callers": callers,
-                "count": callers.len(),
-            }),
-        )
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let repo_root = Self::get_optional_string_param(&request.params, "repo")
+            .unwrap_or("")
+            .to_string();
+        let value = crate::livegraph_feed::callers_engine_response(
+            engine,
+            &repo_state,
+            &target,
+            || {
+                repo_state.storage.find_direct_callers(
+                    &snapshot.snapshot_uid,
+                    &target.stable_key,
+                    &edge_types,
+                )
+            },
+            symbol,
+            &repo_root,
+        );
+        match value {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
     }
 
     fn handle_callees(&self, request: &Request) -> DispatchResult {
@@ -836,43 +1101,51 @@ impl ServiceDispatcher {
             }
         };
 
-        // Find callees
+        // QUERY-AUTO-LAZY-SQLITE-1: LAZY SQLite read -- the closure runs ONLY when LiveGraph cannot serve (or
+        // for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
         let edge_types = ["CALLS"];
-        let callees = match repo_state.storage.find_direct_callees(
-            &snapshot.snapshot_uid,
-            &target.stable_key,
-            &edge_types,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "target": target,
-                "callees": callees,
-                "count": callees.len(),
-            }),
-        )
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let repo_root = Self::get_optional_string_param(&request.params, "repo")
+            .unwrap_or("")
+            .to_string();
+        let value = crate::livegraph_feed::callees_engine_response(
+            engine,
+            &repo_state,
+            &target,
+            || {
+                repo_state.storage.find_direct_callees(
+                    &snapshot.snapshot_uid,
+                    &target.stable_key,
+                    &edge_types,
+                )
+            },
+            symbol,
+            &repo_root,
+        );
+        match value {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
     }
 
     fn handle_imports(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
-
-        let file_path = match Self::get_string_param(&request.params, "file") {
-            Ok(f) => f,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+        // REG-1: resolve repo from path/alias and auto-load (display_name for the livegraph feed).
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
+        // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): engine routing. The DEFAULT is now `auto` -- LiveGraph-first with
+        // a per-call directional no-loss compare + a labelled SQLite fallback. `sqlite` (EXPLICIT) = the
+        // unchanged single-file listing (the escape hatch); `livegraph` / `compare` = the read-model / compare
+        // surfaces (unchanged, D6).
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -894,10 +1167,78 @@ impl ServiceDispatcher {
             }
         };
 
+        if engine == "livegraph" {
+            // D6: file filter OPTIONAL (None -> repo-wide). repo_root + include_fixtures feed the
+            // module-cycle completeness certificate (the named `module_cycle_*` trust fields).
+            let repo_root = Self::get_optional_string_param(&request.params, "repo")
+                .unwrap_or("")
+                .to_string();
+            let include_fixtures = request
+                .params
+                .get("include_fixtures")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let file_filter = Self::get_optional_string_param(&request.params, "file");
+            return DispatchResult::success(
+                &request.id,
+                crate::livegraph_feed::imports_view_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &repo_root,
+                    include_fixtures,
+                    file_filter,
+                ),
+            );
+        }
+        if engine == "compare" {
+            // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6) + REPOWIDE-1 (D6): NO file -> the repo-wide readiness
+            // aggregate; WITH file -> the per-file SQLite-vs-LiveGraph compare. SQLite primary; no default flip.
+            match Self::get_optional_string_param(&request.params, "file") {
+                Some(file_path) => {
+                    return DispatchResult::success(
+                        &request.id,
+                        crate::livegraph_feed::imports_compare_response(
+                            &repo_state,
+                            &repo_uid,
+                            &snapshot.snapshot_uid,
+                            file_path,
+                        ),
+                    );
+                }
+                None => {
+                    return DispatchResult::success(
+                        &request.id,
+                        crate::livegraph_feed::imports_readiness_response(
+                            &repo_state,
+                            &repo_uid,
+                            &display_name,
+                            &snapshot.snapshot_uid,
+                        ),
+                    );
+                }
+            }
+        }
+        if engine != "sqlite" && engine != "auto" {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::invalid_request(format!(
+                    "unsupported imports engine: {engine} (expected auto|sqlite|livegraph|compare)"
+                )),
+            );
+        }
+
+        // ---- engine = auto (DEFAULT) or sqlite (explicit): single-file (file REQUIRED + must exist). ----
+        let file_path = match Self::get_string_param(&request.params, "file") {
+            Ok(f) => f,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
         // Construct FILE stable key
         let file_stable_key = format!("{}:{}:FILE", repo_uid, file_path);
 
-        // Verify file exists
+        // Verify file exists (the existing "file not found" contract is preserved for BOTH auto + sqlite).
         match repo_state
             .storage
             .node_exists(&snapshot.snapshot_uid, &file_stable_key)
@@ -917,7 +1258,21 @@ impl ServiceDispatcher {
             }
         }
 
-        // Find imports
+        if engine == "auto" {
+            // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): LiveGraph-first with the per-call no-loss compare + a labelled
+            // SQLite fallback (backend_used / fallback_reason are JSON-only; the human render strips them).
+            return DispatchResult::success(
+                &request.id,
+                crate::livegraph_feed::imports_auto_response(
+                    &repo_state,
+                    &repo_uid,
+                    &snapshot.snapshot_uid,
+                    file_path,
+                ),
+            );
+        }
+
+        // ---- engine = sqlite (EXPLICIT escape hatch): the existing listing, UNCHANGED (no backend metadata). --
         let imports = match repo_state
             .storage
             .find_imports(&snapshot.snapshot_uid, &file_stable_key)
@@ -980,6 +1335,61 @@ impl ServiceDispatcher {
         };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
+        // STATS-LIVEGRAPH-IMPL-1: engine routing. DEFAULT (no flags == `auto`) = the cert-gated LiveGraph
+        // module-stats FASTPATH (`stats_auto_response`): serves the LiveGraph stats WITHOUT
+        // `compute_module_stats` on a GREEN repo cert at the current fingerprint, else a labelled SQLite
+        // fallback (byte-identical human output). EXPLICIT `--engine sqlite` = the forced SQLite path below
+        // (rule 7: UNCHANGED escape hatch, no `backend_used`). `livegraph` = the forced LiveGraph diagnostic
+        // (no fallback); `compare` = SQLite primary + a field-exact divergence report + sidecar.
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
+        match engine {
+            "auto" => {
+                return match crate::livegraph_feed::stats_auto_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                };
+            }
+            "livegraph" => {
+                return DispatchResult::success(
+                    &request.id,
+                    crate::livegraph_feed::stats_livegraph_response(
+                        &repo_state,
+                        &repo_uid,
+                        &display_name,
+                        &snapshot.snapshot_uid,
+                    ),
+                );
+            }
+            "compare" => {
+                let repo_root = Self::get_optional_string_param(&request.params, "repo")
+                    .unwrap_or("")
+                    .to_string();
+                return match crate::livegraph_feed::stats_compare_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &repo_root,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                };
+            }
+            // EXPLICIT `--engine sqlite` (or any non-routed value) -> the forced SQLite path below (UNCHANGED).
+            _ => {}
+        }
+
         // RMAPD-PERF-1: Emit heartbeat before potentially long query
         let _ = emitter.emit(ProgressDetail {
             phase: "computing_module_stats".to_string(),
@@ -987,7 +1397,8 @@ impl ServiceDispatcher {
             total: 1,
         });
 
-        // Compute module stats
+        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The forced
+        // SQLite module-stats answer -- UNCHANGED (rule 7): the canonical body with NO `backend_used`.
         let query_start = Instant::now();
         let stats = match repo_state
             .storage
@@ -1069,6 +1480,117 @@ impl ServiceDispatcher {
         };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
+        // CYCLES-LIVEGRAPH-CLI-1 + CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: engine/kind routing. DEFAULT
+        // (no flags == `auto`) = the cert-gated LiveGraph MODULE-cycle fastpath (`cycles_auto_response`).
+        // EXPLICIT `--engine sqlite` = the forced SQLite MODULE-import path below (rule 7: UNCHANGED escape
+        // hatch). `livegraph` + `file-import` = the LiveGraph captured FILE import-cycle graph (a DIFFERENT
+        // question; NO SQLite fallback — D7). The daemon rejects unsupported combos defensively (D2/D6).
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
+        let kind = Self::get_optional_string_param(&request.params, "kind").unwrap_or("");
+        match (engine, kind) {
+            ("livegraph", "file-import") => {
+                return DispatchResult::success(
+                    &request.id,
+                    crate::livegraph_feed::file_import_cycles_response(
+                        &repo_state,
+                        &repo_uid,
+                        &display_name,
+                        &snapshot.snapshot_uid,
+                    ),
+                );
+            }
+            // MODULE-CYCLES-CLI-1 (D2): LiveGraph directory-aggregated MODULE cycles (no SQLite fallback).
+            ("livegraph", "module-import") => {
+                return DispatchResult::success(
+                    &request.id,
+                    crate::livegraph_feed::module_import_cycles_response(
+                        &repo_state,
+                        &repo_uid,
+                        &display_name,
+                        &snapshot.snapshot_uid,
+                    ),
+                );
+            }
+            // Defensive rejects (the CLI gives the primary user-facing errors).
+            ("livegraph", _) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "--engine livegraph requires --kind file-import or module-import",
+                    ),
+                );
+            }
+            ("sqlite", "file-import") => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import",
+                    ),
+                );
+            }
+            // MODULE-CYCLES-CLI-1 (D4=A): compare LiveGraph derived MODULE cycles vs SQLite (structural;
+            // SQLite primary + classified sidecar). Only MODULE-import — FILE-import has no SQLite peer.
+            ("compare", "module-import") => {
+                let repo_root = Self::get_optional_string_param(&request.params, "repo")
+                    .unwrap_or("")
+                    .to_string();
+                return match crate::livegraph_feed::module_cycle_compare_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &repo_root,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e),
+                    ),
+                };
+            }
+            ("compare", _) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "--engine compare is only supported with --kind module-import (FILE-import has no SQLite peer graph)",
+                    ),
+                );
+            }
+            (_, "file-import") => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "--kind file-import requires --engine livegraph",
+                    ),
+                );
+            }
+            // CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the DEFAULT (`auto`, no kind or module-import) -> the
+            // cert-gated LiveGraph fastpath. Serves the LiveGraph module cycles WITHOUT `find_cycles` when a
+            // valid GREEN repo no-loss certificate holds at the current fingerprint; ELSE the canonical SQLite
+            // answer (byte-identical, CYCLES-OUTPUT-CONTRACT-1) with a labelled `fallback_reason`.
+            ("auto", "") | ("auto", "module-import") => {
+                return match crate::livegraph_feed::cycles_auto_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                };
+            }
+            // EXPLICIT `--engine sqlite` (no kind or module-import, D6) -> the forced SQLite MODULE-import path
+            // below (rule 7: UNCHANGED -- the canonical SQLite answer, no fastpath, no `backend_used`).
+            _ => {}
+        }
+
         // RMAPD-PERF-1: Emit heartbeat before potentially long Tarjan SCC
         let _ = emitter.emit(ProgressDetail {
             phase: "finding_cycles".to_string(),
@@ -1076,7 +1598,10 @@ impl ServiceDispatcher {
             total: 1,
         });
 
-        // Module-level cycles (default)
+        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The forced
+        // SQLite MODULE-import answer: canonical, qualified, deterministically-ordered (CYCLES-OUTPUT-
+        // CONTRACT-1) -- UNCHANGED (rule 7). `find_cycles` (the SCC query) is unchanged; the qualified +
+        // canonical mapping is applied at the boundary by `cycle_output`. No fastpath, no `backend_used`.
         let query_start = Instant::now();
         let cycles = match repo_state
             .storage
@@ -1090,6 +1615,20 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let qualified = match repo_state
+            .storage
+            .module_qualified_names(&snapshot.snapshot_uid)
+        {
+            Ok(q) => q,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        let canonical_cycles = crate::cycle_output::sqlite_module_cycles_json(&cycles, &qualified);
+        let cycle_count = canonical_cycles.len();
         let query_ms = query_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -1104,15 +1643,14 @@ impl ServiceDispatcher {
             query_ms
         );
 
-        // CLI-OUT-2B: Include display_name for human renderers
         DispatchResult::success(
             &request.id,
             serde_json::json!({
                 "repo_uid": repo_uid,
                 "display_name": display_name,
                 "snapshot_uid": snapshot.snapshot_uid,
-                "cycles": cycles,
-                "count": cycles.len(),
+                "cycles": canonical_cycles,
+                "count": cycle_count,
             }),
         )
     }
@@ -1209,30 +1747,47 @@ impl ServiceDispatcher {
         };
 
         // Shortest path: CALLS + IMPORTS, max depth 8
-        let path_result = match repo_state.storage.find_shortest_path(
-            &snapshot.snapshot_uid,
+        // QUERY-AUTO-LAZY-SQLITE-1: the SQLite path read is LAZY -- the closure runs ONLY when LiveGraph cannot
+        // serve (or for --engine sqlite/compare). The LiveGraph-served default (incl. a no-path EXACT) SKIPS
+        // it. (PATH-LIVEGRAPH-DEFAULT-1 migrated path's Auto to LiveGraph-first; the prior "does NOT
+        // auto-migrate" comment was STALE.)
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let repo_root =
+            Self::get_optional_string_param(&request.params, "repo").unwrap_or_default();
+        let response = crate::livegraph_feed::path_engine_response(
+            engine,
+            &repo_state,
             &from_sym.stable_key,
             &to_sym.stable_key,
-            8,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "repo_uid": repo_uid,
-                "snapshot_uid": snapshot.snapshot_uid,
-                "path": path_result,
-                "found": path_result.found,
-            }),
-        )
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            || {
+                let path_result = repo_state.storage.find_shortest_path(
+                    &snapshot.snapshot_uid,
+                    &from_sym.stable_key,
+                    &to_sym.stable_key,
+                    8,
+                )?;
+                let found = path_result.found;
+                Ok(serde_json::json!({
+                    "repo_uid": repo_uid,
+                    "snapshot_uid": snapshot.snapshot_uid,
+                    "path": path_result,
+                    "found": found,
+                }))
+            },
+            repo_root,
+        );
+        match response {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
     }
 
     // ── Write operations ────────────────────────────────────────────
@@ -2070,16 +2625,18 @@ impl ServiceDispatcher {
         // Parse optional focus
         let focus = Self::get_optional_string_param(&request.params, "focus");
 
-        // Parse optional budget (default: small)
+        // Parse optional budget (default: small).
+        // TRUNCATION-AUDIT-1: "full" (the `--full` escape hatch) maps to the uncapped tier.
         let budget = match request.params.get("budget").and_then(|v| v.as_str()) {
             None | Some("small") => Budget::Small,
             Some("medium") => Budget::Medium,
             Some("large") => Budget::Large,
+            Some("full") => Budget::Full,
             Some(other) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::invalid_request(format!(
-                        "invalid budget value: {} (expected small|medium|large)",
+                        "invalid budget value: {} (expected small|medium|large|full)",
                         other
                     )),
                 );
@@ -2101,25 +2658,82 @@ impl ServiceDispatcher {
             total: 1,
         });
 
+        // COHERENCE-LEAF-SERVE-IMPL-1: orient bounded (b)-leaf SERVE-THEN-FALLBACK. Resolve the latest
+        // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the bounded
+        // orient cert (FOCUS-RESOLUTION ∧ CALLGRAPH no-loss) can be evaluated BEFORE the use case runs.
+        // GREEN -> run orient through the StoragePort decorator: focus resolution + callers/callees are
+        // served from the CURRENT-STATE LiveGraph with ZERO eager `nodes`/`edges` reads for those leaves.
+        // The (c) trust contributor and the MODULE_SUMMARY counts stay SQLite — delegated by the decorator
+        // and SQLite-LABELLED. Cycle VALUES also stay SQLite (the decorator delegates `find_module_cycles*`,
+        // RATIFIED CYCLES-A), but the IMPORT_CYCLES leaf LABEL is UNCHANGED shipped behavior: the hybrid
+        // cert-gated `orient_cycles_outcome` in `build_orient_envelope` labels it `livegraph` on a GREEN
+        // `cycles_cert`, else SQLite. Cycles are NOT in the bounded orient cert and are NOT LG-value-served
+        // here (CYCLES-B is the deferred follow-up). `build_orient_envelope`'s CALLGRAPH leaf LABEL follows
+        // this SAME `serve_from_lg` decision (review-3 item 1): on green the served callers/callees outcomes
+        // peek the GREEN callgraph cert so the full served path is zero per-call read for the callgraph leaf
+        // (not just the decorator's value serve); on RED they are SQLite-LABELLED. RED / non-resident /
+        // non-TS / no-snapshot -> the unchanged eager SQLite path. The cert build reads SQLite ONCE per
+        // fingerprint (the drilldown invariant).
+        let serve_from_lg = repo_state
+            .storage
+            .get_latest_snapshot(&repo_uid)
+            .ok()
+            .flatten()
+            .map(|s| {
+                crate::orient_serve::orient_bounded_cert_is_green(&repo_state, &s.snapshot_uid)
+            })
+            .unwrap_or(false);
+
         // Call the agent orient use case
         let orient_start = Instant::now();
-        let mut result =
-            match repo_graph_agent::orient(&repo_state.storage, &repo_uid, focus, budget, &now) {
-                Ok(r) => r,
-                Err(e) => {
-                    return DispatchResult::error(
-                        &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                    );
-                }
-            };
+        let orient_outcome = if serve_from_lg {
+            let decorator = crate::orient_serve::OrientServeDecorator::new(
+                &repo_state.livegraph,
+                &repo_state.storage,
+            );
+            repo_graph_agent::orient(&decorator, &repo_uid, focus, budget, &now)
+        } else {
+            repo_graph_agent::orient(&repo_state.storage, &repo_uid, focus, budget, &now)
+        };
+        let mut result = match orient_outcome {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
         let orient_ms = orient_start.elapsed().as_millis();
 
         // CLI-OUT-2B: Inject display_name for human renderers
         result.display_name = Some(display_name);
 
-        // Apply trust overlay (matches CLI contract)
-        let mut output = match serde_json::to_value(&result) {
+        // ORIENT-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response. This
+        // REPLACES the prior post-serialize top-level `trust` overlay injection: the degraded-state
+        // briefing now rides on `value.trust_briefing` (D-ORIENT-6 = O2), and the wrapper adds per-signal
+        // provenance/trust/freshness + the root MEET. The FOUR LG-first leaves (IMPORT_CYCLES /
+        // HIGH_COMPLEXITY / CALLERS_SUMMARY / CALLEES_SUMMARY) are each labelled by a daemon-side NO-LOSS
+        // proof (the cycles / complexity no-loss certs + the callers/callees `Auto` ladder with a per-symbol
+        // no-loss key compare); everything else is SQLite/Authority/FS.
+        let _ = emitter.emit(ProgressDetail {
+            phase: "assembling_coherence_envelope".to_string(),
+            current: 0,
+            total: 1,
+        });
+        let envelope_start = Instant::now();
+        // COHERENCE-LEAF-SERVE-IMPL-1 (review-3 item 1): pass the bounded SERVE DECISION (`serve_from_lg`,
+        // computed above) into envelope assembly so the CALLERS/CALLEES callgraph leaf LABEL follows the
+        // ACTUAL serve. On `serve_from_lg == false` the agent ran over BARE SQLite, so those leaves are
+        // SQLite-LABELLED — never re-certified `livegraph` from the callgraph cert state alone (which could
+        // be GREEN even when a DIFFERENT bounded contributor, e.g. focus-resolution, forced the fallback).
+        let envelope = crate::orient_coherence::build_orient_envelope(
+            &repo_state,
+            &repo_uid,
+            result,
+            serve_from_lg,
+        );
+        let output = match serde_json::to_value(&envelope) {
             Ok(v) => v,
             Err(e) => {
                 return DispatchResult::error(
@@ -2128,44 +2742,18 @@ impl ServiceDispatcher {
                 );
             }
         };
-
-        // RMAPD-PERF-1: Emit heartbeat before trust overlay computation
-        let _ = emitter.emit(ProgressDetail {
-            phase: "computing_trust_overlay".to_string(),
-            current: 0,
-            total: 1,
-        });
-
-        // Add trust section if degraded (briefing surface pattern)
-        let overlay_start = Instant::now();
-        if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
-            if let Some(trust) = compute_trust_overlay_for_snapshot(
-                &repo_state.storage,
-                &repo_uid,
-                &snapshot,
-                "CALLS+IMPORTS",
-            ) {
-                if trust.has_degradation() || !trust.caveats.is_empty() {
-                    if let serde_json::Value::Object(ref mut map) = output {
-                        if let Ok(trust_value) = serde_json::to_value(&trust) {
-                            map.insert("trust".to_string(), trust_value);
-                        }
-                    }
-                }
-            }
-        }
-        let overlay_ms = overlay_start.elapsed().as_millis();
+        let envelope_ms = envelope_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
 
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
-            "[PERF] orient: total={}ms resolve={}ms lock={}ms orient={}ms overlay={}ms",
+            "[PERF] orient: total={}ms resolve={}ms lock={}ms orient={}ms envelope={}ms",
             total_ms,
             resolve_ms,
             lock_ms,
             orient_ms,
-            overlay_ms
+            envelope_ms
         );
 
         DispatchResult::success(&request.id, output)
@@ -2220,7 +2808,15 @@ impl ServiceDispatcher {
             Ok(mut result) => {
                 // CLI-OUT-2B: Inject display_name for human renderers
                 result.display_name = Some(display_name);
-                match serde_json::to_value(&result) {
+
+                // CHECK-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response,
+                // mirroring `handle_orient`. check has NO LiveGraph leaf, NO cert, and NO trust overlay
+                // (D-CHECK-2/4), so this is a THIN stale-read + delegate: the adapter reads the
+                // AUTHORITATIVE stale-index flag (`get_stale_files`) and labels the verdict with honest
+                // MEET freshness + the multi-source verdict provenance. The verdict VALUE is byte-identical
+                // to before; only the wrapper adds labels.
+                let envelope = crate::check_coherence::build_check_envelope(&repo_state, result);
+                match serde_json::to_value(&envelope) {
                     Ok(v) => DispatchResult::success(&request.id, v),
                     Err(e) => DispatchResult::error(
                         &request.id,
@@ -2249,15 +2845,17 @@ impl ServiceDispatcher {
         };
 
         // Parse optional budget (default: medium for explain)
-        // CLI contract: explain only accepts medium|large, not small
+        // CLI contract: explain accepts medium|large, plus "full" (TRUNCATION-AUDIT-1, the
+        // `--full` uncapped escape hatch); not small.
         let budget = match request.params.get("budget").and_then(|v| v.as_str()) {
             None | Some("medium") => Budget::Medium,
             Some("large") => Budget::Large,
+            Some("full") => Budget::Full,
             Some(other) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::invalid_request(format!(
-                        "invalid budget value: {} (expected medium|large)",
+                        "invalid budget value: {} (expected medium|large|full)",
                         other
                     )),
                 );
@@ -2270,14 +2868,42 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
+        // COHERENCE-LEAF-SERVE-IMPL-2: explain bounded (b)-leaf SERVE-THEN-FALLBACK (the EXPLAIN consumer of
+        // the focus-resolution producer; sibling of handle_orient's IMPL-1 wiring). Resolve the latest
+        // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the SHARED bounded
+        // cert (FOCUS-RESOLUTION ∧ CALLGRAPH no-loss — the SAME `orient_bounded_cert_is_green` orient uses)
+        // can be evaluated BEFORE the use case runs. GREEN -> run explain through the SAME `OrientServeDecorator`:
+        // focus resolution (`resolve_path_focus`/`resolve_stable_key_focus`/`get_symbol_context`/
+        // `resolve_symbol_name`) is served from the CURRENT-STATE LiveGraph with ZERO eager `nodes` reads, so
+        // explain SYMBOL-focus is `nodes`-FREE on green (the `explain_symbol` pipeline emits no MODULE_SUMMARY;
+        // its only `nodes` reads ARE those four focus-resolution methods, all decorator-served). The (c) trust
+        // contributor (`get_trust_summary`, edges+unresolved_edges) and cycles (`find_cycles_involving_*`,
+        // edges) stay SQLite — delegated by the decorator (Contract Clause 3 + CYCLES-A); explain is NEVER
+        // `edges`-free. explain FILE/PATH keep their `compute_*_summary` / `list_*` `nodes` reads (delegated;
+        // the HONEST BOUND — the explain analogue of orient REPO/PATH/FILE's MODULE_SUMMARY; NOT `nodes`-free).
+        // RED / non-resident / non-TS / no-snapshot -> the unchanged eager bare-SQLite path. The cert build
+        // reads SQLite ONCE per fingerprint (the drilldown invariant); a cached GREEN/RED reads none.
+        let serve_from_lg = repo_state
+            .storage
+            .get_latest_snapshot(&repo_uid)
+            .ok()
+            .flatten()
+            .map(|s| {
+                crate::orient_serve::orient_bounded_cert_is_green(&repo_state, &s.snapshot_uid)
+            })
+            .unwrap_or(false);
+
         // Call the agent explain use case
-        let mut result = match repo_graph_agent::run_explain(
-            &repo_state.storage,
-            &repo_uid,
-            target,
-            budget,
-            &now,
-        ) {
+        let explain_outcome = if serve_from_lg {
+            let decorator = crate::orient_serve::OrientServeDecorator::new(
+                &repo_state.livegraph,
+                &repo_state.storage,
+            );
+            repo_graph_agent::run_explain(&decorator, &repo_uid, target, budget, &now)
+        } else {
+            repo_graph_agent::run_explain(&repo_state.storage, &repo_uid, target, budget, &now)
+        };
+        let mut result = match explain_outcome {
             Ok(r) => r,
             Err(e) => {
                 return DispatchResult::error(
@@ -2287,39 +2913,32 @@ impl ServiceDispatcher {
             }
         };
 
-        // CLI-OUT-3: Inject display_name for human renderers (explain deferred to CLI-OUT-3)
+        // CLI-OUT-3: Inject display_name for human renderers.
         result.display_name = Some(display_name);
 
-        // Apply trust overlay (matches CLI contract)
-        let mut output = match serde_json::to_value(&result) {
-            Ok(v) => v,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        // Add trust section if degraded (briefing surface pattern)
-        if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
-            if let Some(trust) = compute_trust_overlay_for_snapshot(
-                &repo_state.storage,
-                &repo_uid,
-                &snapshot,
-                "CALLS+IMPORTS",
-            ) {
-                if trust.has_degradation() || !trust.caveats.is_empty() {
-                    if let serde_json::Value::Object(ref mut map) = output {
-                        if let Ok(trust_value) = serde_json::to_value(&trust) {
-                            map.insert("trust".to_string(), trust_value);
-                        }
-                    }
-                }
-            }
+        // EXPLAIN-LIVEGRAPH-IMPL (operator 2026-06-12): assemble the `CoherenceEnvelope<CoherentOrientResult>`
+        // response, mirroring `handle_orient`/`handle_check`. The adapter GENUINELY SERVES each green LG-first
+        // leaf's VALUE from the LiveGraph — it rebuilds EXPLAIN_IMPORTS / EXPLAIN_CYCLES from
+        // `live_import_view` / `module_import_cycles` and the EXPLAIN_IDENTITY anchor from `node_display`, and
+        // gates EXPLAIN_CALLERS / EXPLAIN_CALLEES by the live caller/callee key-set no-loss compare — with a
+        // labelled SQLite fallback per leaf when not green. It then folds the honest MEET freshness/provenance
+        // and `value.trust_briefing` (the SAME degraded-only `"CALLS+IMPORTS"` overlay this handler injected
+        // before, now on the shared container — explain is the SECOND populator after orient). The LG-first
+        // values come from the LiveGraph (or the proven SQLite primary on fallback), NOT a relabelled SQLite
+        // result.
+        let envelope = crate::explain_coherence::build_explain_envelope(
+            &repo_state,
+            &repo_uid,
+            result,
+            matches!(budget, Budget::Large),
+        );
+        match serde_json::to_value(&envelope) {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
         }
-
-        DispatchResult::success(&request.id, output)
     }
 
     // ── Trust and governance handlers ───────────────────────────────
@@ -2414,7 +3033,17 @@ impl ServiceDispatcher {
             trust_ms
         );
 
-        match serde_json::to_value(&report) {
+        // TRUST-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentTrustReport>` response (the ratified
+        // hybrid), mirroring handle_orient/handle_check/handle_explain. The adapter adds the Half-A
+        // current-state posture leaf — GENUINELY SERVED from the LiveGraph (residency / per-partition
+        // freshness / language / producer / migrated-answer capability, projected from `live_partitions()` +
+        // the repo-wide `module_stats()` answer) — BESIDE the RETAINED v1 report (Half B, source=sqlite,
+        // payloads byte-identical, LABELLED outgoing-extractor), folds the honest MEET freshness/provenance,
+        // and labels the multi-source downgrade leaf `{sqlite, declaration}`. The v1 computation above is
+        // UNCHANGED; the wrapper adds labels + the posture, it never re-judges (F5: no axis is presented as
+        // current-state unless its leaf is source=livegraph).
+        let envelope = crate::trust_coherence::build_trust_envelope(&repo_state, report);
+        match serde_json::to_value(&envelope) {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(
                 &request.id,

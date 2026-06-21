@@ -1,0 +1,24 @@
+# ── repo-graph-livegraph ───────────────────────────────────────────
+# LIVEGRAPH-RUNTIME-1 (Stage C, slice 2): the in-memory runtime substrate — partition residency +
+# per-partition epoch + always-resident xref + trust-labelled answers via repo-graph-trust-model.
+# It is FED already-ingested PartitionIr (D1 accept+swap); it does NOT run indexers, persist, or
+# touch the CLI. Deps: repo-graph-ir + repo-graph-trust-model (D4) + repo-graph-algorithms (a PURE,
+# zero-dependency SCC crate, added by CYCLES-LIVEGRAPH-1 for file_import_cycles() — reuse over inlining
+# Tarjan; preserves the Dependency Rule: livegraph -> stable lower-level pure algorithms).
+# See docs/slices/livegraph-runtime-1.md, docs/slices/cycles-livegraph-1.md.
+[package]
+name = "repo-graph-livegraph"
+version = "0.1.0"
+edition = "2021"
+description = "In-memory LiveGraph runtime substrate (LIVEGRAPH-RUNTIME-1). Non-production."
+license = "MIT"
+publish = false
+
+[dependencies]
+repo-graph-ir = { path = "../repo-graph-ir" }
+repo-graph-trust-model = { path = "../repo-graph-trust-model" }
+# Pure, zero-dependency Tarjan SCC (CYCLES-LIVEGRAPH-1). Reuse, not inline.
+repo-graph-algorithms = { path = "../graph-algorithms" }
+# Pure cross-partition import resolver (IMPORTS-XPART-RESOLUTION-1). The LiveGraph is a CLIENT of it
+# (D2): it stores the resolver's OUTPUT as the in-memory cross-partition overlay (IMPORTS-XPART-WIRING-1).
+repo-graph-import-resolver = { path = "../repo-graph-import-resolver" }

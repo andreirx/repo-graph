@@ -62,6 +62,20 @@ publish      = false
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Coherence support crate — added in ORIENT-LIVEGRAPH-IMPL. The agent
+# crate is the home of `CoherentOrientResult` (COHERENCE-LAYER-1 D7):
+# the coherence command-container references agent DTOs (`Signal`,
+# `Focus`, `Confidence`, …), so it CANNOT live in the pure inner
+# `repo-graph-coherence` crate (that would invert the dependency rule).
+# This crate therefore depends on `repo-graph-coherence` (outer → inner;
+# coherence is pure DTO/domain and depends only on `repo-graph-trust-model`).
+# This is the RATIFIED edge (selection packet, operator 2026-06-09:
+# "orient … depend on it"). It does NOT pull in `repo-graph-trust`: the
+# `trust_briefing` overlay is carried as an opaque `serde_json::Value`
+# (D-ORIENT-6 CRATE-HOME option c), preserving the documented
+# no-dependency-on-`repo-graph-trust` boundary below.
+repo-graph-coherence = { path = "../repo-graph-coherence" }
+
 # Gate crate — added in Rust-43A. The agent orient pipeline
 # emits GATE_PASS / GATE_FAIL / GATE_INCOMPLETE signals by
 # calling `repo_graph_gate::assemble_from_requirements`. This

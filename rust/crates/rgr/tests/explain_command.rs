@@ -138,6 +138,74 @@ fn explain_json_flag_order_independent() {
     );
 }
 
+// ── 4. TRUNCATION-AUDIT-1: --full flag parse + mutual exclusion ──────────
+
+#[test]
+fn explain_full_flag_accepted() {
+    // --full must parse → daemon-unavailable (exit 2), not usage error (exit 1).
+    let output = run_cmd_isolated(&["explain", "src/a.ts", "--full"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--full must parse (exit 2 daemon error), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn explain_full_with_budget_mutually_exclusive() {
+    // --full and --budget are mutually exclusive → usage error (exit 1) BEFORE daemon connect.
+    let output = run_cmd_isolated(&["explain", "src/a.ts", "--full", "--budget", "large"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--full cannot be combined with --budget"),
+        "stderr must explain the mutual exclusion: {}",
+        stderr
+    );
+}
+
+// ── 5. TRUNCATION-AUDIT-1 review-1 #3: `--help` documents `--full` ───────────
+
+#[test]
+fn explain_help_flag_exits_zero_and_documents_full() {
+    // `rmap explain --help` must succeed (exit 0) and document --full on stderr, short-circuiting
+    // BEFORE any daemon connection (the isolated socket is never contacted). Pre-fix this errored
+    // with exit 1 ("unknown flag: --help").
+    let output = run_cmd_isolated(&["explain", "--help"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "explain --help must exit 0. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--full"),
+        "explain --help must document --full: {}",
+        stderr
+    );
+}
+
+#[test]
+fn explain_short_help_flag_is_help_not_target() {
+    // `-h` must be treated as help (exit 0), NOT swallowed as the positional <target> (which would
+    // reach the daemon and exit 2). Guards the match-arm ordering in run_explain_cmd.
+    let output = run_cmd_isolated(&["explain", "-h"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "explain -h must exit 0 (help), not be treated as a target. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SUCCESS-PATH TESTS
 //

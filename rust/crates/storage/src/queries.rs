@@ -112,6 +112,24 @@ pub struct ImportResult {
     pub depth: i64,
 }
 
+/// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: one IMPORTS edge in the BULK per-snapshot enumeration -- the
+/// importing file's path + the imported node's classification, for the repo-wide directional compare. The
+/// `source_file` is the importing FILE; `target_file` is the imported FILE path (empty for a non-FILE / no-file
+/// target). Read-only; never mutates storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkImportRow {
+    /// The importing file's repo-relative path.
+    pub source_file: String,
+    /// The imported file's repo-relative path (empty if the target has no file).
+    pub target_file: String,
+    /// The target node kind (e.g. `FILE`).
+    pub kind: String,
+    /// The target node subtype (e.g. `SOURCE` / `EXTERNAL`).
+    pub subtype: Option<String>,
+    /// The import edge resolution (e.g. `static` / `unresolved`).
+    pub resolution: Option<String>,
+}
+
 /// Result of a shortest-path search between two symbols.
 ///
 /// Matches the TS `formatPathResult` wire format (json.ts:74-86).
@@ -315,6 +333,45 @@ pub struct CycleNode {
     pub node_id: String,
     pub name: String,
     pub file: Option<String>,
+}
+
+/// STATS-LIVEGRAPH-IMPL-1: the SHARED Martin-metric derivation `(instability, abstractness,
+/// distance_from_main_sequence)` from the raw degree + symbol-classification counts, 2-dp rounded
+/// (mirrors TS `Math.round(x * 100) / 100`).
+///
+/// Used by BOTH backends: [`StorageConnection::compute_module_stats`] (the SQLite path) AND the
+/// LiveGraph stats fastpath (which maps its raw per-module counts through this exact helper). Sharing
+/// the arithmetic makes a GREEN field-exact stats cert compare BIT-IDENTICAL floats — no float jitter
+/// can force a spurious RED, and a GREEN cert provably equals what the SQLite path would have produced
+/// (the no-loss contract, RISK-5).
+///
+/// - `instability  = fan_out / (fan_in + fan_out)` (0 when the total degree is 0)
+/// - `abstractness = abstract_count / type_count`  (0 when `type_count` is 0)
+/// - `distance     = |abstractness + instability - 1.0|`
+pub fn martin_metrics(
+    fan_in: i64,
+    fan_out: i64,
+    abstract_count: i64,
+    type_count: i64,
+) -> (f64, f64, f64) {
+    let total = fan_in + fan_out;
+    let instability_raw = if total > 0 {
+        fan_out as f64 / total as f64
+    } else {
+        0.0
+    };
+    let abstractness_raw = if type_count > 0 {
+        abstract_count as f64 / type_count as f64
+    } else {
+        0.0
+    };
+    let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
+
+    // Round to 2 decimal places: mirrors TS Math.round(x * 100) / 100.
+    let instability = (instability_raw * 100.0).round() / 100.0;
+    let abstractness = (abstractness_raw * 100.0).round() / 100.0;
+    let distance = (distance_raw * 100.0).round() / 100.0;
+    (instability, abstractness, distance)
 }
 
 /// Per-module structural metrics.
@@ -1038,6 +1095,46 @@ impl StorageConnection {
         Ok(results)
     }
 
+    /// MODULE-CYCLES-CLI-1 (D5): map each MODULE node_uid -> its QUALIFIED module path (the directory),
+    /// for the `--engine compare --kind module-import` path. `find_cycles` returns the SHORT module name
+    /// (e.g. "src"), which collides across packages; the compare needs the qualified path
+    /// (e.g. "packages/a/src") to diff against the LiveGraph's dirname identities. Read-only; the DEFAULT
+    /// `rmap cycles` output (short `name`) is UNCHANGED.
+    pub fn module_qualified_names(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<std::collections::HashMap<String, String>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT node_uid, COALESCE(qualified_name, name)
+             FROM nodes WHERE snapshot_uid = ? AND kind = 'MODULE'",
+        )?;
+        let map = stmt
+            .query_map(rusqlite::params![snapshot_uid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+        Ok(map)
+    }
+
+    /// CYCLES-COMPLETENESS-AUDIT-1 (D3-A): the DISTINCT non-null `files.language` values for a repo -- the
+    /// language INVENTORY the completeness audit reads (at the audit boundary) to decide
+    /// `has_non_ts_cycle_source`. `files` is keyed by `repo_uid` (no snapshot dimension); the indexer
+    /// (`indexer/routing.rs::detect_language`) writes only a CLOSED, code-only vocabulary
+    /// (typescript/tsx/javascript/jsx/java/python/rust/c/cpp) or NULL for non-code files -- so a non-null
+    /// value is ALWAYS a real code language (no "unknown"/doc/data pollution to filter). Read-only; never
+    /// consulted by the runtime certificate evaluator (which stays SQLite-free).
+    pub fn distinct_file_languages(&self, repo_uid: &str) -> Result<Vec<String>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT DISTINCT language FROM files
+             WHERE repo_uid = ? AND language IS NOT NULL
+             ORDER BY language ASC",
+        )?;
+        let langs = stmt
+            .query_map(rusqlite::params![repo_uid], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(langs)
+    }
+
     /// Compute per-module structural metrics.
     ///
     /// Mirrors the TS `computeModuleStats` (sqlite-storage.ts:2846-2964).
@@ -1176,23 +1273,10 @@ impl StorageConnection {
             let (path, fan_in, fan_out, file_count, symbol_count, abstract_count, type_count) =
                 row.map_err(StorageError::from)?;
 
-            let total = fan_in + fan_out;
-            let instability_raw = if total > 0 {
-                fan_out as f64 / total as f64
-            } else {
-                0.0
-            };
-            let abstractness_raw = if type_count > 0 {
-                abstract_count as f64 / type_count as f64
-            } else {
-                0.0
-            };
-            let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
-
-            // Round to 2 decimal places: mirrors TS Math.round(x * 100) / 100.
-            let instability = (instability_raw * 100.0).round() / 100.0;
-            let abstractness = (abstractness_raw * 100.0).round() / 100.0;
-            let distance = (distance_raw * 100.0).round() / 100.0;
+            // STATS-LIVEGRAPH-IMPL-1: derive the Martin metrics through the SHARED helper so the
+            // LiveGraph fastpath (which calls the SAME `martin_metrics`) produces bit-identical floats.
+            let (instability, abstractness, distance) =
+                martin_metrics(fan_in, fan_out, abstract_count, type_count);
 
             results.push(ModuleStatsResult {
                 module: path,
@@ -1259,6 +1343,44 @@ impl StorageConnection {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
+    }
+
+    /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: enumerate ALL IMPORTS edges for a snapshot as
+    /// [`BulkImportRow`]s (the importing FILE path + the imported node's path / kind / subtype / resolution) in
+    /// ONE read-only query -- the SQLite import-bearing file set + their classified targets for the repo-wide
+    /// directional compare. Does NOT touch [`Self::find_imports`] (the per-file path stays unchanged). Rows
+    /// with no importing-file path are skipped (an IMPORTS edge must have an importing file).
+    pub fn all_imports(&self, snapshot_uid: &str) -> Result<Vec<BulkImportRow>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT
+				sf.path AS source_path, tf.path AS target_path,
+				tn.kind, tn.subtype, e.resolution
+			 FROM edges e
+			 JOIN nodes sn ON e.source_node_uid = sn.node_uid
+			 JOIN nodes tn ON e.target_node_uid = tn.node_uid
+			 LEFT JOIN files sf ON sn.file_uid = sf.file_uid
+			 LEFT JOIN files tf ON tn.file_uid = tf.file_uid
+			 WHERE e.snapshot_uid = ?1
+			   AND e.type = 'IMPORTS'
+			 ORDER BY source_path ASC, target_path ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            let source_path: Option<String> = row.get(0)?;
+            let target_path: Option<String> = row.get(1)?;
+            Ok(BulkImportRow {
+                source_file: source_path.unwrap_or_default(),
+                target_file: target_path.unwrap_or_default(),
+                kind: row.get(2)?,
+                subtype: row.get(3)?,
+                resolution: row.get(4)?,
+            })
+        })?;
+        Ok(rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?
+            .into_iter()
+            .filter(|r| !r.source_file.is_empty())
+            .collect())
     }
 
     /// Find the shortest path between two nodes via BFS.
@@ -2320,6 +2442,18 @@ mod tests {
     use crate::crud::test_helpers::fresh_storage;
     use crate::StorageConnection;
 
+    // STATS-LIVEGRAPH-IMPL-1: lock the shared Martin-metric derivation (the LiveGraph fastpath calls the
+    // SAME helper, so these values are the byte-identity contract).
+    #[test]
+    fn martin_metrics_matches_the_inline_arithmetic() {
+        // instability = fan_out/(fan_in+fan_out); abstractness = abstract/type; distance = |a+i-1|, 2dp.
+        assert_eq!(martin_metrics(0, 0, 0, 0), (0.0, 0.0, 1.0)); // total=0 -> i=0; type=0 -> a=0; |0+0-1|=1
+        assert_eq!(martin_metrics(1, 3, 1, 4), (0.75, 0.25, 0.0)); // |0.25+0.75-1|=0
+        assert_eq!(martin_metrics(3, 1, 0, 2), (0.25, 0.0, 0.75)); // |0+0.25-1|=0.75
+                                                                   // Rounding to 2dp mirrors TS Math.round(x*100)/100: 1/3 -> 0.33.
+        assert_eq!(martin_metrics(2, 1, 0, 0).0, 0.33);
+    }
+
     /// Insert a minimal node directly so resolve_symbol can be tested
     /// without pulling in the full indexer stack.
     fn insert_raw_node(
@@ -3370,6 +3504,56 @@ mod tests {
 				rusqlite::params![edge_uid, snapshot_uid, source_node_uid, target_node_uid, edge_type],
 			)
 			.unwrap();
+    }
+
+    #[test]
+    fn all_imports_enumerates_source_and_target_paths() {
+        // IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: the bulk query returns (source_file, target_file, kind,
+        // subtype, resolution) for IMPORTS edges only, with the FILE-path JOINs resolved.
+        let (storage, snap) = setup_db_with_snapshot();
+        let file_node = |path: &str, node_uid: &str| {
+            let file_uid = format!("r1:{path}");
+            storage
+                .connection()
+                .execute(
+                    "INSERT OR IGNORE INTO files (file_uid, repo_uid, path, language, is_test)
+                     VALUES (?, 'r1', ?, 'typescript', 0)",
+                    rusqlite::params![file_uid, path],
+                )
+                .unwrap();
+            storage
+                .connection()
+                .execute(
+                    "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, file_uid)
+                     VALUES (?, ?, 'r1', ?, 'FILE', 'SOURCE', ?, ?)",
+                    rusqlite::params![
+                        node_uid,
+                        snap,
+                        format!("r1:{path}:FILE"),
+                        path,
+                        file_uid
+                    ],
+                )
+                .unwrap();
+        };
+        file_node("src/a.ts", "n-a");
+        file_node("src/b.ts", "n-b");
+        insert_raw_edge(&storage, &snap, "e-ab", "n-a", "n-b", "IMPORTS");
+        let rows = storage.all_imports(&snap).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.source_file, "src/a.ts");
+        assert_eq!(r.target_file, "src/b.ts");
+        assert_eq!(r.kind, "FILE");
+        assert_eq!(r.subtype.as_deref(), Some("SOURCE"));
+        assert_eq!(r.resolution.as_deref(), Some("static"));
+        // a non-IMPORTS edge is excluded.
+        insert_raw_edge(&storage, &snap, "e-call", "n-a", "n-b", "CALLS");
+        assert_eq!(
+            storage.all_imports(&snap).unwrap().len(),
+            1,
+            "only IMPORTS edges are enumerated"
+        );
     }
 
     #[test]

@@ -401,6 +401,627 @@ fn index_then_query_end_to_end() {
 }
 
 #[test]
+fn orient_returns_coherence_envelope_shape() {
+    // ORIENT-LIVEGRAPH-IMPL: rmapd-level proof (real dispatch + serialization, in-process transport, no
+    // socket) that orient now serves a `CoherenceEnvelope<CoherentOrientResult>` — the wrapper top level,
+    // the per-signal leaf envelopes, the root axes, and the source map. No LiveGraph is preloaded in this
+    // harness, so the LG-first leaves take the honest SQLite path (source = {sqlite}); this exercises the
+    // degradation/fallback labelling end-to-end (the LG-served path is unit-tested in livegraph_feed).
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-orient-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"coh-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let orient_request = format!(
+        r#"{{"id":"coh-2","method":"orient","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level (RISK-O-F): value + provenance + trust + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env.get("trust").is_some(),
+        "wrapper has root trust (TrustPosture): {}",
+        results[0]
+    );
+    assert!(
+        env.get("freshness").is_some(),
+        "wrapper has root freshness: {}",
+        results[0]
+    );
+    // Root trust is the AXIS-typed posture, not the legacy briefing prose.
+    assert!(env["trust"].get("class").is_some(), "root trust has class");
+    assert!(
+        env["trust"].get("completeness").is_some(),
+        "root trust has completeness"
+    );
+    // Root provenance.source is the source SET (the source-map union).
+    assert!(
+        env["provenance"]["source"].is_array(),
+        "root provenance.source is a set"
+    );
+
+    // ── The inner value = CoherentOrientResult (signals re-typed to leaf envelopes, D7). ──
+    let value = &env["value"];
+    assert_eq!(value["schema"], "rgr.agent.v1");
+    assert_eq!(value["command"], "orient");
+    let signals = value["signals"]
+        .as_array()
+        .expect("value.signals is an array of leaf envelopes");
+    assert!(
+        !signals.is_empty(),
+        "repo focus emits SNAPSHOT_INFO + MODULE_SUMMARY at minimum: {}",
+        results[0]
+    );
+
+    // ── Each signal is a CoherenceEnvelope leaf: pristine inner Signal + provenance/trust/freshness. ──
+    for leaf in signals {
+        assert!(
+            leaf["value"].get("code").is_some(),
+            "leaf.value is the pristine Signal: {}",
+            leaf
+        );
+        assert!(
+            leaf.get("trust").is_some(),
+            "leaf carries a trust posture: {}",
+            leaf
+        );
+        let src = leaf["provenance"]["source"]
+            .as_array()
+            .expect("leaf provenance.source is a set");
+        assert!(
+            !src.is_empty(),
+            "leaf source set is non-empty (honest provenance, never silent): {}",
+            leaf
+        );
+    }
+
+    // Source map / honest fallback: with NO preloaded LiveGraph, NONE of the FOUR LG-first leaves
+    // (IMPORT_CYCLES / HIGH_COMPLEXITY / CALLERS_SUMMARY / CALLEES_SUMMARY) may claim `livegraph` — each is
+    // the proven SQLite primary or a labelled SQLite fallback. This proves the degradation labelling is
+    // honest uniformly across the source map (no leaf silently over-claims a current-state source).
+    let lg_first = [
+        "IMPORT_CYCLES",
+        "HIGH_COMPLEXITY",
+        "CALLERS_SUMMARY",
+        "CALLEES_SUMMARY",
+    ];
+    for leaf in signals {
+        let code = leaf["value"]["code"].as_str().unwrap_or("");
+        let src = leaf["provenance"]["source"].as_array().unwrap();
+        assert!(
+            !src.iter().any(|s| s == "livegraph"),
+            "no preloaded LiveGraph -> {} leaf must not be livegraph-sourced: {}",
+            code,
+            leaf
+        );
+        // An LG-first leaf, when emitted without a LiveGraph, is SQLite-sourced: either the proven SQLite
+        // primary or a labelled `LiveGraphUnavailable` fallback — never a `livegraph` claim.
+        if lg_first.contains(&code) {
+            assert!(
+                src.iter().any(|s| s == "sqlite"),
+                "LG-first {} leaf must be SQLite-sourced when no LiveGraph is preloaded: {}",
+                code,
+                leaf
+            );
+        }
+    }
+
+    // Root provenance.source is the UNION of the leaf sources; with SQLite/Authority/FS leaves present it
+    // must include `sqlite` (the source-map union, contract D8).
+    let root_src = env["provenance"]["source"].as_array().unwrap();
+    assert!(
+        root_src.iter().any(|s| s == "sqlite"),
+        "root provenance.source union includes sqlite: {}",
+        results[0]
+    );
+    assert!(
+        !root_src.iter().any(|s| s == "livegraph"),
+        "no preloaded LiveGraph -> root source union must not include livegraph: {}",
+        results[0]
+    );
+}
+
+#[test]
+fn check_returns_coherence_envelope_shape() {
+    // CHECK-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_check` dispatch + real serialization, in-process
+    // transport, no socket — the same path `rmapd` runs minus the accept loop) that `check` now serves a
+    // `CoherenceEnvelope<CoherentOrientResult>`. It pins, end-to-end through the daemon, the contract the
+    // review-0 dispatch tests lacked: the wrapper top level, the per-signal leaf envelopes
+    // (`value.signals[*].value`), the MULTI-SOURCE verdict provenance {sqlite, declaration}, honest root
+    // freshness/trust, the ABSENT `trust_briefing`, and the never-LiveGraph invariant (D-CHECK-2/4).
+    //
+    // Coverage map for the degradation trio: this is the snapshot-present FRESH case (an indexed repo has no
+    // stale files). The STALE case (authoritative `get_stale_files` read) and the no-snapshot UNAVAILABLE /
+    // single-source {sqlite} case are pinned with a real `RepoState` + real SQLite in
+    // daemon-runtime `check_coherence` tests, and the pure folds in agent `check::coherent` tests. The CLI
+    // exit-code parity (PASS=0/FAIL=1/INCOMPLETE=2/not-found=2) is pinned in rgr `presentation::check`.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-check-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"chk-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let check_request = format!(
+        r#"{{"id":"chk-2","method":"check","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&check_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level: value + provenance + trust + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env["trust"].get("class").is_some() && env["trust"].get("completeness").is_some(),
+        "root trust is the AXIS-typed posture (class + completeness): {}",
+        results[0]
+    );
+    // Root freshness is present and AUTHORITATIVE. A freshly-indexed repo has no stale files → Fresh; the
+    // snapshot exists so it is never Unavailable here (that is the no-snapshot case, covered elsewhere).
+    let root_freshness = env["freshness"]
+        .as_str()
+        .expect("root freshness is a state string");
+    assert_eq!(
+        root_freshness, "Fresh",
+        "freshly-indexed snapshot has no stale files → Fresh (honest, not minted): {}",
+        results[0]
+    );
+
+    // ── The inner value = CoherentOrientResult (signals re-typed to leaf envelopes, D7). ──
+    let value = &env["value"];
+    assert_eq!(value["schema"], "rgr.agent.v1");
+    assert_eq!(value["command"], "check");
+    // E5 / D-CHECK-2: check NEVER carries a trust briefing (orient's field stays absent on check's wire).
+    assert!(
+        value.get("trust_briefing").is_none(),
+        "check serializes NO trust_briefing key: {}",
+        results[0]
+    );
+    let signals = value["signals"]
+        .as_array()
+        .expect("value.signals is an array of leaf envelopes");
+    assert!(
+        !signals.is_empty(),
+        "check ALWAYS emits at least the verdict signal: {}",
+        results[0]
+    );
+
+    // ── Each signal is a CoherenceEnvelope leaf: pristine inner Signal + provenance/trust/freshness, and
+    //    NEVER a LiveGraph claim (check reads zero LiveGraph — D-CHECK-4). ──
+    for leaf in signals {
+        assert!(
+            leaf["value"].get("code").is_some(),
+            "leaf.value is the pristine Signal (value.signals[*].value nesting): {}",
+            leaf
+        );
+        assert!(
+            leaf.get("trust").is_some(),
+            "leaf carries a trust posture: {}",
+            leaf
+        );
+        let src = leaf["provenance"]["source"]
+            .as_array()
+            .expect("leaf provenance.source is a set");
+        assert!(
+            !src.is_empty(),
+            "leaf source set is non-empty (honest provenance): {}",
+            leaf
+        );
+        assert!(
+            !src.iter().any(|s| s == "livegraph"),
+            "check leaf must NEVER claim a livegraph source: {}",
+            leaf
+        );
+        assert!(
+            leaf["provenance"]
+                .get("fallback_reason")
+                .and_then(|v| v.as_str())
+                .is_none(),
+            "check makes no LiveGraph read → no leaf fallback_reason: {}",
+            leaf
+        );
+    }
+
+    // ── The VERDICT leaf is the MULTI-SOURCE composite (D-CHECK-1/5): snapshot-present → the gate ALWAYS
+    //    reads the `declarations` Authority table, so the honest source set is {sqlite, declaration}. ──
+    let verdict = signals
+        .iter()
+        .find(|leaf| {
+            matches!(
+                leaf["value"]["code"].as_str(),
+                Some("CHECK_PASS") | Some("CHECK_FAIL") | Some("CHECK_INCOMPLETE")
+            )
+        })
+        .unwrap_or_else(|| panic!("check ALWAYS emits a verdict signal: {}", results[0]));
+    let verdict_src: Vec<&str> = verdict["provenance"]["source"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        verdict_src.contains(&"sqlite") && verdict_src.contains(&"declaration"),
+        "snapshot-present verdict folds sqlite-operational + sqlite-trust-core + declaration-authority \
+         → multi-source {{sqlite, declaration}}, got {:?}: {}",
+        verdict_src,
+        results[0]
+    );
+
+    // ── Root provenance.source = the SET UNION of the leaf sources: includes sqlite + declaration, never
+    //    livegraph; no LiveGraph read can produce a fallback (E3). ──
+    let root_src: Vec<&str> = env["provenance"]["source"]
+        .as_array()
+        .expect("root provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        root_src.contains(&"sqlite") && root_src.contains(&"declaration"),
+        "root source union includes sqlite + declaration: {:?}",
+        root_src
+    );
+    assert!(
+        !root_src.contains(&"livegraph"),
+        "check reads zero LiveGraph → root source union excludes livegraph: {:?}",
+        root_src
+    );
+    assert!(
+        env["provenance"]
+            .get("fallback_reason")
+            .and_then(|v| v.as_str())
+            .is_none(),
+        "check makes no LiveGraph read → root fallback_reason is null: {}",
+        results[0]
+    );
+}
+
+#[test]
+fn trust_returns_coherence_envelope_shape() {
+    // TRUST-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_trust` dispatch + real serialization, in-process
+    // transport, no socket) that trust now serves the ratified HYBRID `CoherenceEnvelope<CoherentTrustReport>`.
+    // No LiveGraph is preloaded in this harness, so Half A (the current-state posture) is the HONEST cold case
+    // (`Unavailable`, but still `source = livegraph`) and the root MEET degrades to Unavailable EVEN over a
+    // freshly-indexed (Fresh) snapshot (D-T6) — while Half B (the v1 report) is fully SERVED + sqlite-labelled.
+    // The WARM posture projection (REAL LiveGraph serving) is proven by daemon-runtime `trust_coherence`'s
+    // synthetic-fixture test; the pure hybrid folds by the trust-crate `coherent` unit tests.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-trust-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"coht-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let trust_request = format!(
+        r#"{{"id":"coht-2","method":"trust","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&trust_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level: value + provenance + trust(class+completeness) + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env["trust"].get("class").is_some() && env["trust"].get("completeness").is_some(),
+        "root trust is the AXIS-typed posture: {}",
+        results[0]
+    );
+    let value = &env["value"];
+
+    // ── Half A: the current-state posture leaf is the ONLY livegraph-sourced leaf; cold here → Unavailable
+    //    (F3 — unknown, NOT a Fresh known-zero; resident=false reported explicitly). ──
+    let posture = &value["current_state_posture"];
+    let posture_src: Vec<&str> = posture["provenance"]["source"]
+        .as_array()
+        .expect("posture provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert_eq!(
+        posture_src,
+        vec!["livegraph"],
+        "the current-state posture leaf is livegraph-sourced: {}",
+        results[0]
+    );
+    assert_eq!(
+        posture["trust"]["class"].as_str(),
+        Some("Unavailable"),
+        "no preload → cold LiveGraph → Unavailable posture (not a fabricated current-state Exact): {}",
+        results[0]
+    );
+    assert_eq!(
+        posture["value"]["resident"].as_bool(),
+        Some(false),
+        "the posture reports resident=false explicitly (F3): {}",
+        results[0]
+    );
+
+    // ── Half B: the v1 report is SERVED, every residual leaf sqlite-sourced (never livegraph, F5). The
+    //    reliability leaf carries the snapshot posture (Fresh — a freshly-indexed snapshot has no stale
+    //    files), so Half B is honest + available even though Half A is cold. ──
+    let reliability_src: Vec<&str> = value["reliability"]["provenance"]["source"]
+        .as_array()
+        .expect("reliability provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert_eq!(
+        reliability_src,
+        vec!["sqlite"],
+        "a Half-B residual leaf is sqlite-sourced, never livegraph (F5): {}",
+        results[0]
+    );
+    assert_eq!(
+        value["reliability"]["freshness"].as_str(),
+        Some("Fresh"),
+        "Half B is served Fresh over the freshly-indexed snapshot: {}",
+        results[0]
+    );
+
+    // ── The downgrade-triggers leaf is the MULTI-SOURCE composite {sqlite, declaration} (D-TRUST-4/D8): the
+    //    entrypoint Authority table is read on EVERY report. ──
+    let downgrades_src: Vec<&str> = value["triggered_downgrades"]["provenance"]["source"]
+        .as_array()
+        .expect("downgrades provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        downgrades_src.contains(&"sqlite") && downgrades_src.contains(&"declaration"),
+        "the downgrade-triggers leaf is multi-source {{sqlite, declaration}}, got {:?}: {}",
+        downgrades_src,
+        results[0]
+    );
+
+    // ── P2 / D-TRUST-5: the dead_code reliability axis NEVER appears on the wire. ──
+    assert!(
+        !results[0].contains("dead_code"),
+        "the dead_code axis must stay internal (skip_serializing): {}",
+        results[0]
+    );
+
+    // ── E3: root provenance = the SET UNION of all leaf sources = {livegraph, sqlite, declaration} (the
+    //    posture leaf is the livegraph contributor). Root MEET degrades to Unavailable over the cold
+    //    LiveGraph even with a Fresh snapshot (D-T6 — the honest hybrid). ──
+    let root_src: Vec<&str> = env["provenance"]["source"]
+        .as_array()
+        .expect("root provenance.source is a set")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        root_src.contains(&"livegraph")
+            && root_src.contains(&"sqlite")
+            && root_src.contains(&"declaration"),
+        "root source union = {{livegraph, sqlite, declaration}}, got {:?}: {}",
+        root_src,
+        results[0]
+    );
+    assert_eq!(
+        env["freshness"].as_str(),
+        Some("Unavailable"),
+        "a cold LiveGraph degrades the root MEET to Unavailable even over a Fresh snapshot (D-T6): {}",
+        results[0]
+    );
+}
+
+#[test]
+fn explain_returns_coherence_envelope_shape() {
+    // EXPLAIN-LIVEGRAPH-IMPL: rmapd-level proof (real `handle_explain` dispatch + real serialization,
+    // in-process transport, no socket) that explain now serves a `CoherenceEnvelope<CoherentOrientResult>`.
+    // No LiveGraph is preloaded in this harness, so the FOUR LG-first reuse leaves take the HONEST SQLite
+    // path (source = {sqlite}, never livegraph) — this exercises the labelled-fallback source map end-to-end.
+    // The LG-SERVED multi-source path is proven by `explain_coherence`'s synthetic-fixture e2e test + the
+    // agent-side `explain::coherent` unit tests.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherence-explain-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    // A symbol target exercises the richest explain path (a symbol focus adds EXPLAIN_CALLERS/CALLEES); the
+    // assertions below pin honest labelling for whatever leaves the resolved focus emits.
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"cohx-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let explain_request = format!(
+        r#"{{"id":"cohx-2","method":"explain","params":{{"repo":"{}","target":"hello"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let env = &parsed["result"];
+
+    // ── The wrapper top level: value + provenance + trust + freshness. ──
+    assert!(
+        env.get("value").is_some(),
+        "wrapper has value: {}",
+        results[0]
+    );
+    assert!(
+        env.get("provenance").is_some(),
+        "wrapper has root provenance: {}",
+        results[0]
+    );
+    assert!(
+        env["trust"].get("class").is_some(),
+        "wrapper root trust is the axis-typed posture: {}",
+        results[0]
+    );
+    assert!(
+        env.get("freshness").is_some(),
+        "wrapper has root freshness: {}",
+        results[0]
+    );
+
+    // ── The inner value = CoherentOrientResult (command=explain; signals re-typed to leaf envelopes). ──
+    let value = &env["value"];
+    assert_eq!(value["schema"], "rgr.agent.v1");
+    assert_eq!(value["command"], "explain");
+    let signals = value["signals"]
+        .as_array()
+        .expect("value.signals is an array of leaf envelopes");
+    assert!(
+        !signals.is_empty(),
+        "a resolved symbol focus emits at least EXPLAIN_IDENTITY + EXPLAIN_TRUST: {}",
+        results[0]
+    );
+
+    // ── Each leaf is a CoherenceEnvelope: pristine inner Signal + provenance/trust/freshness. ──
+    // With NO preloaded LiveGraph, NO leaf may claim `livegraph` — the LG-first reuse leaves
+    // (EXPLAIN_CALLERS/CALLEES/IMPORTS/CYCLES) are the proven SQLite primary or a labelled SQLite fallback;
+    // EXPLAIN_IDENTITY is single-source {sqlite} (D-IMPL-1). This pins honest fallback labelling uniformly.
+    let lg_first = [
+        "EXPLAIN_CALLERS",
+        "EXPLAIN_CALLEES",
+        "EXPLAIN_IMPORTS",
+        "EXPLAIN_CYCLES",
+    ];
+    for leaf in signals {
+        let code = leaf["value"]["code"].as_str().unwrap_or("");
+        assert!(
+            !code.is_empty(),
+            "leaf.value is the pristine Signal: {}",
+            leaf
+        );
+        assert!(
+            leaf.get("trust").is_some(),
+            "leaf carries a trust posture: {}",
+            leaf
+        );
+        let src: Vec<&str> = leaf["provenance"]["source"]
+            .as_array()
+            .expect("leaf provenance.source is a set")
+            .iter()
+            .filter_map(|s| s.as_str())
+            .collect();
+        assert!(
+            !src.is_empty(),
+            "leaf source set is non-empty (honest, never silent): {}",
+            leaf
+        );
+        assert!(
+            !src.contains(&"livegraph"),
+            "no preloaded LiveGraph -> {} leaf must not be livegraph-sourced: {}",
+            code,
+            leaf
+        );
+        if lg_first.contains(&code) {
+            assert!(
+                src.contains(&"sqlite"),
+                "LG-first {} leaf is SQLite-sourced when no LiveGraph is preloaded: {}",
+                code,
+                leaf
+            );
+        }
+        // EXPLAIN_IDENTITY is single-source {sqlite} (D-IMPL-1).
+        if code == "EXPLAIN_IDENTITY" {
+            assert_eq!(
+                src,
+                vec!["sqlite"],
+                "EXPLAIN_IDENTITY is single-source sqlite: {}",
+                leaf
+            );
+        }
+    }
+    // NOTE: which LG-first leaves a focus emits depends on resolution (symbol -> CALLERS/CALLEES; file ->
+    // IMPORTS; path -> CYCLES), so this round-trip test asserts honest labelling for WHATEVER leaves are
+    // present (the loop above) rather than requiring a specific one — that would couple it to the extractor's
+    // symbol-name resolution. The DETERMINISTIC LG-served + SQLite-fallback callgraph proofs live in
+    // `daemon-runtime`'s `explain_coherence::explain_lg_served_e2e` (synthetic keys, resolution-independent).
+
+    // ── Root provenance.source union includes sqlite, never livegraph (no preloaded LG). ──
+    let root_src: Vec<&str> = env["provenance"]["source"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(
+        root_src.contains(&"sqlite"),
+        "root source union includes sqlite: {:?}",
+        root_src
+    );
+    assert!(
+        !root_src.contains(&"livegraph"),
+        "no preloaded LiveGraph -> root source union excludes livegraph: {:?}",
+        root_src
+    );
+}
+
+#[test]
 fn stats_success_returns_module_metrics() {
     // Create isolated state root
     let state_temp = tempdir().unwrap();
@@ -675,6 +1296,123 @@ fn explain_rejects_small_budget() {
         output.contains(r#""code":"InvalidRequest""#),
         "Should reject small budget: {}",
         output
+    );
+}
+
+// ── TRUNCATION-AUDIT-1: --full (budget "full") at the daemon command boundary ────
+
+#[test]
+fn explain_full_budget_uncaps_over_cap_file_listing() {
+    // Over-cap full-output proof AT THE COMMAND BOUNDARY: the explain path-focus EXPLAIN_FILES
+    // section caps at items_cap (15 for medium). Index 16 files so the cap bites at `medium` and
+    // NOT at `full`; assert `full` emits every file (items.len() == count) with NO truncation flag.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("over-cap-repo");
+    std::fs::create_dir_all(repo_dir.join("src")).unwrap();
+    // 16 distinct TS files (> the 15-item cap), each with one exported function.
+    for i in 0..16 {
+        std::fs::write(
+            repo_dir.join(format!("src/f{i:02}.ts")),
+            format!("export function fn{i:02}() {{ return {i}; }}\n"),
+        )
+        .unwrap();
+    }
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"oc-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // medium budget (cap 15) over 16 files → the EXPLAIN_FILES section truncates.
+    let medium = format!(
+        r#"{{"id":"oc-2","method":"explain","params":{{"repo":"{}","target":"src","budget":"medium"}}}}"#,
+        canonical_path
+    );
+    let med_out = run_daemon_requests_with_state(vec![&medium], Arc::clone(&state))[0].clone();
+    assert!(
+        med_out.contains(r#""items_truncated":true"#),
+        "medium budget must truncate the 16-file listing (cap 15): {}",
+        med_out
+    );
+
+    // full budget → NOTHING truncates anywhere in the response.
+    let full = format!(
+        r#"{{"id":"oc-3","method":"explain","params":{{"repo":"{}","target":"src","budget":"full"}}}}"#,
+        canonical_path
+    );
+    let full_out = run_daemon_requests_with_state(vec![&full], Arc::clone(&state))[0].clone();
+    assert!(
+        full_out.contains(r#""schema":"rgr.agent.v1""#),
+        "--full explain must succeed: {}",
+        full_out
+    );
+    assert!(
+        !full_out.contains(r#""items_truncated":true"#),
+        "--full must not truncate ANY section: {}",
+        full_out
+    );
+
+    // count == total proof: the EXPLAIN_FILES section emits items.len() == count under --full.
+    let parsed: serde_json::Value = serde_json::from_str(full_out.lines().last().unwrap()).unwrap();
+    let signals = parsed["result"]["value"]["signals"]
+        .as_array()
+        .expect("value.signals is an array");
+    let files_sig = signals
+        .iter()
+        .find(|s| s["value"]["code"] == "EXPLAIN_FILES")
+        .expect("EXPLAIN_FILES signal present");
+    let ev = &files_sig["value"]["evidence"];
+    let count = ev["count"].as_u64().expect("count");
+    let items = ev["items"].as_array().expect("items array");
+    assert!(count >= 16, "all 16 indexed files counted: {}", count);
+    assert_eq!(
+        items.len() as u64,
+        count,
+        "--full emits EVERY file (items.len() == count): {}",
+        full_out
+    );
+}
+
+#[test]
+fn orient_accepts_full_budget() {
+    // The daemon must ACCEPT budget "full" for orient (map → Budget::Full), not reject it as an
+    // invalid budget. Proves the dispatch budget parse handles the --full tier end-to-end.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("orient-full-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"of-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let orient_request = format!(
+        r#"{{"id":"of-2","method":"orient","params":{{"repo":"{}","budget":"full"}}}}"#,
+        canonical_path
+    );
+    let out = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state))[0].clone();
+    assert!(
+        !out.contains(r#""code":"InvalidRequest""#),
+        "budget \"full\" must be accepted, not rejected: {}",
+        out
+    );
+    assert!(
+        out.contains(r#""schema":"rgr.agent.v1""#),
+        "orient --full must return a successful envelope: {}",
+        out
     );
 }
 

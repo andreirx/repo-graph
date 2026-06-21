@@ -40,22 +40,205 @@ rmap index [repo_path]         # daemon allocates db_path, defaults to cwd
 rmap refresh                   # resolves repo from cwd
 ```
 
-### Legacy Commands (still require positional args)
+### Legacy Commands (positional-args form)
 
-These commands have not yet migrated to REG-1 and still require explicit paths:
+`assess`, `policy`, and `violations` have **migrated to REG-1 cwd-resolution** — each handler
+(`commands/assess.rs` `run_assess`, `commands/policy.rs` `run_policy`,
+`commands/modules/violations.rs` `run_violations`) calls `execute_repo_request(...)` with no
+storage positionals:
 
 ```bash
-rmap assess <db_path> <repo_uid>
-rmap enrich <db_path> <repo_uid>
-rmap policy <db_path> <repo_uid> [options]
-rmap modules boundary <db_path> <repo_uid> [options]
-rmap violations <db_path> <repo_uid>
-rmap quality/* <db_path> <repo_uid> [options]
-rmap declare/* <db_path> <repo_uid> [options]
+rmap assess [--baseline <snapshot>]            # resolves repo from cwd
+rmap policy [--kind <kind>] [--file <path>]    # resolves repo from cwd
+rmap violations [--json]                       # resolves repo from cwd
 ```
 
-These are primarily write operations or governance commands that will be
-migrated in future slices.
+The quality commands `churn`, `hotspots`, and `risk` are **also migrated** — each handler
+(`commands/quality/{churn,hotspots,risk}.rs`) calls `execute_repo_request(...)` under a
+"Migrated from legacy `<db_path> <repo_uid>` contract to REG-1" doc comment. There is **no
+`rmap quality` subcommand namespace**: `main.rs` routes `churn` / `hotspots` / `risk` /
+`coverage` / `assess` as flat top-level commands.
+
+`declare *` has **NOT** migrated. `declare boundary`, `declare requirement`, and
+`declare quality-policy` still require `<db_path> <repo_uid>` positionals at the handler
+(`commands/declare/{boundary,requirement,quality_policy}.rs`):
+
+```bash
+rmap declare boundary       <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
+rmap declare requirement    <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> ...
+rmap declare quality-policy <db_path> <repo_uid> <policy_id> --measurement <kind> ...
+```
+
+> **Help-vs-handler mismatch (code-level — flagged, not fixable in a docs slice).** Top-level
+> `rmap --help` lists the `declare` subcommands under "Declarations (resolve repo from cwd)" with
+> cwd-style signatures (e.g. `rmap declare boundary <module_path> --forbids …`, no
+> `<db_path> <repo_uid>`), but the handlers reject that form and require the positional form above
+> (confirmed at runtime: `rmap declare boundary` prints `usage: … <db_path> <repo_uid>
+> <module_path> …`). The handler is the shipped contract; the `rmap --help` summary lines are
+> stale. Repairing the help text is a code change, out of scope for this docs reconcile.
+
+Two more surfaces still require explicit positional paths (verified at the handler):
+
+```bash
+rmap enrich <db_path> <repo_uid> [options]                       # commands/enrich.rs
+rmap modules boundary <db_path> <repo_uid> <source> [options]    # commands/modules/boundary.rs
+```
+
+> **Reconciled (OUTPUT-DOC-TRUTH-AUDIT-1, was PRIORITY-DOCS-RECONCILE-6).** The deeper per-command
+> signature blocks later in this file (`policy`, `boundaries`, `contracts`) previously still showed
+> pre-REG-1 `<db_path> <repo_uid>` forms — `policy`'s handler was already cwd-migrated, so its block
+> was stale doc residue. They have now been corrected to the cwd-resolved (REG-1) shape, each verified
+> against the command's handler usage string (`commands/policy.rs`, `commands/boundaries/mod.rs`,
+> `commands/contracts.rs`). **`rmap <cmd> --help` is NOT a reliable
+> verification surface:** most commands have no `--help` handler — `rmap churn --help` /
+> `rmap cycles --help` print usage only as a side effect of the unknown-flag path
+> (`error: unknown flag: --help`), and symbol-taking commands like `rmap callers --help` treat
+> `--help` as a positional symbol argument and then fail through normal repo/symbol resolution.
+> The exact message is **state-dependent**, not a recognition of `--help`: repo resolution runs
+> first, so an unindexed cwd yields `error: repo not indexed` (observed), and only an indexed repo
+> reaches symbol resolution and a `symbol not found` failure. To verify an argument form, run the
+> bare command to trigger its usage error, or read the command's handler.
+
+## Engine Routing — LiveGraph-first defaults (`--engine`)
+
+Six graph commands — `callers`, `callees`, `path`, `imports`, `cycles`, `stats` —
+accept an `--engine` selector that chooses the answer backend. This is the user-visible
+surface of the SCIP-first / LiveGraph substrate (the daemon holds a current-state
+in-memory LiveGraph beside the SQLite snapshot).
+
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Cert-gated **LiveGraph-first**: serve the in-memory LiveGraph answer when a daemon-side **no-loss certificate** is GREEN at the current fingerprint (Exact + Fresh + TypeScript-primary partitions), else a **labelled SQLite fallback**. Human output is byte-identical whichever backend served. |
+| `sqlite` | Force the SQLite backend — the proven, byte-identical baseline and the escape hatch. |
+| `livegraph` | Force the LiveGraph backend (diagnostic / read-model surface). |
+| `compare` | Run both; the SQLite answer stays PRIMARY. `callers`/`callees`/`path`/`cycles`/`stats` write the LiveGraph-vs-SQLite report to a classified `.rgr/livegraph-compare/…` **file sidecar** (its path is returned in the `--json`); `imports` rides the comparison **inline** in the `--json` (no file sidecar). |
+
+Source: `rust/crates/rgr/src/commands/graph.rs` (`extract_engine_flag`, default `"auto"`);
+daemon routing in `rust/crates/daemon-runtime/src/dispatch.rs`. These six are the
+"SQLite-free migrated default paths" — on a GREEN cert the default serves no `nodes`/`edges`
+SQLite read for the migrated answer.
+
+**`--json` routing metadata.** Under `--engine auto`, the JSON envelope carries
+`backend_used` and (on fallback) `fallback_reason`; the human renderer strips them so the
+default text is backend-independent. Under `--engine compare` the SQLite answer stays PRIMARY
+and the LiveGraph-vs-SQLite report rides alongside it: `callers`/`callees`/`path`/`cycles`/`stats`
+add an inline `*_compare` block **and** a `*_compare_sidecar` path (the report is also written to
+a `.rgr/livegraph-compare/…` file — e.g. `livegraph_compare` + `livegraph_compare_sidecar`,
+`livegraph_stats_compare` + `livegraph_stats_compare_sidecar`); `imports` adds an inline
+`comparison` block (per-file) or a readiness aggregate (repo-wide) with **no** file sidecar.
+
+### `cycles` — `--engine` + `--kind`
+
+```
+rmap cycles [--engine auto|sqlite|livegraph|compare] [--kind file-import|module-import] [--json]
+```
+
+- **Default** (`auto`, no `--kind`): cert-gated LiveGraph-first **module-import** cycles,
+  labelled SQLite fallback. The default module-cycle output was **canonicalized**
+  (qualified module identities + deterministic ordering) — a ratified, visible
+  human-output change versus the older render.
+- `--engine sqlite`: forced SQLite module-import cycles (escape hatch).
+- `--engine livegraph --kind file-import`: captured resolved-relative **FILE**-import
+  cycles (a *different* graph; no SQLite peer, so no fallback — scope is labelled).
+- `--engine livegraph --kind module-import`: directory-aggregated module-import cycles
+  from the LiveGraph.
+- `--engine compare --kind module-import`: SQLite primary + a LiveGraph-vs-SQLite compare
+  summary and sidecar.
+- Invalid combinations are rejected with an explicit error (e.g. `--kind file-import`
+  requires `--engine livegraph`; `--engine compare --kind file-import` is unsupported —
+  FILE-import has no SQLite peer graph).
+
+### `imports` — optional `<file>` under LiveGraph / compare
+
+```
+rmap imports [<file>] [--engine auto|sqlite|livegraph|compare] [--json]
+```
+
+- `auto` (default) / `sqlite`: require **exactly one** `<file>` (single-file import view).
+- `livegraph`: `<file>` is **OPTIONAL** — omit it for a repo-wide import view.
+- `compare`: with `<file>` → per-file readiness; without `<file>` → a repo-wide readiness
+  aggregate.
+
+### `stats` — `--engine`
+
+```
+rmap stats [--engine auto|sqlite|livegraph|compare] [--json]
+```
+
+Default `auto` is cert-gated LiveGraph-first (served from the LiveGraph module-stats
+substrate when the stats no-loss cert is GREEN at the current fingerprint, else a labelled
+SQLite fallback) — byte-preserving human output. This is the 6th SQLite-free migrated
+default.
+
+### `callers` / `callees` / `path` — `--engine`
+
+```
+rmap callers <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]
+rmap callees <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]
+rmap path <from> <to> [--engine auto|sqlite|livegraph|compare] [--json]
+```
+
+Default `auto` serves the LiveGraph when a per-call no-loss key-set compare holds, else the
+labelled SQLite fallback. Human output is byte-identical.
+
+## Coherence Envelope (`orient` / `check` / `explain` / `trust`)
+
+`orient`, `check`, `explain`, and `trust` return a `CoherenceEnvelope<T>` (the
+COHERENCE-LAYER-1 contract). The daemon serves LiveGraph-derivable leaves where a
+per-signal **no-loss certificate** holds and **labels every leaf's source**, falling back
+to SQLite (labelled) otherwise. Human output hides the envelope detail (signals grouped by
+severity); `--json` prints the full wrapped envelope.
+
+Source: `rust/crates/repo-graph-coherence/src/lib.rs` (the `CoherenceEnvelope` / `Provenance`
+/ `TrustPosture` structs); daemon handlers `build_{orient,check,explain,trust}_envelope` in
+`dispatch.rs`.
+
+**Envelope shape (`--json`).** A representative bounded-fallback serialization: one signal
+fell back to SQLite for a cycle divergence (so `source` is the union `livegraph` + `sqlite`
+with the cert-ladder `fallback_reason` recorded), while the served SQLite answer is itself
+`Exact` / `Fresh` for the snapshot. The optional collection fields carry
+`#[serde(skip_serializing_if = …)]`, so empty `basis` / `missing_partitions` /
+`degradation_reasons` / `contributing_languages` are **omitted entirely** (not emitted as `[]`)
+— see the field semantics below. Field order matches struct declaration order:
+
+```json
+{
+  "value": { "...": "the command payload; signals live under value" },
+  "provenance": {
+    "source": ["livegraph", "sqlite"],
+    "fallback_reason": "LiveGraphCycleDivergence"
+  },
+  "trust": {
+    "class": "Exact",
+    "completeness": "Complete"
+  },
+  "freshness": "Fresh"
+}
+```
+
+Field semantics:
+
+- `provenance.source` — set-UNION of contributing leaf sources: `livegraph` | `sqlite` |
+  `filesystem` | `declaration`.
+- `provenance.fallback_reason` — present only when a LiveGraph-first leaf fell back to
+  SQLite (the cert ladder; e.g. `LiveGraphStale`, `LiveGraphCycleDivergence`,
+  `LiveGraphBoundedServeDeclined`).
+- `provenance.basis` / `provenance.missing_partitions` — omitted when empty.
+- `trust.class` — `Exact` | `Partial` | `Unavailable` | `Stale`.
+- `trust.completeness` — `Complete` | `Degraded` | `Unknown`.
+- `trust.degradation_reasons` / `trust.contributing_languages` — omitted when empty.
+- `freshness` — `Fresh` | `Stale` | … (the `repo-graph-trust-model` epoch axis).
+
+The root `trust`/`freshness` are the **MEET** (weakest leaf) and `provenance.source` is the
+set-UNION — so a bounded-GREEN orient/explain reports `source: ["livegraph","sqlite"]` (the
+(b) leaves from the LiveGraph, the retained trust/structural leaves from SQLite), never a
+false "all current-state" claim.
+
+**Eager-read posture (honest).** orient SYMBOL-focus + explain SYMBOL-focus resolve their
+focus from the LiveGraph and are `nodes`-free on green; the remaining pipelines (orient
+REPO/PATH/FILE, explain FILE/PATH, check, trust) keep bounded SQLite reads **by design** (the
+retained-forever `unresolved_edges` + structural-identity reads). See
+`docs/slices/coherence-leaf-serve-1.md`.
 
 ## Command-Specific Contracts
 
@@ -338,7 +521,7 @@ automatically during `rmap index` / `rmap refresh`.
 **Usage:**
 
 ```
-rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <kind>]
+rmap policy [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <kind>] [--json]
 ```
 
 **Supported kinds:**
@@ -523,9 +706,9 @@ are populated automatically during `rmap index` / `rmap refresh`.
 **Commands:**
 
 ```
-rmap boundaries list <db_path> <repo_uid> [filters...]
-rmap boundaries show <db_path> <repo_uid> <surface_uid>
-rmap boundaries summary <db_path> <repo_uid>
+rmap boundaries list [filters...]
+rmap boundaries show <surface_uid>
+rmap boundaries summary
 ```
 
 **List filters:**
@@ -690,10 +873,10 @@ are populated automatically during `rmap index` / `rmap refresh`.
 **Commands:**
 
 ```
-rmap contracts list <db_path> <repo_uid> [--kind protobuf]
-rmap contracts show <db_path> <repo_uid> <file_path>
-rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]
-rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]
+rmap contracts list [--kind protobuf]
+rmap contracts show <file_path>
+rmap contracts elements [--kind message|enum|service|method|field] [--file <path>]
+rmap contracts usages [--element <element_uid>] [--min-confidence <0.0-1.0>]
 ```
 
 **List filters:**
@@ -922,9 +1105,20 @@ rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-conf
 
 **Design doc:** `docs/slices/cs-1-protobuf-schema.md`
 
-## JSON-Only Output
+## Output Format
 
-`rmap` always produces JSON on stdout. There is no `--json` flag because
-JSON is the default and only format.
+The agent-facing query commands default to **human-readable** plain-text output and emit the
+full machine envelope under `--json` (CLI-OUT-1): `orient`, `check`, `explain`, `trust`,
+`callers`, `callees`, `path`, `imports`, `cycles`, `stats` (and the other cwd-resolved query
+surfaces). Their human renderers strip JSON-only routing metadata (`backend_used`,
+`fallback_reason`, compare blocks/sidecars) so the default text is backend-independent (see
+Engine Routing above).
 
-Human-readable table format is not planned. Agents are the primary consumer.
+Source: the per-command `run_*` functions in `rust/crates/rgr/src/commands/` parse `--json`
+and otherwise call `render_human` (e.g. `graph.rs` `run_callers` / `run_cycles` / `run_stats`).
+This is **not** universal: the hidden `rmap dev …` diagnostic family (`graph.rs` `run_dev`) has
+no `--json` path, and some legacy/governance surfaces documented above predate CLI-OUT-1.
+
+(Historical note: an earlier contract revision stated `rmap` was JSON-only with no `--json`
+flag. That predates CLI-OUT-1 and is superseded by the human-default + `--json` model
+described here.)

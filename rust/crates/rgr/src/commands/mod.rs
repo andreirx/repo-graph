@@ -54,7 +54,7 @@ pub use docs::run_docs;
 pub use doctor::run_doctor;
 pub use enrich::run_enrich;
 pub use gate::run_gate;
-pub use graph::{run_callees, run_callers, run_cycles, run_imports, run_path, run_stats};
+pub use graph::{run_callees, run_callers, run_cycles, run_dev, run_imports, run_path, run_stats};
 pub use hook::run_hook;
 pub use index::{run_index, run_refresh};
 pub use inferences::run_inferences;

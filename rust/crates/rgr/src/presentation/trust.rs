@@ -1,362 +1,404 @@
 //! Presentation layer for the `trust` command.
 //!
-//! # CLI-OUT-2B
+//! # CLI-OUT-2B → TRUST-LIVEGRAPH-IMPL
 //!
-//! Transforms daemon TrustReport into human-readable plain text.
+//! The daemon now returns the ratified HYBRID `CoherenceEnvelope<CoherentTrustReport>` (the wrapper is the
+//! top level). The `--json` path prints it verbatim; this human path projects it. The render is the honest
+//! two-half model (`docs/slices/trust-livegraph-1.md` §3e / W2):
+//!   - a NEW **Current-State Posture** section (Half A, `source = livegraph`) — residency / per-partition
+//!     freshness / language / producer / migrated-answer capability, GENUINELY served from the LiveGraph;
+//!   - the existing v1 sections (Half B, `source = sqlite`) with their bullet text BYTE-IDENTICAL to the
+//!     pre-wrapper report, each heading carrying a `(source, snapshot-scoped extraction, freshness)` label so
+//!     a reader never mistakes the OUTGOING-extractor snapshot diagnostics for the current-state LiveGraph
+//!     resolution (F5);
+//!   - an overall **Posture** line carrying the root MEET (current-state-vs-snapshot freshness).
+//!
+//! The renderer reuses the trust crate's coherent DTOs (`repo_graph_trust::CoherentTrustReport`) for
+//! deserialization so the CLI view cannot silently drift from the daemon's wire shape.
 //!
 //! ## Human Output Structure
 //!
 //! ```text
 //! Trust Report: billing-service
 //! Snapshot: snap_01kr...
+//! Posture: Exact (Fresh)
 //!
-//! Resolution
+//! Current-State Posture  (livegraph, current-state, Fresh)
+//!   - Resident: yes (1 partition)
+//!   - app: Fresh, TypeScript, producer scip-typescript@0.4.0
+//!   - Producer available: yes
+//!   - Migrated-answer capability: yes
+//!
+//! Resolution  (sqlite, snapshot-scoped extraction, Fresh)
 //!   - Calls: 78% resolved (1234 of 1582)
-//!   - Imports: 95% resolved (2100 of 2210)
+//!   - Edges: 95% resolved (2100 of 2210)
 //!
-//! Reliability
+//! Reliability  (sqlite, snapshot-scoped extraction, Fresh)
 //!   - Call-graph: LOW (unresolved calls exceed threshold)
-//!   - Import-graph: HIGH
-//!   - Change-impact: MEDIUM (low call resolution affects impact analysis)
-//!
-//! Unresolved Breakdown
-//!   - 234 calls_function_ambiguous_or_missing
-//!   - 114 calls_obj_method_needs_type_info
-//!
-//! Classification
-//!   - 45 unknown
-//!   - 89 external library candidate
-//!   - 214 internal candidate
-//!
-//! Suspicious Modules (zero connectivity)
-//!   - src/legacy/adapter
-//!
-//! Triggered Downgrades
-//!   - framework_heavy_suspicion: Express routes detected, call resolution degraded
+//!   ...
 //! ```
 
-use serde::Deserialize;
+use repo_graph_coherence::{AnswerClass, CoherenceEnvelope, FreshnessState, Provenance, Source};
+use repo_graph_trust::types::ReliabilityAxisScore;
+use repo_graph_trust::{CoherentTrustReport, LiveGraphPosture};
 
 use crate::presentation::{bullet, heading, kv_line};
 
-// ── Response Types ───────────────────────────────────────────────────────────
+/// The wire type `rmap trust` deserializes: the daemon's `CoherenceEnvelope<CoherentTrustReport>`.
+pub type TrustEnvelope = CoherenceEnvelope<CoherentTrustReport>;
 
-/// Deserialized trust response from daemon.
-#[derive(Debug, Deserialize)]
-pub struct TrustResponse {
-    pub snapshot_uid: String,
-    /// Human-readable repo name for CLI display.
-    #[serde(default)]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub basis_commit: Option<String>,
-    pub summary: TrustSummary,
-    #[serde(default)]
-    pub categories: Vec<CategoryRow>,
-    #[serde(default)]
-    pub classifications: Vec<ClassificationRow>,
-    #[serde(default)]
-    pub modules: Vec<ModuleRow>,
-    #[serde(default)]
-    pub caveats: Vec<String>,
+// ── Labels (the per-section source/freshness honesty markers) ───────────────────────────────────
+
+fn freshness_label(f: FreshnessState) -> &'static str {
+    match f {
+        FreshnessState::Fresh => "Fresh",
+        FreshnessState::Stale => "Stale",
+        FreshnessState::PrecisionPending => "PrecisionPending",
+        FreshnessState::RefreshFailed => "RefreshFailed",
+        FreshnessState::Unavailable => "Unavailable",
+    }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct TrustSummary {
-    pub edges_total: u64,
-    pub edges_resolved: u64,
-    pub unresolved_total: u64,
-    pub resolved_calls: u64,
-    pub unresolved_calls: u64,
-    #[serde(default)]
-    pub unresolved_calls_external: u64,
-    #[serde(default)]
-    pub unresolved_calls_internal_like: u64,
-    pub call_resolution_rate: f64,
-    pub reliability: Reliability,
-    pub triggered_downgrades: TriggeredDowngrades,
+fn class_label(c: AnswerClass) -> &'static str {
+    match c {
+        AnswerClass::Exact => "Exact",
+        AnswerClass::Partial => "Partial",
+        AnswerClass::Unavailable => "Unavailable",
+        AnswerClass::Stale => "Stale",
+    }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Reliability {
-    pub import_graph: AxisScore,
-    pub call_graph: AxisScore,
-    pub change_impact: AxisScore,
+fn source_label(p: &Provenance) -> String {
+    let parts: Vec<&str> = p
+        .source
+        .iter()
+        .map(|s| match s {
+            Source::Livegraph => "livegraph",
+            Source::Sqlite => "sqlite",
+            Source::Filesystem => "filesystem",
+            Source::Declaration => "declaration",
+        })
+        .collect();
+    parts.join("+")
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AxisScore {
-    pub level: String,
-    #[serde(default)]
-    pub reasons: Vec<String>,
+/// A labelled section heading: `Title  (source, scope, Freshness)`. `scope` is `"snapshot-scoped
+/// extraction"` for Half-B residual leaves and `"current-state"` for the Half-A posture leaf.
+fn labelled_heading<T>(title: &str, leaf: &CoherenceEnvelope<T>, scope: &str) -> String {
+    heading(&format!(
+        "{}  ({}, {}, {})",
+        title,
+        source_label(&leaf.provenance),
+        scope,
+        freshness_label(leaf.freshness)
+    ))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct TriggeredDowngrades {
-    pub framework_heavy_suspicion: DowngradeTrigger,
-    pub registry_pattern_suspicion: DowngradeTrigger,
-    pub missing_entrypoint_declarations: DowngradeTrigger,
-    pub alias_resolution_suspicion: DowngradeTrigger,
+fn yes_no(b: bool) -> &'static str {
+    if b {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DowngradeTrigger {
-    pub triggered: bool,
-    #[serde(default)]
-    pub reasons: Vec<String>,
-}
+// ── Top-level render ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-pub struct CategoryRow {
-    pub category: String,
-    pub label: String,
-    pub unresolved: u64,
-}
+/// Render trust's coherence-wrapped daemon response (TRUST-LIVEGRAPH-IMPL).
+pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
+    let v = &env.value;
+    let mut out = String::new();
 
-#[derive(Debug, Deserialize)]
-pub struct ClassificationRow {
-    pub classification: String,
-    pub count: u64,
-}
+    // ── Header ──
+    let repo_display = v.display_name.as_deref().unwrap_or(&v.snapshot_uid);
+    out.push_str(&kv_line("Trust Report", repo_display));
+    out.push_str(&kv_line("Snapshot", &truncate_uid(&v.snapshot_uid)));
+    // The overall MEET posture (root): the hybrid's honest current-state-vs-snapshot freshness. A Fresh
+    // LiveGraph posture over a Stale snapshot reads Stale; a cold LiveGraph reads Unavailable (D-T6).
+    out.push_str(&kv_line(
+        "Posture",
+        &format!(
+            "{} ({})",
+            class_label(env.trust.class),
+            freshness_label(env.freshness)
+        ),
+    ));
+    out.push('\n');
 
-#[derive(Debug, Deserialize)]
-pub struct ModuleRow {
-    pub module_stable_key: String,
-    pub qualified_name: String,
-    pub fan_in: u64,
-    pub fan_out: u64,
-    pub file_count: u64,
-    #[serde(default)]
-    pub suspicious_zero_connectivity: bool,
-    #[serde(default)]
-    pub trust_notes: Vec<String>,
-}
+    // ── Half A — Current-State Posture (livegraph) ──
+    out.push_str(&render_posture(&v.current_state_posture));
+    out.push('\n');
 
-// ── Human Rendering ──────────────────────────────────────────────────────────
+    // ── Half B — residual extraction diagnostics (sqlite, snapshot-scoped) ──
+    out.push_str(&render_resolution(v));
+    out.push('\n');
 
-impl TrustResponse {
-    /// Render the trust response as human-readable plain text.
-    pub fn render_human(&self) -> String {
-        let mut out = String::new();
+    out.push_str(&render_reliability(v));
+    out.push('\n');
 
-        // ── Header ─────────────────────────────────────────────────
-        // Fallback to snapshot_uid prefix if display_name absent (consistent with cycles)
-        let repo_display = self
-            .display_name
-            .as_deref()
-            .unwrap_or_else(|| &self.snapshot_uid);
-        out.push_str(&kv_line("Trust Report", repo_display));
-        out.push_str(&kv_line("Snapshot", &truncate_uid(&self.snapshot_uid)));
+    let breakdown = render_unresolved_breakdown(v);
+    if !breakdown.is_empty() {
+        out.push_str(&breakdown);
         out.push('\n');
-
-        // ── Resolution ─────────────────────────────────────────────
-        out.push_str(&self.render_resolution());
-        out.push('\n');
-
-        // ── Reliability ────────────────────────────────────────────
-        out.push_str(&self.render_reliability());
-        out.push('\n');
-
-        // ── Unresolved Breakdown ───────────────────────────────────
-        let breakdown = self.render_unresolved_breakdown();
-        if !breakdown.is_empty() {
-            out.push_str(&breakdown);
-            out.push('\n');
-        }
-
-        // ── Classification ─────────────────────────────────────────
-        let classification = self.render_classification();
-        if !classification.is_empty() {
-            out.push_str(&classification);
-            out.push('\n');
-        }
-
-        // ── Suspicious Modules ─────────────────────────────────────
-        let suspicious = self.render_suspicious_modules();
-        if !suspicious.is_empty() {
-            out.push_str(&suspicious);
-            out.push('\n');
-        }
-
-        // ── Triggered Downgrades ───────────────────────────────────
-        let downgrades = self.render_downgrades();
-        if !downgrades.is_empty() {
-            out.push_str(&downgrades);
-            out.push('\n');
-        }
-
-        // ── Caveats ────────────────────────────────────────────────
-        if !self.caveats.is_empty() {
-            out.push_str(&heading("Caveats"));
-            for caveat in &self.caveats {
-                out.push_str(&bullet(caveat));
-            }
-            out.push('\n');
-        }
-
-        out.trim_end().to_string()
     }
 
-    fn render_resolution(&self) -> String {
-        let mut out = heading("Resolution");
+    let classification = render_classification(v);
+    if !classification.is_empty() {
+        out.push_str(&classification);
+        out.push('\n');
+    }
 
-        let s = &self.summary;
+    let suspicious = render_suspicious_modules(v);
+    if !suspicious.is_empty() {
+        out.push_str(&suspicious);
+        out.push('\n');
+    }
 
-        // Call resolution
-        let total_calls = s.resolved_calls + s.unresolved_calls;
-        let call_pct = if total_calls > 0 {
-            (s.resolved_calls as f64 / total_calls as f64 * 100.0).round() as u64
+    let downgrades = render_downgrades(v);
+    if !downgrades.is_empty() {
+        out.push_str(&downgrades);
+        out.push('\n');
+    }
+
+    let caveats = &v.caveats.value;
+    if !caveats.is_empty() {
+        out.push_str(&labelled_heading(
+            "Caveats",
+            &v.caveats,
+            "snapshot-scoped extraction",
+        ));
+        for caveat in caveats {
+            out.push_str(&bullet(caveat));
+        }
+        out.push('\n');
+    }
+
+    out.trim_end().to_string()
+}
+
+// ── Half A — Current-State Posture (livegraph) ──────────────────────────────────────────────────
+
+fn render_posture(leaf: &CoherenceEnvelope<LiveGraphPosture>) -> String {
+    let p = &leaf.value;
+    let mut out = labelled_heading("Current-State Posture", leaf, "current-state");
+
+    if !p.resident {
+        out.push_str(&bullet(
+            "Resident: no (LiveGraph not loaded for this repo — current-state posture unavailable)",
+        ));
+        return out;
+    }
+
+    let n = p.partitions.len();
+    out.push_str(&bullet(&format!(
+        "Resident: yes ({} partition{})",
+        n,
+        if n == 1 { "" } else { "s" }
+    )));
+    for part in &p.partitions {
+        let lang = if part.typescript_primary {
+            "TypeScript"
         } else {
-            100
+            "non-TypeScript"
+        };
+        let producer = if part.producer_fingerprint.is_empty() {
+            "(no producer)".to_string()
+        } else {
+            part.producer_fingerprint.clone()
         };
         out.push_str(&bullet(&format!(
-            "Calls: {}% resolved ({} of {})",
-            call_pct, s.resolved_calls, total_calls
+            "{}: {}, {}, producer {}",
+            part.partition_id,
+            freshness_label(part.freshness),
+            lang,
+            producer
         )));
-
-        // Edge resolution (imports + calls combined)
-        let edge_pct = if s.edges_total > 0 {
-            (s.edges_resolved as f64 / s.edges_total as f64 * 100.0).round() as u64
-        } else {
-            100
-        };
-        out.push_str(&bullet(&format!(
-            "Edges: {}% resolved ({} of {})",
-            edge_pct, s.edges_resolved, s.edges_total
-        )));
-
-        out
     }
-
-    fn render_reliability(&self) -> String {
-        let mut out = heading("Reliability");
-        let r = &self.summary.reliability;
-
-        out.push_str(&bullet(&format_axis("Call-graph", &r.call_graph)));
-        out.push_str(&bullet(&format_axis("Import-graph", &r.import_graph)));
-        out.push_str(&bullet(&format_axis("Change-impact", &r.change_impact)));
-
-        out
-    }
-
-    fn render_unresolved_breakdown(&self) -> String {
-        // Filter to non-zero categories
-        let non_zero: Vec<_> = self
-            .categories
-            .iter()
-            .filter(|c| c.unresolved > 0)
-            .collect();
-
-        if non_zero.is_empty() {
-            return String::new();
-        }
-
-        let mut out = heading("Unresolved Breakdown");
-        for cat in non_zero {
-            out.push_str(&bullet(&format!("{} {}", cat.unresolved, cat.label)));
-        }
-        out
-    }
-
-    fn render_classification(&self) -> String {
-        // Filter to non-zero classifications
-        let non_zero: Vec<_> = self
-            .classifications
-            .iter()
-            .filter(|c| c.count > 0)
-            .collect();
-
-        if non_zero.is_empty() {
-            return String::new();
-        }
-
-        let mut out = heading("Classification");
-        for cls in non_zero {
-            out.push_str(&bullet(&format!("{} {}", cls.count, cls.classification)));
-        }
-        out
-    }
-
-    fn render_suspicious_modules(&self) -> String {
-        let suspicious: Vec<_> = self
-            .modules
-            .iter()
-            .filter(|m| m.suspicious_zero_connectivity)
-            .collect();
-
-        if suspicious.is_empty() {
-            return String::new();
-        }
-
-        let mut out = heading("Suspicious Modules (zero connectivity)");
-        for m in suspicious.iter().take(10) {
-            out.push_str(&bullet(&m.qualified_name));
-        }
-        if suspicious.len() > 10 {
-            out.push_str(&bullet(&format!("... ({} more)", suspicious.len() - 10)));
-        }
-        out
-    }
-
-    fn render_downgrades(&self) -> String {
-        let d = &self.summary.triggered_downgrades;
-        let mut items = Vec::new();
-
-        if d.framework_heavy_suspicion.triggered {
-            let reason = d
-                .framework_heavy_suspicion
-                .reasons
-                .first()
-                .map(|s| s.as_str())
-                .unwrap_or("framework patterns detected");
-            items.push(format!("framework_heavy_suspicion: {}", reason));
-        }
-        if d.registry_pattern_suspicion.triggered {
-            let reason = d
-                .registry_pattern_suspicion
-                .reasons
-                .first()
-                .map(|s| s.as_str())
-                .unwrap_or("registry patterns detected");
-            items.push(format!("registry_pattern_suspicion: {}", reason));
-        }
-        if d.missing_entrypoint_declarations.triggered {
-            let reason = d
-                .missing_entrypoint_declarations
-                .reasons
-                .first()
-                .map(|s| s.as_str())
-                .unwrap_or("entrypoints not declared");
-            items.push(format!("missing_entrypoint_declarations: {}", reason));
-        }
-        if d.alias_resolution_suspicion.triggered {
-            let reason = d
-                .alias_resolution_suspicion
-                .reasons
-                .first()
-                .map(|s| s.as_str())
-                .unwrap_or("alias resolution issues");
-            items.push(format!("alias_resolution_suspicion: {}", reason));
-        }
-
-        if items.is_empty() {
-            return String::new();
-        }
-
-        let mut out = heading("Triggered Downgrades");
-        for item in items {
-            out.push_str(&bullet(&item));
-        }
-        out
-    }
+    out.push_str(&bullet(&format!(
+        "Producer available: {}",
+        yes_no(p.producer_available)
+    )));
+    out.push_str(&bullet(&format!(
+        "Migrated-answer capability: {}",
+        yes_no(p.migrated_answer_capability)
+    )));
+    out
 }
 
-fn format_axis(name: &str, axis: &AxisScore) -> String {
+// ── Half B — residual diagnostics sections (bullet text byte-identical to the v1 report) ────────
+
+fn render_resolution(v: &CoherentTrustReport) -> String {
+    // Labelled by the resolution leaf (sqlite, snapshot-scoped). The Edges line carries the v1
+    // `edges_resolved == edges_total` quirk verbatim (RISK-T-F).
+    let mut out = labelled_heading("Resolution", &v.resolution, "snapshot-scoped extraction");
+    let r = &v.resolution.value;
+
+    let total_calls = r.resolved_calls + r.unresolved_calls;
+    let call_pct = if total_calls > 0 {
+        (r.resolved_calls as f64 / total_calls as f64 * 100.0).round() as u64
+    } else {
+        100
+    };
+    out.push_str(&bullet(&format!(
+        "Calls: {}% resolved ({} of {})",
+        call_pct, r.resolved_calls, total_calls
+    )));
+
+    let edge_pct = if r.edges_total > 0 {
+        (r.edges_resolved as f64 / r.edges_total as f64 * 100.0).round() as u64
+    } else {
+        100
+    };
+    out.push_str(&bullet(&format!(
+        "Edges: {}% resolved ({} of {})",
+        edge_pct, r.edges_resolved, r.edges_total
+    )));
+
+    out
+}
+
+fn render_reliability(v: &CoherentTrustReport) -> String {
+    let mut out = labelled_heading("Reliability", &v.reliability, "snapshot-scoped extraction");
+    let r = &v.reliability.value;
+
+    out.push_str(&bullet(&format_axis("Call-graph", &r.call_graph)));
+    out.push_str(&bullet(&format_axis("Import-graph", &r.import_graph)));
+    out.push_str(&bullet(&format_axis("Change-impact", &r.change_impact)));
+
+    out
+}
+
+fn render_unresolved_breakdown(v: &CoherentTrustReport) -> String {
+    let non_zero: Vec<_> = v
+        .categories
+        .value
+        .iter()
+        .filter(|c| c.unresolved > 0)
+        .collect();
+    if non_zero.is_empty() {
+        return String::new();
+    }
+    let mut out = labelled_heading(
+        "Unresolved Breakdown",
+        &v.categories,
+        "snapshot-scoped extraction",
+    );
+    for cat in non_zero {
+        out.push_str(&bullet(&format!("{} {}", cat.unresolved, cat.label)));
+    }
+    out
+}
+
+fn render_classification(v: &CoherentTrustReport) -> String {
+    let non_zero: Vec<_> = v
+        .classifications
+        .value
+        .iter()
+        .filter(|c| c.count > 0)
+        .collect();
+    if non_zero.is_empty() {
+        return String::new();
+    }
+    let mut out = labelled_heading(
+        "Classification",
+        &v.classifications,
+        "snapshot-scoped extraction",
+    );
+    for cls in non_zero {
+        out.push_str(&bullet(&format!("{} {}", cls.count, cls.classification)));
+    }
+    out
+}
+
+fn render_suspicious_modules(v: &CoherentTrustReport) -> String {
+    let suspicious: Vec<_> = v
+        .modules
+        .value
+        .iter()
+        .filter(|m| m.suspicious_zero_connectivity)
+        .collect();
+    if suspicious.is_empty() {
+        return String::new();
+    }
+    let mut out = labelled_heading(
+        "Suspicious Modules (zero connectivity)",
+        &v.modules,
+        "snapshot-scoped extraction",
+    );
+    for m in suspicious.iter().take(10) {
+        out.push_str(&bullet(&m.qualified_name));
+    }
+    if suspicious.len() > 10 {
+        out.push_str(&bullet(&format!("... ({} more)", suspicious.len() - 10)));
+    }
+    out
+}
+
+fn render_downgrades(v: &CoherentTrustReport) -> String {
+    let d = &v.triggered_downgrades.value;
+    let mut items = Vec::new();
+
+    if d.framework_heavy_suspicion.triggered {
+        let reason = d
+            .framework_heavy_suspicion
+            .reasons
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("framework patterns detected");
+        items.push(format!("framework_heavy_suspicion: {}", reason));
+    }
+    if d.registry_pattern_suspicion.triggered {
+        let reason = d
+            .registry_pattern_suspicion
+            .reasons
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("registry patterns detected");
+        items.push(format!("registry_pattern_suspicion: {}", reason));
+    }
+    if d.missing_entrypoint_declarations.triggered {
+        let reason = d
+            .missing_entrypoint_declarations
+            .reasons
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("entrypoints not declared");
+        items.push(format!("missing_entrypoint_declarations: {}", reason));
+    }
+    if d.alias_resolution_suspicion.triggered {
+        let reason = d
+            .alias_resolution_suspicion
+            .reasons
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("alias resolution issues");
+        items.push(format!("alias_resolution_suspicion: {}", reason));
+    }
+
+    if items.is_empty() {
+        return String::new();
+    }
+
+    // The downgrade-triggers leaf is multi-source {sqlite, declaration} (D-TRUST-4): the label shows BOTH
+    // contributing sources (the entrypoint Authority read).
+    let mut out = labelled_heading(
+        "Triggered Downgrades",
+        &v.triggered_downgrades,
+        "snapshot-scoped extraction",
+    );
+    for item in items {
+        out.push_str(&bullet(&item));
+    }
+    out
+}
+
+fn format_axis(name: &str, axis: &ReliabilityAxisScore) -> String {
+    let level = format!("{:?}", axis.level);
     if axis.reasons.is_empty() {
-        format!("{}: {}", name, axis.level)
+        format!("{}: {}", name, level)
     } else {
         let humanized: Vec<String> = axis.reasons.iter().map(|r| humanize_reason(r)).collect();
-        format!("{}: {} ({})", name, axis.level, humanized.join("; "))
+        format!("{}: {} ({})", name, level, humanized.join("; "))
     }
 }
 
@@ -385,17 +427,12 @@ fn humanize_reason(reason: &str) -> String {
         }
     }
 
-    // Pattern: "alias_resolution_suspicion"
     if reason == "alias_resolution_suspicion" {
         return "alias resolution suspected".to_string();
     }
-
-    // Pattern: "missing_entrypoint_declarations"
     if reason == "missing_entrypoint_declarations" {
         return "no entrypoints declared".to_string();
     }
-
-    // Pattern: "registry_pattern_suspicion"
     if reason == "registry_pattern_suspicion" {
         return "registry/factory patterns detected".to_string();
     }
@@ -412,95 +449,10 @@ fn truncate_uid(uid: &str) -> String {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
-
+// ── Tests ────────────────────────────────────────────────────────────────────────────────────────
+//
+// In a SIBLING file (`trust_tests.rs`) via `#[path]` to respect the >500-line structural guardrail
+// (CLAUDE.md §Structural Guardrails). The tests build the wrapper through the real `trust_to_coherent`.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn minimal_response() -> TrustResponse {
-        TrustResponse {
-            snapshot_uid: "snap_01kr12345678".to_string(),
-            display_name: Some("test-repo".to_string()),
-            basis_commit: None,
-            summary: TrustSummary {
-                edges_total: 100,
-                edges_resolved: 80,
-                unresolved_total: 20,
-                resolved_calls: 50,
-                unresolved_calls: 10,
-                unresolved_calls_external: 5,
-                unresolved_calls_internal_like: 5,
-                call_resolution_rate: 0.833,
-                reliability: Reliability {
-                    import_graph: AxisScore {
-                        level: "HIGH".to_string(),
-                        reasons: vec![],
-                    },
-                    call_graph: AxisScore {
-                        level: "MEDIUM".to_string(),
-                        reasons: vec!["some unresolved calls".to_string()],
-                    },
-                    change_impact: AxisScore {
-                        level: "HIGH".to_string(),
-                        reasons: vec![],
-                    },
-                },
-                triggered_downgrades: TriggeredDowngrades {
-                    framework_heavy_suspicion: DowngradeTrigger {
-                        triggered: false,
-                        reasons: vec![],
-                    },
-                    registry_pattern_suspicion: DowngradeTrigger {
-                        triggered: false,
-                        reasons: vec![],
-                    },
-                    missing_entrypoint_declarations: DowngradeTrigger {
-                        triggered: false,
-                        reasons: vec![],
-                    },
-                    alias_resolution_suspicion: DowngradeTrigger {
-                        triggered: false,
-                        reasons: vec![],
-                    },
-                },
-            },
-            categories: vec![],
-            classifications: vec![],
-            modules: vec![],
-            caveats: vec![],
-        }
-    }
-
-    #[test]
-    fn render_shows_repo_display_name() {
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(out.contains("Trust Report: test-repo"));
-    }
-
-    #[test]
-    fn render_shows_resolution_rates() {
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(out.contains("Calls: 83% resolved"));
-        assert!(out.contains("Edges: 80% resolved"));
-    }
-
-    #[test]
-    fn render_shows_reliability_levels() {
-        let r = minimal_response();
-        let out = r.render_human();
-        assert!(out.contains("Call-graph: MEDIUM"));
-        assert!(out.contains("Import-graph: HIGH"));
-    }
-
-    #[test]
-    fn render_falls_back_to_snapshot_uid_when_no_display_name() {
-        let mut r = minimal_response();
-        r.display_name = None;
-        let out = r.render_human();
-        // Falls back to snapshot_uid when display_name absent
-        assert!(out.contains("Trust Report: snap_01kr12345678"));
-    }
-}
+#[path = "trust_tests.rs"]
+mod tests;

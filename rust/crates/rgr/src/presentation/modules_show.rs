@@ -224,14 +224,19 @@ impl ModulesShowResponse {
         }
 
         // ── Symbols ────────────────────────────────────────────────
+        // OUTPUT-DOC-TRUTH-AUDIT-1: dead_symbol_count is a SYNTACTIC graph-orphan
+        // estimate (no inbound reference in the modeled graph), a low-reliability
+        // Layer-2 inference — NOT a Layer-0 "safe to delete" fact. Rendered as
+        // "unreferenced" + a caveat so an agent never reads it as deletion-safe.
+        // (`modules list` shows the same count compactly as `unref?`.)
         out.push_str("\nSymbols:\n");
         if self.rollups.dead_test_symbol_count > 0 {
             out.push_str(&format!(
                 "  {} ({} in tests)\n",
                 format_count(
                     self.rollups.dead_symbol_count,
-                    "dead symbol",
-                    "dead symbols"
+                    "unreferenced symbol",
+                    "unreferenced symbols"
                 ),
                 self.rollups.dead_test_symbol_count
             ));
@@ -240,11 +245,16 @@ impl ModulesShowResponse {
                 "  {}\n",
                 format_count(
                     self.rollups.dead_symbol_count,
-                    "dead symbol",
-                    "dead symbols"
+                    "unreferenced symbol",
+                    "unreferenced symbols"
                 )
             ));
         }
+        out.push_str(
+            "  note: unreferenced = no inbound reference in the indexed graph \
+             (syntactic estimate); over-counts under low call-graph resolution; \
+             run `rmap trust` for reliability.\n",
+        );
 
         // ── Evidence ───────────────────────────────────────────────
         if !self.evidence.is_empty() {
@@ -436,12 +446,27 @@ mod tests {
     }
 
     #[test]
-    fn show_render_shows_dead_symbols() {
+    fn show_render_shows_unreferenced_symbols_with_caveat() {
+        // OUTPUT-DOC-TRUTH-AUDIT-1: the same dead_symbol_count overclaim as `modules
+        // list` — render it as the honest "unreferenced" + caveat, never the flat
+        // "dead symbols" fact.
         let resp = sample_show_response();
         let output = resp.render_human();
         assert!(output.contains("Symbols:"));
-        assert!(output.contains("25 dead symbols"));
+        assert!(output.contains("25 unreferenced symbols"));
         assert!(output.contains("5 in tests"));
+        assert!(
+            !output.contains("dead"),
+            "the overclaiming `dead` label must be absent:\n{output}"
+        );
+        assert!(
+            output.contains("note: unreferenced = no inbound reference"),
+            "caveat present:\n{output}"
+        );
+        assert!(
+            output.contains("run `rmap trust` for reliability."),
+            "caveat routes to the reliability surface:\n{output}"
+        );
     }
 
     #[test]

@@ -1,0 +1,26 @@
+[package]
+name = "repo-graph-scip-ingest"
+version = "0.1.0"
+edition = "2021"
+description = "SCIP ingestion adapter for repo-graph (INGEST-CORE-1). Decodes SCIP and (later) adopts AST canonical keys via (file,range) join, deriving Calls/References."
+
+[dependencies]
+# Official Sourcegraph SCIP protobuf bindings (Apache-2.0). scip 0.7.1 uses
+# rust-protobuf (the `protobuf` crate), NOT prost; add it explicitly for the
+# Message trait (`parse_from_bytes`). Version matches scip's resolved protobuf.
+scip = "0.7.1"
+protobuf = "3.7"
+# Pipeline (step 3): the AST producer + the domain IR. ts-extractor returns
+# repo-graph-indexer types; SourceLocation lives in repo-graph-classification.
+repo-graph-ts-extractor = { path = "../ts-extractor" }
+repo-graph-indexer = { path = "../indexer" }
+repo-graph-classification = { path = "../classification" }
+repo-graph-ir = { path = "../repo-graph-ir" }
+# IMPORTS-MODULE-INGEST-1: parse the ts-extractor import edge `metadata_json` ({rawPath, resolvedPath}).
+serde_json = "1"
+# IMPORTS-TSCONFIG-PATHS-1: tsconfig.json is JSONC (comments + trailing commas); json5 (a JSONC superset)
+# parses it into serde_json::Value. Ratified: REUSE a parser, do NOT hand-roll comment/comma stripping.
+json5 = "0.4"
+
+[dev-dependencies]
+# None — the de-risk runs via examples/decode_smoke.rs.

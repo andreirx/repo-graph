@@ -48,6 +48,15 @@ publish      = false
 # Policy → policy dependency, follows the dependency rule.
 repo-graph-classification = { path = "../classification" }
 
+# TRUST-LIVEGRAPH-IMPL: the shared CoherenceEnvelope<T> wrapper + the MEET folds +
+# the BTreeSet<Source> provenance vocabulary (re-exporting repo-graph-trust-model's
+# AnswerClass / FreshnessState / TrustPosture axes). The coherent trust report
+# (`coherent.rs`) is the trust analogue of agent's CoherentOrientResult, so the trust
+# crate depends on repo-graph-coherence exactly as the agent crate does (the ratified
+# agent -> repo-graph-coherence edge mirrored here; acyclic: coherence -> trust-model
+# only). Pure policy -> pure policy, follows the dependency rule.
+repo-graph-coherence = { path = "../repo-graph-coherence" }
+
 # Serde for DTO derives on the trust report types.
 serde = { version = "1", features = ["derive"] }
 

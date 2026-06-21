@@ -48,6 +48,15 @@ members = [
     "crates/python-extractor",
     "crates/quality-policy",
     "crates/quality-policy-runner",
+    "crates/repo-graph-ir",
+    "crates/repo-graph-import-resolver",
+    "crates/repo-graph-scip-ingest",
+    "crates/repo-graph-trust-model",
+    "crates/repo-graph-coherence",
+    "crates/repo-graph-livegraph",
+    "crates/repo-graph-livegraph-feed",
+    "crates/repo-graph-warm-cache",
+    "crates/repo-graph-warm-cache-feed",
     "crates/repo-index",
     "crates/rgr",
     "crates/rmapd",
@@ -59,6 +68,11 @@ members = [
     "crates/trust",
     "crates/ts-extractor",
     "crates/tsserver-resolver",
+    # Research / probe tooling (non-production; rust/tools).
+    "tools/cjoin-probe",
+    "tools/xpart-probe",
+    "tools/refresh-probe",
+    "tools/rust-ingest-probe",
 ]
 
 # ── Workspace Package Metadata ─────────────────────────────────────

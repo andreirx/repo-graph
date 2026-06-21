@@ -7,8 +7,17 @@
 //!
 //! Focus resolution reuses `orient`'s resolution logic so the same
 //! target string resolves to the same entity in both commands.
+//!
+//! EXPLAIN-LIVEGRAPH-IMPL: the [`coherent`] submodule wraps this use case's
+//! bare [`OrientResult`] into a `CoherenceEnvelope<CoherentOrientResult>`
+//! (per-leaf provenance/trust/freshness + the root MEET). The section logic
+//! below is UNTOUCHED — the coherence layer wraps the answer, it does not
+//! re-aggregate it.
 
-use std::collections::HashMap;
+mod call_ranking;
+pub mod coherent;
+
+pub use coherent::{explain_to_coherent, ExplainLgDecisions};
 
 use repo_graph_gate::GateStorageRead;
 
@@ -17,6 +26,7 @@ use crate::dto::budget::Budget;
 use crate::dto::envelope::{Confidence, Focus, OrientResult, EXPLAIN_COMMAND, ORIENT_SCHEMA};
 use crate::dto::signal::*;
 use crate::errors::{AgentStorageError, ExplainError};
+use crate::ordering;
 use crate::ranking;
 use crate::storage_port::{
     AgentReliabilityLevel, AgentSnapshot, AgentStorageRead, AgentSymbolContext,
@@ -27,6 +37,8 @@ fn items_cap(budget: Budget) -> usize {
     match budget {
         Budget::Small | Budget::Medium => 15,
         Budget::Large => 50,
+        // TRUNCATION-AUDIT-1: `--full` uncaps every per-section item list.
+        Budget::Full => usize::MAX,
     }
 }
 
@@ -283,7 +295,11 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // ── EXPLAIN_CALLERS ─────────────────────────────────────
     // Always emitted for symbol targets — "0 callers" is
     // meaningful positive information in a deep dive.
-    let callers = storage.find_symbol_callers(snapshot_uid, symbol_stable_key)?;
+    let mut callers = storage.find_symbol_callers(snapshot_uid, symbol_stable_key)?;
+    // COHERENCE-LEAF-SERVE-IMPL-2: rank the FULL caller set by relevance BEFORE truncation, so the
+    // budget-truncated `items` are a pure function of the (callgraph-cert-proven-equal) caller SET —
+    // byte-identical whether served from SQLite or the LiveGraph. See `call_ranking`.
+    call_ranking::rank_caller_rows(&mut callers);
     {
         let count = callers.len() as u64;
         let top_modules = group_by_module(callers.iter().map(|c| c.module_path.as_deref()));
@@ -307,7 +323,9 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_CALLEES ─────────────────────────────────────
     // Always emitted for symbol targets — same reasoning.
-    let callees = storage.find_symbol_callees(snapshot_uid, symbol_stable_key)?;
+    let mut callees = storage.find_symbol_callees(snapshot_uid, symbol_stable_key)?;
+    // Same relevance ranking as callers (the dual outgoing-edge set) — see `call_ranking`.
+    call_ranking::rank_callee_rows(&mut callees);
     {
         let count = callees.len() as u64;
         let top_modules = group_by_module(callees.iter().map(|c| c.module_path.as_deref()));
@@ -333,8 +351,11 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
     if let Some(ref module_path) = context.module_path {
         // EXPLAIN_CYCLES
-        let cycles = storage.find_cycles_involving_module(snapshot_uid, module_path)?;
+        let mut cycles = storage.find_cycles_involving_module(snapshot_uid, module_path)?;
         if !cycles.is_empty() {
+            // TRUNCATION-AUDIT-1: rank the FULL cycle set (length DESC, then ring members)
+            // BEFORE the cut so the surviving top-N are the biggest cycles, deterministically.
+            ordering::sort_cycles(&mut cycles);
             let count = cycles.len() as u64;
             let mut items: Vec<CycleEvidence> = cycles
                 .into_iter()
@@ -382,6 +403,10 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 });
             }
             if total > 0 {
+                // TRUNCATION-AUDIT-1: rank by edge_count DESC (then source/target) BEFORE the
+                // cut, matching the orient boundary aggregators' order. Previously truncated in
+                // declaration-iteration (arbitrary) order.
+                ordering::sort_boundary_violations(&mut per_rule);
                 let (trunc, omitted) = truncate_items(&mut per_rule, cap);
                 signals.push(
                     Signal::explain_boundary(ExplainBoundaryEvidence {
@@ -489,8 +514,11 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     }));
 
     // ── EXPLAIN_IMPORTS ─────────────────────────────────────
-    let imports = storage.find_file_imports(snapshot_uid, file_path)?;
+    let mut imports = storage.find_file_imports(snapshot_uid, file_path)?;
     if !imports.is_empty() {
+        // TRUNCATION-AUDIT-1: order by target_file ASC BEFORE the cut (deterministic,
+        // source-independent). Previously truncated in storage order.
+        ordering::sort_explain_imports(&mut imports);
         let count = imports.len() as u64;
         let mut items: Vec<ExplainImportItem> = imports
             .into_iter()
@@ -509,9 +537,12 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_SYMBOLS ─────────────────────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
-    let symbols = storage.list_symbols_in_file(snapshot_uid, file_path)?;
+    let mut symbols = storage.list_symbols_in_file(snapshot_uid, file_path)?;
 
     if !symbols.is_empty() {
+        // TRUNCATION-AUDIT-1: file reading order (line_start ASC, then name, then stable_key)
+        // BEFORE the cut, so a truncated file view keeps the earliest symbols deterministically.
+        ordering::sort_explain_symbols(&mut symbols);
         let count = symbols.len() as u64;
         let mut items: Vec<ExplainSymbolItem> = symbols
             .iter()
@@ -610,8 +641,11 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
     }));
 
     // ── EXPLAIN_FILES ───────────────────────────────────────
-    let files = storage.list_files_in_path(snapshot_uid, path_prefix)?;
+    let mut files = storage.list_files_in_path(snapshot_uid, path_prefix)?;
     if !files.is_empty() {
+        // TRUNCATION-AUDIT-1: rank by symbol_count DESC (then path ASC) BEFORE the cut, so a
+        // truncated path view keeps the densest files — not the alphabetically-first ones.
+        ordering::sort_explain_files(&mut files);
         let count = files.len() as u64;
         let mut items: Vec<ExplainFileItem> = files
             .into_iter()
@@ -632,8 +666,10 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_CYCLES ──────────────────────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
-    let cycles = storage.find_cycles_involving_path(snapshot_uid, path_prefix)?;
+    let mut cycles = storage.find_cycles_involving_path(snapshot_uid, path_prefix)?;
     if !cycles.is_empty() {
+        // TRUNCATION-AUDIT-1: length DESC, then ring members — biggest cycles survive the cut.
+        ordering::sort_cycles(&mut cycles);
         let count = cycles.len() as u64;
         let mut items: Vec<CycleEvidence> = cycles
             .into_iter()
@@ -674,6 +710,8 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
             });
         }
         if total > 0 {
+            // TRUNCATION-AUDIT-1: edge_count DESC (then source/target) BEFORE the cut.
+            ordering::sort_boundary_violations(&mut per_rule);
             let (trunc, omitted) = truncate_items(&mut per_rule, cap);
             signals.push(Signal::explain_boundary(ExplainBoundaryEvidence {
                 violation_count: total,
@@ -750,11 +788,9 @@ const TOP_MODULES_N: usize = 3;
 fn group_by_module<'a>(
     module_paths: impl Iterator<Item = Option<&'a str>>,
 ) -> Vec<ModuleCountEvidence> {
-    let mut counts: HashMap<String, u64> = HashMap::new();
-    for mp in module_paths {
-        let key = mp.unwrap_or("(unknown)").to_string();
-        *counts.entry(key).or_insert(0) += 1;
-    }
+    // Shared with `call_ranking`'s concentration so `top_modules` and the caller/callee ranking count
+    // identically (same per-row basis + `(unknown)` sentinel).
+    let counts = call_ranking::module_counts(module_paths);
     let mut entries: Vec<ModuleCountEvidence> = counts
         .into_iter()
         .map(|(module, count)| ModuleCountEvidence { module, count })
@@ -869,6 +905,9 @@ fn build_gate_signal<S: GateStorageRead + ?Sized>(
             effective_verdict: format!("{:?}", o.effective_verdict),
         })
         .collect();
+    // TRUNCATION-AUDIT-1: worst verdict first (FAIL→…→PASS), then obligation identity, BEFORE
+    // the cut, so a truncated gate view keeps the most urgent obligations deterministically.
+    ordering::sort_explain_gate_items(&mut items);
     let (trunc, omitted) = truncate_items(&mut items, cap);
 
     let sig = Signal::explain_gate(ExplainGateEvidence {

@@ -1,0 +1,9 @@
+{
+  "name": "synthetic-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Frozen TS fixture for INGEST-CORE-1 4c harness. index.scip is committed.",
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

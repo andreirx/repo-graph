@@ -2,7 +2,19 @@
 
 ## Status
 
-SPECIFICATION — not yet implemented.
+SPECIFICATION — tier model stands; backing-store and producer assumptions REVISED
+by `docs/architecture/adr/adr-extraction-substrate-scip-first.md`
+(EXTRACTION-SUBSTRATE-ADR-1).
+
+**Revision (2026-05-29):** Two assumptions below are superseded by the SCIP-first
+ADR:
+1. Tier B "raw extraction facts" were assumed produced by repo-graph's own
+   extractors. Now: L0/L1 symbol/reference/call facts come from SCIP (external
+   compiler-grade producer); tree-sitter is retained only for the AST value layer.
+2. Tier B backing store was "SQLite initially" (see Decision Log). Now: raw graph
+   leaves SQLite for a partitioned binary warm cache (format deferred pending
+   SCIP-TS-PARITY-SPIKE-1). The A1/A2 model and Invariants 1 and 3 are unchanged
+   and become load-bearing for SCIP-symbol -> canonical-stable-key mapping.
 
 ## Problem Statement
 
@@ -262,7 +274,7 @@ Tier A and Tier B may evolve on different migration tracks. Tier B schema change
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Tier B backing store | SQLite initially | Reduce migration risk; separate semantics before swapping engines |
+| Tier B backing store | SQLite initially — REVISED to partitioned binary warm cache by EXTRACTION-SUBSTRATE-ADR-1 (format pending spike) | Reduce migration risk; separate semantics before swapping engines |
 | Retention policy | current + parent + baseline | Supports refresh, comparison, and pruning |
 | First command migration | callers/callees/path | Graph-native, current-snapshot, high latency sensitivity |
 | Physical DB split | Deferred | Logical separation first; measure before splitting |

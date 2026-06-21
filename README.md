@@ -98,15 +98,21 @@ rmap imports "src/core/auth/session.ts"
 rmap trust
 ```
 
-### Quality discovery (legacy)
+The six migrated graph commands (`callers`, `callees`, `path`, `imports`, `cycles`,
+`stats`) accept `--engine auto|sqlite|livegraph|compare` (default `auto` = cert-gated
+LiveGraph-first, byte-identical SQLite fallback). `rmap dev …` (`livegraph-preload` /
+`livegraph-refresh` / `cycle-completeness-audit`) is a **hidden diagnostic** surface,
+not part of the normal workflow. See `docs/cli/rmap-contracts.md`.
 
-**Note:** These quality commands still require explicit `<db_path> <repo_uid>` arguments and have not yet migrated to the daemon-native contract.
+### Quality discovery
+
+`churn`, `hotspots`, and `risk` resolve the repo from the current working directory
+(REG-1 daemon-native contract) — no `<db_path> <repo_uid>` arguments:
 
 ```bash
-# Legacy contract
-rmap churn <db_path> <repo_uid> --since "2 weeks ago"
-rmap hotspots <db_path> <repo_uid>
-rmap risk <db_path> <repo_uid>
+rmap churn --since "2 weeks ago"   # commits + lines changed per file
+rmap hotspots                      # churn × complexity hotspot pressure
+rmap risk                          # risk ranking
 ```
 
 ### Indexing
@@ -209,15 +215,21 @@ rmap gate --strict        # strict mode
 rmap gate --advisory      # advisory mode
 ```
 
-Declaration and assessment (legacy — still require `<db_path> <repo_uid>`):
+Quality-policy declaration is still on the legacy positional contract — it opens
+storage directly and requires `<db_path> <repo_uid>`:
 ```bash
 rmap declare quality-policy ./repo.db my-repo QP-001 \
   --policy-kind absolute_max \
   --measurement cyclomatic_complexity \
   --threshold 15 \
   --severity fail
+```
 
-rmap assess ./repo.db my-repo
+Assessment is daemon-native (REG-1) — it resolves the repo from the current
+working directory, with no `<db_path> <repo_uid>`:
+```bash
+rmap assess                        # assess the current repo
+rmap assess --baseline <snapshot>  # compare against a baseline snapshot
 ```
 
 See `docs/cli/rmap-contracts.md` for the full governance CLI contract.
@@ -226,6 +238,7 @@ See `docs/cli/rmap-contracts.md` for the full governance CLI contract.
 
 - Public dead-code claims are withdrawn until coverage-backed evidence is integrated. Do not treat old dead-code expectations as current product behavior.
 - SQLite is the current persistence mechanism, not the conceptual end-state center.
+- **SCIP-first / LiveGraph substrate (active):** the extraction substrate has re-centered onto a **SCIP-first** model — compiler-grade producers (`scip-typescript` / `scip-clang` / `rust-analyzer`) feed a repo-graph-owned in-memory IR that the long-lived daemon holds as a current-state **LiveGraph**. Six graph commands (`callers`, `callees`, `path`, `imports`, `cycles`, `stats`) now have cert-gated **LiveGraph-served default paths** with a byte-identical labelled SQLite fallback; `orient` / `check` / `explain` / `trust` are **coherence-served** (a `CoherenceEnvelope` carrying per-signal provenance/trust/freshness). A **bounded** SQLite retention remains **by design**: the raw `nodes`/`edges` and `unresolved_edges` tables cannot be fully dropped (the trust unresolved-call inputs have no current-state SCIP source), so they are retained SQLite-labelled. See `docs/architecture/adr/adr-extraction-substrate-scip-first.md`, `docs/architecture/scip-migration-plan.md`, and `docs/cli/rmap-contracts.md`.
 - The runtime architecture now relies on a shipped, long-lived daemon that coordinates many-reader/few-writer shared access for multiple AI agents, removing CLI bootstrap latency.
 
 ## Installation

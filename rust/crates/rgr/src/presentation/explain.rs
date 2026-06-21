@@ -54,6 +54,7 @@
 //!   - Call graph reliability: high
 //! ```
 
+use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
 use crate::presentation::{bullet, heading, kv_line};
@@ -61,6 +62,14 @@ use crate::presentation::{bullet, heading, kv_line};
 // ── Response Types ───────────────────────────────────────────────────────────
 
 /// Deserialized explain response from daemon.
+///
+/// EXPLAIN-LIVEGRAPH-IMPL: the daemon now returns a `CoherenceEnvelope<CoherentOrientResult>` (the wrapper
+/// is the top level), so the CLI parses `CoherenceEnvelope<ExplainResponse>` and renders the inner `value`
+/// (see `run_explain_cmd`). Each signal is a LEAF `CoherenceEnvelope<ExplainSignal>` (contract D7) — the
+/// inner `ExplainSignal` is pristine; provenance/trust/freshness ride in the wrapper siblings. The renderer
+/// reads each `.value`, so the section TEXT is byte-identical to the pre-wrapper output (§1e / §5 W4).
+/// explain's `value.trust_briefing` (degraded-only) is JSON-only — the human render never read the overlay
+/// and does not start (the renderer carries no `trust` field, matching pre-wrapper behaviour).
 #[derive(Debug, Deserialize)]
 pub struct ExplainResponse {
     pub repo: String,
@@ -74,8 +83,10 @@ pub struct ExplainResponse {
     pub snapshot: String,
     pub focus: ExplainFocus,
     pub confidence: String,
+    /// Each signal is a LEAF `CoherenceEnvelope<ExplainSignal>` (EXPLAIN-LIVEGRAPH-IMPL / contract D7). The
+    /// renderer reads each `.value` (the pristine `ExplainSignal`).
     #[serde(default)]
-    pub signals: Vec<ExplainSignal>,
+    pub signals: Vec<CoherenceEnvelope<ExplainSignal>>,
     #[serde(default)]
     pub truncated: bool,
 }
@@ -115,7 +126,13 @@ pub struct ExplainSignal {
 
 impl ExplainResponse {
     /// Render the explain response as human-readable plain text.
-    pub fn render_human(&self) -> String {
+    ///
+    /// `full` is the `--full` flag (TRUNCATION-AUDIT-1): when set, the per-section display cap in
+    /// [`render_signal_section`](Self::render_signal_section) is lifted so every item renders (the human
+    /// analogue of the daemon's `Budget::Full`, for `rmap explain <target> --full | grep <x>`). The default
+    /// (`full = false`) path is byte-identical to the pre-flag output. See `explain_sections.rs` for the
+    /// two-cap model.
+    pub fn render_human(&self, full: bool) -> String {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
@@ -139,16 +156,27 @@ impl ExplainResponse {
         }
 
         // ── Render sections by signal type ─────────────────────────
+        // Each signal is a LEAF `CoherenceEnvelope<ExplainSignal>`; read the pristine inner `.value` (the
+        // section TEXT is byte-identical to the pre-wrapper output).
         for signal in &self.signals {
-            if let Some(section) = self.render_signal_section(signal) {
+            if let Some(section) = self.render_signal_section(&signal.value, full) {
                 out.push_str(&section);
                 out.push('\n');
             }
         }
 
         // ── Truncation warning ──────────────────────���──────────────
-        if self.truncated {
-            out.push_str("\n[Output truncated. Use --json for full results.]\n");
+        // Only the default (capped) path can truncate; `--full` (full == true) uncaps the daemon AND these
+        // renderers, so this notice never fires under `--full`. Guarding on `!full` keeps the message honest
+        // (no "truncated" claim when nothing was cut) even if a stale `truncated` flag slipped through.
+        if self.truncated && !full {
+            // TRUNCATION-AUDIT-1 review-2 #1: plain `--json` does NOT uncap — it is a transport
+            // format that preserves the selected budget (the daemon still emits `items_truncated:
+            // true`). Only `--full` (⇒ `Budget::Full`) lifts every cap. So the notice points to
+            // `--full` for complete output and `--full --json` for complete JSON, never bare `--json`.
+            out.push_str(
+                "\n[Output truncated. Use --full for complete output, or --full --json for complete JSON.]\n",
+            );
         }
 
         out.trim_end().to_string()
@@ -189,8 +217,8 @@ impl ExplainResponse {
 
     fn get_identity_name(&self) -> Option<String> {
         for signal in &self.signals {
-            if signal.code == "EXPLAIN_IDENTITY" {
-                if let Some(ref ev) = signal.evidence {
+            if signal.value.code == "EXPLAIN_IDENTITY" {
+                if let Some(ref ev) = signal.value.evidence {
                     return ev
                         .get("name")
                         .and_then(|v| v.as_str())
@@ -203,8 +231,8 @@ impl ExplainResponse {
 
     fn get_identity_info(&self) -> Option<String> {
         for signal in &self.signals {
-            if signal.code == "EXPLAIN_IDENTITY" {
-                if let Some(ref ev) = signal.evidence {
+            if signal.value.code == "EXPLAIN_IDENTITY" {
+                if let Some(ref ev) = signal.value.evidence {
                     let mut info = String::new();
 
                     if let Some(lang) = ev.get("language").and_then(|v| v.as_str()) {
@@ -242,280 +270,6 @@ impl ExplainResponse {
         out.push_str("\nSpecify a more precise target or use the stable_key directly.\n");
         out
     }
-
-    fn render_signal_section(&self, signal: &ExplainSignal) -> Option<String> {
-        let evidence = signal.evidence.as_ref()?;
-
-        match signal.code.as_str() {
-            "EXPLAIN_CALLERS" => Some(self.render_callers(evidence)),
-            "EXPLAIN_CALLEES" => Some(self.render_callees(evidence)),
-            "EXPLAIN_IMPORTS" => Some(self.render_imports(evidence)),
-            "EXPLAIN_SYMBOLS" => Some(self.render_symbols(evidence)),
-            "EXPLAIN_FILES" => Some(self.render_files(evidence)),
-            "EXPLAIN_CYCLES" => self.render_cycles(evidence),
-            "EXPLAIN_BOUNDARY" => self.render_boundary(evidence),
-            "EXPLAIN_GATE" => self.render_gate(evidence),
-            "EXPLAIN_TRUST" => Some(self.render_trust(evidence)),
-            "EXPLAIN_IDENTITY" => None, // Handled in header
-            "EXPLAIN_MEASUREMENTS" => self.render_measurements(evidence),
-            _ => None,
-        }
-    }
-
-    fn render_callers(&self, evidence: &serde_json::Value) -> String {
-        let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Callers ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(10) {
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let module = item.get("module").and_then(|v| v.as_str());
-                if let Some(m) = module {
-                    out.push_str(&bullet(&format!("{} ({})", name, m)));
-                } else {
-                    out.push_str(&bullet(name));
-                }
-            }
-            if items.len() > 10 {
-                out.push_str(&format!("  ... ({} more)\n", items.len() - 10));
-            }
-        }
-
-        out
-    }
-
-    fn render_callees(&self, evidence: &serde_json::Value) -> String {
-        let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Callees ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(10) {
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let module = item.get("module").and_then(|v| v.as_str());
-                if let Some(m) = module {
-                    out.push_str(&bullet(&format!("{} ({})", name, m)));
-                } else {
-                    out.push_str(&bullet(name));
-                }
-            }
-            if items.len() > 10 {
-                out.push_str(&format!("  ... ({} more)\n", items.len() - 10));
-            }
-        }
-
-        out
-    }
-
-    fn render_imports(&self, evidence: &serde_json::Value) -> String {
-        let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Imports ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(15) {
-                let target = item
-                    .get("target_file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                out.push_str(&bullet(target));
-            }
-            if items.len() > 15 {
-                out.push_str(&format!("  ... ({} more)\n", items.len() - 15));
-            }
-        }
-
-        out
-    }
-
-    fn render_symbols(&self, evidence: &serde_json::Value) -> String {
-        let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Symbols ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(15) {
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let subtype = item.get("subtype").and_then(|v| v.as_str());
-                if let Some(st) = subtype {
-                    out.push_str(&bullet(&format!("{} ({})", name, st)));
-                } else {
-                    out.push_str(&bullet(name));
-                }
-            }
-            if items.len() > 15 {
-                out.push_str(&format!("  ... ({} more)\n", items.len() - 15));
-            }
-        }
-
-        out
-    }
-
-    fn render_files(&self, evidence: &serde_json::Value) -> String {
-        let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Files ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(15) {
-                let path = item
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let symbol_count = item
-                    .get("symbol_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                out.push_str(&bullet(&format!("{} ({} symbols)", path, symbol_count)));
-            }
-            if items.len() > 15 {
-                out.push_str(&format!("  ... ({} more)\n", items.len() - 15));
-            }
-        }
-
-        out
-    }
-
-    fn render_cycles(&self, evidence: &serde_json::Value) -> Option<String> {
-        let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        if count == 0 {
-            return None;
-        }
-
-        let mut out = heading(&format!("Import cycles ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for (i, item) in items.iter().take(5).enumerate() {
-                if let Some(modules) = item.get("modules").and_then(|v| v.as_array()) {
-                    let cycle_str: Vec<&str> = modules.iter().filter_map(|m| m.as_str()).collect();
-                    out.push_str(&bullet(&format!(
-                        "Cycle {}: {}",
-                        i + 1,
-                        cycle_str.join(" -> ")
-                    )));
-                }
-            }
-            if items.len() > 5 {
-                out.push_str(&format!("  ... ({} more)\n", items.len() - 5));
-            }
-        }
-
-        Some(out)
-    }
-
-    fn render_boundary(&self, evidence: &serde_json::Value) -> Option<String> {
-        let count = evidence
-            .get("violation_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        if count == 0 {
-            return None;
-        }
-
-        let mut out = heading(&format!("Boundary violations ({})", count));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(10) {
-                let source = item
-                    .get("source_module")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let target = item
-                    .get("target_module")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let edges = item.get("edge_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                out.push_str(&bullet(&format!(
-                    "{} -> {} ({} edges)",
-                    source, target, edges
-                )));
-            }
-        }
-
-        Some(out)
-    }
-
-    fn render_gate(&self, evidence: &serde_json::Value) -> Option<String> {
-        let outcome = evidence
-            .get("outcome")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let count = evidence
-            .get("obligation_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-
-        let mut out = heading(&format!(
-            "Gate ({}: {} obligations)",
-            outcome.to_uppercase(),
-            count
-        ));
-
-        if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
-            for item in items.iter().take(10) {
-                let req_id = item.get("req_id").and_then(|v| v.as_str()).unwrap_or("?");
-                let method = item.get("method").and_then(|v| v.as_str()).unwrap_or("?");
-                let verdict = item
-                    .get("effective_verdict")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                out.push_str(&bullet(&format!("{}: {} ({})", req_id, method, verdict)));
-            }
-        }
-
-        Some(out)
-    }
-
-    fn render_trust(&self, evidence: &serde_json::Value) -> String {
-        let mut out = heading("Trust");
-
-        if let Some(rate) = evidence
-            .get("call_resolution_rate")
-            .and_then(|v| v.as_f64())
-        {
-            out.push_str(&bullet(&format!("Call resolution: {:.0}%", rate * 100.0)));
-        }
-        if let Some(reliability) = evidence
-            .get("call_graph_reliability")
-            .and_then(|v| v.as_str())
-        {
-            out.push_str(&bullet(&format!("Call graph reliability: {}", reliability)));
-        }
-        if let Some(enrichment) = evidence.get("enrichment_state").and_then(|v| v.as_str()) {
-            out.push_str(&bullet(&format!("Enrichment: {}", enrichment)));
-        }
-
-        out
-    }
-
-    fn render_measurements(&self, evidence: &serde_json::Value) -> Option<String> {
-        let items = evidence.get("items").and_then(|v| v.as_array())?;
-        if items.is_empty() {
-            return None;
-        }
-
-        let mut out = heading("Measurements");
-
-        for item in items.iter().take(10) {
-            let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
-            let value = item.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let aggregation = item
-                .get("aggregation")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            out.push_str(&bullet(&format!(
-                "{} ({}): {:.2}",
-                kind, aggregation, value
-            )));
-        }
-
-        Some(out)
-    }
 }
 
 #[cfg(test)]
@@ -544,14 +298,14 @@ mod tests {
     #[test]
     fn render_shows_repo_name() {
         let r = minimal_response();
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Repo: test-repo"));
     }
 
     #[test]
     fn render_shows_file_target() {
         let r = minimal_response();
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Target: src/core/auth.ts (file)"));
     }
 
@@ -566,7 +320,7 @@ mod tests {
             reason: Some("no_match".to_string()),
             candidates: vec![],
         };
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Target: nonexistent (unresolved: no_match)"));
     }
 
@@ -592,16 +346,23 @@ mod tests {
                 },
             ],
         };
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(out.contains("Ambiguous target"));
         assert!(out.contains("AuthService.validate"));
         assert!(out.contains("UserService.validate"));
     }
 
+    /// Wrap a bare `ExplainSignal` as a LEAF `CoherenceEnvelope<ExplainSignal>` (the post-wrapper signal
+    /// shape) for the render tests — `sqlite_leaf` is the simplest shared constructor; the render path
+    /// reads only the inner `.value`, so the leaf labels are immaterial to the section TEXT.
+    fn leaf(signal: ExplainSignal) -> CoherenceEnvelope<ExplainSignal> {
+        CoherenceEnvelope::sqlite_leaf(signal, false)
+    }
+
     #[test]
     fn render_shows_callers() {
         let mut r = minimal_response();
-        r.signals = vec![ExplainSignal {
+        r.signals = vec![leaf(ExplainSignal {
             code: "EXPLAIN_CALLERS".to_string(),
             summary: "3 direct callers.".to_string(),
             evidence: Some(serde_json::json!({
@@ -612,8 +373,8 @@ mod tests {
                     {"name": "impersonate", "module": "src/admin"}
                 ]
             })),
-        }];
-        let out = r.render_human();
+        })];
+        let out = r.render_human(false);
         assert!(out.contains("Callers (3)"));
         assert!(out.contains("handleLogin (src/controllers)"));
     }
@@ -621,7 +382,7 @@ mod tests {
     #[test]
     fn render_shows_trust() {
         let mut r = minimal_response();
-        r.signals = vec![ExplainSignal {
+        r.signals = vec![leaf(ExplainSignal {
             code: "EXPLAIN_TRUST".to_string(),
             summary: "Trust info.".to_string(),
             evidence: Some(serde_json::json!({
@@ -629,8 +390,8 @@ mod tests {
                 "call_graph_reliability": "high",
                 "enrichment_state": "ran"
             })),
-        }];
-        let out = r.render_human();
+        })];
+        let out = r.render_human(false);
         assert!(out.contains("Trust"));
         assert!(out.contains("Call resolution: 95%"));
         assert!(out.contains("Call graph reliability: high"));
@@ -639,7 +400,7 @@ mod tests {
     #[test]
     fn render_hides_internal_fields() {
         let r = minimal_response();
-        let out = r.render_human();
+        let out = r.render_human(false);
         assert!(!out.contains("snap-123"), "snapshot should be hidden");
     }
 
@@ -667,5 +428,153 @@ mod tests {
         assert_eq!(r.repo, "my-app");
         assert!(r.focus.resolved);
         assert_eq!(r.focus.resolved_kind, Some("file".to_string()));
+    }
+
+    /// EXPLAIN-LIVEGRAPH-IMPL §5 W1/W4: the CLI parses the FULL `CoherenceEnvelope<ExplainResponse>` wrapper
+    /// the daemon now emits — `signals` moved UNDER `value`, each a LEAF with its own `.value` carrying the
+    /// `{code, summary, evidence}`. The human render reads `value.signals[*].value`, so the section TEXT is
+    /// byte-identical to the pre-wrapper output. This pins the wire→render projection so it cannot silently
+    /// drift from the daemon's wrapper (the explain analogue of check's `render_check_envelope` test).
+    #[test]
+    fn deserialize_and_render_wrapped_envelope() {
+        let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1",
+                "command": "explain",
+                "repo": "my-app",
+                "snapshot": "snap-abc",
+                "focus": {
+                    "input": "AuthService.validate",
+                    "resolved": true,
+                    "resolved_kind": "symbol",
+                    "resolved_path": "src/auth.ts"
+                },
+                "confidence": "high",
+                "signals": [
+                    {
+                        "value": {
+                            "code": "EXPLAIN_IDENTITY",
+                            "summary": "Identity: symbol target.",
+                            "evidence": {"name": "validate"}
+                        },
+                        "provenance": {"source": ["sqlite"]},
+                        "trust": {"class": "Exact", "completeness": "Complete"},
+                        "freshness": "Fresh"
+                    },
+                    {
+                        "value": {
+                            "code": "EXPLAIN_CALLERS",
+                            "summary": "1 direct caller.",
+                            "evidence": {"count": 1, "items": [{"name": "handleLogin", "module": "src/ctl"}]}
+                        },
+                        "provenance": {"source": ["livegraph", "sqlite"]},
+                        "trust": {"class": "Exact", "completeness": "Complete"},
+                        "freshness": "Fresh"
+                    }
+                ],
+                "limits": [],
+                "next": [],
+                "truncated": false
+            },
+            "provenance": {"source": ["livegraph", "sqlite"]},
+            "trust": {"class": "Exact", "completeness": "Complete"},
+            "freshness": "Fresh"
+        }"#;
+
+        let env: CoherenceEnvelope<ExplainResponse> = serde_json::from_str(json).unwrap();
+        assert_eq!(env.value.repo, "my-app");
+        let out = env.value.render_human(false);
+        // Identity (read from the leaf's inner value) drives the symbol Target header.
+        assert!(out.contains("Target: validate"));
+        assert!(out.contains("Kind: symbol"));
+        assert!(out.contains("File: src/auth.ts"));
+        // The caller section is rendered from the leaf's inner value.
+        assert!(out.contains("Callers (1)"));
+        assert!(out.contains("handleLogin (src/ctl)"));
+        // The internal snapshot uid stays hidden.
+        assert!(!out.contains("snap-abc"));
+    }
+
+    // ── TRUNCATION-AUDIT-1 review-1 #1/#2: the SECOND (presentation) display cap ──
+    //
+    // The agent already emits EVERY item under `Budget::Full` (proven at the daemon boundary by
+    // `explain_full_budget_uncaps_over_cap_file_listing`). But these renderers cap the HUMAN output AGAIN
+    // at a fixed per-section N (EXPLAIN_SYMBOLS: 15). Before this fix `--full` uncapped the JSON yet the
+    // human render still truncated, so `rmap explain <target> --full | grep <x>` missed items past the
+    // display cap. These two tests pin both paths at the presentation seam (no daemon required).
+
+    /// Build a resolved file-target response carrying an over-cap EXPLAIN_SYMBOLS section of `n` symbols
+    /// named `sym00..sym{n-1}`, so a cap of 15 bites at n=20 (sym15..sym19 are the dropped tail).
+    fn symbols_response(n: usize) -> ExplainResponse {
+        let items: Vec<serde_json::Value> = (0..n)
+            .map(|i| serde_json::json!({ "name": format!("sym{:02}", i), "subtype": "function" }))
+            .collect();
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_SYMBOLS".to_string(),
+            summary: format!("{} symbols.", n),
+            evidence: Some(serde_json::json!({ "count": n, "items": items })),
+        })];
+        r
+    }
+
+    #[test]
+    fn render_full_uncaps_symbols_past_presentation_cap() {
+        // 20 > the EXPLAIN_SYMBOLS presentation cap (15). Under `--full` EVERY symbol must render and the
+        // "... (N more)" note must be ABSENT. This FAILS against the pre-fix `.take(15)` renderer, which
+        // dropped sym15..sym19 and printed "... (5 more)".
+        let out = symbols_response(20).render_human(true);
+        assert!(out.contains("sym00"), "first symbol present:\n{out}");
+        assert!(
+            out.contains("sym19"),
+            "--full must render the 20th symbol (past the cap of 15):\n{out}"
+        );
+        assert!(
+            !out.contains("more)"),
+            "--full must NOT emit a '... (N more)' truncation note:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_default_caps_symbols_at_presentation_limit() {
+        // The default (full == false) path is unchanged: cap 15, sym15..sym19 dropped, overflow note shown.
+        let out = symbols_response(20).render_human(false);
+        assert!(out.contains("sym00"));
+        assert!(
+            out.contains("sym14"),
+            "the 15th symbol is the last kept under the default cap:\n{out}"
+        );
+        assert!(
+            !out.contains("sym19"),
+            "default cap (15) must drop the 20th symbol:\n{out}"
+        );
+        assert!(
+            out.contains("... (5 more)"),
+            "default path reports the cut honestly:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_truncation_notice_points_to_full_not_bare_json() {
+        // TRUNCATION-AUDIT-1 review-2 #1: the `self.truncated` notice (distinct from the per-section
+        // "(N more)" overflow note) previously read "Use --json for full results." — false, because
+        // plain `--json` preserves the budget (the daemon still reports `items_truncated: true`); only
+        // `--full` ⇒ `Budget::Full` uncaps. The corrected notice points to `--full` / `--full --json`.
+        // The first two asserts FAIL against the old string; the third pins the old wording gone.
+        let mut r = minimal_response();
+        r.truncated = true;
+        let out = r.render_human(false);
+        assert!(
+            out.contains("--full for complete output"),
+            "notice must point to --full for complete output:\n{out}"
+        );
+        assert!(
+            out.contains("--full --json for complete JSON"),
+            "notice must show --full --json (not bare --json) for complete JSON:\n{out}"
+        );
+        assert!(
+            !out.contains("Use --json for full results"),
+            "the misleading bare-`--json` wording must be gone:\n{out}"
+        );
     }
 }

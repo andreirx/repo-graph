@@ -53,6 +53,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -132,6 +141,15 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link",
+]
+
+[[package]]
+name = "cjoin-probe"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-cpp-extractor",
+ "repo-graph-indexer",
+ "repo-graph-scip-ingest",
 ]
 
 [[package]]
@@ -624,6 +642,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "json5"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b0db21af676c1ce64250b5f40f3ce2cf27e4e47cb91ed91eb6fe9350b430c1"
+dependencies = [
+ "pest",
+ "pest_derive",
+ "serde",
+]
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -794,6 +823,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "pest"
+version = "2.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0848c601009d37dfa3430c4666e147e49cdcf1b92ecd3e63657d8a5f19da662"
+dependencies = [
+ "memchr",
+ "ucd-trie",
+]
+
+[[package]]
+name = "pest_derive"
+version = "2.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11f486f1ea21e6c10ed15d5a7c77165d0ee443402f0780849d1768e7d9d6fe77"
+dependencies = [
+ "pest",
+ "pest_generator",
+]
+
+[[package]]
+name = "pest_generator"
+version = "2.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8040c4647b13b210a963c1ed407c1ff4fdfa01c31d6d2a098218702e6664f94f"
+dependencies = [
+ "pest",
+ "pest_meta",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "pest_meta"
+version = "2.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89815c69d36021a140146f26659a81d6c2afa33d216d736dd4be5381a7362220"
+dependencies = [
+ "pest",
+ "sha2",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -840,6 +912,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -913,6 +1005,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "refresh-probe"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-scip-ingest",
+ "scip",
+ "xpart-probe",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,6 +1047,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 name = "repo-graph-agent"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-coherence",
  "repo-graph-gate",
  "serde",
  "serde_json",
@@ -999,6 +1102,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-coherence"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-trust-model",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "repo-graph-coverage"
 version = "0.1.0"
 dependencies = [
@@ -1041,19 +1153,27 @@ dependencies = [
  "repo-graph-agent",
  "repo-graph-boundary-interaction",
  "repo-graph-classification",
+ "repo-graph-coherence",
  "repo-graph-coverage",
  "repo-graph-daemon-policy",
  "repo-graph-daemon-transport",
  "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-git",
+ "repo-graph-ir",
+ "repo-graph-livegraph",
+ "repo-graph-livegraph-feed",
  "repo-graph-module-queries",
  "repo-graph-platform-paths",
  "repo-graph-policy-facts",
  "repo-graph-quality-policy-runner",
  "repo-graph-repo-index",
+ "repo-graph-scip-ingest",
  "repo-graph-storage",
  "repo-graph-trust",
+ "repo-graph-trust-model",
+ "repo-graph-warm-cache",
+ "repo-graph-warm-cache-feed",
  "rust-analyzer-resolver",
  "serde",
  "serde_json",
@@ -1114,6 +1234,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-import-resolver"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+]
+
+[[package]]
 name = "repo-graph-indexer"
 version = "0.1.0"
 dependencies = [
@@ -1132,6 +1259,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-ir"
+version = "0.1.0"
+
+[[package]]
 name = "repo-graph-java-extractor"
 version = "0.1.0"
 dependencies = [
@@ -1143,6 +1274,26 @@ dependencies = [
  "tree-sitter-java",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "repo-graph-livegraph"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-algorithms",
+ "repo-graph-import-resolver",
+ "repo-graph-ir",
+ "repo-graph-trust-model",
+]
+
+[[package]]
+name = "repo-graph-livegraph-feed"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-livegraph",
+ "repo-graph-scip-ingest",
+ "repo-graph-trust-model",
 ]
 
 [[package]]
@@ -1265,6 +1416,7 @@ dependencies = [
  "repo-graph-agent",
  "repo-graph-boundary-interaction",
  "repo-graph-classification",
+ "repo-graph-coherence",
  "repo-graph-coverage",
  "repo-graph-daemon-policy",
  "repo-graph-daemon-runtime",
@@ -1304,6 +1456,20 @@ dependencies = [
  "tree-sitter-rust",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "repo-graph-scip-ingest"
+version = "0.1.0"
+dependencies = [
+ "json5",
+ "protobuf",
+ "repo-graph-classification",
+ "repo-graph-indexer",
+ "repo-graph-ir",
+ "repo-graph-ts-extractor",
+ "scip",
+ "serde_json",
 ]
 
 [[package]]
@@ -1357,9 +1523,17 @@ name = "repo-graph-trust"
 version = "0.1.0"
 dependencies = [
  "repo-graph-classification",
+ "repo-graph-coherence",
  "serde",
  "serde_json",
  "walkdir",
+]
+
+[[package]]
+name = "repo-graph-trust-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1374,6 +1548,29 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "repo-graph-warm-cache"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "hex",
+ "repo-graph-ir",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "repo-graph-warm-cache-feed"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-livegraph",
+ "repo-graph-trust-model",
+ "repo-graph-warm-cache",
 ]
 
 [[package]]
@@ -1411,6 +1608,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-ingest-probe"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-scip-ingest",
+ "scip",
+]
+
+[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1442,6 +1648,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "scip"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4d0e81b39f590b2edbe2369760641511898ed34062aed2e18e6d05eead3d6b7"
+dependencies = [
+ "protobuf",
 ]
 
 [[package]]
@@ -1839,6 +2054,12 @@ name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
+
+[[package]]
+name = "ucd-trie"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 
 [[package]]
 name = "ulid"
@@ -2279,6 +2500,16 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "xpart-probe"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-scip-ingest",
+ "scip",
+ "serde_json",
+]
 
 [[package]]
 name = "yoke"

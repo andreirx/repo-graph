@@ -15,7 +15,7 @@
 use std::process::ExitCode;
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
-use crate::presentation::trust::TrustResponse;
+use crate::presentation::trust::{render_trust_envelope, TrustEnvelope};
 
 fn print_usage() {
     eprintln!("usage: rmap trust [--json]");
@@ -100,10 +100,13 @@ pub fn run_trust(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render
-                match serde_json::from_value::<TrustResponse>(result) {
-                    Ok(response) => {
-                        println!("{}", response.render_human());
+                // Human mode: parse the coherence wrapper and render the hybrid (TRUST-LIVEGRAPH-IMPL).
+                // The daemon now returns `CoherenceEnvelope<CoherentTrustReport>`; reading the pre-wrapper
+                // `TrustResponse` would fail to parse. trust derives NO verdict exit code (success is ALWAYS
+                // 0), so a missed remap fails LOUD here (parse error -> exit 2), never a silent green->red flip.
+                match serde_json::from_value::<TrustEnvelope>(result) {
+                    Ok(envelope) => {
+                        println!("{}", render_trust_envelope(&envelope));
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

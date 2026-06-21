@@ -99,8 +99,14 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ## Storage Architecture Track
 
-Three-tier storage model: Durable Authority Store, Derived Snapshot Cache, Live Working Graph.
-See `agent_docs/storage-architecture-v2.md` for full specification.
+Tier model (Durable Authority, Operational Metadata, Derived Cache, Live Working
+Graph) from STORAGE-ARCH-1 stands. **Revised by
+`docs/architecture/adr/adr-extraction-substrate-scip-first.md`
+(EXTRACTION-SUBSTRATE-ADR-1):** L0/L1 facts now come from SCIP (external
+compiler-grade producer), not homegrown extraction; raw graph leaves SQLite for a
+partitioned binary warm cache (format was pending spike evidence at the ADR; since ratified by PARTITIONED-WARM-CACHE-ARCH-1 → bincode under a validation envelope). SQLite raw-graph
+storage is now transitional, not strategic.
+See `agent_docs/storage-architecture-v2.md` for the tier specification.
 
 | Slice | Scope | Status |
 |-------|-------|--------|
@@ -109,30 +115,141 @@ See `agent_docs/storage-architecture-v2.md` for full specification.
 | **CACHE-SEMANTICS-1** | Retention classes, cache epoch, stale-epoch exclusion | COMPLETE |
 | **RETENTION-POLICY-1** | Retention lifecycle (classify + deferred prune) | AMENDED |
 | **STATE-ROOT-SEPARATION-1** | Authority vs sandbox-local state boundaries | COMPLETE |
-| **PERF-OBS-1B** | Timing instrumentation (phase breakdown, global vs sandbox) | QUEUED |
-| **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | FUTURE |
-| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | FUTURE |
-| **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | FUTURE |
-| **CACHE-STORAGE-1** | Evaluate Tier B backing store alternatives | FUTURE |
+| **EXTRACTION-SUBSTRATE-ADR-1** | SCIP-first substrate decision (committed; operational decisions were deferred at the ADR, since decided — REFRESH-PROBE-1 + PARTITIONED-WARM-CACHE-ARCH-1) | ACCEPTED |
+| **SCIP-TS-PARITY-SPIKE-1** | TS SCIP parity + operational spike | PARTIAL (GO for TS) |
+| **SCIP-CLANG-SPIKE-1** | C/C++ via scip-clang | PARTIAL (GO; leveldb 39 TUs->90 docs) |
+| **SCIP-RUST-SPIKE-1** | Rust via rust-analyzer SCIP; self-host | PARTIAL (GO w/ caveats; per-crate + dedup) |
+| **SCIP-INGEST-IR-1** | Canonical IR, SCIP ingestion, stable-key mapping, call-graph derivation | IMPLEMENTED (design D1–D5 → INGEST-CORE-1; Stage A) |
+| **PARTITIONED-WARM-CACHE-ARCH-1** | Binary warm cache; format decision | RATIFIED 2026-06-01 (bincode under validation envelope; Stage D) |
+| **QUERY-MIGRATION-1** | callers/callees/path/cycles on LiveGraph partitions | IMPLEMENTED (Stage C; callers/callees headless, path deferred; cycles/imports default-migrated via Stage-D fastpaths) |
+| **STATS-LIVEGRAPH-1** | stats served from LiveGraph (cert-gated fastpath; 6th SQLite-free default) | IMPLEMENTED (spec `f6046ab` + impl `28ed216`; Stage D) |
+| **COHERENCE-LAYER-1** | orient/check/explain/trust mixed live+persisted `CoherenceEnvelope` contract | DESIGNED + IMPLEMENTED (contract `6ed17b8` + multi-source-leaf amendment `5129f44`; Stage D) |
+| **ORIENT-LIVEGRAPH-1** | `rmap orient` served via `CoherenceEnvelope` (4 LG-first leaves no-loss-labelled + labelled SQLite fallback) | DESIGNED + IMPLEMENTED (spec `af49ea6` + impl `2fd4478`, with the `repo-graph-coherence` support crate) |
+| **CHECK-LIVEGRAPH-1** | `rmap check` served via `CoherenceEnvelope` (MEET-freshness verdict; no LiveGraph leaf) | DESIGNED + IMPLEMENTED (spec `ef30083` + impl `3e76271`) |
+| **EXPLAIN-LIVEGRAPH-1** | `rmap explain` served via `CoherenceEnvelope` (5 green leaf VALUES served from LiveGraph) | DESIGNED + IMPLEMENTED (spec `cb8a311` + impl `82b6557`) |
+| **TRUST-LIVEGRAPH-1** | `rmap trust` served via `CoherenceEnvelope` (hybrid: LiveGraph posture + retained v1) | DESIGNED + IMPLEMENTED (spec `9c18754` + impl `dc55114`) |
+| **ORIENT-SQLITE-FREE-1** | spec: eliminate orient's eager `nodes`/`edges` base read (Option B, command 1) | SPEC — DEFERRED (`e10a455`); orient producer-gated on a shared trust-core producer (DR-1); composite cert RED by construction. DR-0 → S3 (explain leads). Producer REFUTED downstream (see probe). |
+| **EXPLAIN-SQLITE-FREE-1** | spec: eliminate explain's eager `nodes`/`edges` base read (Option B lead) | SPEC — PRODUCER-GATED (`f3237f9`); same trust-core blocker as orient (DR-E1 = DR-1) + focus-resolution gap; producer-light hypothesis refuted. DR-0 → S1 (shared producer first). |
+| **TRUST-SUMMARY-LIVEGRAPH-1** | spec: the shared LiveGraph-native trust-summary producer (orient DR-1 / explain DR-E1) | SPEC — NEEDS-EXTENSION (`94fc506`); `IrEdge` resolved-only, no `CallObservation`; 7/8 consumed fields need an IR/ingest/classifier extension. DR-TS-0 → S1 (probe first). |
+| **SCIP-UNRESOLVED-CALL-PROBE-1** | spike: does SCIP carry unresolved calls + reach `unresolved_edges` parity? | PROBE — **NO-GO** (`7d4b3bb`); scip-typescript emits no unresolved-call occurrence; paired 0 ≠ 3, structurally inverted. **Producer line CLOSED → Option A** (homegrown `unresolved_edges` stays SQLite-labelled). |
+| **SQLITE-RAW-DECOMMISSION-READINESS-10** | end-of-arc re-baseline: the SCIP unresolved-call boundary + the gate partition | AUDIT (this reconcile) — the trust unresolved-call fields are RED BY DESIGN (no current-state SCIP source); a FULL decommission for that contributor is IMPOSSIBLE; goal re-bounded. |
+| **SQLITE-RAW-DECOMMISSION-1** | retire raw `nodes`/`edges` substrate (incl. `unresolved_edges`) | **CONTRACT RATIFIED** (Stage D, terminal; bounded, Option A — `sqlite-raw-decommission-1.md`, 2026-06-14; retirement IMPL **DEFERRED** on prereqs; PREREQ-1's focus-resolution lever has since SHIPPED + CLOSED at HEAD `7fff04e` — see COHERENCE-LEAF-SERVE-1) — the trust contributor's unresolved-call fields (`unresolved_edges` + diagnostics) are RED-by-design: no current-state SCIP source (SCIP-UNRESOLVED-CALL-PROBE-1 NO-GO → Option A), so a FULL global drop is impossible; re-scoped to a BOUNDED partial per readiness-10. Other gates still RED (non-TS ceiling, drilldown fallbacks, cert builds, 31 non-graph tables). [Was: "readiness-9 gate RED, all five deletion gates FAIL" — superseded by readiness-10's partition: gate 1 can never go fully GREEN.] |
+| **COHERENCE-LEAF-SERVE-1** | PREREQ-1: serve the (b) leaves from the LiveGraph + close the focus-resolution lever | IMPLEMENTED + CLOSED (Stage D; focus-resolution producer `ccaad68` → orient IMPL-1 `765583b` SYMBOL-focus nodes-free → explain IMPL-2 `9e6077c` SYMBOL-focus nodes-free + relevance-ranked callers → PREREQ-1 CLOSED + decommission CHECKPOINTED `7fff04e` (HEAD); PREREQ-2 + retirement IMPL DEFERRED) |
+| **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
+| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
+| **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
+| **PERF-OBS-1B** | Timing of SQLite raw-graph substrate | DEPRIORITIZED (outgoing substrate) |
+| **CACHE-STORAGE-1** | Evaluate Tier B backing store alternatives | SUBSUMED by PARTITIONED-WARM-CACHE-ARCH-1 |
 
 ### Track Priority
 
-This track is **active**. Lifecycle semantics before timing instrumentation.
+This track is **active**, centered on the SCIP-first extraction substrate pivot,
+not on SQLite raw-graph lifecycle polish. As of 2026-06-08 the pivot is in **Stage D
+(persistence + SQLite raw decommission)**; Stages A–C are complete. [OBSERVED: git
+HEAD chain + `CURRENT_SLICE.md` + slice docs.]
 
-Sequence: RETENTION-POLICY-1 → STATE-ROOT-SEPARATION-1 → PERF-OBS-1B → reevaluate LIVE-GRAPH-1.
+Sequence (migration-plan stages; ✓ = landed). **Stage A** — EXTRACTION-SUBSTRATE-ADR-1 ✓
+→ SCIP-INGEST-IR-1 design ✓ → INGEST-CORE-1 ✓. **Stage B** — CJOIN-PROVE-1/2 ✓,
+XPART-PROVE-1(+1B)+boundary decision ✓, REFRESH-PROBE-1 ✓ (Verdict B), RUST-INGEST-PROVE-1 ✓
+(GO-with-caveats). **Stage C** — TRUST-MODEL-REBASE-1 ✓ → LIVEGRAPH-RUNTIME-1 ✓ →
+QUERY-MIGRATION-1 ✓ → VALUE-JOIN-1 ✓. **Stage D (current)** — LIVEGRAPH-INTEGRATION-1A/1B/1C ✓
+→ PARTITIONED-WARM-CACHE-ARCH-1 ✓ → WARM-CACHE-1 (+ daemon-wiring / valuefacts /
+producer-absent) ✓ → imports + cycles LiveGraph default fastpaths + lazy callers/callees/path ✓
+→ SQLITE-RAW-DECOMMISSION-READINESS-1..7 (audits) → STATS-LIVEGRAPH-1 ✓ (spec `f6046ab` + impl `28ed216`;
+6/10 SQLite-free defaults) → COHERENCE-LAYER-1 ✓ (contract `6ed17b8` + amendment `5129f44`; four per-command
+impls orient `2fd4478` / check `3e76271` / explain `82b6557` / trust `dc55114`) →
+SQLITE-RAW-DECOMMISSION-READINESS-9 ✓ (post-coherence recompute; gate RED) →
+**Option-B producer investigation (CLOSED, NO-GO)**: ORIENT-SQLITE-FREE-1 ✓ (`e10a455`; orient producer-gated,
+deferred) → EXPLAIN-SQLITE-FREE-1 ✓ (`f3237f9`; explain producer-gated, same trust-core source) →
+TRUST-SUMMARY-LIVEGRAPH-1 ✓ (`94fc506`; the shared producer is NEEDS-EXTENSION) → SCIP-UNRESOLVED-CALL-PROBE-1 ✓
+(`7d4b3bb`; **NO-GO** — SCIP carries no unresolved-call disposition → operator ratified **Option A**, the honest
+hybrid) → SQLITE-RAW-DECOMMISSION-READINESS-10 ✓ (end-of-arc re-baseline; the SCIP unresolved-call boundary) →
+**SQLITE-RAW-DECOMMISSION-1 (CONTRACT RATIFIED; GATED + PARTIAL BY DESIGN — the trust unresolved-call fields are
+RED-by-design per the probe; a FULL global drop is impossible, re-scoped to a BOUNDED partial per readiness-10)** →
+**PREREQ-1 COHERENCE-LEAF-SERVE arc** (focus-resolution producer `ccaad68` → orient IMPL-1 `765583b` → explain
+IMPL-2 `9e6077c` → PREREQ-1 lever CLOSED + decommission CHECKPOINTED **`7fff04e`, HEAD**; orient/explain
+SYMBOL-focus `nodes`-free on green; PREREQ-2 + retirement IMPL DEFERRED).
+Full Stage-B/C/D ledger: `CURRENT_SLICE.md`.
 
-**Rationale:**
-- CACHE-SEMANTICS-1 gave the semantic model (retention classes, stale-epoch exclusion)
-- RETENTION-POLICY-1 turns that model into lifecycle behavior (amended: classify-only on foreground, prune deferred)
-- STATE-ROOT-SEPARATION-1 fixes the authority/sandbox boundary
-- PERF-OBS-1B measures the system after lifecycle semantics are real
-- LIVE-GRAPH-1 decision deferred until post-prune behavior is observable
+**Honesty:** the viability spikes (TS/C/Rust) are complete and the gate is retired.
+The refresh model (REFRESH-PROBE-1 → two-speed Verdict B) and warm-cache format
+(PARTITIONED-WARM-CACHE-ARCH-1 → bincode under a validation envelope) are now decided;
+the partition is the refresh unit (REFRESH-PROBE-1) and only the exact coalescing
+window remains runtime-tuned. See `docs/architecture/scip-migration-plan.md`.
 
 ### Current Priority
 
-**PERF-OBS-1B** — Timing instrumentation (phase breakdown, global vs sandbox).
+**Stage D — SQLite raw decommission: the readiness arc is COMPLETE, PREREQ-1 is CLOSED, and the retirement IMPL
+is DEFERRED — the next BUILD is an OPEN governance call.** The readiness arc closed at the readiness-10
+end-of-arc re-baseline: the Option-B producer investigation returned NO-GO and proved a FULL
+`nodes`/`edges`/`unresolved_edges` retirement is partially IMPOSSIBLE (the trust unresolved-call fields have no
+current-state SCIP source — RED by design). SQLITE-RAW-DECOMMISSION-1 is RATIFIED as the BOUNDED
+partial-decommission contract (Option A), with the retirement IMPL DEFERRED on prerequisites. **PREREQ-1's
+focus-resolution lever has since SHIPPED + CLOSED at HEAD `7fff04e`** — the COHERENCE-LEAF-SERVE arc (orient +
+explain SYMBOL-focus `nodes`-free on green); PREREQ-2 + the bounded retirement IMPL stay DEFERRED (diminishing
+returns / a permanent SQLite floor). What remains is the next BUILD — P1 (marginal partial fastpaths) and/or P2
+(non-TS coverage), an OPEN call, NOT yet chosen (detailed in "P3 RATIFIED; the next BUILD is the OPEN call"
+below). [INFERRED priority, OBSERVED-backed — git HEAD=`7fff04e`; the Stage-D order line above; the
+`docs/slices/sqlite-raw-decommission-readiness-10.md` end-of-arc re-baseline, which supersedes the readiness-9
+recompute.]
 
-Next in sequence after STATE-ROOT-SEPARATION-1 (COMPLETE).
+**COHERENCE-LAYER-1 is DESIGNED + IMPLEMENTED.** The ratified mixed-source `CoherenceEnvelope<T>` contract
+(`6ed17b8`, multi-source-leaf amendment `5129f44`) and all four per-command builds shipped: orient (`2fd4478`,
+which also lands the `repo-graph-coherence` support crate), check (`3e76271`), explain (`82b6557`), trust
+(`dc55114`). orient/check/explain/trust no longer return a bare SQLite-only result — each serves a
+`CoherenceEnvelope` with honest per-signal provenance/trust/freshness + labelled SQLite fallback: explain
+genuinely serves its green structural leaf VALUES from the LiveGraph, trust adds a current-state LiveGraph
+posture beside the retained v1 (hybrid), orient no-loss-labels its four LG-first leaves, check folds a
+MEET-freshness verdict. This was the last command class with NO LiveGraph path.
+
+**Honest scope of what coherence did NOT do** [OBSERVED, first-hand: `dispatch.rs` handle_orient:2603 /
+handle_check:2689 / handle_explain:2766 / handle_trust:2870 — the base SQLite use case runs UNCONDITIONALLY in
+every handler; full evidence in readiness-9]: it did NOT eliminate the EAGER SQLite read for the four. The
+base use case (`repo_graph_agent::orient` / `run_check` / `run_explain` / `assemble_trust_report`) still reads
+SQLite — incl. `nodes`/`edges` for orient/explain/trust — on every call; the `CoherenceEnvelope` is assembled
+ON TOP. So the SQLite-FREE served count stays **6/10** (callers/callees/path/imports/cycles/stats); the four
+coherence defaults are a SERVING + OUTPUT-HONESTY advance, not an eager-read elimination.
+
+**The Option-B producer investigation CLOSED (NO-GO) — the goal is re-bounded.** readiness-9 recommended
+Option B (eliminate the four coherence commands' eager SQLite base reads) as the incremental continuation AND a
+prerequisite for the eventual global `nodes`/`edges` drop, leaving the A-vs-B sequencing OPEN. The four-commit
+arc that followed tested that to destruction: ORIENT-SQLITE-FREE-1 (`e10a455`) and EXPLAIN-SQLITE-FREE-1
+(`f3237f9`) proved orient and explain are both producer-gated on ONE shared trust-core source;
+TRUST-SUMMARY-LIVEGRAPH-1 (`94fc506`) found that shared producer NEEDS-EXTENSION (the IR's `IrEdge` is
+resolved-only; unresolved calls are dropped at SCIP ingest); SCIP-UNRESOLVED-CALL-PROBE-1 (`7d4b3bb`) returned
+**NO-GO** — scip-typescript emits no occurrence for an unresolved call target, so there is no current-state SCIP
+source for a parity unresolved-call count (paired evidence: SCIP-recoverable 0 ≠ homegrown `unresolved_edges` 3,
+structurally inverted). Operator ratified **Option A**: keep the homegrown `unresolved_edges` (+ diagnostics) as
+the trust summary's unresolved-call input, served SQLite-LABELLED (the TRUST-LIVEGRAPH-1 Half-B shape).
+
+**Consequence (VISION-level boundary, readiness-10):** the trust contributor's unresolved-call fields are RED
+**BY DESIGN** — no current-state substrate carries the fact, so a FULL `edges`/`unresolved_edges` decommission
+for that contributor is IMPOSSIBLE, not merely pending. This does NOT refute SCIP as the substrate (it resolves
+MORE than the homegrown extractor); it bounds only the narrow claim that SCIP can SOURCE a parity unresolved-call
+count. The **A-vs-B question is now RESOLVED for B**: Option B is bounded by this boundary — it survives only as a
+marginal partial (serve the LG-derivable resolved/non-trust leaves, keep the trust leaf SQLite-labelled) that
+flips NO deletion gate. The other gates remain RED-pending-work (non-TS LiveGraph coverage = the structural
+ceiling; the drilldown fallback paths + the imports/cycles/stats cert builds; the 31 non-graph tables).
+
+**P3 RATIFIED; the next BUILD is the OPEN call.** readiness-10's P1–P4 matrix is now partly resolved: **P3 (the
+BOUNDED partial decommission) is RATIFIED** as the terminal contract `docs/slices/sqlite-raw-decommission-1.md`
+(Option A, 2026-06-14) — `unresolved_edges` + diagnostics retained-forever, `nodes`/`edges` bounded-partial with
+the retirement IMPL **DEFERRED** on prerequisites. **PREREQ-1 (the (b)-leaf serve / focus-resolution lever) has
+since SHIPPED + CLOSED** — the COHERENCE-LEAF-SERVE arc (focus-resolution producer `ccaad68` → orient IMPL-1
+`765583b` → explain IMPL-2 `9e6077c` → PREREQ-1 CLOSED + decommission CHECKPOINTED at HEAD `7fff04e`): orient +
+explain SYMBOL-focus are now `nodes`-free on green, the achievable `nodes`-free surface is BANKED, and PREREQ-2 +
+the bounded retirement IMPL stay DEFERRED (diminishing returns / a permanent SQLite floor). What remains OPEN is
+the next BUILD: P1 (marginal partial fastpaths, flips no gate)
+and/or P2 (non-TS coverage — the larger strategic unlock, which does NOT fix the unresolved-call gap). P4 (pivot
+off) was not taken. The next track is NOT yet chosen.
+
+SCIP-INGEST-IR-1 is **no longer current** — it shipped as INGEST-CORE-1 (Stage A);
+`docs/slices/scip-ingest-ir-1.md` holds the historical design. STATS-LIVEGRAPH-1 is IMPLEMENTED
+(`docs/slices/stats-livegraph-1.md`); COHERENCE-LAYER-1 and the four per-command builds are IMPLEMENTED
+(`docs/slices/coherence-layer-1.md` + `{orient,check,explain,trust}-livegraph-1.md`). The Option-B producer
+investigation is CLOSED and recorded in `docs/slices/{orient,explain}-sqlite-free-1.md` +
+`trust-summary-livegraph-1.md` (specs) + `scip-unresolved-call-probe-1.md` (the NO-GO probe); the end-of-arc
+re-baseline is `docs/slices/sqlite-raw-decommission-readiness-10.md`.
 
 ### Recently Completed
 
@@ -503,8 +620,14 @@ HOOK-1 delivered:
 21. ~~CLI-OUT-5 — Inventory/policy output~~ (COMPLETE)
 22. ~~CLI-OUT-6 — Quality/risk output~~ (COMPLETE)
 23. ~~CLI-OUT-7 — Governance output~~ (COMPLETE)
-24. **SMOKE-1 — Validation harness cleanup (CURRENT)**
+24. ~~SMOKE-1 — Validation harness cleanup~~ (COMPLETE 2026-05-20)
 25. CURSOR-1 — Cursor integration (QUEUED)
+
+**The active development track is no longer this Distribution/CLI-OUT program — it is the
+Storage Architecture / SCIP Stage-D program** (this track's CLI-OUT-1..7 and SMOKE-1 are all
+COMPLETE; CURSOR-1 remains queued). Genuine current priority: see the **Storage Architecture
+Track → Current Priority** above (SQLITE-RAW-DECOMMISSION-1 readiness; COHERENCE-LAYER-1 DESIGNED + IMPLEMENTED) and `CURRENT_SLICE.md`.
+[OBSERVED: the git HEAD chain is entirely Stage-D storage work.]
 
 ### Artifact Matrix (REL-1)
 

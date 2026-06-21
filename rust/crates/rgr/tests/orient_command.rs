@@ -221,6 +221,80 @@ fn orient_json_flag_order_independent() {
     );
 }
 
+// ── 4. TRUNCATION-AUDIT-1: --full flag parse + mutual exclusion ──────────
+
+#[test]
+fn orient_full_flag_accepted() {
+    // --full is the uncapped escape hatch; parse must SUCCEED → daemon-unavailable (exit 2),
+    // not usage error (exit 1). Proves the flag is accepted + threaded to the request.
+    let output = run_cmd_isolated(&["orient", "--full"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--full must parse (exit 2 daemon error), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn orient_full_with_budget_mutually_exclusive() {
+    // --full and --budget both set the cap → mutually exclusive → usage error (exit 1) BEFORE
+    // any daemon connection.
+    let output = run_cmd_isolated(&["orient", "--full", "--budget", "large"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--full cannot be combined with --budget"),
+        "stderr must explain the mutual exclusion: {}",
+        stderr
+    );
+}
+
+#[test]
+fn orient_budget_then_full_mutually_exclusive_order_independent() {
+    // Order independence: --budget first, then --full → still exit 1.
+    let output = run_cmd_isolated(&["orient", "--budget", "small", "--full"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--full cannot be combined with --budget"),
+        "stderr: {}",
+        stderr
+    );
+}
+
+// ── 5. TRUNCATION-AUDIT-1 review-1 #3: `--help` documents `--full` ───────────
+
+#[test]
+fn orient_help_flag_exits_zero_and_documents_full() {
+    // review-1 OBSERVED `rmap orient --help` exiting with usage error "unknown flag: --help". It must
+    // instead succeed (exit 0) and document --full on stderr, short-circuiting before daemon connection.
+    let output = run_cmd_isolated(&["orient", "--help"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "orient --help must exit 0. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--full"),
+        "orient --help must document --full: {}",
+        stderr
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SUCCESS-PATH TESTS
 //

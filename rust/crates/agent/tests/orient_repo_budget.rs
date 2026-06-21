@@ -89,14 +89,37 @@ fn seed_many_signals() -> FakeAgentStorage {
 }
 
 #[test]
-fn small_budget_truncates_seven_signals_to_five() {
+fn small_budget_keeps_headline_signals_unstripped() {
+    // ORIENT-DENSITY-1 §2: a small budget trades DEPTH, never the load-bearing
+    // facts. This seed emits 7 signals; 3 are protected headline codes
+    // (BOUNDARY_VIOLATIONS alert, IMPORT_CYCLES, MODULE_SUMMARY) and 4 are
+    // unprotected. The cap (5) applies only to the unprotected tail — 4 ≤ 5 — so
+    // NOTHING is dropped and the structure / cycles / alert all survive at small.
+    // (Before this slice the flat cap dropped 2 signals, stripping MODULE_SUMMARY
+    // — the exact "small budget = thin meta" inversion the slice fixes.)
     let fake = seed_many_signals();
     let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 
-    assert_eq!(result.signals.len(), 5, "small cap = 5 signals");
-    assert_eq!(result.signals_truncated, Some(true));
-    assert_eq!(result.signals_omitted_count, Some(2));
-    assert!(result.truncated, "top-level truncated must be true");
+    let codes: Vec<&str> = result.signals.iter().map(|s| s.code().as_str()).collect();
+    assert!(
+        codes.contains(&"MODULE_SUMMARY"),
+        "structure must survive a small budget: {codes:?}"
+    );
+    assert!(
+        codes.contains(&"IMPORT_CYCLES"),
+        "cycles must survive a small budget: {codes:?}"
+    );
+    assert!(
+        codes.contains(&"BOUNDARY_VIOLATIONS"),
+        "the boundary alert must survive a small budget: {codes:?}"
+    );
+    assert_eq!(
+        result.signals.len(),
+        7,
+        "4 unprotected ≤ small cap (5) ⇒ nothing truncated"
+    );
+    assert_eq!(result.signals_truncated, None);
+    assert!(!result.truncated, "headline-only response is not truncated");
 }
 
 #[test]
@@ -131,21 +154,11 @@ fn truncated_sections_preserve_highest_ranked_signals() {
     // The highest-ranked signal must survive truncation.
     let first = result.signals.first().unwrap();
     assert_eq!(first.rank(), 1);
-    // Informational signals are the lowest priority; at small
-    // budget with 8 emitted signals and cap 5, informational
-    // signals should be the first to drop.
-    let has_informational = result
-        .signals
-        .iter()
-        .any(|s| s.category() == repo_graph_agent::SignalCategory::Informational);
-    // It's acceptable for informational to survive IF everything
-    // higher priority fit under the cap first. With 5 cap and
-    // 3 higher-priority signals (1 High + 4 Medium trust/structure
-    // = 5 non-informational), the 5-slot cap fills before any
-    // informational can survive. Let's check that precisely.
-    let _ = has_informational; // Kept for clarity; not asserted.
-
-    // Ranks must still be dense 1..N.
+    // ORIENT-DENSITY-1: with headline protection the 4 unprotected signals fit
+    // under the small cap (5), so all 7 survive — including the low-priority
+    // informational MODULE_SUMMARY (the structure the dense headline needs). The
+    // ranks stay dense because truncation only ever REMOVES the unprotected tail,
+    // never reorders.
     for (i, s) in result.signals.iter().enumerate() {
         assert_eq!(s.rank(), (i + 1) as u32);
     }

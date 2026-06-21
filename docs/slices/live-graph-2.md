@@ -2,7 +2,11 @@
 
 ## Status
 
-QUEUED — specification complete, not yet implemented.
+REVISED / folded into QUERY-MIGRATION-1 by
+`docs/architecture/adr/adr-extraction-substrate-scip-first.md`
+(EXTRACTION-SUBSTRATE-ADR-1). Migration target is now LiveGraph partitions fed by
+SCIP-derived facts. The SQLite fallback pattern below is retained only for the
+transition period. Not yet implemented.
 
 ## Problem Statement
 

@@ -14,17 +14,18 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::Instant;
 
-/// Perf logging macro - only emits when perf-trace feature is enabled.
-#[cfg(feature = "perf-trace")]
+/// PERF-INSTRUMENTATION-1: request/phase perf marker.
+///
+/// Emits to stderr when the compile-time `perf-trace` feature is on (force-on,
+/// unchanged legacy behavior) OR the runtime `RMAP_PERF` gate is at level >= 1.
+/// When off, the only cost is a single relaxed atomic load (`perf_enabled`);
+/// the format arguments are never evaluated.
 macro_rules! perf_log {
     ($($arg:tt)*) => {
-        eprintln!($($arg)*);
+        if cfg!(feature = "perf-trace") || $crate::perf::perf_enabled() {
+            eprintln!($($arg)*);
+        }
     };
-}
-
-#[cfg(not(feature = "perf-trace"))]
-macro_rules! perf_log {
-    ($($arg:tt)*) => {};
 }
 
 use repo_graph_boundary_interaction::table::Language as BiLanguage;
@@ -2702,10 +2703,23 @@ pub fn index_into_storage_with_progress(
     options: &ComposeOptions,
     mut progress: Option<ProgressCallback<'_>>,
 ) -> Result<IndexResult, ComposeError> {
+    // PERF-INSTRUMENTATION-1: capture the runtime gate once. Every marker below
+    // self-gates; when RMAP_PERF is off the only cost is the atomic load already
+    // paid here plus the per-phase `Instant`s (negligible).
+    let perf_on = crate::perf::perf_enabled();
+    let perf_files = crate::perf::perf_file_enabled();
+    let index_start = Instant::now();
+
+    perf_log!("[PERF] index {}: > discover", repo_uid);
     emit_progress(&mut progress, "scanning", 0, 1)?;
+    let discover_start = Instant::now();
     let prepared = prepare_repo_inputs(repo_path)?;
+    let discover_ms = discover_start.elapsed().as_millis();
+    let discover_files = prepared.file_inputs.len();
     emit_progress(&mut progress, "scanning", 1, 1)?;
 
+    perf_log!("[PERF] index {}: > init", repo_uid);
+    let init_start = Instant::now();
     let mut ts_extractor = TsExtractor::new();
     ts_extractor
         .initialize()
@@ -2735,6 +2749,7 @@ pub fn index_into_storage_with_progress(
     rust_extractor
         .initialize()
         .map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
+    let init_ms = init_start.elapsed().as_millis();
 
     // Checkpoint BEFORE repo mutation — abort here if transport failed
     emit_progress(&mut progress, "initializing", 0, 1)?;
@@ -2749,54 +2764,69 @@ pub fn index_into_storage_with_progress(
         &mut rust_extractor,
     ];
 
-    // Bridge the compose progress callback to the indexer callback.
-    // The indexer emits per-file extracting progress with abort checkpoints.
-    let mut indexer_progress_callback = |event: &IndexProgressEvent| -> ControlFlow<()> {
-        if let Some(ref mut cb) = progress {
-            let phase = match event.phase {
-                IndexPhase::Scanning => "scanning",
-                IndexPhase::Extracting => "extracting",
-                IndexPhase::Resolving => "resolving",
-                IndexPhase::Persisting => "persisting",
-            };
-            cb(&ProgressEvent::new(phase, event.current, event.total))
-        } else {
-            ControlFlow::Continue(())
-        }
-    };
-
-    let mut idx_options = IndexOptions {
-        basis_commit: options.basis_commit.clone(),
-        edge_batch_size: options.edge_batch_size,
-        c_include_roots: options.c_include_roots.clone(),
-        on_progress: Some(&mut indexer_progress_callback),
-        ..IndexOptions::default()
-    };
-
     // State-boundary hook: wired at the composition root (SB-4-pre).
     // Constructs the hook; on invalid repo_uid it degrades
     // gracefully (diagnostic, no emission, no abort).
     let mut sb_hook = crate::state_boundary_hook::StateBoundaryHook::new(repo_uid);
 
-    // The indexer now emits per-file progress with abort checkpoints.
+    // PERF-INSTRUMENTATION-1: emit phase-ENTRY + (level-2) per-file markers from
+    // the orchestrator's progress stream. The phase DURATIONS are NOT derived
+    // here — they are measured at the real storage-write boundaries inside the
+    // orchestrator and returned on `result.phase_timings` (the only layer that
+    // can see those boundaries). Scoped so the marker borrow is released before
+    // `result` is read for the summary.
+    let mut markers =
+        crate::perf::IndexProgressMarkers::new(repo_uid, discover_files as u64, perf_files);
+
+    // Bridge the compose progress callback to the indexer callback.
+    // The indexer emits per-file extracting progress with abort checkpoints.
     // IndexError::Aborted maps to ComposeError::Aborted for transport failure.
-    let mut result = match orchestrator::index_repo(
-        storage,
-        &mut extractors,
-        repo_uid,
-        &prepared.file_inputs,
-        &prepared.contract_file_inputs,
-        &mut idx_options,
-        Some(&mut sb_hook),
-    ) {
-        Ok(r) => r,
-        Err(IndexError::Aborted) => return Err(ComposeError::Aborted),
-        Err(e) => return Err(ComposeError::Index(format!("{}", e))),
+    let mut result = {
+        let mut indexer_progress_callback = |event: &IndexProgressEvent| -> ControlFlow<()> {
+            if perf_on {
+                markers.observe(event);
+            }
+            if let Some(ref mut cb) = progress {
+                let phase = match event.phase {
+                    IndexPhase::Scanning => "scanning",
+                    IndexPhase::Extracting => "extracting",
+                    IndexPhase::Resolving => "resolving",
+                    IndexPhase::Persisting => "persisting",
+                };
+                cb(&ProgressEvent::new(phase, event.current, event.total))
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+
+        let mut idx_options = IndexOptions {
+            basis_commit: options.basis_commit.clone(),
+            edge_batch_size: options.edge_batch_size,
+            c_include_roots: options.c_include_roots.clone(),
+            on_progress: Some(&mut indexer_progress_callback),
+            ..IndexOptions::default()
+        };
+
+        match orchestrator::index_repo(
+            storage,
+            &mut extractors,
+            repo_uid,
+            &prepared.file_inputs,
+            &prepared.contract_file_inputs,
+            &mut idx_options,
+            Some(&mut sb_hook),
+        ) {
+            Ok(r) => r,
+            Err(IndexError::Aborted) => return Err(ComposeError::Aborted),
+            Err(e) => return Err(ComposeError::Index(format!("{}", e))),
+        }
     };
 
     // Persisting phase: checkpoint BEFORE each mutation (7 mutations total)
     // Semantics: current=N means "about to do mutation N"
 
+    perf_log!("[PERF] index {}: > postpass", repo_uid);
+    let postpass_start = Instant::now();
     emit_progress(&mut progress, "persisting", 0, 8)?; // about to persist read failures
     persist_read_failures(
         storage,
@@ -2930,6 +2960,31 @@ pub fn index_into_storage_with_progress(
         &prepared.file_inputs,
         &declared_roots,
     )?;
+
+    // PERF-INSTRUMENTATION-1: one-line per-phase summary for the whole index.
+    // `extract`/`resolve`/`store`/`finalize` are the orchestrator's REAL
+    // measurements (`store` = the actual storage write calls); `discover`/`init`/
+    // `postpass` are these compose-level windows; counts come from the result.
+    // Formatting lives in `crate::perf` (out of this 4000-line file).
+    let postpass_ms = postpass_start.elapsed().as_millis();
+    let total_ms = index_start.elapsed().as_millis();
+    perf_log!(
+        "{}",
+        crate::perf::format_index_summary(
+            repo_uid,
+            discover_ms,
+            discover_files,
+            init_ms,
+            &result.phase_timings,
+            postpass_ms,
+            total_ms,
+            &crate::perf::IndexCounts {
+                nodes: result.nodes_total,
+                edges: result.edges_total,
+                unresolved: result.edges_unresolved,
+            },
+        )
+    );
 
     Ok(result)
 }
@@ -3511,7 +3566,10 @@ pub fn refresh_into_storage_with_progress(
         &declared_roots,
     )?;
 
-    #[cfg(feature = "perf-trace")]
+    // PERF-INSTRUMENTATION-1: runtime-gated (was `#[cfg(feature = "perf-trace")]`)
+    // so a refresh under RMAP_PERF emits its summary consistently with the rest of
+    // the refresh markers and the index path. `perf_log!` self-gates; the two
+    // durations are cheap to compute unconditionally.
     {
         let module_persist_ms = module_persist_start.elapsed().as_millis();
         let total_ms = refresh_start.elapsed().as_millis();

@@ -1,0 +1,553 @@
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+//! Canonical ingestion IR for repo-graph (INGEST-CORE-1 subset).
+//!
+//! This crate is the repo-graph-owned domain model the LiveGraph is built from.
+//! SCIP is an upstream fact *producer*, NOT the domain model: SCIP symbol ids,
+//! roles, and framing are consumed at the ingestion boundary
+//! (`repo-graph-scip-ingest`) and recorded only as provenance — never as identity.
+//!
+//! Foundational rule, enforced structurally: this crate has **zero**
+//! `scip` / `sqlite` / `tree-sitter` dependencies. If SCIP types were reachable
+//! from here, SCIP would have become the domain model and the slice would have
+//! failed its purpose.
+//!
+//! Canonical identity is **value-level reuse** of the existing `ts-extractor`
+//! symbol stable-key string (`repo:file#name:SYMBOL:subtype[:dupN]`) — the exact
+//! value A1 governance and measurements already target. Literal unification with
+//! `state_bindings::StableKey` (opaque/resource-only) is deferred. See
+//! `docs/slices/ingest-core-1.md`.
+
+// ── Canonical identity ────────────────────────────────────────────
+
+/// Canonical symbol identity.
+///
+/// Holds the existing `ts-extractor` symbol stable-key value (value-level reuse).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CanonicalKey(String);
+
+impl CanonicalKey {
+    /// Wrap an existing canonical symbol stable-key value, as emitted by
+    /// `ts-extractor` (primary) or by the documented SCIP-descriptor fallback.
+    pub fn from_existing(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Borrow the underlying canonical key string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume and return the underlying canonical key string.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+/// How a node's canonical identity was obtained.
+///
+/// Recorded per node so the fallback rate is a measured, surfaced number
+/// (exit criteria 1-2): fallback must never silently mask a weak definition join.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentitySource {
+    /// Adopted from a `ts-extractor` AST definition via a `(file, range)` join.
+    /// The PRIMARY path.
+    AstAdopted,
+    /// Synthesized from SCIP global-symbol descriptors because no AST definition
+    /// matched. FALLBACK only — counted and surfaced, never silent.
+    ScipSynthesizedFallback,
+    /// The file/module-scope structural node (`ts-extractor` FILE node). Has NO SCIP
+    /// symbol; its provenance carries no `scip_symbol_id`. Materialized so file-scope
+    /// reference edges (`EdgeBasis::FileScopeReference`) have a node-backed source and
+    /// the partition graph has no dangling edge endpoints. It is source-file scope, not
+    /// a module-architecture / boundary / runtime entity.
+    AstFileScope,
+}
+
+// ── Edges ─────────────────────────────────────────────────────────
+
+/// Edge classification carried by the IR.
+///
+/// INGEST-CORE-1 carried only `Calls` and `References`; `Imports` was deferred because
+/// `scip-typescript` does not reliably emit import roles (spike M2). IMPORTS-MODULE-INGEST-1 adds
+/// `Imports` as an **AST-derived** edge (authority = `ts-extractor`, NOT SCIP roles): a module-import
+/// edge between file-scope (FILE) identities. See `EdgeBasis::AstImport` and `ImportEdgeMeta`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeType {
+    /// A syntax-confirmed call.
+    Calls,
+    /// A resolved reference that is not a confirmed call.
+    References,
+    /// A module-import edge (FILE -> FILE), AST-derived. Carries `ImportEdgeMeta`.
+    Imports,
+}
+
+/// The derivation basis for an edge (D2 graded model: carried data only — there is
+/// no query or trust logic in this crate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeBasis {
+    /// Confirmed by a call-expression range in the AST join, with a declaration-level
+    /// (callable) caller. Maps to `EdgeType::Calls`. The only basis admitted into the
+    /// strict call graph.
+    SyntaxConfirmedCall,
+    /// Resolved reference with a declaration-level caller, not call-confirmed. Maps to
+    /// `EdgeType::References`.
+    DerivedReference,
+    /// Resolved reference whose caller is a file/module-scope source node (not a
+    /// callable). Always maps to `EdgeType::References`, never `Calls`: a top-level
+    /// call-expression is module-init execution, not a callable-to-callable edge, and
+    /// is excluded from strict call-graph traversal by default. Carries real
+    /// module-scope provenance (imports, boundary/dependency analysis).
+    FileScopeReference,
+    /// An AST-extracted module-import edge (IMPORTS-MODULE-INGEST-1). Maps to `EdgeType::Imports`.
+    /// Authority is the `ts-extractor` AST (an `import` declaration), NOT SCIP roles or a
+    /// `FileScopeReference` inference. FILE -> FILE; carries `ImportEdgeMeta`.
+    AstImport,
+    /// A CROSS-PARTITION module-import edge (IMPORTS-XPART-RESOLUTION-1): an AST import OBSERVATION whose
+    /// target FILE was resolved against the global FILE inventory (relative + extension/index), NOT
+    /// node-resolved inside the producing partition. A STRONGER inference than a raw observation but NOT
+    /// identical to `AstImport`. Maps to `EdgeType::Imports`. These edges are RUNTIME/in-memory only and
+    /// are NEVER persisted in a per-partition IR / warm cache (per-partition cache coherence, F1).
+    AstImportFileInventoryResolved,
+    /// A TSCONFIG-PATH-ALIAS import edge (IMPORTS-TSCONFIG-PATHS-1): an AST import OBSERVATION whose
+    /// non-relative specifier matched a `compilerOptions.paths` alias and was EXPANDED (paths + baseUrl) then
+    /// resolved against the global FILE inventory (extension/index). DISTINCT from a relative import
+    /// (`AstImportFileInventoryResolved`) and from a package import. Maps to `EdgeType::Imports`. RUNTIME/
+    /// in-memory ONLY -- never persisted (cache coherence; the alias config IS persisted, the edge is not).
+    AstImportTsconfigPathResolved,
+    /// A LITERAL DYNAMIC import edge (IMPORTS-DYNAMIC-CLASSIFICATION-1): an `import('...')` call whose literal
+    /// specifier resolved (relative via the FILE inventory, or a tsconfig alias) to a FILE. DISTINCT from a
+    /// static import -- the provenance is "a cycle edge via a dynamic import". Maps to `EdgeType::Imports`.
+    /// RUNTIME/in-memory ONLY -- never persisted. A NON-LITERAL `import(expr)` is NEVER edged (blocks).
+    AstDynamicImportResolved,
+}
+
+/// Resolution class of an extracted module import (IMPORTS-MODULE-INGEST-1 + IMPORTS-EXTRACT-COMPLETENESS-1).
+///
+/// `EdgeType::Imports` edges ONLY ever carry `StaticResolved` (a relative import node-resolved to a FILE
+/// in the same partition). The other classes are produced by IMPORTS-EXTRACT-COMPLETENESS-1 for
+/// [`ImportObservation`]s — completeness evidence that is NEVER a graph edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportResolution {
+    /// A relative import node-resolved to a concrete FILE target in this partition (the ONLY class that
+    /// becomes an `EdgeType::Imports` edge).
+    StaticResolved,
+    /// A relative import whose target FILE is not node-resolved in this partition (no resolvable path, or
+    /// the target file is in another partition). Observation only.
+    StaticUnresolved,
+    /// A non-relative (package / bare) specifier (e.g. `"react"`). Observation only.
+    PackageExternal,
+    /// A dynamic `import()` with no static target. Observation only.
+    DynamicUnsupported,
+}
+
+/// Display/dependency metadata for an `EdgeType::Imports` edge (IMPORTS-MODULE-INGEST-1).
+///
+/// FILE-granular only (D2): no import `kind`/`type-only` (those are binding-level facts, deferred). The
+/// edge's `src`/`dst` are the file-scope FILE identities; this carries the specifier provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportEdgeMeta {
+    /// The raw module specifier as written (e.g. `"./foo"`).
+    pub raw_specifier: String,
+    /// The producer-resolved partition-relative target path (the `:FILE` target's path).
+    pub resolved_path: String,
+    /// Resolution class (always [`ImportResolution::StaticResolved`] for an edge).
+    pub resolution: ImportResolution,
+}
+
+/// A classified module-import OBSERVATION (IMPORTS-EXTRACT-COMPLETENESS-1) — completeness evidence for an
+/// import that did NOT become a graph edge (and, for honest counts, also the StaticResolved ones that
+/// did). It is NEVER a graph edge: a non-node-resolved import has no FILE-node endpoint. `resolution` is
+/// the mutually-exclusive class; `is_re_export`/`is_type_only`/`is_side_effect` are orthogonal modifiers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportObservation {
+    /// The IMPORTING file's REPO-RELATIVE path (e.g. `"packages/a/src/main.ts"`) — the source endpoint a
+    /// cross-partition resolver needs (IMPORTS-XPART-WIRING-1). Ingest-populated from the doc key path;
+    /// repo-relative since KEY-NAMESPACE-REPO-RELATIVE-1.
+    pub source_file: String,
+    /// The raw module specifier as written (e.g. `"./foo"`, `"react"`).
+    pub raw_specifier: String,
+    /// The mutually-exclusive resolution class.
+    pub resolution: ImportResolution,
+    /// From an `export ... from` (a re-export), not an `import`.
+    pub is_re_export: bool,
+    /// `import type` / `export type` (type-only).
+    pub is_type_only: bool,
+    /// Bound no local identifier (e.g. `import "./x"`).
+    pub is_side_effect: bool,
+    /// IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: POSITIVE external evidence captured at the INGEST boundary -- the
+    /// non-relative specifier's package resolves into a `node_modules` (or `@types/`) install whose REALPATH
+    /// is NOT in the repo source tree (so it is a real external package, NOT a workspace symlink). Lets the
+    /// IO-free classifier mark a transitively-pulled / type-only external benign without re-touching the FS.
+    /// `false` for relative imports and for anything not resolved as external at ingest.
+    pub external_node_modules: bool,
+}
+
+// ── Partition + provenance ────────────────────────────────────────
+
+/// The kind of analysis partition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartitionKind {
+    /// A TypeScript workspace package.
+    TsPackage,
+}
+
+/// Identifier for an analysis partition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PartitionId(String);
+
+impl PartitionId {
+    /// Construct a partition id from a string value.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Borrow the underlying string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// An analysis partition: one buildable unit indexed by one producer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Partition {
+    /// Partition identity.
+    pub id: PartitionId,
+    /// Partition kind.
+    pub kind: PartitionKind,
+    /// Partition root (partition-relative paths are relative to this).
+    pub root: String,
+    /// Producing indexer (e.g. `"scip-typescript"`).
+    pub indexer: String,
+    /// Producing indexer version (e.g. `"0.4.0"`).
+    pub indexer_version: String,
+    /// Hash of the build inputs that produced this partition's facts.
+    pub build_inputs_hash: String,
+    /// IMPORTS-PACKAGE-RESOLUTION-1: the package.json `name` of this partition (its WORKSPACE identity).
+    /// `None` when the root has no readable package.json `name`. The union of these across loaded partitions
+    /// is the workspace map that classifies a bare import as workspace-local (vs external/unresolved).
+    pub package_name: Option<String>,
+    /// IMPORTS-PACKAGE-RESOLUTION-1: the declared dependency NAMES (dependencies + devDependencies +
+    /// peerDependencies) from this partition's package.json -- POSITIVE evidence that a bare import is an
+    /// EXTERNAL package (non-cycle-relevant). NEVER inferred from absence in the workspace map.
+    pub declared_dependencies: std::collections::BTreeSet<String>,
+    /// IMPORTS-TSCONFIG-PATHS-1: this partition's tsconfig path-alias config (baseUrl + paths), captured at
+    /// ingest. `None` when the partition has no readable `compilerOptions.paths`. The pure resolver expands a
+    /// non-relative specifier matching a `paths` pattern against this + the FILE inventory.
+    pub tsconfig_aliases: Option<TsconfigAliasConfig>,
+}
+
+/// IMPORTS-TSCONFIG-PATHS-1: a partition's tsconfig path-alias configuration (compilerOptions `baseUrl` +
+/// `paths`), captured at the INGEST boundary so the pure resolver stays IO-free. PERSISTED in the IR (the
+/// config is partition-stable); the resolved EDGES are runtime-overlay only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TsconfigAliasConfig {
+    /// `compilerOptions.baseUrl`, relative to the tsconfig dir (= the partition root). Defaults to `"."` when
+    /// `paths` is present but `baseUrl` is absent (modern TS resolves `paths` relative to the tsconfig).
+    pub base_url: String,
+    /// `compilerOptions.paths`: alias pattern -> target list. Each pattern/target may contain ONE `*`.
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    /// The partition's repo-relative prefix (e.g. `"admin"`; `""` for a repo-root partition). `base_url`
+    /// resolves against it so the expanded path is a repo-relative key into the global FILE inventory.
+    pub partition_prefix: String,
+}
+
+/// Provenance for a node or edge: the external-producer evidence (IR design R6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance {
+    /// Producing indexer.
+    pub indexer: String,
+    /// Producing indexer version.
+    pub indexer_version: String,
+    /// Original SCIP symbol id (substrate, non-durable identity). `None` when the
+    /// fact came only from the AST.
+    pub scip_symbol_id: Option<String>,
+    /// Hash of the build inputs.
+    pub build_inputs_hash: String,
+}
+
+// ── Source range ──────────────────────────────────────────────────
+
+/// A source range, partition-relative. Rows are 1-based, columns 0-based,
+/// matching `ts-extractor`'s convention.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceRange {
+    /// Partition-relative file path.
+    pub file: String,
+    /// 1-based start line.
+    pub start_line: u32,
+    /// 0-based start column.
+    pub start_col: u32,
+    /// 1-based end line.
+    pub end_line: u32,
+    /// 0-based end column.
+    pub end_col: u32,
+}
+
+// ── Nodes + edges + container ─────────────────────────────────────
+
+/// Visibility classification of a symbol, mirrored from the producer (IR-SYMBOL-ATTRIBUTES-1).
+///
+/// IR-owned: a CLOSED 5-variant set (DS3) carried as a type-safe enum, NOT a string — unlike
+/// [`SymbolAttributes::symbol_kind`], whose vocabulary is open and grows. The variant set mirrors the
+/// producer `Visibility`; if the producer's set grows, this grows in lockstep (a one-line mirror). The
+/// producer's lowercase serde spelling (`export`, `private`, …) is the SQLite `visibility`-column
+/// spelling; this enum preserves the FULL fact (not a lossy `is_export` bool), so a future consumer
+/// (dead-code, API-surface) can read private/protected/internal without re-extraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrVisibility {
+    /// `public`.
+    Public,
+    /// `private`.
+    Private,
+    /// `protected`.
+    Protected,
+    /// `internal`.
+    Internal,
+    /// `export`.
+    Export,
+}
+
+/// Structural per-symbol attributes sourced from the AST-adopted producer node (IR-SYMBOL-ATTRIBUTES-1).
+///
+/// Present (the containing `Option` is `Some`) ONLY for AST-adopted SYMBOL nodes — nodes that matched a
+/// producer `ExtractedNode`. Absent (`None`) on `ScipSynthesizedFallback` and `AstFileScope` nodes, which
+/// have NO producer node and therefore NO honest structural attributes (`None` = unknown, never conflated
+/// with a known zero — the architecture's explicit-degradation rule). The block's presence/absence is ONE
+/// fact (AST-producer present, as a unit, DS1); the subfields stay INDEPENDENTLY optional inside it,
+/// because the producer emits each independently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolAttributes {
+    /// Producer visibility. `None` when the producer emitted no visibility for the symbol.
+    pub visibility: Option<IrVisibility>,
+    /// True iff the producer's `parent_node_uid` is `None` (a top-level symbol). Mirrors the SQLite
+    /// `parent_node_uid IS NULL` predicate exactly (parity by construction); stats needs only the boolean,
+    /// not the parent identity, so no second identity model is imported into the IR (DS4).
+    pub is_top_level: bool,
+    /// Granular symbol kind: the producer `NodeSubtype`'s SCREAMING_SNAKE_CASE spelling
+    /// (`"INTERFACE"`, `"TYPE_ALIAS"`, `"CLASS"`, `"ENUM"`, `"FUNCTION"`, …). `None` when the producer
+    /// emitted no subtype. DISTINCT from [`IrNode::subtype`], which holds the COARSE SCIP terminal-
+    /// descriptor suffix (`Namespace`/`Type`/`Method`/`Term`); a SCIP `Type` covers class AND interface
+    /// AND type-alias AND enum, so it cannot supply this distinction — hence this granular AST-sourced
+    /// field. Kept as a string (DS2) to avoid coupling the IR to an extractor enum, matching the existing
+    /// `subtype` precedent and giving byte-parity with the SQLite string compare for free.
+    pub symbol_kind: Option<String>,
+}
+
+/// A node in the canonical IR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrNode {
+    /// Canonical identity.
+    pub key: CanonicalKey,
+    /// Symbol subtype as emitted by extraction (e.g. `"FUNCTION"`, `"CLASS"`).
+    /// Kept as a string to avoid coupling the IR to an extractor enum.
+    pub subtype: String,
+    /// Symbol name.
+    pub name: String,
+    /// Source range, if known.
+    pub range: Option<SourceRange>,
+    /// Owning partition.
+    pub partition_id: PartitionId,
+    /// How this node's identity was obtained (primary vs fallback).
+    pub identity_source: IdentitySource,
+    /// Provenance.
+    pub provenance: Provenance,
+    /// Structural per-symbol attributes (IR-SYMBOL-ATTRIBUTES-1). `Some` for AST-adopted SYMBOL nodes
+    /// (`identity_source == AstAdopted`); `None` for `ScipSynthesizedFallback` + `AstFileScope` nodes,
+    /// which have no producer AST node (unknown, not zero). See [`SymbolAttributes`].
+    pub attributes: Option<SymbolAttributes>,
+}
+
+/// An edge in the canonical IR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrEdge {
+    /// Source (caller) canonical key.
+    pub src: CanonicalKey,
+    /// Target (callee / referent) canonical key.
+    pub dst: CanonicalKey,
+    /// Edge classification.
+    pub edge_type: EdgeType,
+    /// Derivation basis.
+    pub basis: EdgeBasis,
+    /// Provenance.
+    pub provenance: Provenance,
+    /// Import metadata — `Some` iff this is an `EdgeType::Imports` / `EdgeBasis::AstImport` edge,
+    /// `None` for all call/reference edges (IMPORTS-MODULE-INGEST-1).
+    pub import: Option<ImportEdgeMeta>,
+}
+
+/// The ingested IR for a single partition. In-memory only (D1: the warm cache is a
+/// later, separate projection; this crate has no serialization).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartitionIr {
+    /// The partition this IR belongs to.
+    pub partition: Partition,
+    /// Nodes.
+    pub nodes: Vec<IrNode>,
+    /// Edges.
+    pub edges: Vec<IrEdge>,
+    /// Classified module-import observations (IMPORTS-EXTRACT-COMPLETENESS-1) — completeness evidence for
+    /// imports that are NOT graph edges (unresolved/package/dynamic) plus the resolved ones (for counts).
+    pub import_observations: Vec<ImportObservation>,
+}
+
+impl PartitionIr {
+    /// Create an empty IR for a partition.
+    pub fn new(partition: Partition) -> Self {
+        Self {
+            partition,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            import_observations: Vec::new(),
+        }
+    }
+
+    /// Find a node by canonical key.
+    pub fn node(&self, key: &CanonicalKey) -> Option<&IrNode> {
+        self.nodes.iter().find(|n| &n.key == key)
+    }
+
+    /// Edges whose source is `key` (outgoing).
+    pub fn outgoing(&self, key: &CanonicalKey) -> Vec<&IrEdge> {
+        self.edges.iter().filter(|e| &e.src == key).collect()
+    }
+
+    /// Edges whose target is `key` (incoming) — the basis for `callers`.
+    pub fn incoming(&self, key: &CanonicalKey) -> Vec<&IrEdge> {
+        self.edges.iter().filter(|e| &e.dst == key).collect()
+    }
+
+    /// Number of nodes whose identity was synthesized via the SCIP-descriptor
+    /// fallback (exit criteria 1-2: fallback must be surfaced, not silent).
+    pub fn fallback_node_count(&self) -> usize {
+        self.nodes
+            .iter()
+            .filter(|n| n.identity_source == IdentitySource::ScipSynthesizedFallback)
+            .count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prov() -> Provenance {
+        Provenance {
+            indexer: "scip-typescript".into(),
+            indexer_version: "0.4.0".into(),
+            scip_symbol_id: None,
+            build_inputs_hash: "h".into(),
+        }
+    }
+
+    fn part() -> Partition {
+        Partition {
+            id: PartitionId::new("p"),
+            kind: PartitionKind::TsPackage,
+            root: "/x".into(),
+            indexer: "scip-typescript".into(),
+            indexer_version: "0.4.0".into(),
+            build_inputs_hash: "h".into(),
+            package_name: None,
+            declared_dependencies: std::collections::BTreeSet::new(),
+            tsconfig_aliases: None,
+        }
+    }
+
+    #[test]
+    fn canonical_key_roundtrip() {
+        let k = CanonicalKey::from_existing("repo:src/a.ts#f:SYMBOL:FUNCTION");
+        assert_eq!(k.as_str(), "repo:src/a.ts#f:SYMBOL:FUNCTION");
+        assert_eq!(k.clone().into_string(), "repo:src/a.ts#f:SYMBOL:FUNCTION");
+    }
+
+    #[test]
+    fn fallback_count_is_surfaced() {
+        let mut ir = PartitionIr::new(part());
+        ir.nodes.push(IrNode {
+            key: CanonicalKey::from_existing("k1"),
+            subtype: "FUNCTION".into(),
+            name: "f".into(),
+            range: None,
+            partition_id: PartitionId::new("p"),
+            identity_source: IdentitySource::AstAdopted,
+            provenance: prov(),
+            attributes: None,
+        });
+        ir.nodes.push(IrNode {
+            key: CanonicalKey::from_existing("k2"),
+            subtype: "FUNCTION".into(),
+            name: "g".into(),
+            range: None,
+            partition_id: PartitionId::new("p"),
+            identity_source: IdentitySource::ScipSynthesizedFallback,
+            provenance: prov(),
+            attributes: None,
+        });
+        assert_eq!(ir.fallback_node_count(), 1);
+        assert!(ir.node(&CanonicalKey::from_existing("k1")).is_some());
+    }
+
+    #[test]
+    fn symbol_attributes_carry_on_node_and_subfields_are_independent() {
+        // IR-SYMBOL-ATTRIBUTES-1: an AST-adopted SYMBOL node carries a populated attribute block; the
+        // block's presence is one fact, but the subfields stay INDEPENDENTLY optional (DS1) — a
+        // Some-visibility + None-symbol_kind state is LEGAL, not impossible.
+        let full = IrNode {
+            key: CanonicalKey::from_existing("k"),
+            subtype: "Type".into(), // coarse SCIP descriptor suffix (distinct from symbol_kind)
+            name: "Widget".into(),
+            range: None,
+            partition_id: PartitionId::new("p"),
+            identity_source: IdentitySource::AstAdopted,
+            provenance: prov(),
+            attributes: Some(SymbolAttributes {
+                visibility: Some(IrVisibility::Export),
+                is_top_level: true,
+                symbol_kind: Some("CLASS".into()),
+            }),
+        };
+        let attrs = full
+            .attributes
+            .as_ref()
+            .expect("AST-adopted node carries attributes");
+        assert_eq!(attrs.visibility, Some(IrVisibility::Export));
+        assert!(attrs.is_top_level);
+        assert_eq!(attrs.symbol_kind.as_deref(), Some("CLASS"));
+
+        // Legal mixed state: visibility known, kind unknown (independent producer optionals).
+        let mixed = SymbolAttributes {
+            visibility: Some(IrVisibility::Private),
+            is_top_level: false,
+            symbol_kind: None,
+        };
+        assert_ne!(attrs, &mixed);
+
+        // Fallback / FILE nodes carry None (unknown), never an empty/zeroed block.
+        let fallback = IrNode {
+            attributes: None,
+            identity_source: IdentitySource::ScipSynthesizedFallback,
+            ..full.clone()
+        };
+        assert!(fallback.attributes.is_none());
+    }
+
+    #[test]
+    fn incoming_is_callers_basis() {
+        let mut ir = PartitionIr::new(part());
+        let caller = CanonicalKey::from_existing("caller");
+        let callee = CanonicalKey::from_existing("callee");
+        ir.edges.push(IrEdge {
+            src: caller.clone(),
+            dst: callee.clone(),
+            edge_type: EdgeType::Calls,
+            basis: EdgeBasis::SyntaxConfirmedCall,
+            provenance: prov(),
+            import: None,
+        });
+        let callers = ir.incoming(&callee);
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].src, caller);
+    }
+}

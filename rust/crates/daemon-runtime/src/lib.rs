@@ -46,11 +46,39 @@
 //! }
 //! ```
 
+pub mod callgraph_cert;
+pub mod check_coherence;
+pub mod cycle_completeness_audit;
+pub mod cycle_output;
 pub mod dispatch;
+pub mod explain_coherence;
+pub mod explain_lg_identity;
+pub mod explain_lg_serve;
+pub mod focus_resolution_cert;
 pub mod handlers;
+pub mod livegraph_feed;
+pub mod livegraph_refresh;
+pub mod livegraph_warm_cache;
+pub mod orient_coherence;
+pub mod orient_lg_decisions;
+pub mod orient_serve;
+pub mod partition_discovery;
 pub mod registry;
+pub mod resource_metrics;
 pub mod state;
+pub mod trust_coherence;
 pub mod util;
+
+// COHERENCE-LEAF-SERVE-IMPL-2: explain's consumer of the SHARED `OrientServeDecorator` + bounded cert
+// (the dispatch wiring lives in `dispatch::handle_explain`; these are its serve/no-eager-read/honest-bound/
+// RED-fallback proofs, kept out of the 500-line `orient_serve` per its "no behavior change" scope).
+#[cfg(test)]
+mod explain_serve_tests;
+
+// DOCTOR-RESOURCE-REPORT: proves `daemon_info` carries a real (non-zero) daemon RSS
+// + total `databases/` disk + repo count through the full dispatch path.
+#[cfg(test)]
+mod daemon_info_resource_tests;
 
 pub use dispatch::ServiceDispatcher;
 pub use registry::{RegistryEntry, RegistryError, RepoRegistry};
@@ -170,6 +198,23 @@ fn clear_stale_sandbox_state() {
     // No sandbox root on non-Unix platforms
 }
 
+/// PERF-INSTRUMENTATION-1: force the one-time `RMAP_PERF` read at startup and,
+/// when perf tracing is on, announce the active level once in the daemon log.
+///
+/// This is the daemon-startup init the slice asks for; placing it here (not in
+/// rmapd) keeps the rmapd binary "wiring only" per CLAUDE.md. The gate global
+/// itself lives in `repo-graph-repo-index` so both this crate's `perf_trace!`
+/// and repo-index's `perf_log!` share one process-global.
+fn log_perf_startup() {
+    let level = repo_graph_repo_index::perf::init();
+    if level > 0 {
+        eprintln!(
+            "info: perf tracing ENABLED (RMAP_PERF={}) — emitting [PERF] markers to stderr (daemon log)",
+            level
+        );
+    }
+}
+
 /// Run the daemon in socket mode (default).
 ///
 /// Binds a Unix domain socket, accepts connections, and processes requests.
@@ -183,6 +228,9 @@ fn clear_stale_sandbox_state() {
 /// Logs startup timing at INFO level (PERF-OBS-1).
 pub fn run_daemon() -> Result<(), String> {
     let startup_start = Instant::now();
+
+    // PERF-INSTRUMENTATION-1: read RMAP_PERF once and announce if enabled.
+    log_perf_startup();
 
     // Clear stale sandbox state before starting
     // Sandbox root is ephemeral; socket daemon is authoritative
@@ -238,6 +286,11 @@ pub fn run_daemon() -> Result<(), String> {
 /// declarations) will be blocked. Cache operations (index, refresh, queries)
 /// remain allowed.
 pub fn run_daemon_stdio() -> Result<(), String> {
+    // PERF-INSTRUMENTATION-1: read RMAP_PERF once and announce if enabled. The
+    // isolated dogfood drives this stdio path, so `[PERF]` markers it emits land
+    // in the per-call stderr capture.
+    log_perf_startup();
+
     // DaemonState is !Send/!Sync due to interior mutability. Arc is used for
     // shared ownership, not cross-thread access. The daemon is single-threaded.
     #[allow(clippy::arc_with_non_send_sync)]

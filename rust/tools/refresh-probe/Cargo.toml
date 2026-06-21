@@ -1,0 +1,23 @@
+# ── refresh-probe (research / probe tooling — NOT production) ──────
+# REFRESH-PROBE-1 (Stage B) probe: measures SCIP-backed per-partition refresh COST and workflow
+# shape (whole-partition reindex chain timing + the blocking-model contract). Decides the runtime
+# refresh model (A direct / B two-speed / C explicit). Reproducible research evidence, not
+# shipped. See docs/slices/refresh-probe-1.md.
+#
+# Increment 1: single-partition refresh-chain timing (p50/p95/min/max) + blocking-model demo +
+# A/B/C recommendation. Increment 2 (separate): cross-partition fanout + alias reconciliation
+# time + burst + amodx scale.
+[package]
+name = "refresh-probe"
+version = "0.1.0"
+edition = "2021"
+description = "REFRESH-PROBE-1 research/probe tooling (SCIP refresh cost + workflow shape). Non-production."
+publish = false
+
+[dependencies]
+repo-graph-scip-ingest = { path = "../../crates/repo-graph-scip-ingest" }
+repo-graph-ir = { path = "../../crates/repo-graph-ir" }
+# Increment 2 reuses the XPART-PROVE-1B export-surface reconciliation engine to time T_alias on
+# the cross-partition fanout — the SAME logic, not a fork.
+xpart-probe = { path = "../xpart-probe" }
+scip = "0.7.1"

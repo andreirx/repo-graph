@@ -195,6 +195,8 @@ impl ExtractorPort for RustExtractor {
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
             resolved_callsites: Vec::new(), // Fork-1 posture: empty
+            // IMPORTS-EXTRACT-COMPLETENESS-1: TS-only this slice; non-TS extractors observe no imports.
+            import_observations: Vec::new(),
         })
     }
 }

@@ -1,0 +1,26 @@
+# ── repo-graph-import-resolver ──────────────────────────────────────
+# Pure cross-partition import resolver (IMPORTS-XPART-RESOLUTION-1).
+#
+# Given a global FILE inventory (repo-relative path -> FILE node key) and import candidates
+# (source FILE key + raw specifier), resolves RELATIVE specifiers to a target FILE via
+# extension/index rules, deterministically. Output is in-memory edge CANDIDATES — the caller
+# (a later wiring slice) inserts them into the LiveGraph; they are NEVER persisted per-partition.
+#
+# Design principles:
+#   - Pure: NO daemon, NO storage, NO scip, NO ts-extractor, NO filesystem.
+#   - Inputs are plain strings (DTO-only). The single domain dep is `repo-graph-ir` for the
+#     output `EdgeBasis::AstImportFileInventoryResolved`.
+#   - Deterministic; ambiguity (multiple candidates) is reported, never silently picked.
+[package]
+name = "repo-graph-import-resolver"
+version = "0.1.0"
+edition = "2021"
+description = "Pure cross-partition TS import resolver for repo-graph (IMPORTS-XPART-RESOLUTION-1). Relative + extension/index resolution over a global FILE inventory; in-memory edge candidates, never persisted."
+license = "MIT"
+publish = false
+
+[dependencies]
+repo-graph-ir = { path = "../repo-graph-ir" }
+
+[dev-dependencies]
+# None — unit tests use standard assertions.

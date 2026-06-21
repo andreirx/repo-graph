@@ -16,6 +16,11 @@ use crate::platform::{
     get_adapter, granular_socket_probes, socket_resolution_probes, PlatformAdapter, ProbeResult,
 };
 
+/// `daemon_info`-derived probes (authority policy + daemon RSS + total storage).
+/// Extracted into a child module to keep this file under the 500-line structural
+/// guardrail. `format_size` (defined below) is shared into it via `super::`.
+mod daemon_info;
+
 /// Doctor output for JSON mode.
 #[derive(Debug, Serialize)]
 struct DoctorOutput {
@@ -111,10 +116,9 @@ fn execute_doctor() -> (DoctorOutput, bool) {
         probes.push(storage_probe);
     }
 
-    // Add state root mode probe (STATE-ROOT-SEPARATION-1)
-    if let Some(state_root_probe) = state_root_mode_probe() {
-        probes.push(state_root_probe);
-    }
+    // daemon_info-derived probes: authority policy (STATE-ROOT-SEPARATION-1) plus
+    // daemon memory + total storage (DOCTOR-RESOURCE-REPORT), from one round-trip.
+    probes.extend(daemon_info::probes());
 
     let passed = probes.iter().filter(|p| p.passed).count();
     let failed = probes.len() - passed;
@@ -175,7 +179,9 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         "path": cwd.to_string_lossy()
     });
 
-    let response = match client.request("perf", Some(params)) {
+    // DEV-INSTALL-DOCTOR-WAIT-1: use the cheap `storage_health` summary, NOT the heavy `perf`
+    // diagnostic (which runs a per-table COUNT(*) scan — ~80-100s on large repos).
+    let response = match client.request("storage_health", Some(params)) {
         Ok(r) => r,
         Err(e) => {
             let msg = format!("{}", e);
@@ -198,20 +204,19 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         }
     };
 
-    // Parse response
+    // Parse response (DEV-INSTALL-DOCTOR-WAIT-1: flat `storage_health` shape).
     let db_size = response
         .get("db_size_bytes")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
-    let retention = response.get("retention");
-    let snapshot_count = retention
-        .and_then(|r| r.get("total_snapshots"))
+    let snapshot_count = response
+        .get("total_snapshots")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
 
     // CACHE-SEMANTICS-1: prunable snapshot count
-    let prunable_count = retention
-        .and_then(|r| r.get("prunable"))
+    let prunable_count = response
+        .get("prunable_snapshots")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
 
@@ -233,61 +238,6 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         message,
         details: None,
     })
-}
-
-/// Query daemon for authority write policy.
-///
-/// STATE-ROOT-SEPARATION-1: Reports whether authority writes (baselines, aliases,
-/// declarations) are permitted in the current daemon execution mode.
-///
-/// The key diagnostic question: "Can I write authority data from this context?"
-fn state_root_mode_probe() -> Option<ProbeResult> {
-    let mut client = match DaemonClient::new() {
-        Ok(c) => c,
-        Err(e) => {
-            return Some(ProbeResult {
-                name: "authority_policy".to_string(),
-                passed: false,
-                message: "daemon unavailable".to_string(),
-                details: Some(format!("{}", e)),
-            });
-        }
-    };
-
-    let response = match client.request("daemon_info", None) {
-        Ok(r) => r,
-        Err(e) => {
-            return Some(ProbeResult {
-                name: "authority_policy".to_string(),
-                passed: false,
-                message: "query failed".to_string(),
-                details: Some(format!("{}", e)),
-            });
-        }
-    };
-
-    let authority_writes = response
-        .get("authority_writes_allowed")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    // In sandbox mode, authority writes are blocked — this is expected behavior, not a failure
-    // The probe always passes; it's informational
-    if authority_writes {
-        Some(ProbeResult {
-            name: "authority_policy".to_string(),
-            passed: true,
-            message: "baselines, aliases, declarations: allowed".to_string(),
-            details: None,
-        })
-    } else {
-        Some(ProbeResult {
-            name: "authority_policy".to_string(),
-            passed: true, // Not a failure - sandbox mode is valid operation
-            message: "baselines, aliases, declarations: blocked (sandbox mode)".to_string(),
-            details: Some("authority writes require socket daemon".to_string()),
-        })
-    }
 }
 
 /// Format size in human-readable form.
@@ -415,6 +365,29 @@ fn print_human_output(output: &DoctorOutput) {
         println!();
     }
 
+    // Resources (DOCTOR-RESOURCE-REPORT): daemon RAM (RSS) + total on-disk storage.
+    // `daemon_memory` and `total_storage` belong to no other group, so this section is
+    // the only place they surface in human output. The probe `name` is machine-readable
+    // snake_case (the JSON contract); the human line maps it to a friendly label.
+    let resource_probes: Vec<_> = output
+        .probes
+        .iter()
+        .filter(|p| matches!(p.name.as_str(), "daemon_memory" | "total_storage"))
+        .collect();
+
+    if !resource_probes.is_empty() {
+        println!("Resources:");
+        for probe in &resource_probes {
+            let label = match probe.name.as_str() {
+                "daemon_memory" => "daemon memory",
+                "total_storage" => "total storage",
+                other => other,
+            };
+            print_probe_labeled(probe, label);
+        }
+        println!();
+    }
+
     // Summary
     if output.summary.healthy {
         println!(
@@ -430,8 +403,15 @@ fn print_human_output(output: &DoctorOutput) {
 }
 
 fn print_probe(probe: &ProbeOutput) {
+    print_probe_labeled(probe, &probe.name);
+}
+
+/// Render a probe with an explicit display label, so the human line can differ from the
+/// machine-readable `name`. DOCTOR-RESOURCE-REPORT uses this for the Resources section
+/// (JSON `daemon_memory` → human "daemon memory").
+fn print_probe_labeled(probe: &ProbeOutput, label: &str) {
     let status = if probe.passed { "ok" } else { "FAIL" };
-    println!("  [{}] {}: {}", status, probe.name, probe.message);
+    println!("  [{}] {}: {}", status, label, probe.message);
     if let Some(ref details) = probe.details {
         println!("        {}", details);
     }

@@ -1,0 +1,16 @@
+# ── cjoin-probe (research / probe tooling — NOT production) ─────────
+# CJOIN-PROVE-1 (Stage B, ST1) measurement probe: C/C++ AST<->SCIP body-bearing-callable
+# value-fact join on leveldb. Reproducible research evidence, not shipped. Lives under
+# rust/tools (not rust/crates) to stay out of the production crate namespace; reusable by
+# the planned CJOIN-PROVE-2 macro-heavy probe. See docs/slices/cjoin-prove-1.md.
+[package]
+name = "cjoin-probe"
+version = "0.1.0"
+edition = "2021"
+description = "CJOIN-PROVE-1 research/probe tooling (C/C++ AST<->SCIP join). Non-production."
+publish = false
+
+[dependencies]
+repo-graph-scip-ingest = { path = "../../crates/repo-graph-scip-ingest" }
+repo-graph-cpp-extractor = { path = "../../crates/cpp-extractor" }
+repo-graph-indexer = { path = "../../crates/indexer" }
