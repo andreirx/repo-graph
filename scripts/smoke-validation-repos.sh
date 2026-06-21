@@ -66,6 +66,8 @@ INTERNAL_NAMES=(
     "glamCRM"
     "hexmanos"
     "zap-engine"
+    "zap-squad"
+    "FRAKTAG"
 )
 INTERNAL_PATHS=(
     "$REPO_ROOT"
@@ -73,6 +75,8 @@ INTERNAL_PATHS=(
     "$PARENT_DIR/glamCRM"
     "$PARENT_DIR/hexmanos"
     "$PARENT_DIR/zap-engine"
+    "$PARENT_DIR/zap-squad"
+    "$PARENT_DIR/FRAKTAG"
 )
 
 usage() {
