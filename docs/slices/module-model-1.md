@@ -463,3 +463,32 @@ the isolated dogfood — never index into the operator's real registry):
 - stats fan-in/out reliability marker (TECH-DEBT #6) — separate slice.
 - Any production code in THIS slice (this is design only; a later IMPL executes it).
 - ROADMAP.md / TECH-DEBT.md / CURRENT_SLICE.md edits (out of scope per the selection packet).
+
+---
+
+## 12. Ratification (operator — 2026-06-23)
+
+D1–D6 ratified. The §7 matrices are preserved as the audit trail; this section is the
+binding outcome the IMPL executes (it does NOT re-open these).
+
+- **D1 = A3** — two self-labelled notions (package/directory groups vs declared/inferred
+  modules). As recommended.
+- **D2 = (i)** — orient reads the directory roll-up; no module-identity change. As recommended.
+- **D3 = include** — the umbrella-chain descent ships as a bounded second commit. As recommended.
+- **D4 = merge** — main+test by logical package, show test count. As recommended.
+- **D5 — RATIFIED WITH CORRECTION (the §7 D5 recommendation is SUPERSEDED).** The
+  agent-facing CLI/JSON output is **USEFUL INFORMATION — the product — not a frozen API.**
+  Shape it for maximum usefulness, density, and honesty, and **break from the past output
+  shape when the past was not ideal**; backward-compat does not veto a better output. The
+  only "contract" that constrains is an **internal seam between modules that work together**
+  — keep that coherent as ordinary internal design. (The one genuine *output* contract is
+  the governance/gate surface — verdict states + exit codes, which CI depends on and the
+  VISION freezes — and it is not touched by this discovery-output change.) The IMPL picks
+  the BEST orient/stats output shape and updates our own consumers (host hook shims,
+  AGENTS.md/CLAUDE.md, any doc that describes the shape) to match — it is NOT constrained
+  to additive-only.
+- **D6 = one slice** (D1+D2+D4; D3 = optional second commit) — RATIFIED, rationale
+  CORRECTED. Not "don't ship a half-coherent state" (a done slice is not shipped — gates +
+  the release script sit between slice-done and a release). The reason is **minimize
+  leftover tech debt + keep the surface coherent at each slice boundary**: relabelling
+  stats without fixing orient would leave the tree half-migrated.
