@@ -218,6 +218,24 @@ pub struct AgentModuleSize {
     pub file_count: u64,
 }
 
+/// One leaf directory that owns files — a row of the directory TOPOLOGY
+/// (MODULE-MODEL-1 D2(i)).
+///
+/// `path` is the directory's `qualified_name` (a `nodes` kind=MODULE node);
+/// `file_count` is its OWNS-edge count. This is a Layer-0/1 EXTRACTED fact —
+/// the SAME physical per-directory facts `stats`' `compute_module_stats`
+/// enumerates — and is DISTINCT from the declared/inferred `module_candidates`
+/// surface (`AgentModuleSize`). The `orient` headline folds these into logical
+/// package groups via `package_groups::rollup_package_groups`; the two notions
+/// are then separately labelled, never collapsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDirectoryGroup {
+    /// The directory's repo-relative path (e.g. `src/main/java/org/app/owner`).
+    pub path: String,
+    /// Number of files this directory directly owns in the snapshot.
+    pub file_count: u64,
+}
+
 // ── Complexity measurement ──────────────────────────────────────
 
 /// A symbol with high cyclomatic complexity.
@@ -762,6 +780,28 @@ pub trait AgentStorageRead {
         _snapshot_uid: &str,
         _limit: usize,
     ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
+        Ok(Vec::new())
+    }
+
+    /// List leaf directories that own ≥1 file, with their owned-file counts —
+    /// the directory TOPOLOGY (`nodes` kind=MODULE ⋈ OWNS) the `orient`
+    /// structure headline folds into package groups (MODULE-MODEL-1 D2(i)).
+    ///
+    /// A Layer-0/1 EXTRACTED fact, DISTINCT from the declared/inferred
+    /// `module_candidates` surface (`list_module_sizes` / `get_module_summary`):
+    /// it is present whenever files were indexed (the indexer materializes a
+    /// MODULE node + OWNS edges per directory), even on repos where
+    /// `module_candidates` is empty. Order is by path (a total order); the
+    /// caller folds + re-sorts via `rollup_package_groups`. This is the SAME
+    /// per-directory set `stats` reads through `compute_module_stats`, so the
+    /// two commands' topology numbers cannot diverge.
+    ///
+    /// Default impl returns empty so the many `AgentStorageRead` test fakes need
+    /// no stub; the real adapter overrides it.
+    fn list_directory_groups(
+        &self,
+        _snapshot_uid: &str,
+    ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
         Ok(Vec::new())
     }
 

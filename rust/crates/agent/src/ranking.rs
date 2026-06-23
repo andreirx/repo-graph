@@ -193,6 +193,7 @@ mod tests {
                 discovered_module_count: None,
                 module_kinds: None,
                 top_modules: Vec::new(),
+                package_groups: Vec::new(),
             }),
             Signal::trust_low_resolution(TrustLowResolutionEvidence {
                 resolution_rate: 0.5,

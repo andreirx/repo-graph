@@ -25,11 +25,12 @@
 
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
-    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSize,
-    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
-    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
-    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry,
+    AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry,
+    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
+    AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
+    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
+    EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
 use repo_graph_trust::types::{
@@ -1325,6 +1326,16 @@ impl AgentStorageRead for StorageConnection {
         // bind-safe LIMIT that lets `--full` carry the COMPLETE module list)
         // lives in the extracted `agent_orient_reads` discovery module.
         crate::agent_orient_reads::module_sizes(self.connection(), snapshot_uid, limit)
+    }
+
+    fn list_directory_groups(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
+        // MODULE-MODEL-1 D2(i): the directory TOPOLOGY read backing the package
+        // groups. Body lives beside `module_sizes` in the `agent_orient_reads`
+        // discovery module (same `>500`-line guardrail rationale).
+        crate::agent_orient_reads::directory_groups(self.connection(), snapshot_uid)
     }
 
     fn get_boundary_links_freshness(

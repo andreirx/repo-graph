@@ -9,10 +9,11 @@
 
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
-    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSize, AgentModuleSummary,
-    AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
+    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry,
+    AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSize,
+    AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot,
+    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentTrustSummary,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -339,6 +340,18 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         limit: usize,
     ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
         self.inner.list_module_sizes(snapshot_uid, limit)
+    }
+
+    // MODULE-MODEL-1 D2(i): the directory-topology read backing orient's package
+    // groups. Like get_module_summary / list_module_sizes above it is a (c)-class
+    // SQLite read (per-directory `nodes`+OWNS, no LiveGraph home) — DELEGATE to the
+    // inner port. Without this the decorator would fall back to the trait's empty
+    // default and the LiveGraph-served path would lose its package groups.
+    fn list_directory_groups(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
+        self.inner.list_directory_groups(snapshot_uid)
     }
 
     fn get_boundary_links_freshness(

@@ -347,6 +347,14 @@ impl OrientResponse {
 
         // ── DEPTH: full detail (large / --full) ────────────────────
         if depth.shows_full_detail() {
+            // Package groups first (the Layer-0/1 directory TOPOLOGY the headline
+            // leads with), then the declared/inferred module_candidates breakdown
+            // — two separately-labelled notions (MODULE-MODEL-1).
+            let pkg_groups = self.package_groups_section();
+            if !pkg_groups.is_empty() {
+                out.push('\n');
+                out.push_str(&pkg_groups);
+            }
             let breakdown = self.module_breakdown_section();
             if !breakdown.is_empty() {
                 out.push('\n');

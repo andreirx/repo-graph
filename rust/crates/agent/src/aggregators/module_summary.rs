@@ -21,9 +21,41 @@
 use super::AggregatorOutput;
 use crate::dto::budget::Budget;
 use crate::dto::limit::{DegradationInfo, Limit, LimitCode};
-use crate::dto::signal::{ModuleKindBreakdown, ModuleSizeEvidence, ModuleSummaryEvidence, Signal};
+use crate::dto::signal::{
+    ModuleKindBreakdown, ModuleSizeEvidence, ModuleSummaryEvidence, PackageGroupEvidence, Signal,
+};
 use crate::errors::AgentStorageError;
+use crate::package_groups::{rollup_package_groups, DirGroup};
 use crate::storage_port::AgentStorageRead;
+
+/// Read the directory TOPOLOGY (`nodes` kind=MODULE ⋈ OWNS leaf dirs) and fold
+/// it into the logical package groups the dense `orient` headline NAMES
+/// (MODULE-MODEL-1 D2(i)/D4).
+///
+/// Independent of `module_candidates`: present whenever files were indexed, so
+/// the structure is named even on the Rust-indexer path where
+/// `get_module_summary` returns `None`. Empty only when no directory owns files.
+fn read_package_groups<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+) -> Result<Vec<PackageGroupEvidence>, AgentStorageError> {
+    let dirs: Vec<DirGroup> = storage
+        .list_directory_groups(snapshot_uid)?
+        .into_iter()
+        .map(|g| DirGroup {
+            path: g.path,
+            file_count: g.file_count,
+        })
+        .collect();
+    Ok(rollup_package_groups(&dirs)
+        .into_iter()
+        .map(|g| PackageGroupEvidence {
+            name: g.name,
+            file_count: g.file_count,
+            test_file_count: g.test_file_count,
+        })
+        .collect())
+}
 
 /// Create the standard MODULE_DATA_UNAVAILABLE limit with degradation info.
 ///
@@ -47,7 +79,14 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     // Always get raw snapshot totals.
     let summary = storage.compute_repo_summary(snapshot_uid)?;
 
-    // Check for module discovery data.
+    // Directory/package TOPOLOGY (Layer 0/1) — the structure the headline NAMES.
+    // Read independently of module_candidates so the named structure survives on
+    // repos where get_module_summary returns None (Rust-indexer path). Only one
+    // match arm runs, so moving it into each is fine.
+    let package_groups = read_package_groups(storage, snapshot_uid)?;
+
+    // Check for module discovery data (the declared/inferred `module_candidates`
+    // notion — a SEPARATE, labelled count, never collapsed into the topology).
     let module_summary = storage.get_module_summary(snapshot_uid)?;
 
     let (evidence, limits) = match module_summary {
@@ -79,11 +118,14 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                     inferred: ms.inferred_count,
                 }),
                 top_modules,
+                package_groups,
             };
             (evidence, Vec::new())
         }
         None => {
-            // Fallback: no module candidates, emit limit.
+            // Fallback: no module candidates, emit limit. The package GROUPS
+            // (directory topology) are still surfaced — they do not depend on
+            // module_candidates — so the structure is named even here.
             let evidence = ModuleSummaryEvidence {
                 file_count: summary.file_count,
                 symbol_count: summary.symbol_count,
@@ -91,6 +133,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 discovered_module_count: None,
                 module_kinds: None,
                 top_modules: Vec::new(),
+                package_groups,
             };
             let limits = vec![module_data_unavailable_limit()];
             (evidence, limits)
@@ -117,7 +160,8 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
 
     // File-level summary does not include module discovery data.
     // Module ownership is per-repo, not per-file. Emit the limit
-    // to indicate this is a fallback path.
+    // to indicate this is a fallback path. Package groups are a repo-wide
+    // topology, not file-scoped → empty here.
     let evidence = ModuleSummaryEvidence {
         file_count: summary.file_count,
         symbol_count: summary.symbol_count,
@@ -125,6 +169,7 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
         discovered_module_count: None,
         module_kinds: None,
         top_modules: Vec::new(),
+        package_groups: Vec::new(),
     };
 
     Ok(AggregatorOutput {
@@ -147,7 +192,8 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
     let summary = storage.compute_path_summary(snapshot_uid, path_prefix)?;
 
     // Path-level summary does not include module discovery data.
-    // Module ownership is per-repo. Emit the limit.
+    // Module ownership is per-repo. Emit the limit. Package groups are a
+    // repo-wide topology, not path-scoped → empty here.
     let evidence = ModuleSummaryEvidence {
         file_count: summary.file_count,
         symbol_count: summary.symbol_count,
@@ -155,6 +201,7 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
         discovered_module_count: None,
         module_kinds: None,
         top_modules: Vec::new(),
+        package_groups: Vec::new(),
     };
 
     Ok(AggregatorOutput {

@@ -64,6 +64,7 @@ pub mod errors;
 pub mod explain;
 pub mod ordering;
 pub mod orient;
+pub mod package_groups;
 pub mod ranking;
 pub mod storage_port;
 
@@ -121,6 +122,7 @@ pub use dto::{
         ModuleCountEvidence,
         ModuleKindBreakdown,
         ModuleSummaryEvidence,
+        PackageGroupEvidence,
         Severity,
         Signal,
         SignalCategory,
@@ -137,11 +139,12 @@ pub use dto::{
 pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
 pub use explain::{explain_to_coherent, run_explain, ExplainLgDecisions};
 pub use orient::orient;
+pub use package_groups::{rollup_package_groups, DirGroup, PackageGroup};
 pub use storage_port::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
-    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSize,
-    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
-    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageRead,
-    AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry,
+    AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry,
+    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
+    AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
+    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };

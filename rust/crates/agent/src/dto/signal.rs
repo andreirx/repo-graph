@@ -546,6 +546,26 @@ pub struct ModuleSizeEvidence {
     pub file_count: u64,
 }
 
+/// One logical package/directory group for the `orient` STRUCTURE headline
+/// (MODULE-MODEL-1 D2(i)/D4).
+///
+/// A Layer-0/1 directory-topology fact: a `src/main` + `src/test` merge of a
+/// logical package, named with the common source-root prefix collapsed
+/// (`owner`, not `src/main/java/org/.../owner`). DISTINCT from the
+/// declared/inferred `module_candidates` notion the sibling
+/// `discovered_module_count` reports — the two are separately labelled, never
+/// collapsed (the cross-command coherence fix). Produced by
+/// `package_groups::rollup_package_groups`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PackageGroupEvidence {
+    /// Reader-facing package name (prefix-collapsed), e.g. `owner`.
+    pub name: String,
+    /// Files owned across `src/main` + `src/test`.
+    pub file_count: u64,
+    /// How many of those are test files.
+    pub test_file_count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleSummaryEvidence {
     // ── Snapshot totals (always present) ──────────────────────────
@@ -562,13 +582,26 @@ pub struct ModuleSummaryEvidence {
     /// `None` when module discovery data is unavailable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module_kinds: Option<ModuleKindBreakdown>,
-    /// Top modules by size, NAMED — the data the dense structure
-    /// headline leads with (ORIENT-DENSITY-1). Additive, within the
-    /// existing signal-evidence payload (NO `CoherenceEnvelope`
-    /// shape change). Empty (and omitted from JSON) when module
-    /// discovery data is unavailable.
+    /// Top modules by size, NAMED — the declared/inferred `module_candidates`
+    /// breakdown (ORIENT-DENSITY-1). Additive, within the existing
+    /// signal-evidence payload (NO `CoherenceEnvelope` shape change). Empty
+    /// (and omitted from JSON) when module discovery data is unavailable.
+    ///
+    /// MODULE-MODEL-1: this is now the SECONDARY, separately-labelled
+    /// "declared/inferred modules" notion. The PRIMARY structure the headline
+    /// leads with is `package_groups` (directory topology) below.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_modules: Vec<ModuleSizeEvidence>,
+
+    /// Directory/package groups (Layer 0/1 TOPOLOGY) — the structure the dense
+    /// `orient` headline NAMES (MODULE-MODEL-1 D2(i)/D4). Present whenever files
+    /// were indexed (independent of `module_candidates`); empty (and omitted)
+    /// only when no directory owns files. DISTINCT from `top_modules` /
+    /// `discovered_module_count` (the declared/inferred module notion) — the two
+    /// are separately labelled, never collapsed. Additive within the existing
+    /// evidence payload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_groups: Vec<PackageGroupEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1721,6 +1754,7 @@ mod tests {
             discovered_module_count: None,
             module_kinds: None,
             top_modules: Vec::new(),
+            package_groups: Vec::new(),
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert_eq!(s.category, SignalCategory::Informational);
@@ -1751,6 +1785,7 @@ mod tests {
                     file_count: 12,
                 },
             ],
+            package_groups: Vec::new(),
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert!(s.summary.contains("50 files"));

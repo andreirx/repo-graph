@@ -40,7 +40,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Confidence score for inferred modules.
 pub const INFERRED_MODULE_CONFIDENCE: f64 = 0.7;
@@ -204,6 +204,10 @@ pub fn detect_inferred_modules(
     let mut umbrella_children: HashMap<String, DirectoryStats> = HashMap::new();
     // Track direct files in umbrella (not in any child).
     let mut umbrella_direct_counts: HashMap<String, usize> = HashMap::new();
+    // MODULE-MODEL-1 D3: per-umbrella source-file inventory (path RELATIVE to the
+    // top-level + is_test + language), used to descend single-child chains to the
+    // first ≥2-sibling fan-out when the fixed-depth-2 split above does not fire.
+    let mut umbrella_files: HashMap<String, Vec<DescentFile>> = HashMap::new();
 
     for path in file_paths {
         // Extract filename for build file detection.
@@ -270,6 +274,18 @@ pub fn detect_inferred_modules(
 
                 // Track umbrella children stats (Phase 3.2).
                 if is_umbrella_candidate(dir) {
+                    // MODULE-MODEL-1 D3: record the file (path relative to the
+                    // top-level) for possible single-child-chain descent.
+                    if parts.len() >= 2 {
+                        umbrella_files
+                            .entry(dir.clone())
+                            .or_default()
+                            .push(DescentFile {
+                                rel: parts[1..].join("/"),
+                                is_test,
+                                language: language.map(str::to_string),
+                            });
+                    }
                     if parts.len() == 2 {
                         // Direct file in umbrella (e.g., src/main.c)
                         if !is_test {
@@ -393,6 +409,21 @@ pub fn detect_inferred_modules(
                     }
                     continue; // Skip creating parent module
                 }
+
+                // MODULE-MODEL-1 D3: the fixed-depth-2 split did not fire. Try
+                // descending a single-(source-)child chain to the first
+                // ≥2-sibling fan-out — manifest-less nested layouts like
+                // `src/main/java/org/app/{a,b,c}` that depth-2 collapses into one
+                // `src` module. Reuses the existing thresholds; returns None (→
+                // single top-level module, unchanged) when no qualifying fan-out
+                // exists (e.g. nginx's small `src/{core,http,event}`).
+                if let Some(descended) = umbrella_files
+                    .get(&dir)
+                    .and_then(|files| descend_umbrella_chain(&dir, files))
+                {
+                    result.modules.extend(descended);
+                    continue;
+                }
             }
 
             // Normal case: create module for the top-level directory.
@@ -464,6 +495,117 @@ struct DirectoryStats {
     build_files: Vec<String>,
     /// Language counts by language name (Phase 3.2).
     language_counts: HashMap<String, usize>,
+}
+
+/// A source/test file under an umbrella top-level directory, recorded for
+/// single-child-chain descent (MODULE-MODEL-1 D3). `rel` is the path RELATIVE to
+/// the umbrella top-level (e.g. `main/java/org/app/a/F.java` for top `src`).
+struct DescentFile {
+    rel: String,
+    is_test: bool,
+    language: Option<String>,
+}
+
+/// MODULE-MODEL-1 D3: descend a single-source-child directory chain under an
+/// umbrella top-level to the FIRST directory that fans out into ≥2 sibling
+/// children with source files, and split THERE into the qualifying children —
+/// instead of collapsing a deep chain like `src/main/java/org/app/{a,b,c}` (no
+/// manifest) into one `src` module.
+///
+/// Returns the child modules to emit, or `None` to keep the single top-level
+/// module: when no source children exist, OR when the fan-out exists but no
+/// child has ≥5 source files (e.g. nginx's small `src/{core,http,event}`),
+/// preserving the existing single-`src` behavior. Reuses the existing umbrella
+/// thresholds (≥2 qualifying children, ≥5 source files/child, ≤5 direct source
+/// files at the fan-out). Test-only subtrees (e.g. a sibling `src/test`) are not
+/// part of the source chain, so a Maven-style `src/{main,test}` layout still
+/// descends `main`'s package chain.
+///
+/// Identity note (§8): on affected manifest-less nested repos this changes
+/// inferred-module directory paths/keys — intentional heuristic evolution, not a
+/// breaking change. Inferred modules are orientation-grade (confidence 0.7),
+/// recomputed per snapshot; refresh recomputes, no migration needed.
+fn descend_umbrella_chain(top: &str, files: &[DescentFile]) -> Option<Vec<InferredModule>> {
+    // Segments WITHIN `top` we have descended through so far (empty = top root).
+    let mut rel_prefix: Vec<String> = Vec::new();
+    loop {
+        let depth = rel_prefix.len();
+        // Group files at this level by their immediate child segment; a file
+        // whose directory IS the current prefix is "direct".
+        let mut children: BTreeMap<String, DirectoryStats> = BTreeMap::new();
+        let mut direct_source = 0usize;
+        for f in files {
+            let segs: Vec<&str> = f.rel.split('/').collect();
+            // segs = [dir..., filename]; the file's directory is segs[..len-1].
+            let dir_segs = &segs[..segs.len().saturating_sub(1)];
+            if dir_segs.len() < depth {
+                continue; // not deep enough to live under the current prefix
+            }
+            if !rel_prefix.iter().zip(dir_segs.iter()).all(|(a, b)| a == b) {
+                continue; // diverges from the descended prefix
+            }
+            if dir_segs.len() == depth {
+                if !f.is_test {
+                    direct_source += 1; // file sits directly in the prefix dir
+                }
+                continue;
+            }
+            let entry = children.entry(dir_segs[depth].to_string()).or_default();
+            if f.is_test {
+                entry.test_file_count += 1;
+            } else {
+                entry.source_file_count += 1;
+                if let Some(lang) = &f.language {
+                    *entry.language_counts.entry(lang.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+
+        // Children that contain source files define the chain shape.
+        let source_children: Vec<String> = children
+            .iter()
+            .filter(|(_, s)| s.source_file_count > 0)
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        match source_children.len() {
+            0 => return None, // no source below — keep the single top-level module
+            1 => {
+                rel_prefix.push(source_children.into_iter().next().unwrap());
+                continue; // single source child — descend the chain
+            }
+            _ => {
+                // ≥2 source children — the fan-out. Split iff it qualifies.
+                let qualifying: Vec<(&String, &DirectoryStats)> = children
+                    .iter()
+                    .filter(|(_, s)| s.source_file_count >= UMBRELLA_MIN_FILES_PER_CHILD)
+                    .collect();
+                if qualifying.len() < UMBRELLA_MIN_CHILDREN
+                    || direct_source > UMBRELLA_MAX_PARENT_DIRECT_FILES
+                {
+                    return None;
+                }
+                let base = if rel_prefix.is_empty() {
+                    top.to_string()
+                } else {
+                    format!("{}/{}", top, rel_prefix.join("/"))
+                };
+                let modules = qualifying
+                    .into_iter()
+                    .map(|(child, s)| InferredModule {
+                        directory_path: format!("{base}/{child}"),
+                        display_name: child.clone(),
+                        source_file_count: s.source_file_count,
+                        test_file_count: s.test_file_count,
+                        is_fallback_root: false,
+                        build_files_present: Vec::new(),
+                        dominant_language: compute_dominant_language(&s.language_counts),
+                    })
+                    .collect();
+                return Some(modules);
+            }
+        }
+    }
 }
 
 // ── Build file detection (Phase 3.2) ─────────────────────────────────
@@ -1564,6 +1706,79 @@ mod tests {
         // Should NOT split (only 1 qualifying child, threshold is 2).
         assert_eq!(result.modules.len(), 1);
         assert_eq!(result.modules[0].directory_path, "src");
+    }
+
+    #[test]
+    fn descend_single_child_chain_to_fanout() {
+        // MODULE-MODEL-1 D3: a manifest-less deep package chain
+        // `src/main/java/org/app/{service,model}` is a single-source-child chain
+        // (src→main→java→org→app) that fixed-depth-2 collapses into one `src`
+        // module. Descent walks the chain to the `app` fan-out and splits into
+        // the package modules.
+        let mut files = vec![];
+        for i in 0..6 {
+            files.push(format!("src/main/java/org/app/service/Svc{i}.java"));
+        }
+        for i in 0..5 {
+            files.push(format!("src/main/java/org/app/model/Mdl{i}.java"));
+        }
+
+        let result = detect_inferred_modules(&files, "java-app");
+
+        let paths: HashSet<&str> = result
+            .modules
+            .iter()
+            .map(|m| m.directory_path.as_str())
+            .collect();
+        assert!(
+            !paths.contains("src"),
+            "must NOT collapse the chain to a single `src`: {paths:?}"
+        );
+        assert!(
+            paths.contains("src/main/java/org/app/service"),
+            "descends to the fan-out: {paths:?}"
+        );
+        assert!(
+            paths.contains("src/main/java/org/app/model"),
+            "descends to the fan-out: {paths:?}"
+        );
+        assert_eq!(result.modules.len(), 2, "{paths:?}");
+        // The split children carry their own subtree counts + language.
+        let service = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "src/main/java/org/app/service")
+            .unwrap();
+        assert_eq!(service.source_file_count, 6);
+        assert_eq!(service.display_name, "service");
+        assert_eq!(service.dominant_language.as_deref(), Some("java"));
+    }
+
+    #[test]
+    fn descend_follows_source_chain_past_test_sibling() {
+        // A Maven-style layout: the SOURCE package chain lives under `src/main`;
+        // `src/test` is a test-only sibling. Descent follows the source chain
+        // (`main`) and is not blocked by the test sibling at the `src` level.
+        let mut files = vec![];
+        for i in 0..6 {
+            files.push(format!("src/main/java/org/app/service/Svc{i}.java"));
+        }
+        for i in 0..5 {
+            files.push(format!("src/main/java/org/app/model/Mdl{i}.java"));
+        }
+        for i in 0..3 {
+            files.push(format!("src/test/java/org/app/service/SvcTest{i}.java"));
+        }
+
+        let result = detect_inferred_modules(&files, "java-app");
+        let paths: HashSet<&str> = result
+            .modules
+            .iter()
+            .map(|m| m.directory_path.as_str())
+            .collect();
+        assert!(!paths.contains("src"), "{paths:?}");
+        assert!(paths.contains("src/main/java/org/app/service"), "{paths:?}");
+        assert!(paths.contains("src/main/java/org/app/model"), "{paths:?}");
     }
 
     #[test]

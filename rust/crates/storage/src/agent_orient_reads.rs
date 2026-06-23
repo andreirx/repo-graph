@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use repo_graph_agent::{AgentDocEntry, AgentModuleSize, AgentStorageError};
+use repo_graph_agent::{AgentDirectoryGroup, AgentDocEntry, AgentModuleSize, AgentStorageError};
 use rusqlite::Connection;
 
 use crate::agent_impl::map_err;
@@ -132,6 +132,54 @@ pub(crate) fn module_sizes(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(map_err("list_module_sizes"))
+}
+
+/// List leaf directories that own ≥1 file, with their owned-file counts
+/// (MODULE-MODEL-1 D2(i)).
+///
+/// Reads the per-directory TOPOLOGY — the indexer materializes a `nodes`
+/// kind=MODULE node per directory (`qualified_name` = the dir path) and an OWNS
+/// edge from a directory to each file it directly contains
+/// (`orchestrator::create_module_nodes`). This is the SAME `(path, file_count)`
+/// set `queries::compute_module_stats` derives for `stats` (OWNS-edge count per
+/// MODULE node, kept only when > 0), projected without the Martin metrics — so
+/// `orient` (which folds these into package groups) and `stats` cannot report
+/// divergent topology numbers. A Layer-0/1 EXTRACTED fact, DISTINCT from the
+/// declared/inferred `module_candidates` surface `module_sizes` reads.
+///
+/// Order is by path ASC (a total order); the caller folds + re-sorts.
+pub(crate) fn directory_groups(
+    conn: &Connection,
+    snapshot_uid: &str,
+) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.qualified_name AS path, COUNT(o.target_node_uid) AS file_count \
+             FROM nodes m \
+             JOIN edges o \
+               ON o.source_node_uid = m.node_uid \
+               AND o.snapshot_uid = ?1 \
+               AND o.type = 'OWNS' \
+             WHERE m.snapshot_uid = ?1 \
+               AND m.kind = 'MODULE' \
+               AND m.qualified_name IS NOT NULL \
+             GROUP BY m.node_uid, m.qualified_name \
+             HAVING file_count > 0 \
+             ORDER BY m.qualified_name ASC",
+        )
+        .map_err(map_err("list_directory_groups"))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![snapshot_uid], |row| {
+            Ok(AgentDirectoryGroup {
+                path: row.get::<_, String>(0)?,
+                file_count: row.get::<_, i64>(1)? as u64,
+            })
+        })
+        .map_err(map_err("list_directory_groups"))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(map_err("list_directory_groups"))
 }
 
 #[cfg(test)]

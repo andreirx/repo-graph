@@ -98,6 +98,14 @@ fn nginx_like() -> OrientResponse {
                     {"path": "src/os", "file_count": 18},
                     {"path": "src/stream", "file_count": 12},
                     {"path": "src/mail", "file_count": 8}
+                ],
+                "package_groups": [
+                    {"name": "http", "file_count": 89, "test_file_count": 0},
+                    {"name": "core", "file_count": 54, "test_file_count": 0},
+                    {"name": "event", "file_count": 20, "test_file_count": 0},
+                    {"name": "os", "file_count": 18, "test_file_count": 0},
+                    {"name": "stream", "file_count": 12, "test_file_count": 0},
+                    {"name": "mail", "file_count": 8, "test_file_count": 0}
                 ]
             }),
         ),
@@ -193,13 +201,15 @@ fn hides_internal_fields() {
 
 #[test]
 fn small_structure_line_names_modules() {
-    // §3.1 + §4: small budget LEADS with the named structure, not a bare count.
+    // §3.1 + §4 + MODULE-MODEL-1 D2(i): small budget LEADS with the NAMED
+    // package-group topology, with the declared/inferred module count as a
+    // separately-labelled secondary fact (never collapsed).
     let out = nginx_like().render_human(OrientDepth::Small);
     assert!(
         out.contains(
-            "nginx · 397 files, 5000 symbols · 6 modules: http, core, event, os, stream, mail"
+            "nginx · 397 files, 5000 symbols · 6 package groups: http, core, event, os, stream, mail · 6 modules"
         ),
-        "small must NAME the modules:\n{out}"
+        "small must NAME the package groups + label the module count:\n{out}"
     );
 }
 
@@ -253,7 +263,7 @@ fn small_is_dense_not_thin_meta() {
     // not the old severity-grouped meta list.
     let out = nginx_like().render_human(OrientDepth::Small);
     // Dense, NAMED facts present.
-    assert!(out.contains("modules: http, core"));
+    assert!(out.contains("package groups: http, core"));
     assert!(out.contains("Complexity centers: src/http"));
     assert!(out.contains("Reliability: call-graph"));
     // The old thin-meta surface is gone: no "Signals / High / Medium / Low" grouping.
@@ -282,16 +292,22 @@ fn budget_trades_depth_small_subset_of_full() {
     let full = r.render_human(OrientDepth::Full);
 
     // The dense headline is present at BOTH tiers (budget never strips it).
-    assert!(small.contains("modules: http, core, event, os, stream, mail"));
-    assert!(full.contains("modules: http, core, event, os, stream, mail"));
+    assert!(small.contains("package groups: http, core, event, os, stream, mail"));
+    assert!(full.contains("package groups: http, core, event, os, stream, mail"));
     assert!(small.contains("src/http/ngx_http_upstream.c (cx 89)"));
     assert!(full.contains("src/http/ngx_http_upstream.c (cx 89)"));
 
-    // FULL adds DEPTH small does not have: per-module breakdown with counts,
-    // the per-axis reliability, and the full certainty/provenance block.
+    // FULL adds DEPTH small does not have: the package-group topology breakdown
+    // AND the (separately-labelled) declared/inferred module breakdown, the
+    // per-axis reliability, and the full certainty/provenance block.
     assert!(
-        full.contains("Modules (by size)"),
-        "full adds the breakdown:\n{full}"
+        full.contains("Package groups (directory/package topology"),
+        "full adds the topology breakdown:\n{full}"
+    );
+    assert!(full.contains("http — 89 files"), "{full}");
+    assert!(
+        full.contains("Modules (declared/inferred, by size)"),
+        "full adds the labelled module breakdown:\n{full}"
     );
     assert!(full.contains("src/http — 89 files"));
     assert!(
@@ -301,7 +317,8 @@ fn budget_trades_depth_small_subset_of_full() {
     assert!(full.contains("Import-graph reliability is LOW"));
 
     // SMALL does NOT carry the depth sections (they are the trade).
-    assert!(!small.contains("Modules (by size)"));
+    assert!(!small.contains("Package groups (directory/package topology"));
+    assert!(!small.contains("Modules (declared/inferred, by size)"));
     assert!(!small.contains("Degradation"));
     // FULL is complete → no "--full" pointer; SMALL has it.
     assert!(small.contains("[--full for the complete breakdown"));
@@ -335,7 +352,7 @@ fn medium_adds_limits_and_next_but_small_does_not() {
     assert!(medium.contains("Next steps"));
     assert!(medium.contains("rmap check"));
     // The dense headline is still there at medium.
-    assert!(medium.contains("modules: http, core"));
+    assert!(medium.contains("package groups: http, core"));
 }
 
 // ── ORIENT-DENSITY-1 §3: high-severity alerts stay load-bearing ──

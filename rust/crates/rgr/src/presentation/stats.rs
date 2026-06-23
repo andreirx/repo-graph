@@ -8,13 +8,24 @@
 //!
 //! ## Human Output Structure
 //!
+//! MODULE-MODEL-1 (D1/D4): the Summary is self-labelled — `package groups`
+//! (logical packages, main+test merged; agrees with `orient`) and `directory
+//! groups` (the leaf-directory rows below) — never a bare `modules: N`. The
+//! declared/inferred `module_candidates` notion lives in `modules` / `trust`.
+//!
 //! ```text
 //! Module Stats: billing-service
 //!
 //! Summary
-//!   modules: 24
+//!   package groups: 18
+//!   directory groups: 24
 //!   total_files: 312
 //!   total_symbols: 4521
+//!
+//! Package groups (by size — directory/package topology, Layer 0/1)
+//!   handlers               files=45 (12 test)
+//!   models                 files=38
+//!   ...
 //!
 //! By size
 //!   src/handlers           files=45  symbols=892
@@ -37,6 +48,7 @@
 //!   ...
 //! ```
 
+use repo_graph_agent::{rollup_package_groups, DirGroup};
 use serde::Deserialize;
 
 use crate::presentation::heading;
@@ -87,9 +99,31 @@ impl StatsResponse {
             .unwrap_or_else(|| &self.repo_uid);
         out.push_str(&format!("Module Stats: {}\n\n", repo_display));
 
+        // ── Package groups (MODULE-MODEL-1 D2(i)/D4) ───────────────
+        // Fold the per-directory rows into logical package groups via the SAME
+        // shared roll-up `orient` uses — so the two commands cannot report
+        // divergent topology numbers. The rows below are the directory-level
+        // detail (Martin metrics are per-directory); the package groups are the
+        // merged main+test view the agent orients by.
+        let package_groups = rollup_package_groups(
+            &self
+                .stats
+                .iter()
+                .map(|m| DirGroup {
+                    path: m.module.clone(),
+                    file_count: m.file_count.max(0) as u64,
+                })
+                .collect::<Vec<_>>(),
+        );
+
         // ── Summary ────────────────────────────────────────────────
+        // Self-labelled, never a bare "modules: N" (MODULE-MODEL-1 D1): the
+        // package-group count agrees with `orient`; the directory-group count is
+        // the number of leaf-directory rows enumerated below. The
+        // declared/inferred `module_candidates` notion lives in `modules`/`trust`.
         out.push_str(&heading("Summary"));
-        out.push_str(&format!("  modules: {}\n", self.stats.len()));
+        out.push_str(&format!("  package groups: {}\n", package_groups.len()));
+        out.push_str(&format!("  directory groups: {}\n", self.stats.len()));
 
         let total_files: i64 = self.stats.iter().map(|m| m.file_count).sum();
         let total_symbols: i64 = self.stats.iter().map(|m| m.symbol_count).sum();
@@ -98,11 +132,28 @@ impl StatsResponse {
         out.push('\n');
 
         if self.stats.is_empty() {
-            out.push_str("No modules found.\n");
+            out.push_str("No directory groups found.\n");
             return out;
         }
 
-        // ── By size ────────────────────────────────────────────────
+        // ── Package groups (by size, main+test merged) ─────────────
+        out.push_str(&heading(
+            "Package groups (by size — directory/package topology, Layer 0/1)",
+        ));
+        for g in &package_groups {
+            let test_suffix = if g.test_file_count > 0 {
+                format!(" ({} test)", g.test_file_count)
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "  {}  files={}{}\n",
+                g.name, g.file_count, test_suffix
+            ));
+        }
+        out.push('\n');
+
+        // ── By size (per directory group) ──────────────────────────
         out.push_str(&heading("By size"));
         let mut by_size = self.stats.clone();
         by_size.sort_by(|a, b| {
@@ -217,9 +268,31 @@ mod tests {
     fn render_human_includes_summary() {
         let resp = sample_stats();
         let output = resp.render_human();
-        assert!(output.contains("modules: 3"));
+        // MODULE-MODEL-1 D1: self-labelled, never a bare "modules: N". The sample
+        // dirs (src/handlers, src/models, src/utils) share the `src` prefix and
+        // have no main/test split → 3 package groups == 3 directory groups.
+        assert!(output.contains("package groups: 3"), "{output}");
+        assert!(output.contains("directory groups: 3"), "{output}");
+        assert!(
+            !output.contains("  modules: "),
+            "bare module count: {output}"
+        );
         assert!(output.contains("total_files: 93")); // 45 + 38 + 10
         assert!(output.contains("total_symbols: 1646")); // 892 + 634 + 120
+    }
+
+    #[test]
+    fn render_human_names_package_groups() {
+        // The merged package-group view (prefix collapsed to last segment).
+        let resp = sample_stats();
+        let output = resp.render_human();
+        let pkg_section = output
+            .split("Package groups (by size")
+            .nth(1)
+            .expect("package groups section present");
+        for name in ["handlers", "models", "utils"] {
+            assert!(pkg_section.contains(name), "missing {name}: {output}");
+        }
     }
 
     #[test]
@@ -305,8 +378,9 @@ mod tests {
             stats: vec![],
         };
         let output = resp.render_human();
-        assert!(output.contains("modules: 0"));
-        assert!(output.contains("No modules found."));
+        assert!(output.contains("package groups: 0"));
+        assert!(output.contains("directory groups: 0"));
+        assert!(output.contains("No directory groups found."));
     }
 
     #[test]

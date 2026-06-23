@@ -46,6 +46,33 @@ fn module_short_name(path: &str) -> &str {
     path.rsplit('/').find(|s| !s.is_empty()).unwrap_or(path)
 }
 
+/// The labelled declared/inferred-module count phrase from a MODULE_SUMMARY
+/// evidence payload — e.g. `1 declared module`, `5 inferred modules`,
+/// `3 modules` (MODULE-MODEL-1). This is the `module_candidates` notion
+/// (Layer 1/2), kept DISTINCT from the directory/package topology so the two
+/// are never conflated. The kind word is applied only when the WHOLE set is one
+/// kind (honest; a mixed set stays the bare `module(s)`). `None` when there is
+/// no module-discovery data — the topology still names the structure.
+fn declared_module_phrase(ev: &serde_json::Value) -> Option<String> {
+    let count = ev.get("discovered_module_count").and_then(|v| v.as_u64())?;
+    let kind_count = |k: &str| -> u64 {
+        ev.get("module_kinds")
+            .and_then(|m| m.get(k))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    };
+    let label = if count > 0 && kind_count("declared") == count {
+        "declared module"
+    } else if count > 0 && kind_count("inferred") == count {
+        "inferred module"
+    } else if count > 0 && kind_count("operational") == count {
+        "operational module"
+    } else {
+        "module"
+    };
+    Some(format!("{} {}{}", count, label, plural(count)))
+}
+
 impl OrientResponse {
     /// The MODULE_SUMMARY signal's evidence payload, if present.
     fn module_summary_evidence(&self) -> Option<&serde_json::Value> {
@@ -79,9 +106,16 @@ impl OrientResponse {
         out
     }
 
-    /// The dense STRUCTURE line: `<repo> · <N> files[, <M> symbols] · <K>
-    /// modules: a, b, c`. Module names are capped by depth; the true total
-    /// (`discovered_module_count`) drives the count and the `+N more` tail.
+    /// The dense STRUCTURE line (MODULE-MODEL-1 D2(i)): `<repo> · <N> files[,
+    /// <M> symbols] · <P> package groups: a, b, c · <D> declared modules`.
+    ///
+    /// LEADS with the directory/package TOPOLOGY (Layer 0/1 — where the code
+    /// physically lives, the load-bearing structure an agent orients by), NAMED.
+    /// Package names are capped by depth; `package_groups.len()` is the true
+    /// total and drives the `+N more` tail. The declared/inferred
+    /// `module_candidates` count rides as a SEPARATE, self-labelled secondary
+    /// fact — never collapsed into the topology (the cross-command coherence
+    /// fix: an agent can tell the two notions apart from the line alone).
     pub(super) fn structure_line(&self, depth: OrientDepth) -> String {
         let repo = self.display_name.as_deref().unwrap_or(&self.repo);
         let mut line = repo.to_string();
@@ -97,33 +131,30 @@ impl OrientResponse {
             }
         }
 
-        let names: Vec<&str> = ev
-            .get("top_modules")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
+        // STRUCTURE (Layer 0/1 topology): NAME the package groups.
+        if let Some(groups) = ev.get("package_groups").and_then(|v| v.as_array()) {
+            let total = groups.len() as u64;
+            if total > 0 {
+                let names: Vec<&str> = groups
+                    .iter()
                     .take(depth.module_name_cap())
-                    .filter_map(|m| m.get("path").and_then(|p| p.as_str()))
-                    .map(module_short_name)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let total = ev.get("discovered_module_count").and_then(|v| v.as_u64());
-
-        if !names.is_empty() {
-            let total = total.unwrap_or(names.len() as u64);
-            line.push_str(&format!(
-                " · {} module{}: {}",
-                total,
-                plural(total),
-                names.join(", ")
-            ));
-            let shown = names.len() as u64;
-            if total > shown {
-                line.push_str(&format!(", +{} more", total - shown));
+                    .filter_map(|g| g.get("name").and_then(|n| n.as_str()))
+                    .collect();
+                line.push_str(&format!(" · {} package group{}", total, plural(total)));
+                if !names.is_empty() {
+                    line.push_str(&format!(": {}", names.join(", ")));
+                    let shown = names.len() as u64;
+                    if total > shown {
+                        line.push_str(&format!(", +{} more", total - shown));
+                    }
+                }
             }
-        } else if let Some(total) = total {
-            line.push_str(&format!(" · {} module{}", total, plural(total)));
+        }
+
+        // DECLARED/INFERRED MODULE notion (Layer 1/2): a SEPARATE, self-labelled
+        // count — never collapsed into the topology above.
+        if let Some(phrase) = declared_module_phrase(ev) {
+            line.push_str(&format!(" · {}", phrase));
         }
         line
     }
@@ -348,8 +379,56 @@ impl OrientResponse {
         None
     }
 
-    /// The full per-module breakdown (NAMED, with file counts), shown at
-    /// `large` / `--full`. Empty when no module discovery data exists.
+    /// The full package-group breakdown (NAMED, with file + test counts), shown
+    /// at `large` / `--full` (MODULE-MODEL-1 D4). The directory/package TOPOLOGY
+    /// (Layer 0/1 — where the code physically lives), the structure the headline
+    /// leads with. DISTINCT from `module_breakdown_section` below (the
+    /// declared/inferred `module_candidates` notion). Empty when no directory
+    /// owns files. Mirrors the headline: it names the top few; this is the
+    /// authoritative complete list.
+    pub(super) fn package_groups_section(&self) -> String {
+        let Some(ev) = self.module_summary_evidence() else {
+            return String::new();
+        };
+        let Some(groups) = ev.get("package_groups").and_then(|v| v.as_array()) else {
+            return String::new();
+        };
+        if groups.is_empty() {
+            return String::new();
+        }
+
+        let mut out = heading("Package groups (directory/package topology — Layer 0/1)");
+        for g in groups {
+            let name = g
+                .get("name")
+                .and_then(|p| p.as_str())
+                .unwrap_or("(unknown)");
+            let files = g.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let test = g
+                .get("test_file_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let test_suffix = if test > 0 {
+                format!(" ({test} test)")
+            } else {
+                String::new()
+            };
+            out.push_str(&bullet(&format!(
+                "{} — {} file{}{}",
+                name,
+                files,
+                plural(files),
+                test_suffix
+            )));
+        }
+        out
+    }
+
+    /// The full per-module breakdown (NAMED, with file counts) for the
+    /// declared/inferred `module_candidates` notion (Layer 1/2), shown at
+    /// `large` / `--full`. DISTINCT from `package_groups_section` above (the
+    /// physical directory topology) — separately labelled, never collapsed
+    /// (MODULE-MODEL-1 coherence). Empty when no module discovery data exists.
     pub(super) fn module_breakdown_section(&self) -> String {
         let Some(ev) = self.module_summary_evidence() else {
             return String::new();
@@ -361,7 +440,7 @@ impl OrientResponse {
             return String::new();
         }
 
-        let mut out = heading("Modules (by size)");
+        let mut out = heading("Modules (declared/inferred, by size)");
         for m in modules {
             let path = m
                 .get("path")
