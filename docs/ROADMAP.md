@@ -80,6 +80,19 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
   `RMAP_PERF` markers exist now), then scope / batch / fold into extraction.
   _(TECH-DEBT #8)_
 
+**Dedicated slices — queued for agents to write** (relay: builder writes the spec → Codex
+reviews → IMPL slice; operator triggers each). Paired findings bunched into one slice:
+
+- `MODULE-MODEL-1` (#3 + #4) — **spec written + ratified** (D1–D6, §12); ready for its IMPL.
+- `DAEMON-CONCURRENCY-1` (#1 + #2) — serial → concurrent connection handling + query-path
+  cancellation.
+- `STATS-HONESTY-1` (#5 + #6) — `total_symbols` false-zero + fan-in/out reliability marker
+  (reader-context; coordinates with `RELIABILITY-REFRAME-1` below — same honesty theme).
+- `PROTOCOL-HELP-TRUTH-1` (#7 + #9) — REG-1 `--help` truth + peripheral output-words audit
+  (apply the "labels speak the reader's language" lens across the command tail).
+- `POSTPASS-PROFILE-1` (#8) — profiling **spike**: measure which postpasses dominate → scope /
+  batch (output is findings + a follow-on slice, not necessarily an IMPL).
+
 ## Resolution & attribution — resolve what we can, label what we can't (reader-context)
 
 *Pervasive primary-surface honesty: today's "unresolved / reliability LOW" tells the agent
