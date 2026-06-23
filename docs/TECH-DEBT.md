@@ -78,13 +78,17 @@ robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
   enumerates **11** module-sized units (`…/owner` 12 files, `…/vet` 6, `…/system` 5,
   …). The repo has obvious `owner`/`vet`/`system` package separation; orient
   flattens it to a single root module.
-- **Root cause (HYPOTHESIS — needs confirmation):** the inferred-module
-  umbrella-splitting heuristic (see *Inferred Module Identity Evolution →
-  Umbrella-directory splitting*) keys on umbrella prefixes (`src`, `packages`,
-  `apps`, …) with ≥2 children of 5+ source files. A Java
-  `src/main/java/org/…/petclinic/*` layout presents a single child (`main`) at the
-  `src` umbrella, so the heuristic never reaches the real package boundary and
-  collapses to root.
+- **Root cause (CONFIRMED against code — `docs/slices/module-model-1.md` §2):** NOT
+  the umbrella heuristic — that hypothesis was disproven. spring-petclinic ships a
+  declared Gradle root, so inferred detection runs in **gap-fill mode and the
+  umbrella heuristic never runs** here. The real cause is the unmigrated **dual-path
+  model**: `orient`/`modules` read `module_candidates` (one declared Gradle module →
+  "1"); `stats` reads `nodes` kind='MODULE' leaf directories with a `files>0` filter
+  (→ "11"). This is the dual-truth ORIENT-BUG-1 diagnosed; ORIENT-BUG-1 migrated
+  `trust` onto `module_candidates` but left `stats` on the old `nodes` source. The
+  umbrella-descent gap (fixed depth 2, ≥2 children) is REAL but only a **secondary,
+  manifest-less variant** (`src/.../{a,b,c}` with no manifest) — it does not explain
+  this case.
 - **Impact (VISION — Primary Use Case + Discovery clarity):** `orient` is THE primary
   orientation surface, and "what modules exist and what they own" is named as the
   first thing an agent needs. "1 module: ." is not merely thin — it is a
@@ -94,10 +98,12 @@ robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
 - **Related:** ORIENT-BUG-1 fixed an earlier orient/trust module-**count** mismatch
   by sharing `module_candidates`. This is distinct: under-segmentation of the
   inferred-module model itself on nested layouts.
-- **Required fix:** extend inferred-module discovery to descend through single-child
-  umbrella chains (`src/main/java/…`) to the first directory with real sibling
-  fan-out, OR reconcile orient's module model with the directory grouping stats uses
-  (see #4). Confirm the root cause first.
+- **Required fix (per `module-model-1.md`):** name the **package/directory topology**
+  (a Layer-0/1 fact the indexer already computes) as `orient`'s structure headline,
+  and unify the cross-command "module" notion (#4) so each count is self-labelled —
+  finishing ORIENT-BUG-1's migration by moving `stats` off `nodes` kind='MODULE'. The
+  umbrella-chain descent is a **secondary** fix for the manifest-less variant only.
+  Six decisions (D1–D6) are surfaced in the spec for ratification before the IMPL.
 
 ### 4. "module" denotes different things across orient/modules vs stats (P2)
 
@@ -110,9 +116,12 @@ robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
   forces the consumer to reverse-engineer which notion each means. At minimum each
   count must be self-labelling (inferred-module vs directory-group); ideally they
   share one model.
-- **Required fix:** pick the single canonical "module" notion for the discovery
-  surface (the VISION's Layer-1/2 inferred/declared module) and either align stats
-  to it or rename stats' unit (e.g. "directories"). Pairs with #3.
+- **Required fix (per `module-model-1.md` D1):** keep **two self-labelled notions** —
+  *package/directory groups* (Layer-0/1 topology, what `stats` and `orient`'s
+  structure line show) vs *declared/inferred modules* (Layer-1/2 `module_candidates`,
+  what `modules`/`trust` show); no command emits a bare "modules: N" that means
+  directory groups. (Collapsing to one notion was considered and rejected — see D1.)
+  Pairs with #3 as one slice.
 
 ### 5. stats reports `total_symbols: 0` on rmap-indexed repos — false zero (P2)
 

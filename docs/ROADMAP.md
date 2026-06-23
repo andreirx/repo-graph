@@ -46,9 +46,12 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
 
 - **orient module under-segmentation** — `orient` reports "1 module" on deeply-nested
   layouts (spring-petclinic: 1 vs `stats`' 11); a structurally wrong model on the
-  _primary_ surface. Fix the umbrella heuristic to descend single-child chains,
-  decided together with the module-model unification below. _(TECH-DEBT #3; pairs the
-  module-model P2)_
+  _primary_ surface. Root cause is the unmigrated **dual-path** (orient/modules read
+  `module_candidates`; `stats` reads `nodes` kind='MODULE') — **not** the umbrella
+  heuristic (disproven; that's a secondary manifest-less variant). Fix: name the
+  package topology + unify the "module" notion. Spec'd in
+  `docs/slices/module-model-1.md` (6 decisions await ratification). _(TECH-DEBT #3;
+  pairs the module-model P2)_
 - **daemon concurrency** — `run_socket` handles connections inline (serial;
   head-of-line blocking), contradicting the VISION's concurrent-readers daemon. Make
   connection handling concurrent over the existing `RepoCoordinator` (FIFO writer
