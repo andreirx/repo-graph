@@ -80,6 +80,38 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
   `RMAP_PERF` markers exist now), then scope / batch / fold into extraction.
   _(TECH-DEBT #8)_
 
+## Resolution & attribution — resolve what we can, label what we can't (reader-context)
+
+*Pervasive primary-surface honesty: today's "unresolved / reliability LOW" tells the agent
+about repo-graph's own pipeline, not about their code — meaningless on **every** repo.
+Context: `docs/TECH-DEBT.md` § Resolution (R1–R4). Labels follow the VISION's "labels speak
+the reader's language" principle. Runs **parallel to** the product-surface honesty track
+(no contention).*
+
+- **Run enrichment automatically (P1)** — wire the LSP enrichment pass into the daemon as a
+  **background task after index/refresh**, with **atomic snapshot hand-off** (index returns
+  fast syntax; enrich upgrades the graph behind it); toolchain-aware (auto-run when present;
+  reader-context message when absent — "semantic resolution unavailable; install
+  rust-analyzer", not "enrichment phase did not run"). Closes the in-scope resolution gap
+  with no agent babysitting. **Not blocked on DAEMON-CONCURRENCY-1** — different capability
+  (autonomous background work, not concurrent client access); shares only state-safety, which
+  the snapshot model makes an atomic pointer swap. _(TECH-DEBT R4)_
+- **Attribute the unresolved set, in the reader's terms (P1)** — label each reference
+  `library call → serde` / `stdlib → std::…` / `system call → …` / `native/DLL call` /
+  `dynamic dispatch` / `(unknown — couldn't attribute)`, with provenance (which dep + version;
+  resolve `#include` via include paths). The basis codes are already computed — surface them
+  as reader-context labels + named attribution. _(TECH-DEBT R2)_
+- **Reframe reliability as a coverage map (P1)** — stop grading ourselves ("reliability LOW /
+  22% / below 50%"); show the agent **where their calls go**: "N% into external libraries
+  (serde, tokio, …) — follow to their crates/docs; your own code's calls M% resolved." Exclude
+  out-of-scope refs from the in-scope rate; flag only genuine in-scope failures, in their
+  terms. _(TECH-DEBT R1)_
+
+Prereqs / sequencing: enrichment-lifecycle + reliability-reframe + attribution (Rust/TS/Python)
+are **unblocked** (the enrichment pipeline, classifier, and Cargo/package manifest readers all
+exist) → fix ASAP. **Java attribution is blocked on a Rust-path Gradle dependency reader**
+(TECH-DEBT R3) — that reader is the prerequisite slice for Java.
+
 ## Quality discovery surface (VISION's named primary frontier)
 
 The discovery layer the VISION calls #1 and that is still missing:

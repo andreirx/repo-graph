@@ -593,6 +593,21 @@ load-bearing/governance surface; the discovery output's consumers are our own sh
 agent-instruction docs, updated as maintenance.)
 
 
+### Labels speak the reader's language, not ours
+
+Every external label describes the reader's subject — *their* code, dependencies,
+architecture — in terms that pertain to *their* problem; never repo-graph's internal
+processing state. "Library call (`serde`)", "system call", "native/DLL call", "dynamic
+dispatch" tell the agent what a symbol *is* and where to look. "Unresolved", "couldn't
+resolve as X", "below 50% threshold", "needs type info", "enrichment phase did not run"
+narrate *our* pipeline's success/failure/confidence — internal diagnostics: useful to us,
+noise to the consumer. Honesty applies in the reader's frame too: "likely a `serde` call
+(inferred from the import + manifest)" is honest *and* reader-facing;
+"external_library_candidate, basis=specifier_matches_package_dependency" is honest but
+internal. The test: does the label describe the reader's world or ours? Only the reader's
+ships. (Internal diagnostics stay available on an explicit debug/diagnostic surface — they
+just don't pollute the product.)
+
 ## Vision Statement
 
 Build the system of record for software engineering decisions and evidence.

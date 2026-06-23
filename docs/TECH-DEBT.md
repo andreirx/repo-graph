@@ -202,6 +202,62 @@ robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
 
 ---
 
+## Resolution, Attribution & Honest Reliability (the "unresolved" signal)
+
+Surfaced 2026-06-23 (roadmap-planning conversation): on a clean-compiling repo, `orient`
+reports "call-graph reliability LOW (22%) / 427 unresolved imports" — a signal that describes
+repo-graph's own resolution pipeline, not the reader's code, and conflates expected external-
+dependency usage with extraction failure. Context store for the ROADMAP "Resolution &
+attribution" track. Verified against code (cites).
+
+### R1. Reliability rate counts out-of-scope calls as failures (P1)
+
+- **OBSERVED:** `call_resolution_rate = resolved_calls / (resolved_calls + unresolved_calls)`
+  (`trust/src/rules.rs:215`; `agent/src/aggregators/trust.rs:46`); the external/internal
+  **classification is an explicitly orthogonal axis** (`classification/src/types.rs:315`) that
+  does NOT factor into the rate. So calls into `serde`/`std`/framework APIs — out of source
+  scope, unresolvable by design — are counted in `unresolved_calls` and depress the rate.
+  Thresholds: 50%/85% bands (`trust/rules.rs:220-225`); agent LOW at 0.20 (`trust.rs:26`).
+- **Impact (VISION — labels speak the reader's language; outer layers surface unknowns):** a
+  clean repo that simply uses libraries reads as "LOW reliability." The signal grades
+  repo-graph, not the reader's code.
+- **Required fix:** compute the in-scope rate over in-scope references only; present the
+  external share as a reader-context coverage map (named libraries). ROADMAP "reframe
+  reliability."
+
+### R2. The unresolved set is categorized but not attributed (P1)
+
+- **OBSERVED:** `UnresolvedEdgeClassification` = `ExternalLibraryCandidate / InternalCandidate /
+  FrameworkBoundaryCandidate / Unknown` (`classification/src/types.rs:320`) — four coarse
+  buckets, no named dependency, no distinct stdlib/system bucket. The distinguishing info
+  exists in the basis codes (`SpecifierMatchesPackageDependency`, `SpecifierMatchesRuntimeModule`,
+  … `types.rs:343-372`) but is collapsed into the bucket and not surfaced.
+- **Impact:** the best an agent sees is "external_library_candidate" (internal-context), never
+  "library call → serde" (reader-context).
+- **Required fix:** surface reader-context labels + named attribution (lib/stdlib/system/
+  dynamic), using the basis codes + manifest deps. ROADMAP "attribute the unresolved set."
+
+### R3. Manifest/dependency readers missing on the Rust path (P2 — prereq for R2 on Java)
+
+- **OBSERVED:** `SpecifierMatchesPackageDependency` matches against package.json (TS). On the
+  `rmap` path, Java/Gradle has no dependency reader (see "No Gradle reader on the Rust side"
+  below) → the rule can't fire → imports fall to `Unknown` (spring-petclinic: 1327 unknown vs
+  54 external_library_candidate).
+- **Required fix:** a Rust-path Gradle (build.gradle/settings.gradle) dependency reader — the
+  prerequisite for Java attribution. (Rust/TS/Python attribution is unblocked.)
+
+### R4. Enrichment is opt-in and not in the pipeline (P1)
+
+- **OBSERVED:** the LSP enrichment pass is a standalone command (`rgr/src/commands/enrich.rs`);
+  `index`/`refresh` never invoke it. So the pass that resolves `obj.method()` (the in-scope
+  gap) does not run unless invoked → "enrichment phase did not run" → the agent must babysit
+  the tool.
+- **Impact (VISION — installable infrastructure; daemon runtime; orientation not babysitting):**
+  repo-graph offloads its own job onto the consumer.
+- **Required fix:** run enrichment automatically as a daemon background task after
+  index/refresh, with atomic snapshot hand-off, toolchain-aware. NOT blocked on
+  DAEMON-CONCURRENCY-1 (different capability). ROADMAP "run enrichment automatically."
+
 ## Extraction — TypeScript
 
 - Call graph resolution: 33% on self-index with import-binding-assisted resolution
