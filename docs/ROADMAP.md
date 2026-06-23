@@ -107,10 +107,18 @@ the reader's language" principle. Runs **parallel to** the product-surface hones
   out-of-scope refs from the in-scope rate; flag only genuine in-scope failures, in their
   terms. _(TECH-DEBT R1)_
 
-Prereqs / sequencing: enrichment-lifecycle + reliability-reframe + attribution (Rust/TS/Python)
-are **unblocked** (the enrichment pipeline, classifier, and Cargo/package manifest readers all
-exist) → fix ASAP. **Java attribution is blocked on a Rust-path Gradle dependency reader**
-(TECH-DEBT R3) — that reader is the prerequisite slice for Java.
+**Dedicated slices — queued for agents to write** (relay: builder writes the spec → Codex
+reviews → a follow-on IMPL slice; operator triggers each):
+
+- `ENRICH-LIFECYCLE-1` (R4) — run enrichment automatically. **Unblocked.**
+- `RELIABILITY-REFRAME-1` (R1) — reliability → reader-context coverage map. **Unblocked.**
+- `ATTRIBUTION-1` (R2) — reader-context named attribution (library / stdlib / system / dynamic).
+  **Unblocked for Rust/TS/Python.**
+- `GRADLE-DEP-READER-1` (R3) — Rust-path Gradle dependency reader; **prerequisite for Java
+  attribution.**
+
+Unblocked = the enrichment pipeline, classifier, and Cargo/package manifest readers all exist;
+none requires DAEMON-CONCURRENCY-1.
 
 ## Quality discovery surface (VISION's named primary frontier)
 
