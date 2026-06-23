@@ -560,6 +560,38 @@ This keeps repo-graph useful even if major AI platforms provide built-in code in
 
   This is the verification standard. Use it to judge whether implementation work is complete.
 
+### Clarification — optimize for the VISION; nothing is frozen for its own sake
+
+Layer 2 is about output that *teaches* the agent (self-describing semantics), not output
+pinned for backward-compat. The agent-facing discovery output (orient, stats, modules,
+trust, callers/callees, …) is the product: make it more useful, denser, more honest, and
+**break from a past shape that wasn't ideal** rather than ossify it.
+
+More broadly, **no contract is ossified** — not the output, not an internal module seam,
+not a governance object. Each is subject to one question: **is there a really good
+reason — does the benefit to the VISION outweigh the cost of changing it?** **Cost is
+load-bearing assumptions disturbed, not lines of code**: a change that mechanically
+touches much but invalidates no assumption is cheap; one that touches little but breaks an
+assumption many things rely on is expensive. When the benefit wins, we change it *and
+carefully propagate* to every dependent.
+
+**This judgment is surfaced, not made silently.** The agent proposes the change with its
+cost/benefit-vs-VISION reasoning; the operator ratifies. Scale the surfacing by cost
+(decision autonomy by blast radius): a low-cost improvement to the discovery output the
+agent makes and records in one line; a change that disturbs load-bearing assumptions — an
+internal seam, a governance object — is a **DECISION_REQUIRED**, surfaced *before* the
+change with the trade-off explicit. The larger the load-bearing footprint, the louder the
+surfacing.
+
+The differences across the surface are of degree. The discovery output usually has few
+load-bearing dependents (agents read it fresh; our own shims) → improve it freely.
+Internal seams, and especially governance objects (gate verdict states + exit codes; the
+gate/measurement/versioning specs — CI and audit depend on them) carry many load-bearing
+assumptions → a higher bar and more careful, often versioned, propagation. (This scopes
+rule #4 above — "changes to output shape require contract documentation updates" — to the
+load-bearing/governance surface; the discovery output's consumers are our own shims +
+agent-instruction docs, updated as maintenance.)
+
 
 ## Vision Statement
 
