@@ -140,6 +140,18 @@ pub enum ErrorCode {
     /// whose results cannot be delivered to the client.
     ProgressDeliveryFailed,
 
+    /// The daemon is at its concurrent-connection capacity (over-cap).
+    ///
+    /// DAEMON-CONCURRENCY-IMPL-1 (D-C = BP-BUSY): the concurrent accept loop
+    /// bounds in-flight connection handlers with a counting semaphore
+    /// (`RMAP_DAEMON_MAX_CONNS`, default 64 — an arbitrary policy default, not
+    /// source-derived). When no permit is free the daemon returns this code on
+    /// the existing error envelope and closes the connection, rather than
+    /// silently queueing the client into an opaque hang. This is honest
+    /// degradation: an explicit, machine-readable "at capacity" the client can
+    /// back off / retry on.
+    Busy,
+
     /// Internal error (bug or unexpected failure).
     InternalError,
 }
@@ -158,6 +170,7 @@ impl ErrorCode {
             Self::Timeout => "Timeout",
             Self::Cancelled => "Cancelled",
             Self::ProgressDeliveryFailed => "ProgressDeliveryFailed",
+            Self::Busy => "Busy",
             Self::InternalError => "InternalError",
         }
     }

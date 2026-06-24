@@ -229,7 +229,9 @@ fn callgraph_compare_is_exact(repo_state: &RepoState, snapshot_uid: &str) -> Opt
     if lg.live_partitions().is_empty() {
         return Some(false);
     }
-    let storage = &repo_state.storage;
+    // D-S = S-A: one fresh per-operation connection for the cert-build reads; open failure -> None
+    // (NOT green; safe SQLite fallback). The orient read guard keeps these reads snapshot-consistent.
+    let storage = repo_state.storage().ok()?;
     // The SQLite identity surface — the sanctioned cert-BUILD read (the SAME `query_all_nodes`
     // `focus_resolution_cert` uses), so the corpus is the UNION of both stores' SYMBOL identities.
     let sqlite_nodes = storage.query_all_nodes(snapshot_uid).ok()?;

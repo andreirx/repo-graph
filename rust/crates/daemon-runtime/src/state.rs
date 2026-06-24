@@ -33,7 +33,6 @@
 //!
 //! See `agent_docs/storage-architecture-v2.md` for the A1/A2/B tier model.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -190,9 +189,6 @@ pub struct RepoState {
     /// Concurrency coordinator for this repo.
     pub coordinator: RepoCoordinator,
 
-    /// Storage connection (owned by daemon, not opened per-request).
-    pub storage: StorageConnection,
-
     /// LIVEGRAPH-INTEGRATION-1B: optional in-memory LiveGraph, populated by the dev-only
     /// `livegraph_preload` method (`None` until preloaded). Interior mutability because `RepoState`
     /// is shared as `Arc<RepoState>` — preload write-locks, callers/callees read-lock.
@@ -260,11 +256,15 @@ impl RepoState {
             return Err(format!("database not found: {}", db_path.display()));
         }
 
-        let storage = StorageConnection::open(db_path)
+        // DAEMON-CONCURRENCY-IMPL-1 (D-S = S-A): open a connection ONLY to validate
+        // the repo exists at load time; it is dropped at the end of this fn. Reads
+        // open their own connection per operation (see `storage()`) — `RepoState`
+        // holds NO shared `!Sync` connection, which is what makes it `Send + Sync`.
+        let validation_conn = StorageConnection::open(db_path)
             .map_err(|e| format!("failed to open database: {}", e))?;
 
         // Validate repo exists in the database
-        match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
+        match validation_conn.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
             Ok(Some(_)) => {}
             Ok(None) => {
                 return Err(format!(
@@ -277,13 +277,13 @@ impl RepoState {
                 return Err(format!("failed to verify repo: {}", e));
             }
         }
+        drop(validation_conn);
 
         let key = RepoKey::new(db_path, repo_uid)?;
 
         Ok(Self {
             key,
             coordinator: RepoCoordinator::new(),
-            storage,
             livegraph: parking_lot::RwLock::new(None),
             import_cert: parking_lot::RwLock::new(None),
             cycles_cert: parking_lot::RwLock::new(None),
@@ -302,6 +302,36 @@ impl RepoState {
     /// Get the database path.
     pub fn db_path(&self) -> &Path {
         &self.key.db_path
+    }
+
+    /// Open a fresh storage connection for one read operation (D-S = S-A,
+    /// connection-per-operation).
+    ///
+    /// DAEMON-CONCURRENCY-IMPL-1: `RepoState` no longer holds a shared
+    /// `StorageConnection`. `rusqlite::Connection` is `Send` but `!Sync`, so a
+    /// shared connection would make `RepoState` `!Sync` and unshareable across the
+    /// concurrent connection-handler threads. Instead each read operation opens its
+    /// own connection here, via the NORMAL [`StorageConnection::open`] — which runs
+    /// the idempotent migration check (NO fast-open that could serve an unmigrated
+    /// schema, per the §14 ratification; that would be a Layer-0 honesty violation).
+    /// SQLite WAL gives true concurrent reads across these per-operation connections.
+    ///
+    /// REQUEST-LEVEL CONSISTENCY: a read handler holds its coordinator read guard
+    /// (`acquire_read`) for the whole request, which — under W-A — excludes every
+    /// coordinated writer (index/refresh/enrich and, after this slice, the LiveGraph
+    /// preload/refresh writers). So all connections a handler opens during one
+    /// request observe the SAME committed snapshot; no writer can commit mid-request.
+    ///
+    /// COST: the normal open re-runs migration 001's idempotent DDL + a version-gate
+    /// scan on each call (read-only on an already-migrated WAL DB). This is the
+    /// ratified per-op-open cost; a per-repo connection pool (D-S = S-B) is the named
+    /// upgrade lever if profiling shows it is hot.
+    ///
+    /// Writers are unaffected: they already open their own connection in the compose
+    /// pipeline (`index_path_with_progress`/`refresh_path_with_progress`).
+    pub fn storage(&self) -> Result<StorageConnection, String> {
+        StorageConnection::open(&self.key.db_path)
+            .map_err(|e| format!("failed to open storage connection: {}", e))
     }
 }
 
@@ -332,8 +362,15 @@ pub struct DaemonState {
     /// Repo registry for path-based resolution.
     ///
     /// The registry is daemon-owned and persisted to `registry.json`.
-    /// Uses RefCell for interior mutability (daemon is single-threaded).
-    registry: RefCell<RepoRegistry>,
+    ///
+    /// DAEMON-CONCURRENCY-IMPL-1 (D-S = S-A): `parking_lot::Mutex` (was `RefCell`,
+    /// which is `!Sync`) so `DaemonState` is `Send + Sync` and shareable across the
+    /// concurrent connection-handler threads. Access is brief (resolve/list/save) and
+    /// never nested on one thread (audited), so a `Mutex` — which deadlocks on a
+    /// re-entrant lock, unlike `RefCell` which would panic — is safe. `RwLock` is not
+    /// needed: registry critical sections are short and contention is negligible vs
+    /// the per-request query work.
+    registry: Mutex<RepoRegistry>,
 }
 
 impl DaemonState {
@@ -357,7 +394,7 @@ impl DaemonState {
         Self {
             repos: RwLock::new(HashMap::new()),
             db_runtimes: RwLock::new(HashMap::new()),
-            registry: RefCell::new(registry),
+            registry: Mutex::new(registry),
         }
     }
 
@@ -370,7 +407,7 @@ impl DaemonState {
         Self {
             repos: RwLock::new(HashMap::new()),
             db_runtimes: RwLock::new(HashMap::new()),
-            registry: RefCell::new(registry),
+            registry: Mutex::new(registry),
         }
     }
 
@@ -384,7 +421,7 @@ impl DaemonState {
     ///
     /// Detection: sandbox mode if state root is under `/private/tmp/`.
     pub fn state_root_mode(&self) -> StateRootMode {
-        let state_root = self.registry.borrow().state_root().to_path_buf();
+        let state_root = self.registry.lock().state_root().to_path_buf();
 
         // macOS sandbox environments use /private/tmp/ as writable root
         // This is where STDIO-STATE-ROOT-1 places sandbox state
@@ -514,11 +551,11 @@ impl DaemonState {
             }
         }
 
-        // Open and insert
-        // Note: RepoState is !Sync due to interior RefCell. Arc is used for shared
-        // ownership across the RwLock, not for cross-thread access. The daemon is
-        // single-threaded, so this is safe.
-        #[allow(clippy::arc_with_non_send_sync)]
+        // Open and insert. DAEMON-CONCURRENCY-IMPL-1: `RepoState` is now `Send + Sync`
+        // (registry behind a `Mutex`; reads open their own connection per operation —
+        // no shared `!Sync` connection), so it is shared across threads as a normal
+        // `Arc`. The previous `arc_with_non_send_sync` allow is GONE — its removal
+        // compiling is the proof the state became `Send + Sync`.
         let state = Arc::new(RepoState::open(db_path, repo_uid)?);
         {
             let mut repos = self.repos.write().unwrap();
@@ -557,25 +594,33 @@ impl DaemonState {
 
     // ── Registry operations ─────────────────────────────────────────────
 
-    /// Access the registry immutably.
+    /// Access the registry.
     ///
-    /// Returns a RefCell borrow - caller must not hold across await points.
-    pub fn registry(&self) -> std::cell::Ref<'_, RepoRegistry> {
-        self.registry.borrow()
+    /// Returns a `parking_lot::MutexGuard`. The guard gives shared, read-style
+    /// access (callers use it read-only); it must be dropped before any other
+    /// registry access on the SAME thread — the `Mutex` is non-reentrant, so a
+    /// nested `registry()`/`registry_mut()`/`save_registry()` while holding it
+    /// deadlocks (the call sites were audited for this — all are sequential,
+    /// none nested). Held briefly; never across a blocking call.
+    pub fn registry(&self) -> MutexGuard<'_, RepoRegistry> {
+        self.registry.lock()
     }
 
-    /// Access the registry mutably.
+    /// Access the registry for mutation.
     ///
-    /// Returns a RefCell borrow - caller must not hold across await points.
-    pub fn registry_mut(&self) -> std::cell::RefMut<'_, RepoRegistry> {
-        self.registry.borrow_mut()
+    /// Same `MutexGuard` as [`registry`](Self::registry) (one lock; `MutexGuard`
+    /// derefs to `&mut`). Kept as a distinct method so write call sites read
+    /// intentionally. Same non-reentrancy caveat: do not nest registry access
+    /// while holding the returned guard.
+    pub fn registry_mut(&self) -> MutexGuard<'_, RepoRegistry> {
+        self.registry.lock()
     }
 
     /// Resolve a path to a registered repo.
     ///
     /// Uses registry resolution: exact match or longest ancestor prefix.
     pub fn resolve_repo_path(&self, path: &Path) -> Option<crate::registry::RegistryEntry> {
-        self.registry.borrow().resolve(path).cloned()
+        self.registry.lock().resolve(path).cloned()
     }
 
     /// Resolve by alias or path.
@@ -584,7 +629,7 @@ impl DaemonState {
         alias_or_path: &str,
     ) -> Option<crate::registry::RegistryEntry> {
         self.registry
-            .borrow()
+            .lock()
             .resolve_alias_or_path(alias_or_path)
             .cloned()
     }
@@ -593,7 +638,7 @@ impl DaemonState {
     ///
     /// Should be called after mutations to persist changes.
     pub fn save_registry(&self) -> Result<(), RegistryError> {
-        self.registry.borrow_mut().save()
+        self.registry.lock().save()
     }
 }
 
@@ -931,5 +976,69 @@ mod tests {
     fn state_root_mode_allows_authority_writes() {
         assert!(StateRootMode::Global.allows_authority_writes());
         assert!(!StateRootMode::SandboxLocal.allows_authority_writes());
+    }
+
+    // ── DAEMON-CONCURRENCY-IMPL-1 ───────────────────────────────────
+
+    /// The state must be `Send + Sync` to be shared as `Arc<ServiceDispatcher>` across the concurrent
+    /// connection-handler threads. The `arc_with_non_send_sync` allows were removed (registry behind a
+    /// `Mutex`, reads connection-per-op); this pins the invariant explicitly so a future `!Sync` field
+    /// (e.g. a re-introduced shared connection or a `RefCell`) fails HERE, not as a confusing dispatch
+    /// trait-bound error.
+    #[test]
+    fn daemon_and_repo_state_are_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<DaemonState>();
+        assert_send_sync::<RepoState>();
+        assert_send_sync::<Arc<DaemonState>>();
+        assert_send_sync::<Arc<RepoState>>();
+        assert_send_sync::<crate::ServiceDispatcher>();
+        assert_send_sync::<Arc<crate::ServiceDispatcher>>();
+    }
+
+    /// DAEMON-CONCURRENCY-IMPL-1 behavior 2 (writer serialization): concurrent writers on the SAME DB
+    /// serialize on the `DatabaseState` write lock — at most one is ever inside the critical section, so
+    /// there is no interleaving / corruption window. The `max == 1` assertion holds regardless of timing
+    /// (a correct lock NEVER admits two); `yield_now` only widens the window to catch a broken lock. No
+    /// wall-clock correctness dependency. (Readers seeing only the last-good READY snapshot during a
+    /// build is the storage layer's invariant, pinned by
+    /// `get_latest_snapshot_excludes_building_snapshots` in `storage`.)
+    #[test]
+    fn concurrent_writers_serialize_on_db_write_lock() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempdir().unwrap();
+        let db_path = create_test_db(dir.path(), "writer-repo");
+        let daemon = DaemonState::new();
+        let runtime = daemon.get_or_create_db_runtime(&db_path).unwrap();
+
+        let in_section = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let runtime = Arc::clone(&runtime);
+            let in_section = Arc::clone(&in_section);
+            let max_seen = Arc::clone(&max_seen);
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..50 {
+                    let _guard = runtime.acquire_write();
+                    let now = in_section.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_seen.fetch_max(now, Ordering::SeqCst);
+                    std::thread::yield_now(); // widen the window; does not affect the max==1 invariant
+                    in_section.fetch_sub(1, Ordering::SeqCst);
+                    // _guard drops here, releasing the DB write lock
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(
+            max_seen.load(Ordering::SeqCst),
+            1,
+            "the DatabaseState write lock must serialize writers (never two concurrently)"
+        );
     }
 }

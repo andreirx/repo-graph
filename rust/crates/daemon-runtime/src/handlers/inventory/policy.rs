@@ -39,8 +39,20 @@ pub fn handle_policy(state: &DaemonState, request: &Request) -> DispatchResult {
     // Acquire read lock
     let _read_guard = repo_state.coordinator.acquire_read();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Get latest snapshot
-    let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
         Ok(Some(snap)) if snap.status == "ready" => snap,
         Ok(Some(snap)) => {
             return DispatchResult::error(
@@ -106,21 +118,21 @@ pub fn handle_policy(state: &DaemonState, request: &Request) -> DispatchResult {
     match kind.as_str() {
         "STATUS_MAPPING" => query_status_mappings(
             request,
-            &repo_state.storage,
+            &storage,
             &repo_uid,
             &snapshot.snapshot_uid,
             file_filter,
         ),
         "BEHAVIORAL_MARKER" => query_behavioral_markers(
             request,
-            &repo_state.storage,
+            &storage,
             &repo_uid,
             &snapshot.snapshot_uid,
             file_filter,
         ),
         "RETURN_FATE" => query_return_fates(
             request,
-            &repo_state.storage,
+            &storage,
             &repo_uid,
             &snapshot.snapshot_uid,
             file_filter,

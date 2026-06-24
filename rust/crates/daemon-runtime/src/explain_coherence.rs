@@ -76,8 +76,13 @@ pub(crate) fn build_explain_envelope(
     // staleness from a post-budget/truncated signal list; never mint a false `Fresh`). CONSERVATIVE on read
     // error -> STALE (a failed read cannot vouch for freshness). Ambiguous/no-match emit no signals and take
     // the resolution-only path where `stale` is ignored, so this read is harmless there.
-    let stale = match repo_state.storage.get_stale_files(&snapshot_uid) {
-        Ok(files) => !files.is_empty(),
+    // D-S = S-A: open a fresh per-operation connection (the request's read guard keeps it
+    // snapshot-consistent). Open failure cannot vouch for freshness -> conservative STALE.
+    let stale = match repo_state.storage() {
+        Ok(conn) => match conn.get_stale_files(&snapshot_uid) {
+            Ok(files) => !files.is_empty(),
+            Err(_) => true,
+        },
         Err(_) => true,
     };
 

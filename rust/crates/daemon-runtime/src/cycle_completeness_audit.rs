@@ -117,8 +117,10 @@ pub fn cycle_completeness_audit_response(
         .collect();
 
     // 2. SQLite language inventory (D3-A): non-TS evidence (audit-time read; NOT the evaluator).
-    let languages = repo_state
-        .storage
+    // D-S = S-A: one fresh per-operation connection for this fn's SQLite reads (the handler holds a
+    // read guard, so the snapshot is consistent across both reads below).
+    let conn = repo_state.storage()?;
+    let languages = conn
         .distinct_file_languages(repo_uid)
         .map_err(|e| e.to_string())?;
     let (baseline, non_ts_languages) =
@@ -145,8 +147,7 @@ pub fn cycle_completeness_audit_response(
 
     // 5. D3-B corroboration (NOT an evaluator input): does SQLite see MORE module cycles than the
     //    TS-only LiveGraph? If so AND non-TS code is present, the non-TS completeness risk is corroborated.
-    let sqlite_module_cycle_count = repo_state
-        .storage
+    let sqlite_module_cycle_count = conn
         .find_cycles(snapshot_uid, "module")
         .map_err(|e| e.to_string())?
         .len();

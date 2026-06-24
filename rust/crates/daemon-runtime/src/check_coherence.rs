@@ -38,11 +38,15 @@ pub(crate) fn build_check_envelope(
     let stale = if snapshot_uid.is_empty() {
         false
     } else {
-        match repo_state.storage.get_stale_files(&snapshot_uid) {
-            Ok(files) => !files.is_empty(),
-            // CONSERVATIVE on read error → STALE: a failed stale-files read cannot vouch for freshness, so
-            // it degrades rather than minting a false `Fresh` (the codebase Unknown→Stale discipline;
-            // `orient_coherence.rs` does the same).
+        // D-S = S-A: open a fresh per-operation connection (the request's read guard keeps it
+        // snapshot-consistent). CONSERVATIVE on open OR read error → STALE: a failed stale-files
+        // read cannot vouch for freshness, so it degrades rather than minting a false `Fresh` (the
+        // codebase Unknown→Stale discipline; `orient_coherence.rs` does the same).
+        match repo_state.storage() {
+            Ok(conn) => match conn.get_stale_files(&snapshot_uid) {
+                Ok(files) => !files.is_empty(),
+                Err(_) => true,
+            },
             Err(_) => true,
         }
     };

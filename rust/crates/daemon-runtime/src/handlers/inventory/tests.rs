@@ -361,7 +361,6 @@ export function hello(): string {
     );
 
     // Create dispatcher
-    #[allow(clippy::arc_with_non_send_sync)]
     let dispatcher = ServiceDispatcher::new(Arc::new(state));
 
     // Create index request

@@ -240,13 +240,15 @@ pub fn run_daemon() -> Result<(), String> {
     let socket_path = daemon_socket_path()?;
     let config = SocketConfig::new(socket_path.clone());
 
-    // DaemonState is !Send/!Sync due to interior mutability. Arc is used for
-    // shared ownership, not cross-thread access. The daemon is single-threaded.
-    #[allow(clippy::arc_with_non_send_sync)]
     let state = Arc::new(DaemonState::new());
     let state_init = startup_start.elapsed();
 
-    let dispatcher = ServiceDispatcher::new(state);
+    // DAEMON-CONCURRENCY-IMPL-1 (D-C = C-B): the dispatcher is shared across
+    // concurrent connection-handler threads as `Arc<ServiceDispatcher>`.
+    // `DaemonState` is now `Send + Sync` (registry behind a `parking_lot::Mutex`;
+    // reads use connection-per-operation), so the prior `arc_with_non_send_sync`
+    // allow is gone — its removal compiling is the proof the state is `Send + Sync`.
+    let dispatcher = Arc::new(ServiceDispatcher::new(state));
     let dispatcher_init = startup_start.elapsed();
 
     // Determine startup mode (cold vs warm based on registry existence)
@@ -270,7 +272,7 @@ pub fn run_daemon() -> Result<(), String> {
         dispatcher_init - state_init
     );
 
-    run_socket_transport(&config, &dispatcher).map_err(|e| e.to_string())
+    run_socket_transport(&config, dispatcher).map_err(|e| e.to_string())
 }
 
 /// Run the daemon in stdio mode (debug/test only).
@@ -291,9 +293,9 @@ pub fn run_daemon_stdio() -> Result<(), String> {
     // in the per-call stderr capture.
     log_perf_startup();
 
-    // DaemonState is !Send/!Sync due to interior mutability. Arc is used for
-    // shared ownership, not cross-thread access. The daemon is single-threaded.
-    #[allow(clippy::arc_with_non_send_sync)]
+    // DAEMON-CONCURRENCY-IMPL-1: DaemonState is Send + Sync now, so this is a plain `Arc` (the prior
+    // arc_with_non_send_sync allow is gone — its removal compiling proves Send + Sync). Stdio mode is
+    // single-connection, but the shared state is the same shared-safe type the socket daemon uses.
     let state = Arc::new(DaemonState::new());
 
     // STATE-ROOT-SEPARATION-1: Warn on sandbox mode startup

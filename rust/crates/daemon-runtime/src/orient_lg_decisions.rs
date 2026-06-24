@@ -212,9 +212,10 @@ fn sqlite_caller_keys(
     snapshot_uid: &str,
     target: &str,
 ) -> Result<std::collections::BTreeSet<String>, repo_graph_agent::AgentStorageError> {
-    repo_state
-        .storage
-        .find_symbol_callers(snapshot_uid, target)
+    let conn = repo_state
+        .storage()
+        .map_err(|e| repo_graph_agent::AgentStorageError::new("find_symbol_callers", e))?;
+    conn.find_symbol_callers(snapshot_uid, target)
         .map(|rows| rows.into_iter().map(|r| r.stable_key).collect())
 }
 
@@ -225,9 +226,10 @@ fn sqlite_callee_keys(
     snapshot_uid: &str,
     target: &str,
 ) -> Result<std::collections::BTreeSet<String>, repo_graph_agent::AgentStorageError> {
-    repo_state
-        .storage
-        .find_symbol_callees(snapshot_uid, target)
+    let conn = repo_state
+        .storage()
+        .map_err(|e| repo_graph_agent::AgentStorageError::new("find_symbol_callees", e))?;
+    conn.find_symbol_callees(snapshot_uid, target)
         .map(|rows| rows.into_iter().map(|r| r.stable_key).collect())
 }
 

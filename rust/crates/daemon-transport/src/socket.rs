@@ -25,9 +25,35 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::conn_limit::ConnectionLimiter;
 use crate::dispatch::{DispatchResult, Dispatcher, EmitError, ProgressEmitter};
-use crate::envelope::{ErrorDetail, ErrorResponse, ProgressDetail, ProgressResponse, Request};
+use crate::envelope::{
+    ErrorCode, ErrorDetail, ErrorResponse, ProgressDetail, ProgressResponse, Request,
+};
 use crate::error::TransportError;
+
+/// Default concurrent-connection cap (DAEMON-CONCURRENCY-IMPL-1, D-C = C-B).
+///
+/// **Arbitrary policy default, not source-derived.** Overridable via the
+/// `RMAP_DAEMON_MAX_CONNS` environment variable (matches the `RMAP_` env
+/// convention). Caps the number of in-flight connection-handler threads so a
+/// connection storm cannot spawn unbounded threads. For the agent workload
+/// (connect → one query → close) one connection ≈ one in-flight request.
+const DEFAULT_MAX_CONNS: usize = 64;
+
+/// Resolve the concurrent-connection cap from `RMAP_DAEMON_MAX_CONNS`.
+///
+/// Falls back to [`DEFAULT_MAX_CONNS`] when the variable is absent, unparseable,
+/// or `0` (a `0` cap would reject every connection — never a useful daemon).
+fn max_connections_from_env() -> usize {
+    match std::env::var("RMAP_DAEMON_MAX_CONNS") {
+        Ok(v) => match v.trim().parse::<usize>() {
+            Ok(n) if n > 0 => n,
+            _ => DEFAULT_MAX_CONNS,
+        },
+        Err(_) => DEFAULT_MAX_CONNS,
+    }
+}
 
 /// Configuration for the socket transport.
 pub struct SocketConfig {
@@ -241,28 +267,67 @@ fn parse_and_dispatch<D: Dispatcher, W: Write>(
     }
 }
 
+/// Write a typed `Busy` error to an over-cap connection, then let it close.
+///
+/// DAEMON-CONCURRENCY-IMPL-1 (D-C = BP-BUSY): when the concurrency cap is
+/// reached the accept loop keeps draining `accept()` (so the listener never
+/// stalls) and rejects the new connection with an explicit, machine-readable
+/// "at capacity" on the EXISTING `ErrorResponse`/`ErrorDetail` envelope — honest
+/// degradation, not a silent queue/hang. The id is `"unknown"`: rejection
+/// happens at accept time, before any request line is read, so no request id is
+/// known yet (the client correlates the closed connection, not an id). Writes
+/// are best-effort — an over-cap client may already be gone.
+fn write_busy_response(stream: &mut UnixStream) {
+    let resp = ErrorResponse::for_unparseable(ErrorDetail::new(
+        ErrorCode::Busy,
+        "daemon at concurrent-connection capacity (RMAP_DAEMON_MAX_CONNS); retry shortly",
+    ));
+    if let Ok(json) = serde_json::to_string(&resp) {
+        let _ = writeln!(stream, "{}", json);
+        let _ = stream.flush();
+    }
+    // `stream` drops at the caller's scope end, closing the connection.
+}
+
 /// Run the socket transport loop.
 ///
-/// Accepts connections on the Unix socket and handles requests.
-/// Runs until `shutdown` is set to true or a fatal error occurs.
+/// Accepts connections on the Unix socket and handles each on its OWN thread, so
+/// `accept()` returns immediately to take the next client (DAEMON-CONCURRENCY-IMPL-1,
+/// D-C = C-B — removes the serial loop's head-of-line blocking, TECH-DEBT #1).
+/// Per-connection request handling stays serial (NDJSON pipelining is unchanged);
+/// concurrency is ACROSS connections, which is the multi-agent case.
+///
+/// Concurrency is bounded by a counting semaphore of `max_conns` permits. When
+/// no permit is free the over-cap connection is rejected with `ErrorCode::Busy`
+/// and closed (BP-BUSY) rather than queued into an opaque hang.
+///
+/// Runs until `shutdown` is set to true or a fatal error occurs. Outstanding
+/// connection threads are detached: on shutdown the accept loop returns while
+/// any in-flight handlers run to completion (a long `index`/`refresh` ties up
+/// one thread, not the whole daemon). Each handler holds its `Arc<D>` clone, so
+/// the dispatcher outlives the accept loop until the last handler finishes.
 ///
 /// # Arguments
 /// * `listener` - The bound Unix socket listener
-/// * `dispatcher` - The request dispatcher
+/// * `dispatcher` - The request dispatcher, shared across handler threads
 /// * `shutdown` - Atomic flag to signal shutdown
+/// * `max_conns` - Maximum concurrent connection-handler threads (semaphore cap)
 ///
 /// # Returns
 /// * `Ok(())` on clean shutdown
 /// * `Err(TransportError)` on fatal error
-pub fn run_socket<D: Dispatcher>(
+pub fn run_socket<D: Dispatcher + Send + Sync + 'static>(
     listener: &UnixListener,
-    dispatcher: &D,
+    dispatcher: Arc<D>,
     shutdown: &AtomicBool,
+    max_conns: usize,
 ) -> Result<(), TransportError> {
     // Set non-blocking so we can check shutdown flag periodically
     listener
         .set_nonblocking(true)
         .map_err(|e| TransportError::SocketBind(format!("failed to set non-blocking: {}", e)))?;
+
+    let limiter = ConnectionLimiter::new(max_conns);
 
     while !shutdown.load(Ordering::Relaxed) {
         match listener.accept() {
@@ -271,7 +336,25 @@ pub fn run_socket<D: Dispatcher>(
                 if let Err(e) = stream.set_nonblocking(false) {
                     eprintln!("warning: failed to set client stream blocking: {}", e);
                 }
-                handle_connection(stream, dispatcher);
+
+                match limiter.try_acquire() {
+                    // Permit acquired: hand the stream to a worker thread so the
+                    // accept loop returns immediately. The permit moves into the
+                    // thread and releases (RAII) when the handler ends — including
+                    // on panic, which a spawned thread isolates from the daemon.
+                    Some(permit) => {
+                        let dispatcher = Arc::clone(&dispatcher);
+                        std::thread::spawn(move || {
+                            handle_connection(stream, dispatcher.as_ref());
+                            drop(permit);
+                        });
+                    }
+                    // At capacity: BP-BUSY honest rejection, then close.
+                    None => {
+                        let mut stream = stream;
+                        write_busy_response(&mut stream);
+                    }
+                }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 // No pending connection, sleep briefly and check shutdown
@@ -299,9 +382,9 @@ pub fn run_socket<D: Dispatcher>(
 /// # Returns
 /// * `Ok(())` on clean shutdown
 /// * `Err` if socket bind fails or another daemon is running
-pub fn run_socket_transport<D: Dispatcher>(
+pub fn run_socket_transport<D: Dispatcher + Send + Sync + 'static>(
     config: &SocketConfig,
-    dispatcher: &D,
+    dispatcher: Arc<D>,
 ) -> Result<(), TransportError> {
     // Bind socket with stale handling
     let listener = match bind_socket(&config.socket_path)? {
@@ -314,7 +397,12 @@ pub fn run_socket_transport<D: Dispatcher>(
         }
     };
 
-    eprintln!("daemon listening on {}", config.socket_path.display());
+    let max_conns = max_connections_from_env();
+    eprintln!(
+        "daemon listening on {} (max concurrent connections: {})",
+        config.socket_path.display(),
+        max_conns
+    );
 
     // Shutdown flag for signal handling
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -328,7 +416,7 @@ pub fn run_socket_transport<D: Dispatcher>(
     .map_err(|e| TransportError::SocketBind(format!("failed to install signal handler: {}", e)))?;
 
     // Run the accept loop
-    let result = run_socket(&listener, dispatcher, &shutdown);
+    let result = run_socket(&listener, dispatcher, &shutdown, max_conns);
 
     // Clean up socket on shutdown
     cleanup_socket(&config.socket_path);
@@ -408,13 +496,13 @@ mod tests {
             _ => panic!("bind failed"),
         };
 
-        let dispatcher = MockDispatcher::new();
+        let dispatcher = Arc::new(MockDispatcher::new());
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
 
         // Spawn server thread
         let path_clone = path.clone();
-        let server = thread::spawn(move || run_socket(&listener, &dispatcher, &shutdown_clone));
+        let server = thread::spawn(move || run_socket(&listener, dispatcher, &shutdown_clone, 64));
 
         // Give server time to start
         thread::sleep(Duration::from_millis(50));
@@ -458,12 +546,12 @@ mod tests {
             _ => panic!("bind failed"),
         };
 
-        let dispatcher = MockDispatcher::new();
+        let dispatcher = Arc::new(MockDispatcher::new());
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
 
         let path_clone = path.clone();
-        let server = thread::spawn(move || run_socket(&listener, &dispatcher, &shutdown_clone));
+        let server = thread::spawn(move || run_socket(&listener, dispatcher, &shutdown_clone, 64));
 
         thread::sleep(Duration::from_millis(50));
 

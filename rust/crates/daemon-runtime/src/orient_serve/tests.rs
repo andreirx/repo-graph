@@ -103,6 +103,8 @@ fn bounded_cert_red_without_livegraph() {
 #[test]
 fn parity_orient_decorator_equals_sqlite_symbol_focus() {
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     // Precondition: the bounded cert is GREEN (so the daemon would pick the decorator path).
     assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
@@ -111,7 +113,7 @@ fn parity_orient_decorator_equals_sqlite_symbol_focus() {
 
     // Decorator path: focus resolution + callers/callees served from the LiveGraph.
     let served = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &f.state.storage);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
         repo_graph_agent::orient(
             &decorator,
             test_fixture::REPO,
@@ -123,7 +125,7 @@ fn parity_orient_decorator_equals_sqlite_symbol_focus() {
     };
     // Bare SQLite path (the fallback / today's eager read).
     let plain = repo_graph_agent::orient(
-        &f.state.storage,
+        &storage,
         test_fixture::REPO,
         Some(focus.as_str()),
         repo_graph_agent::Budget::Small,
@@ -151,9 +153,11 @@ fn parity_orient_decorator_equals_sqlite_repo_focus() {
     // Repo focus emits no callers/callees + no focus resolution; the decorator still produces the
     // identical result (it delegates MODULE_SUMMARY / trust / cycles to SQLite verbatim).
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     let now = "2026-01-01T00:00:00Z";
     let served = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &f.state.storage);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
         repo_graph_agent::orient(
             &decorator,
             test_fixture::REPO,
@@ -164,7 +168,7 @@ fn parity_orient_decorator_equals_sqlite_repo_focus() {
         .expect("decorator orient ok")
     };
     let plain = repo_graph_agent::orient(
-        &f.state.storage,
+        &storage,
         test_fixture::REPO,
         None,
         repo_graph_agent::Budget::Small,
@@ -434,9 +438,11 @@ impl<S: GateStorageRead + ?Sized> GateStorageRead for PartialSpy<'_, S> {
 #[test]
 fn no_eager_b_read_symbol_focus_serves_from_livegraph() {
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
-    let spy = PartialSpy(&f.state.storage);
+    let spy = PartialSpy(&storage);
     let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
 
     let focus = test_fixture::callee_key();
@@ -484,6 +490,8 @@ fn no_eager_b_read_symbol_focus_serves_from_livegraph() {
 #[test]
 fn served_path_build_envelope_callgraph_label_zero_per_call_read() {
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     let callee = test_fixture::callee_key();
     let caller = test_fixture::caller_key();
     let now = "2026-01-01T00:00:00Z";
@@ -497,7 +505,7 @@ fn served_path_build_envelope_callgraph_label_zero_per_call_read() {
     // 2. orient through the decorator (handle_orient step 2): the value serve. calleeFn HAS a caller
     //    (-> CALLERS_SUMMARY); callerFn HAS a callee (-> CALLEES_SUMMARY). Both served from the LiveGraph.
     let serve = |focus: &str| {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &f.state.storage);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
         repo_graph_agent::orient(
             &decorator,
             test_fixture::REPO,
@@ -513,22 +521,19 @@ fn served_path_build_envelope_callgraph_label_zero_per_call_read() {
     // 3. MUTATE-AFTER-CERT: drop the SQLite `CALLS` edge ("ec0", from the fixture). The LiveGraph is
     //    untouched, so the cached cert fingerprint is unchanged -> the cert stays GREEN, but a per-call
     //    SQLite callers/callees compare would now see an empty row set and DIVERGE.
-    f.state
-        .storage
+    storage
         .delete_edges_by_uids(&["ec0".to_string()])
         .expect("delete the SQLite CALLS edge");
     // Not vacuous: the SQLite callgraph genuinely diverges from the LiveGraph in BOTH directions now.
     assert!(
-        f.state
-            .storage
+        storage
             .find_symbol_callers(&f.snapshot_uid, &callee)
             .expect("find_symbol_callers ok")
             .is_empty(),
         "post-mutation SQLite has NO caller for calleeFn -> a per-call callers compare WOULD fall back"
     );
     assert!(
-        f.state
-            .storage
+        storage
             .find_symbol_callees(&f.snapshot_uid, &caller)
             .expect("find_symbol_callees ok")
             .is_empty(),
@@ -619,6 +624,8 @@ fn seed_focus_resolution_cert_red(state: &crate::state::RepoState, snapshot_uid:
 #[test]
 fn red_bounded_cert_labels_callgraph_sqlite_despite_green_callgraph_cert() {
     let f = test_fixture::build_fixture(false); // faithful mirror: BOTH sub-certs would be green
+                                                // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     let callee = test_fixture::callee_key();
     let now = "2026-01-01T00:00:00Z";
 
@@ -645,7 +652,7 @@ fn red_bounded_cert_labels_callgraph_sqlite_despite_green_callgraph_cert() {
     //    (exactly what handle_orient runs when it declines the decorator), then assemble the envelope with
     //    serve_from_lg = false.
     let result = repo_graph_agent::orient(
-        &f.state.storage,
+        &storage,
         test_fixture::REPO,
         Some(callee.as_str()),
         repo_graph_agent::Budget::Small,

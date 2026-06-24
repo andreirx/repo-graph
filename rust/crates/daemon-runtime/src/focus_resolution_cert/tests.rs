@@ -31,7 +31,8 @@ fn focus_cert_green_and_parity_on_faithful_mirror() {
 
         let lp = lg.resolve_path("src").data().unwrap().clone();
         let sp = state
-            .storage
+            .storage()
+            .unwrap()
             .resolve_path_focus(&snapshot_uid, "src")
             .unwrap();
         assert!(path_eq(&lp, &sp), "path parity for 'src': {lp:?} vs {sp:?}");
@@ -42,14 +43,16 @@ fn focus_cert_green_and_parity_on_faithful_mirror() {
             .unwrap()
             .clone();
         let sk = state
-            .storage
+            .storage()
+            .unwrap()
             .resolve_stable_key_focus(&snapshot_uid, &module_key("src"))
             .unwrap();
         assert!(opt_candidate_eq(&lk, &sk), "module stable-key parity");
 
         let ln = lg.resolve_symbol_name("foo").data().unwrap().clone();
         let sn = state
-            .storage
+            .storage()
+            .unwrap()
             .resolve_symbol_name(&snapshot_uid, "foo")
             .unwrap();
         assert!(
@@ -60,7 +63,8 @@ fn focus_cert_green_and_parity_on_faithful_mirror() {
         let widget = format!("{REPO}:src/a.ts#Widget.render:SYMBOL:METHOD");
         let lc = lg.symbol_context(&widget).data().unwrap().clone();
         let sc = state
-            .storage
+            .storage()
+            .unwrap()
             .get_symbol_context(&snapshot_uid, &widget)
             .unwrap();
         assert!(
@@ -301,7 +305,8 @@ fn focus_cert_ambiguous_name_caps_at_five_with_sqlite_parity() {
     ));
 
     let sq = state
-        .storage
+        .storage()
+        .unwrap()
         .resolve_symbol_name(&snapshot_uid, "dup")
         .unwrap();
     let lg_cands = {
@@ -352,10 +357,14 @@ fn green_focus_resolution_decision_reads_no_sqlite() {
         "faithful mirror -> GREEN"
     );
 
-    // (2) Swap storage for an EMPTY database (the spy). The LiveGraph + fingerprint are unchanged.
+    // (2) Repoint the repo's db_path at an EMPTY database. Connection-per-op (D-S = S-A) opens from
+    //     `key.db_path`, so any re-read now hits the empty DB — the connection-per-op equivalent of the
+    //     old "swap storage for the spy". The LiveGraph + fingerprint are unchanged.
     let empty_dir = tempdir().unwrap();
     let empty_db = empty_dir.path().join("empty.db");
-    state.storage = StorageConnection::open(&empty_db).expect("open empty db");
+    // Create + migrate the empty db file so a later per-op open succeeds (and finds no nodes -> RED).
+    drop(StorageConnection::open(&empty_db).expect("open empty db"));
+    state.key.db_path = empty_db;
 
     // (3) The cached GREEN at the unchanged fingerprint must serve WITHOUT re-reading SQLite. A
     //     re-read would hit the empty DB and flip to RED; still reporting GREEN proves zero reads.

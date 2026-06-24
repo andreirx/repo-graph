@@ -88,11 +88,23 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
     // Acquire write lock for marking
     let _write_guard = repo_state.coordinator.acquire_write();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Resolve snapshot UID
     let snapshot_uid = match snapshot_uid_param {
         Some(uid) => {
             // Verify snapshot exists and belongs to this repo
-            match repo_state.storage.get_snapshot(uid) {
+            match storage.get_snapshot(uid) {
                 Ok(Some(snap)) => {
                     if snap.repo_uid != *repo_uid {
                         return DispatchResult::error(
@@ -121,7 +133,7 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
         }
         None => {
             // Use latest snapshot
-            match repo_state.storage.get_latest_snapshot(repo_uid) {
+            match storage.get_latest_snapshot(repo_uid) {
                 Ok(Some(snap)) => snap.snapshot_uid,
                 Ok(None) => {
                     return DispatchResult::error(
@@ -143,10 +155,7 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
     };
 
     // Mark as user baseline
-    if let Err(e) = repo_state
-        .storage
-        .mark_snapshot_retention(&snapshot_uid, RetentionClass::BaselineUser)
-    {
+    if let Err(e) = storage.mark_snapshot_retention(&snapshot_uid, RetentionClass::BaselineUser) {
         return DispatchResult::error(
             &request.id,
             ErrorDetail::new(ErrorCode::InternalError, format!("{}", e)),
@@ -155,7 +164,7 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
 
     // Re-run classification to maintain coherent current/parent/baseline_auto
     // (e.g., if we just marked the current snapshot, a new current must be assigned)
-    if let Err(e) = repo_state.storage.classify_repo_retention(repo_uid) {
+    if let Err(e) = storage.classify_repo_retention(repo_uid) {
         // Non-fatal warning — the mark succeeded, classification is best-effort
         eprintln!(
             "warning: retention reclassification failed after mark_baseline: {}",
@@ -245,8 +254,20 @@ pub fn handle_unmark_baseline(state: &DaemonState, request: &Request) -> Dispatc
     // Acquire write lock
     let _write_guard = repo_state.coordinator.acquire_write();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Verify snapshot exists and is marked as user baseline
-    match repo_state.storage.get_snapshot(snapshot_uid) {
+    match storage.get_snapshot(snapshot_uid) {
         Ok(Some(snap)) => {
             if snap.repo_uid != *repo_uid {
                 return DispatchResult::error(
@@ -273,10 +294,7 @@ pub fn handle_unmark_baseline(state: &DaemonState, request: &Request) -> Dispatc
     }
 
     // Mark as prunable (will be reclassified on next refresh)
-    if let Err(e) = repo_state
-        .storage
-        .mark_snapshot_retention(snapshot_uid, RetentionClass::Prunable)
-    {
+    if let Err(e) = storage.mark_snapshot_retention(snapshot_uid, RetentionClass::Prunable) {
         return DispatchResult::error(
             &request.id,
             ErrorDetail::new(ErrorCode::InternalError, format!("{}", e)),
@@ -284,7 +302,7 @@ pub fn handle_unmark_baseline(state: &DaemonState, request: &Request) -> Dispatc
     }
 
     // Re-run classification to assign proper class
-    if let Err(e) = repo_state.storage.classify_repo_retention(repo_uid) {
+    if let Err(e) = storage.classify_repo_retention(repo_uid) {
         // Non-fatal warning
         eprintln!(
             "warning: retention reclassification failed after unmark: {}",

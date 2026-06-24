@@ -48,8 +48,8 @@
 //! use std::path::PathBuf;
 //!
 //! let config = SocketConfig::new(PathBuf::from("/tmp/daemon.sock"));
-//! let dispatcher = MockDispatcher::new();
-//! run_socket_transport(&config, &dispatcher).expect("transport error");
+//! let dispatcher = std::sync::Arc::new(MockDispatcher::new());
+//! run_socket_transport(&config, dispatcher).expect("transport error");
 //! ```
 //!
 //! ## Stdio mode (debug/test)
@@ -61,6 +61,7 @@
 //! run_stdio(&dispatcher).expect("transport error");
 //! ```
 
+mod conn_limit;
 mod dispatch;
 mod envelope;
 mod error;

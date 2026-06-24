@@ -1201,9 +1201,9 @@ pub fn imports_view_response(
     // a SQLite language-inventory error -> None -> the certificate reads `UnknownBaselineMissing` (honest, not
     // a false completeness claim). REUSES the audit's `build_baseline` (the single policy-versioned assembly).
     let baseline = repo_state
-        .storage
-        .distinct_file_languages(repo_uid)
+        .storage()
         .ok()
+        .and_then(|conn| conn.distinct_file_languages(repo_uid).ok())
         .map(|languages| {
             let discovered =
                 crate::partition_discovery::discover_partition_roots(repo_root, include_fixtures);
@@ -1445,8 +1445,9 @@ pub fn imports_compare_response(
     // SQLite PRIMARY (the existing per-file listing -- unchanged shape).
     let file_stable_key = format!("{repo_uid}:{file_path}:FILE");
     let imports = repo_state
-        .storage
-        .find_imports(snapshot_uid, &file_stable_key)
+        .storage()
+        .ok()
+        .and_then(|conn| conn.find_imports(snapshot_uid, &file_stable_key).ok())
         .unwrap_or_default();
     // The SQLite RESOLVED-LOCAL subset (D2): kind=FILE, NOT external, resolution=static, a target file path.
     let sqlite_resolved_targets: Vec<String> = imports
@@ -1770,8 +1771,9 @@ pub fn imports_auto_response(
         cert,
         || {
             repo_state
-                .storage
-                .find_imports(snapshot_uid, &file_stable_key)
+                .storage()
+                .ok()
+                .and_then(|conn| conn.find_imports(snapshot_uid, &file_stable_key).ok())
                 .unwrap_or_default()
         },
         || build_and_store_import_cert(repo_state, repo_uid, snapshot_uid, current_fp.clone()),
@@ -1937,8 +1939,9 @@ pub fn imports_readiness_response(
     snapshot_uid: &str,
 ) -> Value {
     let bulk = repo_state
-        .storage
-        .all_imports(snapshot_uid)
+        .storage()
+        .ok()
+        .and_then(|conn| conn.all_imports(snapshot_uid).ok())
         .unwrap_or_default();
     let guard = repo_state.livegraph.read();
     let (view, precond_map) = match guard.as_ref() {
@@ -2043,8 +2046,14 @@ fn module_cycle_compare_data(
     snapshot_uid: &str,
 ) -> Result<ModuleCycleCompareData, repo_graph_storage::error::StorageError> {
     use repo_graph_livegraph::module_cycle_compare::compare_module_cycles;
-    let sqlite_cycles = repo_state.storage.find_cycles(snapshot_uid, "module")?;
-    let qnames = repo_state.storage.module_qualified_names(snapshot_uid)?;
+    // D-S = S-A: one fresh per-operation connection for these reads.
+    let conn = repo_state.storage().map_err(|e| {
+        repo_graph_storage::error::StorageError::InvalidArgument(format!(
+            "failed to open storage connection: {e}"
+        ))
+    })?;
+    let sqlite_cycles = conn.find_cycles(snapshot_uid, "module")?;
+    let qnames = conn.module_qualified_names(snapshot_uid)?;
     let sqlite_count = sqlite_cycles.len();
     // D5: the SHORT module name ("src") collides across packages; the compare diffs by the QUALIFIED path.
     let sqlite_qualified: Vec<Vec<String>> = sqlite_cycles
@@ -2214,8 +2223,14 @@ fn serve_cycles_sqlite(
     snapshot_uid: &str,
     fallback_reason: FallbackReason,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
-    let sqlite_cycles = repo_state.storage.find_cycles(snapshot_uid, "module")?;
-    let qualified = repo_state.storage.module_qualified_names(snapshot_uid)?;
+    // D-S = S-A: one fresh per-operation connection for these reads.
+    let conn = repo_state.storage().map_err(|e| {
+        repo_graph_storage::error::StorageError::InvalidArgument(format!(
+            "failed to open storage connection: {e}"
+        ))
+    })?;
+    let sqlite_cycles = conn.find_cycles(snapshot_uid, "module")?;
+    let qualified = conn.module_qualified_names(snapshot_uid)?;
     let cycles = crate::cycle_output::sqlite_module_cycles_json(&sqlite_cycles, &qualified);
     let count = cycles.len();
     Ok(json!({
@@ -2438,7 +2453,11 @@ fn stats_compare_data(
     snapshot_uid: &str,
 ) -> Result<StatsCompareData, StorageError> {
     use std::collections::BTreeMap;
-    let sqlite_stats = repo_state.storage.compute_module_stats(snapshot_uid)?;
+    // D-S = S-A: one fresh per-operation connection for this read.
+    let conn = repo_state.storage().map_err(|e| {
+        StorageError::InvalidArgument(format!("failed to open storage connection: {e}"))
+    })?;
+    let sqlite_stats = conn.compute_module_stats(snapshot_uid)?;
     let (lg_rows, livegraph_class) = {
         let guard = repo_state.livegraph.read();
         match guard.as_ref() {
@@ -2543,7 +2562,11 @@ fn serve_stats_sqlite(
     snapshot_uid: &str,
     fallback_reason: FallbackReason,
 ) -> Result<Value, StorageError> {
-    let stats = repo_state.storage.compute_module_stats(snapshot_uid)?;
+    // D-S = S-A: one fresh per-operation connection for this read.
+    let conn = repo_state.storage().map_err(|e| {
+        StorageError::InvalidArgument(format!("failed to open storage connection: {e}"))
+    })?;
+    let stats = conn.compute_module_stats(snapshot_uid)?;
     Ok(json!({
         "repo_uid": repo_uid,
         "snapshot_uid": snapshot_uid,

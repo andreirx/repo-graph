@@ -43,3 +43,6 @@ ctrlc = "3"
 [dev-dependencies]
 # Temp directories for socket tests
 tempfile = "3"
+# JSON for the headless concurrency integration test's dispatcher/responses
+# (serde_json is already a normal dep; integration tests need it declared here too).
+serde_json = "1"

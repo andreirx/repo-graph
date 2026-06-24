@@ -38,8 +38,20 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
     // Acquire read lock
     let _read_guard = repo_state.coordinator.acquire_read();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Get latest snapshot
-    let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
         Ok(Some(snap)) if snap.status == "ready" => snap,
         Ok(Some(snap)) => {
             return DispatchResult::error(
@@ -67,10 +79,7 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
     // ── Section 1: Declared boundary violations (legacy) ─────────────────
 
     // Load active boundary declarations (directory-level MODULE targets)
-    let boundaries = match repo_state
-        .storage
-        .get_active_boundary_declarations(&repo_uid)
-    {
+    let boundaries = match storage.get_active_boundary_declarations(&repo_uid) {
         Ok(b) => b,
         Err(e) => {
             return DispatchResult::error(
@@ -101,7 +110,7 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
     rules.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
 
     for (boundary_module, forbids, reason) in &rules {
-        let edges = match repo_state.storage.find_imports_between_paths(
+        let edges = match storage.find_imports_between_paths(
             &snapshot.snapshot_uid,
             boundary_module,
             forbids,
@@ -130,7 +139,7 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
     // ── Section 2: Discovered module boundary violations ─────────────────
 
     // Load module graph facts once
-    let facts = match load_module_graph_facts(&repo_state.storage, &snapshot.snapshot_uid) {
+    let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
         Ok(f) => f,
         Err(e) => {
             return DispatchResult::error(
@@ -144,19 +153,18 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
     };
 
     // Evaluate using preloaded facts
-    let discovered_result =
-        match evaluate_violations_from_facts(&repo_state.storage, &repo_uid, &facts) {
-            Ok(r) => r,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::InternalError,
-                        format!("failed to evaluate violations: {}", e),
-                    ),
-                );
-            }
-        };
+    let discovered_result = match evaluate_violations_from_facts(&storage, &repo_uid, &facts) {
+        Ok(r) => r,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::InternalError,
+                    format!("failed to evaluate violations: {}", e),
+                ),
+            );
+        }
+    };
 
     // ── Build output ─────────────────────────────────────────────────────
 

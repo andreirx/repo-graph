@@ -65,8 +65,13 @@ pub(crate) fn build_orient_envelope(
     // practice the agent already read this same surface successfully earlier in the request (trust
     // aggregator), so the error branch is defensive-only. (Ambiguous/no-match emit no signals and take the
     // resolution-only path where `stale` is ignored, so this read is harmless there.)
-    let stale = match repo_state.storage.get_stale_files(&snapshot_uid) {
-        Ok(files) => !files.is_empty(),
+    // D-S = S-A: open a fresh per-operation connection (the orient read guard keeps it
+    // snapshot-consistent). Open failure cannot vouch for freshness -> conservative STALE.
+    let stale = match repo_state.storage() {
+        Ok(conn) => match conn.get_stale_files(&snapshot_uid) {
+            Ok(files) => !files.is_empty(),
+            Err(_) => true,
+        },
         Err(_) => true,
     };
 
@@ -223,17 +228,10 @@ pub(crate) fn compute_trust_briefing(
     repo_uid: &str,
     snapshot_uid: &str,
 ) -> Option<serde_json::Value> {
-    let snapshot = repo_state
-        .storage
-        .get_snapshot(snapshot_uid)
-        .ok()
-        .flatten()?;
-    let trust = compute_trust_overlay_for_snapshot(
-        &repo_state.storage,
-        repo_uid,
-        &snapshot,
-        "CALLS+IMPORTS",
-    )?;
+    // D-S = S-A: one fresh per-operation connection for this briefing (open failure -> None = no briefing).
+    let storage = repo_state.storage().ok()?;
+    let snapshot = storage.get_snapshot(snapshot_uid).ok().flatten()?;
+    let trust = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS")?;
     if trust.has_degradation() || !trust.caveats.is_empty() {
         serde_json::to_value(&trust).ok()
     } else {

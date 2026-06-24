@@ -51,12 +51,12 @@ fn complexity_compare_is_exact(repo_state: &RepoState, snapshot_uid: &str) -> Op
     let threshold = repo_graph_agent::aggregators::complexity::DEFAULT_COMPLEXITY_THRESHOLD;
     // SQLite FULL high-complexity set: count first, then read the whole set (limit = count) — the compare is
     // over the WHOLE set, not the top-N sample the signal evidence carries.
-    let count = repo_state
-        .storage
+    // D-S = S-A: one fresh per-operation connection; open failure -> None (safe SQLite fallback).
+    let conn = repo_state.storage().ok()?;
+    let count = conn
         .count_high_complexity_symbols(snapshot_uid, threshold)
         .ok()?;
-    let sqlite_rows = repo_state
-        .storage
+    let sqlite_rows = conn
         .query_high_complexity_symbols(snapshot_uid, threshold, count as usize)
         .ok()?;
     let sqlite_set: BTreeSet<(String, u64)> = sqlite_rows

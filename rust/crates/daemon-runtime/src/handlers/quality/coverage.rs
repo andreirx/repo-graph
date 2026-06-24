@@ -64,8 +64,20 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
     // Then acquire repo refresh lock (blocks new readers, waits for active readers)
     let _refresh_guard = repo_state.coordinator.acquire_refresh();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Get snapshot
-    let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
         Ok(Some(snap)) if snap.status == "ready" => snap,
         Ok(Some(snap)) => {
             return DispatchResult::error(
@@ -91,7 +103,7 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
     };
 
     // Get repo
-    let repo = match repo_state.storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
+    let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
         Ok(Some(r)) => r,
         Ok(None) => {
             return DispatchResult::error(
@@ -128,7 +140,7 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
     };
 
     // Get indexed files
-    let indexed_files = match repo_state.storage.get_files_by_repo(&repo_uid) {
+    let indexed_files = match storage.get_files_by_repo(&repo_uid) {
         Ok(files) => files,
         Err(e) => {
             return DispatchResult::error(

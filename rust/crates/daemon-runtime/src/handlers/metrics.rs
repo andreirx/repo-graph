@@ -67,8 +67,20 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
     // Acquire read lock
     let _read_guard = repo_state.coordinator.acquire_read();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Collect database metrics
-    let db_metrics = match repo_state.storage.collect_database_metrics() {
+    let db_metrics = match storage.collect_database_metrics() {
         Ok(m) => m,
         Err(e) => {
             return DispatchResult::error(
@@ -79,10 +91,7 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
     };
 
     // Collect retention metrics
-    let retention_metrics = match repo_state
-        .storage
-        .collect_snapshot_retention_metrics(repo_uid)
-    {
+    let retention_metrics = match storage.collect_snapshot_retention_metrics(repo_uid) {
         Ok(m) => m,
         Err(e) => {
             return DispatchResult::error(
@@ -93,11 +102,10 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
     };
 
     // Collect retention class stats (CACHE-SEMANTICS-1)
-    let (retention_stats, retention_stats_error) =
-        match repo_state.storage.get_retention_stats(repo_uid) {
-            Ok(s) => (Some(s), None),
-            Err(e) => (None, Some(format!("{}", e))),
-        };
+    let (retention_stats, retention_stats_error) = match storage.get_retention_stats(repo_uid) {
+        Ok(s) => (Some(s), None),
+        Err(e) => (None, Some(format!("{}", e))),
+    };
 
     // Build response
     let tables: Vec<serde_json::Value> = db_metrics
@@ -208,8 +216,20 @@ pub fn handle_storage_health(state: &DaemonState, request: &Request) -> Dispatch
     };
     let _read_guard = repo_state.coordinator.acquire_read();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Cheap COUNT(*)s on the small `snapshots` table (no node/edge scan) — total + prunable.
-    let stats = match repo_state.storage.get_retention_stats(repo_uid) {
+    let stats = match storage.get_retention_stats(repo_uid) {
         Ok(s) => s,
         Err(e) => {
             return DispatchResult::error(

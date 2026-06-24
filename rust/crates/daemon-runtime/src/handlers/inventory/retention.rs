@@ -210,8 +210,20 @@ pub fn handle_classify_retention(state: &DaemonState, request: &Request) -> Disp
     // Acquire write lock for lifecycle enforcement
     let _write_guard = repo_state.coordinator.acquire_write();
 
+    // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
+    // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
+    let storage = match repo_state.storage() {
+        Ok(s) => s,
+        Err(e) => {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            )
+        }
+    };
+
     // Enforce retention lifecycle
-    let result = match enforce_retention_lifecycle(&repo_state.storage, repo_uid) {
+    let result = match enforce_retention_lifecycle(&storage, repo_uid) {
         Ok(r) => r,
         Err(e) => {
             return DispatchResult::error(

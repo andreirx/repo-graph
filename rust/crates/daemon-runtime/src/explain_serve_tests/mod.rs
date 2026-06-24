@@ -57,6 +57,8 @@ fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
 #[test]
 fn parity_explain_symbol_high_fanin_ranked_equals_sqlite() {
     let f = fanin_fixture::build();
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     // Precondition: the bounded cert is GREEN over the high-fan-in corpus (so handle_explain picks the
     // decorator path). A faithful SQLite mirror of the resident LiveGraph -> focus-resolution ∧ callgraph
     // both GREEN.
@@ -70,12 +72,12 @@ fn parity_explain_symbol_high_fanin_ranked_equals_sqlite() {
     // Decorator path: focus resolution + callers served from the LiveGraph (raw IR-edge order), then
     // ranked + truncated by the agent.
     let served = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &f.state.storage);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
         run_explain(&decorator, fanin_fixture::REPO, &target)
     };
     // Bare SQLite path (the RED fallback / today's eager read): callers in SQLite raw order, then ranked +
     // truncated identically.
-    let plain = run_explain(&f.state.storage, fanin_fixture::REPO, &target);
+    let plain = run_explain(&storage, fanin_fixture::REPO, &target);
 
     // (a) The bare `OrientResult` is byte/value-identical despite the two stores returning the caller SET in
     // different raw orders — the ranking reconciles them BEFORE truncation, so the cert-proven-equal SET
@@ -140,11 +142,13 @@ fn parity_explain_symbol_high_fanin_ranked_equals_sqlite() {
 #[test]
 fn no_eager_nodes_read_explain_symbol_serves_from_livegraph() {
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
     // PANIC on the six served (b) methods; DELEGATE everything else (the (c) trust read, cycles,
     // gate/Authority, FS) to the real storage.
-    let spy = ServeSpy::panicking(&f.state.storage);
+    let spy = ServeSpy::panicking(&storage);
     let target = test_fixture::callee_key();
     let result = {
         let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
@@ -168,9 +172,11 @@ fn no_eager_nodes_read_explain_symbol_serves_from_livegraph() {
 #[test]
 fn honest_bound_explain_file_still_reads_nodes_on_green() {
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
-    let spy = ServeSpy::recording(&f.state.storage);
+    let spy = ServeSpy::recording(&storage);
     {
         let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
         // FILE focus: focus resolution is served (no `nodes` read for resolution), but `explain_file`
@@ -192,9 +198,11 @@ fn honest_bound_explain_file_still_reads_nodes_on_green() {
 #[test]
 fn honest_bound_explain_path_still_reads_nodes_on_green() {
     let f = test_fixture::build_fixture(false);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
-    let spy = ServeSpy::recording(&f.state.storage);
+    let spy = ServeSpy::recording(&storage);
     {
         let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
         // PATH focus: focus resolution served, but `explain_path` reads `compute_path_summary` +
@@ -220,6 +228,8 @@ fn red_bounded_cert_falls_back_to_bare_sqlite() {
     // is still faithful (`nodes` untouched) so its cert is GREEN, but the callgraph diverges -> RED ->
     // bounded cert (focus-res ∧ callgraph) RED -> handle_explain declines the decorator (serve_from_lg=false).
     let f = test_fixture::build_fixture(true);
+    // D-S = S-A: one per-op connection for this test (was the `repo_state.storage` field).
+    let storage = f.state.storage().unwrap();
     assert!(
         crate::focus_resolution_cert::focus_resolution_is_green(&f.state, &f.snapshot_uid),
         "focus resolution stays GREEN (nodes faithful) — only the callgraph diverges"
@@ -235,7 +245,7 @@ fn red_bounded_cert_falls_back_to_bare_sqlite() {
 
     // The dispatch's serve_from_lg == false branch: bare SQLite (the unchanged eager path).
     let callee = test_fixture::callee_key();
-    let result = run_explain(&f.state.storage, test_fixture::REPO, &callee);
+    let result = run_explain(&storage, test_fixture::REPO, &callee);
 
     // Non-leak: the bare answer has ZERO callers (SQLite has no CALLS edge) — the LiveGraph's caller
     // (callerFn) did NOT leak through. A decorator path would have served 1 caller.

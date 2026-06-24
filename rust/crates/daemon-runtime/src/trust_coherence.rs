@@ -46,8 +46,13 @@ pub(crate) fn build_trust_envelope(
     // SAME budget-/ranking-independent condition orient/check/explain use, so the Half-B freshness label is
     // faithful. CONSERVATIVE on read error -> STALE (a failed read cannot vouch for freshness). The snapshot
     // gate in `handle_trust` guarantees a ready snapshot before this point, so the uid is non-empty.
-    let stale = match repo_state.storage.get_stale_files(&report.snapshot_uid) {
-        Ok(files) => !files.is_empty(),
+    // D-S = S-A: open a fresh per-operation connection (the request's read guard keeps it
+    // snapshot-consistent). Open failure cannot vouch for freshness -> conservative STALE.
+    let stale = match repo_state.storage() {
+        Ok(conn) => match conn.get_stale_files(&report.snapshot_uid) {
+            Ok(files) => !files.is_empty(),
+            Err(_) => true,
+        },
         Err(_) => true,
     };
 

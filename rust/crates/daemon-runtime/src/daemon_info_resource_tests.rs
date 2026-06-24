@@ -23,9 +23,6 @@ use crate::state::DaemonState;
 /// the success result value.
 fn dispatch_daemon_info(state_root: &std::path::Path) -> Value {
     let registry = RepoRegistry::with_state_root(state_root).expect("registry");
-    // DaemonState is !Send/!Sync (interior mutability); Arc is shared ownership for a
-    // single-threaded daemon, matching `run_daemon`.
-    #[allow(clippy::arc_with_non_send_sync)]
     let state = Arc::new(DaemonState::with_registry(registry));
     let dispatcher = ServiceDispatcher::new(state);
 

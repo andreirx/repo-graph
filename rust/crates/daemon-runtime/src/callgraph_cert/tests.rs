@@ -123,7 +123,7 @@ fn lg_caller_rows_match_sqlite_rows_field_exact() {
     let lg = guard.as_ref().unwrap();
     let lg_rows = lg_caller_rows(lg, &test_fixture::callee_key()).expect("Exact caller rows");
     let sq_rows = repo_graph_agent::AgentStorageRead::find_symbol_callers(
-        &f.state.storage,
+        &f.state.storage().unwrap(),
         &f.snapshot_uid,
         &test_fixture::callee_key(),
     )
