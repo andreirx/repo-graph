@@ -71,6 +71,22 @@ robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
   (not just progress-emitting index/refresh), keyed off peer-disconnect detection.
   Couples to #1's concurrency rework. Extends D5b from index/refresh to queries.
 
+### 2b. LiveGraph preload/refresh acquire no coordinator (P2 — latent; active under concurrency)
+
+- **OBSERVED (DAEMON-CONCURRENCY-1 decision review, 2026-06-23):** `handle_livegraph_preload`
+  and `handle_livegraph_refresh` mutate the in-memory LiveGraph but acquire **no** repo
+  coordinator — they call only `resolve_and_load_repo` then swap the graph
+  (`dispatch.rs:764-797`, `:804-880`), unlike the production writer `handle_refresh` which
+  takes `acquire_write` + `acquire_refresh` (`dispatch.rs:2044`, `:2047`).
+- **Impact:** harmless in today's **serial** daemon (nothing else runs concurrently). But
+  under DAEMON-CONCURRENCY-1's concurrent accept loop, these handlers can swap the LiveGraph
+  **under live readers** regardless of the refresh-reader policy (W-A or W-B) — a cross-store
+  inconsistency. This is why B1 (`DAEMON-CONCURRENCY-IMPL-1`) MUST bring them under the
+  coordinator; the same fix is what a background enrich writer (ENRICH-LIFECYCLE-1) reuses.
+- **Required fix:** classify `livegraph_refresh`/`preload` (and background enrich) as
+  writer-ish under the repo coordinator. Tracked in `daemon-concurrency-1.md` §14 (B1 scope).
+  The deeper request-level epoch binding is `DAEMON-W-B-EPOCH-1` (ROADMAP).
+
 ### 3. orient under-segments deeply-nested package layouts (P1)
 
 - **OBSERVED (spring-petclinic, `smoke-runs/2026-06-21T15-55-40Z/`):** `orient --full`

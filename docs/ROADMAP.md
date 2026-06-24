@@ -53,9 +53,17 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
   `docs/slices/module-model-1.md` (6 decisions await ratification). _(TECH-DEBT #3;
   pairs the module-model P2)_
 - **daemon concurrency** — `run_socket` handles connections inline (serial;
-  head-of-line blocking), contradicting the VISION's concurrent-readers daemon. Make
-  connection handling concurrent over the existing `RepoCoordinator` (FIFO writer
-  queue already exists). _(TECH-DEBT #1; unblocks cancellation)_
+  head-of-line blocking), contradicting the VISION's concurrent-readers daemon. Spec'd
+  + **decision-reviewed + ratified** (`docs/slices/daemon-concurrency-1.md` §14). Ships
+  as **B1** (`DAEMON-CONCURRENCY-IMPL-1`: concurrent dispatch + state `Send+Sync` + W-A +
+  bring `livegraph_refresh`/`preload` under the coordinator + S-A normal-open) → **B2**
+  (query-path cancellation). The two-agent review withdrew W-B (cross-store split-brain) →
+  deferred to **`DAEMON-W-B-EPOCH-1`** (below). _(TECH-DEBT #1/#2/#2b)_
+  - **`DAEMON-W-B-EPOCH-1`** (deferred, depends on B1) — capture a request-level
+    `(ready_snapshot_uid, livegraph_fingerprint)` epoch once and thread it through every
+    SQLite + LiveGraph read in a request; prove whole-request join coherence (amend
+    daemon-concurrency-1 §6); then re-enable W-B (serve last-good during refresh) + E-A
+    (the ENRICH-LIFECYCLE-1 shared seam). The deferred relaxation, not lost.
 
 **P2**
 

@@ -697,9 +697,35 @@ confirms they **compose** via one seam:
 
 ---
 
-## 14. Ratification (operator — to be completed)
+## 14. Ratification (operator — 2026-06-23)
 
-D-C, D-S, D-W, D-K, D-SPLIT, D-E await ratification. The §8 matrices are the audit trail; on sign-off
-this section records the binding cells (as `module-model-1.md` §12 does) and the IMPL (B1, then B2)
-executes them without re-opening. Recommended slate: **D-C=C-B (cap 64, over-cap BP-BUSY),
-D-S=S-A (fast-open), D-W=W-B, D-K=K-A, D-SPLIT=B1→B2, D-E=E-A.**
+Ratified after a **two-agent adversarial decision review** (the first use of that mode): the builder
+recommended the §8 slate → Codex (reviewer) adversarially challenged the recommendations against
+source → the builder rebutted/conceded → the two **converged**. The review caught a real blocker the
+relay's artifact-review had approved: **W-B reintroduces a cross-store split-brain** (SQLite snapshot
+and the in-memory LiveGraph swap independently, with no captured per-request epoch — `dispatch.rs:2677-2685`
++ `agent/src/orient/repo.rs:98-105` + `orient_serve/storage_port_impl.rs:38-49,111-126`; `path` stamps a
+SQLite `snapshot_uid` onto a LiveGraph-served answer, `dispatch.rs:1760-1766`). It also surfaced a latent
+hole the spec missed: `livegraph_refresh`/`livegraph_preload` acquire **no** coordinator
+(`dispatch.rs:764-880`) — harmless serially, unsafe under concurrent accept regardless of W-A/W-B.
+
+**The §8 RECOMMENDED cells for D-S, D-W, D-E are SUPERSEDED by this section** (the matrices remain as the
+options audit trail). Binding slate the IMPL executes without re-opening:
+
+| Decision | RATIFIED | Change from §8 |
+|---|---|---|
+| **D-C** | **C-B** — thread-per-connection + counting-semaphore cap, **BP-BUSY** over-cap. Cap default 64 is an **arbitrary policy** knob (`RMAP_DAEMON_MAX_CONNS`), not source-derived. | unchanged (number labeled policy) |
+| **D-S** | **S-A** — connection-per-operation using the **normal `StorageConnection::open`**. **Fast-open WITHDRAWN** (skipping `run_migrations` could serve an unmigrated schema — a Layer-0 honesty violation). A fast-open is admissible only behind daemon-start schema validation + a cheap schema-marker recheck, or via S-B if profiling earns it. | fast-open dropped |
+| **D-W** | **W-A** (keep the refresh read-block) **+ bring `livegraph_refresh`/`livegraph_preload` (and any future background enrich writer) under the repo coordinator.** W-A is NOT safe without this fix — the uncoordinated LiveGraph writers defeat the read-guard. **W-B WITHDRAWN**, deferred to `DAEMON-W-B-EPOCH-1`. | W-B → W-A + coordination fix |
+| **D-K** | **K-A** — heartbeat-write cancel via the D5b seam. **Documented limit:** a connected-but-not-reading peer can block the heartbeat write (cancel latency unbounded in that case); K-B is the upgrade trigger. | unchanged + documented caveat |
+| **D-SPLIT** | **B1 → B2.** B1 = concurrent dispatch + state `Send+Sync` + **W-A** + LiveGraph-writer coordination + **S-A normal-open**. B2 = query cancellation (D-K). | B1 scope corrected (W-A, +coordination) |
+| **D-E** | **E-B** — keep ENRICH-LIFECYCLE-1 independent for now. Under the corrected model a background enrich IS just an uncoordinated LiveGraph writer, so B1's coordination fix is exactly what enrich reuses later. E-A revisited with W-B. | E-A → E-B |
+
+**Deferred (not lost):** `DAEMON-W-B-EPOCH-1` — capture a request-level `(ready_snapshot_uid,
+livegraph_fingerprint)` epoch once and thread it through **every** read in a request (eliminate the
+double snapshot-resolve in `orient/repo.rs` + the per-method decorator reads), then amend §6 to prove
+**whole-request join coherence** (not just per-store atomicity) and re-enable W-B + E-A. Queued in `docs/ROADMAP.md`.
+
+**§6 correction (binding):** the §6 safety argument proves per-store atomicity, which is correct but
+**insufficient** — it must prove whole-request cross-store coherence. The IMPL of B1 relies on W-A's
+read-guard exclusion (valid only after the coordination fix), NOT on the §6 cross-store claim.
