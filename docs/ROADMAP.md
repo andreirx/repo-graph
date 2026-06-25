@@ -52,18 +52,38 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
   package topology + unify the "module" notion. Spec'd in
   `docs/slices/module-model-1.md` (6 decisions await ratification). _(TECH-DEBT #3;
   pairs the module-model P2)_
-- **daemon concurrency** — `run_socket` handles connections inline (serial;
-  head-of-line blocking), contradicting the VISION's concurrent-readers daemon. Spec'd
-  + **decision-reviewed + ratified** (`docs/slices/daemon-concurrency-1.md` §14). Ships
-  as **B1** (`DAEMON-CONCURRENCY-IMPL-1`: concurrent dispatch + state `Send+Sync` + W-A +
-  bring `livegraph_refresh`/`preload` under the coordinator + S-A normal-open) → **B2**
-  (query-path cancellation). The two-agent review withdrew W-B (cross-store split-brain) →
-  deferred to **`DAEMON-W-B-EPOCH-1`** (below). _(TECH-DEBT #1/#2/#2b)_
+- **daemon concurrency** — `run_socket` handled connections inline (serial; head-of-line
+  blocking), contradicting the VISION's concurrent-readers daemon. Spec'd + **decision-
+  reviewed + ratified** (`docs/slices/daemon-concurrency-1.md` §14). **B1 SHIPPED**
+  (`DAEMON-CONCURRENCY-IMPL-1`: concurrent dispatch + state `Send+Sync` + W-A +
+  `livegraph_refresh`/`preload` under the coordinator + S-A normal-open). The two-agent
+  review withdrew W-B (cross-store split-brain) → deferred to **`DAEMON-W-B-EPOCH-1`**.
+  _(TECH-DEBT #1/#2/#2b)_
+  - **B2 (query-path cancellation, in-loop / Option A) — decomposed.** The single mega-slice
+    blocked (all 7 paths at once was too big to converge honestly; `sqlite3_interrupt` only
+    aborts SQL, not the Rust loops). Split into: **`DAEMON-CANCEL-1`** (the cancel seam +
+    `run_interruptible` fix [panic ≠ Cancelled] + in-loop cancellation for the two deep Rust
+    loops: cycles Tarjan + path BFS, honest large-fixture tests) → **`DAEMON-CANCEL-2`**
+    (stats SQL `sqlite3_interrupt` to the production handler + orient/check/trust/explain
+    multi-signal assembly checkpoints). Un-wired paths keep honest handler-boundary
+    detection in the interim.
   - **`DAEMON-W-B-EPOCH-1`** (deferred, depends on B1) — capture a request-level
     `(ready_snapshot_uid, livegraph_fingerprint)` epoch once and thread it through every
     SQLite + LiveGraph read in a request; prove whole-request join coherence (amend
     daemon-concurrency-1 §6); then re-enable W-B (serve last-good during refresh) + E-A
     (the ENRICH-LIFECYCLE-1 shared seam). The deferred relaxation, not lost.
+  - **`WORKTREE-SUPPORT-1`** (spec — ties to the multi-agent daemon) — does repo-graph serve
+    git **worktrees** correctly? Agents increasingly work in worktrees (parallel/isolated
+    work; the relay's own worktree isolation), and B1 just made the daemon concurrent for
+    exactly that multi-agent case. Open questions the spec must resolve against code: does the
+    daemon registry key a repo by **canonicalized working-dir path** (→ each worktree is a
+    distinct current-state, served correctly but with no shared-extraction reuse) or by **.git
+    identity** (→ two worktrees collide on one entry and the daemon serves the wrong branch's
+    state — a correctness bug)? `.rgr/` warm cache is per-working-dir (good); the global
+    registry (`daemon-runtime/src/registry.rs`, `state_root/registry.json` + `databases/`) is
+    the risk surface. Detect a worktree via `git rev-parse --git-common-dir`. Per the VISION
+    ("git owns history, repo-graph owns current-state"), each worktree's current-state is
+    distinct and must be served as such; shared-history extraction reuse is a nice-to-have.
 
 **P2**
 
