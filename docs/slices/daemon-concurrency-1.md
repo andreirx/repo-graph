@@ -729,3 +729,16 @@ double snapshot-resolve in `orient/repo.rs` + the per-method decorator reads), t
 **§6 correction (binding):** the §6 safety argument proves per-store atomicity, which is correct but
 **insufficient** — it must prove whole-request cross-store coherence. The IMPL of B1 relies on W-A's
 read-guard exclusion (valid only after the coordination fix), NOT on the §6 cross-store claim.
+
+**D-K granularity resolution (2026-06-25, B2-CHECKPOINT-GRANULARITY → A).** During the first B2 IMPL
+attempt the builder delivered handler-boundary checkpoints only (cancel *before* heavy work) and
+escalated, because the heavy loops sit inside opaque storage/agent calls and reaching them needs a
+cross-cutting cancel seam. A two-agent decision review surfaced **Option A (keep §7.3: in-loop
+checkpoints, full)** vs **Option B (handler-boundary only, reduced guarantee)**. **Operator ratified
+A.** So B2 implements cancellation that fires *inside* the heavy loops: a checkpoint/`CancelToken`
+threaded through the Rust-side loops (cycles/path/orient/check/trust/explain) reusing the D5b
+emitter-`Err` seam, **plus** `sqlite3_interrupt` (rusqlite interrupt handle) for the SQL-bound
+`compute_module_stats` path (which cannot be checkpointed mid-statement). The cross-cutting cancel
+seam is accepted by this ratification; §7.3 stands unchanged. If the seam would require a NEW crate
+boundary or a breaking trait-contract change (beyond threading an optional cancel param), the IMPL
+STOPs + surfaces (it does not restructure a boundary unilaterally).
