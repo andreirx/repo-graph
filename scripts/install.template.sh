@@ -272,12 +272,38 @@ resolve_version() {
         error "curl is required but not found"
     fi
 
-    # Get latest release from GitHub API
+    # Network step: resolve the latest release tag from the GitHub API.
+    #
+    # Observability + fail-fast (the reported silent-hang fix):
+    #   - Log the exact URL before the request so a stall here is attributable.
+    #   - Bound the request with --connect-timeout/--max-time so an unreachable,
+    #     IPv6-stalled, proxied, or rate-limited api.github.com FAILS in seconds
+    #     instead of hanging forever (this curl previously had NO timeout).
+    #   - The curl is split out of the parse pipeline so its exit code is
+    #     observable: a "curl | grep | sed" pipeline assigned via `local` masks
+    #     curl's exit status, which is exactly why the failure was invisible.
+    #     The resolution logic (URL, tag_name parse, 'v'-prefix strip) is
+    #     unchanged — only the plumbing that exposes the exit code differs.
+    #   - 2>/dev/null is dropped so curl's own -S error line (e.g. "curl: (28)
+    #     ...") surfaces alongside our actionable message.
+    # NOTE: api.github.com is the ONLY host this step uses; the binary download
+    # (download_binary) uses github.com. An error here therefore points at the
+    # API host specifically, which distinguishes a rate limit from no connectivity.
+    info "  GET ${RELEASES_URL}/latest"
+
+    local api_response curl_exit
+    api_response="$(curl -fsSL --connect-timeout 10 --max-time 30 "${RELEASES_URL}/latest")" && curl_exit=0 || curl_exit=$?
+
+    if [[ "${curl_exit}" -ne 0 ]]; then
+        error "Could not reach api.github.com (curl exit ${curl_exit}) — likely a network/proxy issue or the GitHub API rate limit. This step is the ONLY one that contacts api.github.com (the binary download uses github.com), so this points at the API host specifically. Retry, or pin the version to skip the API lookup: RMAP_VERSION=<ver> curl -fsSL <install-url> | bash"
+    fi
+
+    # Parse the resolved tag from the API response (logic unchanged).
     local latest_tag
-    latest_tag="$(curl -fsSL "${RELEASES_URL}/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+    latest_tag="$(printf '%s' "${api_response}" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
 
     if [[ -z "${latest_tag}" ]]; then
-        error "Could not determine latest version. Specify version with --version or RMAP_VERSION"
+        error "Could not determine latest version (api.github.com was reachable but the response had no tag_name). Specify version with --version or RMAP_VERSION"
     fi
 
     # Remove 'v' prefix
@@ -298,14 +324,34 @@ download_binary() {
     tmp_dir="$(mktemp -d)"
     trap "rm -rf '${tmp_dir}'" EXIT
 
+    # Network step: download the release tarball + checksum from github.com
+    # (NOT api.github.com — that host is only used by resolve_version). Log the
+    # exact URL before each request and capture each curl exit code so a failure
+    # names the URL + exit code instead of failing silently.
+    #
+    # Timeouts: --connect-timeout 10 fails fast if the connection cannot be
+    # established (the stall failure mode). The tarball is a multi-MB binary, so
+    # it gets a generous --max-time 600 (10 min) backstop — large enough not to
+    # abort a legitimately slow-but-progressing download, small enough that a
+    # wedged transfer cannot hang forever. The checksum is a few bytes, so it
+    # reuses the tight --max-time 30 (same as the API call).
+    # (A future refinement could swap the tarball's fixed --max-time for
+    # --speed-limit/--speed-time to abort only on a true mid-transfer stall; that
+    # is out of scope for this logging/timeout slice.)
     info "Downloading ${artifact}..."
-    if ! curl -fsSL -o "${tmp_dir}/${artifact}" "${download_url}"; then
-        error "Failed to download ${artifact} from ${download_url}"
+    info "  GET ${download_url}"
+    local dl_exit
+    curl -fsSL --connect-timeout 10 --max-time 600 -o "${tmp_dir}/${artifact}" "${download_url}" && dl_exit=0 || dl_exit=$?
+    if [[ "${dl_exit}" -ne 0 ]]; then
+        error "Failed to download ${artifact} (curl exit ${dl_exit}) from ${download_url}"
     fi
 
     info "Downloading checksum..."
-    if ! curl -fsSL -o "${tmp_dir}/${artifact}.sha256" "${checksum_url}"; then
-        error "Failed to download checksum"
+    info "  GET ${checksum_url}"
+    local sum_exit
+    curl -fsSL --connect-timeout 10 --max-time 30 -o "${tmp_dir}/${artifact}.sha256" "${checksum_url}" && sum_exit=0 || sum_exit=$?
+    if [[ "${sum_exit}" -ne 0 ]]; then
+        error "Failed to download checksum (curl exit ${sum_exit}) from ${checksum_url}"
     fi
 
     info "Verifying checksum..."
