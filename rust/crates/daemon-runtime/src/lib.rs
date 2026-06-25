@@ -47,6 +47,7 @@
 //! ```
 
 pub mod callgraph_cert;
+pub mod cancel;
 pub mod check_coherence;
 pub mod cycle_completeness_audit;
 pub mod cycle_output;

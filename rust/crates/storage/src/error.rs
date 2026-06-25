@@ -134,6 +134,17 @@ pub enum StorageError {
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
 
+    /// A read-only query was cancelled mid-flight because the client's transport
+    /// disconnected (DAEMON-CANCEL-1). A cooperative checkpoint threaded into a
+    /// heavy Rust loop (the Tarjan SCC traversal in `find_cycles_cancellable`)
+    /// observed the peer was gone and abandoned the work. Read-only ⇒ no partial
+    /// state to roll back. This is a CLIENT cancellation, NOT a storage failure:
+    /// the daemon maps it to `ErrorCode::Cancelled`, never `InternalError`. It is
+    /// distinct from `Sqlite(SQLITE_INTERRUPT)` (the mid-statement SQL-abort path,
+    /// DAEMON-CANCEL-2); this variant is the Rust-loop checkpoint channel.
+    #[error("operation cancelled (client disconnected)")]
+    Cancelled,
+
     /// A measurement's `value_json` could not be parsed as a numeric value.
     ///
     /// Measurements are expected to have `{ "value": <number> }` in

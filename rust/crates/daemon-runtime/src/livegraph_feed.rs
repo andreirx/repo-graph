@@ -672,14 +672,31 @@ struct LgPathAuto {
     nodes: Vec<PathNodeDisplay>,
 }
 
-/// LiveGraph path for `(from_key, to_key)`, if the LiveGraph can answer. `None` = no LiveGraph for this
-/// repo. Carries class + freshness + TS-only + found + per-node display metadata. The `file:line` is
-/// resolved here (under the read guard) via the read-only `node_location` lookup over the resident IR —
-/// it does NOT affect path()/trust semantics, only presentation.
-fn livegraph_path(repo_state: &RepoState, from_key: &str, to_key: &str) -> Option<LgPathAuto> {
+/// LiveGraph path for `(from_key, to_key)` with a cooperative cancellation checkpoint
+/// threaded into the BFS (DAEMON-CANCEL-1). `Ok(None)` = no LiveGraph for this repo
+/// (fall back to SQLite); `Ok(Some(_))` = the LiveGraph answer reduced to the `Auto`
+/// decision; `Err(StorageError::Cancelled)` = the peer disconnected mid-search (the BFS
+/// bailed at its next checkpoint). Carries class + freshness + TS-only + found + per-node
+/// display metadata. The `file:line` display metadata is resolved here (under
+/// the read guard) via `node_location` and does NOT affect path()/trust semantics.
+fn livegraph_path_cancellable(
+    repo_state: &RepoState,
+    from_key: &str,
+    to_key: &str,
+    // The `graph-algorithms` `CancelCheck` is exactly this bare type alias; we spell
+    // it out so `daemon-runtime` needs no direct dependency on `graph-algorithms`
+    // (it reaches the cancellable BFS through `livegraph`). It coerces to
+    // `LiveGraph::path_cancellable`'s `CancelCheck` param at the call below.
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Option<LgPathAuto>, StorageError> {
     let guard = repo_state.livegraph.read();
-    let lg = guard.as_ref()?;
-    let env = lg.path(from_key, to_key);
+    let lg = match guard.as_ref() {
+        Some(lg) => lg,
+        None => return Ok(None),
+    };
+    let env = lg
+        .path_cancellable(from_key, to_key, cancel)
+        .map_err(|_cancelled| StorageError::Cancelled)?;
     let keys = env.data().map(|d| d.nodes.clone()).unwrap_or_default();
     let found = !keys.is_empty();
     let nodes = keys
@@ -691,13 +708,13 @@ fn livegraph_path(repo_state: &RepoState, from_key: &str, to_key: &str) -> Optio
             PathNodeDisplay { key: k, location }
         })
         .collect();
-    Some(LgPathAuto {
+    Ok(Some(LgPathAuto {
         class: env.class(),
         freshness: env.freshness(),
         ts_only: ts_only(env.contributing_languages()),
         found,
         nodes,
-    })
+    }))
 }
 
 /// The `Auto` path decision (PATH-LIVEGRAPH-DEFAULT-1 D2/D3 + the display-metadata invariant): serve
@@ -838,42 +855,56 @@ pub fn path_engine_response(
     snapshot_uid: &str,
     sqlite_fetch: impl FnOnce() -> Result<Value, StorageError>,
     repo_root: &str,
+    // DAEMON-CANCEL-1: a cooperative checkpoint threaded into the LiveGraph BFS so a
+    // peer disconnect cancels the search mid-flight. Consulted only on the
+    // LiveGraph-serving arms (Auto/LiveGraph); `Compare` keeps the plain BFS (it is
+    // a diagnostic that always reads SQLite) and the SQLite fallback is not
+    // checkpointed here (that is the `sqlite3_interrupt` path, DAEMON-CANCEL-2).
+    // Bare seam type (= `graph-algorithms` `CancelCheck`); see `livegraph_path_cancellable`.
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, StorageError> {
     match engine {
         // `--engine sqlite` FORCES SQLite (always reads).
         Engine::Sqlite => path_auto_or_sqlite(repo_uid, snapshot_uid, None, None, sqlite_fetch),
         // DEFAULT (PATH-LIVEGRAPH-DEFAULT-1 + QUERY-AUTO-LAZY-SQLITE-1): serve LiveGraph when Exact + Fresh +
         // TS-only (D3 no-path EXACT is served -- path() returns Exact only for a proven-complete found-OR-no-
-        // path); ELSE a LAZY labelled SQLite fallback. The served path does NOT read nodes/edges.
+        // path); ELSE a LAZY labelled SQLite fallback. The served path does NOT read nodes/edges. A peer
+        // disconnect mid-BFS surfaces as `StorageError::Cancelled` via `?`.
         Engine::Auto => {
-            let (served, reason) =
-                match path_auto_outcome(livegraph_path(repo_state, from_key, to_key)) {
-                    Ok((found, nodes)) => (Some((found, nodes)), None),
-                    Err(reason) => (None, Some(reason)),
-                };
+            let lg = livegraph_path_cancellable(repo_state, from_key, to_key, cancel)?;
+            let (served, reason) = match path_auto_outcome(lg) {
+                Ok((found, nodes)) => (Some((found, nodes)), None),
+                Err(reason) => (None, Some(reason)),
+            };
             path_auto_or_sqlite(repo_uid, snapshot_uid, served, reason, sqlite_fetch)
         }
         // Explicit LiveGraph keeps trust_class/freshness as a diagnostic surface; SQLite LAZILY on fallback.
-        Engine::LiveGraph => match livegraph_path(repo_state, from_key, to_key) {
-            Some(a) => Ok(json!({
-                "repo_uid": repo_uid,
-                "snapshot_uid": snapshot_uid,
-                "found": a.found,
-                "path": livegraph_path_result(a.found, &a.nodes),
-                "backend_used": "livegraph",
-                "fallback_reason": Value::Null,
-                "trust_class": format!("{:?}", a.class),
-                "freshness": format!("{:?}", a.freshness),
-            })),
-            None => path_auto_or_sqlite(
-                repo_uid,
-                snapshot_uid,
-                None,
-                Some(FallbackReason::LiveGraphUnavailable),
-                sqlite_fetch,
-            ),
-        },
+        Engine::LiveGraph => {
+            match livegraph_path_cancellable(repo_state, from_key, to_key, cancel)? {
+                Some(a) => Ok(json!({
+                    "repo_uid": repo_uid,
+                    "snapshot_uid": snapshot_uid,
+                    "found": a.found,
+                    "path": livegraph_path_result(a.found, &a.nodes),
+                    "backend_used": "livegraph",
+                    "fallback_reason": Value::Null,
+                    "trust_class": format!("{:?}", a.class),
+                    "freshness": format!("{:?}", a.freshness),
+                })),
+                None => path_auto_or_sqlite(
+                    repo_uid,
+                    snapshot_uid,
+                    None,
+                    Some(FallbackReason::LiveGraphUnavailable),
+                    sqlite_fetch,
+                ),
+            }
+        }
         // Compare: ALWAYS reads SQLite. The sqlite_found/sqlite_names extraction (compare-only) moves HERE.
+        // DAEMON-CANCEL-1: the compare LiveGraph BFS is checkpointed too (review finding #2) — it runs the
+        // SAME `LiveGraph::path` BFS, so a peer disconnect mid-search cancels it, not just the Auto/LiveGraph
+        // arms. The SQLite side (`sqlite_fetch`, a recursive CTE) stays uncheckpointed — `sqlite3_interrupt`
+        // is DAEMON-CANCEL-2.
         Engine::Compare => {
             let mut sqlite_response = sqlite_fetch()?;
             let sqlite_found = sqlite_response
@@ -891,7 +922,7 @@ pub fn path_engine_response(
                         .collect()
                 })
                 .unwrap_or_default();
-            let lg = livegraph_path(repo_state, from_key, to_key).map(|a| {
+            let lg = livegraph_path_cancellable(repo_state, from_key, to_key, cancel)?.map(|a| {
                 (
                     a.class,
                     a.freshness,
@@ -1035,11 +1066,17 @@ pub fn file_import_cycles_response(
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
-) -> Value {
+    // DAEMON-CANCEL-1: checkpoint threaded into the file-import Tarjan so
+    // `cycles --engine livegraph --kind file-import` cancels mid-flight. `Err` is
+    // `StorageError::Cancelled` on a peer disconnect (this route has no SQLite peer).
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Value, repo_graph_storage::error::StorageError> {
     let guard = repo_state.livegraph.read();
     let (class, freshness, missing, reasons, cycles, scope) = match guard.as_ref() {
         Some(lg) => {
-            let env = lg.file_import_cycles();
+            let env = lg
+                .file_import_cycles_cancellable(cancel)
+                .map_err(|_| repo_graph_storage::error::StorageError::Cancelled)?;
             let data = env.data();
             let cycles = data.map(file_import_cycles_json).unwrap_or_default();
             // IMPORTS-XPART-ENUMERATION-1 (D6): emit the STRUCTURED D5 scope flag set (not the old
@@ -1068,7 +1105,7 @@ pub fn file_import_cycles_response(
         ),
     };
     let count = cycles.len();
-    json!({
+    Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
         "snapshot_uid": snapshot_uid,
@@ -1081,7 +1118,7 @@ pub fn file_import_cycles_response(
         "freshness": freshness,
         "missing_partitions": missing,
         "degradation_reasons": reasons,
-    })
+    }))
 }
 
 /// Map a [`ModuleImportCyclesAnswer`] into the `cycles:[{nodes:[{node_id,name,file}]}]` shape
@@ -1131,11 +1168,17 @@ pub fn module_import_cycles_response(
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
-) -> Value {
+    // DAEMON-CANCEL-1: checkpoint threaded into the module-import Tarjan so
+    // `cycles --engine livegraph --kind module-import` cancels mid-flight. `Err` is
+    // `StorageError::Cancelled` on a peer disconnect (this route has no SQLite peer).
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Value, repo_graph_storage::error::StorageError> {
     let guard = repo_state.livegraph.read();
     let (class, freshness, missing, reasons, cycles, scope) = match guard.as_ref() {
         Some(lg) => {
-            let env = lg.module_import_cycles();
+            let env = lg
+                .module_import_cycles_cancellable(cancel)
+                .map_err(|_| repo_graph_storage::error::StorageError::Cancelled)?;
             let data = env.data();
             let cycles = data.map(module_import_cycles_json).unwrap_or_default();
             let scope = data
@@ -1163,7 +1206,7 @@ pub fn module_import_cycles_response(
         ),
     };
     let count = cycles.len();
-    json!({
+    Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
         "snapshot_uid": snapshot_uid,
@@ -1176,7 +1219,7 @@ pub fn module_import_cycles_response(
         "freshness": freshness,
         "missing_partitions": missing,
         "degradation_reasons": reasons,
-    })
+    }))
 }
 
 /// IMPORTS-LIVEGRAPH-CLI-1 (D2/D4/D5): build the `imports --engine livegraph` response -- the
@@ -2039,11 +2082,20 @@ struct ModuleCycleCompareData {
     lg_modules: std::collections::BTreeSet<String>,
 }
 
-/// Compute the shared [`ModuleCycleCompareData`] — the SQLite MODULE cycles mapped to QUALIFIED module paths vs
-/// the LiveGraph derived module cycles, compared by SET. Reads SQLite once + the LiveGraph once (one read lock).
-fn module_cycle_compare_data(
+/// Compute the shared [`ModuleCycleCompareData`] — the SQLite MODULE cycles mapped to QUALIFIED module
+/// paths vs the LiveGraph derived module cycles, compared by SET (reads SQLite once + the LiveGraph once) —
+/// with a cooperative checkpoint threaded into BOTH Tarjan loops it runs: the SQLite SCC
+/// (`find_cycles_cancellable`) and the LiveGraph module-cycle SCC (`module_import_cycles_cancellable`). So
+/// BOTH the `--engine compare` surface AND the DEFAULT route's first-call-per-fingerprint cert build cancel
+/// mid-flight (DAEMON-CANCEL-1). On a peer disconnect it returns
+/// [`StorageError::Cancelled`](repo_graph_storage::error::StorageError::Cancelled); read-only ⇒ nothing to
+/// roll back. There is no non-cancellable variant: the orient cert-build path reaches this through
+/// [`build_and_store_cycles_cert`]'s never-breaking checkpoint, which is byte-identical (the `Cancelled` arm
+/// is then unreachable).
+fn module_cycle_compare_data_cancellable(
     repo_state: &RepoState,
     snapshot_uid: &str,
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<ModuleCycleCompareData, repo_graph_storage::error::StorageError> {
     use repo_graph_livegraph::module_cycle_compare::compare_module_cycles;
     // D-S = S-A: one fresh per-operation connection for these reads.
@@ -2052,7 +2104,8 @@ fn module_cycle_compare_data(
             "failed to open storage connection: {e}"
         ))
     })?;
-    let sqlite_cycles = conn.find_cycles(snapshot_uid, "module")?;
+    // Reborrow `cancel` (`&mut *cancel`) so it stays usable for the LiveGraph Tarjan below.
+    let sqlite_cycles = conn.find_cycles_cancellable(snapshot_uid, "module", &mut *cancel)?;
     let qnames = conn.module_qualified_names(snapshot_uid)?;
     let sqlite_count = sqlite_cycles.len();
     // D5: the SHORT module name ("src") collides across packages; the compare diffs by the QUALIFIED path.
@@ -2074,7 +2127,9 @@ fn module_cycle_compare_data(
         let guard = repo_state.livegraph.read();
         match guard.as_ref() {
             Some(lg) => {
-                let env = lg.module_import_cycles();
+                let env = lg
+                    .module_import_cycles_cancellable(cancel)
+                    .map_err(|_| repo_graph_storage::error::StorageError::Cancelled)?;
                 let cycles = env
                     .data()
                     .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect())
@@ -2116,10 +2171,14 @@ pub fn module_cycle_compare_response(
     display_name: &str,
     snapshot_uid: &str,
     repo_root: &str,
-) -> Result<Value, String> {
+    // DAEMON-CANCEL-1: checkpoint threaded into the compare's two Tarjan loops so
+    // `cycles --engine compare` cancels mid-flight. The error type is now `StorageError`
+    // (was `String`) so the handler can distinguish `Cancelled` from an internal error.
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Value, repo_graph_storage::error::StorageError> {
     use repo_graph_livegraph::module_cycle_compare::classify_missing_module_cycle;
     // The SHARED comparison computation (identical basis to the fastpath cert -> no drift).
-    let data = module_cycle_compare_data(repo_state, snapshot_uid).map_err(|e| e.to_string())?;
+    let data = module_cycle_compare_data_cancellable(repo_state, snapshot_uid, cancel)?;
     let cmp = &data.comparison;
     // MODULE-CYCLES-COMPARE-CLASSIFY-1 (D2=A): classify each missing cycle from LiveGraph evidence
     // (replacing the blanket UnknownDivergence); evidence-backed or Unknown.
@@ -2222,6 +2281,9 @@ fn serve_cycles_sqlite(
     display_name: &str,
     snapshot_uid: &str,
     fallback_reason: FallbackReason,
+    // DAEMON-CANCEL-1: cooperative checkpoint threaded into the SQLite SCC Tarjan
+    // (`find_cycles_cancellable`) so the DEFAULT `cycles` fallback cancels mid-flight.
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
     // D-S = S-A: one fresh per-operation connection for these reads.
     let conn = repo_state.storage().map_err(|e| {
@@ -2229,7 +2291,7 @@ fn serve_cycles_sqlite(
             "failed to open storage connection: {e}"
         ))
     })?;
-    let sqlite_cycles = conn.find_cycles(snapshot_uid, "module")?;
+    let sqlite_cycles = conn.find_cycles_cancellable(snapshot_uid, "module", cancel)?;
     let qualified = conn.module_qualified_names(snapshot_uid)?;
     let cycles = crate::cycle_output::sqlite_module_cycles_json(&sqlite_cycles, &qualified);
     let count = cycles.len();
@@ -2246,22 +2308,66 @@ fn serve_cycles_sqlite(
 
 /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (build): run the SHARED module-cycle compare -> verdict, STORE the cert
 /// keyed by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint / a storage error -> the caller
-/// falls back to SQLite). Reads SQLite ONCE per fingerprint via the SAME `module_cycle_compare_data` the
-/// `--engine compare` uses, so the GREEN verdict PROVABLY matches the compare (no drift -> no false GREEN).
+/// falls back to SQLite). Reads SQLite ONCE per fingerprint via the SAME compare data the `--engine compare`
+/// uses, so the GREEN verdict PROVABLY matches the compare (no drift -> no false GREEN).
+///
+/// This is the NON-CANCELLABLE cert build, retained for the ORIENT cert-build caller
+/// (`orient_lg_decisions`), which is OUT of DAEMON-CANCEL-1's in-loop scope. It delegates to
+/// [`build_and_store_cycles_cert_cancellable`] with a NEVER-breaking checkpoint, so its behavior is
+/// byte-identical to the historical `module_cycle_compare_data(...).ok()?` form (the `Cancelled` arm cannot
+/// fire; `.ok().flatten()` collapses both the no-fingerprint and storage-error cases to `None`). The DEFAULT
+/// `cycles` handler uses the cancellable form DIRECTLY — review iteration 1 found this first-call-per-
+/// fingerprint cert build was the last uncheckpointed Tarjan on that route.
 pub(crate) fn build_and_store_cycles_cert(
     repo_state: &RepoState,
     snapshot_uid: &str,
     fingerprint: Option<String>,
 ) -> Option<bool> {
-    let fingerprint = fingerprint?;
-    let data = module_cycle_compare_data(repo_state, snapshot_uid).ok()?;
+    build_and_store_cycles_cert_cancellable(repo_state, snapshot_uid, fingerprint, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+    .ok()
+    .flatten()
+}
+
+/// [`build_and_store_cycles_cert`] with the cooperative checkpoint threaded into the SHARED compare data's
+/// two Tarjan loops (via [`module_cycle_compare_data_cancellable`]: the SQLite SCC `find_cycles_cancellable`
+/// plus the LiveGraph module-cycle SCC), so the DEFAULT `cycles` route's first-call-per-fingerprint cert
+/// build cancels MID-FLIGHT on a peer disconnect (DAEMON-CANCEL-1, review iteration 1 — this build
+/// previously ran its Tarjan to completion uncancellably). Returns:
+///
+/// - `Err(StorageError::Cancelled)` — the peer disconnected during the cert-build traversal (the handler
+///   maps this to `ErrorCode::Cancelled`).
+/// - `Ok(None)` — no fingerprint, OR a NON-cancel storage error (the caller then falls back to the
+///   itself-cancellable SQLite serve, exactly as the historical `.ok()?` did). A non-cancel read failure is
+///   deliberately NOT surfaced as a cancel — only a genuine client disconnect is (DAEMON-CANCEL-1
+///   deliverable #2 discipline: never mislabel an internal failure as a cancellation).
+/// - `Ok(Some(is_green))` — the verdict was computed and the cert stored.
+pub(crate) fn build_and_store_cycles_cert_cancellable(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+    fingerprint: Option<String>,
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Option<bool>, repo_graph_storage::error::StorageError> {
+    let Some(fingerprint) = fingerprint else {
+        return Ok(None);
+    };
+    let data = match module_cycle_compare_data_cancellable(repo_state, snapshot_uid, cancel) {
+        Ok(data) => data,
+        Err(repo_graph_storage::error::StorageError::Cancelled) => {
+            return Err(repo_graph_storage::error::StorageError::Cancelled)
+        }
+        // Non-cancel storage error: behave like the historical `.ok()?` — no cert stored, fall back to
+        // SQLite. NOT a client cancel, so it is not surfaced as `Cancelled`.
+        Err(_) => return Ok(None),
+    };
     let is_green = data.comparison.is_exact();
     let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
     *repo_state.cycles_cert.write() = Some(CycleNoLossCert {
         verdict,
         fingerprint,
     });
-    Some(is_green)
+    Ok(Some(is_green))
 }
 
 /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1/D4): the PURE fastpath/SQLite ladder. precondition UNMET (the
@@ -2269,26 +2375,40 @@ pub(crate) fn build_and_store_cycles_cert(
 /// `precondition_reason`) ; precondition met + GREEN cert -> serve LiveGraph WITHOUT find_cycles ; cert
 /// RED/stale/missing/build-failed -> SQLite (`LiveGraphCycleDivergence`). Pure (no I/O itself): a panicking
 /// `serve_sqlite` proves the GREEN path skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing.
+///
+/// DAEMON-CANCEL-1 (review iteration 1): the two SQLite-touching branches (`serve_sqlite`, `build_cert`)
+/// RECEIVE the cooperative `cancel` checkpoint as a parameter rather than capturing it. The ladder reborrows
+/// the one `&mut` into whichever branch it takes — which (a) lets the StaleOrMissing→RED path build the cert
+/// and THEN serve SQLite without two closures aliasing the same `&mut`, and (b) lets the cert build cancel
+/// mid-Tarjan. A `Cancelled` from either branch short-circuits the ladder via `?`. The pure-decision shape is
+/// preserved: a panicking closure still proves which branch runs.
 fn cycles_fastpath_or_sqlite(
     precondition_met: bool,
     precondition_reason: FallbackReason,
     cert: CycleCertState,
     serve_livegraph: impl FnOnce() -> Value,
-    serve_sqlite: impl FnOnce(FallbackReason) -> Value,
-    build_cert: impl FnOnce() -> Option<bool>,
-) -> Value {
+    serve_sqlite: impl FnOnce(
+        FallbackReason,
+        &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+    ) -> Result<Value, repo_graph_storage::error::StorageError>,
+    build_cert: impl FnOnce(
+        &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+    ) -> Result<Option<bool>, repo_graph_storage::error::StorageError>,
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Value, repo_graph_storage::error::StorageError> {
     if !precondition_met {
-        return serve_sqlite(precondition_reason);
+        return serve_sqlite(precondition_reason, cancel);
     }
     let green = match cert {
         CycleCertState::ValidGreen => true,
         CycleCertState::ValidNotGreen => false,
-        CycleCertState::StaleOrMissing => build_cert().unwrap_or(false),
+        // Reborrow so `cancel` stays usable for the serve_sqlite fall-through on a RED build.
+        CycleCertState::StaleOrMissing => build_cert(&mut *cancel)?.unwrap_or(false),
     };
     if green {
-        serve_livegraph()
+        Ok(serve_livegraph())
     } else {
-        serve_sqlite(FallbackReason::LiveGraphCycleDivergence)
+        serve_sqlite(FallbackReason::LiveGraphCycleDivergence, cancel)
     }
 }
 
@@ -2301,6 +2421,16 @@ pub fn cycles_auto_response(
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
+    // DAEMON-CANCEL-1: the cooperative checkpoint for the DEFAULT `rmap cycles`, threaded into EVERY Tarjan
+    // loop this route can run, so a peer disconnect during ANY phase cancels mid-flight:
+    //   1. the precondition LiveGraph module-cycle SCC (`module_import_cycles_cancellable`, below),
+    //   2. the first-call-per-fingerprint cert build (`build_and_store_cycles_cert_cancellable` →
+    //      `module_cycle_compare_data_cancellable`, which runs BOTH the SQLite and LiveGraph SCCs), and
+    //   3. the SQLite SCC fallback (`serve_cycles_sqlite` → `find_cycles_cancellable`).
+    // Review iteration 1 closed the phase-2 gap: that cert build previously ran its Tarjan to completion
+    // uncancellably. The ORIENT cert-build caller is unaffected — it reaches the verdict through the
+    // never-breaking `build_and_store_cycles_cert`, so orient stays byte-identical (out of CANCEL-1 scope).
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
     // SQLite-FREE: the module-cycle answer-class (the precondition), the LiveGraph cycles (the served answer),
     // and the current fingerprint -- all from a single LiveGraph read lock.
@@ -2308,7 +2438,11 @@ pub fn cycles_auto_response(
         let guard = repo_state.livegraph.read();
         match guard.as_ref() {
             Some(lg) => {
-                let env = lg.module_import_cycles();
+                // The in-loop layer: the module-cycle Tarjan is checkpointed, so the
+                // default route cancels mid-traversal (not at the handler boundary).
+                let env = lg
+                    .module_import_cycles_cancellable(cancel)
+                    .map_err(|_| repo_graph_storage::error::StorageError::Cancelled)?;
                 let met = format!("{:?}", env.class()) == "Exact";
                 let cycles: Vec<Vec<String>> = env
                     .data()
@@ -2344,27 +2478,35 @@ pub fn cycles_auto_response(
             _ => CycleCertState::StaleOrMissing,
         }
     };
-    // The ladder. A storage error in the SQLite fallback surfaces as Err (the caller maps it).
-    let mut sqlite_err: Option<repo_graph_storage::error::StorageError> = None;
-    let result = cycles_fastpath_or_sqlite(
+    // The ladder. The two SQLite-touching branches receive `cancel` as a parameter (so the build-then-serve
+    // path on a RED cert reuses the one checkpoint without aliasing); a `Cancelled` from either short-circuits
+    // via the helper's `?`. DAEMON-CANCEL-1 (review iteration 1): `build_and_store_cycles_cert_cancellable`
+    // makes the first-call-per-fingerprint cert build cancel mid-Tarjan — the route's last uncheckpointed loop.
+    cycles_fastpath_or_sqlite(
         precondition_met,
         precondition_reason,
         cert,
         || serve_cycles_fastpath(repo_uid, display_name, snapshot_uid, &lg_cycles),
-        |reason| match serve_cycles_sqlite(repo_state, repo_uid, display_name, snapshot_uid, reason)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                sqlite_err = Some(e);
-                Value::Null
-            }
+        |reason, cancel| {
+            serve_cycles_sqlite(
+                repo_state,
+                repo_uid,
+                display_name,
+                snapshot_uid,
+                reason,
+                cancel,
+            )
         },
-        || build_and_store_cycles_cert(repo_state, snapshot_uid, current_fp.clone()),
-    );
-    if let Some(e) = sqlite_err {
-        return Err(e);
-    }
-    Ok(result)
+        |cancel| {
+            build_and_store_cycles_cert_cancellable(
+                repo_state,
+                snapshot_uid,
+                current_fp.clone(),
+                cancel,
+            )
+        },
+        cancel,
+    )
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2820,9 +2962,11 @@ mod tests {
             FallbackReason::LiveGraphUnavailable,
             CycleCertState::ValidGreen,
             || json!({"backend_used": "livegraph"}),
-            |_r| panic!("SQLite (find_cycles) must NOT be read on a GREEN cached cert"),
-            || panic!("the cert must NOT be rebuilt when ValidGreen"),
-        );
+            |_r, _c| panic!("SQLite (find_cycles) must NOT be read on a GREEN cached cert"),
+            |_c| panic!("the cert must NOT be rebuilt when ValidGreen"),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .expect("GREEN cached path serves LiveGraph and never errors");
         assert_eq!(out["backend_used"], "livegraph");
     }
 
@@ -2833,9 +2977,11 @@ mod tests {
             FallbackReason::LiveGraphUnavailable,
             CycleCertState::ValidNotGreen,
             || panic!("must NOT serve LiveGraph when the cert is not GREEN"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || panic!("must NOT rebuild when ValidNotGreen"),
-        );
+            |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
+            |_c| panic!("must NOT rebuild when ValidNotGreen"),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .expect("ValidNotGreen serves SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphCycleDivergence");
     }
@@ -2847,9 +2993,11 @@ mod tests {
             FallbackReason::LiveGraphPartial,
             CycleCertState::ValidGreen, // ignored when the precondition is unmet
             || panic!("must NOT serve LiveGraph when the precondition is unmet"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || panic!("must NOT build the cert when the precondition is unmet"),
-        );
+            |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
+            |_c| panic!("must NOT build the cert when the precondition is unmet"),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .expect("precondition-unmet serves SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphPartial");
     }
@@ -2861,9 +3009,11 @@ mod tests {
             FallbackReason::LiveGraphUnavailable,
             CycleCertState::StaleOrMissing,
             || json!({"backend_used": "livegraph"}),
-            |_r| panic!("a GREEN build must serve LiveGraph, not SQLite"),
-            || Some(true),
-        );
+            |_r, _c| panic!("a GREEN build must serve LiveGraph, not SQLite"),
+            |_c| Ok(Some(true)),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .expect("a GREEN build serves LiveGraph and never errors");
         assert_eq!(out["backend_used"], "livegraph");
     }
 
@@ -2874,9 +3024,11 @@ mod tests {
             FallbackReason::LiveGraphUnavailable,
             CycleCertState::StaleOrMissing,
             || panic!("a RED build must fall back to SQLite"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || Some(false),
-        );
+            |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
+            |_c| Ok(Some(false)),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .expect("a RED build falls back to SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphCycleDivergence");
     }
@@ -2888,9 +3040,11 @@ mod tests {
             FallbackReason::LiveGraphUnavailable,
             CycleCertState::StaleOrMissing,
             || panic!("a build failure must fall back to SQLite"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || None,
-        );
+            |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
+            |_c| Ok(None),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .expect("a build failure falls back to SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphCycleDivergence");
     }

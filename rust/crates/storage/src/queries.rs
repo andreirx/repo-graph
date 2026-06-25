@@ -1021,7 +1021,35 @@ impl StorageConnection {
         snapshot_uid: &str,
         level: &str,
     ) -> Result<Vec<CycleResult>, StorageError> {
-        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+        // The non-cancellable entry point is the cancellable one with a checkpoint
+        // that never breaks — byte-identical for the many existing callers (agent
+        // module-cycles, the LiveGraph compare/audit paths). `expect` cannot fire.
+        self.find_cycles_cancellable(snapshot_uid, level, &mut || {
+            std::ops::ControlFlow::Continue(())
+        })
+    }
+
+    /// `find_cycles` with a cooperative cancellation checkpoint (DAEMON-CANCEL-1).
+    /// `cancel` is consulted inside the Rust-side loops — the Tarjan SCC traversal
+    /// (via `find_sccs_cancellable`) and the per-cycle name-resolution loop — so a
+    /// peer disconnect mid-computation abandons the work at the next checkpoint
+    /// instead of running the whole traversal to completion with no consumer.
+    /// Returns [`StorageError::Cancelled`] on [`ControlFlow::Break`](std::ops::ControlFlow::Break).
+    /// Read-only ⇒ no partial state to undo.
+    ///
+    /// Note (OBSERVED, code-cited): Step 1's edge-load is a single `SELECT`; a Rust
+    /// checkpoint cannot interrupt it mid-statement. The genuinely-unbounded work
+    /// here is the in-memory Tarjan traversal (checkpointed via
+    /// `find_sccs_cancellable`) plus the per-cycle name fan-out (checkpointed
+    /// below). SQL-statement-granular interruption (`sqlite3_interrupt`) is
+    /// DAEMON-CANCEL-2; this slice checkpoints only the Rust loops.
+    pub fn find_cycles_cancellable(
+        &self,
+        snapshot_uid: &str,
+        level: &str,
+        cancel: repo_graph_algorithms::CancelCheck,
+    ) -> Result<Vec<CycleResult>, StorageError> {
+        use repo_graph_algorithms::{find_sccs_cancellable, Cancelled, DirectedEdge};
 
         let node_kind = match level {
             "file" => "FILE",
@@ -1053,14 +1081,22 @@ impl StorageConnection {
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Step 2: Run Tarjan's SCC algorithm (O(V+E)).
-        let scc_result = find_sccs(&edges);
+        // Step 2: Run Tarjan's SCC algorithm (O(V+E)), checkpointing mid-traversal.
+        // Reborrow `cancel` (`&mut *cancel`) so it stays usable for Step 3 below.
+        let scc_result = find_sccs_cancellable(&edges, &mut *cancel)
+            .map_err(|Cancelled| StorageError::Cancelled)?;
 
         // Step 3: Convert cycles to CycleResult format.
         // The SCC result already filters to size > 1 in its `cycles` field.
         let mut results = Vec::new();
 
         for (idx, scc) in scc_result.cycles.iter().enumerate() {
+            // Checkpoint per cycle: each cycle fans out into per-member SQL name
+            // lookups, so on a pathological many-cycle graph this loop is itself
+            // heavy. Read-only ⇒ on Break we drop the partial result.
+            if cancel().is_break() {
+                return Err(StorageError::Cancelled);
+            }
             // Look up names for each node in the cycle.
             let nodes: Vec<CycleNode> = scc
                 .members
@@ -3504,6 +3540,63 @@ mod tests {
 				rusqlite::params![edge_uid, snapshot_uid, source_node_uid, target_node_uid, edge_type],
 			)
 			.unwrap();
+    }
+
+    /// DAEMON-CANCEL-1: a large MODULE import cycle so the Tarjan traversal runs
+    /// well past `CANCEL_CHECK_INTERVAL` (256) DFS steps. A never-breaking
+    /// checkpoint serves the cycle transparently; a breaking checkpoint abandons
+    /// the work mid-traversal and surfaces `StorageError::Cancelled` (read-only ⇒
+    /// no rollback). Proves the storage wiring threads the seam into the Rust loop.
+    #[test]
+    fn find_cycles_cancellable_aborts_mid_traversal_on_break() {
+        let (storage, snap_uid) = setup_db_with_snapshot();
+        const N: usize = 600;
+        for i in 0..N {
+            insert_raw_node(
+                &storage,
+                &snap_uid,
+                &format!("m{i}"),
+                &format!("r1:mod{i}:MODULE"),
+                &format!("mod{i}"),
+                "MODULE",
+            );
+        }
+        // One big cycle m0 -> m1 -> ... -> m599 -> m0 (a single SCC of size N).
+        for i in 0..N {
+            insert_raw_edge(
+                &storage,
+                &snap_uid,
+                &format!("e{i}"),
+                &format!("m{i}"),
+                &format!("m{}", (i + 1) % N),
+                "IMPORTS",
+            );
+        }
+
+        // Transparent when the checkpoint never breaks: the full SCC is found.
+        let full = storage
+            .find_cycles_cancellable(&snap_uid, "module", &mut || {
+                std::ops::ControlFlow::Continue(())
+            })
+            .expect("never-breaking checkpoint must not cancel");
+        assert_eq!(full.len(), 1, "the N-module ring is one cycle");
+        assert_eq!(full[0].length, N, "the cycle spans all {N} modules");
+
+        // A breaking checkpoint cancels: the first checkpoint fires ~256 DFS steps
+        // in (mid-traversal of the ~1800-step pass), so the result is Cancelled.
+        let mut checks = 0usize;
+        let cancelled = storage.find_cycles_cancellable(&snap_uid, "module", &mut || {
+            checks += 1;
+            std::ops::ControlFlow::Break(())
+        });
+        assert!(
+            matches!(cancelled, Err(StorageError::Cancelled)),
+            "a broken checkpoint must surface StorageError::Cancelled, got {cancelled:?}"
+        );
+        assert_eq!(
+            checks, 1,
+            "cancellation fires on the first (mid-traversal) checkpoint, not after completing"
+        );
     }
 
     #[test]

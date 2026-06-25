@@ -16,4 +16,6 @@
 
 mod scc;
 
-pub use scc::{find_sccs, DirectedEdge, Scc, SccResult};
+pub use scc::{
+    find_sccs, find_sccs_cancellable, CancelCheck, Cancelled, DirectedEdge, Scc, SccResult,
+};

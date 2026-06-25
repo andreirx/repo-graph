@@ -155,6 +155,12 @@ pub struct PathAnswer {
     pub contributing_epochs: BTreeMap<String, u64>,
 }
 
+/// How many BFS node pops to take between cancellation checks in
+/// [`LiveGraph::path_cancellable`] (DAEMON-CANCEL-1). Bounds cancel latency while
+/// keeping the per-pop overhead negligible — the same bounded-interval pattern the
+/// Tarjan checkpoint uses (`graph-algorithms` `CANCEL_CHECK_INTERVAL`).
+const PATH_CANCEL_CHECK_INTERVAL: usize = 256;
+
 // ── VALUE-JOIN-1 value-fact model (D6 separate channel; D1 cyclomatic complexity) ──
 
 /// One kind of value-layer fact (D1: cyclomatic complexity only this slice).
@@ -847,6 +853,31 @@ impl LiveGraph {
     /// partition. If traversal reached a node it could not fully expand (its defining partition is
     /// non-resident / stale / unknown) → `Partial`, NEVER a confident exact-empty "no path".
     pub fn path(&self, from: &str, to: &str) -> AnswerEnvelope<PathAnswer> {
+        // The non-cancellable entry point is the cancellable one with a checkpoint
+        // that never breaks — byte-identical for every existing caller (the
+        // `--engine compare` path, the unit tests). `expect` cannot fire: a
+        // never-breaking checkpoint makes the `Cancelled` arm unreachable.
+        self.path_cancellable(from, to, &mut || std::ops::ControlFlow::Continue(()))
+            .expect("never-breaking checkpoint cannot cancel")
+    }
+
+    /// [`path`](Self::path) with a cooperative cancellation checkpoint
+    /// (DAEMON-CANCEL-1). `cancel` is consulted every [`PATH_CANCEL_CHECK_INTERVAL`]
+    /// BFS node pops — a bounded interval (the same pattern `find_sccs_cancellable`
+    /// uses for cycles) — so a peer disconnect mid-traversal abandons the in-memory
+    /// search instead of walking the whole reachable region (which, on a large
+    /// resident graph, the daemon would otherwise do with no consumer). On
+    /// [`ControlFlow::Break`](std::ops::ControlFlow::Break) it returns
+    /// [`Cancelled`](repo_graph_algorithms::Cancelled); the partial BFS state is
+    /// dropped (read-only ⇒ nothing to roll back). The `Cancelled` and `CancelCheck`
+    /// seam types are reused from `graph-algorithms` (already a dependency of this
+    /// crate for `find_sccs`), so the whole cancel seam has ONE `Cancelled` type.
+    pub fn path_cancellable(
+        &self,
+        from: &str,
+        to: &str,
+        cancel: repo_graph_algorithms::CancelCheck,
+    ) -> Result<AnswerEnvelope<PathAnswer>, repo_graph_algorithms::Cancelled> {
         use std::collections::VecDeque;
 
         // Precompute node -> defining partition (from `defines`, resident or not).
@@ -877,11 +908,11 @@ impl LiveGraph {
 
         // Unknown source or target → Unavailable (null ≠ empty).
         if !known.contains(from) || !known.contains(to) {
-            return AnswerEnvelope::unavailable(
+            return Ok(AnswerEnvelope::unavailable(
                 DegradationReason::UnresolvedAlias,
                 FreshnessState::Unavailable,
                 BTreeSet::new(),
-            );
+            ));
         }
 
         // A node is FULLY EXPANDABLE iff it is defined in a resident + Fresh partition (its outgoing
@@ -905,7 +936,21 @@ impl LiveGraph {
         visited.insert(from.to_string());
         queue.push_back(from.to_string());
         let mut found = false;
+        // Cooperative cancellation cadence: consult `cancel` every
+        // PATH_CANCEL_CHECK_INTERVAL node pops (a bounded interval, mirroring the
+        // Tarjan checkpoint). A short path finds its target before the first check,
+        // so normal queries pay nothing.
+        let mut pops_since_check: usize = 0;
         while let Some(n) = queue.pop_front() {
+            pops_since_check += 1;
+            if pops_since_check >= PATH_CANCEL_CHECK_INTERVAL {
+                pops_since_check = 0;
+                if cancel().is_break() {
+                    // Read-only ⇒ drop the partial BFS state; the caller (the daemon
+                    // path handler) abandons the search and reports Cancelled.
+                    return Err(repo_graph_algorithms::Cancelled);
+                }
+            }
             if n == to {
                 found = true;
                 break;
@@ -974,7 +1019,7 @@ impl LiveGraph {
                 contributing_epochs: epochs,
             };
             // Edges are all SyntaxConfirmedCall by construction → basis condition holds.
-            return if worst == FreshnessState::Fresh {
+            return Ok(if worst == FreshnessState::Fresh {
                 AnswerEnvelope::exact(
                     data,
                     QueryCompleteness::Complete,
@@ -987,7 +1032,7 @@ impl LiveGraph {
                 // A path partition is non-Fresh → freshness dominates → Stale (path still served).
                 AnswerEnvelope::stale(data, worst, Vec::new(), Vec::new(), Vec::new(), languages)
                     .expect("path stale invariant holds")
-            };
+            });
         }
 
         // No path. Languages from the source's partition (+ any).
@@ -1007,7 +1052,7 @@ impl LiveGraph {
         };
         if degraded {
             // Incomplete traversal → NEVER a confident exact-empty "no path"; Partial.
-            AnswerEnvelope::partial(
+            Ok(AnswerEnvelope::partial(
                 Some(empty),
                 vec![DegradationReason::UnresolvedAlias],
                 Vec::new(),
@@ -1015,17 +1060,17 @@ impl LiveGraph {
                 Vec::new(),
                 languages,
             )
-            .expect("path partial invariant holds")
+            .expect("path partial invariant holds"))
         } else {
             // The reachable region was proven complete (resident + Fresh) → Exact no-path.
-            AnswerEnvelope::exact(
+            Ok(AnswerEnvelope::exact(
                 empty,
                 QueryCompleteness::Complete,
                 FreshnessState::Fresh,
                 Vec::new(),
                 languages,
             )
-            .expect("path exact no-path invariant holds")
+            .expect("path exact no-path invariant holds"))
         }
     }
 
@@ -1202,7 +1247,28 @@ impl LiveGraph {
     /// partition → `Stale`. This is a DIFFERENT question from `rmap cycles` (MODULE-import), never
     /// comparable to it.
     pub fn file_import_cycles(&self) -> AnswerEnvelope<FileImportCyclesAnswer> {
-        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+        // The non-cancellable entry point is the cancellable one with a checkpoint
+        // that never breaks — byte-identical for every existing caller (orient /
+        // explain / the cycle-completeness audit / the unit tests). `expect` cannot
+        // fire: a never-breaking checkpoint makes the `Cancelled` arm unreachable.
+        self.file_import_cycles_cancellable(&mut || std::ops::ControlFlow::Continue(()))
+            .expect("never-breaking checkpoint cannot cancel")
+    }
+
+    /// [`file_import_cycles`](Self::file_import_cycles) with a cooperative
+    /// cancellation checkpoint threaded into the Tarjan SCC traversal
+    /// (DAEMON-CANCEL-1). `cancel` is consulted at a bounded interval inside
+    /// `find_sccs_cancellable`, so a peer disconnect mid-traversal abandons the work
+    /// instead of running the whole SCC pass with no consumer. On
+    /// [`ControlFlow::Break`](std::ops::ControlFlow::Break) it returns
+    /// [`Cancelled`](repo_graph_algorithms::Cancelled); the partial result is dropped
+    /// (read-only ⇒ nothing to roll back). Used by the daemon's `cycles --engine
+    /// livegraph --kind file-import` route.
+    pub fn file_import_cycles_cancellable(
+        &self,
+        cancel: repo_graph_algorithms::CancelCheck,
+    ) -> Result<AnswerEnvelope<FileImportCyclesAnswer>, repo_graph_algorithms::Cancelled> {
+        use repo_graph_algorithms::{find_sccs_cancellable, DirectedEdge};
         let (file_edges, scope) = self.file_import_edges();
         let edges: Vec<DirectedEdge> = file_edges
             .iter()
@@ -1212,8 +1278,8 @@ impl LiveGraph {
             })
             .collect();
         let (missing, worst, languages, epochs) = self.whole_graph_completeness();
-        // SCC → cycles (find_sccs pre-filters to size > 1).
-        let cycles: Vec<FileImportCycle> = find_sccs(&edges)
+        // SCC → cycles (find_sccs pre-filters to size > 1), checkpointed mid-traversal.
+        let cycles: Vec<FileImportCycle> = find_sccs_cancellable(&edges, cancel)?
             .cycles
             .iter()
             .map(|c| FileImportCycle {
@@ -1225,7 +1291,7 @@ impl LiveGraph {
             scope,
             contributing_epochs: epochs,
         };
-        capture_envelope(data, missing, worst, languages)
+        Ok(capture_envelope(data, missing, worst, languages))
     }
 
     /// The captured FILE import edge universe (`(src_key, dst_key)` pairs) + the D5 scope flag set, shared
@@ -1322,7 +1388,28 @@ impl LiveGraph {
     /// file_import_cycles' completeness (D4) and is honestly scoped (`module_aggregated`; the captured FILE
     /// graph it aggregated; NEVER "all module cycles" — the FILE-graph completeness caveat propagates up).
     pub fn module_import_cycles(&self) -> AnswerEnvelope<ModuleImportCyclesAnswer> {
-        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+        // The non-cancellable entry point is the cancellable one with a checkpoint
+        // that never breaks — byte-identical for every existing caller (orient's
+        // module-cycle decision, explain's EXPLAIN_CYCLES rebuild, the compare
+        // surface, the unit tests). `expect` cannot fire on a never-breaking check.
+        self.module_import_cycles_cancellable(&mut || std::ops::ControlFlow::Continue(()))
+            .expect("never-breaking checkpoint cannot cancel")
+    }
+
+    /// [`module_import_cycles`](Self::module_import_cycles) with a cooperative
+    /// cancellation checkpoint threaded into the Tarjan SCC traversal
+    /// (DAEMON-CANCEL-1) — the in-loop layer for the DEFAULT `rmap cycles` LiveGraph
+    /// module-cycle answer. `cancel` is consulted at a bounded interval inside
+    /// `find_sccs_cancellable`, so a peer disconnect mid-traversal abandons the work
+    /// instead of running the whole SCC pass with no consumer. On
+    /// [`ControlFlow::Break`](std::ops::ControlFlow::Break) it returns
+    /// [`Cancelled`](repo_graph_algorithms::Cancelled); the partial result is dropped
+    /// (read-only ⇒ nothing to roll back).
+    pub fn module_import_cycles_cancellable(
+        &self,
+        cancel: repo_graph_algorithms::CancelCheck,
+    ) -> Result<AnswerEnvelope<ModuleImportCyclesAnswer>, repo_graph_algorithms::Cancelled> {
+        use repo_graph_algorithms::{find_sccs_cancellable, DirectedEdge};
         let (module_pairs, file_scope) = self.module_import_pairs();
         let edges: Vec<DirectedEdge> = module_pairs
             .iter()
@@ -1332,7 +1419,7 @@ impl LiveGraph {
             })
             .collect();
         let (missing, worst, languages, epochs) = self.whole_graph_completeness();
-        let cycles: Vec<ModuleImportCycle> = find_sccs(&edges)
+        let cycles: Vec<ModuleImportCycle> = find_sccs_cancellable(&edges, cancel)?
             .cycles
             .iter()
             .map(|c| ModuleImportCycle {
@@ -1347,7 +1434,7 @@ impl LiveGraph {
             },
             contributing_epochs: epochs,
         };
-        capture_envelope(data, missing, worst, languages)
+        Ok(capture_envelope(data, missing, worst, languages))
     }
 
     /// STATS-LIVEGRAPH-IMPL-1: per-module structural stats (the degree graph + the symbol-classification
@@ -2906,6 +2993,154 @@ mod tests {
         assert_eq!(
             lg.path("api.caller", "does.not.exist").class(),
             AnswerClass::Unavailable
+        );
+    }
+
+    /// DAEMON-CANCEL-1: a long resident chain `c0 -> c1 -> ... -> c5000` plus an
+    /// isolated `sink`. BFS from `c0` toward the unreachable `sink` must visit the
+    /// whole chain (5001 pops) — far more than `PATH_CANCEL_CHECK_INTERVAL` (256).
+    /// A never-breaking checkpoint completes (proven no-path); a breaking checkpoint
+    /// abandons mid-BFS and returns `Cancelled` (read-only ⇒ no rollback). Proves
+    /// the BFS loop is genuinely checkpointed, not wrapped.
+    #[test]
+    fn path_cancellable_aborts_mid_bfs_on_break() {
+        const N: usize = 5000;
+        let mut nodes: Vec<_> = (0..=N)
+            .map(|i| node(&format!("c{i}"), IdentitySource::AstAdopted))
+            .collect();
+        nodes.push(node("sink", IdentitySource::AstAdopted));
+        let edges: Vec<_> = (0..N)
+            .map(|i| edge(&format!("c{i}"), &format!("c{}", i + 1)))
+            .collect();
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "chain",
+            ir("chain", nodes, edges),
+            LanguageSupport::TypeScriptPrimary,
+        );
+
+        // Never-breaking: the BFS completes; the unreachable sink is a proven no-path.
+        let full = lg
+            .path_cancellable("c0", "sink", &mut || std::ops::ControlFlow::Continue(()))
+            .expect("never-breaking checkpoint must not cancel");
+        assert!(
+            full.data().expect("no-path data").nodes.is_empty(),
+            "sink is unreachable from c0 → proven no-path"
+        );
+
+        // Breaking on the first checkpoint cancels mid-BFS (≈pop 256 of 5001).
+        let mut checks = 0usize;
+        let cancelled = lg.path_cancellable("c0", "sink", &mut || {
+            checks += 1;
+            std::ops::ControlFlow::Break(())
+        });
+        assert!(
+            matches!(cancelled, Err(repo_graph_algorithms::Cancelled)),
+            "a broken checkpoint must surface Cancelled, got {cancelled:?}"
+        );
+        assert_eq!(
+            checks, 1,
+            "cancellation fires on the first (mid-BFS) checkpoint, not after exhausting 5001 nodes"
+        );
+    }
+
+    /// DAEMON-CANCEL-1: a large MODULE import ring (N files each in its own dir,
+    /// importing the next → an N-module SCC) makes the Tarjan traversal run ≫
+    /// `CANCEL_CHECK_INTERVAL` (256). A never-breaking checkpoint finds the full cycle;
+    /// a breaking one abandons mid-traversal and returns `Cancelled`. Proves the
+    /// LiveGraph module-cycle wrapper (the DEFAULT `rmap cycles` Tarjan) threads the
+    /// checkpoint into the loop, not merely around it.
+    #[test]
+    fn module_import_cycles_cancellable_aborts_mid_traversal() {
+        const N: usize = 600;
+        let nodes: Vec<_> = (0..N)
+            .map(|i| file_node(&format!("repo:mod{i}/index.ts:FILE")))
+            .collect();
+        let edges: Vec<_> = (0..N)
+            .map(|i| {
+                import_edge(
+                    &format!("repo:mod{i}/index.ts:FILE"),
+                    &format!("repo:mod{}/index.ts:FILE", (i + 1) % N),
+                )
+            })
+            .collect();
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", nodes, edges),
+            LanguageSupport::TypeScriptPrimary,
+        );
+
+        let full = lg
+            .module_import_cycles_cancellable(&mut || std::ops::ControlFlow::Continue(()))
+            .expect("never-breaking checkpoint must not cancel");
+        assert_eq!(
+            full.data().expect("data").cycles.len(),
+            1,
+            "the N-module ring is one SCC"
+        );
+
+        let mut checks = 0usize;
+        let cancelled = lg.module_import_cycles_cancellable(&mut || {
+            checks += 1;
+            std::ops::ControlFlow::Break(())
+        });
+        assert!(
+            matches!(cancelled, Err(repo_graph_algorithms::Cancelled)),
+            "a broken checkpoint must surface Cancelled, got {cancelled:?}"
+        );
+        assert_eq!(
+            checks, 1,
+            "cancellation fires on the first (mid-traversal) checkpoint, not after the full SCC pass"
+        );
+    }
+
+    /// DAEMON-CANCEL-1: the file-import variant — a large FILE import ring makes the
+    /// Tarjan run long; a never-breaking checkpoint finds the cycle, a breaking one
+    /// abandons mid-traversal. Proves `file_import_cycles_cancellable` (the
+    /// `cycles --engine livegraph --kind file-import` route) is genuinely checkpointed.
+    #[test]
+    fn file_import_cycles_cancellable_aborts_mid_traversal() {
+        const N: usize = 600;
+        let nodes: Vec<_> = (0..N)
+            .map(|i| file_node(&format!("repo:dir/f{i}.ts:FILE")))
+            .collect();
+        let edges: Vec<_> = (0..N)
+            .map(|i| {
+                import_edge(
+                    &format!("repo:dir/f{i}.ts:FILE"),
+                    &format!("repo:dir/f{}.ts:FILE", (i + 1) % N),
+                )
+            })
+            .collect();
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", nodes, edges),
+            LanguageSupport::TypeScriptPrimary,
+        );
+
+        let full = lg
+            .file_import_cycles_cancellable(&mut || std::ops::ControlFlow::Continue(()))
+            .expect("never-breaking checkpoint must not cancel");
+        assert_eq!(
+            full.data().expect("data").cycles.len(),
+            1,
+            "the N-file ring is one SCC"
+        );
+
+        let mut checks = 0usize;
+        let cancelled = lg.file_import_cycles_cancellable(&mut || {
+            checks += 1;
+            std::ops::ControlFlow::Break(())
+        });
+        assert!(
+            matches!(cancelled, Err(repo_graph_algorithms::Cancelled)),
+            "a broken checkpoint must surface Cancelled, got {cancelled:?}"
+        );
+        assert_eq!(
+            checks, 1,
+            "cancellation fires on the first (mid-traversal) checkpoint"
         );
     }
 

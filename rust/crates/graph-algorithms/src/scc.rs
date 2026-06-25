@@ -21,6 +21,37 @@
 //! Within each SCC, members are in reverse finishing order (stack pop order).
 
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
+
+/// Cooperative cancellation checkpoint (DAEMON-CANCEL-1, in-loop / Option A).
+///
+/// A closure consulted at bounded intervals inside a heavy Rust loop. Returning
+/// [`ControlFlow::Break`] means "abandon the work and unwind"; [`ControlFlow::Continue`]
+/// means "keep going". This is the SAME shape D5b uses for index/refresh abort:
+/// the daemon builds a checkpoint that emits a heartbeat and reports `Break` when
+/// the transport write fails (peer gone). The seam is a bare `&mut dyn FnMut`, so
+/// no shared cancel-token type and no new crate cross the boundary — only
+/// `std::ops::ControlFlow`.
+///
+/// It is `FnMut` (not `Fn`) because the daemon's heartbeat probe borrows the
+/// progress emitter mutably. Threaded into the Rust-side query loops
+/// (`find_sccs_cancellable` here; `LiveGraph::path_cancellable` reuses this same
+/// type). SQL-bound heavy work cannot be checkpointed mid-statement from Rust and
+/// uses `sqlite3_interrupt` instead (DAEMON-CANCEL-2).
+pub type CancelCheck<'a> = &'a mut dyn FnMut() -> ControlFlow<()>;
+
+/// Returned by the `*_cancellable` algorithms when a [`CancelCheck`] asked to
+/// abandon the work. Read-only traversals hold no partial state, so a cancelled
+/// computation simply discards its in-progress result — there is nothing to roll
+/// back (DAEMON-CANCEL-1: "read-only ⇒ no rollback").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancelled;
+
+/// How many DFS steps to take between cancellation checks. The check itself is a
+/// virtual call (and, in the daemon, a transport write), so amortizing it keeps
+/// the non-cancellable wrapper's overhead negligible while bounding cancel latency
+/// to a few hundred cheap steps.
+const CANCEL_CHECK_INTERVAL: usize = 256;
 
 /// A directed edge in the graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +137,25 @@ impl SccResult {
 /// assert_eq!(result.cycles[0].size(), 3);
 /// ```
 pub fn find_sccs(edges: &[DirectedEdge]) -> SccResult {
+    // The non-cancellable entry point is the cancellable one with a checkpoint
+    // that never breaks. `expect` cannot fire: a never-breaking checkpoint makes
+    // the `Cancelled` arm unreachable.
+    find_sccs_cancellable(edges, &mut || ControlFlow::Continue(()))
+        .expect("never-breaking checkpoint cannot cancel")
+}
+
+/// Find all strongly connected components, consulting `cancel` at bounded
+/// intervals so a peer disconnect can abandon a long traversal mid-flight
+/// (DAEMON-CANCEL-1). On [`ControlFlow::Break`] from `cancel` the traversal stops
+/// and returns [`Cancelled`]; the partially-built result is dropped (read-only ⇒
+/// nothing to roll back).
+///
+/// [`find_sccs`] is exactly this function with a never-breaking checkpoint, so the
+/// two are byte-identical when cancellation is not triggered.
+pub fn find_sccs_cancellable(
+    edges: &[DirectedEdge],
+    cancel: CancelCheck,
+) -> Result<SccResult, Cancelled> {
     // Build adjacency list and collect all nodes
     let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut all_nodes: HashSet<&str> = HashSet::new();
@@ -139,10 +189,16 @@ pub fn find_sccs(edges: &[DirectedEdge]) -> SccResult {
     let mut lowlinks: HashMap<&str, usize> = HashMap::new();
     let mut all_sccs: Vec<Scc> = Vec::new();
 
-    // Recursive DFS (using explicit stack to avoid stack overflow on deep graphs)
+    // Shared DFS-step counter so the cancellation cadence is bounded across the
+    // whole traversal, not reset per start node (a single dense start node can
+    // visit the entire graph in one `tarjan_visit` call).
+    let mut steps_since_check: usize = 0;
+
+    // Recursive DFS (using explicit stack to avoid stack overflow on deep graphs).
+    // `&&` short-circuits: tarjan_visit only runs for an unvisited start node.
     for start_node in &sorted_nodes {
-        if !indices.contains_key(start_node) {
-            tarjan_visit(
+        if !indices.contains_key(start_node)
+            && tarjan_visit(
                 start_node,
                 &adjacency,
                 &mut index_counter,
@@ -151,7 +207,12 @@ pub fn find_sccs(edges: &[DirectedEdge]) -> SccResult {
                 &mut indices,
                 &mut lowlinks,
                 &mut all_sccs,
-            );
+                cancel,
+                &mut steps_since_check,
+            )
+            .is_break()
+        {
+            return Err(Cancelled);
         }
     }
 
@@ -162,17 +223,22 @@ pub fn find_sccs(edges: &[DirectedEdge]) -> SccResult {
         .cloned()
         .collect();
 
-    SccResult {
+    Ok(SccResult {
         all_sccs,
         cycles,
         node_count,
         edge_count,
-    }
+    })
 }
 
 /// Iterative Tarjan DFS to avoid stack overflow on deep graphs.
 ///
 /// Uses explicit state stack instead of recursion.
+///
+/// Returns [`ControlFlow::Break`] if `cancel` asked to abandon the traversal
+/// (checked every [`CANCEL_CHECK_INTERVAL`] DFS steps via the shared
+/// `steps_since_check` counter), otherwise [`ControlFlow::Continue`] once the
+/// component rooted at `start` is fully explored.
 #[allow(clippy::too_many_arguments)]
 fn tarjan_visit<'a>(
     start: &'a str,
@@ -183,7 +249,9 @@ fn tarjan_visit<'a>(
     indices: &mut HashMap<&'a str, usize>,
     lowlinks: &mut HashMap<&'a str, usize>,
     result: &mut Vec<Scc>,
-) {
+    cancel: CancelCheck,
+    steps_since_check: &mut usize,
+) -> ControlFlow<()> {
     // State for iterative DFS: (node, neighbor_index, phase)
     // phase 0: entering node
     // phase 1: processing neighbors
@@ -202,6 +270,17 @@ fn tarjan_visit<'a>(
     }];
 
     while let Some(frame) = call_stack.last().cloned() {
+        // Cooperative cancellation: every CANCEL_CHECK_INTERVAL DFS steps, ask the
+        // checkpoint whether to abandon. Read-only ⇒ on Break we simply unwind and
+        // the caller drops the partial result — nothing to roll back.
+        *steps_since_check += 1;
+        if *steps_since_check >= CANCEL_CHECK_INTERVAL {
+            *steps_since_check = 0;
+            if cancel().is_break() {
+                return ControlFlow::Break(());
+            }
+        }
+
         match frame.phase {
             0 => {
                 // Entering node
@@ -293,6 +372,9 @@ fn tarjan_visit<'a>(
             _ => unreachable!(),
         }
     }
+
+    // Component fully explored without cancellation.
+    ControlFlow::Continue(())
 }
 
 /// Check if a graph has any cycles.
@@ -441,5 +523,75 @@ mod tests {
 
         assert!(!has_cycles(&no_cycle));
         assert!(has_cycles(&with_cycle));
+    }
+
+    // ── DAEMON-CANCEL-1: cooperative in-loop cancellation ────────────────────
+
+    /// A long linear chain so the DFS while-loop runs far more than
+    /// `CANCEL_CHECK_INTERVAL` steps — enough that a checkpoint fires mid-traversal.
+    fn long_chain(n: usize) -> Vec<DirectedEdge> {
+        (0..n)
+            .map(|i| edge(&i.to_string(), &(i + 1).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn cancellable_matches_plain_when_never_cancelled() {
+        // A never-breaking checkpoint must produce results identical to the plain
+        // entry point — cancellation is transparent when not triggered.
+        let edges = vec![
+            edge("1", "2"),
+            edge("2", "3"),
+            edge("3", "1"),
+            edge("3", "4"),
+        ];
+        let plain = find_sccs(&edges);
+        let cancellable = find_sccs_cancellable(&edges, &mut || ControlFlow::Continue(())).unwrap();
+        assert_eq!(plain.node_count, cancellable.node_count);
+        assert_eq!(plain.edge_count, cancellable.edge_count);
+        assert_eq!(plain.cycle_count(), cancellable.cycle_count());
+        assert_eq!(
+            plain.cycles.first().map(|c| &c.members),
+            cancellable.cycles.first().map(|c| &c.members)
+        );
+    }
+
+    #[test]
+    fn cancellable_stops_mid_traversal() {
+        // 50k-node chain ⇒ the DFS while-loop runs ~150k steps. A checkpoint that
+        // breaks on its FIRST call cancels after ~CANCEL_CHECK_INTERVAL steps — long
+        // before the traversal could complete. This proves IN-FLIGHT cancellation
+        // (the loop stops mid-traversal), not before-start. Deterministic, no clock.
+        let edges = long_chain(50_000);
+        let mut checks = 0usize;
+        let result = find_sccs_cancellable(&edges, &mut || {
+            checks += 1;
+            ControlFlow::Break(())
+        });
+        assert!(matches!(result, Err(Cancelled)));
+        assert_eq!(
+            checks, 1,
+            "should break on the first checkpoint, mid-traversal (≈256 steps in, not 150k)"
+        );
+    }
+
+    #[test]
+    fn cancellable_completes_if_checkpoint_allows() {
+        // Same large graph, but a checkpoint that always continues: the traversal
+        // runs to completion and reports the acyclic chain. Confirms the checkpoint
+        // is consulted many times yet never forces a spurious cancel.
+        let edges = long_chain(2_000);
+        let mut checks = 0usize;
+        let result = find_sccs_cancellable(&edges, &mut || {
+            checks += 1;
+            ControlFlow::Continue(())
+        })
+        .expect("continue checkpoint never cancels");
+        assert!(result.is_acyclic());
+        assert_eq!(result.node_count, 2_001);
+        assert!(
+            checks > 1,
+            "checkpoint should fire repeatedly on a long traversal"
+        );
     }
 }

@@ -269,7 +269,9 @@ impl Dispatcher for ServiceDispatcher {
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "stats" => self.handle_stats(request, emitter),
             "cycles" => self.handle_cycles(request, emitter),
-            "path" => self.handle_path(request),
+            // DAEMON-CANCEL-1: path now receives the emitter so its LiveGraph BFS can
+            // checkpoint mid-search (it previously dispatched without one).
+            "path" => self.handle_path(request, emitter),
 
             // ── Agent services ──────────────────────────────────────
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
@@ -1549,29 +1551,51 @@ impl ServiceDispatcher {
         // question; NO SQLite fallback — D7). The daemon rejects unsupported combos defensively (D2/D6).
         let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
         let kind = Self::get_optional_string_param(&request.params, "kind").unwrap_or("");
+
+        // DAEMON-CANCEL-1: map a cancellable cycles route's Result onto the dispatch
+        // envelope. A checkpoint Break surfaces as `StorageError::Cancelled` →
+        // `ErrorCode::Cancelled` with a "during" message (proving the cancel fired
+        // IN-LOOP, not at the handler boundary); any other storage error is
+        // `InternalError` (worker/storage failure is NEVER mislabelled as a client
+        // cancel). Shared by all four Tarjan-running cycles routes below.
+        let cyc_result = |r: Result<Value, repo_graph_storage::error::StorageError>| match r {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(repo_graph_storage::error::StorageError::Cancelled) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "cycles query cancelled (client disconnected during traversal)",
+                ),
+            ),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        };
+
         match (engine, kind) {
             ("livegraph", "file-import") => {
-                return DispatchResult::success(
-                    &request.id,
-                    crate::livegraph_feed::file_import_cycles_response(
-                        &repo_state,
-                        &repo_uid,
-                        &display_name,
-                        &snapshot.snapshot_uid,
-                    ),
-                );
+                // DAEMON-CANCEL-1: thread the in-loop checkpoint into the file-import Tarjan.
+                let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
+                return cyc_result(crate::livegraph_feed::file_import_cycles_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &mut checkpoint,
+                ));
             }
             // MODULE-CYCLES-CLI-1 (D2): LiveGraph directory-aggregated MODULE cycles (no SQLite fallback).
             ("livegraph", "module-import") => {
-                return DispatchResult::success(
-                    &request.id,
-                    crate::livegraph_feed::module_import_cycles_response(
-                        &repo_state,
-                        &repo_uid,
-                        &display_name,
-                        &snapshot.snapshot_uid,
-                    ),
-                );
+                // DAEMON-CANCEL-1: thread the in-loop checkpoint into the module-import Tarjan.
+                let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
+                return cyc_result(crate::livegraph_feed::module_import_cycles_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &mut checkpoint,
+                ));
             }
             // Defensive rejects (the CLI gives the primary user-facing errors).
             ("livegraph", _) => {
@@ -1598,19 +1622,16 @@ impl ServiceDispatcher {
                 let repo_root = Self::get_optional_string_param(&request.params, "repo")
                     .unwrap_or("")
                     .to_string();
-                return match crate::livegraph_feed::module_cycle_compare_response(
+                // DAEMON-CANCEL-1: thread the in-loop checkpoint into the compare's two Tarjan loops.
+                let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
+                return cyc_result(crate::livegraph_feed::module_cycle_compare_response(
                     &repo_state,
                     &repo_uid,
                     &display_name,
                     &snapshot.snapshot_uid,
                     &repo_root,
-                ) {
-                    Ok(v) => DispatchResult::success(&request.id, v),
-                    Err(e) => DispatchResult::error(
-                        &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e),
-                    ),
-                };
+                    &mut checkpoint,
+                ));
             }
             ("compare", _) => {
                 return DispatchResult::error(
@@ -1635,43 +1656,68 @@ impl ServiceDispatcher {
             // valid GREEN repo no-loss certificate holds at the current fingerprint; ELSE the canonical SQLite
             // answer (byte-identical, CYCLES-OUTPUT-CONTRACT-1) with a labelled `fallback_reason`.
             ("auto", "") | ("auto", "module-import") => {
-                return match crate::livegraph_feed::cycles_auto_response(
+                // DAEMON-CANCEL-1: thread the in-loop checkpoint into the DEFAULT route's Tarjan
+                // loops — the LiveGraph module-cycle SCC and (on fallback) the SQLite SCC. This is
+                // the path the iteration-0 review flagged as still running uncheckpointed.
+                let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
+                return cyc_result(crate::livegraph_feed::cycles_auto_response(
                     &repo_state,
                     &repo_uid,
                     &display_name,
                     &snapshot.snapshot_uid,
-                ) {
-                    Ok(v) => DispatchResult::success(&request.id, v),
-                    Err(e) => DispatchResult::error(
-                        &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                    ),
-                };
+                    &mut checkpoint,
+                ));
             }
             // EXPLICIT `--engine sqlite` (no kind or module-import, D6) -> the forced SQLite MODULE-import path
             // below (rule 7: UNCHANGED -- the canonical SQLite answer, no fastpath, no `backend_used`).
             _ => {}
         }
 
-        // RMAPD-PERF-1: Emit heartbeat before potentially long Tarjan SCC
-        let _ = emitter.emit(ProgressDetail {
-            phase: "finding_cycles".to_string(),
-            current: 0,
-            total: 1,
-        });
+        // RMAPD-PERF-1 + DAEMON-CANCEL-1 (handler-boundary layer): a heartbeat before
+        // the (potentially long) Tarjan SCC. Unlike the prior fire-and-forget emit,
+        // this OBSERVES the result: if the peer is already gone, skip the heavy work
+        // and return Cancelled (read-only ⇒ nothing to discard yet).
+        if crate::cancel::pre_work_check(emitter, "finding_cycles").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "cycles query cancelled (client disconnected before traversal)",
+                ),
+            );
+        }
 
-        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The forced
+        // EXPLICIT `--engine sqlite` ONLY (every other engine/kind returned from the match above). The forced
         // SQLite MODULE-import answer: canonical, qualified, deterministically-ordered (CYCLES-OUTPUT-
-        // CONTRACT-1) -- UNCHANGED (rule 7). `find_cycles` (the SCC query) is unchanged; the qualified +
-        // canonical mapping is applied at the boundary by `cycle_output`. No fastpath, no `backend_used`.
+        // CONTRACT-1). DAEMON-CANCEL-1 in-loop layer: `find_cycles` is an in-memory Tarjan SCC (a Rust/CPU
+        // loop, NOT a single SQL statement), so it takes a cooperative `loop_checkpoint` threaded into the
+        // traversal — a disconnect DURING the SCC pass cancels mid-flight. This is the LAST of the cycles
+        // routes: every Tarjan-running route is now checkpointed (the DEFAULT `auto` route — both its LiveGraph
+        // module-cycle Tarjan and its SQLite fallback — and the `livegraph`/`compare` routes were wired in the
+        // match arms above; the iteration-0 review flagged the `auto` route as the gap). Worker-panic vs
+        // client-cancel are NOT conflated: a real storage error stays InternalError; only
+        // `StorageError::Cancelled` (the checkpoint-`Break` channel) maps to Cancelled.
         let query_start = Instant::now();
-        let cycles = match storage.find_cycles(&snapshot.snapshot_uid, "module") {
-            Ok(c) => c,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
+        let cycles = {
+            let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
+            match storage.find_cycles_cancellable(&snapshot.snapshot_uid, "module", &mut checkpoint)
+            {
+                Ok(c) => c,
+                Err(repo_graph_storage::error::StorageError::Cancelled) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "cycles query cancelled (client disconnected during traversal)",
+                        ),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
             }
         };
         let qualified = match storage.module_qualified_names(&snapshot.snapshot_uid) {
@@ -1711,7 +1757,7 @@ impl ServiceDispatcher {
         )
     }
 
-    fn handle_path(&self, request: &Request) -> DispatchResult {
+    fn handle_path(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         // REG-1: resolve repo from path/alias and auto-load
         let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
             Ok(r) => r,
@@ -1816,6 +1862,26 @@ impl ServiceDispatcher {
         ));
         let repo_root =
             Self::get_optional_string_param(&request.params, "repo").unwrap_or_default();
+
+        // DAEMON-CANCEL-1 (handler-boundary layer): bail before the BFS if the peer
+        // is already gone. Symbol resolution above is cheap; the heavy work is the
+        // LiveGraph BFS inside `path_engine_response`.
+        if crate::cancel::pre_work_check(emitter, "finding_path").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "path query cancelled (client disconnected before search)",
+                ),
+            );
+        }
+
+        // DAEMON-CANCEL-1 in-loop layer: thread a cooperative checkpoint INTO the
+        // LiveGraph BFS (`path_engine_response` → `LiveGraph::path_cancellable`) so a
+        // disconnect DURING the search cancels mid-traversal. The SQLite fallback
+        // (`find_shortest_path`, a recursive CTE) is NOT checkpointed here — that is
+        // the `sqlite3_interrupt` path, DAEMON-CANCEL-2. Read-only ⇒ no rollback.
+        let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_path");
         let response = crate::livegraph_feed::path_engine_response(
             engine,
             &repo_state,
@@ -1839,9 +1905,17 @@ impl ServiceDispatcher {
                 }))
             },
             repo_root,
+            &mut checkpoint,
         );
         match response {
             Ok(v) => DispatchResult::success(&request.id, v),
+            Err(repo_graph_storage::error::StorageError::Cancelled) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "path query cancelled (client disconnected during search)",
+                ),
+            ),
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
