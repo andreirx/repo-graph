@@ -71,8 +71,8 @@ pub mod storage_port;
 // ── Public surface (locked at Rust-42) ────────────────────────
 
 pub use check::{
-    check_to_coherent, run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode,
-    ConditionResult, ConditionStatus, GateOutcomeForCheck,
+    check_to_coherent, run_check, run_check_cancellable, CheckInput, CheckResult, CheckVerdict,
+    ConditionCode, ConditionResult, ConditionStatus, GateOutcomeForCheck,
 };
 pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
 pub use dto::coherent::{
@@ -137,14 +137,15 @@ pub use dto::{
     source::SourceRef,
 };
 pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
-pub use explain::{explain_to_coherent, run_explain, ExplainLgDecisions};
-pub use orient::orient;
+pub use explain::{explain_to_coherent, run_explain, run_explain_cancellable, ExplainLgDecisions};
+pub use orient::{orient, orient_cancellable};
 pub use package_groups::{rollup_package_groups, DirGroup, PackageGroup};
 pub use storage_port::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
-    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry,
-    AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry,
-    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
-    AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+    AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,
+    AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
+    AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
+    AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+    AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
+    EnrichmentState,
 };

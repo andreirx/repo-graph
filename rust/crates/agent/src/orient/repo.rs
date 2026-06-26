@@ -39,7 +39,7 @@ use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::{Signal, SignalCode};
 use crate::errors::OrientError;
 use crate::ranking;
-use crate::storage_port::AgentStorageRead;
+use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
 
 /// Load-bearing signal codes the dense `orient` headline is built
 /// from — pinned through budget truncation (ORIENT-DENSITY-1 §2/§3).
@@ -86,6 +86,7 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     repo_uid: &str,
     budget: Budget,
     now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     // ── 1. Resolve repo identity. ────────────────────────────
     let repo = storage
@@ -116,8 +117,10 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     let trust_result = aggregators::trust::aggregate(storage, repo_uid, &snapshot_uid)?;
     merge(&mut all_signals, &mut all_limits, trust_result.output);
 
-    // cycles
-    let cycles_out = aggregators::cycles::aggregate(storage, &snapshot_uid)?;
+    // cycles (DAEMON-CANCEL-3: the heavy module-cycle Tarjan, cancellable; reborrow
+    // `&mut *cancel` so the same checkpoint serves the complexity materialization below)
+    let cycles_out =
+        aggregators::cycles::aggregate_cancellable(storage, &snapshot_uid, &mut *cancel)?;
     merge(&mut all_signals, &mut all_limits, cycles_out);
 
     // boundary violations
@@ -167,7 +170,8 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
         // budget drives how many NAMED complexity centers ride in the evidence
         // (ORIENT-DENSITY-1 §5: small/medium = lean headline, large/full = every
         // above-threshold center for the `--full` complexity breakdown).
-        let complexity_out = aggregators::complexity::aggregate(storage, &snapshot_uid, budget)?;
+        let complexity_out =
+            aggregators::complexity::aggregate_cancellable(storage, &snapshot_uid, budget, cancel)?;
         merge(&mut all_signals, &mut all_limits, complexity_out);
     } else {
         all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));

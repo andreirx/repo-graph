@@ -456,6 +456,19 @@ pub struct AgentCalleeRow {
 
 // ── Trait ────────────────────────────────────────────────────────
 
+/// A cooperative cancellation checkpoint (DAEMON-CANCEL-3).
+///
+/// A `&mut` closure the storage adapter calls at bounded intervals inside a heavy
+/// Rust loop; returning [`ControlFlow::Break`](std::ops::ControlFlow::Break) tells
+/// the loop to abandon its (read-only, so discardable) work. This is the agent-crate
+/// spelling of the same `&mut dyn FnMut() -> ControlFlow<()>` shape
+/// `repo_graph_algorithms::CancelCheck` uses; it is aliased here so the agent crate
+/// stays free of a graph-algorithms dependency (std types only). The daemon builds
+/// the concrete closure from its request emitter (`cancel::loop_checkpoint`); a
+/// no-op closure (`|| ControlFlow::Continue(())`) reproduces the non-cancellable
+/// behavior byte-for-byte.
+pub type AgentCancelCheck<'a> = &'a mut dyn FnMut() -> std::ops::ControlFlow<()>;
+
 /// The narrow read port the agent use-case layer needs from a
 /// storage backend.
 ///
@@ -467,6 +480,20 @@ pub struct AgentCalleeRow {
 /// All methods are read-only. Every method maps storage errors
 /// into `AgentStorageError` at the adapter boundary so the agent
 /// crate never sees rusqlite, SQL diagnostics, or table names.
+///
+/// ## Cooperative cancellation (DAEMON-CANCEL-3)
+///
+/// A handful of port methods have a `*_cancellable` sibling taking an
+/// [`AgentCancelCheck`]. These exist ONLY for the genuinely-heavy read paths the
+/// daemon reaches on its transport thread (the module-cycle Tarjan and the
+/// complexity FETCH_ALL materialization). The sibling threads a cooperative
+/// checkpoint INTO the adapter's heavy Rust loop so a disconnected peer's
+/// in-flight orient/explain abandons the work mid-traversal instead of running it
+/// to completion with no consumer. Every sibling ships a DEFAULT body that IGNORES
+/// the checkpoint and delegates to the non-cancellable method, so test fakes and
+/// non-daemon callers are unaffected — only the real `StorageConnection` adapter
+/// (and the orient serve decorator) override them. This mirrors the storage crate's
+/// own `find_cycles` → `find_cycles_cancellable` pattern (CANCEL-1) one layer up.
 pub trait AgentStorageRead {
     /// Look up a repo by its stable `repo_uid`. Returns
     /// `Ok(None)` when the repo is not registered.
@@ -490,6 +517,19 @@ pub trait AgentStorageRead {
     /// Canonicalized (each cycle appears once, rotated to its
     /// lexicographically smallest UID).
     fn find_module_cycles(&self, snapshot_uid: &str) -> Result<Vec<AgentCycle>, AgentStorageError>;
+
+    /// Cancellable variant of [`find_module_cycles`](Self::find_module_cycles)
+    /// (DAEMON-CANCEL-3). The adapter consults `cancel` inside the Tarjan SCC
+    /// traversal and the per-cycle name fan-out; on
+    /// [`ControlFlow::Break`](std::ops::ControlFlow::Break) it abandons the work.
+    /// DEFAULT: ignore `cancel`, delegate to the non-cancellable method.
+    fn find_module_cycles_cancellable(
+        &self,
+        snapshot_uid: &str,
+        _cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.find_module_cycles(snapshot_uid)
+    }
 
     /// Return nodes unreferenced by any reference edge, minus
     /// declared entrypoints and framework-liveness inferences.
@@ -540,6 +580,24 @@ pub trait AgentStorageRead {
         repo_uid: &str,
         snapshot_uid: &str,
     ) -> Result<AgentTrustSummary, AgentStorageError>;
+
+    /// Cancellable variant of [`get_trust_summary`](Self::get_trust_summary)
+    /// (DAEMON-CANCEL-3). The adapter threads `cancel` into the trust assembly's
+    /// up-to-100_000-row unresolved-sample loop (the demonstrated heavy path `check`
+    /// inherits via this method); on [`ControlFlow::Break`](std::ops::ControlFlow::Break)
+    /// it abandons the work and returns a "cancelled" storage error. DEFAULT: ignore
+    /// `cancel`, delegate to the non-cancellable method — so test fakes and non-daemon
+    /// callers are unaffected. (The trust `compute_module_stats` SQL the same path
+    /// reaches is opaque to a Rust checkpoint; the daemon runs `check` under
+    /// `sqlite3_interrupt` to abort it — the two mechanisms compose, see `check`.)
+    fn get_trust_summary_cancellable(
+        &self,
+        repo_uid: &str,
+        snapshot_uid: &str,
+        _cancel: AgentCancelCheck<'_>,
+    ) -> Result<AgentTrustSummary, AgentStorageError> {
+        self.get_trust_summary(repo_uid, snapshot_uid)
+    }
 
     // ── Focus resolution (Rust-44) ──────────────────────────────
 
@@ -618,6 +676,20 @@ pub trait AgentStorageRead {
         path_prefix: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError>;
 
+    /// Cancellable variant of
+    /// [`find_cycles_involving_path`](Self::find_cycles_involving_path)
+    /// (DAEMON-CANCEL-3). The adapter consults `cancel` inside the Tarjan SCC
+    /// traversal and the per-cycle prefix-filter fan-out. DEFAULT: ignore `cancel`,
+    /// delegate to the non-cancellable method.
+    fn find_cycles_involving_path_cancellable(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+        _cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.find_cycles_involving_path(snapshot_uid, path_prefix)
+    }
+
     // ── Symbol-focus methods (Rust-45) ──────────────────────────
 
     /// Resolve a symbol name to candidate nodes. Returns up to 5
@@ -660,6 +732,20 @@ pub trait AgentStorageRead {
         snapshot_uid: &str,
         module_qualified_name: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError>;
+
+    /// Cancellable variant of
+    /// [`find_cycles_involving_module`](Self::find_cycles_involving_module)
+    /// (DAEMON-CANCEL-3). The adapter consults `cancel` inside the Tarjan SCC
+    /// traversal and the per-cycle match fan-out. DEFAULT: ignore `cancel`, delegate
+    /// to the non-cancellable method.
+    fn find_cycles_involving_module_cancellable(
+        &self,
+        snapshot_uid: &str,
+        module_qualified_name: &str,
+        _cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.find_cycles_involving_module(snapshot_uid, module_qualified_name)
+    }
 
     // ── Explain-focus methods ───────────────────────────────────
 
@@ -720,6 +806,22 @@ pub trait AgentStorageRead {
         min_threshold: u64,
         limit: usize,
     ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError>;
+
+    /// Cancellable variant of
+    /// [`query_high_complexity_symbols`](Self::query_high_complexity_symbols)
+    /// (DAEMON-CANCEL-3). The `FETCH_ALL` orient call materializes every complexity
+    /// row (the SQL `ORDER BY ... LIMIT i64::MAX` plus a Rust collect/threshold
+    /// loop); the adapter consults `cancel` inside that collect loop. DEFAULT: ignore
+    /// `cancel`, delegate to the non-cancellable method.
+    fn query_high_complexity_symbols_cancellable(
+        &self,
+        snapshot_uid: &str,
+        min_threshold: u64,
+        limit: usize,
+        _cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
+        self.query_high_complexity_symbols(snapshot_uid, min_threshold, limit)
+    }
 
     /// Check whether any complexity measurements exist for a snapshot.
     ///

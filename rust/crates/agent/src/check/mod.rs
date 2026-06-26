@@ -29,7 +29,7 @@ use crate::dto::signal::{
 };
 use crate::errors::CheckError;
 use crate::ranking;
-use crate::storage_port::AgentStorageRead;
+use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
 
 /// Entry point for the check use case.
 ///
@@ -48,6 +48,29 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
     now: &str,
+) -> Result<OrientResult, CheckError> {
+    run_check_cancellable(storage, repo_uid, now, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// Cancellable entry point for the check use case (DAEMON-CANCEL-3).
+///
+/// Identical to [`run_check`] but threads a cooperative `cancel` checkpoint into the
+/// one demonstrated heavy path `check` inherits — the trust assembly's
+/// unresolved-sample loop, reached via `get_trust_summary_cancellable`. The daemon's
+/// check handler runs this whole function on a worker thread under CANCEL-2's
+/// `sqlite3_interrupt` supervisor, so the trust `compute_module_stats` SQL and the
+/// gate complexity-measurement load (both opaque `SELECT`s) are aborted by the
+/// interrupt on disconnect, while this `cancel` covers the pure trust loop — the two
+/// mechanisms compose. [`run_check`] passes a no-op, preserving byte-identical
+/// behavior for every other caller. The small gate-evidence parsing loops are left
+/// alone (NARROW scope; bounded by matching obligations, and SQL-interruptible).
+pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
+    storage: &S,
+    repo_uid: &str,
+    now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, CheckError> {
     // ── Phase 1: Gather ─────────────────────────────────────────
 
@@ -82,8 +105,9 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
             // 3. Get stale files.
             let stale_files = storage.get_stale_files(&snap_uid)?;
 
-            // 4. Get trust summary.
-            let trust = storage.get_trust_summary(repo_uid, &snap_uid)?;
+            // 4. Get trust summary (DAEMON-CANCEL-3: cancellable — the heavy trust
+            //    sample loop check inherits; the SQL is interrupt-covered on the worker).
+            let trust = storage.get_trust_summary_cancellable(repo_uid, &snap_uid, cancel)?;
 
             // 5. Get gate outcome.
             let gate_outcome = gather_gate_outcome(storage, repo_uid, &snap_uid, now);

@@ -13,7 +13,7 @@ use super::AggregatorOutput;
 use crate::dto::signal::{CycleEvidence, ImportCyclesEvidence, Signal};
 use crate::errors::AgentStorageError;
 use crate::ordering;
-use crate::storage_port::AgentStorageRead;
+use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
 
 const CYCLE_TOP_N: usize = 3;
 
@@ -21,7 +21,21 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    let mut cycles = storage.find_module_cycles(snapshot_uid)?;
+    aggregate_cancellable(storage, snapshot_uid, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// DAEMON-CANCEL-3: cancellable variant of [`aggregate`]. Threads the cooperative
+/// `cancel` checkpoint into the module-cycle Tarjan via
+/// `find_module_cycles_cancellable`; everything else is identical. The daemon's
+/// orient handler passes a real checkpoint here; `aggregate` passes a no-op.
+pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    cancel: AgentCancelCheck<'_>,
+) -> Result<AggregatorOutput, AgentStorageError> {
+    let mut cycles = storage.find_module_cycles_cancellable(snapshot_uid, cancel)?;
 
     if cycles.is_empty() {
         return Ok(AggregatorOutput::empty());
@@ -59,7 +73,21 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
     snapshot_uid: &str,
     path_prefix: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    let mut cycles = storage.find_cycles_involving_path(snapshot_uid, path_prefix)?;
+    aggregate_path_cancellable(storage, snapshot_uid, path_prefix, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// DAEMON-CANCEL-3: cancellable variant of [`aggregate_path`]. Threads `cancel` into
+/// the path-scoped cycle Tarjan + filter via `find_cycles_involving_path_cancellable`.
+pub fn aggregate_path_cancellable<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    path_prefix: &str,
+    cancel: AgentCancelCheck<'_>,
+) -> Result<AggregatorOutput, AgentStorageError> {
+    let mut cycles =
+        storage.find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)?;
 
     if cycles.is_empty() {
         return Ok(AggregatorOutput::empty());

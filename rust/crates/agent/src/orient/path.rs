@@ -28,7 +28,7 @@ use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::Signal;
 use crate::errors::OrientError;
 use crate::ranking;
-use crate::storage_port::{AgentSnapshot, AgentStorageRead};
+use crate::storage_port::{AgentCancelCheck, AgentSnapshot, AgentStorageRead};
 
 /// Path-area orient pipeline.
 ///
@@ -36,6 +36,7 @@ use crate::storage_port::{AgentSnapshot, AgentStorageRead};
 /// `module_stable_key` is the MODULE node's stable key when one
 /// exists at the exact prefix path. `None` when the prefix has
 /// content but no MODULE node.
+#[allow(clippy::too_many_arguments)]
 pub fn orient_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_name: &str,
@@ -44,6 +45,7 @@ pub fn orient_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
     module_stable_key: Option<&str>,
     budget: Budget,
     now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     let snapshot_uid = &snapshot.snapshot_uid;
     let repo_uid = &snapshot.repo_uid;
@@ -59,8 +61,13 @@ pub fn orient_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
     let trust_result = aggregators::trust::aggregate(storage, repo_uid, snapshot_uid)?;
     merge(&mut all_signals, &mut all_limits, trust_result.output);
 
-    // ── cycles (path-scoped) ────────────────────────────────
-    let cycles_out = aggregators::cycles::aggregate_path(storage, snapshot_uid, path_prefix)?;
+    // ── cycles (path-scoped; DAEMON-CANCEL-3 cancellable Tarjan + filter) ────
+    let cycles_out = aggregators::cycles::aggregate_path_cancellable(
+        storage,
+        snapshot_uid,
+        path_prefix,
+        cancel,
+    )?;
     merge(&mut all_signals, &mut all_limits, cycles_out);
 
     // ── boundary (path-scoped) ──────────────────────────────

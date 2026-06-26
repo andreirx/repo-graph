@@ -8,7 +8,7 @@ use super::AggregatorOutput;
 use crate::dto::budget::Budget;
 use crate::dto::signal::{ComplexSymbolEvidence, HighComplexityEvidence, Signal};
 use crate::errors::AgentStorageError;
-use crate::storage_port::AgentStorageRead;
+use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
 
 /// Default complexity threshold for HIGH_COMPLEXITY signal.
 /// Symbols with cyclomatic complexity >= this value are flagged.
@@ -35,7 +35,27 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     snapshot_uid: &str,
     budget: Budget,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    aggregate_with_threshold(storage, snapshot_uid, DEFAULT_COMPLEXITY_THRESHOLD, budget)
+    aggregate_cancellable(storage, snapshot_uid, budget, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// DAEMON-CANCEL-3: cancellable variant of [`aggregate`]. Threads `cancel` into the
+/// FETCH_ALL complexity materialization (the demonstrated heavy chokepoint). The
+/// daemon's orient handler passes a real checkpoint; `aggregate` passes a no-op.
+pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    budget: Budget,
+    cancel: AgentCancelCheck<'_>,
+) -> Result<AggregatorOutput, AgentStorageError> {
+    aggregate_with_threshold_cancellable(
+        storage,
+        snapshot_uid,
+        DEFAULT_COMPLEXITY_THRESHOLD,
+        budget,
+        cancel,
+    )
 }
 
 /// Aggregate with a custom threshold (for testing or configuration).
@@ -44,6 +64,21 @@ pub fn aggregate_with_threshold<S: AgentStorageRead + ?Sized>(
     snapshot_uid: &str,
     threshold: u64,
     budget: Budget,
+) -> Result<AggregatorOutput, AgentStorageError> {
+    aggregate_with_threshold_cancellable(storage, snapshot_uid, threshold, budget, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// DAEMON-CANCEL-3: cancellable variant of [`aggregate_with_threshold`]. Only the
+/// FETCH_ALL `query_high_complexity_symbols` read is checkpointed — `count_*` is a
+/// single fast aggregate (not a materialization), left alone per the NARROW scope.
+pub fn aggregate_with_threshold_cancellable<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    threshold: u64,
+    budget: Budget,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<AggregatorOutput, AgentStorageError> {
     // Get the true count of symbols exceeding threshold (not limited)
     let count = storage.count_high_complexity_symbols(snapshot_uid, threshold)?;
@@ -67,8 +102,12 @@ pub fn aggregate_with_threshold<S: AgentStorageRead + ?Sized>(
     // SQL so the LIMIT cut is itself deterministic — lives in the storage adapter, outside this
     // slice's file scope, and is recorded as the follow-up. Determinism here is required NOW and is
     // achievable agent-side.
-    let mut high_complexity =
-        storage.query_high_complexity_symbols(snapshot_uid, threshold, FETCH_ALL)?;
+    let mut high_complexity = storage.query_high_complexity_symbols_cancellable(
+        snapshot_uid,
+        threshold,
+        FETCH_ALL,
+        cancel,
+    )?;
     crate::ordering::sort_complexity(&mut high_complexity);
     // ORIENT-DENSITY-1 §5: budget trades DEPTH — lean top-N at small/medium,
     // EVERY center (cap usize::MAX) at large/--full for a complete breakdown.

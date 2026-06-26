@@ -44,7 +44,7 @@ use repo_graph_ir::{
     IrNode, Partition, PartitionId, PartitionIr, PartitionKind, Provenance,
 };
 use repo_graph_livegraph::LiveGraph;
-use repo_graph_storage::types::{GraphEdge, GraphNode, TrackedFile};
+use repo_graph_storage::types::{GraphEdge, GraphNode, MeasurementInput, TrackedFile};
 use repo_graph_storage::StorageConnection;
 use repo_graph_trust_model::LanguageSupport;
 use serde_json::{json, Value};
@@ -1276,4 +1276,489 @@ fn dispatched_default_stats_cancels_via_sqlite_fallback_when_peer_disconnects() 
         &mut emitter,
     );
     assert_cancelled_in_flight(&result, "default stats (auto -> sqlite fallback interrupt)");
+}
+
+// ── DAEMON-CANCEL-3: orient / explain in-flight cancellation ─────────────────
+//
+// These prove the THIRD/final B2 piece: the orient and explain handlers cancel
+// WHILE their demonstrated heavy work is in flight — the module-cycle Tarjan and
+// the complexity FETCH_ALL materialization — through the REAL `ServiceDispatcher::
+// dispatch` surface with a closed transport (a failing emitter). Same honest
+// large-fixture shape as the cycles/path/stats tests above: the fixture is sized so
+// a non-cancelling run would complete far more than one checkpoint interval, and
+// `assert_cancelled_in_flight` pins that the cancel fired DURING the loop.
+
+/// Inject `n` `cyclomatic_complexity` measurements (all above the orient threshold of
+/// 20) into a snapshot. The orient complexity aggregator fetches the FULL set
+/// (`FETCH_ALL`) and materializes every row in a Rust loop, checkpointing every 1024
+/// rows — so `n` ≫ 1024 makes that materialization the heavy, cancellable path. The
+/// `target_stable_key`s need not match any node: the adapter's LEFT JOINs tolerate
+/// missing name/file (the unresolved sample is still materialized + threshold-tested).
+fn inject_complexity_measurements(db_path: &str, repo_uid: &str, snapshot_uid: &str, n: usize) {
+    let mut conn =
+        StorageConnection::open(db_path).expect("open daemon db for complexity injection");
+    let rows: Vec<MeasurementInput> = (0..n)
+        .map(|i| MeasurementInput {
+            measurement_uid: format!("cmx{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            target_stable_key: format!("{repo_uid}:cxsym{i}:SYMBOL"),
+            kind: "cyclomatic_complexity".to_string(),
+            // Above the DEFAULT_COMPLEXITY_THRESHOLD (20) so every row survives the filter.
+            value_json: "{\"value\": 42}".to_string(),
+            source: "test".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        })
+        .collect();
+    conn.insert_measurements(&rows)
+        .expect("insert complexity measurements");
+}
+
+/// A repo whose files live under a `pkg/` subdirectory, so `explain("pkg")` resolves
+/// to the PATH pipeline (`explain_path` -> `find_cycles_involving_path` -> the heavy
+/// module-cycle Tarjan) rather than the file pipeline (which reaches no Tarjan).
+fn write_subdir_repo(repo_dir: &Path) {
+    let pkg = repo_dir.join("pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(
+        pkg.join("helper.ts"),
+        "export function helperFunction() {\n    console.log('helper');\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("main.ts"),
+        "import { helperFunction } from './helper';\n\nexport function mainEntry() {\n    helperFunction();\n}\n",
+    )
+    .unwrap();
+}
+
+/// orient (repo focus): a LARGE module-import ring makes the module-cycle Tarjan run
+/// long; a peer that disconnects DURING it is cancelled mid-traversal, proven through
+/// the real dispatcher with a closed transport. This is the orient analogue of
+/// `dispatched_cycles_cancels_mid_tarjan_when_peer_disconnects`, exercising
+/// `orient_cancellable` -> `find_module_cycles_cancellable` -> `find_cycles_cancellable`.
+#[test]
+fn dispatched_orient_cancels_mid_cycle_tarjan_when_peer_disconnects() {
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // 1000-module ring ⇒ the SCC pass runs ~3000 DFS steps, ≫ the 256 checkpoint
+    // interval, so the first in-loop checkpoint fires far before completion.
+    inject_module_ring(&db_path, &repo_uid, &snapshot_uid, 1000);
+
+    // FailAfter(1): the handler-boundary `pre_work_check` heartbeat passes; the first
+    // in-loop checkpoint inside the Tarjan fails ⇒ Cancelled DURING the traversal.
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request("ori", "orient", json!({ "repo": canonical })),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "orient (module-cycle Tarjan)");
+}
+
+/// orient (repo focus): a LARGE complexity set makes the FETCH_ALL materialization the
+/// heavy, cancellable path (the freshly-indexed repo has no module ring, so the cycle
+/// Tarjan returns immediately without checkpointing). A peer that disconnects DURING
+/// the materialization is cancelled mid-loop, exercising
+/// `query_high_complexity_symbols_cancellable`.
+#[test]
+fn dispatched_orient_cancels_mid_complexity_materialization_when_peer_disconnects() {
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // 4000 above-threshold complexity rows ⇒ the materialization loop runs ≫ the 1024
+    // checkpoint chunk; with no injected ring, cycles is trivial (≈0 checkpoints), so
+    // complexity is the first heavy in-loop checkpoint.
+    inject_complexity_measurements(&db_path, &repo_uid, &snapshot_uid, 4000);
+
+    // FailAfter(1): boundary heartbeat passes; the first in-loop complexity checkpoint
+    // fails ⇒ Cancelled DURING the materialization.
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request("oric", "orient", json!({ "repo": canonical })),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "orient (complexity materialization)");
+}
+
+/// explain (path focus): a LARGE module-import ring makes the path-scoped cycle Tarjan
+/// run long; a peer that disconnects DURING it is cancelled mid-traversal. Exercises
+/// the explain handler's NEW emitter + `run_explain_cancellable` ->
+/// `find_cycles_involving_path_cancellable` -> `find_cycles_cancellable`. The
+/// `pkg/`-subdir repo makes `explain("pkg")` route to the PATH pipeline (the file
+/// pipeline reaches no Tarjan).
+#[test]
+fn dispatched_explain_cancels_mid_cycle_tarjan_when_peer_disconnects() {
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_subdir_repo(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    inject_module_ring(&db_path, &repo_uid, &snapshot_uid, 1000);
+
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request(
+            "exp",
+            "explain",
+            json!({ "repo": canonical, "target": "pkg" }),
+        ),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "explain (path-scoped module-cycle Tarjan)");
+}
+
+/// Live-peer transparency: with a connected peer (a Quiet emitter that never fails),
+/// orient and explain run to completion and return Success EVEN on the large ring
+/// fixture — proving the cooperative checkpoint never spuriously cancels and the
+/// cancellable path is byte-transparent when the peer stays. (The cancel only fires on
+/// emit failure = disconnect.)
+#[test]
+fn live_peer_orient_and_explain_complete_on_large_fixture() {
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_subdir_repo(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // Heavy on BOTH chokepoints, yet a live peer must still get a full answer.
+    inject_module_ring(&db_path, &repo_uid, &snapshot_uid, 1000);
+    inject_complexity_measurements(&db_path, &repo_uid, &snapshot_uid, 4000);
+
+    // orient (repo focus): full CoherenceEnvelope semantics, not merely Success — the
+    // cooperative checkpoint is transparent when the peer stays (no spurious cancel).
+    let orient = expect_success(run(
+        &dispatcher,
+        "ori-live",
+        "orient",
+        json!({ "repo": canonical }),
+    ));
+    assert_is_coherence_envelope(&orient, "live-peer orient (large fixture)");
+    let orient_b = expect_success(run(
+        &dispatcher,
+        "ori-live-b",
+        "orient",
+        json!({ "repo": canonical }),
+    ));
+    assert_eq!(
+        orient, orient_b,
+        "live-peer orient must be deterministic + transparent across the checkpoint"
+    );
+    // explain (path focus): same — full envelope, deterministic, transparent.
+    let explain = expect_success(run(
+        &dispatcher,
+        "exp-live",
+        "explain",
+        json!({ "repo": canonical, "target": "pkg" }),
+    ));
+    assert_is_coherence_envelope(&explain, "live-peer explain (large fixture)");
+    let explain_b = expect_success(run(
+        &dispatcher,
+        "exp-live-b",
+        "explain",
+        json!({ "repo": canonical, "target": "pkg" }),
+    ));
+    assert_eq!(
+        explain, explain_b,
+        "live-peer explain must be deterministic + transparent across the checkpoint"
+    );
+}
+
+// ── DAEMON-CANCEL-3: trust / check in-flight cancellation ────────────────────
+//
+// trust/check are the WORKER-SUPERVISED half of B2 (like stats): their heavy work is
+// opaque SQL (trust `compute_module_stats` + the up-to-100k `query_unresolved_edges`,
+// and the gate complexity load) PLUS the pure 100k unresolved-sample loop. The SQL
+// can't be checkpointed in-Rust, so it cancels via `sqlite3_interrupt` driven by
+// CANCEL-1's `run_interruptible` supervisor; the pure loop cancels via the cooperative
+// `CancelFlag`. These tests prove the REAL handlers cancel mid-work through the
+// dispatcher with a closed transport. (The deterministic, timing-free proof of the
+// sample-loop checkpoint lives in trust's `cancellable_assembly_breaks_the_sample_loop_mid_flight`;
+// the SQL-interrupt proof in storage's `interrupt_handle_aborts_in_flight_compute_module_stats`.)
+
+/// Inject `n` unresolved CALLS edges (classification `unknown`, category
+/// `CallsObjMethodNeedsTypeInfo` with enrichment metadata — the heaviest per-row trust
+/// sample: each row both derives a blast radius AND parses JSON). This makes trust's
+/// `query_unresolved_edges` fetch (LEFT JOIN + ORDER BY over the full set, capped at
+/// 100k) AND the pure sample loop run FAR longer than one shortened heartbeat interval,
+/// so a peer disconnect lands mid-work: the fetch is aborted by `sqlite3_interrupt`, the
+/// loop broken by the cooperative `CancelFlag` — the two trust chokepoints CANCEL-3 wires.
+fn inject_unresolved_calls(db_path: &str, repo_uid: &str, snapshot_uid: &str, n: usize) {
+    use repo_graph_classification::types::{
+        UnresolvedEdgeBasisCode, UnresolvedEdgeCategory, UnresolvedEdgeClassification,
+    };
+    use repo_graph_indexer::storage_port::{PersistedUnresolvedEdge, UnresolvedEdgePort};
+    use repo_graph_indexer::types::{EdgeType as IxEdgeType, Resolution as IxResolution};
+
+    let mut conn =
+        StorageConnection::open(db_path).expect("open daemon db for unresolved-edge injection");
+
+    // `unresolved_edges.source_node_uid` has a FK to `nodes(node_uid)`. One shared
+    // source node satisfies it for every injected edge (the FK needs existence, not
+    // uniqueness; the trust query LEFT JOINs it for visibility, identical per row).
+    let src = GraphNode {
+        node_uid: "usrc0".to_string(),
+        snapshot_uid: snapshot_uid.to_string(),
+        repo_uid: repo_uid.to_string(),
+        stable_key: format!("{repo_uid}:usrc0:SYMBOL"),
+        kind: "SYMBOL".to_string(),
+        subtype: Some("FUNCTION".to_string()),
+        name: "usrc0".to_string(),
+        qualified_name: None,
+        file_uid: None,
+        parent_node_uid: None,
+        location: None,
+        signature: None,
+        visibility: Some("export".to_string()),
+        doc_comment: None,
+        metadata_json: None,
+    };
+    conn.insert_nodes(std::slice::from_ref(&src))
+        .expect("insert unresolved-edge source node");
+
+    let edges: Vec<PersistedUnresolvedEdge> = (0..n)
+        .map(|i| PersistedUnresolvedEdge {
+            edge_uid: format!("ue{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            source_node_uid: "usrc0".to_string(),
+            target_key: format!("utgt{i}"),
+            edge_type: IxEdgeType::Calls,
+            resolution: IxResolution::Inferred,
+            extractor: "test".to_string(),
+            line_start: None,
+            col_start: None,
+            line_end: None,
+            col_end: None,
+            metadata_json: Some(
+                r#"{"enrichment":{"receiverType":"Map","typeDisplayName":"Map","isExternalType":true}}"#
+                    .to_string(),
+            ),
+            category: UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            classification: UnresolvedEdgeClassification::Unknown,
+            classifier_version: 1,
+            basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+            observed_at: "2026-01-01T00:00:00Z".to_string(),
+        })
+        .collect();
+    conn.insert_unresolved_edges(&edges)
+        .expect("insert unresolved edges");
+}
+
+/// Assert a Success body is a `CoherenceEnvelope` — the four contract keys present —
+/// so the live-peer transparency checks inspect real response SEMANTICS, not just the
+/// Success discriminant.
+#[track_caller]
+fn assert_is_coherence_envelope(body: &Value, what: &str) {
+    for key in ["value", "provenance", "trust", "freshness"] {
+        assert!(
+            body.get(key).is_some(),
+            "{what}: response must be a CoherenceEnvelope (missing `{key}`); got {body:?}"
+        );
+    }
+}
+
+/// trust: a LARGE unknown-CALLS set makes the trust assembly (the
+/// `query_unresolved_edges` fetch + the 100k sample loop) run long; a peer that
+/// disconnects DURING it is cancelled mid-work — `sqlite3_interrupt` aborts the
+/// in-flight `SELECT` and/or the cooperative flag breaks the loop. Proven through the
+/// real dispatcher with a closed transport. The trust analogue of the stats interrupt
+/// test, exercising `assemble_trust_report_cancellable` on the worker.
+#[test]
+fn dispatched_trust_cancels_in_flight_when_peer_disconnects() {
+    // Opaque-SQL cancellation is heartbeat-timed (no in-statement Rust checkpoint), so
+    // probe FAST: the first supervisor heartbeat then fires while the assembly is still
+    // running. Process-global, but every `run_interruptible` caller in this binary
+    // (stats, trust, check) sets 5 ms.
+    repo_graph_daemon_runtime::cancel::set_heartbeat_interval_ms_for_test(5);
+
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // 120k unknown CALLS samples ⇒ the fetch (capped at 100k) + the 100k sample loop
+    // span many 5 ms intervals, so a disconnect lands mid-work rather than after a fast
+    // completion.
+    inject_unresolved_calls(&db_path, &repo_uid, &snapshot_uid, 120_000);
+
+    // Transparency first: a live peer (Quiet) gets the full answer — the worker wrapping
+    // is invisible when connected.
+    let live = run(
+        &dispatcher,
+        "trust-live",
+        "trust",
+        json!({ "repo": canonical }),
+    );
+    assert!(
+        is_success(&live),
+        "connected: trust on the heavy fixture must return Success, got {live:?}"
+    );
+
+    // Cancellation: FailAfter(1) — the handler-boundary `pre_work_check` heartbeat
+    // passes, then the supervisor's first heartbeat (fired mid-assembly) fails ⇒ the
+    // interrupt aborts the in-flight SELECT / the flag breaks the sample loop ⇒
+    // Cancelled DURING the assembly.
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request("trust", "trust", json!({ "repo": canonical })),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "trust (worker + sqlite interrupt / sample loop)");
+}
+
+/// check: INHERITS trust's heavy assembly via `get_trust_summary`, so the same large
+/// unknown-CALLS fixture makes `run_check` run long; a peer that disconnects DURING it
+/// is cancelled mid-work, exercising the check handler's worker + `run_check_cancellable`
+/// → `get_trust_summary_cancellable` path (the SQL interrupt + the cooperative flag).
+#[test]
+fn dispatched_check_cancels_in_flight_via_inherited_trust_when_peer_disconnects() {
+    repo_graph_daemon_runtime::cancel::set_heartbeat_interval_ms_for_test(5);
+
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    inject_unresolved_calls(&db_path, &repo_uid, &snapshot_uid, 120_000);
+
+    // Transparency first.
+    let live = run(
+        &dispatcher,
+        "check-live",
+        "check",
+        json!({ "repo": canonical }),
+    );
+    assert!(
+        is_success(&live),
+        "connected: check on the heavy fixture must return Success, got {live:?}"
+    );
+
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request("check", "check", json!({ "repo": canonical })),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "check (inherited trust assembly on the worker)");
+}
+
+/// Live-peer transparency: with a connected peer, trust and check run to completion and
+/// return Success with the FULL `CoherenceEnvelope` semantics — AND two runs are
+/// byte-identical (the worker-supervised path is deterministic and transparent, never
+/// spuriously cancelling when the peer stays). "Identical response semantics, not just
+/// success" — the new worker wrapping changes nothing the peer observes.
+#[test]
+fn live_peer_trust_and_check_return_identical_results() {
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // trust: two live runs, identical + full envelope semantics.
+    let trust_a = expect_success(run(
+        &dispatcher,
+        "t-a",
+        "trust",
+        json!({ "repo": canonical }),
+    ));
+    let trust_b = expect_success(run(
+        &dispatcher,
+        "t-b",
+        "trust",
+        json!({ "repo": canonical }),
+    ));
+    assert_is_coherence_envelope(&trust_a, "live-peer trust");
+    assert_eq!(
+        trust_a, trust_b,
+        "live-peer trust must be deterministic + transparent across the worker boundary"
+    );
+
+    // check: two live runs, identical + full envelope semantics.
+    let check_a = expect_success(run(
+        &dispatcher,
+        "c-a",
+        "check",
+        json!({ "repo": canonical }),
+    ));
+    let check_b = expect_success(run(
+        &dispatcher,
+        "c-b",
+        "check",
+        json!({ "repo": canonical }),
+    ));
+    assert_is_coherence_envelope(&check_a, "live-peer check");
+    assert_eq!(
+        check_a, check_b,
+        "live-peer check must be deterministic + transparent across the worker boundary"
+    );
 }

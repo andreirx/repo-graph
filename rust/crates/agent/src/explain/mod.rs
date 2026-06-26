@@ -29,7 +29,7 @@ use crate::errors::{AgentStorageError, ExplainError};
 use crate::ordering;
 use crate::ranking;
 use crate::storage_port::{
-    AgentReliabilityLevel, AgentSnapshot, AgentStorageRead, AgentSymbolContext,
+    AgentCancelCheck, AgentReliabilityLevel, AgentSnapshot, AgentStorageRead, AgentSymbolContext,
 };
 
 /// Items cap per budget tier (medium minimum, large optional).
@@ -60,6 +60,27 @@ pub fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
     target: &str,
     budget: Budget,
     now: &str,
+) -> Result<OrientResult, ExplainError> {
+    run_explain_cancellable(storage, repo_uid, target, budget, now, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// Cancellable entry point for the explain use case (DAEMON-CANCEL-3).
+///
+/// Identical to [`run_explain`] but threads a cooperative `cancel` checkpoint into
+/// the module-cycle Tarjan it reaches on the path/symbol-focus pipelines
+/// (`explain_path`/`explain_symbol`). The daemon's explain handler passes a
+/// checkpoint built from its request emitter; [`run_explain`] passes a no-op,
+/// preserving byte-identical behavior for every other caller. The file-focus
+/// pipeline reaches no cycle Tarjan, so it is not threaded (NARROW scope).
+pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
+    storage: &S,
+    repo_uid: &str,
+    target: &str,
+    budget: Budget,
+    now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, ExplainError> {
     // Budget: minimum medium.
     let budget = match budget {
@@ -108,6 +129,7 @@ pub fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
             resolution.module_stable_key.as_deref(),
             budget,
             now,
+            cancel,
         );
     }
 
@@ -127,6 +149,7 @@ pub fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     target,
                     budget,
                     now,
+                    cancel,
                 ),
                 None => Ok(build_no_match(&repo.name, &snapshot, target, budget)),
             }
@@ -154,6 +177,7 @@ pub fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 Some(&candidate.stable_key),
                 budget,
                 now,
+                cancel,
             )
         }
         None => {
@@ -175,6 +199,7 @@ pub fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
                             target,
                             budget,
                             now,
+                            cancel,
                         ),
                         None => Ok(build_no_match(&repo.name, &snapshot, target, budget)),
                     }
@@ -271,6 +296,7 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     focus_input: &str,
     budget: Budget,
     now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, ExplainError> {
     let snapshot_uid = &snapshot.snapshot_uid;
     let repo_uid = &snapshot.repo_uid;
@@ -350,8 +376,9 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // ── Inherited module-context signals ────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
     if let Some(ref module_path) = context.module_path {
-        // EXPLAIN_CYCLES
-        let mut cycles = storage.find_cycles_involving_module(snapshot_uid, module_path)?;
+        // EXPLAIN_CYCLES (DAEMON-CANCEL-3: cancellable Tarjan + filter)
+        let mut cycles =
+            storage.find_cycles_involving_module_cancellable(snapshot_uid, module_path, cancel)?;
         if !cycles.is_empty() {
             // TRUNCATION-AUDIT-1: rank the FULL cycle set (length DESC, then ring members)
             // BEFORE the cut so the surviving top-N are the biggest cycles, deterministically.
@@ -610,6 +637,7 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
 // ── Path explain pipeline ───────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_name: &str,
@@ -618,6 +646,7 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
     module_stable_key: Option<&str>,
     budget: Budget,
     now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, ExplainError> {
     let snapshot_uid = &snapshot.snapshot_uid;
     let repo_uid = &snapshot.repo_uid;
@@ -666,7 +695,9 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_CYCLES ──────────────────────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
-    let mut cycles = storage.find_cycles_involving_path(snapshot_uid, path_prefix)?;
+    // DAEMON-CANCEL-3: cancellable Tarjan + filter.
+    let mut cycles =
+        storage.find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)?;
     if !cycles.is_empty() {
         // TRUNCATION-AUDIT-1: length DESC, then ring members — biggest cycles survive the cut.
         ordering::sort_cycles(&mut cycles);

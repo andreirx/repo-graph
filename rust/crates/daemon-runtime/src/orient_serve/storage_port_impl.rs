@@ -9,11 +9,11 @@
 
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
-    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry,
-    AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSize,
-    AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot,
-    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentTrustSummary,
+    AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,
+    AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry,
+    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary,
+    AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
+    AgentSymbolEntry, AgentTrustSummary,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -166,6 +166,19 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         self.inner.find_module_cycles(snapshot_uid)
     }
 
+    // DAEMON-CANCEL-3: cycles have no LiveGraph home (delegated to SQLite, CYCLES-A),
+    // so the serve decorator just FORWARDS the cancellable variant + checkpoint to the
+    // inner port. Without this forward, the trait default would drop the checkpoint and
+    // green-path orient/explain would run the Tarjan to completion after a disconnect.
+    fn find_module_cycles_cancellable(
+        &self,
+        snapshot_uid: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.inner
+            .find_module_cycles_cancellable(snapshot_uid, cancel)
+    }
+
     fn find_dead_nodes(
         &self,
         snapshot_uid: &str,
@@ -262,6 +275,16 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             .find_cycles_involving_path(snapshot_uid, path_prefix)
     }
 
+    fn find_cycles_involving_path_cancellable(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.inner
+            .find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)
+    }
+
     fn find_cycles_involving_module(
         &self,
         snapshot_uid: &str,
@@ -269,6 +292,19 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
         self.inner
             .find_cycles_involving_module(snapshot_uid, module_qualified_name)
+    }
+
+    fn find_cycles_involving_module_cancellable(
+        &self,
+        snapshot_uid: &str,
+        module_qualified_name: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.inner.find_cycles_involving_module_cancellable(
+            snapshot_uid,
+            module_qualified_name,
+            cancel,
+        )
     }
 
     fn list_symbols_in_file(
@@ -307,6 +343,21 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
         self.inner
             .query_high_complexity_symbols(snapshot_uid, min_threshold, limit)
+    }
+
+    fn query_high_complexity_symbols_cancellable(
+        &self,
+        snapshot_uid: &str,
+        min_threshold: u64,
+        limit: usize,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
+        self.inner.query_high_complexity_symbols_cancellable(
+            snapshot_uid,
+            min_threshold,
+            limit,
+            cancel,
+        )
     }
 
     fn has_complexity_measurements(&self, snapshot_uid: &str) -> Result<bool, AgentStorageError> {

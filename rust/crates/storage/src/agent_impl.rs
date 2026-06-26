@@ -25,14 +25,14 @@
 
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
-    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry,
-    AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry,
-    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
-    AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
-    EnrichmentState,
+    AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,
+    AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
+    AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
+    AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentTrustSummary, EnrichmentState,
 };
-use repo_graph_trust::service::assemble_trust_report;
+use repo_graph_trust::service::{assemble_trust_report_cancellable, TrustReportOutcome};
 use repo_graph_trust::types::{
     ReliabilityAxisScore as TrustAxisScore, ReliabilityLevel as TrustLevel,
 };
@@ -149,6 +149,30 @@ impl AgentStorageRead for StorageConnection {
         // use the module level at the agent boundary.
         let cycles = self
             .find_cycles(snapshot_uid, "module")
+            .map_err(map_err("find_module_cycles"))?;
+        Ok(cycles
+            .into_iter()
+            .map(|c| AgentCycle {
+                length: c.length,
+                modules: c.nodes.into_iter().map(|n| n.name).collect(),
+            })
+            .collect())
+    }
+
+    fn find_module_cycles_cancellable(
+        &self,
+        snapshot_uid: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        // DAEMON-CANCEL-3: identical to `find_module_cycles` but routed through the
+        // CANCELLABLE Tarjan entry (`find_cycles_cancellable`, CANCEL-1). `cancel` is
+        // consulted inside the SCC traversal and the per-cycle name fan-out, so a
+        // disconnected peer's in-flight orient abandons the O(V+E) traversal at the
+        // next checkpoint instead of running it to completion with no consumer.
+        // Read-only ⇒ nothing to roll back; `StorageError::Cancelled` maps through
+        // the standard adapter boundary like any other storage failure.
+        let cycles = self
+            .find_cycles_cancellable(snapshot_uid, "module", cancel)
             .map_err(map_err("find_module_cycles"))?;
         Ok(cycles
             .into_iter()
@@ -282,13 +306,39 @@ impl AgentStorageRead for StorageConnection {
         repo_uid: &str,
         snapshot_uid: &str,
     ) -> Result<AgentTrustSummary, AgentStorageError> {
-        // Delegate to the trust crate's assembly function, which
-        // uses the existing `TrustStorageRead` impl on
-        // `StorageConnection`. basis_commit and toolchain_json
-        // are not needed by the agent projection and are passed
-        // as None.
-        let report = assemble_trust_report(self, repo_uid, snapshot_uid, None, None)
-            .map_err(|e| AgentStorageError::new("get_trust_summary", format!("{:?}", e)))?;
+        // DAEMON-CANCEL-3: the non-cancellable entry delegates to the cancellable one
+        // with a never-breaking checkpoint, so it stays byte-identical.
+        self.get_trust_summary_cancellable(repo_uid, snapshot_uid, &mut || {
+            std::ops::ControlFlow::Continue(())
+        })
+    }
+
+    fn get_trust_summary_cancellable(
+        &self,
+        repo_uid: &str,
+        snapshot_uid: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<AgentTrustSummary, AgentStorageError> {
+        // Delegate to the trust crate's CANCELLABLE assembly function, which uses the
+        // existing `TrustStorageRead` impl on `StorageConnection` and threads the
+        // cooperative checkpoint into its unresolved-sample loop. basis_commit and
+        // toolchain_json are not needed by the agent projection and are passed as None.
+        let outcome =
+            assemble_trust_report_cancellable(self, repo_uid, snapshot_uid, None, None, cancel)
+                .map_err(|e| AgentStorageError::new("get_trust_summary", format!("{:?}", e)))?;
+        let report = match outcome {
+            TrustReportOutcome::Ready(report) => *report,
+            // The peer disconnected mid sample-loop. Read-only ⇒ nothing to roll back;
+            // surface a "cancelled" storage error. On the daemon's check worker the
+            // resulting CheckError is discarded (the supervisor already returned
+            // Cancelled); for any other caller it is an honest abandonment signal.
+            TrustReportOutcome::Cancelled => {
+                return Err(AgentStorageError::new(
+                    "get_trust_summary",
+                    "cancelled (client disconnected during trust sample processing)",
+                ));
+            }
+        };
 
         // Project the relevant scalars into the agent DTO.
         let resolved_calls = report.summary.resolved_calls;
@@ -799,6 +849,62 @@ impl AgentStorageRead for StorageConnection {
         Ok(filtered)
     }
 
+    fn find_cycles_involving_path_cancellable(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        // DAEMON-CANCEL-3: same shape as `find_cycles_involving_path`, but (1) the
+        // heavy Tarjan runs through the cancellable entry (reborrow `&mut *cancel` so
+        // the checkpoint stays usable for the filter below) and (2) the per-cycle
+        // qualified-name fan-out — itself a SQL lookup per cycle member, unbounded on
+        // a pathological many-cycle graph — is checkpointed per cycle. Read-only ⇒ a
+        // cancelled query drops its partial result with nothing to undo.
+        let all_cycles = self
+            .find_cycles_cancellable(snapshot_uid, "module", &mut *cancel)
+            .map_err(map_err("find_cycles_involving_path"))?;
+
+        let conn = self.connection();
+        let mut filtered: Vec<AgentCycle> = Vec::new();
+        for c in all_cycles {
+            if cancel().is_break() {
+                return Err(AgentStorageError::new(
+                    "find_cycles_involving_path",
+                    "cancelled (client disconnected during cycle filtering)",
+                ));
+            }
+            let qualified_names: Vec<String> = c
+                .nodes
+                .iter()
+                .map(|n| {
+                    conn.query_row(
+                        "SELECT qualified_name FROM nodes \
+						 WHERE node_uid = ?",
+                        rusqlite::params![n.node_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| n.name.clone())
+                })
+                .collect();
+
+            let involves_prefix = qualified_names
+                .iter()
+                .any(|qn| qn == path_prefix || qn.starts_with(&format!("{}/", path_prefix)));
+
+            if involves_prefix {
+                filtered.push(AgentCycle {
+                    length: c.length,
+                    modules: qualified_names,
+                });
+            }
+        }
+
+        Ok(filtered)
+    }
+
     // ── Symbol-focus methods (Rust-45) ──────────────────────────
 
     fn resolve_symbol_name(
@@ -1036,6 +1142,57 @@ impl AgentStorageRead for StorageConnection {
         Ok(filtered)
     }
 
+    fn find_cycles_involving_module_cancellable(
+        &self,
+        snapshot_uid: &str,
+        module_qualified_name: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        // DAEMON-CANCEL-3: the exact-match sibling of
+        // `find_cycles_involving_path_cancellable` (cancellable Tarjan + per-cycle
+        // checkpointed fan-out). Read-only ⇒ a cancelled query drops its partial
+        // result.
+        let all_cycles = self
+            .find_cycles_cancellable(snapshot_uid, "module", &mut *cancel)
+            .map_err(map_err("find_cycles_involving_module"))?;
+
+        let conn = self.connection();
+        let mut filtered: Vec<AgentCycle> = Vec::new();
+        for c in all_cycles {
+            if cancel().is_break() {
+                return Err(AgentStorageError::new(
+                    "find_cycles_involving_module",
+                    "cancelled (client disconnected during cycle filtering)",
+                ));
+            }
+            let qualified_names: Vec<String> = c
+                .nodes
+                .iter()
+                .map(|n| {
+                    conn.query_row(
+                        "SELECT qualified_name FROM nodes \
+						 WHERE node_uid = ?",
+                        rusqlite::params![n.node_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| n.name.clone())
+                })
+                .collect();
+
+            // Exact match — NOT prefix matching.
+            if qualified_names.iter().any(|qn| qn == module_qualified_name) {
+                filtered.push(AgentCycle {
+                    length: c.length,
+                    modules: qualified_names,
+                });
+            }
+        }
+
+        Ok(filtered)
+    }
+
     // ── Explain-focus methods ──────────────────────────────────────
 
     fn list_symbols_in_file(
@@ -1162,6 +1319,24 @@ impl AgentStorageRead for StorageConnection {
         min_threshold: u64,
         limit: usize,
     ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
+        // Single SQL + materialization site lives in the cancellable variant; the
+        // non-cancellable entry is that path with a never-breaking checkpoint —
+        // byte-identical for every existing (test / non-daemon) caller.
+        self.query_high_complexity_symbols_cancellable(
+            snapshot_uid,
+            min_threshold,
+            limit,
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+    }
+
+    fn query_high_complexity_symbols_cancellable(
+        &self,
+        snapshot_uid: &str,
+        min_threshold: u64,
+        limit: usize,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
         let conn = self.connection();
 
         // Query cyclomatic_complexity measurements joined with nodes to get
@@ -1197,9 +1372,43 @@ impl AgentStorageRead for StorageConnection {
             })
             .map_err(map_err("query_high_complexity_symbols"))?;
 
-        // Collect and filter by threshold
+        // Collect and filter by threshold.
+        //
+        // DAEMON-CANCEL-3 — why the COOPERATIVE checkpoint is the right tool here (review
+        // iteration-1 item 5). orient calls this with `limit == FETCH_ALL` (i64::MAX), so
+        // `query_map` materializes EVERY cyclomatic_complexity row into Rust. The
+        // DEMONSTRATED heavy chokepoint (Codex-cited: `aggregators/complexity.rs` fetches
+        // the full above-threshold set then sorts/truncates in Rust) is exactly THIS Rust
+        // collect+threshold loop — and it IS what `cancel` covers: we consult it once per
+        // CHUNK rows as we pull them, abandoning a huge materialization within a bounded
+        // number of rows of a disconnect. Read-only ⇒ the partial `results` is dropped.
+        //
+        // The residual window: the SQL `ORDER BY CAST(json_extract(...) AS INTEGER)` is a
+        // non-indexed expression, so SQLite computes the key + sorts the WHERE-filtered
+        // set (bounded by the number of complexity measurements, i.e. O(functions))
+        // BEFORE yielding row 1. A transport-thread Rust checkpoint cannot fire inside
+        // that opaque sort. This is NOT a gap specific to complexity — it is the SAME
+        // ratified K-A limitation as the cycles Tarjan (whose edge-load `SELECT` is
+        // likewise pre-loop and uncancellable) and is consistent with §14's documented
+        // "cancel latency = checkpoint spacing, and a checkpoint cannot interrupt an
+        // opaque in-Rust-unreachable statement". orient runs cooperatively ON the
+        // transport thread by ratified design (D-K = K-A); it does NOT run on a worker, so
+        // `sqlite3_interrupt` is not available to it. Moving orient to the worker +
+        // interrupt purely to cover this bounded sort window would be a far larger change
+        // than this NARROW slice warrants (orient assembles many signals, not one SQL) —
+        // it is the named upgrade trigger IF the sort window is ever shown to be material.
+        // The bounded sort is NOT the demonstrated chokepoint; the Rust materialization
+        // below is, and it is covered (proven by the dispatcher test
+        // `dispatched_orient_cancels_mid_complexity_materialization_when_peer_disconnects`).
+        const CHUNK: usize = 1024;
         let mut results = Vec::new();
-        for row in rows {
+        for (i, row) in rows.enumerate() {
+            if i % CHUNK == 0 && cancel().is_break() {
+                return Err(AgentStorageError::new(
+                    "query_high_complexity_symbols",
+                    "cancelled (client disconnected during complexity materialization)",
+                ));
+            }
             let (stable_key, symbol_name, file_path, complexity) =
                 row.map_err(map_err("query_high_complexity_symbols"))?;
 

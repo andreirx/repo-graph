@@ -23,6 +23,8 @@
 //! ported here as `pub(crate)` — a narrow DTO-completeness
 //! exception, not a general invitation to port display helpers.
 
+use std::ops::ControlFlow;
+
 use repo_graph_classification::derive_blast_radius;
 use repo_graph_classification::types::{BlastRadiusLevel, UnresolvedEdgeCategory};
 
@@ -75,6 +77,40 @@ impl<E: std::fmt::Display> std::fmt::Display for TrustAssemblyError<E> {
 }
 
 impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for TrustAssemblyError<E> {}
+
+// ── Cooperative cancellation (DAEMON-CANCEL-3) ───────────────────
+
+/// A cooperative cancellation checkpoint (DAEMON-CANCEL-3).
+///
+/// A `&mut` closure the assembly layer calls at bounded intervals inside the heavy
+/// unresolved-sample loop (up to 100_000 rows; `service.ts`'s `computeTrustReport`
+/// inner loop); returning [`ControlFlow::Break`] tells the loop to abandon its
+/// (read-only, so discardable) work. This is the trust-crate spelling of the same
+/// `&mut dyn FnMut() -> ControlFlow<()>` shape the agent crate's `AgentCancelCheck`
+/// uses — std types only, so the trust crate stays free of any daemon /
+/// graph-algorithms dependency. The daemon's trust/check worker builds the concrete
+/// closure from a `CancelFlag` (latched by the transport thread on peer-disconnect);
+/// a no-op closure (`|| ControlFlow::Continue(())`) reproduces the non-cancellable
+/// behavior byte-for-byte.
+pub type TrustCancelCheck<'a> = &'a mut dyn FnMut() -> ControlFlow<()>;
+
+/// Outcome of [`assemble_trust_report_cancellable`]: the assembled report, or the
+/// client disconnected mid-assembly (the cooperative checkpoint broke inside the
+/// unresolved-sample loop).
+///
+/// On a worker thread the supervising transport thread classifies the disconnect
+/// independently (it returns `Supervised::Cancelled` the moment the heartbeat write
+/// fails, which is also what latches the `CancelFlag` the checkpoint observes), so a
+/// returned `Cancelled` is the worker honestly reporting that it stopped early — the
+/// dispatcher never serves it. The variant exists so the cancellable path NEVER
+/// returns a silently-partial report as if it were complete (the
+/// [`TrustReport`](crate::types::TrustReport) is boxed to keep the enum small).
+pub enum TrustReportOutcome {
+    /// The report was fully assembled (served to a still-connected peer).
+    Ready(Box<TrustReport>),
+    /// The peer disconnected mid-assembly; the partial work is discarded.
+    Cancelled,
+}
 
 // ── Input DTO for pure computation ───────────────────────────────
 
@@ -208,6 +244,25 @@ fn build_caveats(
 /// Mirror of `computeTrustReport` from `service.ts:63`, with the
 /// storage-fetching phase factored out into `assemble_trust_report`.
 pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
+    // DAEMON-CANCEL-3: the pure computation delegates to the cancellable body with a
+    // never-breaking checkpoint, so every existing caller is byte-identical.
+    match compute_trust_report_cancellable(input, &mut || ControlFlow::Continue(())) {
+        ControlFlow::Continue(report) => report,
+        ControlFlow::Break(()) => unreachable!("no-op cancel checkpoint never breaks"),
+    }
+}
+
+/// Cancellable variant of [`compute_trust_report`] (DAEMON-CANCEL-3).
+///
+/// Identical except the Phase-5 unresolved-sample loop (up to 100_000 rows) consults
+/// `cancel`; on [`ControlFlow::Break`] the whole computation is abandoned
+/// ([`ControlFlow::Break`] out, read-only ⇒ nothing to roll back). All other phases
+/// are cheap fixed-size work and are left un-checkpointed — NARROW scope: only the
+/// demonstrated heavy sample loop is threaded.
+pub fn compute_trust_report_cancellable(
+    input: &TrustComputationInput,
+    cancel: TrustCancelCheck<'_>,
+) -> ControlFlow<(), TrustReport> {
     let diagnostics_available = input.diagnostics.is_some();
 
     // ── Phase 1: Detection rules ─────────────────────────────
@@ -345,12 +400,21 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
     // the disambiguator. Used by the agent storage adapter
     // to map into `EnrichmentState::{NotApplicable, NotRun}`
     // without ambiguity. See the field doc on `TrustReport`.
-    let (unknown_calls_blast_radius, enrichment_status, enrichment_eligible_count) =
-        if !input.all_classification_counts.is_empty() {
-            compute_blast_radius_and_enrichment(&input.unknown_calls_samples)
-        } else {
-            (None, None, 0)
-        };
+    let (unknown_calls_blast_radius, enrichment_status, enrichment_eligible_count) = if !input
+        .all_classification_counts
+        .is_empty()
+    {
+        // DAEMON-CANCEL-3: the up-to-100_000-row sample loop is the heavy path; it
+        // consults `cancel` per chunk and Breaks the whole computation out on
+        // disconnect.
+        match compute_blast_radius_and_enrichment_cancellable(&input.unknown_calls_samples, cancel)
+        {
+            ControlFlow::Continue(v) => v,
+            ControlFlow::Break(()) => return ControlFlow::Break(()),
+        }
+    } else {
+        (None, None, 0)
+    };
 
     // ── Phase 6: Module rows ─────────────────────────────────
     // Explicit sort by qualified_name for deterministic output.
@@ -405,7 +469,7 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
     };
 
     // ── Assemble report ──────────────────────────────────────
-    TrustReport {
+    ControlFlow::Continue(TrustReport {
         snapshot_uid: input.snapshot_uid.clone(),
         display_name: None, // Populated by daemon handler
         basis_commit: input.basis_commit.clone(),
@@ -453,7 +517,7 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
         caveats,
         diagnostics_available,
         enrichment_eligible_count,
-    }
+    })
 }
 
 // ── Blast-radius + enrichment computation ────────────────────────
@@ -465,13 +529,30 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
 /// service.ts:214-288. Uses typed `UnresolvedEdgeCategory` and
 /// `derive_blast_radius` from the classification crate — no raw
 /// string comparisons where typed enums exist.
-fn compute_blast_radius_and_enrichment(
+///
+/// DAEMON-CANCEL-3: this is the demonstrated heavy trust path (up to 100_000 samples,
+/// each deriving a blast radius and parsing enrichment metadata JSON). It consults
+/// `cancel` once per [`CHUNK`](self) rows pulled and returns
+/// [`ControlFlow::Break`] on disconnect, so a disconnected peer's in-flight
+/// trust/check abandons the loop instead of grinding through every sample with no
+/// consumer. The per-chunk cadence bounds the cooperative-flag polling cost while
+/// still abandoning a full materialization within a bounded number of rows. Read-only
+/// ⇒ the partial counters are simply dropped.
+fn compute_blast_radius_and_enrichment_cancellable(
     samples: &[TrustUnresolvedEdgeSample],
-) -> (
-    Option<UnknownCallsBlastRadiusBreakdown>,
-    Option<EnrichmentStatus>,
-    u64,
-) {
+    cancel: TrustCancelCheck<'_>,
+) -> ControlFlow<
+    (),
+    (
+        Option<UnknownCallsBlastRadiusBreakdown>,
+        Option<EnrichmentStatus>,
+        u64,
+    ),
+> {
+    // Poll the cooperative checkpoint once per this many samples — frequent enough to
+    // bail within a bounded window, sparse enough that the flag read is negligible
+    // against the per-sample work.
+    const CHUNK: usize = 1024;
     let mut breakdown = UnknownCallsBlastRadiusBreakdown {
         low: 0,
         medium: 0,
@@ -485,7 +566,11 @@ fn compute_blast_radius_and_enrichment(
     let mut type_counts: std::collections::BTreeMap<String, (u64, bool)> =
         std::collections::BTreeMap::new();
 
-    for sample in samples {
+    for (i, sample) in samples.iter().enumerate() {
+        // DAEMON-CANCEL-3: cooperative checkpoint — bail the whole loop on disconnect.
+        if i % CHUNK == 0 && cancel().is_break() {
+            return ControlFlow::Break(());
+        }
         // Filter to CALLS-family only (typed check, not string).
         if !sample.category.is_calls_category() {
             continue;
@@ -573,7 +658,7 @@ fn compute_blast_radius_and_enrichment(
         None
     };
 
-    (blast_radius, enrichment, eligible_count)
+    ControlFlow::Continue((blast_radius, enrichment, eligible_count))
 }
 
 // ── Layer 2: Storage-backed assembly ─────────────────────────────
@@ -595,6 +680,42 @@ pub fn assemble_trust_report<S: TrustStorageRead>(
     basis_commit: Option<&str>,
     toolchain_json: Option<&str>,
 ) -> Result<TrustReport, TrustAssemblyError<S::Error>> {
+    // DAEMON-CANCEL-3: delegate to the cancellable sibling with a never-breaking
+    // checkpoint, so every existing (non-daemon) caller is byte-identical and never
+    // observes the `Cancelled` outcome.
+    match assemble_trust_report_cancellable(
+        storage,
+        repo_uid,
+        snapshot_uid,
+        basis_commit,
+        toolchain_json,
+        &mut || ControlFlow::Continue(()),
+    )? {
+        TrustReportOutcome::Ready(report) => Ok(*report),
+        TrustReportOutcome::Cancelled => unreachable!("no-op cancel checkpoint never breaks"),
+    }
+}
+
+/// Cancellable variant of [`assemble_trust_report`] (DAEMON-CANCEL-3).
+///
+/// Identical storage fetches and JSON parsing, but threads `cancel` into the pure
+/// computation's Phase-5 unresolved-sample loop (the demonstrated heavy trust path).
+/// The SQL reads themselves (notably `compute_module_stats` and the up-to-100_000-row
+/// `query_unresolved_edges`) are NOT checkpointed here — an opaque `SELECT` has no
+/// Rust frame to poll; the daemon's trust/check worker runs this whole function under
+/// CANCEL-2's `sqlite3_interrupt` supervisor, which aborts whichever statement is
+/// in-flight on disconnect. So the two cancellation mechanisms compose: the interrupt
+/// for the SQL, this cooperative `cancel` for the pure sample loop. On a sample-loop
+/// break the function returns [`TrustReportOutcome::Cancelled`] (read-only ⇒ the
+/// partial report is discarded).
+pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
+    storage: &S,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    basis_commit: Option<&str>,
+    toolchain_json: Option<&str>,
+    cancel: TrustCancelCheck<'_>,
+) -> Result<TrustReportOutcome, TrustAssemblyError<S::Error>> {
     // ── Parse JSON strings ───────────────────────────────────
     let diagnostics: Option<ExtractionDiagnostics> = {
         let json_str = storage
@@ -701,7 +822,11 @@ pub fn assemble_trust_report<S: TrustStorageRead>(
         unknown_calls_samples,
     };
 
-    Ok(compute_trust_report(&input))
+    // ── Delegate to pure computation (cancellable sample loop) ─
+    match compute_trust_report_cancellable(&input, cancel) {
+        ControlFlow::Continue(report) => Ok(TrustReportOutcome::Ready(Box::new(report))),
+        ControlFlow::Break(()) => Ok(TrustReportOutcome::Cancelled),
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────
@@ -1405,5 +1530,95 @@ mod tests {
             }
             other => panic!("expected JsonParse for diagnostics, got {:?}", other),
         }
+    }
+
+    // ── DAEMON-CANCEL-3: sample-loop cooperative cancellation ─────────
+    //
+    // Deterministic (no timing, no daemon): prove the Phase-5 unresolved-sample loop
+    // honors the cooperative checkpoint and surfaces `TrustReportOutcome::Cancelled`.
+    // The daemon's worker+`sqlite3_interrupt` covers the SQL; this covers the pure
+    // loop the slice names ("checkpoint the large unresolved-sample processing loop").
+
+    /// `n` unknown CALLS samples (the heaviest per-row shape: a
+    /// `CallsObjMethodNeedsTypeInfo` with enrichment metadata, so each iteration both
+    /// derives a blast radius AND parses JSON — exactly the 100_000-row cost the slice
+    /// flags).
+    fn unknown_calls_samples(n: usize) -> Vec<TrustUnresolvedEdgeSample> {
+        (0..n)
+            .map(|_| TrustUnresolvedEdgeSample {
+                category: UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+                basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+                source_node_visibility: Some("export".into()),
+                metadata_json: Some(
+                    r#"{"enrichment":{"receiverType":"Map","typeDisplayName":"Map","isExternalType":true}}"#
+                        .into(),
+                ),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cancellable_assembly_breaks_the_sample_loop_mid_flight() {
+        // 3000 samples ⇒ the loop polls the checkpoint at i = 0, 1024, 2048. A checkpoint
+        // that breaks on its SECOND poll proves MID-loop cancellation (≈1024 of 3000
+        // samples processed, not all) — fully deterministic, no wall-clock.
+        let mut mock = MockStorage::ok();
+        mock.all_classification_counts = vec![ClassificationCountRow {
+            classification: UnresolvedEdgeClassification::Unknown,
+            count: 3000,
+        }];
+        mock.unknown_calls_samples = unknown_calls_samples(3000);
+
+        let mut polls = 0usize;
+        let mut cancel = || {
+            polls += 1;
+            if polls >= 2 {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+        let outcome =
+            assemble_trust_report_cancellable(&mock, "r1", "snap1", None, None, &mut cancel)
+                .expect("storage ok");
+        assert!(
+            matches!(outcome, TrustReportOutcome::Cancelled),
+            "a checkpoint that breaks mid sample-loop must yield TrustReportOutcome::Cancelled"
+        );
+        assert_eq!(
+            polls, 2,
+            "the loop must stop at the breaking poll, not run to the end"
+        );
+    }
+
+    #[test]
+    fn cancellable_assembly_completes_and_matches_baseline_with_noop_checkpoint() {
+        // Same input, never-breaking checkpoint ⇒ Ready, and the report is byte-identical
+        // to the non-cancellable `assemble_trust_report` (the delegation is transparent).
+        let mut mock = MockStorage::ok();
+        mock.all_classification_counts = vec![ClassificationCountRow {
+            classification: UnresolvedEdgeClassification::Unknown,
+            count: 10,
+        }];
+        mock.unknown_calls_samples = unknown_calls_samples(10);
+
+        let outcome =
+            assemble_trust_report_cancellable(&mock, "r1", "snap1", None, None, &mut || {
+                ControlFlow::Continue(())
+            })
+            .expect("storage ok");
+        let report = match outcome {
+            TrustReportOutcome::Ready(r) => *r,
+            TrustReportOutcome::Cancelled => panic!("no-op checkpoint must not cancel"),
+        };
+        let baseline = assemble_trust_report(&mock, "r1", "snap1", None, None).expect("baseline");
+        assert_eq!(
+            report.unknown_calls_blast_radius, baseline.unknown_calls_blast_radius,
+            "cancellable (no-op) path must compute the full loop, matching the baseline"
+        );
+        assert!(
+            report.unknown_calls_blast_radius.is_some(),
+            "the samples must have produced a blast-radius breakdown"
+        );
     }
 }

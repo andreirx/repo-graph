@@ -164,7 +164,9 @@ pub use rules::{
     detect_missing_entrypoint_declarations, detect_registry_pattern_suspicion,
 };
 pub use service::{
-    assemble_trust_report, compute_trust_report, TrustAssemblyError, TrustComputationInput,
+    assemble_trust_report, assemble_trust_report_cancellable, compute_trust_report,
+    compute_trust_report_cancellable, TrustAssemblyError, TrustCancelCheck, TrustComputationInput,
+    TrustReportOutcome,
 };
 pub use storage_port::TrustStorageRead;
 

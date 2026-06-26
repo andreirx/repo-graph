@@ -36,7 +36,9 @@ use crate::dto::envelope::{
     Focus, FocusCandidate, OrientResult, ResolvedKind, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use crate::errors::OrientError;
-use crate::storage_port::{AgentFocusCandidate, AgentFocusKind, AgentStorageRead};
+use crate::storage_port::{
+    AgentCancelCheck, AgentFocusCandidate, AgentFocusKind, AgentStorageRead,
+};
 
 /// Entry point for the orient use case.
 ///
@@ -61,9 +63,33 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
     budget: Budget,
     now: &str,
 ) -> Result<OrientResult, OrientError> {
+    orient_cancellable(storage, repo_uid, focus, budget, now, &mut || {
+        std::ops::ControlFlow::Continue(())
+    })
+}
+
+/// Cancellable entry point for the orient use case (DAEMON-CANCEL-3).
+///
+/// Identical to [`orient`] but threads a cooperative `cancel` checkpoint into the
+/// two demonstrated heavy read paths it can reach — the module-cycle Tarjan
+/// (repo/path/symbol focus) and the complexity FETCH_ALL materialization (repo
+/// focus). The daemon's transport-thread orient handler passes a checkpoint built
+/// from its request emitter (`cancel::loop_checkpoint`) so a disconnected peer's
+/// in-flight orient abandons that heavy work; [`orient`] passes a no-op, preserving
+/// byte-identical behavior for every other caller. Only the cycle/complexity
+/// aggregators consult `cancel` — the small DTO/summary reads are left alone (NARROW
+/// scope).
+pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
+    storage: &S,
+    repo_uid: &str,
+    focus: Option<&str>,
+    budget: Budget,
+    now: &str,
+    cancel: AgentCancelCheck<'_>,
+) -> Result<OrientResult, OrientError> {
     match focus {
-        None => repo::orient_repo(storage, repo_uid, budget, now),
-        Some(focus_str) => orient_focused(storage, repo_uid, focus_str, budget, now),
+        None => repo::orient_repo(storage, repo_uid, budget, now, cancel),
+        Some(focus_str) => orient_focused(storage, repo_uid, focus_str, budget, now, cancel),
     }
 }
 
@@ -79,6 +105,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
     focus_str: &str,
     budget: Budget,
     now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     // ── 1. Resolve repo identity. ────────────────────────────
     let repo = storage
@@ -132,6 +159,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
             resolution.module_stable_key.as_deref(),
             budget,
             now,
+            cancel,
         );
     }
 
@@ -150,6 +178,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     focus_str,
                     budget,
                     now,
+                    cancel,
                 ),
                 None => {
                     // Stable key resolved but no context found —
@@ -184,6 +213,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 Some(&candidate.stable_key),
                 budget,
                 now,
+                cancel,
             )
         }
         None => {
@@ -210,6 +240,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                             focus_str,
                             budget,
                             now,
+                            cancel,
                         ),
                         None => Ok(build_no_match_result(
                             &repo.name, &snapshot, focus_str, budget,

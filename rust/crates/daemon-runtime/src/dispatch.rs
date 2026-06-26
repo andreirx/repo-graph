@@ -277,7 +277,7 @@ impl Dispatcher for ServiceDispatcher {
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "orient" => self.handle_orient(request, emitter),
             "check" => self.handle_check(request, emitter),
-            "explain" => self.handle_explain(request),
+            "explain" => self.handle_explain(request, emitter),
 
             // ── Trust and governance ────────────────────────────────
             // RMAPD-PERF-1: trust emits heartbeat for long queries
@@ -2882,12 +2882,19 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
-        // RMAPD-PERF-1: Emit heartbeat before potentially long orient computation
-        let _ = emitter.emit(ProgressDetail {
-            phase: "computing_orient".to_string(),
-            current: 0,
-            total: 1,
-        });
+        // DAEMON-CANCEL-3: cheap handler-boundary cancel check (the "before" layer,
+        // replacing the prior fire-and-forget heartbeat). If the peer is already gone,
+        // skip the whole orient computation and report "before" — distinct from the
+        // in-loop "during" cancellation that the cycle Tarjan / complexity loop raise.
+        if crate::cancel::pre_work_check(emitter, "computing_orient").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "orient query cancelled (client disconnected before computation)",
+                ),
+            );
+        }
 
         // COHERENCE-LEAF-SERVE-IMPL-1: orient bounded (b)-leaf SERVE-THEN-FALLBACK. Resolve the latest
         // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the bounded
@@ -2914,18 +2921,59 @@ impl ServiceDispatcher {
             })
             .unwrap_or(false);
 
-        // Call the agent orient use case
+        // Call the agent orient use case.
+        //
+        // DAEMON-CANCEL-3: run it through `orient_cancellable` with a cooperative
+        // checkpoint built from THIS request's emitter (`loop_checkpoint`). orient
+        // runs ON the transport thread (which owns the emitter), so the checkpoint
+        // emits a heartbeat at each bounded interval inside the heavy module-cycle
+        // Tarjan and complexity FETCH_ALL materialization; a peer disconnect makes
+        // that write fail, breaking the loop so a disconnected client's in-flight
+        // orient abandons the heavy work instead of running it to completion. The
+        // `checkpoint` borrows `emitter` for the duration of the call, so it is scoped
+        // to this block and dropped before the cancellation-classification probe.
         let orient_start = Instant::now();
-        let orient_outcome = if serve_from_lg {
-            let decorator =
-                crate::orient_serve::OrientServeDecorator::new(&repo_state.livegraph, &storage);
-            repo_graph_agent::orient(&decorator, &repo_uid, focus, budget, &now)
-        } else {
-            repo_graph_agent::orient(&storage, &repo_uid, focus, budget, &now)
+        let orient_outcome = {
+            let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_orient");
+            if serve_from_lg {
+                let decorator =
+                    crate::orient_serve::OrientServeDecorator::new(&repo_state.livegraph, &storage);
+                repo_graph_agent::orient_cancellable(
+                    &decorator,
+                    &repo_uid,
+                    focus,
+                    budget,
+                    &now,
+                    &mut checkpoint,
+                )
+            } else {
+                repo_graph_agent::orient_cancellable(
+                    &storage,
+                    &repo_uid,
+                    focus,
+                    budget,
+                    &now,
+                    &mut checkpoint,
+                )
+            }
         };
         let mut result = match orient_outcome {
             Ok(r) => r,
             Err(e) => {
+                // Classify: the cancellable read paths only fail with a cancellation
+                // when their checkpoint broke, which happens iff the emitter write
+                // failed (peer gone). Probe the emitter once: a failing write means the
+                // peer disconnected mid-computation -> Cancelled; otherwise it is a
+                // genuine internal failure (read-only ⇒ nothing to roll back either way).
+                if crate::cancel::pre_work_check(emitter, "orient_cancelled").is_break() {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "orient query cancelled (client disconnected during computation)",
+                        ),
+                    );
+                }
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -3018,16 +3066,78 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
-        // RMAPD-PERF-1: Emit heartbeat before potentially long check computation
-        let _ = emitter.emit(ProgressDetail {
-            phase: "running_check".to_string(),
-            current: 0,
-            total: 1,
-        });
+        // DAEMON-CANCEL-3: handler-boundary cancel check (replaces the fire-and-forget
+        // heartbeat). If the peer is already gone, skip the whole check computation.
+        if crate::cancel::pre_work_check(emitter, "running_check").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "check query cancelled (client disconnected before computation)",
+                ),
+            );
+        }
 
-        // Call the agent check use case
+        // Run check on a WORKER thread, supervised here (DAEMON-CANCEL-3). check
+        // INHERITS trust's heavy work (`get_trust_summary` → `compute_module_stats` SQL
+        // + the unresolved-sample loop) and the gate complexity-measurement load — all
+        // reached through this `storage` connection. On peer-disconnect `on_disconnect`
+        // fires `sqlite3_interrupt` to abort whichever opaque `SELECT` is in flight (the
+        // trust stats or the gate complexity load), while the cooperative `CancelFlag`
+        // — threaded via `run_check_cancellable` → `get_trust_summary_cancellable` —
+        // breaks the pure trust sample loop. So fixing #2 (complexity, SQL-interrupted)
+        // + #3 (trust) and routing check through them gives check in-flight cancel too.
         let check_start = Instant::now();
-        let check_result = repo_graph_agent::run_check(&storage, &repo_uid, &now);
+        let mut check_result = {
+            // Hoist the interrupt handle BEFORE moving the connection into the worker
+            // (S-A; safe no-op if fired after the worker drops the connection).
+            let interrupt = storage.interrupt_handle();
+            let repo_uid_w = repo_uid.clone();
+            let now_w = now.clone();
+            match crate::cancel::run_interruptible(
+                emitter,
+                "running_check",
+                move || interrupt.interrupt(),
+                move |flag| {
+                    let mut checkpoint = flag.checkpoint();
+                    repo_graph_agent::run_check_cancellable(
+                        &storage,
+                        &repo_uid_w,
+                        &now_w,
+                        &mut checkpoint,
+                    )
+                    .map_err(|e| e.to_string())
+                },
+            ) {
+                crate::cancel::Supervised::Completed(Ok(result)) => result,
+                // A genuine storage/gate failure while the peer stayed connected.
+                crate::cancel::Supervised::Completed(Err(msg)) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, msg),
+                    );
+                }
+                crate::cancel::Supervised::Cancelled => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "check query cancelled (client disconnected during computation)",
+                        ),
+                    );
+                }
+                // WorkerVanished ≠ Cancelled (CANCEL-1 deliverable #2).
+                crate::cancel::Supervised::WorkerVanished => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            "check worker vanished (internal failure during computation)",
+                        ),
+                    );
+                }
+            }
+        };
         let check_ms = check_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -3041,26 +3151,19 @@ impl ServiceDispatcher {
             check_ms
         );
 
-        match check_result {
-            Ok(mut result) => {
-                // CLI-OUT-2B: Inject display_name for human renderers
-                result.display_name = Some(display_name);
+        // CLI-OUT-2B: Inject display_name for human renderers. (`check_result` is the
+        // worker's already-unwrapped success value; failures returned early above.)
+        check_result.display_name = Some(display_name);
 
-                // CHECK-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response,
-                // mirroring `handle_orient`. check has NO LiveGraph leaf, NO cert, and NO trust overlay
-                // (D-CHECK-2/4), so this is a THIN stale-read + delegate: the adapter reads the
-                // AUTHORITATIVE stale-index flag (`get_stale_files`) and labels the verdict with honest
-                // MEET freshness + the multi-source verdict provenance. The verdict VALUE is byte-identical
-                // to before; only the wrapper adds labels.
-                let envelope = crate::check_coherence::build_check_envelope(&repo_state, result);
-                match serde_json::to_value(&envelope) {
-                    Ok(v) => DispatchResult::success(&request.id, v),
-                    Err(e) => DispatchResult::error(
-                        &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                    ),
-                }
-            }
+        // CHECK-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response,
+        // mirroring `handle_orient`. check has NO LiveGraph leaf, NO cert, and NO trust overlay
+        // (D-CHECK-2/4), so this is a THIN stale-read + delegate: the adapter reads the
+        // AUTHORITATIVE stale-index flag (`get_stale_files`) and labels the verdict with honest
+        // MEET freshness + the multi-source verdict provenance. The verdict VALUE is byte-identical
+        // to before; only the wrapper adds labels.
+        let envelope = crate::check_coherence::build_check_envelope(&repo_state, check_result);
+        match serde_json::to_value(&envelope) {
+            Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -3068,7 +3171,11 @@ impl ServiceDispatcher {
         }
     }
 
-    fn handle_explain(&self, request: &Request) -> DispatchResult {
+    fn handle_explain(
+        &self,
+        request: &Request,
+        emitter: &mut dyn ProgressEmitter,
+    ) -> DispatchResult {
         // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-3)
         let (repo_state, repo_uid, display_name) =
             match self.resolve_and_load_repo_with_display_name(&request.params) {
@@ -3114,6 +3221,20 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
+        // DAEMON-CANCEL-3: cheap handler-boundary cancel check (the "before" layer).
+        // explain previously took no emitter at all; now it gets one, so it can skip
+        // the whole computation if the peer is already gone (reported "before",
+        // distinct from the in-loop "during" cancellation in the cycle Tarjan).
+        if crate::cancel::pre_work_check(emitter, "computing_explain").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "explain query cancelled (client disconnected before computation)",
+                ),
+            );
+        }
+
         // COHERENCE-LEAF-SERVE-IMPL-2: explain bounded (b)-leaf SERVE-THEN-FALLBACK (the EXPLAIN consumer of
         // the focus-resolution producer; sibling of handle_orient's IMPL-1 wiring). Resolve the latest
         // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the SHARED bounded
@@ -3138,17 +3259,52 @@ impl ServiceDispatcher {
             })
             .unwrap_or(false);
 
-        // Call the agent explain use case
-        let explain_outcome = if serve_from_lg {
-            let decorator =
-                crate::orient_serve::OrientServeDecorator::new(&repo_state.livegraph, &storage);
-            repo_graph_agent::run_explain(&decorator, &repo_uid, target, budget, &now)
-        } else {
-            repo_graph_agent::run_explain(&storage, &repo_uid, target, budget, &now)
+        // Call the agent explain use case.
+        //
+        // DAEMON-CANCEL-3: explain now receives this request's emitter (it previously
+        // took none — `dispatch` passes it as of this slice) and runs through
+        // `run_explain_cancellable` with a cooperative checkpoint, so a peer disconnect
+        // mid-Tarjan on the path/symbol-focus pipelines abandons the heavy cycle work.
+        // Same transport-thread `loop_checkpoint` seam + scoped-borrow shape as
+        // `handle_orient`.
+        let explain_outcome = {
+            let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_explain");
+            if serve_from_lg {
+                let decorator =
+                    crate::orient_serve::OrientServeDecorator::new(&repo_state.livegraph, &storage);
+                repo_graph_agent::run_explain_cancellable(
+                    &decorator,
+                    &repo_uid,
+                    target,
+                    budget,
+                    &now,
+                    &mut checkpoint,
+                )
+            } else {
+                repo_graph_agent::run_explain_cancellable(
+                    &storage,
+                    &repo_uid,
+                    target,
+                    budget,
+                    &now,
+                    &mut checkpoint,
+                )
+            }
         };
         let mut result = match explain_outcome {
             Ok(r) => r,
             Err(e) => {
+                // Same cancellation classification as orient: a failing emitter probe
+                // means the peer disconnected mid-computation -> Cancelled.
+                if crate::cancel::pre_work_check(emitter, "explain_cancelled").is_break() {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "explain query cancelled (client disconnected during computation)",
+                        ),
+                    );
+                }
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -3243,29 +3399,98 @@ impl ServiceDispatcher {
             );
         }
 
-        // RMAPD-PERF-1: Emit heartbeat before potentially long trust computation
-        let _ = emitter.emit(ProgressDetail {
-            phase: "assembling_trust_report".to_string(),
-            current: 0,
-            total: 1,
-        });
+        // DAEMON-CANCEL-3: cheap handler-boundary cancel check (the "before" layer,
+        // replacing the prior fire-and-forget heartbeat). If the peer is already gone,
+        // skip the whole trust assembly and report "before".
+        if crate::cancel::pre_work_check(emitter, "assembling_trust_report").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "trust query cancelled (client disconnected before computation)",
+                ),
+            );
+        }
 
-        // Compute trust report
+        // Compute the trust report on a WORKER thread, supervised from this (transport)
+        // thread (DAEMON-CANCEL-3, reusing CANCEL-2's `run_interruptible`). Trust's
+        // heavy work is two shapes that need two cancel mechanisms, both fired on
+        // peer-disconnect: (1) opaque SQL — `compute_module_stats` + the up-to-100k
+        // `query_unresolved_edges` — has no Rust frame to poll, so `on_disconnect` fires
+        // `sqlite3_interrupt` to abort the in-flight `SELECT`; (2) the pure
+        // unresolved-sample loop polls the cooperative `CancelFlag` the supervisor
+        // latches. A disconnected peer's in-flight trust therefore abandons its work
+        // instead of running to completion with no consumer.
         let trust_start = Instant::now();
-        use repo_graph_trust::service::assemble_trust_report;
-        let mut report = match assemble_trust_report(
-            &storage,
-            &repo_uid,
-            &snapshot.snapshot_uid,
-            snapshot.basis_commit.as_deref(),
-            snapshot.toolchain_json.as_deref(),
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
+        let mut report = {
+            use repo_graph_trust::service::{
+                assemble_trust_report_cancellable, TrustReportOutcome,
+            };
+            // Hoist the interrupt handle BEFORE moving the connection into the worker
+            // (B1 D-S = S-A: this is the leaf's OWN per-op connection, so the handle is
+            // from the exact connection the worker blocks inside; firing it after the
+            // worker drops the connection is a safe no-op).
+            let interrupt = storage.interrupt_handle();
+            let repo_uid_w = repo_uid.clone();
+            let snap_uid_w = snapshot.snapshot_uid.clone();
+            let basis_w = snapshot.basis_commit.clone();
+            let toolchain_w = snapshot.toolchain_json.clone();
+            match crate::cancel::run_interruptible(
+                emitter,
+                "assembling_trust_report",
+                move || interrupt.interrupt(),
+                move |flag| {
+                    let mut checkpoint = flag.checkpoint();
+                    assemble_trust_report_cancellable(
+                        &storage,
+                        &repo_uid_w,
+                        &snap_uid_w,
+                        basis_w.as_deref(),
+                        toolchain_w.as_deref(),
+                        &mut checkpoint,
+                    )
+                    .map_err(|e| e.to_string())
+                },
+            ) {
+                crate::cancel::Supervised::Completed(Ok(TrustReportOutcome::Ready(r))) => *r,
+                // The cooperative checkpoint broke (peer gone). The supervisor returns
+                // Cancelled before the worker can reach here, but classify honestly.
+                crate::cancel::Supervised::Completed(Ok(TrustReportOutcome::Cancelled)) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "trust query cancelled (client disconnected during computation)",
+                        ),
+                    );
+                }
+                // A genuine storage/JSON failure while the peer stayed connected.
+                crate::cancel::Supervised::Completed(Err(msg)) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, msg),
+                    );
+                }
+                crate::cancel::Supervised::Cancelled => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "trust query cancelled (client disconnected during computation)",
+                        ),
+                    );
+                }
+                // WorkerVanished ≠ Cancelled (CANCEL-1 deliverable #2): an internal
+                // failure (worker panic), NEVER masqueraded as a client disconnect.
+                crate::cancel::Supervised::WorkerVanished => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            "trust worker vanished (internal failure during assembly)",
+                        ),
+                    );
+                }
             }
         };
         let trust_ms = trust_start.elapsed().as_millis();

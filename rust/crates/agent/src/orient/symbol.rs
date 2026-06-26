@@ -46,7 +46,7 @@ use crate::dto::signal::{
 use crate::errors::OrientError;
 use crate::ordering;
 use crate::ranking;
-use crate::storage_port::{AgentSnapshot, AgentStorageRead, AgentSymbolContext};
+use crate::storage_port::{AgentCancelCheck, AgentSnapshot, AgentStorageRead, AgentSymbolContext};
 
 /// Maximum number of top modules surfaced in callers/callees
 /// summary evidence.
@@ -71,6 +71,7 @@ pub fn orient_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     focus_input: &str,
     budget: Budget,
     now: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     let snapshot_uid = &snapshot.snapshot_uid;
     let repo_uid = &snapshot.repo_uid;
@@ -114,7 +115,7 @@ pub fn orient_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         all_limits.extend(boundary_out.limits);
 
         // ── import_cycles (module-scoped) ────────────────────
-        let cycles_out = aggregate_cycles_for_module(storage, snapshot_uid, module_path)?;
+        let cycles_out = aggregate_cycles_for_module(storage, snapshot_uid, module_path, cancel)?;
         for sig in cycles_out.signals {
             all_signals.push(sig.with_module_context());
         }
@@ -296,8 +297,14 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
     module_qualified_name: &str,
+    cancel: AgentCancelCheck<'_>,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    let mut cycles = storage.find_cycles_involving_module(snapshot_uid, module_qualified_name)?;
+    // DAEMON-CANCEL-3: symbol-focus cycles run through the cancellable Tarjan + filter.
+    let mut cycles = storage.find_cycles_involving_module_cancellable(
+        snapshot_uid,
+        module_qualified_name,
+        cancel,
+    )?;
 
     if cycles.is_empty() {
         return Ok(AggregatorOutput::empty());

@@ -1160,6 +1160,7 @@ dependencies = [
  "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-git",
+ "repo-graph-indexer",
  "repo-graph-ir",
  "repo-graph-livegraph",
  "repo-graph-livegraph-feed",
