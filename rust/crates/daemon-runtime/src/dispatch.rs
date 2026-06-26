@@ -1402,13 +1402,28 @@ impl ServiceDispatcher {
         let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
         match engine {
             "auto" => {
+                // DAEMON-CANCEL-2: the DEFAULT path. On a GREEN cert it serves the LiveGraph stats
+                // (no SQL). On the SQLite fallback (non-resident / non-`Exact` LiveGraph, or a RED/stale
+                // cert) it runs `compute_module_stats` under the supervisor, so a peer-disconnect
+                // mid-aggregation aborts the in-flight SELECT and returns `Cancelled` — the iteration-0
+                // gap (default route ran heavy SQL to completion after disconnect) is closed.
                 return match crate::livegraph_feed::stats_auto_response(
+                    emitter,
                     &repo_state,
                     &repo_uid,
                     &display_name,
                     &snapshot.snapshot_uid,
                 ) {
-                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Ok(crate::livegraph_feed::StatsOutcome::Ready(v)) => {
+                        DispatchResult::success(&request.id, v)
+                    }
+                    Ok(crate::livegraph_feed::StatsOutcome::Cancelled) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "stats query cancelled (client disconnected during aggregation)",
+                        ),
+                    ),
                     Err(e) => DispatchResult::error(
                         &request.id,
                         ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -1431,13 +1446,23 @@ impl ServiceDispatcher {
                     .unwrap_or("")
                     .to_string();
                 return match crate::livegraph_feed::stats_compare_response(
+                    emitter,
                     &repo_state,
                     &repo_uid,
                     &display_name,
                     &snapshot.snapshot_uid,
                     &repo_root,
                 ) {
-                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Ok(crate::livegraph_feed::StatsOutcome::Ready(v)) => {
+                        DispatchResult::success(&request.id, v)
+                    }
+                    Ok(crate::livegraph_feed::StatsOutcome::Cancelled) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::Cancelled,
+                            "stats query cancelled (client disconnected during aggregation)",
+                        ),
+                    ),
                     Err(e) => DispatchResult::error(
                         &request.id,
                         ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -1448,18 +1473,51 @@ impl ServiceDispatcher {
             _ => {}
         }
 
-        // RMAPD-PERF-1: Emit heartbeat before potentially long query
-        let _ = emitter.emit(ProgressDetail {
-            phase: "computing_module_stats".to_string(),
-            current: 0,
-            total: 1,
-        });
-
-        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The forced
-        // SQLite module-stats answer -- UNCHANGED (rule 7): the canonical body with NO `backend_used`.
+        // EXPLICIT `--engine sqlite` ONLY (the DEFAULT `auto` returned via the fastpath arm above). The
+        // forced SQLite module-stats answer. SUCCESS output is UNCHANGED (rule 7): the canonical body
+        // with NO `backend_used`.
+        //
+        // DAEMON-CANCEL-2: `compute_module_stats` is a SINGLE heavy SQL aggregation the worker blocks
+        // INSIDE, with no Rust frame to poll a cooperative cancel flag (unlike cycles/path, whose heavy
+        // work is a Rust loop the transport thread checkpoints; CANCEL-1). It cancels via
+        // `sqlite3_interrupt` through the SHARED `cancellable_module_stats` chokepoint — the SAME
+        // mechanism the default `auto`/`compare` paths use, so "stats cancels mid-execution" is one
+        // wiring, not three. `storage` is THIS handler's own owned per-op connection (B1 D-S=S-A); the
+        // helper hoists its interrupt handle out BEFORE moving the connection into the worker (the
+        // slice's key design point). Read-only ⇒ a cancelled query has no partial state to roll back.
         let query_start = Instant::now();
-        let stats = match storage.compute_module_stats(&snapshot.snapshot_uid) {
-            Ok(s) => s,
+
+        // Cheap handler-boundary layer (mirrors cycles/path): if the peer is already gone, skip the
+        // worker entirely and report "before" (vs the "during" the supervisor reports mid-aggregation).
+        if crate::cancel::pre_work_check(emitter, "computing_module_stats").is_break() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "stats query cancelled (client disconnected before aggregation)",
+                ),
+            );
+        }
+
+        let stats = match crate::livegraph_feed::cancellable_module_stats(
+            emitter,
+            storage,
+            &snapshot.snapshot_uid,
+        ) {
+            Ok(crate::livegraph_feed::SqlStats::Stats(s)) => s,
+            Ok(crate::livegraph_feed::SqlStats::Cancelled) => {
+                // Peer disconnected mid-aggregation; the interrupt aborted the in-flight statement.
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::Cancelled,
+                        "stats query cancelled (client disconnected during aggregation)",
+                    ),
+                );
+            }
+            // A genuine SQL/storage failure, OR a vanished worker (internal teardown) — both INTERNAL
+            // failures, classified as such (CANCEL-1 deliverable #2), NEVER masqueraded as a client
+            // cancel. (`cancellable_module_stats` maps `WorkerVanished` to a storage error.)
             Err(e) => {
                 return DispatchResult::error(
                     &request.id,

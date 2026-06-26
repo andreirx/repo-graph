@@ -44,7 +44,7 @@ use repo_graph_ir::{
     IrNode, Partition, PartitionId, PartitionIr, PartitionKind, Provenance,
 };
 use repo_graph_livegraph::LiveGraph;
-use repo_graph_storage::types::{GraphEdge, GraphNode};
+use repo_graph_storage::types::{GraphEdge, GraphNode, TrackedFile};
 use repo_graph_storage::StorageConnection;
 use repo_graph_trust_model::LanguageSupport;
 use serde_json::{json, Value};
@@ -1000,4 +1000,280 @@ fn dispatched_path_compare_cancels_mid_bfs() {
         &mut emitter,
     );
     assert_cancelled_in_flight(&result, "path compare");
+}
+
+// ── DAEMON-CANCEL-2: stats SQL cancellation via sqlite3_interrupt ─────────────────
+//
+// stats' heavy work is a SINGLE opaque SQL aggregation (`compute_module_stats`) the
+// worker blocks INSIDE — no Rust frame can poll a cooperative flag (unlike
+// cycles/path). So it cancels via `sqlite3_interrupt` driven by CANCEL-1's worker
+// supervisor (`run_interruptible` + the `on_disconnect` actuator). This is the
+// slice's required acceptance test: the REAL `stats --engine sqlite` handler path, on
+// a LARGE fixture, through the dispatcher seam (a closed transport = a failing
+// emitter).
+//
+// Timing note (honest): opaque-SQL cancellation is inherently heartbeat-timed (no
+// in-statement Rust checkpoint exists — that is the whole reason it needs the
+// interrupt). The fixture is sized so the real aggregation runs FAR longer than one
+// supervisor heartbeat interval, so the disconnect lands mid-statement and a
+// `Cancelled` result is not a fast-query fluke. The machine-speed-INDEPENDENT proof
+// that the interrupt actually ABORTS the in-flight statement (rather than the worker
+// completing and being discarded) is storage's deterministic
+// `interrupt_handle_aborts_in_flight_compute_module_stats` (progress-handler barrier,
+// no wall-clock).
+
+/// Inject a LARGE stats fixture into the daemon's DB via a separate WAL connection
+/// (the daemon's per-op reader, S-A, sees the committed rows): `n` directory MODULEs,
+/// each OWNing one FILE node and `syms` exported SYMBOLs, plus an IMPORTS ring. The
+/// `syms`-per-file symbol scan in `compute_module_stats`' `file_stats` CTE is the slow
+/// lever — sized so the aggregation ≫ one heartbeat interval.
+fn inject_stats_fixture(db_path: &str, repo_uid: &str, snapshot_uid: &str, n: usize, syms: usize) {
+    let mut conn = StorageConnection::open(db_path).expect("open daemon db for stats fixture");
+
+    let files: Vec<TrackedFile> = (0..n)
+        .map(|i| TrackedFile {
+            file_uid: format!("fu{i}"),
+            repo_uid: repo_uid.to_string(),
+            path: format!("statsmod{i}/index.ts"),
+            language: Some("typescript".to_string()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        })
+        .collect();
+    conn.upsert_files(&files)
+        .expect("insert stats fixture files");
+
+    let mut nodes: Vec<GraphNode> = Vec::with_capacity(n * (2 + syms));
+    for i in 0..n {
+        // MODULE node (qualified_name drives `stats`' `path`/ORDER BY + the count).
+        nodes.push(GraphNode {
+            node_uid: format!("sm{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            stable_key: format!("{repo_uid}:statsmod{i}:MODULE"),
+            kind: "MODULE".to_string(),
+            subtype: None,
+            name: format!("statsmod{i}"),
+            qualified_name: Some(format!("statsmod{i}")),
+            file_uid: None,
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        });
+        // The OWNS target: a node carrying file_uid (so the module is not excluded).
+        nodes.push(GraphNode {
+            node_uid: format!("sfn{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            stable_key: format!("{repo_uid}:statsmod{i}/index.ts:FILE"),
+            kind: "FILE".to_string(),
+            subtype: None,
+            name: format!("statsmod{i}/index.ts"),
+            qualified_name: None,
+            file_uid: Some(format!("fu{i}")),
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        });
+        for k in 0..syms {
+            nodes.push(GraphNode {
+                node_uid: format!("ss{i}_{k}"),
+                snapshot_uid: snapshot_uid.to_string(),
+                repo_uid: repo_uid.to_string(),
+                stable_key: format!("{repo_uid}:statsmod{i}/index.ts:sym{k}:SYMBOL"),
+                kind: "SYMBOL".to_string(),
+                subtype: Some("FUNCTION".to_string()),
+                name: format!("sym{k}"),
+                qualified_name: None,
+                file_uid: Some(format!("fu{i}")),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: Some("export".to_string()),
+                doc_comment: None,
+                metadata_json: None,
+            });
+        }
+    }
+    conn.insert_nodes(&nodes)
+        .expect("insert stats fixture nodes");
+
+    let mut edges: Vec<GraphEdge> = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        edges.push(GraphEdge {
+            edge_uid: format!("sowns{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            source_node_uid: format!("sm{i}"),
+            target_node_uid: format!("sfn{i}"),
+            edge_type: "OWNS".to_string(),
+            resolution: "static".to_string(),
+            extractor: "test".to_string(),
+            location: None,
+            metadata_json: None,
+        });
+        edges.push(GraphEdge {
+            edge_uid: format!("simp{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            source_node_uid: format!("sm{i}"),
+            target_node_uid: format!("sm{}", (i + 1) % n),
+            edge_type: "IMPORTS".to_string(),
+            resolution: "static".to_string(),
+            extractor: "test".to_string(),
+            location: None,
+            metadata_json: None,
+        });
+    }
+    conn.insert_edges(&edges)
+        .expect("insert stats fixture edges");
+}
+
+/// stats: the real `--engine sqlite` handler path runs `compute_module_stats` on the
+/// worker under the supervisor; a peer that disconnects DURING the aggregation has the
+/// in-flight SELECT aborted by `sqlite3_interrupt` ⇒ Cancelled (not run-to-completion).
+/// Live-peer transparency is asserted first: connected, the same query returns the full
+/// answer.
+#[test]
+fn dispatched_stats_cancels_via_sqlite_interrupt_when_peer_disconnects() {
+    // Opaque-SQL cancellation is heartbeat-timed (no in-statement Rust checkpoint), so
+    // probe FAST here: the first heartbeat then fires while a SMALL fixture's query is
+    // still running, proving in-flight cancellation without a multi-second giant
+    // fixture. SAFE to set process-wide: in this test binary the ONLY `run_interruptible`
+    // caller is the stats handler, and ONLY this test exercises it. (The wall-clock-free
+    // proof that the interrupt actually aborts the statement is storage's
+    // `interrupt_handle_aborts_in_flight_compute_module_stats`.)
+    repo_graph_daemon_runtime::cancel::set_heartbeat_interval_ms_for_test(5);
+
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // ~60k exported SYMBOLs (50 modules × 1200): with the shortened heartbeat above the
+    // `file_stats` scan + aggregation spans many heartbeat intervals, so the disconnect
+    // lands mid-statement — without the multi-second build a 100 ms-cadence margin would
+    // require.
+    const N_MODULES: usize = 50;
+    const SYMS_PER_FILE: usize = 1200;
+    inject_stats_fixture(&db_path, &repo_uid, &snapshot_uid, N_MODULES, SYMS_PER_FILE);
+
+    // Transparency: a live peer (Quiet) gets the full answer — the supervisor wrapping
+    // is invisible when connected. `>=` because the real S1 index may add its own
+    // MODULE rows; the injected modules must all be present.
+    let live = expect_success(run(
+        &dispatcher,
+        "stats-live",
+        "stats",
+        json!({ "repo": canonical, "engine": "sqlite" }),
+    ));
+    assert!(
+        live["count"].as_u64().unwrap_or(0) >= N_MODULES as u64,
+        "connected: `stats --engine sqlite` returns at least the injected modules \
+         (cancellation transparent); got count={:?}",
+        live["count"]
+    );
+
+    // Cancellation: FailAfter(1) — the handler-boundary heartbeat passes, then the
+    // supervisor's first heartbeat (fired mid-aggregation) fails ⇒ the interrupt aborts
+    // the in-flight SELECT ⇒ Cancelled DURING the aggregation (NOT at the boundary, NOT
+    // after completing).
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request(
+            "stats",
+            "stats",
+            json!({ "repo": canonical, "engine": "sqlite" }),
+        ),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "stats (sqlite interrupt)");
+}
+
+/// DAEMON-CANCEL-2 (review iteration 1): the DEFAULT `rmap stats` — NO `--engine` flag, i.e. engine
+/// `auto`, the path agents actually take. With NO resident LiveGraph the auto route falls back to
+/// `serve_stats_sqlite` → `compute_module_stats`, through the SAME `cancellable_module_stats` chokepoint
+/// the `--engine sqlite` route uses. The iteration-0 build wired ONLY `--engine sqlite`, so default
+/// `rmap stats` still ran heavy SQL to completion after a peer disconnect (the BLOCKING GAP the reviewer
+/// flagged). This proves the DEFAULT path now aborts the in-flight `SELECT` via `sqlite3_interrupt` ⇒
+/// `Cancelled`, not run-to-completion.
+#[test]
+fn dispatched_default_stats_cancels_via_sqlite_fallback_when_peer_disconnects() {
+    // Opaque-SQL cancellation is heartbeat-timed (see the sibling `--engine sqlite` test); probe FAST so
+    // a SMALL fixture's query is still running when a heartbeat fires. Process-global, but the ONLY
+    // `run_interruptible` caller in this binary is the stats handler and both stats tests set 5 ms.
+    repo_graph_daemon_runtime::cancel::set_heartbeat_interval_ms_for_test(5);
+
+    let (dispatcher, _state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let snapshot_uid = indexed["snapshot_uid"].as_str().unwrap().to_string();
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+
+    // Same large fixture as the sibling test: the aggregation spans many 5 ms heartbeat intervals, so a
+    // disconnect lands mid-statement rather than after a fast completion.
+    const N_MODULES: usize = 50;
+    const SYMS_PER_FILE: usize = 1200;
+    inject_stats_fixture(&db_path, &repo_uid, &snapshot_uid, N_MODULES, SYMS_PER_FILE);
+
+    // Transparency + path proof: a live peer (Quiet) gets the full answer on the DEFAULT request (no
+    // `engine` param), and `backend_used == "sqlite"` confirms we exercised the AUTO→SQLite fallback —
+    // NOT the GREEN LiveGraph fastpath (there is no resident LiveGraph after a bare `index`). If a
+    // LiveGraph were unexpectedly resident, this assert fails loudly rather than silently testing the
+    // wrong (no-SQL, nothing-to-cancel) path.
+    let live = expect_success(run(
+        &dispatcher,
+        "stats-live",
+        "stats",
+        json!({ "repo": canonical }),
+    ));
+    assert_eq!(
+        live["backend_used"], "sqlite",
+        "no resident LiveGraph ⇒ default `stats` serves the AUTO→SQLite fallback (the path under test); \
+         got backend_used={:?}",
+        live["backend_used"]
+    );
+    assert!(
+        live["count"].as_u64().unwrap_or(0) >= N_MODULES as u64,
+        "connected: default `stats` returns at least the injected modules (cancellation transparent); \
+         got count={:?}",
+        live["count"]
+    );
+
+    // Cancellation on the DEFAULT path (NO `engine` param). The auto route has no handler-boundary
+    // pre-check (unlike the `--engine sqlite` route), so the supervisor's heartbeats are the only
+    // disconnect probes: `FailAfter(1)` lets heartbeat #1 pass and heartbeat #2 (fired mid-aggregation)
+    // fail ⇒ the interrupt aborts the in-flight SELECT ⇒ Cancelled DURING the aggregation.
+    let mut emitter = FailAfter::new(1);
+    let result = dispatcher.dispatch(
+        &request("stats", "stats", json!({ "repo": canonical })),
+        &mut emitter,
+    );
+    assert_cancelled_in_flight(&result, "default stats (auto -> sqlite fallback interrupt)");
 }

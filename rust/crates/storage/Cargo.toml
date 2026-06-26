@@ -206,6 +206,20 @@ enrichment = { path = "../enrichment" }
 # test ends. No manual cleanup code needed.
 tempfile = "3"
 
+# DAEMON-CANCEL-2: the `hooks` rusqlite feature enables
+# `Connection::progress_handler`, used ONLY by the deterministic
+# `interrupt_handle` abort test (`connection::tests::
+# interrupt_handle_aborts_in_flight_compute_module_stats`) to make a
+# statement provably in-flight before firing the cross-thread interrupt —
+# so the test proves the SQL aborts mid-execution with NO wall-clock
+# timing. This is a [dev-dependencies] feature: under the workspace
+# resolver "2" it is compiled ONLY for this crate's own test builds, never
+# into the production `cargo build` artifact (dev-deps are not built for
+# release, and resolver 2 does not unify their features into the normal
+# build). The feature is purely additive (it compiles one extra method);
+# it changes no runtime behavior of the shipped storage substrate.
+rusqlite = { version = "0.31", features = ["bundled", "hooks"] }
+
 # The agent crate is already a normal dependency of this crate
 # for the AgentStorageRead impl. It is also listed here only so
 # that integration tests (under `tests/`) can import it by name;

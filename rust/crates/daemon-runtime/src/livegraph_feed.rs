@@ -2,6 +2,7 @@
 //! LiveGraph. Decode + ingest + feed ONLY — the daemon does NOT run scip-typescript or do package
 //! discovery / refresh orchestration (that is LIVEGRAPH-INTEGRATION-1C).
 
+use repo_graph_daemon_transport::ProgressEmitter;
 use repo_graph_ir::CanonicalKey;
 use repo_graph_livegraph::{
     FileImportCyclesAnswer, LiveGraph, ModuleImportCyclesAnswer, ModuleStatRow,
@@ -11,6 +12,7 @@ use repo_graph_storage::error::StorageError;
 use repo_graph_storage::queries::{
     martin_metrics, CalleeResult, CallerResult, ModuleStatsResult, ResolvedSymbol,
 };
+use repo_graph_storage::StorageConnection;
 use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -2586,20 +2588,123 @@ struct StatsCompareData {
     field_mismatches: Vec<String>,
 }
 
+/// A `stats` response, together with whether the client disconnected DURING its heavy SQL
+/// aggregation (DAEMON-CANCEL-2). The dispatcher maps `Ready` → success, `Cancelled` →
+/// `ErrorCode::Cancelled`, and a returned `Err` → `ErrorCode::InternalError`.
+///
+/// Every production `stats` path that runs `compute_module_stats` — the default `auto`
+/// SQLite fallback, the cert-build/`--engine compare` divergence read, and the
+/// `--engine sqlite` escape hatch — runs it on a worker thread under CANCEL-1's supervisor
+/// (see [`cancellable_module_stats`]), so a peer-disconnect aborts the in-flight `SELECT`
+/// via `sqlite3_interrupt` rather than letting it run to completion with no consumer.
+pub enum StatsOutcome {
+    /// The query produced its response body (served to a still-connected peer).
+    Ready(Value),
+    /// The peer disconnected mid-aggregation; the in-flight `SELECT` was interrupted.
+    Cancelled,
+}
+
+/// Result of a cancellable [`cancellable_module_stats`] call: the module-stats rows, or the
+/// client disconnected mid-aggregation (the `sqlite3_interrupt` actuator aborted the
+/// in-flight `SELECT`).
+pub(crate) enum SqlStats {
+    Stats(Vec<ModuleStatsResult>),
+    Cancelled,
+}
+
+/// Outcome of the cancellable stats-cert build ([`build_and_store_stats_cert`]). `NotGreen`
+/// folds the prior `Some(false)` (built RED) and `None` (no fingerprint / storage error)
+/// cases — both fall back to SQLite exactly as before; `Cancelled` is the new mid-build
+/// disconnect path.
+#[derive(Debug, PartialEq, Eq)]
+enum CertBuild {
+    Green,
+    NotGreen,
+    Cancelled,
+}
+
+/// Internal: the SQLite-vs-LiveGraph compare data, or the client disconnected during the
+/// SQLite half's `compute_module_stats`.
+enum CompareOutcome {
+    Computed(StatsCompareData),
+    Cancelled,
+}
+
+/// DAEMON-CANCEL-2: run `compute_module_stats` on a worker thread under CANCEL-1's
+/// [`run_interruptible`](crate::cancel::run_interruptible) supervisor, cancellable via
+/// `sqlite3_interrupt` on peer-disconnect. THE single chokepoint every production `stats`
+/// SQL site funnels through, so "stats cancels mid-execution on disconnect" holds on the
+/// DEFAULT `auto` path — not only the explicit `--engine sqlite` escape hatch (the
+/// iteration-0 gap).
+///
+/// ## Connection / interrupt-handle ownership (B1 D-S = S-A, the slice's key design point)
+///
+/// `conn` is the caller's OWN per-operation `StorageConnection`, opened on the transport
+/// thread (in the leaf, e.g. [`serve_stats_sqlite`] / [`stats_compare_data`]). We hoist its
+/// interrupt handle out HERE, BEFORE moving the connection into the worker, and hand the
+/// handle to the supervising (transport) thread as the `on_disconnect` actuator. So the
+/// handle is obtained from the SAME connection the worker blocks inside, before the blocking
+/// call — the slice's STOP-condition shape ("the worker opens its connection internally and
+/// the handle can't be hoisted") does NOT arise: the connection is opened in the leaf and
+/// passed in, never opened inside the worker. Firing the handle after the worker drops the
+/// connection is a safe no-op (see `StorageInterruptHandle`). Connection-per-op ⇒ no reuse ⇒
+/// a late interrupt cannot bleed into a later statement (there is none).
+///
+/// Read-only ⇒ a cancelled query has no partial state to roll back. A worker that vanishes
+/// (panic / internal teardown while the peer was connected) is an INTERNAL failure
+/// (`WorkerVanished`), surfaced as a storage error → `InternalError`, NEVER `Cancelled`
+/// (CANCEL-1 deliverable #2).
+pub(crate) fn cancellable_module_stats(
+    emitter: &mut dyn ProgressEmitter,
+    conn: StorageConnection,
+    snapshot_uid: &str,
+) -> Result<SqlStats, StorageError> {
+    // Hoist the interrupt handle BEFORE the connection moves into the worker (S-A: this is
+    // the leaf's own connection, so the handle is from the exact connection the worker uses).
+    let interrupt = conn.interrupt_handle();
+    let snap = snapshot_uid.to_string();
+    match crate::cancel::run_interruptible(
+        emitter,
+        "computing_module_stats",
+        // On peer-disconnect: `sqlite3_interrupt` the in-flight SELECT (an opaque SQL
+        // statement has no Rust frame to poll the cooperative `CancelFlag`).
+        move || interrupt.interrupt(),
+        // The worker OWNS the connection. Its `CancelFlag` is intentionally unused: only the
+        // interrupt handle can abort a single opaque statement mid-execution.
+        move |_flag| conn.compute_module_stats(&snap),
+    ) {
+        crate::cancel::Supervised::Completed(Ok(stats)) => Ok(SqlStats::Stats(stats)),
+        // A genuine SQL/storage failure while the peer stayed connected — never a cancel.
+        crate::cancel::Supervised::Completed(Err(e)) => Err(e),
+        crate::cancel::Supervised::Cancelled => Ok(SqlStats::Cancelled),
+        // Worker panic / internal teardown: INTERNAL failure, classified as such — NEVER
+        // masqueraded as a client cancel. Mapped to a storage error (→ `InternalError`).
+        crate::cancel::Supervised::WorkerVanished => Err(StorageError::InvalidArgument(
+            "stats worker vanished (internal failure during aggregation)".to_string(),
+        )),
+    }
+}
+
 /// Compute the shared [`StatsCompareData`] — the SQLite `compute_module_stats` answer vs the LiveGraph
 /// `module_stats` answer (mapped to the same DTO), compared per-module by module identity then field-
 /// exact (`ModuleStatsResult: PartialEq`; the floats are bit-identical by the shared `martin_metrics`).
-/// Reads SQLite once + the LiveGraph once (one read lock).
+/// Reads SQLite once + the LiveGraph once (one read lock). DAEMON-CANCEL-2: the SQLite half runs
+/// through [`cancellable_module_stats`], so a peer-disconnect mid-`compute_module_stats` aborts the
+/// `SELECT` and returns [`CompareOutcome::Cancelled`].
 fn stats_compare_data(
+    emitter: &mut dyn ProgressEmitter,
     repo_state: &RepoState,
     snapshot_uid: &str,
-) -> Result<StatsCompareData, StorageError> {
+) -> Result<CompareOutcome, StorageError> {
     use std::collections::BTreeMap;
     // D-S = S-A: one fresh per-operation connection for this read.
     let conn = repo_state.storage().map_err(|e| {
         StorageError::InvalidArgument(format!("failed to open storage connection: {e}"))
     })?;
-    let sqlite_stats = conn.compute_module_stats(snapshot_uid)?;
+    let sqlite_stats = match cancellable_module_stats(emitter, conn, snapshot_uid)? {
+        SqlStats::Stats(s) => s,
+        SqlStats::Cancelled => return Ok(CompareOutcome::Cancelled),
+    };
     let (lg_rows, livegraph_class) = {
         let guard = repo_state.livegraph.read();
         match guard.as_ref() {
@@ -2643,7 +2748,7 @@ fn stats_compare_data(
     let is_exact = missing_in_livegraph.is_empty()
         && extra_in_livegraph.is_empty()
         && field_mismatches.is_empty();
-    Ok(StatsCompareData {
+    Ok(CompareOutcome::Computed(StatsCompareData {
         livegraph_stats,
         sqlite_stats,
         livegraph_class,
@@ -2651,27 +2756,43 @@ fn stats_compare_data(
         missing_in_livegraph,
         extra_in_livegraph,
         field_mismatches,
-    })
+    }))
 }
 
 /// STATS-LIVEGRAPH-IMPL-1 (build): run the SHARED field-exact stats compare -> verdict, STORE the cert
-/// keyed by `fingerprint`, return `Some(is_green)` (or `None` if no fingerprint / a storage error -> the
-/// caller falls back to SQLite). Reads SQLite ONCE per fingerprint via the SAME `stats_compare_data` the
-/// `--engine compare` uses, so the GREEN verdict PROVABLY matches the compare (no drift -> no false GREEN).
+/// keyed by `fingerprint`, return a [`CertBuild`] (`Green`/`NotGreen`, or `Cancelled` if the peer
+/// disconnected during the compare's `compute_module_stats`). Reads SQLite ONCE per fingerprint via the
+/// SAME [`stats_compare_data`] the `--engine compare` uses, so the GREEN verdict PROVABLY matches the
+/// compare (no drift -> no false GREEN). DAEMON-CANCEL-2: the SQLite read is cancellable, so a disconnect
+/// mid-cert-build aborts the in-flight `SELECT` instead of running it to completion.
 fn build_and_store_stats_cert(
+    emitter: &mut dyn ProgressEmitter,
     repo_state: &RepoState,
     snapshot_uid: &str,
     fingerprint: Option<String>,
-) -> Option<bool> {
-    let fingerprint = fingerprint?;
-    let data = stats_compare_data(repo_state, snapshot_uid).ok()?;
+) -> CertBuild {
+    // No fingerprint ⇒ cannot key a cert; treat as not-green (the prior `None` → `false`).
+    let Some(fingerprint) = fingerprint else {
+        return CertBuild::NotGreen;
+    };
+    let data = match stats_compare_data(emitter, repo_state, snapshot_uid) {
+        Ok(CompareOutcome::Computed(d)) => d,
+        Ok(CompareOutcome::Cancelled) => return CertBuild::Cancelled,
+        // Storage error during the cert build ⇒ fall back to SQLite (the prior `.ok()?` → `None`
+        // → `false`); the fallback serve re-runs and surfaces the same error if it persists.
+        Err(_) => return CertBuild::NotGreen,
+    };
     let is_green = data.is_exact;
     let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
     *repo_state.stats_cert.write() = Some(StatsNoLossCert {
         verdict,
         fingerprint,
     });
-    Some(is_green)
+    if is_green {
+        CertBuild::Green
+    } else {
+        CertBuild::NotGreen
+    }
 }
 
 /// STATS-LIVEGRAPH-IMPL-1: the GREEN-cert fastpath body — serve the LiveGraph module stats WITHOUT
@@ -2695,21 +2816,27 @@ fn serve_stats_fastpath(
 }
 
 /// STATS-LIVEGRAPH-IMPL-1: the SQLite stats answer + the fastpath metadata — the fallback / cert-not-green
-/// path. Reads SQLite (`compute_module_stats`). Distinct from the forced `--engine sqlite` arm, which
-/// returns the UNCHANGED body (no `backend_used`) per D4.
+/// path (the DEFAULT `auto` route when the LiveGraph is non-resident / non-`Exact` or the cert is RED).
+/// DAEMON-CANCEL-2: reads SQLite (`compute_module_stats`) through [`cancellable_module_stats`], so a
+/// peer-disconnect mid-aggregation aborts the in-flight `SELECT` ⇒ [`StatsOutcome::Cancelled`]. Distinct
+/// from the forced `--engine sqlite` arm, which returns the UNCHANGED body (no `backend_used`) per D4.
 fn serve_stats_sqlite(
+    emitter: &mut dyn ProgressEmitter,
     repo_state: &RepoState,
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
     fallback_reason: FallbackReason,
-) -> Result<Value, StorageError> {
+) -> Result<StatsOutcome, StorageError> {
     // D-S = S-A: one fresh per-operation connection for this read.
     let conn = repo_state.storage().map_err(|e| {
         StorageError::InvalidArgument(format!("failed to open storage connection: {e}"))
     })?;
-    let stats = conn.compute_module_stats(snapshot_uid)?;
-    Ok(json!({
+    let stats = match cancellable_module_stats(emitter, conn, snapshot_uid)? {
+        SqlStats::Stats(s) => s,
+        SqlStats::Cancelled => return Ok(StatsOutcome::Cancelled),
+    };
+    Ok(StatsOutcome::Ready(json!({
         "repo_uid": repo_uid,
         "snapshot_uid": snapshot_uid,
         "display_name": display_name,
@@ -2717,48 +2844,64 @@ fn serve_stats_sqlite(
         "count": stats.len(),
         "backend_used": "sqlite",
         "fallback_reason": fallback_reason.as_str(),
-    }))
+    })))
 }
 
-/// STATS-LIVEGRAPH-IMPL-1 (D3): the PURE fastpath/SQLite ladder (mirrors `cycles_fastpath_or_sqlite`).
+/// STATS-LIVEGRAPH-IMPL-1 (D3): the fastpath/SQLite ladder (mirrors `cycles_fastpath_or_sqlite`).
 /// precondition UNMET (the LiveGraph module-stats answer is not `Exact` -- non-resident / non-TS /
 /// degraded) -> SQLite (the labelled `precondition_reason`) ; precondition met + GREEN cert -> serve
 /// LiveGraph WITHOUT `compute_module_stats` ; cert RED/stale/missing/build-failed -> SQLite
-/// (`LiveGraphStatsDivergence`). Pure (no I/O itself): a panicking `serve_sqlite` proves the GREEN path
-/// skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing.
+/// (`LiveGraphStatsDivergence`). The decision stays pure: a panicking `serve_sqlite` proves the GREEN
+/// path skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing. DAEMON-CANCEL-2: the SQL-bearing
+/// closures (`serve_sqlite`, `build_cert`) run `compute_module_stats` under the supervisor, so they take
+/// `emitter` and may report a mid-aggregation disconnect, which the ladder forwards as
+/// [`StatsOutcome::Cancelled`].
 fn stats_fastpath_or_sqlite(
+    emitter: &mut dyn ProgressEmitter,
     precondition_met: bool,
     precondition_reason: FallbackReason,
     cert: StatsCertState,
     serve_livegraph: impl FnOnce() -> Value,
-    serve_sqlite: impl FnOnce(FallbackReason) -> Value,
-    build_cert: impl FnOnce() -> Option<bool>,
-) -> Value {
+    serve_sqlite: impl FnOnce(
+        &mut dyn ProgressEmitter,
+        FallbackReason,
+    ) -> Result<StatsOutcome, StorageError>,
+    build_cert: impl FnOnce(&mut dyn ProgressEmitter) -> CertBuild,
+) -> Result<StatsOutcome, StorageError> {
     if !precondition_met {
-        return serve_sqlite(precondition_reason);
+        return serve_sqlite(emitter, precondition_reason);
     }
     let green = match cert {
         StatsCertState::ValidGreen => true,
         StatsCertState::ValidNotGreen => false,
-        StatsCertState::StaleOrMissing => build_cert().unwrap_or(false),
+        StatsCertState::StaleOrMissing => match build_cert(emitter) {
+            CertBuild::Green => true,
+            CertBuild::NotGreen => false,
+            CertBuild::Cancelled => return Ok(StatsOutcome::Cancelled),
+        },
     };
     if green {
-        serve_livegraph()
+        Ok(StatsOutcome::Ready(serve_livegraph()))
     } else {
-        serve_sqlite(FallbackReason::LiveGraphStatsDivergence)
+        serve_sqlite(emitter, FallbackReason::LiveGraphStatsDivergence)
     }
 }
 
-/// STATS-LIVEGRAPH-IMPL-1 (D3): the AUTO (default) `stats` response. Tries the GREEN-cert FASTPATH (serve
-/// the LiveGraph module stats WITHOUT SQLite) ; else SQLite (the proven answer). The answer-class + the
-/// LiveGraph stats + the current fingerprint are SQLite-FREE; SQLite is read ONLY on the cert build + the
-/// SQLite fallback. The served human output is byte-identical either way (the byte-preserving contract).
+/// STATS-LIVEGRAPH-IMPL-1 (D3): the AUTO (default) `stats` response — the path `rmap stats` takes with no
+/// `--engine` flag. Tries the GREEN-cert FASTPATH (serve the LiveGraph module stats WITHOUT SQLite) ; else
+/// SQLite (the proven answer). The answer-class + the LiveGraph stats + the current fingerprint are
+/// SQLite-FREE; SQLite is read ONLY on the cert build + the SQLite fallback. The served human output is
+/// byte-identical either way (the byte-preserving contract). DAEMON-CANCEL-2: every SQLite read on this
+/// path runs `compute_module_stats` under the supervisor, so a peer-disconnect mid-aggregation returns
+/// [`StatsOutcome::Cancelled`] (the in-flight `SELECT` is aborted) — the iteration-0 gap where the
+/// DEFAULT route ran heavy SQL to completion after disconnect is closed.
 pub fn stats_auto_response(
+    emitter: &mut dyn ProgressEmitter,
     repo_state: &RepoState,
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
-) -> Result<Value, StorageError> {
+) -> Result<StatsOutcome, StorageError> {
     // SQLite-FREE: the module-stats answer-class (precondition), the mapped LiveGraph stats (the served
     // answer), and the current fingerprint -- all from a single LiveGraph read lock.
     let (precondition_met, precondition_reason, lg_stats, current_fp) = {
@@ -2799,27 +2942,19 @@ pub fn stats_auto_response(
             _ => StatsCertState::StaleOrMissing,
         }
     };
-    // The ladder. A storage error in the SQLite fallback surfaces as Err (the caller maps it).
-    let mut sqlite_err: Option<StorageError> = None;
-    let result = stats_fastpath_or_sqlite(
+    // The ladder. DAEMON-CANCEL-2: the SQL-bearing closures run `compute_module_stats` under the
+    // supervisor; the ladder returns `StatsOutcome::Cancelled` on a mid-aggregation disconnect and
+    // `Err` on a storage failure (the caller maps both). The closures return their outcome directly,
+    // so the prior `sqlite_err` side-channel is gone.
+    stats_fastpath_or_sqlite(
+        emitter,
         precondition_met,
         precondition_reason,
         cert,
         || serve_stats_fastpath(repo_uid, display_name, snapshot_uid, &lg_stats),
-        |reason| match serve_stats_sqlite(repo_state, repo_uid, display_name, snapshot_uid, reason)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                sqlite_err = Some(e);
-                Value::Null
-            }
-        },
-        || build_and_store_stats_cert(repo_state, snapshot_uid, current_fp.clone()),
-    );
-    if let Some(e) = sqlite_err {
-        return Err(e);
-    }
-    Ok(result)
+        |e, reason| serve_stats_sqlite(e, repo_state, repo_uid, display_name, snapshot_uid, reason),
+        |e| build_and_store_stats_cert(e, repo_state, snapshot_uid, current_fp.clone()),
+    )
 }
 
 /// STATS-LIVEGRAPH-IMPL-1: the explicit `--engine livegraph` diagnostic — serve the LiveGraph module
@@ -2914,13 +3049,19 @@ fn write_stats_compare_sidecar(repo_root: &str, report: &Value) -> Result<String
 /// field-exact divergence breakdown from the SHARED `stats_compare_data` — the SAME data the cert uses)
 /// + a sidecar path. The CLI prints the primary stats unchanged and one compare-summary line.
 pub fn stats_compare_response(
+    emitter: &mut dyn ProgressEmitter,
     repo_state: &RepoState,
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
     repo_root: &str,
-) -> Result<Value, StorageError> {
-    let data = stats_compare_data(repo_state, snapshot_uid)?;
+) -> Result<StatsOutcome, StorageError> {
+    // DAEMON-CANCEL-2: the SQLite half of the compare runs under the supervisor; a mid-aggregation
+    // disconnect aborts the in-flight SELECT and returns Cancelled.
+    let data = match stats_compare_data(emitter, repo_state, snapshot_uid)? {
+        CompareOutcome::Computed(d) => d,
+        CompareOutcome::Cancelled => return Ok(StatsOutcome::Cancelled),
+    };
     let compare = json!({
         "sqlite_count": data.sqlite_stats.len(),
         "livegraph_count": data.livegraph_stats.len(),
@@ -2944,7 +3085,7 @@ pub fn stats_compare_response(
     if let Ok(path) = write_stats_compare_sidecar(repo_root, &compare) {
         body["livegraph_stats_compare_sidecar"] = json!(path);
     }
-    Ok(body)
+    Ok(StatsOutcome::Ready(body))
 }
 
 #[cfg(test)]
@@ -3071,90 +3212,155 @@ mod tests {
         assert_eq!(names, vec!["a/y", "b/x"]);
     }
 
-    // ── STATS-LIVEGRAPH-IMPL-1: the PURE stats fastpath/SQLite ladder ──
+    // ── STATS-LIVEGRAPH-IMPL-1: the stats fastpath/SQLite ladder (DAEMON-CANCEL-2: + cancellation) ──
     // A PANICKING serve_sqlite/build_cert proves which path runs -- the GREEN cached path must serve
-    // LiveGraph WITHOUT touching SQLite or rebuilding the cert.
+    // LiveGraph WITHOUT touching SQLite or rebuilding the cert. The SQL-bearing closures now take an
+    // emitter and return a cancellation-aware outcome (`Result<StatsOutcome, _>` / `CertBuild`).
+
+    use repo_graph_daemon_transport::{EmitError, ProgressDetail};
+
+    /// A no-op emitter for the pure-ladder tests. The ladder forwards it to the SQL closures; the
+    /// stub/panic closures here decide the outcome, so no real transport write happens.
+    struct NoEmit;
+    impl ProgressEmitter for NoEmit {
+        fn emit(&mut self, _d: ProgressDetail) -> Result<(), EmitError> {
+            Ok(())
+        }
+    }
+
+    /// Extract the served body from a ladder outcome, or fail the test on Cancelled/Err.
+    #[track_caller]
+    fn ready_value(out: Result<StatsOutcome, StorageError>) -> Value {
+        match out {
+            Ok(StatsOutcome::Ready(v)) => v,
+            Ok(StatsOutcome::Cancelled) => panic!("expected Ready, got Cancelled"),
+            Err(e) => panic!("expected Ready, got Err: {e}"),
+        }
+    }
 
     #[test]
     fn stats_fastpath_green_cached_serves_livegraph_without_sqlite_or_build() {
         let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
             StatsCertState::ValidGreen,
             || json!({"backend_used": "livegraph"}),
-            |_r| panic!("SQLite (compute_module_stats) must NOT be read on a GREEN cached cert"),
-            || panic!("the cert must NOT be rebuilt when ValidGreen"),
+            |_e, _r| {
+                panic!("SQLite (compute_module_stats) must NOT be read on a GREEN cached cert")
+            },
+            |_e| panic!("the cert must NOT be rebuilt when ValidGreen"),
         );
-        assert_eq!(out["backend_used"], "livegraph");
+        assert_eq!(ready_value(out)["backend_used"], "livegraph");
     }
 
     #[test]
     fn stats_fastpath_not_green_falls_back_to_sqlite() {
         let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
             StatsCertState::ValidNotGreen,
             || panic!("must NOT serve LiveGraph when the cert is not GREEN"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || panic!("must NOT rebuild when ValidNotGreen"),
+            |_e, r| {
+                Ok(StatsOutcome::Ready(
+                    json!({"backend_used": "sqlite", "reason": r.as_str()}),
+                ))
+            },
+            |_e| panic!("must NOT rebuild when ValidNotGreen"),
         );
-        assert_eq!(out["backend_used"], "sqlite");
-        assert_eq!(out["reason"], "LiveGraphStatsDivergence");
+        let v = ready_value(out);
+        assert_eq!(v["backend_used"], "sqlite");
+        assert_eq!(v["reason"], "LiveGraphStatsDivergence");
     }
 
     #[test]
     fn stats_fastpath_precondition_unmet_falls_back_with_reason() {
         let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
             false,
             FallbackReason::LiveGraphPartial,
             StatsCertState::ValidGreen, // ignored when the precondition is unmet
             || panic!("must NOT serve LiveGraph when the precondition is unmet"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || panic!("must NOT build the cert when the precondition is unmet"),
+            |_e, r| {
+                Ok(StatsOutcome::Ready(
+                    json!({"backend_used": "sqlite", "reason": r.as_str()}),
+                ))
+            },
+            |_e| panic!("must NOT build the cert when the precondition is unmet"),
         );
-        assert_eq!(out["backend_used"], "sqlite");
-        assert_eq!(out["reason"], "LiveGraphPartial");
+        let v = ready_value(out);
+        assert_eq!(v["backend_used"], "sqlite");
+        assert_eq!(v["reason"], "LiveGraphPartial");
     }
 
     #[test]
     fn stats_fastpath_stale_build_green_serves_livegraph() {
         let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
             StatsCertState::StaleOrMissing,
             || json!({"backend_used": "livegraph"}),
-            |_r| panic!("a GREEN build must serve LiveGraph, not SQLite"),
-            || Some(true),
+            |_e, _r| panic!("a GREEN build must serve LiveGraph, not SQLite"),
+            |_e| CertBuild::Green,
         );
-        assert_eq!(out["backend_used"], "livegraph");
+        assert_eq!(ready_value(out)["backend_used"], "livegraph");
     }
 
     #[test]
     fn stats_fastpath_stale_build_red_falls_back() {
         let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
             StatsCertState::StaleOrMissing,
             || panic!("a RED build must fall back to SQLite"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || Some(false),
+            |_e, r| {
+                Ok(StatsOutcome::Ready(
+                    json!({"backend_used": "sqlite", "reason": r.as_str()}),
+                ))
+            },
+            |_e| CertBuild::NotGreen,
         );
-        assert_eq!(out["backend_used"], "sqlite");
-        assert_eq!(out["reason"], "LiveGraphStatsDivergence");
+        let v = ready_value(out);
+        assert_eq!(v["backend_used"], "sqlite");
+        assert_eq!(v["reason"], "LiveGraphStatsDivergence");
     }
 
+    // DAEMON-CANCEL-2: a peer-disconnect DURING the cert-build SQL (`build_cert` returns Cancelled) must
+    // propagate as StatsOutcome::Cancelled WITHOUT then running the SQLite fallback. (Replaces the old
+    // `build_failed_falls_back` ladder test: a build failure is now folded into `CertBuild::NotGreen`
+    // INSIDE build_and_store_stats_cert, so it is no longer distinguishable at the ladder boundary —
+    // `stats_fastpath_stale_build_red_falls_back` already covers the not-green fallback.)
     #[test]
-    fn stats_fastpath_build_failed_falls_back() {
+    fn stats_fastpath_stale_build_cancelled_propagates_cancelled() {
         let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
             StatsCertState::StaleOrMissing,
-            || panic!("a build failure must fall back to SQLite"),
-            |r| json!({"backend_used": "sqlite", "reason": r.as_str()}),
-            || None,
+            || panic!("a cancelled build must NOT serve LiveGraph"),
+            |_e, _r| panic!("a cancelled build must NOT then run the SQLite fallback"),
+            |_e| CertBuild::Cancelled,
         );
-        assert_eq!(out["backend_used"], "sqlite");
-        assert_eq!(out["reason"], "LiveGraphStatsDivergence");
+        assert!(matches!(out, Ok(StatsOutcome::Cancelled)));
+    }
+
+    // DAEMON-CANCEL-2: a peer-disconnect DURING the SQLite fallback (`serve_sqlite` returns Cancelled)
+    // must propagate as StatsOutcome::Cancelled.
+    #[test]
+    fn stats_fastpath_sqlite_cancelled_propagates_cancelled() {
+        let out = stats_fastpath_or_sqlite(
+            &mut NoEmit,
+            false, // precondition unmet ⇒ straight to serve_sqlite
+            FallbackReason::LiveGraphPartial,
+            StatsCertState::ValidGreen,
+            || panic!("must NOT serve LiveGraph when the precondition is unmet"),
+            |_e, _r| Ok(StatsOutcome::Cancelled),
+            |_e| panic!("must NOT build the cert when the precondition is unmet"),
+        );
+        assert!(matches!(out, Ok(StatsOutcome::Cancelled)));
     }
 
     #[test]

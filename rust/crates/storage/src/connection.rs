@@ -157,6 +157,39 @@ impl StorageConnection {
         Ok(Self { conn })
     }
 
+    /// Obtain a [`StorageInterruptHandle`] — a `Send + Sync` handle another thread
+    /// can use to abort whatever SQL statement THIS connection is currently running
+    /// (DAEMON-CANCEL-2).
+    ///
+    /// ## Why this exists (the SQL-statement-granular cancel actuator)
+    ///
+    /// DAEMON-CANCEL-1's worker supervisor cancels a heavy *Rust* loop by polling a
+    /// cooperative flag at bounded-interval checkpoints. That is useless for a single
+    /// opaque `SELECT` (e.g. [`compute_module_stats`](Self::compute_module_stats)):
+    /// the worker thread is blocked *inside* SQLite's C VM, with no Rust frame to
+    /// poll a flag. The only way to abort such a statement from another thread is
+    /// SQLite's `sqlite3_interrupt`, which rusqlite exposes as
+    /// `Connection::get_interrupt_handle`. This wraps it.
+    ///
+    /// ## Ownership shape (B1 connection-per-operation, the slice's key design point)
+    ///
+    /// Obtain the handle from the OWNED connection BEFORE handing that connection to
+    /// a worker thread: the daemon read handler holds its per-operation
+    /// `StorageConnection` (D-S = S-A) as a local, hoists this handle out, moves the
+    /// connection into the worker, and gives the handle to the supervising
+    /// (transport) thread. On peer-disconnect the supervisor fires
+    /// [`interrupt`](StorageInterruptHandle::interrupt); the in-flight statement
+    /// aborts with `SQLITE_INTERRUPT` (`rusqlite::ErrorCode::OperationInterrupted`),
+    /// surfaced as [`StorageError::Sqlite`](crate::error::StorageError::Sqlite).
+    ///
+    /// Firing the handle after the connection has closed is a guaranteed no-op (never
+    /// a use-after-free): see [`StorageInterruptHandle`].
+    pub fn interrupt_handle(&self) -> StorageInterruptHandle {
+        StorageInterruptHandle {
+            inner: self.conn.get_interrupt_handle(),
+        }
+    }
+
     /// Crate-internal accessor for the underlying rusqlite
     /// connection.
     ///
@@ -283,6 +316,45 @@ impl StorageConnection {
         sql: &str,
     ) -> Result<T, crate::error::StorageError> {
         Ok(self.conn.query_row(sql, [], |row| row.get(0))?)
+    }
+}
+
+/// A thread-crossing handle that aborts a [`StorageConnection`]'s in-flight SQL
+/// statement (DAEMON-CANCEL-2). Obtain it via
+/// [`StorageConnection::interrupt_handle`].
+///
+/// This is the SQL-statement-granular counterpart to the Rust-loop cooperative
+/// checkpoint: a single opaque statement cannot be checkpointed mid-execution from
+/// Rust, so a supervising thread aborts it with `sqlite3_interrupt` (which the inner
+/// `rusqlite::InterruptHandle` wraps).
+///
+/// ## `Send + Sync`
+///
+/// The inner `rusqlite::InterruptHandle` is `Send + Sync` by construction, so this
+/// is too. That is the whole point: the connection lives on (and is `!Sync` to) the
+/// worker thread, while this handle crosses to the supervising thread.
+///
+/// ## Safe after the connection closes (no use-after-free)
+///
+/// The handle does NOT borrow the connection. Internally it shares an
+/// `Arc<Mutex<*mut sqlite3>>` with the connection; the connection's close/drop
+/// nulls that pointer *under the same mutex* that [`interrupt`](Self::interrupt)
+/// locks (rusqlite's design). So `interrupt` either runs before close (a real
+/// interrupt) or after (it observes the null pointer and no-ops) — never a dangling
+/// dereference. Combined with B1's connection-per-operation model (each query opens
+/// and drops its own connection, no reuse), a "late" or "no-statement-running"
+/// interrupt cannot bleed into any later statement: there is none.
+pub struct StorageInterruptHandle {
+    inner: rusqlite::InterruptHandle,
+}
+
+impl StorageInterruptHandle {
+    /// Abort the statement the originating connection is currently executing, from
+    /// another thread. The aborted statement fails with `SQLITE_INTERRUPT`
+    /// (`rusqlite::ErrorCode::OperationInterrupted`). Idempotent; a no-op when no
+    /// statement is running or the connection has closed (see the type docs).
+    pub fn interrupt(&self) {
+        self.inner.interrupt();
     }
 }
 
@@ -517,5 +589,234 @@ mod tests {
         // Re-open succeeds → drop released the file handle.
         let _storage_2 =
             StorageConnection::open(&db_path).expect("re-open after drop must succeed");
+    }
+
+    // ── DAEMON-CANCEL-2: interrupt_handle aborts an in-flight statement ─────────
+    //
+    // The honest, DETERMINISTIC proof of the slice's core claim: firing the
+    // `StorageInterruptHandle` from ANOTHER thread aborts a REAL, in-flight
+    // `compute_module_stats` `SELECT` mid-execution — it returns SQLITE_INTERRUPT
+    // rather than completing the aggregation. No wall-clock: a `progress_handler`
+    // (the test-only `hooks` rusqlite feature) makes the statement provably
+    // in-flight and parks it until the cross-thread interrupt has been fired, so
+    // the abort is causally pinned, not raced. This is the storage-layer mechanism
+    // proof; the dispatcher/transport wiring (peer-disconnect → interrupt) is proven
+    // in `daemon-runtime`'s `concurrency_dispatch` suite.
+
+    /// Build a real graph fixture so `compute_module_stats` does genuine work:
+    /// `n` directory MODULEs, each OWNing one FILE node and a handful of exported
+    /// SYMBOLs, wired into an IMPORTS ring (for fan-in/out). Returns the snapshot.
+    fn build_stats_fixture(
+        storage: &mut StorageConnection,
+        n: usize,
+        syms_per_file: usize,
+    ) -> String {
+        use crate::types::{CreateSnapshotInput, GraphEdge, GraphNode, Repo, TrackedFile};
+
+        storage
+            .add_repo(&Repo {
+                repo_uid: "r1".into(),
+                name: "fixture".into(),
+                root_path: "/tmp/fixture".into(),
+                default_branch: Some("main".into()),
+                created_at: "2025-01-01T00:00:00.000Z".into(),
+                metadata_json: None,
+            })
+            .unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".into(),
+                kind: "full".into(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid;
+
+        // files (FK target for node.file_uid).
+        let files: Vec<TrackedFile> = (0..n)
+            .map(|i| TrackedFile {
+                file_uid: format!("fu{i}"),
+                repo_uid: "r1".into(),
+                path: format!("mod{i}/index.ts"),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            })
+            .collect();
+        storage.upsert_files(&files).unwrap();
+
+        let mut nodes: Vec<GraphNode> = Vec::new();
+        for i in 0..n {
+            // MODULE node (qualified_name drives the `stats` `path`/ORDER BY).
+            nodes.push(GraphNode {
+                node_uid: format!("m{i}"),
+                snapshot_uid: snap.clone(),
+                repo_uid: "r1".into(),
+                stable_key: format!("r1:mod{i}:MODULE"),
+                kind: "MODULE".into(),
+                subtype: None,
+                name: format!("mod{i}"),
+                qualified_name: Some(format!("mod{i}")),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            });
+            // The OWNS target: a FILE-bearing node (file_uid IS NOT NULL).
+            nodes.push(GraphNode {
+                node_uid: format!("fn{i}"),
+                snapshot_uid: snap.clone(),
+                repo_uid: "r1".into(),
+                stable_key: format!("r1:mod{i}/index.ts:FILE"),
+                kind: "FILE".into(),
+                subtype: None,
+                name: format!("mod{i}/index.ts"),
+                qualified_name: None,
+                file_uid: Some(format!("fu{i}")),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            });
+            // Exported SYMBOLs in that file (drive symbol_count via the file_stats CTE).
+            for k in 0..syms_per_file {
+                nodes.push(GraphNode {
+                    node_uid: format!("s{i}_{k}"),
+                    snapshot_uid: snap.clone(),
+                    repo_uid: "r1".into(),
+                    stable_key: format!("r1:mod{i}/index.ts:sym{k}:SYMBOL"),
+                    kind: "SYMBOL".into(),
+                    subtype: Some("FUNCTION".into()),
+                    name: format!("sym{k}"),
+                    qualified_name: None,
+                    file_uid: Some(format!("fu{i}")),
+                    parent_node_uid: None,
+                    location: None,
+                    signature: None,
+                    visibility: Some("export".into()),
+                    doc_comment: None,
+                    metadata_json: None,
+                });
+            }
+        }
+        storage.insert_nodes(&nodes).unwrap();
+
+        let mut edges: Vec<GraphEdge> = Vec::new();
+        for i in 0..n {
+            edges.push(GraphEdge {
+                edge_uid: format!("owns{i}"),
+                snapshot_uid: snap.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: format!("m{i}"),
+                target_node_uid: format!("fn{i}"),
+                edge_type: "OWNS".into(),
+                resolution: "static".into(),
+                extractor: "test".into(),
+                location: None,
+                metadata_json: None,
+            });
+            edges.push(GraphEdge {
+                edge_uid: format!("imp{i}"),
+                snapshot_uid: snap.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: format!("m{i}"),
+                target_node_uid: format!("m{}", (i + 1) % n),
+                edge_type: "IMPORTS".into(),
+                resolution: "static".into(),
+                extractor: "test".into(),
+                location: None,
+                metadata_json: None,
+            });
+        }
+        storage.insert_edges(&edges).unwrap();
+        snap
+    }
+
+    #[test]
+    fn interrupt_handle_aborts_in_flight_compute_module_stats() {
+        use std::sync::{Arc, Condvar, Mutex};
+
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let snap = build_stats_fixture(&mut storage, 24, 8);
+
+        // Sanity: uninterrupted, the fixture's query produces a full, non-empty
+        // result — so a later SQLITE_INTERRUPT is a real abort of real work, not an
+        // empty/no-op query.
+        let full = storage
+            .compute_module_stats(&snap)
+            .expect("uninterrupted run completes");
+        assert_eq!(
+            full.len(),
+            24,
+            "the fixture must yield all 24 modules when not interrupted"
+        );
+
+        let handle = storage.interrupt_handle();
+
+        // Two-phase rendezvous: (announced, released). The progress handler announces
+        // the statement is in-flight, then parks the worker until the test releases it
+        // — AFTER firing the interrupt — so the abort is causally guaranteed.
+        let barrier = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let b = Arc::clone(&barrier);
+        let mut announced_once = false;
+        storage.connection().progress_handler(
+            64,
+            Some(move || {
+                if !announced_once {
+                    announced_once = true;
+                    let (lock, cv) = &*b;
+                    let mut g = lock.lock().unwrap();
+                    g.0 = true; // in-flight
+                    cv.notify_all();
+                    while !g.1 {
+                        g = cv.wait(g).unwrap();
+                    }
+                }
+                false // do NOT abort via the handler; OUR sqlite3_interrupt is the cause
+            }),
+        );
+
+        let snap2 = snap.clone();
+        let worker = std::thread::spawn(move || storage.compute_module_stats(&snap2));
+
+        // Wait until the statement is provably executing.
+        {
+            let (lock, cv) = &*barrier;
+            let mut g = lock.lock().unwrap();
+            while !g.0 {
+                g = cv.wait(g).unwrap();
+            }
+        }
+        // Fire the interrupt from THIS thread (the worker holds the connection).
+        handle.interrupt();
+        // Release the parked statement; its next VM op observes the interrupt flag.
+        {
+            let (lock, cv) = &*barrier;
+            let mut g = lock.lock().unwrap();
+            g.1 = true;
+            cv.notify_all();
+        }
+
+        let result = worker.join().expect("worker thread joins");
+        match result {
+            Err(StorageError::Sqlite(e)) => assert_eq!(
+                e.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::OperationInterrupted),
+                "the in-flight compute_module_stats SELECT must abort with SQLITE_INTERRUPT, got: {e}"
+            ),
+            other => panic!(
+                "interrupt must abort the in-flight statement with SQLITE_INTERRUPT, got: {other:?}"
+            ),
+        }
     }
 }

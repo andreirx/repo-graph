@@ -197,4 +197,4 @@ pub use freshness_port::{
 };
 
 // Convenience re-exports for the public connection lifecycle API.
-pub use connection::StorageConnection;
+pub use connection::{StorageConnection, StorageInterruptHandle};

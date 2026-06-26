@@ -40,14 +40,24 @@
 //!   `path` use in DAEMON-CANCEL-1: their loops (`find_sccs_cancellable`,
 //!   `LiveGraph::path_cancellable`) are reachable from Rust and accept a
 //!   `CancelCheck` closure.
-//! * **Worker-thread supervisor** ([`run_interruptible`] + [`CancelFlag`]) — for
-//!   heavy work that CANNOT be checkpointed in-Rust from the transport thread
-//!   (a single opaque SQL statement, or multi-signal agent assembly): the work runs
-//!   on a worker thread while the transport thread probes the peer. This is the
-//!   FOUNDATION for DAEMON-CANCEL-2's worker-thread handlers (stats SQL +
-//!   orient/check/trust/explain assembly). It is built and tested here — with the
-//!   internal-failure classification corrected (see [`Supervised`]) — but its
-//!   production callers and its `sqlite3_interrupt` actuator are CANCEL-2.
+//! * **Worker-thread supervisor** ([`run_interruptible`] + [`CancelFlag`] + the
+//!   `on_disconnect` abort actuator) — for heavy work that CANNOT be checkpointed
+//!   in-Rust from the transport thread (a single opaque SQL statement): the work
+//!   runs on a worker thread while the transport thread probes the peer, and on
+//!   disconnect fires an abort actuator the cooperative flag cannot substitute for.
+//!   DAEMON-CANCEL-1 built and tested this supervisor (with the internal-failure
+//!   classification corrected — see [`Supervised`]) but left it without a production
+//!   caller or actuator. **DAEMON-CANCEL-2 wires its first production callers:** EVERY
+//!   `compute_module_stats` path reachable from `handle_stats` — the DEFAULT `auto`
+//!   SQLite fallback, the cert-build / `--engine compare` divergence read, and the
+//!   `--engine sqlite` escape hatch — runs `compute_module_stats` on the worker via the
+//!   single `livegraph_feed::cancellable_module_stats` chokepoint, which passes
+//!   `on_disconnect = move || interrupt.interrupt()` (a `StorageInterruptHandle`
+//!   `sqlite3_interrupt`) so a peer-disconnect aborts the in-flight `SELECT`. (Review
+//!   iteration 1 closed the gap where only the explicit `--engine sqlite` route was
+//!   wired, leaving the production DEFAULT route running heavy SQL to completion after
+//!   disconnect.) orient/check/trust/explain keep their existing handler-boundary
+//!   detection (honest interim) until DAEMON-CANCEL-3 investigates their heaviness.
 //!
 //! ## Abstraction ledger (the cross-cutting cancel seam)
 //!
@@ -76,12 +86,17 @@
 //!   CANCEL-1's in-loop scope and so stays byte-identical.
 //!   `handle_path` threads it into `LiveGraph::path_cancellable`'s BFS on every served
 //!   engine (Auto / LiveGraph / Compare). The worker supervisor ([`run_interruptible`])
-//!   has NO production caller in this slice — it is the ratified foundation
-//!   (DAEMON-CANCEL-1 deliverable #2) for CANCEL-2's worker-thread handlers; it is
-//!   exercised by this module's tests.
+//!   gained its production caller in DAEMON-CANCEL-2: ALL of `handle_stats`'s
+//!   `compute_module_stats` paths (the DEFAULT `auto` SQLite fallback, the cert-build /
+//!   `--engine compare` read, and the `--engine sqlite` escape hatch) run it on the
+//!   worker via the single `livegraph_feed::cancellable_module_stats` chokepoint, which
+//!   passes a `StorageInterruptHandle` `sqlite3_interrupt` as `on_disconnect`.
 //! * **Axis of variation:** cancellable vs not — and within cancellable, which
 //!   threading model the heavy-work shape needs (a transport-thread Rust-loop
-//!   checkpoint, or a worker-thread supervisor for opaque SQL/assembly).
+//!   checkpoint, or a worker-thread supervisor for opaque SQL); and within the
+//!   supervisor, the disconnect response shape (`on_disconnect`): a no-op for a
+//!   cooperative Rust-loop worker, or a `sqlite3_interrupt` abort for an opaque-SQL
+//!   worker. The actuator is a bare `FnOnce()` so the seam never depends on storage.
 //! * **Rejected simpler alternatives:** (1) handler-boundary-only checkpoints
 //!   (cancel BEFORE heavy work) — Option B, operator-rejected (lets an abandoned
 //!   heavy query run to completion). The cheap [`pre_work_check`] layer is KEPT
@@ -91,23 +106,53 @@
 //!   on a CPU-bound Rust loop). cycles/path thread a real checkpoint INTO the loop
 //!   instead. (3) A bespoke cancel-token framework / new crate — rejected: the seam
 //!   is `std::ops::ControlFlow` + a bare closure + an `Arc<AtomicBool>` flag, no
-//!   new type framework. The `sqlite3_interrupt` actuator (for opaque SQL) is
-//!   deliberately NOT added here (DAEMON-CANCEL-2; STOP_CONDITION: no stats
-//!   SQL-interrupt wiring in this slice).
+//!   new type framework. DAEMON-CANCEL-2's `sqlite3_interrupt` actuator (for opaque
+//!   SQL) is added as a generic `on_disconnect: impl FnOnce()` parameter on the
+//!   EXISTING supervisor — not a parallel cancellation path, and not a storage
+//!   dependency in `cancel`: the caller (`handle_stats`) builds the
+//!   `move || interrupt.interrupt()` closure from a `StorageInterruptHandle`.
 
 use std::ops::ControlFlow;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::Duration;
 
 use repo_graph_daemon_transport::{ProgressDetail, ProgressEmitter};
 
-/// How often [`run_interruptible`]'s supervisor probes the peer during a long
-/// worker-thread query. Bounds cancel latency (after a real disconnect) to one
-/// interval. Fast queries are unaffected: the supervisor wakes the instant the
-/// worker finishes, so a sub-interval query never emits a heartbeat at all.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(100);
+/// Cadence (ms) at which [`run_interruptible`]'s supervisor probes the peer during a
+/// long worker-thread query. Bounds cancel latency (after a real disconnect) to one
+/// interval. Fast queries are unaffected: the supervisor wakes the instant the worker
+/// finishes, so a sub-interval query never emits a heartbeat at all.
+///
+/// Settable ONLY via [`set_heartbeat_interval_ms_for_test`] (a test seam, see there);
+/// production always uses 100 ms.
+static HEARTBEAT_MS: AtomicU64 = AtomicU64::new(100);
+
+fn heartbeat_interval() -> Duration {
+    Duration::from_millis(HEARTBEAT_MS.load(Ordering::Relaxed))
+}
+
+/// TEST SEAM — override the supervisor heartbeat cadence (ms, clamped to ≥ 1).
+///
+/// Opaque-SQL cancellation (stats) is INHERENTLY heartbeat-timed: a single `SELECT`
+/// blocks inside SQLite's C VM, so — unlike cycles/path's Rust loops — there is no
+/// in-statement checkpoint a test can barrier on. Proving in-flight cancellation
+/// through the real handler therefore needs the FIRST heartbeat to fire while the
+/// query still runs. Rather than build a multi-second giant fixture to outlast the
+/// 100 ms production cadence (empirically impractical for a safe margin), the daemon's
+/// `dispatched_stats_cancels_via_sqlite_interrupt_when_peer_disconnects` test shortens
+/// the cadence so a SMALL fixture suffices. The wall-clock-FREE proof that the
+/// interrupt actually aborts the statement lives in storage's
+/// `interrupt_handle_aborts_in_flight_compute_module_stats`.
+///
+/// `#[doc(hidden)]` and `_for_test`-named: it is process-global mutable state with no
+/// production caller. The daemon never calls it, so production cadence is the 100 ms
+/// default.
+#[doc(hidden)]
+pub fn set_heartbeat_interval_ms_for_test(ms: u64) {
+    HEARTBEAT_MS.store(ms.max(1), Ordering::Relaxed);
+}
 
 /// A heartbeat progress event. `current/total = 0/1` marks it as a liveness probe
 /// rather than real progress; its only job is to attempt a transport write so a
@@ -239,17 +284,38 @@ pub enum Supervised<T> {
 /// Fast queries pay no fixed latency: `recv_timeout` returns the moment the worker
 /// sends, so a sub-interval query never emits a heartbeat at all.
 ///
-/// NOTE (DAEMON-CANCEL-1 scope): this is the cooperative-flag supervisor only. The
-/// `sqlite3_interrupt` actuator that aborts a single in-flight SQL statement
-/// mid-execution (needed by the stats/agent worker handlers, which disconnect while
-/// blocked *inside* an opaque statement) is DAEMON-CANCEL-2 — it adds an interrupt
-/// handle parameter alongside the flag. There is NO production caller of this
-/// supervisor in DAEMON-CANCEL-1 (cycles/path use the transport-thread
-/// [`loop_checkpoint`] instead); it is the ratified foundation, validated by the
-/// tests below.
+/// ## The two disconnect responses: the cooperative flag AND `on_disconnect`
+///
+/// On peer-disconnect the supervisor does TWO things, for the two shapes of heavy
+/// work a worker can run:
+///
+/// 1. It latches the [`CancelFlag`] — for a worker whose heavy work is a **Rust
+///    loop** that polls `flag.checkpoint()` (the cooperative path; the worker bails
+///    at its next checkpoint).
+/// 2. It calls **`on_disconnect`** — the abort actuator for a worker blocked
+///    *inside* opaque work a Rust checkpoint can NOT reach. The concrete current
+///    user (DAEMON-CANCEL-2) is `stats`: `on_disconnect` fires a
+///    `sqlite3_interrupt` handle (`StorageInterruptHandle::interrupt`) to abort the
+///    in-flight `compute_module_stats` `SELECT`. This is exactly the "interrupt
+///    handle parameter alongside the flag" DAEMON-CANCEL-1 anticipated — generalized
+///    to a bare `FnOnce()` so this seam stays storage-agnostic (the caller builds
+///    the closure; `cancel` never depends on the storage crate).
+///
+/// `on_disconnect` runs on THIS (the supervising/transport) thread, once, only on a
+/// real peer-disconnect — never on worker completion and never on
+/// [`WorkerVanished`](Supervised::WorkerVanished). A cooperative-only worker passes
+/// `|| {}` (no actuator needed); the flag alone suffices for it.
+///
+/// After firing, the supervisor returns [`Cancelled`](Supervised::Cancelled)
+/// WITHOUT joining the worker. The worker unwinds (its `SELECT` returns
+/// `SQLITE_INTERRUPT`, or its Rust loop breaks), drops its connection, and its
+/// discarded `send` no-ops once the receiver is gone. Firing the interrupt handle
+/// after the worker has dropped its connection is a safe no-op (the handle and the
+/// connection serialize on a shared mutex; see `StorageInterruptHandle`).
 pub fn run_interruptible<T, F>(
     emitter: &mut dyn ProgressEmitter,
     phase: &str,
+    on_disconnect: impl FnOnce(),
     work: F,
 ) -> Supervised<T>
 where
@@ -260,19 +326,23 @@ where
     let worker_flag = flag.clone();
     let (tx, rx) = mpsc::channel();
     // Detached worker (like B1's connection threads): on cancel we return without
-    // joining; the worker finishes quickly once cancel-flagged and its `send` no-ops.
+    // joining; the worker finishes quickly once cancel-flagged / interrupted and its
+    // `send` no-ops.
     std::thread::spawn(move || {
         let _ = tx.send(work(worker_flag));
     });
 
+    let heartbeat_period = heartbeat_interval();
     loop {
-        match rx.recv_timeout(HEARTBEAT_INTERVAL) {
+        match rx.recv_timeout(heartbeat_period) {
             Ok(result) => return Supervised::Completed(result),
             Err(RecvTimeoutError::Timeout) => {
                 if emitter.emit(heartbeat(phase)).is_err() {
-                    // Peer gone (K-A). Latch the flag so the worker's loop bails at
-                    // its next checkpoint, then return without joining.
+                    // Peer gone (K-A). Latch the flag (for a cooperative Rust-loop
+                    // worker) AND fire the abort actuator (for a worker blocked
+                    // inside opaque SQL), then return without joining.
                     flag.cancel();
+                    on_disconnect();
                     return Supervised::Cancelled;
                 }
             }
@@ -281,6 +351,7 @@ where
                 // peer was still connected — an INTERNAL failure, NOT a client
                 // cancel. This is the deliverable-#2 fix: the prior WIP returned
                 // Cancelled here, masquerading a worker panic as "client disconnected".
+                // `on_disconnect` is NOT fired: nothing disconnected, the worker died.
                 return Supervised::WorkerVanished;
             }
         }
@@ -354,35 +425,60 @@ mod tests {
 
     #[test]
     fn run_interruptible_completes_when_peer_stays() {
-        // A fast worker returns its value; no heartbeat failure ⇒ Completed.
+        // A fast worker returns its value; no heartbeat failure ⇒ Completed, and the
+        // on_disconnect abort actuator must NOT fire (nothing disconnected).
         let mut emitter = FailAfter {
             ok_for: 1000,
             emits: 0,
         };
-        let out = run_interruptible(&mut emitter, "p", |_flag| 7u32);
+        let fired = Arc::new(AtomicBool::new(false));
+        let f = fired.clone();
+        let out = run_interruptible(
+            &mut emitter,
+            "p",
+            move || f.store(true, Ordering::Relaxed),
+            |_flag| 7u32,
+        );
         assert!(matches!(out, Supervised::Completed(7)));
+        assert!(
+            !fired.load(Ordering::Relaxed),
+            "on_disconnect must not fire when the worker completes with the peer connected"
+        );
     }
 
     #[test]
-    fn run_interruptible_cancels_on_disconnect_while_work_in_flight() {
+    fn run_interruptible_cancels_and_fires_abort_actuator_on_disconnect_in_flight() {
         use std::sync::mpsc as m;
         // The worker blocks until released, so it is provably IN FLIGHT when the
         // emitter starts failing. The supervisor must observe the emit failure,
-        // latch the flag, and return Cancelled WITHOUT waiting for the (still-blocked)
-        // worker. The worker also witnesses the flag being set (proves the
-        // cooperative signal crosses the thread boundary).
+        // latch the flag, FIRE the on_disconnect actuator (the DAEMON-CANCEL-2
+        // sqlite3_interrupt stand-in), and return Cancelled WITHOUT waiting for the
+        // (still-blocked) worker. The worker also witnesses the flag (the cooperative
+        // signal crosses the thread boundary). on_disconnect runs synchronously in
+        // the supervisor before it returns, so observing Cancelled means it fired.
         let (release_tx, release_rx) = m::channel::<()>();
         let (saw_tx, saw_rx) = m::channel::<bool>();
         let mut emitter = FailAfter {
             ok_for: 0,
             emits: 0,
         }; // fails on the first heartbeat
-        let out = run_interruptible(&mut emitter, "p", move |flag| {
-            let _ = release_rx.recv(); // still running at cancel time
-            let _ = saw_tx.send(flag.is_cancelled());
-            42u32
-        });
+        let fired = Arc::new(AtomicBool::new(false));
+        let f = fired.clone();
+        let out = run_interruptible(
+            &mut emitter,
+            "p",
+            move || f.store(true, Ordering::Relaxed), // stand-in for StorageInterruptHandle::interrupt
+            move |flag| {
+                let _ = release_rx.recv(); // still running at cancel time
+                let _ = saw_tx.send(flag.is_cancelled());
+                42u32
+            },
+        );
         assert!(matches!(out, Supervised::Cancelled));
+        assert!(
+            fired.load(Ordering::Relaxed),
+            "the on_disconnect abort actuator must fire on peer-disconnect (this is how the in-flight SQL is aborted)"
+        );
         let _ = release_tx.send(()); // let the detached worker finish and exit
         assert!(
             saw_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -396,15 +492,28 @@ mod tests {
         // value (panic) while the peer is LIVE must surface as WorkerVanished
         // (→ InternalError), NEVER Cancelled (→ "client disconnected"). The emitter
         // never fails, so the only way the channel disconnects is the worker dying.
+        // DAEMON-CANCEL-2 addendum: the on_disconnect abort actuator must NOT fire on
+        // a worker panic — firing sqlite3_interrupt for an internal bug would be a
+        // category error (there was no disconnect).
         let mut emitter = FailAfter {
             ok_for: 1_000_000,
             emits: 0,
         };
-        let out: Supervised<u32> =
-            run_interruptible(&mut emitter, "p", |_flag| panic!("worker boom"));
+        let fired = Arc::new(AtomicBool::new(false));
+        let f = fired.clone();
+        let out: Supervised<u32> = run_interruptible(
+            &mut emitter,
+            "p",
+            move || f.store(true, Ordering::Relaxed),
+            |_flag| panic!("worker boom"),
+        );
         assert!(
             matches!(out, Supervised::WorkerVanished),
             "a worker panic must be WorkerVanished (internal failure), not Cancelled"
+        );
+        assert!(
+            !fired.load(Ordering::Relaxed),
+            "on_disconnect must NOT fire on WorkerVanished (no disconnect happened; the worker died)"
         );
     }
 }
