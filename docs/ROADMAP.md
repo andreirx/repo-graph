@@ -59,14 +59,14 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
   `livegraph_refresh`/`preload` under the coordinator + S-A normal-open). The two-agent
   review withdrew W-B (cross-store split-brain) → deferred to **`DAEMON-W-B-EPOCH-1`**.
   _(TECH-DEBT #1/#2/#2b)_
-  - **B2 (query-path cancellation, in-loop / Option A) — decomposed.** The single mega-slice
-    blocked (all 7 paths at once was too big to converge honestly; `sqlite3_interrupt` only
-    aborts SQL, not the Rust loops). Split into: **`DAEMON-CANCEL-1`** (the cancel seam +
-    `run_interruptible` fix [panic ≠ Cancelled] + in-loop cancellation for the two deep Rust
-    loops: cycles Tarjan + path BFS, honest large-fixture tests) → **`DAEMON-CANCEL-2`**
-    (stats SQL `sqlite3_interrupt` to the production handler + orient/check/trust/explain
-    multi-signal assembly checkpoints). Un-wired paths keep honest handler-boundary
-    detection in the interim.
+  - **B2 (query-path cancellation, in-loop / Option A) — COMPLETE** (decomposed; the mega-slice
+    blocked, too big). Shipped as **`DAEMON-CANCEL-1`** (cancel seam + `run_interruptible` fix
+    [panic ≠ Cancelled] + cycles Tarjan + path BFS) → **`DAEMON-CANCEL-2`** (stats SQL
+    `sqlite3_interrupt`) → **`DAEMON-CANCEL-3`** (orient/check/trust/explain: cycle Tarjan,
+    complexity `FETCH_ALL`, trust `compute_module_stats` SQL + 100k sample loop). A Codex
+    decision review refuted a "these paths are light" hypothesis (cited) → confirmed Option A.
+    Every heavy query path now cancels mid-flight on peer-disconnect; honest large-fixture
+    in-flight tests throughout.
   - **`DAEMON-W-B-EPOCH-1`** (deferred, depends on B1) — capture a request-level
     `(ready_snapshot_uid, livegraph_fingerprint)` epoch once and thread it through every
     SQLite + LiveGraph read in a request; prove whole-request join coherence (amend

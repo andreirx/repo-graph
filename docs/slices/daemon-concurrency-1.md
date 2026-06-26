@@ -742,3 +742,14 @@ emitter-`Err` seam, **plus** `sqlite3_interrupt` (rusqlite interrupt handle) for
 seam is accepted by this ratification; §7.3 stands unchanged. If the seam would require a NEW crate
 boundary or a breaking trait-contract change (beyond threading an optional cancel param), the IMPL
 STOPs + surfaces (it does not restructure a boundary unilaterally).
+
+**B2 COMPLETE (2026-06-26).** D-K shipped in three reviewable slices after the single mega-slice
+blocked: **DAEMON-CANCEL-1** (cancel seam + `run_interruptible` panic≠Cancelled fix + cycles
+Tarjan + path BFS), **DAEMON-CANCEL-2** (stats `sqlite3_interrupt`), **DAEMON-CANCEL-3**
+(orient/check/trust/explain — cycle Tarjan, complexity `FETCH_ALL`, trust `compute_module_stats`
+SQL + sample loop). A Codex adversarial decision review on CANCEL-3 scope **refuted** (with cites)
+a hypothesis that orient/check/trust/explain were light — they reach heavy uncancellable storage
+work — confirming the operator's Option A. Every heavy query path now cancels mid-flight; honest
+large-fixture in-flight tests throughout. The B1 concurrency + B2 cancellation arc is fully shipped.
+**Still deferred:** `DAEMON-W-B-EPOCH-1` (the cross-store epoch → re-enable W-B + E-A) and the K-B
+fd-watcher (the K-A limitation's upgrade).

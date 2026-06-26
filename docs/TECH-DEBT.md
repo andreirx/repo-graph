@@ -52,7 +52,14 @@ robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
   comparable in kind to the all-in-memory indexer redesign under *Large-Repo
   Scalability*.
 
-### 2. No cancellation on the query paths (P2)
+### 2. No cancellation on the query paths (P2) — RESOLVED 2026-06-26
+
+**RESOLVED** by B2 (daemon-concurrency-1 §14 D-K), shipped as DAEMON-CANCEL-1/2/3: every heavy
+query path (cycles, path, stats, orient, check, trust, explain) now cooperatively cancels
+mid-flight on peer-disconnect (Rust-loop checkpoints + `sqlite3_interrupt` for SQL), reusing
+the D5b emitter seam; worker-internal failure stays `WorkerVanished`, not `Cancelled`. K-A
+limitation (a connected-but-not-reading peer can block the heartbeat write) documented; K-B
+fd-watcher is the named deferred upgrade. Original finding preserved below for the audit trail.
 
 - **OBSERVED:** cancellation today is coupled to **progress emission**. Per *Daemon —
   Progress abort checkpoint granularity* (D5b), a transport-write failure during a
