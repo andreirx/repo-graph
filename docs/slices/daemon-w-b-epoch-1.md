@@ -1156,15 +1156,22 @@ cannot ride the callgraph cert (different edge bases). **Operator chose FULL W-B
   (enrich composes via the shared epoch).
 - **Contested → resolved FULL W-B:** D-WB = **WB-A** (relax `Refreshing`→reader); D-SCOPE = **SC-B** (ALL mixed-read
   handlers — orient/explain/callers/callees/path **+ imports/stats/cycles** — get the captured epoch + build-then-peek,
-  closing the global-coordinator TOCTOU the review found); D-CC = **split** — CC-A (callgraph cert) for callers/callees,
-  and a **dedicated path-parity cert over CALLS∪IMPORTS** for `path` (the callgraph cert is CALLS-only and does not
-  license the LiveGraph path serve).
+  closing the global-coordinator TOCTOU the review found); D-CC = CC-A (callgraph cert) for callers/callees, and for
+  `path` — **REFINED at IMPL planning (2026-06-27, decide-and-record, smallest correct):** `path` **serves from the
+  pinned SQLite snapshot under the epoch** (NO LiveGraph fastpath for path). This is the decision-review's explicit
+  "exclude path" resolution — strictly coherent, and path still gets read-during-refresh via the pin. A dedicated
+  CALLS∪IMPORTS path-parity cert to RE-ENABLE path's LiveGraph fastpath is a **deferred speed optimization, NOT a W-B
+  correctness blocker** (the callgraph cert is CALLS-only and cannot license the LG path serve; building a true
+  CALLS∪IMPORTS parity would require extending the LG path engine — out of scope for correctness).
 
 **IMPL decomposition (multi-slice arc — the FULL W-B scope is too big for one slice, per the B2 mega-slice lesson;
 ordered epoch-first / relax-last so the coordinator is relaxed ONLY after every handler is epoch-safe):**
 - **`W-B-EPOCH-IMPL-1`** — the `RequestEpoch` foundation (EP-A/EV-A/RET-A) + build-then-peek on the mixed-read
   handlers, **under W-A** (no relax yet); remove the orient double-resolve. Banks request self-coherence safely.
-- **`W-B-EPOCH-IMPL-2`** — the dedicated **path-parity cert (CALLS∪IMPORTS)** licensing `path`'s LiveGraph serve.
+- **`W-B-EPOCH-IMPL-2`** — `path` epoch-safety: serve `path` from the pinned SQLite snapshot under the epoch (no LG
+  fastpath); thread the epoch + EV-A. Small. (The CALLS∪IMPORTS path-parity cert to re-enable path's LG fastpath is a
+  deferred optimization slice, not here.) **+ the SC-B additions** (imports/stats/cycles build-then-peek under the epoch)
+  so ALL mixed-read handlers are epoch-safe before the flip.
 - **`W-B-EPOCH-IMPL-3`** — flip **WB-A** (relax the coordinator) + the §10/§6 **whole-request join coherence** proof +
   **E-A** (enrich shares the seam). The actual read-during-refresh, last — only once IMPL-1/2 make all handlers
   epoch-safe. The §11 headless coherence tests (incl. 7–9b) land across these slices.
