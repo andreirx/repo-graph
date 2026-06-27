@@ -67,6 +67,7 @@ use repo_graph_livegraph::LiveGraph;
 
 use crate::callgraph_cert::callgraph_is_green;
 use crate::focus_resolution_cert::focus_resolution_is_green;
+use crate::livegraph_feed::{import_cert_fingerprint, RequestEpoch};
 use crate::state::RepoState;
 
 mod storage_port_impl;
@@ -91,6 +92,40 @@ pub fn orient_bounded_cert_is_green(repo_state: &RepoState, snapshot_uid: &str) 
         && callgraph_is_green(repo_state, snapshot_uid)
 }
 
+/// W-B-EPOCH-IMPL-1 (D-EP capture for orient/explain; `daemon-w-b-epoch-1.md` §5.1/§6.4): the BOUNDED-cert
+/// LG-serve eligibility WITNESS, captured BUILD-THEN-PEEK — the sibling of
+/// `callgraph_cert::callgraph_cert_eligibility` over the bounded (FOCUS-RESOLUTION ∧ CALLGRAPH) cert.
+/// Returns `Some(current_fp)` iff BOTH sub-certs are GREEN at EXACTLY the resident fingerprint for
+/// `snapshot_uid` (so the decorator-served (b) leaves are cert-proven no-loss-equal to SQLite@`snapshot_uid`);
+/// otherwise `None` ⇒ orient/explain run over BARE SQLite (the unchanged eager path).
+///
+/// `Some(_).is_some()` is the SAME serve decision the prior `orient_bounded_cert_is_green(...)` produced
+/// (both sub-certs green at the current fingerprint) — under the W-A coordinator no swap can occur
+/// mid-request, so warming builds both certs at the resident fingerprint and the peek confirms them, giving
+/// byte-identical steady-state behavior. Build-then-peek (one livegraph read guard across BOTH the
+/// fingerprint computation and the two cert peeks) is what makes the captured witness honest under a future
+/// W-B relax: see `callgraph_cert_eligibility` for the lazy-rebuild TOCTOU it closes.
+pub fn orient_bounded_cert_eligibility(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+) -> Option<String> {
+    // 1. WARM both sub-certs (each lazily (re)builds if stale/missing, dropping its own guards).
+    let _ = orient_bounded_cert_is_green(repo_state, snapshot_uid);
+    // 2. PEEK under ONE read guard so "(both green) at (this exact resident fingerprint)" is atomic w.r.t.
+    //    a swap (a swap needs `livegraph.write()`, excluded while we hold `read()`).
+    let guard = repo_state.livegraph.read();
+    let current_fp = import_cert_fingerprint(&guard.as_ref()?.live_partitions(), snapshot_uid);
+    let fr_green = matches!(
+        repo_state.focus_resolution_cert.read().as_ref(),
+        Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN"
+    );
+    let cg_green = matches!(
+        repo_state.callgraph_cert.read().as_ref(),
+        Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN"
+    );
+    (fr_green && cg_green).then_some(current_fp)
+}
+
 /// The orient bounded (b)-leaf serve decorator. `livegraph` is the daemon's resident LiveGraph (the
 /// (b)-leaf value source on green); `inner` is the SQLite read port everything else delegates to. Held
 /// by reference (no clone) for the lifetime of one orient request.
@@ -105,13 +140,44 @@ pub fn orient_bounded_cert_is_green(repo_state: &RepoState, snapshot_uid: &str) 
 pub struct OrientServeDecorator<'a, S: ?Sized> {
     livegraph: &'a parking_lot::RwLock<Option<LiveGraph>>,
     inner: &'a S,
+    /// W-B-EPOCH-IMPL-1 (D-EV = EV-A): the captured request epoch. Each (b)-leaf serve re-validates the
+    /// resident LiveGraph fingerprint against `epoch.fingerprint` under the data read guard; on a mismatch
+    /// (a mid-request swap) the leaf fails soft to the pinned SQLite snapshot — never a cross-epoch mix.
+    epoch: &'a RequestEpoch,
 }
 
 impl<'a, S: AgentStorageRead + GateStorageRead + ?Sized> OrientServeDecorator<'a, S> {
-    /// Wrap `inner` (the SQLite port) with `livegraph` (the (b)-leaf value source). Constructed by the
-    /// daemon ONLY when the bounded orient cert is GREEN.
-    pub fn new(livegraph: &'a parking_lot::RwLock<Option<LiveGraph>>, inner: &'a S) -> Self {
-        Self { livegraph, inner }
+    /// Wrap `inner` (the SQLite port) with `livegraph` (the (b)-leaf value source) + the captured request
+    /// `epoch` (the EV-A serve-time validation pin). Constructed by the daemon ONLY when the bounded orient
+    /// cert eligibility is `Some` (the same GREEN-bounded-cert precondition as before).
+    pub fn new(
+        livegraph: &'a parking_lot::RwLock<Option<LiveGraph>>,
+        inner: &'a S,
+        epoch: &'a RequestEpoch,
+    ) -> Self {
+        Self {
+            livegraph,
+            inner,
+            epoch,
+        }
+    }
+
+    /// W-B-EPOCH-IMPL-1 (D-EV = EV-A): is the resident LiveGraph still the captured green-validated epoch?
+    /// `true` iff `import_cert_fingerprint(resident partitions, epoch.snapshot_uid()) == epoch.fingerprint`.
+    /// Computed INSIDE each serve method's read guard (passed `lg`), so the gate and the data read are
+    /// atomic w.r.t. a swap (a swap takes `livegraph.write()`). On `false` the serve method delegates to the
+    /// pinned SQLite snapshot. Partition epochs are monotonic, so once a swap moves the fingerprint the
+    /// match can never spuriously re-appear.
+    fn epoch_resident(&self, lg: &LiveGraph) -> bool {
+        // RED path (no eligibility witness): never serve the LiveGraph, and SKIP the fingerprint
+        // computation. `handle_explain` wraps this decorator even on a RED bounded cert (to pin
+        // `get_latest_snapshot`), so this short-circuit keeps the red (b)-leaf serve byte-for-byte the
+        // bare-SQLite path — the decorator does no LiveGraph work beyond the (negligible) read guard.
+        let Some(captured_fp) = self.epoch.fingerprint.as_ref() else {
+            return false;
+        };
+        let current_fp = import_cert_fingerprint(&lg.live_partitions(), self.epoch.snapshot_uid());
+        &current_fp == captured_fp
     }
 }
 

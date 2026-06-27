@@ -30,6 +30,7 @@ use std::sync::atomic::Ordering;
 use repo_graph_agent::{AgentStorageRead, Budget, SignalCode};
 use repo_graph_coherence::Source;
 use repo_graph_gate::GateStorageRead;
+use repo_graph_trust_model::LanguageSupport;
 
 use crate::callgraph_cert::test_fixture;
 use crate::explain_coherence::build_explain_envelope;
@@ -52,6 +53,26 @@ fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
         .expect("run_explain ok")
 }
 
+/// W-B-EPOCH-IMPL-1: a captured `RequestEpoch` for the GREEN fixture — the pinned `AgentSnapshot` + the
+/// build-then-peek bounded-cert eligibility (`Some(fp)` on the green mirror). `handle_explain` builds the
+/// SAME epoch; the decorator's EV-A gate matches it against the (unswapped) resident fingerprint, so the
+/// served (b) leaves are byte-identical to before this slice.
+fn green_epoch(
+    state: &crate::state::RepoState,
+    snapshot_uid: &str,
+    repo: &str,
+) -> crate::livegraph_feed::RequestEpoch {
+    let storage = state.storage().expect("storage");
+    let snapshot = repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, repo)
+        .expect("get_latest_snapshot ok")
+        .expect("ready snapshot");
+    let fingerprint = crate::orient_serve::orient_bounded_cert_eligibility(state, snapshot_uid);
+    crate::livegraph_feed::RequestEpoch {
+        snapshot,
+        fingerprint,
+    }
+}
+
 // ── V1 PARITY (high fan-in, RANKED): decorator-served explain SYMBOL == bare-SQLite explain SYMBOL ────
 
 #[test]
@@ -72,7 +93,8 @@ fn parity_explain_symbol_high_fanin_ranked_equals_sqlite() {
     // Decorator path: focus resolution + callers served from the LiveGraph (raw IR-edge order), then
     // ranked + truncated by the agent.
     let served = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, fanin_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
         run_explain(&decorator, fanin_fixture::REPO, &target)
     };
     // Bare SQLite path (the RED fallback / today's eager read): callers in SQLite raw order, then ranked +
@@ -151,7 +173,8 @@ fn no_eager_nodes_read_explain_symbol_serves_from_livegraph() {
     let spy = ServeSpy::panicking(&storage);
     let target = test_fixture::callee_key();
     let result = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
         // If ANY served (b) method (the four focus-resolution `nodes` methods or callers/callees) hit
         // SQLite, the spy PANICS. Completing a SYMBOL-focus explain proves explain SYMBOL is `nodes`-free
         // on green: focus resolution is served from the LiveGraph. The (c) trust + cycles `edges` reads are
@@ -178,7 +201,8 @@ fn honest_bound_explain_file_still_reads_nodes_on_green() {
 
     let spy = ServeSpy::recording(&storage);
     {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
         // FILE focus: focus resolution is served (no `nodes` read for resolution), but `explain_file`
         // reads `compute_file_summary` + `list_symbols_in_file` (the identity/symbols leaves) — `nodes`
         // reads, DELEGATED to SQLite. They are NOT decorator-served (the honest bound).
@@ -204,7 +228,8 @@ fn honest_bound_explain_path_still_reads_nodes_on_green() {
 
     let spy = ServeSpy::recording(&storage);
     {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
         // PATH focus: focus resolution served, but `explain_path` reads `compute_path_summary` +
         // `list_files_in_path` (the identity/files leaves) — `nodes` reads, DELEGATED to SQLite.
         let _ = run_explain(&decorator, test_fixture::REPO, test_fixture::MODULE_DIR);
@@ -273,5 +298,123 @@ fn red_bounded_cert_falls_back_to_bare_sqlite() {
         leaf.provenance.source.contains(&Source::Sqlite)
             && !leaf.provenance.source.contains(&Source::Livegraph),
         "on the RED path the callgraph leaf is SQLite-LABELLED, never livegraph"
+    );
+}
+
+// ── W-B-EPOCH-IMPL-1: explain is epoch-pinned (review-0 #1) ───────────────────────────────────────
+
+/// (a) explain does NOT re-resolve "latest" mid-request. The inner port PANICS on `get_latest_snapshot`;
+/// through the epoch-pinned decorator that call returns the captured `epoch.snapshot` instead, and the six
+/// (b) leaves are LiveGraph-served on green (also panic-guarded). So a completing explain whose stamp is the
+/// PINNED uid proves `run_explain` resolved the snapshot exactly once (via the decorator's pin) with no
+/// delegated re-read — the explain analogue of orient's double-resolve removal.
+#[test]
+fn explain_pins_captured_snapshot_no_reresolve() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
+
+    let spy = ServeSpy::panicking(&storage).panic_on_snapshot_resolve();
+    let target = test_fixture::callee_key();
+    let result = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
+        run_explain(&decorator, test_fixture::REPO, &target)
+    };
+    assert_eq!(
+        result.snapshot, f.snapshot_uid,
+        "explain stamps the captured (pinned) snapshot_uid — no mid-request 'latest' re-read"
+    );
+}
+
+/// (b) EV-A: a mid-request LiveGraph swap makes explain fail soft to the PINNED SQLite snapshot, never the
+/// swapped LiveGraph. Green serves the LiveGraph caller (1) despite an emptied SQLite; after the swap the
+/// captured epoch is stale, so the caller leaf delegates to SQLite at the pinned uid (0), and the stamp stays
+/// the pinned snapshot N — coherent, never a cross-epoch mix.
+#[test]
+fn explain_ev_a_falls_back_to_pinned_sqlite_after_swap() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+    let callee = test_fixture::callee_key();
+
+    let callers_count = |r: &repo_graph_agent::OrientResult| -> Option<u64> {
+        r.signals
+            .iter()
+            .find(|s| s.code() == SignalCode::ExplainCallers)
+            .and_then(|s| s.explain_callers_evidence())
+            .map(|e| e.count)
+    };
+
+    // Diverge SQLite from the LiveGraph so the two serve sites are distinguishable: drop the SQLite CALLS
+    // edge. SQLite callers(calleeFn)=∅; the LiveGraph still has callerFn. (A SQLite-only mutation does NOT
+    // move the LiveGraph fingerprint, so the captured epoch still matches — green still serves the LG.)
+    storage.delete_edges_by_uids(&["ec0".to_string()]).unwrap();
+    let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
+
+    let served = run_explain(&decorator, test_fixture::REPO, &callee);
+    assert_eq!(
+        served.snapshot, f.snapshot_uid,
+        "green: stamp is the pinned snapshot"
+    );
+    assert_eq!(
+        callers_count(&served),
+        Some(1),
+        "green: explain serves the LiveGraph caller despite the emptied SQLite"
+    );
+
+    // EV-A: swap the LiveGraph (the resident fingerprint moves) -> the captured epoch is stale -> explain's
+    // caller leaf fails soft to the PINNED SQLite snapshot (emptied), NOT the swapped LiveGraph.
+    f.state.livegraph.write().as_mut().unwrap().load_partition(
+        "p",
+        test_fixture::build_ir(),
+        LanguageSupport::TypeScriptPrimary,
+    );
+    let fell_back = run_explain(&decorator, test_fixture::REPO, &callee);
+    assert_eq!(
+        fell_back.snapshot, f.snapshot_uid,
+        "after swap: the stamp STAYS the pinned snapshot N (no cross-epoch mix)"
+    );
+    assert_eq!(
+        callers_count(&fell_back),
+        Some(0),
+        "after swap: explain serves SQLite@pin (∅), never the stale LiveGraph caller"
+    );
+}
+
+/// (c) RED bounded cert: explain STILL pins, and the always-wrap change is transparent. `handle_explain`
+/// wraps the decorator even on RED (eligibility `None`), so the `epoch_resident` short-circuit makes the
+/// (b) leaves delegate to SQLite at the pinned uid while `get_latest_snapshot` returns the pinned snapshot.
+/// The decorator-served RED answer is therefore byte/value-identical to bare-SQLite explain — the pin adds
+/// coherence without changing the RED output.
+#[test]
+fn explain_red_epoch_pins_and_is_transparent() {
+    // drop_calls = true: the SQLite mirror omits the CALLS edge -> callgraph diverges -> bounded cert RED.
+    let f = test_fixture::build_fixture(true);
+    let storage = f.state.storage().unwrap();
+    assert!(!orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
+
+    // The captured epoch carries NO eligibility witness on RED (`fingerprint == None`).
+    let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+    assert!(
+        epoch.fingerprint.is_none(),
+        "RED bounded cert -> no eligibility witness (fingerprint None)"
+    );
+
+    let callee = test_fixture::callee_key();
+    let via_decorator = {
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
+        run_explain(&decorator, test_fixture::REPO, &callee)
+    };
+    let bare = run_explain(&storage, test_fixture::REPO, &callee);
+
+    assert_eq!(
+        serde_json::to_value(&via_decorator).unwrap(),
+        serde_json::to_value(&bare).unwrap(),
+        "RED explain through the epoch-pinned decorator == bare SQLite explain (transparent)"
+    );
+    assert_eq!(
+        via_decorator.snapshot, f.snapshot_uid,
+        "RED path still stamps the pinned snapshot (get_latest_snapshot returns epoch.snapshot)"
     );
 }

@@ -98,6 +98,26 @@ fn bounded_cert_red_without_livegraph() {
     assert!(!orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 }
 
+/// W-B-EPOCH-IMPL-1: a captured `RequestEpoch` for the GREEN faithful fixture — the pinned `AgentSnapshot`
+/// plus the build-then-peek bounded-cert eligibility (`Some(fp)` on the green mirror). The decorator's
+/// EV-A gate matches it against the (unswapped) resident fingerprint, so every (b) leaf serves from the
+/// LiveGraph exactly as before this slice. Shared by the parity + no-eager-read decorator tests.
+fn green_epoch(
+    state: &crate::state::RepoState,
+    snapshot_uid: &str,
+) -> crate::livegraph_feed::RequestEpoch {
+    let storage = state.storage().expect("storage");
+    let snapshot =
+        repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+            .expect("get_latest_snapshot ok")
+            .expect("ready snapshot");
+    let fingerprint = orient_bounded_cert_eligibility(state, snapshot_uid);
+    crate::livegraph_feed::RequestEpoch {
+        snapshot,
+        fingerprint,
+    }
+}
+
 // ── V1 PARITY: decorator-served orient == bare-SQLite orient ─────────────────────────────────────
 
 #[test]
@@ -113,7 +133,8 @@ fn parity_orient_decorator_equals_sqlite_symbol_focus() {
 
     // Decorator path: focus resolution + callers/callees served from the LiveGraph.
     let served = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
         repo_graph_agent::orient(
             &decorator,
             test_fixture::REPO,
@@ -157,7 +178,8 @@ fn parity_orient_decorator_equals_sqlite_repo_focus() {
     let storage = f.state.storage().unwrap();
     let now = "2026-01-01T00:00:00Z";
     let served = {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
         repo_graph_agent::orient(
             &decorator,
             test_fixture::REPO,
@@ -443,7 +465,8 @@ fn no_eager_b_read_symbol_focus_serves_from_livegraph() {
     assert!(orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
     let spy = PartialSpy(&storage);
-    let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy);
+    let epoch = green_epoch(&f.state, &f.snapshot_uid);
+    let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
 
     let focus = test_fixture::callee_key();
     // If ANY (b) leaf (focus resolution / callers / callees) were read from SQLite, the spy PANICS and
@@ -504,8 +527,9 @@ fn served_path_build_envelope_callgraph_label_zero_per_call_read() {
 
     // 2. orient through the decorator (handle_orient step 2): the value serve. calleeFn HAS a caller
     //    (-> CALLERS_SUMMARY); callerFn HAS a callee (-> CALLEES_SUMMARY). Both served from the LiveGraph.
+    let epoch = green_epoch(&f.state, &f.snapshot_uid);
     let serve = |focus: &str| {
-        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
         repo_graph_agent::orient(
             &decorator,
             test_fixture::REPO,

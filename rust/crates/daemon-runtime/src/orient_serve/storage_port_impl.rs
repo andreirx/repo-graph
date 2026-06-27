@@ -38,10 +38,12 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                let env = lg.resolve_path(path);
-                if env.class() == AnswerClass::Exact {
-                    if let Some(d) = env.data() {
-                        return Ok(map_path_resolution(d));
+                if self.epoch_resident(lg) {
+                    let env = lg.resolve_path(path);
+                    if env.class() == AnswerClass::Exact {
+                        if let Some(d) = env.data() {
+                            return Ok(map_path_resolution(d));
+                        }
                     }
                 }
             }
@@ -57,10 +59,12 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                let env = lg.resolve_stable_key(stable_key);
-                if env.class() == AnswerClass::Exact {
-                    if let Some(d) = env.data() {
-                        return Ok(d.as_ref().map(map_candidate));
+                if self.epoch_resident(lg) {
+                    let env = lg.resolve_stable_key(stable_key);
+                    if env.class() == AnswerClass::Exact {
+                        if let Some(d) = env.data() {
+                            return Ok(d.as_ref().map(map_candidate));
+                        }
                     }
                 }
             }
@@ -77,10 +81,12 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                let env = lg.resolve_symbol_name(name);
-                if env.class() == AnswerClass::Exact {
-                    if let Some(d) = env.data() {
-                        return Ok(d.iter().map(map_candidate).collect());
+                if self.epoch_resident(lg) {
+                    let env = lg.resolve_symbol_name(name);
+                    if env.class() == AnswerClass::Exact {
+                        if let Some(d) = env.data() {
+                            return Ok(d.iter().map(map_candidate).collect());
+                        }
                     }
                 }
             }
@@ -96,10 +102,12 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                let env = lg.symbol_context(symbol_stable_key);
-                if env.class() == AnswerClass::Exact {
-                    if let Some(d) = env.data() {
-                        return Ok(d.as_ref().map(map_symbol_context));
+                if self.epoch_resident(lg) {
+                    let env = lg.symbol_context(symbol_stable_key);
+                    if env.class() == AnswerClass::Exact {
+                        if let Some(d) = env.data() {
+                            return Ok(d.as_ref().map(map_symbol_context));
+                        }
                     }
                 }
             }
@@ -116,8 +124,10 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if let Some(rows) = lg_caller_rows(lg, symbol_stable_key) {
-                    return Ok(rows);
+                if self.epoch_resident(lg) {
+                    if let Some(rows) = lg_caller_rows(lg, symbol_stable_key) {
+                        return Ok(rows);
+                    }
                 }
             }
         }
@@ -133,8 +143,10 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if let Some(rows) = lg_callee_rows(lg, symbol_stable_key) {
-                    return Ok(rows);
+                if self.epoch_resident(lg) {
+                    if let Some(rows) = lg_callee_rows(lg, symbol_stable_key) {
+                        return Ok(rows);
+                    }
                 }
             }
         }
@@ -150,9 +162,17 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
 
     fn get_latest_snapshot(
         &self,
-        repo_uid: &str,
+        _repo_uid: &str,
     ) -> Result<Option<AgentSnapshot>, AgentStorageError> {
-        self.inner.get_latest_snapshot(repo_uid)
+        // W-B-EPOCH-IMPL-1 (D-EP, explain pin — review-0 #1): return the PINNED snapshot, NOT a fresh
+        // `inner` "latest" resolve. The explain use case (`run_explain`) derives its `snapshot_uid` SOLELY
+        // from this call and threads it into every downstream read AND the response stamp, so returning the
+        // captured `epoch.snapshot` pins explain's WHOLE request to epoch N — on BOTH the green and red paths
+        // (`handle_explain` wraps this decorator whenever an epoch was captured), with no agent-crate change.
+        // This is the explain analogue of orient's double-resolve removal (orient threads `&epoch.snapshot`
+        // into `orient_repo` directly, so orient never reaches this method). The decorator is request-scoped
+        // to one repo + epoch, so `repo_uid` is not re-resolved.
+        Ok(Some(self.epoch.snapshot.clone()))
     }
 
     fn get_stale_files(

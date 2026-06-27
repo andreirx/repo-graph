@@ -37,7 +37,7 @@ use crate::dto::envelope::{
 };
 use crate::errors::OrientError;
 use crate::storage_port::{
-    AgentCancelCheck, AgentFocusCandidate, AgentFocusKind, AgentStorageRead,
+    AgentCancelCheck, AgentFocusCandidate, AgentFocusKind, AgentSnapshot, AgentStorageRead,
 };
 
 /// Entry point for the orient use case.
@@ -63,9 +63,37 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
     budget: Budget,
     now: &str,
 ) -> Result<OrientResult, OrientError> {
-    orient_cancellable(storage, repo_uid, focus, budget, now, &mut || {
-        std::ops::ControlFlow::Continue(())
-    })
+    // W-B-EPOCH-IMPL-1: resolve the pinned READY snapshot ONCE here — this non-cancellable wrapper is the
+    // CLI/test boundary, the analogue of the daemon's per-request `RequestEpoch` capture. The use case no
+    // longer resolves "latest" internally, so `NoSnapshot` is raised HERE (the caller that resolves), and
+    // the resolved snapshot is threaded down. Production daemon callers capture their own epoch and call
+    // `orient_cancellable` directly.
+    //
+    // Preserve the NoRepo-before-NoSnapshot ordering: probe `get_repo` first so a missing repo still yields
+    // `NoRepo` (the use case used to resolve the repo before the snapshot). The daemon has the same
+    // ordering — it rejects an unknown repo at registry resolution, before its epoch capture. `get_repo` is
+    // a cheap identity lookup re-done in `orient_repo` for `repo.name`; it is NOT the snapshot
+    // double-resolve this slice removes.
+    storage
+        .get_repo(repo_uid)?
+        .ok_or_else(|| OrientError::NoRepo {
+            repo_uid: repo_uid.to_string(),
+        })?;
+    let snapshot =
+        storage
+            .get_latest_snapshot(repo_uid)?
+            .ok_or_else(|| OrientError::NoSnapshot {
+                repo_uid: repo_uid.to_string(),
+            })?;
+    orient_cancellable(
+        storage,
+        repo_uid,
+        &snapshot,
+        focus,
+        budget,
+        now,
+        &mut || std::ops::ControlFlow::Continue(()),
+    )
 }
 
 /// Cancellable entry point for the orient use case (DAEMON-CANCEL-3).
@@ -82,14 +110,17 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
 pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
+    snapshot: &AgentSnapshot,
     focus: Option<&str>,
     budget: Budget,
     now: &str,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     match focus {
-        None => repo::orient_repo(storage, repo_uid, budget, now, cancel),
-        Some(focus_str) => orient_focused(storage, repo_uid, focus_str, budget, now, cancel),
+        None => repo::orient_repo(storage, repo_uid, snapshot, budget, now, cancel),
+        Some(focus_str) => {
+            orient_focused(storage, repo_uid, snapshot, focus_str, budget, now, cancel)
+        }
     }
 }
 
@@ -102,6 +133,7 @@ pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
 fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
+    snapshot: &AgentSnapshot,
     focus_str: &str,
     budget: Budget,
     now: &str,
@@ -114,14 +146,10 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
             repo_uid: repo_uid.to_string(),
         })?;
 
-    // ── 2. Resolve snapshot. ─────────────────────────────────
-    let snapshot =
-        storage
-            .get_latest_snapshot(repo_uid)?
-            .ok_or_else(|| OrientError::NoSnapshot {
-                repo_uid: repo_uid.to_string(),
-            })?;
-
+    // ── 2. Snapshot is INJECTED (W-B-EPOCH-IMPL-1). ──────────
+    // Resolved ONCE by the caller (the daemon `RequestEpoch` capture / the `orient()` wrapper) and threaded
+    // in — the focused pipelines already take `&snapshot`, so only this top-level resolve moved out.
+    // `NoSnapshot` is raised by the caller before this runs.
     let snapshot_uid = &snapshot.snapshot_uid;
 
     // ── 3. Try path-based resolution first. ──────────────────
@@ -131,7 +159,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
         return file::orient_file(
             storage,
             &repo.name,
-            &snapshot,
+            snapshot,
             focus_str,
             resolution.file_stable_key.as_deref(),
             budget,
@@ -154,7 +182,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
         return path::orient_path(
             storage,
             &repo.name,
-            &snapshot,
+            snapshot,
             focus_str,
             resolution.module_stable_key.as_deref(),
             budget,
@@ -172,7 +200,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 Some(ctx) => symbol::orient_symbol(
                     storage,
                     &repo.name,
-                    &snapshot,
+                    snapshot,
                     &candidate.stable_key,
                     &ctx,
                     focus_str,
@@ -184,7 +212,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     // Stable key resolved but no context found —
                     // defensive: treat as no match.
                     Ok(build_no_match_result(
-                        &repo.name, &snapshot, focus_str, budget,
+                        &repo.name, snapshot, focus_str, budget,
                     ))
                 }
             }
@@ -194,7 +222,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
             file::orient_file(
                 storage,
                 &repo.name,
-                &snapshot,
+                snapshot,
                 file_path,
                 Some(&candidate.stable_key),
                 budget,
@@ -208,7 +236,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
             path::orient_path(
                 storage,
                 &repo.name,
-                &snapshot,
+                snapshot,
                 &path,
                 Some(&candidate.stable_key),
                 budget,
@@ -223,7 +251,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 0 => {
                     // No match — valid response with no data.
                     Ok(build_no_match_result(
-                        &repo.name, &snapshot, focus_str, budget,
+                        &repo.name, snapshot, focus_str, budget,
                     ))
                 }
                 1 => {
@@ -234,7 +262,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                         Some(ctx) => symbol::orient_symbol(
                             storage,
                             &repo.name,
-                            &snapshot,
+                            snapshot,
                             &candidate.stable_key,
                             &ctx,
                             focus_str,
@@ -243,7 +271,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                             cancel,
                         ),
                         None => Ok(build_no_match_result(
-                            &repo.name, &snapshot, focus_str, budget,
+                            &repo.name, snapshot, focus_str, budget,
                         )),
                     }
                 }
@@ -251,7 +279,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     // Ambiguous — return candidates, no signals.
                     Ok(build_ambiguous_result(
                         &repo.name,
-                        &snapshot,
+                        snapshot,
                         focus_str,
                         symbol_candidates,
                         budget,

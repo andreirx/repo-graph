@@ -17,7 +17,66 @@ use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageS
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use repo_graph_agent::AgentSnapshot;
+
 use crate::state::RepoState;
+
+/// W-B-EPOCH-IMPL-1 (D-EP = EP-A): the request-scoped cross-store epoch.
+///
+/// A mixed-read handler (orient / explain / callers / callees) reads TWO independently-versioned
+/// stores — the SQLite READY snapshot and the in-memory [`LiveGraph`] — and, before this slice, resolved
+/// "latest" from each store SEPARATELY (orient resolved the snapshot twice; the LiveGraph was served at a
+/// later instant with no epoch pin). `RequestEpoch` is the fix: each handler captures ONE pinned READY
+/// snapshot + ONE green-validated LG-serve eligibility fingerprint right after `acquire_read`, then threads
+/// the captured value so every read in the request resolves to the SAME epoch (`daemon-w-b-epoch-1.md` §5).
+///
+/// - `snapshot` — the pinned READY [`AgentSnapshot`], resolved ONCE. The request's ATOMIC SQLite identity;
+///   every SQLite read uses [`RequestEpoch::snapshot_uid`]. Carried WHOLE (not just the uid) so the orient
+///   use case keeps `aggregators::snapshot::aggregate(&snapshot)` without a second resolve, and so the
+///   `OrientServeDecorator` (orient/explain) can serve it back from `get_latest_snapshot` (pinning explain's
+///   whole request without an agent-crate change — `daemon-w-b-epoch-1.md` §5.2).
+/// - `fingerprint` — the LG-serve eligibility witness, captured BUILD-THEN-PEEK (§6.4) via
+///   `orient_serve::orient_bounded_cert_eligibility` (orient/explain — FOCUS-RESOLUTION ∧ CALLGRAPH bounded
+///   cert) or `callgraph_cert::callgraph_cert_eligibility` (callers/callees — CALLGRAPH cert). `Some(fp)` =
+///   a GREEN no-loss cert exists at EXACTLY the resident fingerprint for `snapshot_uid` (the resident
+///   partitions are cert-proven no-loss-equal to SQLite@`snapshot_uid`); `None` = no green cert ⇒ eager
+///   SQLite, no LiveGraph serve. At each serve site the resident fingerprint is re-validated against this
+///   captured value under the data read guard (EV-A); on mismatch the leaf fails soft to the pinned SQLite
+///   snapshot — never a cross-epoch mix.
+///
+/// Abstraction ledger (per the operating rule):
+/// - **What:** a request-scoped `{ snapshot, fingerprint }` value captured once per request.
+/// - **Concrete current users:** the orient / explain / callers / callees handlers (`dispatch.rs`), the
+///   `OrientServeDecorator` (orient/explain serve gate + snapshot pin), and `callers_engine_response` /
+///   `callees_engine_response` (the callers/callees Auto-arm serve gate).
+/// - **Axis of variation:** per-request cross-store epoch pinning (one snapshot + one eligibility
+///   fingerprint); nothing beyond that.
+/// - **Rejected simpler:** carrying only `snapshot_uid` — non-buildable, it strands
+///   `snapshot::aggregate(&snapshot)` in `orient/repo.rs`. Rejected fancier: a storage-port `pinned_epoch()`
+///   method — an unearned boundary surface; `AgentSnapshot` already crosses the port, so this value
+///   introduces NO new cross-boundary data shape.
+/// - **Home:** this (`livegraph_feed`) module — the lowest of the three serve modules (orient_serve →
+///   callgraph_cert → livegraph_feed; livegraph_feed depends on neither), beside `import_cert_fingerprint`
+///   which computes the epoch's fingerprint. A dedicated `request_epoch` module was REJECTED (review-0 #3:
+///   the packet forbids a new module boundary, and `RequestEpoch` does not need one); orient_serve /
+///   callgraph_cert would each introduce a module cycle.
+pub struct RequestEpoch {
+    /// The pinned READY snapshot, resolved ONCE — the ATOMIC SQLite pin. Carried WHOLE so the orient use
+    /// case keeps `snapshot::aggregate(&snapshot)` and the decorator can return it from
+    /// `get_latest_snapshot` without re-resolving. Every SQLite read uses `snapshot.snapshot_uid`.
+    pub snapshot: AgentSnapshot,
+    /// The LG-serve eligibility witness (build-then-peek): `Some(fp)` = a GREEN no-loss cert validated
+    /// `import_cert_fingerprint(partitions, snapshot.snapshot_uid)` at capture; `None` = no green cert ⇒
+    /// eager SQLite, no LiveGraph serve.
+    pub fingerprint: Option<String>,
+}
+
+impl RequestEpoch {
+    /// The pinned SQLite identity — every SQLite read and the response stamp use THIS.
+    pub fn snapshot_uid(&self) -> &str {
+        &self.snapshot.snapshot_uid
+    }
+}
 
 /// Decode a supplied `index.scip`, ingest it into a `PartitionIr` + complexity map, and feed both
 /// into `lg` (epoch-stamped). Pure over the runtime (no daemon state) so it is unit-testable against
@@ -352,9 +411,23 @@ pub fn livegraph_callee_keys(
 
 /// LiveGraph `callers` answer reduced for the `Auto` decision (class + freshness + TS-only + keys).
 /// `None` = not usable (`Unavailable` / no LiveGraph) → `Auto` falls back with `LiveGraphUnavailable`.
-fn livegraph_callers_auto(repo_state: &RepoState, target: &str) -> Option<LgAuto> {
+fn livegraph_callers_auto(
+    repo_state: &RepoState,
+    epoch: &RequestEpoch,
+    target: &str,
+) -> Option<LgAuto> {
     let guard = repo_state.livegraph.read();
     let lg = guard.as_ref()?;
+    // W-B-EPOCH-IMPL-1 (D-EV = EV-A): the resident LiveGraph must still be the captured green-validated
+    // epoch (the CALLGRAPH-cert eligibility). The fingerprint compare is computed under the SAME read guard
+    // that reads the envelope below, so the gate + the data read are atomic w.r.t. a swap. On a
+    // swap/straddle (current_fp != captured) or a `None` eligibility, return `None` ⇒ the Auto arm serves
+    // SQLite at the pinned snapshot (never a cross-epoch mix). This subsumes the existing per-call
+    // Exact+Fresh+TS-only reduction below, which is kept (belt-and-suspenders).
+    let current_fp = import_cert_fingerprint(&lg.live_partitions(), epoch.snapshot_uid());
+    if Some(&current_fp) != epoch.fingerprint.as_ref() {
+        return None;
+    }
     let env = lg.callers(target, Granularity::CallerDetail);
     if env.class() == AnswerClass::Unavailable {
         return None;
@@ -372,9 +445,19 @@ fn livegraph_callers_auto(repo_state: &RepoState, target: &str) -> Option<LgAuto
 }
 
 /// LiveGraph `callees` answer reduced for the `Auto` decision (symmetric to [`livegraph_callers_auto`]).
-fn livegraph_callees_auto(repo_state: &RepoState, target: &str) -> Option<LgAuto> {
+fn livegraph_callees_auto(
+    repo_state: &RepoState,
+    epoch: &RequestEpoch,
+    target: &str,
+) -> Option<LgAuto> {
     let guard = repo_state.livegraph.read();
     let lg = guard.as_ref()?;
+    // W-B-EPOCH-IMPL-1 (D-EV = EV-A): see `livegraph_callers_auto` — the same captured-epoch fingerprint
+    // gate under the data read guard; mismatch/None ⇒ SQLite at the pinned snapshot.
+    let current_fp = import_cert_fingerprint(&lg.live_partitions(), epoch.snapshot_uid());
+    if Some(&current_fp) != epoch.fingerprint.as_ref() {
+        return None;
+    }
     let env = lg.callees(target, Granularity::CallerDetail);
     if env.class() == AnswerClass::Unavailable {
         return None;
@@ -473,6 +556,7 @@ fn callers_value(
 pub fn callers_engine_response(
     engine: Engine,
     repo_state: &RepoState,
+    epoch: &RequestEpoch,
     target: &ResolvedSymbol,
     sqlite_fetch: impl FnOnce() -> Result<Vec<CallerResult>, StorageError>,
     symbol: &str,
@@ -482,12 +566,17 @@ pub fn callers_engine_response(
         // Explicit SQLite escape hatch: ALWAYS read (the closure is called).
         Engine::Sqlite => callers_auto_or_sqlite(target, None, None, sqlite_fetch),
         // DEFAULT (QUERY-AUTO-LAZY-SQLITE-1): LiveGraph-first; SQLite read LAZILY only on fallback.
+        // W-B-EPOCH-IMPL-1: the Auto serve is gated on the captured CALLGRAPH-cert epoch (EV-A) inside
+        // `livegraph_callers_auto`.
         Engine::Auto => {
-            let (served, reason) =
-                match auto_outcome(livegraph_callers_auto(repo_state, &target.stable_key)) {
-                    Ok(keys) => (Some(keys), None),
-                    Err(reason) => (None, Some(reason)),
-                };
+            let (served, reason) = match auto_outcome(livegraph_callers_auto(
+                repo_state,
+                epoch,
+                &target.stable_key,
+            )) {
+                Ok(keys) => (Some(keys), None),
+                Err(reason) => (None, Some(reason)),
+            };
             callers_auto_or_sqlite(target, served, reason, sqlite_fetch)
         }
         // Explicit LiveGraph: serve LiveGraph; SQLite LAZILY only on the unavailable fallback (existing 1B
@@ -569,6 +658,7 @@ fn callees_value(
 pub fn callees_engine_response(
     engine: Engine,
     repo_state: &RepoState,
+    epoch: &RequestEpoch,
     target: &ResolvedSymbol,
     sqlite_fetch: impl FnOnce() -> Result<Vec<CalleeResult>, StorageError>,
     symbol: &str,
@@ -578,12 +668,17 @@ pub fn callees_engine_response(
         // Explicit SQLite escape hatch: ALWAYS read (the closure is called).
         Engine::Sqlite => callees_auto_or_sqlite(target, None, None, sqlite_fetch),
         // DEFAULT (QUERY-AUTO-LAZY-SQLITE-1): LiveGraph-first; SQLite read LAZILY only on fallback.
+        // W-B-EPOCH-IMPL-1: the Auto serve is gated on the captured CALLGRAPH-cert epoch (EV-A) inside
+        // `livegraph_callees_auto`.
         Engine::Auto => {
-            let (served, reason) =
-                match auto_outcome(livegraph_callees_auto(repo_state, &target.stable_key)) {
-                    Ok(keys) => (Some(keys), None),
-                    Err(reason) => (None, Some(reason)),
-                };
+            let (served, reason) = match auto_outcome(livegraph_callees_auto(
+                repo_state,
+                epoch,
+                &target.stable_key,
+            )) {
+                Ok(keys) => (Some(keys), None),
+                Err(reason) => (None, Some(reason)),
+            };
             callees_auto_or_sqlite(target, served, reason, sqlite_fetch)
         }
         // Explicit LiveGraph: serve LiveGraph; SQLite LAZILY only on the unavailable fallback.
@@ -3091,6 +3186,224 @@ pub fn stats_compare_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W-B-EPOCH-IMPL-1 headless coherence proofs (under W-A), on the SHARED faithful fixture
+    /// (`callgraph_cert::test_fixture`: a resident LiveGraph byte-mirrored by SQLite, so a GREEN cert IS
+    /// value parity). Covers the two eligibility witnesses (build-then-peek) and the EV-A serve-time gate at
+    /// BOTH serve sites — the callers/callees Auto arm (this module) and the orient/explain decorator: a
+    /// mid-request LiveGraph swap (the W-B race, simulated by `load_partition` bumping the partition epoch so
+    /// the resident fingerprint moves) makes each leaf fail soft to the PINNED SQLite snapshot — never a
+    /// cross-epoch mix. Relocated here from the removed `request_epoch` module (review-0 #3) — beside
+    /// `RequestEpoch`'s new home and the callers/callees engine-response under test.
+    mod wb_epoch_coherence {
+        use crate::callgraph_cert::{callgraph_cert_eligibility, test_fixture};
+        use crate::livegraph_feed::{
+            callees_engine_response, callers_engine_response, import_cert_fingerprint, Engine,
+            RequestEpoch,
+        };
+        use crate::orient_serve::{
+            orient_bounded_cert_eligibility, orient_bounded_cert_is_green, OrientServeDecorator,
+        };
+        use repo_graph_agent::AgentStorageRead;
+        use repo_graph_storage::queries::ResolvedSymbol;
+        use repo_graph_storage::StorageConnection;
+        use repo_graph_trust_model::LanguageSupport;
+
+        /// Capture the request epoch for the fixture, using the given eligibility witness.
+        fn capture(
+            state: &crate::state::RepoState,
+            snapshot_uid: &str,
+            fingerprint: Option<String>,
+        ) -> RequestEpoch {
+            let storage = state.storage().unwrap();
+            let snapshot = AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+                .unwrap()
+                .unwrap();
+            assert_eq!(snapshot.snapshot_uid, snapshot_uid);
+            RequestEpoch {
+                snapshot,
+                fingerprint,
+            }
+        }
+
+        /// Simulate a refresh's LiveGraph swap: re-feed the partition, which bumps its epoch in place — so
+        /// the resident `import_cert_fingerprint` changes (epochs are monotonic, fingerprints never recur).
+        fn swap_livegraph(state: &crate::state::RepoState) {
+            state.livegraph.write().as_mut().unwrap().load_partition(
+                "p",
+                test_fixture::build_ir(),
+                LanguageSupport::TypeScriptPrimary,
+            );
+        }
+
+        fn resolved(stable_key: &str, name: &str) -> ResolvedSymbol {
+            ResolvedSymbol {
+                stable_key: stable_key.to_string(),
+                name: name.to_string(),
+                qualified_name: None,
+                kind: "SYMBOL".to_string(),
+                subtype: None,
+                file: None,
+                line: None,
+                column: None,
+            }
+        }
+
+        // ── Eligibility witnesses (build-then-peek) ──────────────────────────────────────────────
+
+        #[test]
+        fn callgraph_eligibility_is_the_exact_resident_fingerprint_on_green() {
+            let f = test_fixture::build_fixture(false);
+            let fp = callgraph_cert_eligibility(&f.state, &f.snapshot_uid)
+                .expect("green mirror -> Some eligibility");
+            // The witness IS the exact resident-and-validated fingerprint (build-then-peek, §6.4).
+            let current = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            assert_eq!(fp, current);
+        }
+
+        #[test]
+        fn callgraph_eligibility_none_on_red_and_without_livegraph() {
+            // RED: the SQLite mirror drops the CALLS edge -> the callgraph cert is RED -> no witness.
+            let red = test_fixture::build_fixture(true);
+            assert!(callgraph_cert_eligibility(&red.state, &red.snapshot_uid).is_none());
+            // No resident LiveGraph -> no witness (eager SQLite).
+            let f = test_fixture::build_fixture(false);
+            *f.state.livegraph.write() = None;
+            assert!(callgraph_cert_eligibility(&f.state, &f.snapshot_uid).is_none());
+        }
+
+        #[test]
+        fn bounded_eligibility_some_iff_bounded_cert_green() {
+            let f = test_fixture::build_fixture(false);
+            assert_eq!(
+                orient_bounded_cert_eligibility(&f.state, &f.snapshot_uid).is_some(),
+                orient_bounded_cert_is_green(&f.state, &f.snapshot_uid),
+                "eligibility.is_some() is the SAME serve decision as the prior bool gate"
+            );
+            *f.state.livegraph.write() = None;
+            assert!(orient_bounded_cert_eligibility(&f.state, &f.snapshot_uid).is_none());
+        }
+
+        // ── EV-A at the callers/callees Auto arm ─────────────────────────────────────────────────
+
+        #[test]
+        fn ev_a_callers_serves_livegraph_on_green_then_pinned_sqlite_after_swap() {
+            let f = test_fixture::build_fixture(false);
+            let storage = f.state.storage().unwrap();
+            let fingerprint = callgraph_cert_eligibility(&f.state, &f.snapshot_uid);
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+            let target = resolved(&test_fixture::callee_key(), "calleeFn");
+            let edge = ["CALLS"];
+
+            // Steady state (no swap): the Auto serve hits the LiveGraph (transparency) — callerFn->calleeFn.
+            let v = callers_engine_response(
+                Engine::Auto,
+                &f.state,
+                &epoch,
+                &target,
+                || storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge),
+                "calleeFn",
+                "",
+            )
+            .unwrap();
+            assert_eq!(v["backend_used"], "livegraph");
+            assert_eq!(v["callers"][0]["stable_key"], test_fixture::caller_key());
+
+            // EV-A: a mid-request LiveGraph swap moves the resident fingerprint; the captured epoch no longer
+            // matches -> fail soft to SQLite AT THE PINNED snapshot (coherent — the same caller, never N+1).
+            swap_livegraph(&f.state);
+            let v2 = callers_engine_response(
+                Engine::Auto,
+                &f.state,
+                &epoch,
+                &target,
+                || storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge),
+                "calleeFn",
+                "",
+            )
+            .unwrap();
+            assert_eq!(v2["backend_used"], "sqlite");
+            assert_eq!(v2["callers"][0]["stable_key"], test_fixture::caller_key());
+        }
+
+        #[test]
+        fn ev_a_callees_serves_livegraph_on_green_then_pinned_sqlite_after_swap() {
+            let f = test_fixture::build_fixture(false);
+            let storage = f.state.storage().unwrap();
+            let fingerprint = callgraph_cert_eligibility(&f.state, &f.snapshot_uid);
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+            let target = resolved(&test_fixture::caller_key(), "callerFn");
+            let edge = ["CALLS"];
+
+            let v = callees_engine_response(
+                Engine::Auto,
+                &f.state,
+                &epoch,
+                &target,
+                || storage.find_direct_callees(epoch.snapshot_uid(), &target.stable_key, &edge),
+                "callerFn",
+                "",
+            )
+            .unwrap();
+            assert_eq!(v["backend_used"], "livegraph");
+            assert_eq!(v["callees"][0]["stable_key"], test_fixture::callee_key());
+
+            swap_livegraph(&f.state);
+            let v2 = callees_engine_response(
+                Engine::Auto,
+                &f.state,
+                &epoch,
+                &target,
+                || storage.find_direct_callees(epoch.snapshot_uid(), &target.stable_key, &edge),
+                "callerFn",
+                "",
+            )
+            .unwrap();
+            assert_eq!(v2["backend_used"], "sqlite");
+            assert_eq!(v2["callees"][0]["stable_key"], test_fixture::callee_key());
+        }
+
+        // ── EV-A at the orient/explain decorator ─────────────────────────────────────────────────
+
+        #[test]
+        fn ev_a_decorator_serves_livegraph_on_green_then_pinned_sqlite_after_swap() {
+            let f = test_fixture::build_fixture(false);
+            let storage: StorageConnection = f.state.storage().unwrap();
+            let fingerprint = orient_bounded_cert_eligibility(&f.state, &f.snapshot_uid);
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+            let callee = test_fixture::callee_key();
+
+            // Make SQLite DIVERGE from the LiveGraph so the two serve sites are distinguishable: delete the
+            // SQLite CALLS edge. SQLite callers(calleeFn) is now empty; the LiveGraph still has callerFn. A
+            // SQLite-only mutation does NOT touch the LiveGraph fingerprint, so the captured epoch matches.
+            storage.delete_edges_by_uids(&["ec0".to_string()]).unwrap();
+
+            let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
+
+            // Green (epoch matches the resident fingerprint): SERVE the LiveGraph -> callerFn, DESPITE the now
+            // empty SQLite. Proves the decorator serves LG on a matching epoch.
+            let lg_rows = decorator
+                .find_symbol_callers(epoch.snapshot_uid(), &callee)
+                .unwrap();
+            assert_eq!(lg_rows.len(), 1);
+            assert_eq!(lg_rows[0].stable_key, test_fixture::caller_key());
+
+            // EV-A: swap the LiveGraph (epoch no longer matches) -> the decorator fails soft to the PINNED
+            // SQLite snapshot, which we mutated to empty. Proves the swap routes to SQLite, not the stale LG.
+            swap_livegraph(&f.state);
+            let sqlite_rows = decorator
+                .find_symbol_callers(epoch.snapshot_uid(), &callee)
+                .unwrap();
+            assert!(
+                sqlite_rows.is_empty(),
+                "stale captured epoch -> delegate to the pinned SQLite snapshot (mutated to empty), \
+                 NEVER serve the swapped LiveGraph"
+            );
+        }
+    }
 
     // ── CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the PURE fastpath/SQLite ladder ──
     // The ladder takes closures, so a PANICKING serve_sqlite/build_cert proves which path runs -- the GREEN

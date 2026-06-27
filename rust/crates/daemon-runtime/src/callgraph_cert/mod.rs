@@ -346,3 +346,33 @@ pub fn callgraph_cached_green(repo_state: &RepoState, snapshot_uid: &str) -> boo
     let cached = repo_state.callgraph_cert.read();
     matches!(cached.as_ref(), Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN")
 }
+
+/// W-B-EPOCH-IMPL-1 (D-EP capture for callers/callees; `daemon-w-b-epoch-1.md` §5.4/§6.4): the
+/// CALLGRAPH-cert LG-serve eligibility WITNESS, captured BUILD-THEN-PEEK. Returns `Some(current_fp)` iff
+/// a GREEN callgraph cert exists at EXACTLY the resident fingerprint for `snapshot_uid` — i.e. the
+/// resident partitions are cert-proven no-loss-equal to SQLite@`snapshot_uid`, so their callers/callees
+/// rows are substitutable for SQLite@`snapshot_uid`; otherwise `None` ⇒ the request serves eager SQLite at
+/// the pinned snapshot (the EV-A fail-soft).
+///
+/// **Why build-then-peek and not just [`callgraph_is_green`].** `callgraph_is_green` computes
+/// `current_fp` under one guard, DROPS it, then lazily (re)builds the cert under a RE-locked guard
+/// (parking_lot is non-reentrant). Under a future W-B relax a publish could land in that window, so the
+/// rebuilt cert can be keyed at the pre-swap fingerprint while its verdict was computed over post-swap
+/// partitions — a mislabel. Build-then-peek closes this: (1) WARM (lazy build if stale/missing), then
+/// (2) under ONE livegraph read guard — which excludes a concurrent swap (a swap needs `livegraph.write()`)
+/// — compute `current_fp` AND peek a GREEN cert at EXACTLY `current_fp`. So `Some(fp)` is the EXACT
+/// resident-and-validated state, or `None`. (Under the W-A coordinator this slice ships, no swap can occur
+/// mid-request anyway; build-then-peek is the foundation IMPL-3's relax relies on.)
+pub fn callgraph_cert_eligibility(repo_state: &RepoState, snapshot_uid: &str) -> Option<String> {
+    // 1. WARM: lazy (re)build the cert if stale/missing (drops its own guards before returning).
+    let _ = callgraph_is_green(repo_state, snapshot_uid);
+    // 2. PEEK under ONE read guard so "(green cert) at (this exact resident fingerprint)" is atomic
+    //    w.r.t. any swap.
+    let guard = repo_state.livegraph.read();
+    let current_fp = import_cert_fingerprint(&guard.as_ref()?.live_partitions(), snapshot_uid);
+    let cached = repo_state.callgraph_cert.read();
+    match cached.as_ref() {
+        Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN" => Some(current_fp),
+        _ => None,
+    }
+}

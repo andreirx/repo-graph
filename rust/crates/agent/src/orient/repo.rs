@@ -39,7 +39,7 @@ use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::{Signal, SignalCode};
 use crate::errors::OrientError;
 use crate::ranking;
-use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
+use crate::storage_port::{AgentCancelCheck, AgentSnapshot, AgentStorageRead};
 
 /// Load-bearing signal codes the dense `orient` headline is built
 /// from — pinned through budget truncation (ORIENT-DENSITY-1 §2/§3).
@@ -84,6 +84,7 @@ const HEADLINE_SIGNAL_CODES: &[SignalCode] = &[
 pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
+    snapshot: &AgentSnapshot,
     budget: Budget,
     now: &str,
     cancel: AgentCancelCheck<'_>,
@@ -95,14 +96,13 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
             repo_uid: repo_uid.to_string(),
         })?;
 
-    // ── 2. Resolve snapshot. ─────────────────────────────────
-    let snapshot =
-        storage
-            .get_latest_snapshot(repo_uid)?
-            .ok_or_else(|| OrientError::NoSnapshot {
-                repo_uid: repo_uid.to_string(),
-            })?;
-
+    // ── 2. Snapshot is INJECTED (W-B-EPOCH-IMPL-1). ──────────
+    // The pinned READY snapshot is captured ONCE per request by the caller (the daemon's `RequestEpoch`
+    // capture, or the CLI `orient()` wrapper's single resolve) and threaded in. orient_repo no longer
+    // calls `get_latest_snapshot` — this is the named double-resolve elimination (`daemon-w-b-epoch-1.md`
+    // §5.3): the snapshot is used for BOTH `snapshot::aggregate(&snapshot)` AND `snapshot_uid`, so the
+    // whole request resolves to ONE epoch. `OrientError::NoSnapshot` is now raised by the caller (which
+    // resolves before calling), not here.
     let snapshot_uid = snapshot.snapshot_uid.clone();
 
     // ── 3. Run aggregators. ──────────────────────────────────
@@ -110,7 +110,7 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     let mut all_limits: Vec<Limit> = Vec::new();
 
     // snapshot_info
-    let snap_out = aggregators::snapshot::aggregate(&snapshot);
+    let snap_out = aggregators::snapshot::aggregate(snapshot);
     merge(&mut all_signals, &mut all_limits, snap_out);
 
     // trust (returns summary + stale flag for confidence)

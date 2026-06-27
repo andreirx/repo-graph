@@ -1018,26 +1018,39 @@ impl ServiceDispatcher {
             }
         };
 
-        // Get latest snapshot
-        let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
-                );
-            }
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        // W-B-EPOCH-IMPL-1: capture the request epoch ONCE (the pinned `AgentSnapshot` via the
+        // `AgentStorageRead` trait + the BUILD-THEN-PEEK CALLGRAPH-cert LG-serve eligibility). The callers
+        // handler already resolved the snapshot exactly once and threaded its uid to every SQLite read, so
+        // there is NO double-resolve here — the epoch just adds the EV-A serve gate (`epoch.fingerprint`).
+        let epoch =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snapshot)) => {
+                    let fingerprint = crate::callgraph_cert::callgraph_cert_eligibility(
+                        &repo_state,
+                        &snapshot.snapshot_uid,
+                    );
+                    crate::livegraph_feed::RequestEpoch {
+                        snapshot,
+                        fingerprint,
+                    }
+                }
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
 
         // Resolve symbol
         use repo_graph_storage::queries::SymbolResolveError;
-        let target = match storage.resolve_symbol(&snapshot.snapshot_uid, symbol) {
+        let target = match storage.resolve_symbol(epoch.snapshot_uid(), symbol) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -1073,8 +1086,9 @@ impl ServiceDispatcher {
         let value = crate::livegraph_feed::callers_engine_response(
             engine,
             &repo_state,
+            &epoch,
             &target,
-            || storage.find_direct_callers(&snapshot.snapshot_uid, &target.stable_key, &edge_types),
+            || storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge_types),
             symbol,
             &repo_root,
         );
@@ -1111,26 +1125,38 @@ impl ServiceDispatcher {
             }
         };
 
-        // Get latest snapshot
-        let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
-                );
-            }
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        // W-B-EPOCH-IMPL-1: capture the request epoch ONCE (pinned `AgentSnapshot` + the BUILD-THEN-PEEK
+        // CALLGRAPH-cert eligibility). Like callers, callees already resolved once — the epoch adds the EV-A
+        // serve gate (`epoch.fingerprint`).
+        let epoch =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snapshot)) => {
+                    let fingerprint = crate::callgraph_cert::callgraph_cert_eligibility(
+                        &repo_state,
+                        &snapshot.snapshot_uid,
+                    );
+                    crate::livegraph_feed::RequestEpoch {
+                        snapshot,
+                        fingerprint,
+                    }
+                }
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
 
         // Resolve symbol
         use repo_graph_storage::queries::SymbolResolveError;
-        let target = match storage.resolve_symbol(&snapshot.snapshot_uid, symbol) {
+        let target = match storage.resolve_symbol(epoch.snapshot_uid(), symbol) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -1166,8 +1192,9 @@ impl ServiceDispatcher {
         let value = crate::livegraph_feed::callees_engine_response(
             engine,
             &repo_state,
+            &epoch,
             &target,
-            || storage.find_direct_callees(&snapshot.snapshot_uid, &target.stable_key, &edge_types),
+            || storage.find_direct_callees(epoch.snapshot_uid(), &target.stable_key, &edge_types),
             symbol,
             &repo_root,
         );
@@ -2912,14 +2939,51 @@ impl ServiceDispatcher {
         // (not just the decorator's value serve); on RED they are SQLite-LABELLED. RED / non-resident /
         // non-TS / no-snapshot -> the unchanged eager SQLite path. The cert build reads SQLite ONCE per
         // fingerprint (the drilldown invariant).
-        let serve_from_lg = storage
-            .get_latest_snapshot(&repo_uid)
-            .ok()
-            .flatten()
-            .map(|s| {
-                crate::orient_serve::orient_bounded_cert_is_green(&repo_state, &s.snapshot_uid)
-            })
-            .unwrap_or(false);
+        //
+        // W-B-EPOCH-IMPL-1: capture the request epoch ONCE here. This single resolve REPLACES both the
+        // prior serve-decision resolve AND the orient use case's internal `get_latest_snapshot` (the
+        // double-resolve, now deleted in `orient/repo.rs`): the pinned `&AgentSnapshot` is threaded into
+        // `orient_cancellable`. `epoch.fingerprint` is the BUILD-THEN-PEEK bounded-cert LG-serve
+        // eligibility witness (`Some` iff focus-resolution ∧ callgraph are both GREEN at the resident
+        // fingerprint); `serve_from_lg = epoch.fingerprint.is_some()` is the SAME serve decision the prior
+        // `orient_bounded_cert_is_green(...)` produced under W-A. No READY snapshot -> the prior
+        // `OrientError::NoSnapshot` (raised by the use case before) is raised HERE.
+        // The agent-DTO snapshot (`AgentSnapshot`) via the `AgentStorageRead` trait — NOT the inherent
+        // `StorageConnection::get_latest_snapshot` (which returns the storage `Snapshot`); the use case and
+        // the `RequestEpoch` both speak the agent DTO. Same READY-row selection (the trait impl delegates to
+        // the inherent method).
+        let epoch =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snapshot)) => {
+                    let fingerprint = crate::orient_serve::orient_bounded_cert_eligibility(
+                        &repo_state,
+                        &snapshot.snapshot_uid,
+                    );
+                    crate::livegraph_feed::RequestEpoch {
+                        snapshot,
+                        fingerprint,
+                    }
+                }
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            repo_graph_agent::OrientError::NoSnapshot {
+                                repo_uid: repo_uid.clone(),
+                            }
+                            .to_string(),
+                        ),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
+        let serve_from_lg = epoch.fingerprint.is_some();
 
         // Call the agent orient use case.
         //
@@ -2936,11 +3000,15 @@ impl ServiceDispatcher {
         let orient_outcome = {
             let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_orient");
             if serve_from_lg {
-                let decorator =
-                    crate::orient_serve::OrientServeDecorator::new(&repo_state.livegraph, &storage);
+                let decorator = crate::orient_serve::OrientServeDecorator::new(
+                    &repo_state.livegraph,
+                    &storage,
+                    &epoch,
+                );
                 repo_graph_agent::orient_cancellable(
                     &decorator,
                     &repo_uid,
+                    &epoch.snapshot,
                     focus,
                     budget,
                     &now,
@@ -2950,6 +3018,7 @@ impl ServiceDispatcher {
                 repo_graph_agent::orient_cancellable(
                     &storage,
                     &repo_uid,
+                    &epoch.snapshot,
                     focus,
                     budget,
                     &now,
@@ -3250,14 +3319,30 @@ impl ServiceDispatcher {
         // the HONEST BOUND — the explain analogue of orient REPO/PATH/FILE's MODULE_SUMMARY; NOT `nodes`-free).
         // RED / non-resident / non-TS / no-snapshot -> the unchanged eager bare-SQLite path. The cert build
         // reads SQLite ONCE per fingerprint (the drilldown invariant); a cached GREEN/RED reads none.
-        let serve_from_lg = storage
-            .get_latest_snapshot(&repo_uid)
+        //
+        // W-B-EPOCH-IMPL-1: capture the request epoch (the pinned snapshot + the BUILD-THEN-PEEK bounded-cert
+        // eligibility witness). explain IS epoch-pinned (review-0 #1): whenever a READY snapshot is captured,
+        // the handler wraps the SHARED `OrientServeDecorator` — on GREEN and RED alike — and the decorator's
+        // `get_latest_snapshot` returns the PINNED snapshot (`storage_port_impl`). `run_explain` derives its
+        // `snapshot_uid` SOLELY from that call and threads it into every SQLite read + the response stamp, so
+        // the whole explain request resolves to ONE epoch with NO mid-request "latest" re-read (the explain
+        // analogue of orient's double-resolve removal — no agent-crate change needed). The fingerprint then
+        // gates the (b)-leaf serve: GREEN serves the LiveGraph (EV-A), RED delegates to SQLite at the pinned
+        // uid. A missing READY snapshot keeps the bare-SQLite path, where `run_explain` raises
+        // `ExplainError::NoSnapshot` exactly as before.
+        let epoch = repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid)
             .ok()
             .flatten()
-            .map(|s| {
-                crate::orient_serve::orient_bounded_cert_is_green(&repo_state, &s.snapshot_uid)
-            })
-            .unwrap_or(false);
+            .map(|snapshot| {
+                let fingerprint = crate::orient_serve::orient_bounded_cert_eligibility(
+                    &repo_state,
+                    &snapshot.snapshot_uid,
+                );
+                crate::livegraph_feed::RequestEpoch {
+                    snapshot,
+                    fingerprint,
+                }
+            });
 
         // Call the agent explain use case.
         //
@@ -3269,9 +3354,17 @@ impl ServiceDispatcher {
         // `handle_orient`.
         let explain_outcome = {
             let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_explain");
-            if serve_from_lg {
-                let decorator =
-                    crate::orient_serve::OrientServeDecorator::new(&repo_state.livegraph, &storage);
+            if let Some(epoch) = epoch.as_ref() {
+                // W-B-EPOCH-IMPL-1: wrap the epoch-pinned decorator whenever a READY snapshot was captured —
+                // GREEN *and* RED. On green the (b) leaves serve from the LiveGraph (EV-A gate); on red they
+                // delegate to SQLite at the pinned uid (`epoch_resident` is false). EITHER WAY the decorator's
+                // `get_latest_snapshot` returns the PINNED snapshot, so `run_explain` resolves the snapshot
+                // ONCE (no mid-request "latest" re-read) and the whole explain request is coherent at epoch N.
+                let decorator = crate::orient_serve::OrientServeDecorator::new(
+                    &repo_state.livegraph,
+                    &storage,
+                    epoch,
+                );
                 repo_graph_agent::run_explain_cancellable(
                     &decorator,
                     &repo_uid,
@@ -3281,6 +3374,8 @@ impl ServiceDispatcher {
                     &mut checkpoint,
                 )
             } else {
+                // No READY snapshot captured -> bare SQLite; `run_explain` raises `ExplainError::NoSnapshot`
+                // exactly as before (nothing to pin).
                 repo_graph_agent::run_explain_cancellable(
                     &storage,
                     &repo_uid,

@@ -26,6 +26,10 @@ use repo_graph_gate::{
 pub(super) struct ServeSpy<'a, S: ?Sized> {
     inner: &'a S,
     panic_served: bool,
+    /// W-B-EPOCH-IMPL-1: PANIC on `get_latest_snapshot` — the explain-pin proof. Through the epoch-pinned
+    /// decorator this is never reached (the decorator returns `epoch.snapshot`), so a completing explain
+    /// proves `run_explain` did NOT re-resolve "latest".
+    panic_get_latest_snapshot: bool,
     pub(super) read_compute_file_summary: AtomicBool,
     pub(super) read_compute_path_summary: AtomicBool,
     pub(super) read_list_symbols_in_file: AtomicBool,
@@ -41,10 +45,17 @@ impl<'a, S: ?Sized> ServeSpy<'a, S> {
     pub(super) fn recording(inner: &'a S) -> Self {
         Self::with(inner, false)
     }
+    /// Also PANIC on `get_latest_snapshot` (the explain snapshot-pin proof): through the epoch-pinned
+    /// decorator this is never reached, so a completing explain proves no mid-request "latest" re-read.
+    pub(super) fn panic_on_snapshot_resolve(mut self) -> Self {
+        self.panic_get_latest_snapshot = true;
+        self
+    }
     fn with(inner: &'a S, panic_served: bool) -> Self {
         Self {
             inner,
             panic_served,
+            panic_get_latest_snapshot: false,
             read_compute_file_summary: AtomicBool::new(false),
             read_compute_path_summary: AtomicBool::new(false),
             read_list_symbols_in_file: AtomicBool::new(false),
@@ -161,6 +172,12 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
         &self,
         repo_uid: &str,
     ) -> Result<Option<AgentSnapshot>, AgentStorageError> {
+        if self.panic_get_latest_snapshot {
+            panic!(
+                "get_latest_snapshot must NOT be re-resolved on the epoch-pinned path: \
+                 the decorator returns the captured epoch.snapshot"
+            )
+        }
         self.inner.get_latest_snapshot(repo_uid)
     }
     fn get_stale_files(&self, s: &str) -> Result<Vec<AgentStaleFile>, AgentStorageError> {

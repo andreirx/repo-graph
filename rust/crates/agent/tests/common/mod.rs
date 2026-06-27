@@ -133,6 +133,11 @@ pub struct FakeAgentStorage {
     /// error propagation. Shared between both traits — operation
     /// identifiers are globally unique.
     pub force_error_on: RefCell<Option<&'static str>>,
+
+    /// W-B-EPOCH-IMPL-1: how many times `get_latest_snapshot` was called. Used to prove the orient
+    /// double-resolve removal: the use case (`orient_cancellable` with an injected snapshot) must NOT
+    /// resolve "latest" (count stays 0); the `orient()` wrapper resolves exactly once.
+    pub get_latest_snapshot_calls: std::cell::Cell<usize>,
 }
 
 impl FakeAgentStorage {
@@ -199,6 +204,8 @@ impl AgentStorageRead for FakeAgentStorage {
         &self,
         repo_uid: &str,
     ) -> Result<Option<AgentSnapshot>, AgentStorageError> {
+        self.get_latest_snapshot_calls
+            .set(self.get_latest_snapshot_calls.get() + 1);
         self.fail_if_forced("get_latest_snapshot")?;
         Ok(self.snapshots.get(repo_uid).cloned())
     }
