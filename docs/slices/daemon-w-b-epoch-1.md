@@ -1142,27 +1142,33 @@ rejected simpler alternative):
 
 ---
 
-## 14. Ratification (operator — pending)
+## 14. Ratification (operator — 2026-06-27, FULL W-B)
 
-This SPEC enters the relay's decision-review phase with the §8 slate recommended as a **joint** ratification:
-**D-EP = EP-A, D-EV = EV-A, D-RET = RET-A, D-WB = WB-A, D-EA = EA-A, D-SCOPE = SC-A, D-CC = CC-A.** The seven are
-coupled: WB-A (re-enable W-B) is safe **only** with EP-A + EV-A + RET-A (the captured epoch + its eviction/retention
-rules); EA-A rides on WB-A; and **CC-A** (the callgraph-cert basis for the non-orient SC-A handlers) is what makes
-`callers`/`callees`/`path` coherent once WB-A admits readers (D-CC bites only for the SC-A subset, only under WB-A).
-The conservative fallback is **WB-B** (land the epoch under W-A as a staged first cut, flip to WB-A once proven) —
-strictly better than today either way, because EP-A removes the orient double-resolve and makes every request
-self-coherent even under W-A.
+Ratified after the relay's **decision-review phase** (the first live run of DECISION-REVIEW-MODE-1): Codex
+adversarially challenged the §8 slate, the builder rebutted, and the packet returned **4 converged, 3 contested
+(builder conceded all 3)**. The §8 recommendation (SC-A + CC-A under WB-A) is **SUPERSEDED** by this section — the
+review found WB-A relaxes a **global** per-repo coordinator, so the cited subset (SC-A) is insufficient and `path`
+cannot ride the callgraph cert (different edge bases). **Operator chose FULL W-B** (read-during-refresh now).
 
-**On ratification, the IMPL** (a single relay slice unless the reviewer splits it): captures `RequestEpoch` (the
-pinned `AgentSnapshot` + the build-then-peek green-validated eligibility fingerprint) in the SC-A handlers; threads
-the captured `&AgentSnapshot` through the decorator + `orient_repo`/`orient_cancellable` (deleting the
-`orient/repo.rs:99` re-resolve while preserving `snapshot::aggregate`) and `&epoch` daemon-locally into
-`callers`/`callees`/`path`'s `*_engine_response`; adds the serve-time fingerprint comparison at **both** serve sites —
-the decorator (orient/explain) and the `*_engine_response` Auto arm (callers/callees/path, EV-A + CC-A); adds the
-build-then-peek eligibility helpers (`callgraph_cert_eligibility` + the `focus_resolution_cached_green` mirror, §6.4);
-relaxes the coordinator `Refreshing`→reader arm (WB-A); and lands the §11 headless coherence tests (incl. tests 7–9b
-for the non-orient handlers) + the §10 §6 amendment cross-link. If the IMPL discovers that any of these requires a
-NEW crate/module boundary or a data shape crossing a boundary beyond the `RequestEpoch` value (e.g. EV-A turns out to
-need RET-B's retained epoch, or CC-A's coherence cannot be met by the existing callgraph cert), it **STOPs +
-surfaces** — it does not restructure a boundary unilaterally (CLAUDE.md Decision Autonomy; the packet
-STOP_CONDITIONs).
+**Binding slate:**
+- **Converged:** D-EP = EP-A (`RequestEpoch{snapshot,fingerprint}` captured once), D-EV = EV-A (fail-soft to the
+  pinned SQLite snapshot on fingerprint mismatch), D-RET = RET-A (no LG retention; prune stays exclusive), D-EA = EA-A
+  (enrich composes via the shared epoch).
+- **Contested → resolved FULL W-B:** D-WB = **WB-A** (relax `Refreshing`→reader); D-SCOPE = **SC-B** (ALL mixed-read
+  handlers — orient/explain/callers/callees/path **+ imports/stats/cycles** — get the captured epoch + build-then-peek,
+  closing the global-coordinator TOCTOU the review found); D-CC = **split** — CC-A (callgraph cert) for callers/callees,
+  and a **dedicated path-parity cert over CALLS∪IMPORTS** for `path` (the callgraph cert is CALLS-only and does not
+  license the LiveGraph path serve).
+
+**IMPL decomposition (multi-slice arc — the FULL W-B scope is too big for one slice, per the B2 mega-slice lesson;
+ordered epoch-first / relax-last so the coordinator is relaxed ONLY after every handler is epoch-safe):**
+- **`W-B-EPOCH-IMPL-1`** — the `RequestEpoch` foundation (EP-A/EV-A/RET-A) + build-then-peek on the mixed-read
+  handlers, **under W-A** (no relax yet); remove the orient double-resolve. Banks request self-coherence safely.
+- **`W-B-EPOCH-IMPL-2`** — the dedicated **path-parity cert (CALLS∪IMPORTS)** licensing `path`'s LiveGraph serve.
+- **`W-B-EPOCH-IMPL-3`** — flip **WB-A** (relax the coordinator) + the §10/§6 **whole-request join coherence** proof +
+  **E-A** (enrich shares the seam). The actual read-during-refresh, last — only once IMPL-1/2 make all handlers
+  epoch-safe. The §11 headless coherence tests (incl. 7–9b) land across these slices.
+
+Each IMPL slice STOPs + surfaces if it needs a NEW crate/module boundary beyond the `RequestEpoch` value (CLAUDE.md
+Decision Autonomy; the packet STOP_CONDITIONs). The full decision-review audit trail (challenge/rebuttal/packet) is in
+the slice's `.agent-manager/` working dir.
