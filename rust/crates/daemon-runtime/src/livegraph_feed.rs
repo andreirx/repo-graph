@@ -757,12 +757,13 @@ struct PathNodeDisplay {
     location: Option<(String, u32)>,
 }
 
-/// A LiveGraph path answer reduced to what the `Auto` decision needs (PATH-LIVEGRAPH-DEFAULT-1).
+/// A LiveGraph path answer reduced for the explicit `--engine livegraph/compare` diagnostic serve
+/// (PATH-LIVEGRAPH-DEFAULT-1). W-B-EPOCH-IMPL-2A removed the `ts_only` field with `path_auto_outcome`: the
+/// default `Auto` no longer serves the LiveGraph path (it serves the pinned SQLite snapshot), and the explicit
+/// LiveGraph arm surfaces `class`/`freshness` as diagnostics without gating on TS-only.
 struct LgPathAuto {
     class: AnswerClass,
     freshness: FreshnessState,
-    /// Contributing languages are non-empty and ALL `TypeScriptPrimary` (D2 TS-only).
-    ts_only: bool,
     /// Whether a path was found (vs a no-path result).
     found: bool,
     /// Path nodes with display metadata (key + resolved `file:line`).
@@ -808,40 +809,16 @@ fn livegraph_path_cancellable(
     Ok(Some(LgPathAuto {
         class: env.class(),
         freshness: env.freshness(),
-        ts_only: ts_only(env.contributing_languages()),
         found,
         nodes,
     }))
 }
 
-/// The `Auto` path decision (PATH-LIVEGRAPH-DEFAULT-1 D2/D3 + the display-metadata invariant): serve
-/// LiveGraph ONLY when Exact + Fresh + TS-only AND every rendered node has `file:line`. Freshness is
-/// checked before class so a Stale answer reports `LiveGraphStale`. The D3 no-path rule needs NO special
-/// case: `path()` returns `Exact` only for a proven-complete result (a found path OR a proven no-path)
-/// and `Partial` for an incomplete traversal — so an Exact no-path is served and a Partial no-path falls
-/// back. A no-path serves with no nodes to render (the display gate is vacuous). Returns `Ok((found,
-/// nodes))` to serve, or `Err(reason)` to fall back to SQLite.
-fn path_auto_outcome(
-    lg: Option<LgPathAuto>,
-) -> Result<(bool, Vec<PathNodeDisplay>), FallbackReason> {
-    match lg {
-        None => Err(FallbackReason::LiveGraphUnavailable),
-        Some(a) => {
-            if a.freshness != FreshnessState::Fresh {
-                Err(FallbackReason::LiveGraphStale)
-            } else if a.class != AnswerClass::Exact {
-                Err(FallbackReason::LiveGraphPartial)
-            } else if !a.ts_only {
-                Err(FallbackReason::LiveGraphUnsupportedLanguage)
-            } else if a.nodes.iter().any(|n| n.location.is_none()) {
-                // Trust-complete but a rendered node lacks file:line — never render `:0` by default.
-                Err(FallbackReason::LiveGraphDisplayMetadataUnavailable)
-            } else {
-                Ok((a.found, a.nodes))
-            }
-        }
-    }
-}
+// W-B-EPOCH-IMPL-2A (§14 D-CC refined): the former `path_auto_outcome` (the Auto-arm LiveGraph path
+// eligibility: Exact + Fresh + TS-only + display-metadata) is REMOVED — `path`'s default no longer serves the
+// LiveGraph fastpath (`path_engine_response`'s `Engine::Auto` now serves the pinned SQLite snapshot). The LG
+// path BFS itself (`livegraph_path_cancellable`) is preserved for explicit `--engine livegraph/compare`; a
+// future CALLS∪IMPORTS path-parity cert re-introduces a (cert-based) eligibility for the deferred re-enable.
 
 /// Render LiveGraph path nodes into the `{found, path_length, path:[step]}` shape the CLI `PathResponse`
 /// renders. `node_id` keeps the full stable key (identity); `symbol` is the clean NAME (so the human
@@ -963,18 +940,15 @@ pub fn path_engine_response(
     match engine {
         // `--engine sqlite` FORCES SQLite (always reads).
         Engine::Sqlite => path_auto_or_sqlite(repo_uid, snapshot_uid, None, None, sqlite_fetch),
-        // DEFAULT (PATH-LIVEGRAPH-DEFAULT-1 + QUERY-AUTO-LAZY-SQLITE-1): serve LiveGraph when Exact + Fresh +
-        // TS-only (D3 no-path EXACT is served -- path() returns Exact only for a proven-complete found-OR-no-
-        // path); ELSE a LAZY labelled SQLite fallback. The served path does NOT read nodes/edges. A peer
-        // disconnect mid-BFS surfaces as `StorageError::Cancelled` via `?`.
-        Engine::Auto => {
-            let lg = livegraph_path_cancellable(repo_state, from_key, to_key, cancel)?;
-            let (served, reason) = match path_auto_outcome(lg) {
-                Ok((found, nodes)) => (Some((found, nodes)), None),
-                Err(reason) => (None, Some(reason)),
-            };
-            path_auto_or_sqlite(repo_uid, snapshot_uid, served, reason, sqlite_fetch)
-        }
+        // DEFAULT (W-B-EPOCH-IMPL-2A, §14 D-CC refined): serve the PINNED SQLite snapshot — NO LiveGraph
+        // fastpath for `path`. There is no CALLS∪IMPORTS no-loss cert to license an LG path serve (the
+        // callgraph cert is CALLS-only; `path` traverses CALLS ∪ IMPORTS), so a LiveGraph BFS could be as-of a
+        // different epoch than the pinned `snapshot_uid` it is stamped with — the §1c false-freshness hazard.
+        // Serving SQLite at `snapshot_uid` (the handler's captured epoch pin) makes the BFS genuinely as-of the
+        // stamp. `path` still gets read-during-refresh via the pin (IMPL-3). A future CALLS∪IMPORTS path-parity
+        // cert RE-ENABLES the LG fastpath here (a deferred speed optimization, NOT a correctness blocker); the
+        // LG path BFS (`livegraph_path_cancellable`) is preserved for explicit `--engine livegraph/compare`.
+        Engine::Auto => path_auto_or_sqlite(repo_uid, snapshot_uid, None, None, sqlite_fetch),
         // Explicit LiveGraph keeps trust_class/freshness as a diagnostic surface; SQLite LAZILY on fallback.
         Engine::LiveGraph => {
             match livegraph_path_cancellable(repo_state, from_key, to_key, cancel)? {
@@ -1746,16 +1720,6 @@ pub struct ImportNoLossCert {
     pub fingerprint: String,
 }
 
-/// The cert's status for the CURRENT fingerprint (FASTPATH-1 D4).
-enum ImportCertState {
-    /// A valid cert at the current fingerprint, verdict GREEN -> the fastpath may serve LiveGraph.
-    ValidGreen,
-    /// A valid cert at the current fingerprint, verdict != GREEN -> compare-on-call.
-    ValidNotGreen,
-    /// No cert, or a cert at a DIFFERENT fingerprint -> (re)build, else compare-on-call.
-    StaleOrMissing,
-}
-
 /// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D3): the SQLite-FREE import-cert fingerprint -- a digest over the
 /// resident partition snapshot (epoch / fresh / ts / source_inputs_hash / producer_fingerprint), the
 /// `snapshot_uid` (the repo index epoch -> SQLite-side changes), and the import-completeness policy version. Any
@@ -1805,33 +1769,27 @@ fn serve_import_fastpath(
     })
 }
 
-/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D4): the PURE fastpath/compare ladder. precondition UNMET -> the SQLite
-/// fallback (the compare-on-call body via the find_imports closure) ; precondition met + GREEN cert -> serve
-/// LiveGraph WITHOUT calling find_imports ; cert RED/YELLOW/stale/missing/build-failed -> compare-on-call (calls
-/// find_imports). Pure (no RepoState) -> a panicking find_imports closure proves the GREEN fastpath skips SQLite;
-/// the build_cert closure is invoked ONLY on StaleOrMissing.
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D4) + W-B-EPOCH-IMPL-2A (EV-A): the PURE fastpath/compare ladder under
+/// the captured request epoch. `epoch_eligible` is the EV-A serve gate — `true` iff the resident import-cert
+/// fingerprint (computed under the SAME read guard that captured `view`) still equals the green-validated
+/// `epoch.fingerprint` (built BUILD-THEN-PEEK by [`import_cert_eligibility`] in the handler). precondition UNMET
+/// -> the SQLite compare-on-call (via the find_imports closure) ; precondition met AND `epoch_eligible` -> serve
+/// LiveGraph WITHOUT calling find_imports (the cert proved the resident import edges no-loss-equal to
+/// SQLite@`snapshot_uid`) ; NOT eligible (no green cert at capture, OR a swap/straddle since capture so the
+/// resident fingerprint moved) -> compare-on-call (calls find_imports at the pinned snapshot). Pure (no
+/// RepoState) -> a panicking find_imports closure proves the eligible fastpath skips SQLite.
 fn imports_fastpath_or_compare(
     file_path: &str,
     view: &repo_graph_livegraph::import_view::LiveImportView,
     precond: Option<&repo_graph_livegraph::import_view::FilePartitionStatus>,
-    cert: ImportCertState,
+    epoch_eligible: bool,
     find_imports: impl FnOnce() -> Vec<repo_graph_storage::queries::ImportResult>,
-    build_cert: impl FnOnce() -> Option<bool>,
 ) -> Value {
-    let precond_met = precond.is_some_and(|p| p.precondition_met());
-    if !precond_met {
-        // Non-TS / non-resident -> the SQLite fallback (imports_auto_body labels it).
-        return imports_auto_body(file_path, &find_imports(), view, precond);
-    }
-    let green = match cert {
-        ImportCertState::ValidGreen => true,
-        ImportCertState::ValidNotGreen => false,
-        ImportCertState::StaleOrMissing => build_cert().unwrap_or(false),
-    };
-    if green {
+    if precond.is_some_and(|p| p.precondition_met()) && epoch_eligible {
         serve_import_fastpath(file_path, view)
     } else {
-        // RED / YELLOW / build-failed -> the proven compare-on-call (reads SQLite, verifies no-loss).
+        // Non-TS / non-resident, OR the captured epoch no longer matches the resident fingerprint (EV-A
+        // fail-soft) -> the proven compare-on-call (reads SQLite at the pin, verifies no-loss).
         imports_auto_body(file_path, &find_imports(), view, precond)
     }
 }
@@ -1864,17 +1822,82 @@ pub(crate) fn build_and_store_import_cert(
     Some(is_green)
 }
 
-/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1=C / D4): the AUTO (default) `imports <file>` response. Tries the
-/// GREEN-cert FASTPATH (serve LiveGraph WITHOUT SQLite) ; else the proven compare-on-call (reads SQLite). The
-/// view + precondition + current fingerprint are SQLite-FREE; SQLite is read ONLY on the cert build + the
-/// compare-on-call / SQLite-fallback paths.
-pub fn imports_auto_response(
+/// W-B-EPOCH-IMPL-2A (D-EP capture for `imports`; `daemon-w-b-epoch-1.md` §6.4): the IMPORT-cert LG-serve
+/// eligibility WITNESS, captured BUILD-THEN-PEEK. The import-cert sibling of
+/// [`crate::callgraph_cert::callgraph_cert_eligibility`] (callers/callees use the CALLGRAPH cert; `imports`
+/// serves the LiveGraph import EDGES, whose no-loss proof is the IMPORT cert — a GREEN callgraph cert does NOT
+/// license serving import edges). Returns `Some(current_fp)` iff a GREEN import cert exists at EXACTLY the
+/// resident fingerprint for `snapshot_uid` — i.e. the resident partitions' import edges are cert-proven
+/// no-loss-equal to SQLite@`snapshot_uid`, so they are substitutable for it; otherwise `None` ⇒ the request
+/// serves the per-call compare-on-call at the pinned snapshot (the EV-A fail-soft).
+///
+/// **The build-then-peek pattern (reused by IMPL-2B for stats/cycles).** A naïve "compute current_fp, then
+/// lazily build the cert" leaks a TOCTOU: the cert build re-locks the LiveGraph (parking_lot is non-reentrant),
+/// so under a future W-B relax a publish could land between the fingerprint computation and the build, keying
+/// the stored verdict at the pre-swap fingerprint while it was computed over post-swap partitions — a mislabel.
+/// Build-then-peek closes it:
+///   1. WARM — lazy-build the import cert at the current resident fingerprint if (and only if) it is
+///      stale/missing (a valid cert is reused, preserving the zero-SQLite-read green fastpath).
+///   2. PEEK — under ONE livegraph read guard (which excludes a concurrent swap, since a swap needs
+///      `livegraph.write()`), recompute `current_fp` AND peek a GREEN import cert at EXACTLY `current_fp`.
+///
+/// So `Some(fp)` is the EXACT resident-and-validated state, or `None`. (Under the W-A coordinator this slice
+/// ships, no swap can occur mid-request anyway; build-then-peek is the foundation IMPL-3's relax relies on —
+/// this is exactly the closing of the "capture-view-then-lazy-cert-build straddle" the decision-review found.)
+pub(crate) fn import_cert_eligibility(
     repo_state: &RepoState,
     repo_uid: &str,
     snapshot_uid: &str,
+) -> Option<String> {
+    // 1. WARM: lazy (re)build the import cert ONLY if stale/missing at the current resident fingerprint
+    //    (build_and_store_import_cert reads SQLite once per fingerprint; the stale-check keeps a valid GREEN
+    //    cert's serve zero-read). The read guard is dropped before the build so it can re-lock without deadlock.
+    let warm_fp = {
+        let guard = repo_state.livegraph.read();
+        guard
+            .as_ref()
+            .map(|lg| import_cert_fingerprint(&lg.live_partitions(), snapshot_uid))
+    };
+    if let Some(fp) = warm_fp {
+        let stale = !matches!(
+            repo_state.import_cert.read().as_ref(),
+            Some(c) if c.fingerprint == fp
+        );
+        if stale {
+            let _ = build_and_store_import_cert(repo_state, repo_uid, snapshot_uid, Some(fp));
+        }
+    }
+    // 2. PEEK under ONE read guard so "(GREEN import cert) at (this exact resident fingerprint)" is atomic
+    //    w.r.t. any swap.
+    let guard = repo_state.livegraph.read();
+    let current_fp = import_cert_fingerprint(&guard.as_ref()?.live_partitions(), snapshot_uid);
+    let cached = repo_state.import_cert.read();
+    match cached.as_ref() {
+        Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN" => Some(current_fp),
+        _ => None,
+    }
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1=C / D4) + W-B-EPOCH-IMPL-2A (EV-A): the AUTO (default)
+/// `imports <file>` response under the captured request `epoch`. Serves the GREEN-cert FASTPATH (LiveGraph
+/// WITHOUT SQLite) iff the file's precondition is met AND the resident import-cert fingerprint STILL equals the
+/// captured green-validated `epoch.fingerprint` (the EV-A gate) ; else the proven compare-on-call (reads SQLite
+/// at the pinned `epoch.snapshot_uid()`).
+///
+/// **TOCTOU closed.** `view` + the file's `precond` + the resident `current_fp` are captured under ONE read
+/// guard, so the served view and the fingerprint it is validated by are the SAME resident partition set; the
+/// gate then compares that `current_fp` against the PRE-validated `epoch.fingerprint` (built BUILD-THEN-PEEK by
+/// [`import_cert_eligibility`] in the handler). A swap/straddle since capture moves `current_fp`, so the gate
+/// fails and the request fails soft to SQLite at the pin — never a green-labelled serve of an unvalidated view.
+/// No lazy cert build happens here anymore (it moved to the eligibility capture).
+pub fn imports_auto_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    epoch: &RequestEpoch,
     file_path: &str,
 ) -> Value {
-    // SQLite-FREE: the file's view + precondition + the current import-cert fingerprint.
+    let snapshot_uid = epoch.snapshot_uid();
+    // SQLite-FREE: the file's view + precondition + the current import-cert fingerprint, ALL under ONE guard.
     let guard = repo_state.livegraph.read();
     let (view, precond, current_fp) = match guard.as_ref() {
         Some(lg) => (
@@ -1889,35 +1912,17 @@ pub fn imports_auto_response(
         ),
     };
     drop(guard);
-    // The cert's state for the CURRENT fingerprint.
-    let cert = {
-        let cached = repo_state.import_cert.read();
-        match (&current_fp, cached.as_ref()) {
-            (Some(fp), Some(c)) if &c.fingerprint == fp => {
-                if c.verdict == "GREEN" {
-                    ImportCertState::ValidGreen
-                } else {
-                    ImportCertState::ValidNotGreen
-                }
-            }
-            _ => ImportCertState::StaleOrMissing,
-        }
-    };
+    // EV-A: serve the LiveGraph fastpath iff the resident fingerprint still equals the captured green-validated
+    // eligibility witness; mismatch / None (a swap/straddle since capture, or no GREEN import cert) -> SQLite.
+    let epoch_eligible = current_fp.is_some() && current_fp.as_ref() == epoch.fingerprint.as_ref();
     let file_stable_key = format!("{repo_uid}:{file_path}:FILE");
-    imports_fastpath_or_compare(
-        file_path,
-        &view,
-        precond.as_ref(),
-        cert,
-        || {
-            repo_state
-                .storage()
-                .ok()
-                .and_then(|conn| conn.find_imports(snapshot_uid, &file_stable_key).ok())
-                .unwrap_or_default()
-        },
-        || build_and_store_import_cert(repo_state, repo_uid, snapshot_uid, current_fp.clone()),
-    )
+    imports_fastpath_or_compare(file_path, &view, precond.as_ref(), epoch_eligible, || {
+        repo_state
+            .storage()
+            .ok()
+            .and_then(|conn| conn.find_imports(snapshot_uid, &file_stable_key).ok())
+            .unwrap_or_default()
+    })
 }
 
 /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1 (D2/D3/D4): the PURE repo-wide aggregation -- run the per-file
@@ -3198,16 +3203,19 @@ mod tests {
     mod wb_epoch_coherence {
         use crate::callgraph_cert::{callgraph_cert_eligibility, test_fixture};
         use crate::livegraph_feed::{
-            callees_engine_response, callers_engine_response, import_cert_fingerprint, Engine,
-            RequestEpoch,
+            callees_engine_response, callers_engine_response, import_cert_eligibility,
+            import_cert_fingerprint, imports_auto_response, path_engine_response, Engine,
+            ImportNoLossCert, RequestEpoch,
         };
         use crate::orient_serve::{
             orient_bounded_cert_eligibility, orient_bounded_cert_is_green, OrientServeDecorator,
         };
         use repo_graph_agent::AgentStorageRead;
+        use repo_graph_storage::error::StorageError;
         use repo_graph_storage::queries::ResolvedSymbol;
         use repo_graph_storage::StorageConnection;
         use repo_graph_trust_model::LanguageSupport;
+        use serde_json::{json, Value};
 
         /// Capture the request epoch for the fixture, using the given eligibility witness.
         fn capture(
@@ -3402,6 +3410,168 @@ mod tests {
                 "stale captured epoch -> delegate to the pinned SQLite snapshot (mutated to empty), \
                  NEVER serve the swapped LiveGraph"
             );
+        }
+
+        // ── W-B-EPOCH-IMPL-2A: `imports` build-then-peek eligibility + EV-A ───────────────────────
+
+        /// The import-cert eligibility witness is BUILD-THEN-PEEK: `Some` ONLY when a GREEN import cert exists
+        /// at EXACTLY the resident fingerprint, and the returned fingerprint IS that exact resident state.
+        #[test]
+        fn import_cert_eligibility_is_some_only_on_green_at_the_exact_resident_fingerprint() {
+            let f = test_fixture::build_fixture(false);
+            // The faithful fixture has NO import edges -> the import cert builds YELLOW (`met == 0`) -> the
+            // warm builds it, the peek finds it non-GREEN -> no witness (eager SQLite).
+            assert!(
+                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid).is_none(),
+                "no import-bearing files -> YELLOW import cert -> no eligibility witness"
+            );
+            // Pre-store a GREEN import cert at EXACTLY the resident fingerprint (what the producer stores on a
+            // no-loss repo). The warm sees a valid (non-stale) cert -> NO rebuild -> the peek hits -> Some(fp),
+            // and the witness IS the exact resident-and-validated fingerprint.
+            let resident_fp = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            *f.state.import_cert.write() = Some(ImportNoLossCert {
+                verdict: "GREEN".to_string(),
+                fingerprint: resident_fp.clone(),
+            });
+            let fp = import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid)
+                .expect("GREEN import cert at the resident fingerprint -> Some eligibility");
+            assert_eq!(
+                fp, resident_fp,
+                "the witness IS the exact resident-and-validated fingerprint"
+            );
+
+            // Honesty under a lazy rebuild straddle (§6.4): a swap bumps the partition epoch so the resident
+            // fingerprint MOVES; the pre-stored GREEN cert is now at the OLD fp; the warm rebuilds at the NEW
+            // fp (YELLOW, no imports) and the peek at the new fp finds no GREEN -> None. The stale GREEN
+            // witness is NEVER returned (monotonic epochs: the old fp never recurs).
+            swap_livegraph(&f.state);
+            assert!(
+                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid).is_none(),
+                "after a swap the witness is None, never the stale pre-swap fingerprint"
+            );
+
+            // No resident LiveGraph -> None (eager SQLite).
+            *f.state.livegraph.write() = None;
+            assert!(
+                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid).is_none()
+            );
+        }
+
+        /// EV-A at the `imports` auto serve (TOCTOU closed): on a matching epoch the GREEN-cert FASTPATH
+        /// serves the LiveGraph (zero SQLite read; `comparison.source` is the no-loss certificate); a
+        /// mid-request swap moves the resident fingerprint so the captured epoch no longer matches -> the serve
+        /// fails soft to the per-call compare-on-call at the PINNED snapshot (`comparison.sqlite_resolved_local`
+        /// present; NO cert source) — never a cert-labelled serve of the unvalidated post-swap view.
+        #[test]
+        fn ev_a_imports_serves_cert_fastpath_on_green_then_pinned_sqlite_after_swap() {
+            let f = test_fixture::build_fixture(false);
+            // GREEN import cert at the resident fingerprint -> the eligibility witness is Some.
+            let resident_fp = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            *f.state.import_cert.write() = Some(ImportNoLossCert {
+                verdict: "GREEN".to_string(),
+                fingerprint: resident_fp.clone(),
+            });
+            let fingerprint =
+                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid);
+            assert!(fingerprint.is_some(), "GREEN import cert -> eligible");
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+            // CALLER_PATH ("src/a.ts") is a resident TS file -> the precondition is met.
+            let file = test_fixture::CALLER_PATH;
+
+            // Steady state: epoch matches the resident fingerprint -> the cert FASTPATH (LiveGraph, the no-loss
+            // certificate source).
+            let v = imports_auto_response(&f.state, test_fixture::REPO, &epoch, file);
+            assert_eq!(v["backend_used"], "livegraph");
+            assert_eq!(v["comparison"]["source"], "repo_no_loss_certificate");
+
+            // EV-A: a swap moves the resident fingerprint; the captured epoch no longer matches -> the serve
+            // routes to the per-call compare-on-call at the pin (reads SQLite). (The empty-imports fixture
+            // serves `livegraph` VACUOUSLY here — nothing to lose — so the observable EV-A signal is the
+            // compare path's `sqlite_resolved_local`, NOT the cert `source`.)
+            swap_livegraph(&f.state);
+            let v2 = imports_auto_response(&f.state, test_fixture::REPO, &epoch, file);
+            assert!(
+                v2["comparison"]["sqlite_resolved_local"].is_number(),
+                "stale epoch -> the per-call SQLite compare-on-call at the pin (not the cert fastpath)"
+            );
+            assert!(
+                v2["comparison"]["source"].is_null(),
+                "the post-swap serve is NEVER labelled with the no-loss certificate source"
+            );
+        }
+
+        // ── W-B-EPOCH-IMPL-2A: `path` serves the pinned SQLite snapshot (§14 D-CC refined) ────────
+
+        /// `path`'s default (`Engine::Auto`) serves the PINNED SQLite snapshot — NOT the LiveGraph BFS — even
+        /// though the resident LiveGraph HAS the path. Closes the §1c false-freshness stamp (the served BFS is
+        /// now genuinely as-of the stamped `snapshot_uid`). The explicit `--engine livegraph` diagnostic STILL
+        /// serves the LiveGraph (the BFS machinery is preserved for the deferred CALLS∪IMPORTS re-enable).
+        #[test]
+        fn path_auto_serves_pinned_sqlite_not_livegraph() {
+            let f = test_fixture::build_fixture(false);
+            let from = test_fixture::caller_key();
+            let to = test_fixture::callee_key();
+
+            // Engine::Auto -> serve the pinned SQLite snapshot (the sentinel closure). The LiveGraph BFS is NOT
+            // consulted, so the served path is the SQLite sentinel and the stamp is the pinned snapshot_uid.
+            let mut cancel = || std::ops::ControlFlow::Continue(());
+            let auto = path_engine_response(
+                Engine::Auto,
+                &f.state,
+                &from,
+                &to,
+                test_fixture::REPO,
+                &f.snapshot_uid,
+                || -> Result<Value, StorageError> {
+                    Ok(json!({
+                        "repo_uid": test_fixture::REPO,
+                        "snapshot_uid": f.snapshot_uid,
+                        "path": { "found": true, "path": [{ "symbol": "from_sqlite" }] },
+                        "found": true,
+                    }))
+                },
+                "",
+                &mut cancel,
+            )
+            .unwrap();
+            assert_eq!(
+                auto["backend_used"], "sqlite",
+                "path Auto serves the pinned SQLite snapshot, NOT the LiveGraph BFS"
+            );
+            assert_eq!(
+                auto["snapshot_uid"], f.snapshot_uid,
+                "stamped with the pinned snapshot"
+            );
+            assert_eq!(
+                auto["path"]["path"][0]["symbol"], "from_sqlite",
+                "the SERVED path is the SQLite answer (the LiveGraph BFS was not consulted)"
+            );
+
+            // Contrast: the explicit --engine livegraph diagnostic STILL serves the LiveGraph BFS (preserved);
+            // the resident LiveGraph has callerFn->calleeFn, so the SQLite closure is never read.
+            let mut cancel2 = || std::ops::ControlFlow::Continue(());
+            let lg = path_engine_response(
+                Engine::LiveGraph,
+                &f.state,
+                &from,
+                &to,
+                test_fixture::REPO,
+                &f.snapshot_uid,
+                || -> Result<Value, StorageError> {
+                    panic!("explicit --engine livegraph must not read SQLite when the LiveGraph serves")
+                },
+                "",
+                &mut cancel2,
+            )
+            .unwrap();
+            assert_eq!(lg["backend_used"], "livegraph");
+            assert_eq!(lg["found"], true);
         }
     }
 
@@ -4117,70 +4287,22 @@ mod tests {
             }],
             observations: vec![],
         };
-        let panic_sqlite = || -> Vec<ImportResult> { panic!("SQLite read on the GREEN fastpath") };
+        let panic_sqlite =
+            || -> Vec<ImportResult> { panic!("SQLite read on the eligible fastpath") };
         let empty_sqlite = Vec::<ImportResult>::new;
-        // GREEN cert + precondition met -> FASTPATH; the panicking find_imports + build are NEVER called.
-        let g = imports_fastpath_or_compare(
-            "a.ts",
-            &view,
-            Some(&met),
-            ImportCertState::ValidGreen,
-            panic_sqlite,
-            || panic!("build on a valid cert"),
-        );
+        // W-B-EPOCH-IMPL-2A (EV-A): epoch_eligible + precondition met -> FASTPATH; the panicking find_imports
+        // is NEVER called (proves zero SQLite read on the cert-proven serve).
+        let g = imports_fastpath_or_compare("a.ts", &view, Some(&met), true, panic_sqlite);
         assert_eq!(g["backend_used"], "livegraph");
         assert_eq!(g["comparison"]["source"], "repo_no_loss_certificate");
         assert_eq!(g["count"], 1);
-        // RED cert (ValidNotGreen) -> COMPARE-ON-CALL (find_imports runs -> per-call comparison, NOT the cert).
-        let r = imports_fastpath_or_compare(
-            "a.ts",
-            &view,
-            Some(&met),
-            ImportCertState::ValidNotGreen,
-            empty_sqlite,
-            || panic!("build on a valid cert"),
-        );
+        // NOT eligible (no green cert at capture, OR a swap moved the resident fingerprint -> the EV-A
+        // fail-soft) -> COMPARE-ON-CALL: find_imports runs, a per-call comparison (NOT the cert source).
+        let r = imports_fastpath_or_compare("a.ts", &view, Some(&met), false, empty_sqlite);
         assert!(r["comparison"]["sqlite_resolved_local"].is_number());
         assert!(r["comparison"]["source"].is_null());
-        // STALE/MISSING + build -> GREEN -> FASTPATH (find_imports NEVER called).
-        let s = imports_fastpath_or_compare(
-            "a.ts",
-            &view,
-            Some(&met),
-            ImportCertState::StaleOrMissing,
-            panic_sqlite,
-            || Some(true),
-        );
-        assert_eq!(s["comparison"]["source"], "repo_no_loss_certificate");
-        // STALE/MISSING + build -> RED -> compare-on-call.
-        let s2 = imports_fastpath_or_compare(
-            "a.ts",
-            &view,
-            Some(&met),
-            ImportCertState::StaleOrMissing,
-            empty_sqlite,
-            || Some(false),
-        );
-        assert!(s2["comparison"]["sqlite_resolved_local"].is_number());
-        // BUILD FAILURE (None) -> compare-on-call (safe fallback, NOT the cert).
-        let bf = imports_fastpath_or_compare(
-            "a.ts",
-            &view,
-            Some(&met),
-            ImportCertState::StaleOrMissing,
-            empty_sqlite,
-            || None,
-        );
-        assert!(bf["comparison"]["sqlite_resolved_local"].is_number());
-        // NON-TS (precondition unmet) -> SQLite fallback regardless of the GREEN cert; build NEVER called.
-        let nt = imports_fastpath_or_compare(
-            "a.cpp",
-            &view,
-            None,
-            ImportCertState::ValidGreen,
-            empty_sqlite,
-            || panic!("build on a non-TS file"),
-        );
+        // NON-TS (precondition unmet) -> SQLite compare-on-call regardless of eligibility.
+        let nt = imports_fastpath_or_compare("a.cpp", &view, None, true, empty_sqlite);
         assert_eq!(nt["backend_used"], "sqlite");
     }
 
@@ -4212,120 +4334,9 @@ mod tests {
         assert!(!r.trust_class_mismatch.is_empty());
     }
 
-    // PATH-LIVEGRAPH-DEFAULT-1: the `Auto` decision. Serve LiveGraph ONLY when Exact + Fresh + TS-only;
-    // otherwise SQLite fallback with a labelled reason.
-
-    /// A path node WITH display metadata (resolvable `file:line`).
-    fn pnode(key: &str, line: u32) -> PathNodeDisplay {
-        PathNodeDisplay {
-            key: key.to_string(),
-            location: Some((format!("{key}.ts"), line)),
-        }
-    }
-    /// A path node WITHOUT display metadata (no recoverable range).
-    fn pnode_no_loc(key: &str) -> PathNodeDisplay {
-        PathNodeDisplay {
-            key: key.to_string(),
-            location: None,
-        }
-    }
-    fn lg_path(
-        class: AnswerClass,
-        freshness: FreshnessState,
-        ts_only: bool,
-        found: bool,
-        nodes: Vec<PathNodeDisplay>,
-    ) -> Option<LgPathAuto> {
-        Some(LgPathAuto {
-            class,
-            freshness,
-            ts_only,
-            found,
-            nodes,
-        })
-    }
-
-    #[test]
-    fn path_auto_serves_livegraph_when_exact_fresh_ts() {
-        // A found Exact/Fresh/TS path WITH display metadata is served from LiveGraph.
-        let nodes = vec![pnode("a", 1), pnode("b", 2)];
-        let found = path_auto_outcome(lg_path(
-            AnswerClass::Exact,
-            FreshnessState::Fresh,
-            true,
-            true,
-            nodes.clone(),
-        ));
-        assert_eq!(found, Ok((true, nodes)));
-        // D3: an EXACT no-path (traversal completeness proven) is ALSO served — no nodes to render, so
-        // the display gate is vacuous.
-        let no_path = path_auto_outcome(lg_path(
-            AnswerClass::Exact,
-            FreshnessState::Fresh,
-            true,
-            false,
-            vec![],
-        ));
-        assert_eq!(no_path, Ok((false, vec![])));
-    }
-
-    #[test]
-    fn path_auto_falls_back_on_partial() {
-        // D3: a PARTIAL no-path (incomplete traversal) MUST fall back to SQLite, never an exact-empty.
-        let r = path_auto_outcome(lg_path(
-            AnswerClass::Partial,
-            FreshnessState::Fresh,
-            true,
-            false,
-            vec![],
-        ));
-        assert_eq!(r, Err(FallbackReason::LiveGraphPartial));
-    }
-
-    #[test]
-    fn path_auto_falls_back_on_stale() {
-        // Freshness is checked BEFORE class, so a Stale (even Exact) answer reports LiveGraphStale.
-        let r = path_auto_outcome(lg_path(
-            AnswerClass::Exact,
-            FreshnessState::Stale,
-            true,
-            true,
-            vec![pnode("a", 1), pnode("b", 2)],
-        ));
-        assert_eq!(r, Err(FallbackReason::LiveGraphStale));
-    }
-
-    #[test]
-    fn path_auto_falls_back_on_unsupported_language() {
-        // Exact + Fresh but NOT TS-only -> fall back (D2 TS-only scope).
-        let r = path_auto_outcome(lg_path(
-            AnswerClass::Exact,
-            FreshnessState::Fresh,
-            false,
-            true,
-            vec![pnode("a", 1), pnode("b", 2)],
-        ));
-        assert_eq!(r, Err(FallbackReason::LiveGraphUnsupportedLanguage));
-    }
-
-    #[test]
-    fn path_auto_falls_back_on_missing_display_metadata() {
-        // Exact + Fresh + TS, but a rendered node lacks file:line -> fall back rather than render `:0`
-        // (PATH-LIVEGRAPH-DEFAULT-1 invariant; never serve a degraded default human path).
-        let r = path_auto_outcome(lg_path(
-            AnswerClass::Exact,
-            FreshnessState::Fresh,
-            true,
-            true,
-            vec![pnode("a", 1), pnode_no_loc("b")],
-        ));
-        assert_eq!(r, Err(FallbackReason::LiveGraphDisplayMetadataUnavailable));
-    }
-
-    #[test]
-    fn path_auto_falls_back_on_unavailable() {
-        // No LiveGraph for this repo -> LiveGraphUnavailable.
-        let r = path_auto_outcome(None);
-        assert_eq!(r, Err(FallbackReason::LiveGraphUnavailable));
-    }
+    // W-B-EPOCH-IMPL-2A (§14 D-CC refined): the former `path_auto_outcome` unit tests
+    // (`path_auto_serves_livegraph_when_*` / `path_auto_falls_back_on_*`) are REMOVED with the function —
+    // `path`'s default no longer serves the LiveGraph fastpath. The replacement coherence proof (Engine::Auto
+    // serves the PINNED SQLite snapshot even when the LiveGraph has a path; explicit `--engine livegraph` still
+    // serves the LG) lives in `wb_epoch_coherence::path_auto_serves_pinned_sqlite_not_livegraph`.
 }

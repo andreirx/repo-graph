@@ -1232,22 +1232,26 @@ impl ServiceDispatcher {
             }
         };
 
-        // Get latest snapshot
-        let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
-                );
-            }
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        // Get latest snapshot. W-B-EPOCH-IMPL-2A: resolve the AGENT `AgentSnapshot` DTO (the
+        // `AgentStorageRead` trait — same READY-row selection as the inherent method) so the `auto` path can
+        // wrap it in a `RequestEpoch`. The explicit engines below use only `snapshot.snapshot_uid` (a &str),
+        // unchanged.
+        let snapshot =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snap)) => snap,
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
 
         if engine == "livegraph" {
             // D6: file filter OPTIONAL (None -> repo-wide). repo_root + include_fixtures feed the
@@ -1340,12 +1344,25 @@ impl ServiceDispatcher {
         if engine == "auto" {
             // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): LiveGraph-first with the per-call no-loss compare + a labelled
             // SQLite fallback (backend_used / fallback_reason are JSON-only; the human render strips them).
+            // W-B-EPOCH-IMPL-2A (SC-B): capture the request epoch ONCE — the pinned snapshot + the BUILD-THEN-PEEK
+            // import-cert eligibility witness (`import_cert_eligibility`) — and serve under it. The EV-A gate in
+            // `imports_auto_response` fails soft to the pinned SQLite snapshot on a fingerprint mismatch, closing
+            // the capture-view-then-lazy-cert-build TOCTOU the decision-review found.
+            let fingerprint = crate::livegraph_feed::import_cert_eligibility(
+                &repo_state,
+                &repo_uid,
+                &snapshot.snapshot_uid,
+            );
+            let epoch = crate::livegraph_feed::RequestEpoch {
+                snapshot,
+                fingerprint,
+            };
             return DispatchResult::success(
                 &request.id,
                 crate::livegraph_feed::imports_auto_response(
                     &repo_state,
                     &repo_uid,
-                    &snapshot.snapshot_uid,
+                    &epoch,
                     file_path,
                 ),
             );
@@ -1870,27 +1887,38 @@ impl ServiceDispatcher {
             }
         };
 
-        // Get latest snapshot
-        let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
-                );
-            }
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
+        // Get latest snapshot. W-B-EPOCH-IMPL-2A (§14 D-CC refined): capture the request epoch — the pinned
+        // `AgentSnapshot` (resolved ONCE; the request's atomic SQLite pin) with NO LG-serve eligibility
+        // (`fingerprint: None`). `path` has NO cert: there is no CALLS∪IMPORTS no-loss cert to license a
+        // LiveGraph path serve, so `path` serves the pinned SQLite snapshot under the epoch (the `Engine::Auto`
+        // arm of `path_engine_response`). `fingerprint: None` is the honest, uniform "no eligibility" witness
+        // (a future CALLS∪IMPORTS parity cert makes it `Some`, re-enabling the LG fastpath). Every read +
+        // the response stamp use `epoch.snapshot_uid()`.
+        let snapshot =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snap)) => snap,
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
+        let epoch = crate::livegraph_feed::RequestEpoch {
+            snapshot,
+            fingerprint: None,
         };
 
         // Resolve symbols
         use repo_graph_storage::queries::SymbolResolveError;
 
-        let from_sym = match storage.resolve_symbol(&snapshot.snapshot_uid, from_query) {
+        let from_sym = match storage.resolve_symbol(epoch.snapshot_uid(), from_query) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -1913,7 +1941,7 @@ impl ServiceDispatcher {
             }
         };
 
-        let to_sym = match storage.resolve_symbol(&snapshot.snapshot_uid, to_query) {
+        let to_sym = match storage.resolve_symbol(epoch.snapshot_uid(), to_query) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -1973,10 +2001,10 @@ impl ServiceDispatcher {
             &from_sym.stable_key,
             &to_sym.stable_key,
             &repo_uid,
-            &snapshot.snapshot_uid,
+            epoch.snapshot_uid(),
             || {
                 let path_result = storage.find_shortest_path(
-                    &snapshot.snapshot_uid,
+                    epoch.snapshot_uid(),
                     &from_sym.stable_key,
                     &to_sym.stable_key,
                     8,
@@ -1984,7 +2012,7 @@ impl ServiceDispatcher {
                 let found = path_result.found;
                 Ok(serde_json::json!({
                     "repo_uid": repo_uid,
-                    "snapshot_uid": snapshot.snapshot_uid,
+                    "snapshot_uid": epoch.snapshot_uid(),
                     "path": path_result,
                     "found": found,
                 }))
