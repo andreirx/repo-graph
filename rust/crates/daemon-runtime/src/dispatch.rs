@@ -3584,6 +3584,51 @@ impl ServiceDispatcher {
             );
         }
 
+        // W-B-EPOCH-IMPL-2C: capture the request epoch ONCE — the pinned snapshot + the BUILD-THEN-PEEK
+        // stats-cert eligibility witness (`stats_cert_eligibility`), identically to the other 8 mixed-read
+        // handlers. Trust's Half-A current-state posture is a PROJECTION of the LiveGraph `module_stats()`
+        // answer (trust_coherence.rs), whose no-loss proof is the STATS cert — the SAME cert `stats` gates on,
+        // reused (no new cert). The EV-A gate in `build_posture_leaf` fails soft to the Unavailable posture on a
+        // fingerprint mismatch, so the LiveGraph posture is NEVER computed from an epoch incoherent with the
+        // pinned v1 report (Half B) it ships beside (the cross-epoch split-brain this arc prevents). The cert
+        // build runs under the SAME supervisor, so a peer-disconnect mid-aggregation aborts the in-flight
+        // SELECT and returns Cancelled rather than a stale witness.
+        let fingerprint = match crate::livegraph_feed::stats_cert_eligibility(
+            emitter,
+            &repo_state,
+            &snapshot.snapshot_uid,
+        ) {
+            crate::livegraph_feed::StatsEligibility::Witness(fp) => fp,
+            crate::livegraph_feed::StatsEligibility::Cancelled => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::Cancelled,
+                        "trust query cancelled (client disconnected during stats-cert eligibility)",
+                    ),
+                );
+            }
+        };
+        // The epoch's `AgentSnapshot` is built from the SAME resolved storage `Snapshot` above — NO second
+        // "latest" resolve (the epoch's whole point: pin once, never re-resolve). The mapping mirrors the
+        // canonical `AgentStorageRead` impl (storage/src/agent_impl.rs:121-132): storage `kind` -> agent
+        // `scope`. `snapshot` itself is retained for the v1 worker below, which needs `toolchain_json` (a field
+        // `AgentSnapshot` does not carry). Trust reads only `epoch.snapshot_uid()` (the pinned SQLite identity);
+        // it has no orient-style `snapshot::aggregate`, so the other `AgentSnapshot` fields are inert here.
+        let epoch = crate::livegraph_feed::RequestEpoch {
+            snapshot: repo_graph_agent::AgentSnapshot {
+                snapshot_uid: snapshot.snapshot_uid.clone(),
+                repo_uid: snapshot.repo_uid.clone(),
+                scope: snapshot.kind.clone(),
+                basis_commit: snapshot.basis_commit.clone(),
+                created_at: snapshot.created_at.clone(),
+                files_total: snapshot.files_total.max(0) as u64,
+                nodes_total: snapshot.nodes_total.max(0) as u64,
+                edges_total: snapshot.edges_total.max(0) as u64,
+            },
+            fingerprint,
+        };
+
         // Compute the trust report on a WORKER thread, supervised from this (transport)
         // thread (DAEMON-CANCEL-3, reusing CANCEL-2's `run_interruptible`). Trust's
         // heavy work is two shapes that need two cancel mechanisms, both fired on
@@ -3691,7 +3736,7 @@ impl ServiceDispatcher {
         // and labels the multi-source downgrade leaf `{sqlite, declaration}`. The v1 computation above is
         // UNCHANGED; the wrapper adds labels + the posture, it never re-judges (F5: no axis is presented as
         // current-state unless its leaf is source=livegraph).
-        let envelope = crate::trust_coherence::build_trust_envelope(&repo_state, report);
+        let envelope = crate::trust_coherence::build_trust_envelope(&repo_state, &epoch, report);
         match serde_json::to_value(&envelope) {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(
