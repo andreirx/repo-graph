@@ -2343,16 +2343,6 @@ pub struct CycleNoLossCert {
     pub fingerprint: String,
 }
 
-/// The cycles cert's status for the CURRENT fingerprint (mirrors `ImportCertState`).
-enum CycleCertState {
-    /// Valid at the current fingerprint, GREEN -> the fastpath may serve LiveGraph.
-    ValidGreen,
-    /// Valid at the current fingerprint, not GREEN -> SQLite.
-    ValidNotGreen,
-    /// No cert, or a cert at a DIFFERENT fingerprint -> (re)build, else SQLite.
-    StaleOrMissing,
-}
-
 /// Serve the LiveGraph MODULE cycles in the CANONICAL, byte-identical output (`cycle_output`) WITHOUT reading
 /// SQLite -- the GREEN-cert fastpath. The `cycles` array is byte-identical to the SQLite default's canonical
 /// output (proven in CYCLES-OUTPUT-CONTRACT-1 on xpart + amodx). `backend_used=livegraph`, no fallback.
@@ -2472,68 +2462,131 @@ pub(crate) fn build_and_store_cycles_cert_cancellable(
     Ok(Some(is_green))
 }
 
-/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1/D4): the PURE fastpath/SQLite ladder. precondition UNMET (the
-/// LiveGraph module-cycle answer is not `Exact` -- non-resident / non-TS / degraded) -> SQLite (the labelled
-/// `precondition_reason`) ; precondition met + GREEN cert -> serve LiveGraph WITHOUT find_cycles ; cert
-/// RED/stale/missing/build-failed -> SQLite (`LiveGraphCycleDivergence`). Pure (no I/O itself): a panicking
-/// `serve_sqlite` proves the GREEN path skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing.
+/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1/D4) + W-B-EPOCH-IMPL-2B (EV-A): the PURE fastpath/SQLite ladder
+/// under the captured request epoch. precondition UNMET (the LiveGraph module-cycle answer is not `Exact` --
+/// non-resident / non-TS / degraded) -> SQLite (the labelled `precondition_reason`) ; precondition met AND
+/// `epoch_eligible` -> serve LiveGraph WITHOUT `find_cycles` (the cycles cert proved the resident module
+/// cycles no-loss-equal to SQLite@`snapshot_uid`) ; NOT eligible (no GREEN cycles cert at capture, OR a
+/// swap/straddle since capture so the resident fingerprint moved) -> SQLite (`LiveGraphCycleDivergence`).
+/// Pure (no I/O itself): a panicking `serve_sqlite` proves the eligible path skips SQLite.
 ///
-/// DAEMON-CANCEL-1 (review iteration 1): the two SQLite-touching branches (`serve_sqlite`, `build_cert`)
-/// RECEIVE the cooperative `cancel` checkpoint as a parameter rather than capturing it. The ladder reborrows
-/// the one `&mut` into whichever branch it takes — which (a) lets the StaleOrMissing→RED path build the cert
-/// and THEN serve SQLite without two closures aliasing the same `&mut`, and (b) lets the cert build cancel
-/// mid-Tarjan. A `Cancelled` from either branch short-circuits the ladder via `?`. The pure-decision shape is
-/// preserved: a panicking closure still proves which branch runs.
+/// `epoch_eligible` is the EV-A serve gate — `true` iff the resident cycles-cert fingerprint (computed under
+/// the SAME read guard that captured `lg_cycles`) still equals the green-validated `epoch.fingerprint` (built
+/// BUILD-THEN-PEEK by [`cycles_cert_eligibility`] in the handler). No lazy cert build happens here anymore (it
+/// moved to the eligibility capture, closing the capture-LG-cycles-then-lazy-cert-build TOCTOU).
+///
+/// DAEMON-CANCEL-1: the SQLite-touching `serve_sqlite` branch RECEIVES the cooperative `cancel` checkpoint as a
+/// parameter (so the SQLite SCC fallback cancels mid-Tarjan). The first-call-per-fingerprint cert build's
+/// cancellation now lives in [`cycles_cert_eligibility`] (its WARM step threads the SAME checkpoint), so the
+/// route's every Tarjan still cancels mid-flight.
 fn cycles_fastpath_or_sqlite(
     precondition_met: bool,
     precondition_reason: FallbackReason,
-    cert: CycleCertState,
+    epoch_eligible: bool,
     serve_livegraph: impl FnOnce() -> Value,
     serve_sqlite: impl FnOnce(
         FallbackReason,
         &mut dyn FnMut() -> std::ops::ControlFlow<()>,
     ) -> Result<Value, repo_graph_storage::error::StorageError>,
-    build_cert: impl FnOnce(
-        &mut dyn FnMut() -> std::ops::ControlFlow<()>,
-    ) -> Result<Option<bool>, repo_graph_storage::error::StorageError>,
     cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
     if !precondition_met {
         return serve_sqlite(precondition_reason, cancel);
     }
-    let green = match cert {
-        CycleCertState::ValidGreen => true,
-        CycleCertState::ValidNotGreen => false,
-        // Reborrow so `cancel` stays usable for the serve_sqlite fall-through on a RED build.
-        CycleCertState::StaleOrMissing => build_cert(&mut *cancel)?.unwrap_or(false),
-    };
-    if green {
+    if epoch_eligible {
         Ok(serve_livegraph())
     } else {
         serve_sqlite(FallbackReason::LiveGraphCycleDivergence, cancel)
     }
 }
 
-/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1=A / D4): the AUTO (default) `cycles` response. Tries the GREEN-cert
-/// FASTPATH (serve the LiveGraph module cycles WITHOUT SQLite) ; else SQLite (canonical). The answer-class +
-/// the LiveGraph cycles + the current fingerprint are SQLite-FREE; SQLite is read ONLY on the cert build + the
-/// SQLite fallback. The served output is byte-identical either way (CYCLES-OUTPUT-CONTRACT-1).
+/// W-B-EPOCH-IMPL-2B (D-EP capture for `cycles`; `daemon-w-b-epoch-1.md` §6.4): the CYCLES-cert LG-serve
+/// eligibility WITNESS, captured BUILD-THEN-PEEK. The cycles sibling of [`import_cert_eligibility`] /
+/// [`crate::callgraph_cert::callgraph_cert_eligibility`] (callers/callees use the CALLGRAPH cert, `imports`
+/// the IMPORT cert; `cycles` serves the LiveGraph MODULE-cycle SCC, whose no-loss proof is the CYCLES cert —
+/// a GREEN callgraph/import cert does NOT license serving module cycles). Returns `Some(current_fp)` iff a
+/// GREEN cycles cert exists at EXACTLY the resident fingerprint for `snapshot_uid` — i.e. the resident
+/// partitions' module cycles are cert-proven no-loss-equal to SQLite@`snapshot_uid`, so they are
+/// substitutable for it; otherwise `None` ⇒ the request serves the canonical SQLite answer at the pinned
+/// snapshot (the EV-A fail-soft).
+///
+/// **Build-then-peek** (see [`import_cert_eligibility`] for the full rationale + the TOCTOU it closes):
+///   1. WARM — lazy-build the cycles cert at the current resident fingerprint iff stale/missing (a valid cert
+///      is reused, preserving the zero-`find_cycles` green fastpath).
+///   2. PEEK — under ONE livegraph read guard (which excludes a concurrent swap), recompute `current_fp` AND
+///      peek a GREEN cycles cert at EXACTLY `current_fp`.
+///
+/// So `Some(fp)` is the EXACT resident-and-validated state, or `None`.
+///
+/// DAEMON-CANCEL-1: `cancel` is threaded into the WARM (re)build (`build_and_store_cycles_cert_cancellable`)
+/// so the first-call-per-fingerprint cert build still cancels mid-Tarjan on a peer disconnect —
+/// `Err(StorageError::Cancelled)` propagates to the handler (mapped to `ErrorCode::Cancelled`). This is the
+/// SAME Tarjan that previously cancelled inside the serve ladder; build-then-peek only moved WHERE it runs.
+pub(crate) fn cycles_cert_eligibility(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+    cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
+) -> Result<Option<String>, repo_graph_storage::error::StorageError> {
+    // 1. WARM: lazy (re)build the cycles cert ONLY if stale/missing at the current resident fingerprint (the
+    //    stale-check keeps a valid cert's serve zero-read). The read guard is dropped before the build so it
+    //    can re-lock without deadlock.
+    let warm_fp = {
+        let guard = repo_state.livegraph.read();
+        guard
+            .as_ref()
+            .map(|lg| import_cert_fingerprint(&lg.live_partitions(), snapshot_uid))
+    };
+    if let Some(fp) = warm_fp {
+        let stale = !matches!(
+            repo_state.cycles_cert.read().as_ref(),
+            Some(c) if c.fingerprint == fp
+        );
+        if stale {
+            build_and_store_cycles_cert_cancellable(repo_state, snapshot_uid, Some(fp), cancel)?;
+        }
+    }
+    // 2. PEEK under ONE read guard so "(GREEN cycles cert) at (this exact resident fingerprint)" is atomic
+    //    w.r.t. any swap.
+    let guard = repo_state.livegraph.read();
+    let current_fp = match guard.as_ref() {
+        Some(lg) => import_cert_fingerprint(&lg.live_partitions(), snapshot_uid),
+        None => return Ok(None),
+    };
+    let cached = repo_state.cycles_cert.read();
+    Ok(match cached.as_ref() {
+        Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN" => Some(current_fp),
+        _ => None,
+    })
+}
+
+/// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (D1=A / D4) + W-B-EPOCH-IMPL-2B (EV-A): the AUTO (default) `cycles`
+/// response under the captured request `epoch`. Serves the GREEN-cert FASTPATH (the LiveGraph module cycles
+/// WITHOUT SQLite) iff the precondition is met AND the resident cycles-cert fingerprint STILL equals the
+/// captured green-validated `epoch.fingerprint` (the EV-A gate) ; else the canonical SQLite answer at the
+/// pinned `epoch.snapshot_uid()`. The answer-class + the LiveGraph cycles + the current fingerprint are
+/// SQLite-FREE; SQLite is read ONLY on the fallback. The served output is byte-identical either way
+/// (CYCLES-OUTPUT-CONTRACT-1).
+///
+/// **TOCTOU closed.** `lg_cycles` + the precondition + the resident `current_fp` are captured under ONE read
+/// guard, so the served cycles and the fingerprint they are validated by are the SAME resident partition set;
+/// the gate then compares that `current_fp` against the PRE-validated `epoch.fingerprint` (built
+/// BUILD-THEN-PEEK by [`cycles_cert_eligibility`] in the handler). A swap/straddle since capture moves
+/// `current_fp`, so the gate fails and the request fails soft to the pinned SQLite snapshot — never a
+/// green-labelled serve of an unvalidated module-cycle set. No lazy cert build happens here anymore (it moved
+/// to the eligibility capture).
+///
+/// DAEMON-CANCEL-1: `cancel` is threaded into BOTH the precondition LiveGraph module-cycle SCC
+/// (`module_import_cycles_cancellable`) and the SQLite SCC fallback (`serve_cycles_sqlite` →
+/// `find_cycles_cancellable`); the cert build's cancellation is in [`cycles_cert_eligibility`]. So a peer
+/// disconnect during ANY phase still cancels mid-flight.
 pub fn cycles_auto_response(
     repo_state: &RepoState,
     repo_uid: &str,
     display_name: &str,
-    snapshot_uid: &str,
-    // DAEMON-CANCEL-1: the cooperative checkpoint for the DEFAULT `rmap cycles`, threaded into EVERY Tarjan
-    // loop this route can run, so a peer disconnect during ANY phase cancels mid-flight:
-    //   1. the precondition LiveGraph module-cycle SCC (`module_import_cycles_cancellable`, below),
-    //   2. the first-call-per-fingerprint cert build (`build_and_store_cycles_cert_cancellable` →
-    //      `module_cycle_compare_data_cancellable`, which runs BOTH the SQLite and LiveGraph SCCs), and
-    //   3. the SQLite SCC fallback (`serve_cycles_sqlite` → `find_cycles_cancellable`).
-    // Review iteration 1 closed the phase-2 gap: that cert build previously ran its Tarjan to completion
-    // uncancellably. The ORIENT cert-build caller is unaffected — it reaches the verdict through the
-    // never-breaking `build_and_store_cycles_cert`, so orient stays byte-identical (out of CANCEL-1 scope).
+    epoch: &RequestEpoch,
     cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
+    let snapshot_uid = epoch.snapshot_uid();
     // SQLite-FREE: the module-cycle answer-class (the precondition), the LiveGraph cycles (the served answer),
     // and the current fingerprint -- all from a single LiveGraph read lock.
     let (precondition_met, precondition_reason, lg_cycles, current_fp) = {
@@ -2566,28 +2619,13 @@ pub fn cycles_auto_response(
             ),
         }
     };
-    // The cert's state for the CURRENT fingerprint.
-    let cert = {
-        let cached = repo_state.cycles_cert.read();
-        match (&current_fp, cached.as_ref()) {
-            (Some(fp), Some(c)) if &c.fingerprint == fp => {
-                if c.verdict == "GREEN" {
-                    CycleCertState::ValidGreen
-                } else {
-                    CycleCertState::ValidNotGreen
-                }
-            }
-            _ => CycleCertState::StaleOrMissing,
-        }
-    };
-    // The ladder. The two SQLite-touching branches receive `cancel` as a parameter (so the build-then-serve
-    // path on a RED cert reuses the one checkpoint without aliasing); a `Cancelled` from either short-circuits
-    // via the helper's `?`. DAEMON-CANCEL-1 (review iteration 1): `build_and_store_cycles_cert_cancellable`
-    // makes the first-call-per-fingerprint cert build cancel mid-Tarjan — the route's last uncheckpointed loop.
+    // EV-A: serve the LiveGraph fastpath iff the resident fingerprint still equals the captured green-validated
+    // eligibility witness; mismatch / None (a swap/straddle since capture, or no GREEN cycles cert) -> SQLite.
+    let epoch_eligible = current_fp.is_some() && current_fp.as_ref() == epoch.fingerprint.as_ref();
     cycles_fastpath_or_sqlite(
         precondition_met,
         precondition_reason,
-        cert,
+        epoch_eligible,
         || serve_cycles_fastpath(repo_uid, display_name, snapshot_uid, &lg_cycles),
         |reason, cancel| {
             serve_cycles_sqlite(
@@ -2596,14 +2634,6 @@ pub fn cycles_auto_response(
                 display_name,
                 snapshot_uid,
                 reason,
-                cancel,
-            )
-        },
-        |cancel| {
-            build_and_store_cycles_cert_cancellable(
-                repo_state,
-                snapshot_uid,
-                current_fp.clone(),
                 cancel,
             )
         },
@@ -2630,16 +2660,6 @@ pub struct StatsNoLossCert {
     pub verdict: String,
     /// The SQLite-free fingerprint this verdict was computed at (the invalidation key).
     pub fingerprint: String,
-}
-
-/// The stats cert's status for the CURRENT fingerprint (mirrors `CycleCertState`).
-enum StatsCertState {
-    /// A valid cert at the current fingerprint, verdict GREEN -> the fastpath may serve LiveGraph.
-    ValidGreen,
-    /// A valid cert at the current fingerprint, verdict != GREEN -> SQLite fallback.
-    ValidNotGreen,
-    /// No cert, or a cert at a DIFFERENT fingerprint -> (re)build, else SQLite fallback.
-    StaleOrMissing,
 }
 
 /// Map the LiveGraph raw per-module stat rows -> the SQLite-compatible `ModuleStatsResult` DTO, deriving
@@ -2947,61 +2967,140 @@ fn serve_stats_sqlite(
     })))
 }
 
-/// STATS-LIVEGRAPH-IMPL-1 (D3): the fastpath/SQLite ladder (mirrors `cycles_fastpath_or_sqlite`).
-/// precondition UNMET (the LiveGraph module-stats answer is not `Exact` -- non-resident / non-TS /
-/// degraded) -> SQLite (the labelled `precondition_reason`) ; precondition met + GREEN cert -> serve
-/// LiveGraph WITHOUT `compute_module_stats` ; cert RED/stale/missing/build-failed -> SQLite
-/// (`LiveGraphStatsDivergence`). The decision stays pure: a panicking `serve_sqlite` proves the GREEN
-/// path skips SQLite; `build_cert` is invoked ONLY on StaleOrMissing. DAEMON-CANCEL-2: the SQL-bearing
-/// closures (`serve_sqlite`, `build_cert`) run `compute_module_stats` under the supervisor, so they take
-/// `emitter` and may report a mid-aggregation disconnect, which the ladder forwards as
-/// [`StatsOutcome::Cancelled`].
+/// STATS-LIVEGRAPH-IMPL-1 (D3) + W-B-EPOCH-IMPL-2B (EV-A): the fastpath/SQLite ladder under the captured
+/// request epoch (mirrors `cycles_fastpath_or_sqlite`). precondition UNMET (the LiveGraph module-stats answer
+/// is not `Exact` -- non-resident / non-TS / degraded) -> SQLite (the labelled `precondition_reason`) ;
+/// precondition met AND `epoch_eligible` -> serve LiveGraph WITHOUT `compute_module_stats` (the stats cert
+/// proved the resident module stats no-loss-equal to SQLite@`snapshot_uid`) ; NOT eligible (no GREEN stats
+/// cert at capture, OR a swap/straddle since capture so the resident fingerprint moved) -> SQLite
+/// (`LiveGraphStatsDivergence`). The decision stays pure: a panicking `serve_sqlite` proves the eligible
+/// path skips SQLite. No lazy cert build happens here anymore (it moved to [`stats_cert_eligibility`],
+/// closing the capture-LG-stats-then-lazy-cert-build TOCTOU). DAEMON-CANCEL-2: `serve_sqlite` runs
+/// `compute_module_stats` under the supervisor, so it takes `emitter` and may report a mid-aggregation
+/// disconnect, which the ladder forwards as [`StatsOutcome::Cancelled`].
 fn stats_fastpath_or_sqlite(
     emitter: &mut dyn ProgressEmitter,
     precondition_met: bool,
     precondition_reason: FallbackReason,
-    cert: StatsCertState,
+    epoch_eligible: bool,
     serve_livegraph: impl FnOnce() -> Value,
     serve_sqlite: impl FnOnce(
         &mut dyn ProgressEmitter,
         FallbackReason,
     ) -> Result<StatsOutcome, StorageError>,
-    build_cert: impl FnOnce(&mut dyn ProgressEmitter) -> CertBuild,
 ) -> Result<StatsOutcome, StorageError> {
     if !precondition_met {
         return serve_sqlite(emitter, precondition_reason);
     }
-    let green = match cert {
-        StatsCertState::ValidGreen => true,
-        StatsCertState::ValidNotGreen => false,
-        StatsCertState::StaleOrMissing => match build_cert(emitter) {
-            CertBuild::Green => true,
-            CertBuild::NotGreen => false,
-            CertBuild::Cancelled => return Ok(StatsOutcome::Cancelled),
-        },
-    };
-    if green {
+    if epoch_eligible {
         Ok(StatsOutcome::Ready(serve_livegraph()))
     } else {
         serve_sqlite(emitter, FallbackReason::LiveGraphStatsDivergence)
     }
 }
 
-/// STATS-LIVEGRAPH-IMPL-1 (D3): the AUTO (default) `stats` response — the path `rmap stats` takes with no
-/// `--engine` flag. Tries the GREEN-cert FASTPATH (serve the LiveGraph module stats WITHOUT SQLite) ; else
-/// SQLite (the proven answer). The answer-class + the LiveGraph stats + the current fingerprint are
-/// SQLite-FREE; SQLite is read ONLY on the cert build + the SQLite fallback. The served human output is
-/// byte-identical either way (the byte-preserving contract). DAEMON-CANCEL-2: every SQLite read on this
-/// path runs `compute_module_stats` under the supervisor, so a peer-disconnect mid-aggregation returns
-/// [`StatsOutcome::Cancelled`] (the in-flight `SELECT` is aborted) — the iteration-0 gap where the
-/// DEFAULT route ran heavy SQL to completion after disconnect is closed.
+/// W-B-EPOCH-IMPL-2B: outcome of [`stats_cert_eligibility`] — the build-then-peek witness, or the peer
+/// disconnected during the WARM cert (re)build's `compute_module_stats`. A dedicated `Cancelled` variant
+/// (rather than folding into `StorageError`) mirrors the stats module's existing cancel convention
+/// ([`StatsOutcome`] / [`SqlStats`] / `CertBuild`): a cancelled aggregation is an interrupted SELECT, not a
+/// storage error.
+pub(crate) enum StatsEligibility {
+    /// The build-then-peek eligibility witness: `Some(fp)` = a GREEN stats cert at EXACTLY the resident
+    /// fingerprint (the resident module stats are cert-proven no-loss-equal to SQLite@`snapshot_uid`);
+    /// `None` = no green cert ⇒ eager SQLite, no LiveGraph serve.
+    Witness(Option<String>),
+    /// The peer disconnected during the WARM cert (re)build (the in-flight `SELECT` was interrupted) — the
+    /// handler maps this to `ErrorCode::Cancelled`.
+    Cancelled,
+}
+
+/// W-B-EPOCH-IMPL-2B (D-EP capture for `stats`; `daemon-w-b-epoch-1.md` §6.4): the STATS-cert LG-serve
+/// eligibility WITNESS, captured BUILD-THEN-PEEK. The stats sibling of [`import_cert_eligibility`] /
+/// [`cycles_cert_eligibility`] (`stats` serves the LiveGraph module STATS, whose no-loss proof is the STATS
+/// cert). Returns `StatsEligibility::Witness(Some(current_fp))` iff a GREEN stats cert exists at EXACTLY the
+/// resident fingerprint for `snapshot_uid` — i.e. the resident partitions' module stats are cert-proven
+/// no-loss-equal to SQLite@`snapshot_uid`, so they are substitutable for it; otherwise `Witness(None)` ⇒ the
+/// request serves the SQLite answer at the pinned snapshot (the EV-A fail-soft).
+///
+/// **Build-then-peek** (see [`import_cert_eligibility`] for the full rationale + the TOCTOU it closes):
+///   1. WARM — lazy-build the stats cert at the current resident fingerprint iff stale/missing (a valid cert
+///      is reused, preserving the zero-`compute_module_stats` green fastpath).
+///   2. PEEK — under ONE livegraph read guard (which excludes a concurrent swap), recompute `current_fp` AND
+///      peek a GREEN stats cert at EXACTLY `current_fp`.
+///
+/// So the witness is the EXACT resident-and-validated state, or `None`.
+///
+/// DAEMON-CANCEL-2: the WARM (re)build runs `compute_module_stats` under the supervisor
+/// ([`cancellable_module_stats`]), so a peer disconnect mid-aggregation returns [`StatsEligibility::Cancelled`]
+/// (the in-flight `SELECT` is aborted) rather than a stale witness. This is the SAME aggregation that
+/// previously cancelled inside the serve ladder; build-then-peek only moved WHERE it runs.
+pub(crate) fn stats_cert_eligibility(
+    emitter: &mut dyn ProgressEmitter,
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+) -> StatsEligibility {
+    // 1. WARM: lazy (re)build the stats cert ONLY if stale/missing at the current resident fingerprint (the
+    //    stale-check keeps a valid cert's serve zero-read). The read guard is dropped before the build so it
+    //    can re-lock without deadlock.
+    let warm_fp = {
+        let guard = repo_state.livegraph.read();
+        guard
+            .as_ref()
+            .map(|lg| import_cert_fingerprint(&lg.live_partitions(), snapshot_uid))
+    };
+    if let Some(fp) = warm_fp {
+        let stale = !matches!(
+            repo_state.stats_cert.read().as_ref(),
+            Some(c) if c.fingerprint == fp
+        );
+        if stale
+            && build_and_store_stats_cert(emitter, repo_state, snapshot_uid, Some(fp))
+                == CertBuild::Cancelled
+        {
+            return StatsEligibility::Cancelled;
+        }
+    }
+    // 2. PEEK under ONE read guard so "(GREEN stats cert) at (this exact resident fingerprint)" is atomic
+    //    w.r.t. any swap.
+    let guard = repo_state.livegraph.read();
+    let current_fp = match guard.as_ref() {
+        Some(lg) => import_cert_fingerprint(&lg.live_partitions(), snapshot_uid),
+        None => return StatsEligibility::Witness(None),
+    };
+    let cached = repo_state.stats_cert.read();
+    StatsEligibility::Witness(match cached.as_ref() {
+        Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN" => Some(current_fp),
+        _ => None,
+    })
+}
+
+/// STATS-LIVEGRAPH-IMPL-1 (D3) + W-B-EPOCH-IMPL-2B (EV-A): the AUTO (default) `stats` response under the
+/// captured request `epoch` — the path `rmap stats` takes with no `--engine` flag. Serves the GREEN-cert
+/// FASTPATH (the LiveGraph module stats WITHOUT SQLite) iff the precondition is met AND the resident
+/// stats-cert fingerprint STILL equals the captured green-validated `epoch.fingerprint` (the EV-A gate) ;
+/// else SQLite (the proven answer) at the pinned `epoch.snapshot_uid()`. The answer-class + the LiveGraph
+/// stats + the current fingerprint are SQLite-FREE; SQLite is read ONLY on the fallback. The served human
+/// output is byte-identical either way (the byte-preserving contract).
+///
+/// **TOCTOU closed.** `lg_stats` + the precondition + the resident `current_fp` are captured under ONE read
+/// guard, so the served stats and the fingerprint they are validated by are the SAME resident partition set;
+/// the gate then compares that `current_fp` against the PRE-validated `epoch.fingerprint` (built
+/// BUILD-THEN-PEEK by [`stats_cert_eligibility`] in the handler). A swap/straddle since capture moves
+/// `current_fp`, so the gate fails and the request fails soft to the pinned SQLite snapshot — never a
+/// green-labelled serve of an unvalidated stat set. No lazy cert build happens here anymore (it moved to the
+/// eligibility capture).
+///
+/// DAEMON-CANCEL-2: the SQLite fallback runs `compute_module_stats` under the supervisor, so a peer-disconnect
+/// mid-aggregation returns [`StatsOutcome::Cancelled`] (the in-flight `SELECT` is aborted); the cert build's
+/// cancellation is in [`stats_cert_eligibility`]. So the DEFAULT route still cancels mid-flight in every phase.
 pub fn stats_auto_response(
     emitter: &mut dyn ProgressEmitter,
     repo_state: &RepoState,
     repo_uid: &str,
     display_name: &str,
-    snapshot_uid: &str,
+    epoch: &RequestEpoch,
 ) -> Result<StatsOutcome, StorageError> {
+    let snapshot_uid = epoch.snapshot_uid();
     // SQLite-FREE: the module-stats answer-class (precondition), the mapped LiveGraph stats (the served
     // answer), and the current fingerprint -- all from a single LiveGraph read lock.
     let (precondition_met, precondition_reason, lg_stats, current_fp) = {
@@ -3028,32 +3127,16 @@ pub fn stats_auto_response(
             ),
         }
     };
-    // The cert's state for the CURRENT fingerprint.
-    let cert = {
-        let cached = repo_state.stats_cert.read();
-        match (&current_fp, cached.as_ref()) {
-            (Some(fp), Some(c)) if &c.fingerprint == fp => {
-                if c.verdict == "GREEN" {
-                    StatsCertState::ValidGreen
-                } else {
-                    StatsCertState::ValidNotGreen
-                }
-            }
-            _ => StatsCertState::StaleOrMissing,
-        }
-    };
-    // The ladder. DAEMON-CANCEL-2: the SQL-bearing closures run `compute_module_stats` under the
-    // supervisor; the ladder returns `StatsOutcome::Cancelled` on a mid-aggregation disconnect and
-    // `Err` on a storage failure (the caller maps both). The closures return their outcome directly,
-    // so the prior `sqlite_err` side-channel is gone.
+    // EV-A: serve the LiveGraph fastpath iff the resident fingerprint still equals the captured green-validated
+    // eligibility witness; mismatch / None (a swap/straddle since capture, or no GREEN stats cert) -> SQLite.
+    let epoch_eligible = current_fp.is_some() && current_fp.as_ref() == epoch.fingerprint.as_ref();
     stats_fastpath_or_sqlite(
         emitter,
         precondition_met,
         precondition_reason,
-        cert,
+        epoch_eligible,
         || serve_stats_fastpath(repo_uid, display_name, snapshot_uid, &lg_stats),
         |e, reason| serve_stats_sqlite(e, repo_state, repo_uid, display_name, snapshot_uid, reason),
-        |e| build_and_store_stats_cert(e, repo_state, snapshot_uid, current_fp.clone()),
     )
 }
 
@@ -3201,11 +3284,14 @@ mod tests {
     /// cross-epoch mix. Relocated here from the removed `request_epoch` module (review-0 #3) — beside
     /// `RequestEpoch`'s new home and the callers/callees engine-response under test.
     mod wb_epoch_coherence {
+        use super::NoEmit;
         use crate::callgraph_cert::{callgraph_cert_eligibility, test_fixture};
         use crate::livegraph_feed::{
-            callees_engine_response, callers_engine_response, import_cert_eligibility,
-            import_cert_fingerprint, imports_auto_response, path_engine_response, Engine,
-            ImportNoLossCert, RequestEpoch,
+            callees_engine_response, callers_engine_response, cycles_auto_response,
+            cycles_cert_eligibility, import_cert_eligibility, import_cert_fingerprint,
+            imports_auto_response, path_engine_response, stats_auto_response,
+            stats_cert_eligibility, Engine, ImportNoLossCert, RequestEpoch, StatsEligibility,
+            StatsNoLossCert, StatsOutcome,
         };
         use crate::orient_serve::{
             orient_bounded_cert_eligibility, orient_bounded_cert_is_green, OrientServeDecorator,
@@ -3573,39 +3659,224 @@ mod tests {
             assert_eq!(lg["backend_used"], "livegraph");
             assert_eq!(lg["found"], true);
         }
+
+        // ── W-B-EPOCH-IMPL-2B: `cycles` build-then-peek eligibility + EV-A ────────────────────────
+
+        /// The cycles-cert eligibility witness is BUILD-THEN-PEEK: `Some` ONLY when a GREEN cycles cert
+        /// exists at EXACTLY the resident fingerprint, and the returned fingerprint IS that exact resident
+        /// state; after a swap it tracks the NEW resident state, never the stale captured fingerprint.
+        #[test]
+        fn cycles_cert_eligibility_is_the_exact_resident_fingerprint_on_green() {
+            let f = test_fixture::build_fixture(false);
+            let mut never = || std::ops::ControlFlow::Continue(());
+            // The faithful fixture has 0 module-import cycles on BOTH sides -> the cycles cert builds GREEN;
+            // the WARM builds it and the PEEK returns the EXACT resident fingerprint (build-then-peek, §6.4).
+            let fp = cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
+                .expect("eligibility never errors here")
+                .expect("GREEN cycles cert at the resident fingerprint -> Some eligibility");
+            let resident_fp = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            assert_eq!(
+                fp, resident_fp,
+                "the witness IS the exact resident-and-validated fingerprint"
+            );
+
+            // Honesty under a swap (§6.4): a swap bumps the partition epoch so the resident fingerprint
+            // MOVES; the witness is re-derived against the NEW resident state, NEVER the stale captured fp
+            // (monotonic epochs: the old fp never recurs).
+            swap_livegraph(&f.state);
+            let after = cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
+                .expect("eligibility never errors here");
+            assert_ne!(
+                after.as_deref(),
+                Some(resident_fp.as_str()),
+                "after a swap the witness is never the stale pre-swap fingerprint"
+            );
+
+            // No resident LiveGraph -> None (eager SQLite).
+            *f.state.livegraph.write() = None;
+            assert!(
+                cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
+                    .expect("eligibility never errors here")
+                    .is_none()
+            );
+        }
+
+        /// EV-A at the `cycles` auto serve (TOCTOU closed): on a matching epoch the GREEN-cert FASTPATH serves
+        /// the LiveGraph module cycles (`backend_used=livegraph`); a mid-request swap moves the resident
+        /// fingerprint so the captured epoch no longer matches -> the serve fails soft to the canonical SQLite
+        /// answer AT THE PINNED snapshot (`backend_used=sqlite`, stamped with the pinned `snapshot_uid`).
+        #[test]
+        fn ev_a_cycles_serves_livegraph_on_green_then_pinned_sqlite_after_swap() {
+            let f = test_fixture::build_fixture(false);
+            let mut never = || std::ops::ControlFlow::Continue(());
+            let fingerprint = cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
+                .expect("eligibility never errors here");
+            assert!(
+                fingerprint.is_some(),
+                "faithful fixture -> GREEN cycles cert -> eligible"
+            );
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+
+            // Steady state (no swap): the epoch matches the resident fingerprint -> serve the LiveGraph cycles.
+            let v = cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
+                .unwrap();
+            assert_eq!(v["backend_used"], "livegraph");
+
+            // EV-A: a mid-request swap moves the resident fingerprint; the captured epoch no longer matches ->
+            // fail soft to the canonical SQLite answer AT THE PINNED snapshot (coherent at the pin).
+            swap_livegraph(&f.state);
+            let v2 = cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
+                .unwrap();
+            assert_eq!(v2["backend_used"], "sqlite");
+            assert_eq!(
+                v2["snapshot_uid"], f.snapshot_uid,
+                "the SQLite fallback is stamped with the PINNED snapshot"
+            );
+        }
+
+        // ── W-B-EPOCH-IMPL-2B: `stats` build-then-peek eligibility + EV-A ─────────────────────────
+
+        /// The stats-cert eligibility witness is BUILD-THEN-PEEK: `Some` ONLY when a GREEN stats cert exists
+        /// at EXACTLY the resident fingerprint, and the returned fingerprint IS that exact resident state;
+        /// after a swap it tracks the NEW resident state, never the stale captured fingerprint. A pre-stored
+        /// GREEN cert decouples this build-then-peek assertion from the SQLite/LiveGraph stats parity (which
+        /// STATS-LIVEGRAPH-IMPL-1 tests separately) — the WARM reuses the valid cert (no worker).
+        #[test]
+        fn stats_cert_eligibility_is_the_exact_resident_fingerprint_on_green() {
+            let f = test_fixture::build_fixture(false);
+            let resident_fp = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            *f.state.stats_cert.write() = Some(StatsNoLossCert {
+                verdict: "GREEN".to_string(),
+                fingerprint: resident_fp.clone(),
+            });
+            let fp = match stats_cert_eligibility(&mut NoEmit, &f.state, &f.snapshot_uid) {
+                StatsEligibility::Witness(fp) => fp,
+                StatsEligibility::Cancelled => panic!("no disconnect -> never Cancelled"),
+            }
+            .expect("GREEN stats cert at the resident fingerprint -> Some eligibility");
+            assert_eq!(
+                fp, resident_fp,
+                "the witness IS the exact resident-and-validated fingerprint"
+            );
+
+            // Honesty under a swap (§6.4): the WARM rebuilds against the NEW resident state and the PEEK
+            // returns the new fp (or None), NEVER the stale captured fp.
+            swap_livegraph(&f.state);
+            let after = match stats_cert_eligibility(&mut NoEmit, &f.state, &f.snapshot_uid) {
+                StatsEligibility::Witness(fp) => fp,
+                StatsEligibility::Cancelled => panic!("no disconnect -> never Cancelled"),
+            };
+            assert_ne!(
+                after.as_deref(),
+                Some(resident_fp.as_str()),
+                "after a swap the witness is never the stale pre-swap fingerprint"
+            );
+
+            // No resident LiveGraph -> Witness(None) (eager SQLite).
+            *f.state.livegraph.write() = None;
+            assert!(matches!(
+                stats_cert_eligibility(&mut NoEmit, &f.state, &f.snapshot_uid),
+                StatsEligibility::Witness(None)
+            ));
+        }
+
+        /// EV-A at the `stats` auto serve (TOCTOU closed): on a matching epoch the GREEN-cert FASTPATH serves
+        /// the LiveGraph module stats (`backend_used=livegraph`); a mid-request swap moves the resident
+        /// fingerprint so the captured epoch no longer matches -> the serve fails soft to the SQLite answer AT
+        /// THE PINNED snapshot (`backend_used=sqlite`, stamped with the pinned `snapshot_uid`).
+        #[test]
+        fn ev_a_stats_serves_livegraph_on_green_then_pinned_sqlite_after_swap() {
+            let f = test_fixture::build_fixture(false);
+            // Pre-store a GREEN stats cert at the resident fingerprint -> the eligibility witness is Some (no
+            // worker; decouples the EV-A gate from SQLite/LiveGraph stats parity, tested separately).
+            let resident_fp = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            *f.state.stats_cert.write() = Some(StatsNoLossCert {
+                verdict: "GREEN".to_string(),
+                fingerprint: resident_fp.clone(),
+            });
+            let fingerprint = match stats_cert_eligibility(&mut NoEmit, &f.state, &f.snapshot_uid) {
+                StatsEligibility::Witness(fp) => fp,
+                StatsEligibility::Cancelled => panic!("no disconnect -> never Cancelled"),
+            };
+            assert!(fingerprint.is_some(), "GREEN stats cert -> eligible");
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+
+            // Steady state (no swap): the epoch matches the resident fingerprint -> serve the LiveGraph stats.
+            let v = match stats_auto_response(
+                &mut NoEmit,
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+            ) {
+                Ok(StatsOutcome::Ready(v)) => v,
+                Ok(StatsOutcome::Cancelled) => panic!("no disconnect -> never Cancelled"),
+                Err(e) => panic!("stats serve errored: {e}"),
+            };
+            assert_eq!(v["backend_used"], "livegraph");
+
+            // EV-A: a mid-request swap moves the resident fingerprint; the captured epoch no longer matches ->
+            // fail soft to the SQLite answer AT THE PINNED snapshot (the SQLite worker completes with NoEmit).
+            swap_livegraph(&f.state);
+            let v2 = match stats_auto_response(
+                &mut NoEmit,
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+            ) {
+                Ok(StatsOutcome::Ready(v)) => v,
+                Ok(StatsOutcome::Cancelled) => panic!("no disconnect -> never Cancelled"),
+                Err(e) => panic!("stats serve errored: {e}"),
+            };
+            assert_eq!(v2["backend_used"], "sqlite");
+            assert_eq!(
+                v2["snapshot_uid"], f.snapshot_uid,
+                "the SQLite fallback is stamped with the PINNED snapshot"
+            );
+        }
     }
 
-    // ── CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the PURE fastpath/SQLite ladder ──
-    // The ladder takes closures, so a PANICKING serve_sqlite/build_cert proves which path runs -- the GREEN
-    // cached path must serve LiveGraph WITHOUT touching SQLite or rebuilding the cert (rule 9).
+    // ── CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 + W-B-EPOCH-IMPL-2B: the PURE fastpath/SQLite ladder ──
+    // The ladder takes `epoch_eligible: bool` (the EV-A gate) + closures, so a PANICKING serve_sqlite proves
+    // the eligible path serves LiveGraph WITHOUT touching SQLite. The cert (re)build moved OUT of the ladder
+    // into `cycles_cert_eligibility` (build-then-peek), so the ladder no longer takes a build closure; the
+    // build-path + build-cancellation cases now live in the eligibility tests (`wb_epoch_coherence`).
 
     #[test]
-    fn cycles_fastpath_green_cached_serves_livegraph_without_sqlite_or_build() {
+    fn cycles_fastpath_eligible_serves_livegraph_without_sqlite() {
         let out = cycles_fastpath_or_sqlite(
             true,
             FallbackReason::LiveGraphUnavailable,
-            CycleCertState::ValidGreen,
+            true, // epoch_eligible
             || json!({"backend_used": "livegraph"}),
-            |_r, _c| panic!("SQLite (find_cycles) must NOT be read on a GREEN cached cert"),
-            |_c| panic!("the cert must NOT be rebuilt when ValidGreen"),
+            |_r, _c| panic!("SQLite (find_cycles) must NOT be read when the epoch is eligible"),
             &mut || std::ops::ControlFlow::Continue(()),
         )
-        .expect("GREEN cached path serves LiveGraph and never errors");
+        .expect("eligible path serves LiveGraph and never errors");
         assert_eq!(out["backend_used"], "livegraph");
     }
 
     #[test]
-    fn cycles_fastpath_not_green_falls_back_to_sqlite() {
+    fn cycles_fastpath_not_eligible_falls_back_to_sqlite() {
         let out = cycles_fastpath_or_sqlite(
             true,
             FallbackReason::LiveGraphUnavailable,
-            CycleCertState::ValidNotGreen,
-            || panic!("must NOT serve LiveGraph when the cert is not GREEN"),
+            false, // epoch_eligible: a fingerprint mismatch / no GREEN cert -> EV-A fail-soft
+            || panic!("must NOT serve LiveGraph when the epoch is not eligible"),
             |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
-            |_c| panic!("must NOT rebuild when ValidNotGreen"),
             &mut || std::ops::ControlFlow::Continue(()),
         )
-        .expect("ValidNotGreen serves SQLite and never errors");
+        .expect("not-eligible serves SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphCycleDivergence");
     }
@@ -3615,62 +3886,14 @@ mod tests {
         let out = cycles_fastpath_or_sqlite(
             false,
             FallbackReason::LiveGraphPartial,
-            CycleCertState::ValidGreen, // ignored when the precondition is unmet
+            true, // epoch_eligible (ignored when the precondition is unmet)
             || panic!("must NOT serve LiveGraph when the precondition is unmet"),
             |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
-            |_c| panic!("must NOT build the cert when the precondition is unmet"),
             &mut || std::ops::ControlFlow::Continue(()),
         )
         .expect("precondition-unmet serves SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphPartial");
-    }
-
-    #[test]
-    fn cycles_fastpath_stale_build_green_serves_livegraph() {
-        let out = cycles_fastpath_or_sqlite(
-            true,
-            FallbackReason::LiveGraphUnavailable,
-            CycleCertState::StaleOrMissing,
-            || json!({"backend_used": "livegraph"}),
-            |_r, _c| panic!("a GREEN build must serve LiveGraph, not SQLite"),
-            |_c| Ok(Some(true)),
-            &mut || std::ops::ControlFlow::Continue(()),
-        )
-        .expect("a GREEN build serves LiveGraph and never errors");
-        assert_eq!(out["backend_used"], "livegraph");
-    }
-
-    #[test]
-    fn cycles_fastpath_stale_build_red_falls_back() {
-        let out = cycles_fastpath_or_sqlite(
-            true,
-            FallbackReason::LiveGraphUnavailable,
-            CycleCertState::StaleOrMissing,
-            || panic!("a RED build must fall back to SQLite"),
-            |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
-            |_c| Ok(Some(false)),
-            &mut || std::ops::ControlFlow::Continue(()),
-        )
-        .expect("a RED build falls back to SQLite and never errors");
-        assert_eq!(out["backend_used"], "sqlite");
-        assert_eq!(out["reason"], "LiveGraphCycleDivergence");
-    }
-
-    #[test]
-    fn cycles_fastpath_build_failed_falls_back() {
-        let out = cycles_fastpath_or_sqlite(
-            true,
-            FallbackReason::LiveGraphUnavailable,
-            CycleCertState::StaleOrMissing,
-            || panic!("a build failure must fall back to SQLite"),
-            |r, _c| Ok(json!({"backend_used": "sqlite", "reason": r.as_str()})),
-            |_c| Ok(None),
-            &mut || std::ops::ControlFlow::Continue(()),
-        )
-        .expect("a build failure falls back to SQLite and never errors");
-        assert_eq!(out["backend_used"], "sqlite");
-        assert_eq!(out["reason"], "LiveGraphCycleDivergence");
     }
 
     #[test]
@@ -3695,10 +3918,13 @@ mod tests {
         assert_eq!(names, vec!["a/y", "b/x"]);
     }
 
-    // ── STATS-LIVEGRAPH-IMPL-1: the stats fastpath/SQLite ladder (DAEMON-CANCEL-2: + cancellation) ──
-    // A PANICKING serve_sqlite/build_cert proves which path runs -- the GREEN cached path must serve
-    // LiveGraph WITHOUT touching SQLite or rebuilding the cert. The SQL-bearing closures now take an
-    // emitter and return a cancellation-aware outcome (`Result<StatsOutcome, _>` / `CertBuild`).
+    // ── STATS-LIVEGRAPH-IMPL-1 + W-B-EPOCH-IMPL-2B: the stats fastpath/SQLite ladder ──
+    // The ladder takes `epoch_eligible: bool` (the EV-A gate) + closures, so a PANICKING serve_sqlite proves
+    // the eligible path serves LiveGraph WITHOUT touching SQLite. The cert (re)build moved OUT of the ladder
+    // into `stats_cert_eligibility` (build-then-peek), so the ladder no longer takes a build closure; the
+    // build-path + build-cancellation cases now live in the eligibility tests (`wb_epoch_coherence`). The
+    // serve_sqlite closure still takes an emitter and may report a mid-aggregation disconnect
+    // (`StatsOutcome::Cancelled`).
 
     use repo_graph_daemon_transport::{EmitError, ProgressDetail};
 
@@ -3722,35 +3948,33 @@ mod tests {
     }
 
     #[test]
-    fn stats_fastpath_green_cached_serves_livegraph_without_sqlite_or_build() {
+    fn stats_fastpath_eligible_serves_livegraph_without_sqlite() {
         let out = stats_fastpath_or_sqlite(
             &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
-            StatsCertState::ValidGreen,
+            true, // epoch_eligible
             || json!({"backend_used": "livegraph"}),
             |_e, _r| {
-                panic!("SQLite (compute_module_stats) must NOT be read on a GREEN cached cert")
+                panic!("SQLite (compute_module_stats) must NOT be read when the epoch is eligible")
             },
-            |_e| panic!("the cert must NOT be rebuilt when ValidGreen"),
         );
         assert_eq!(ready_value(out)["backend_used"], "livegraph");
     }
 
     #[test]
-    fn stats_fastpath_not_green_falls_back_to_sqlite() {
+    fn stats_fastpath_not_eligible_falls_back_to_sqlite() {
         let out = stats_fastpath_or_sqlite(
             &mut NoEmit,
             true,
             FallbackReason::LiveGraphUnavailable,
-            StatsCertState::ValidNotGreen,
-            || panic!("must NOT serve LiveGraph when the cert is not GREEN"),
+            false, // epoch_eligible: a fingerprint mismatch / no GREEN cert -> EV-A fail-soft
+            || panic!("must NOT serve LiveGraph when the epoch is not eligible"),
             |_e, r| {
                 Ok(StatsOutcome::Ready(
                     json!({"backend_used": "sqlite", "reason": r.as_str()}),
                 ))
             },
-            |_e| panic!("must NOT rebuild when ValidNotGreen"),
         );
         let v = ready_value(out);
         assert_eq!(v["backend_used"], "sqlite");
@@ -3763,85 +3987,31 @@ mod tests {
             &mut NoEmit,
             false,
             FallbackReason::LiveGraphPartial,
-            StatsCertState::ValidGreen, // ignored when the precondition is unmet
+            true, // epoch_eligible (ignored when the precondition is unmet)
             || panic!("must NOT serve LiveGraph when the precondition is unmet"),
             |_e, r| {
                 Ok(StatsOutcome::Ready(
                     json!({"backend_used": "sqlite", "reason": r.as_str()}),
                 ))
             },
-            |_e| panic!("must NOT build the cert when the precondition is unmet"),
         );
         let v = ready_value(out);
         assert_eq!(v["backend_used"], "sqlite");
         assert_eq!(v["reason"], "LiveGraphPartial");
     }
 
-    #[test]
-    fn stats_fastpath_stale_build_green_serves_livegraph() {
-        let out = stats_fastpath_or_sqlite(
-            &mut NoEmit,
-            true,
-            FallbackReason::LiveGraphUnavailable,
-            StatsCertState::StaleOrMissing,
-            || json!({"backend_used": "livegraph"}),
-            |_e, _r| panic!("a GREEN build must serve LiveGraph, not SQLite"),
-            |_e| CertBuild::Green,
-        );
-        assert_eq!(ready_value(out)["backend_used"], "livegraph");
-    }
-
-    #[test]
-    fn stats_fastpath_stale_build_red_falls_back() {
-        let out = stats_fastpath_or_sqlite(
-            &mut NoEmit,
-            true,
-            FallbackReason::LiveGraphUnavailable,
-            StatsCertState::StaleOrMissing,
-            || panic!("a RED build must fall back to SQLite"),
-            |_e, r| {
-                Ok(StatsOutcome::Ready(
-                    json!({"backend_used": "sqlite", "reason": r.as_str()}),
-                ))
-            },
-            |_e| CertBuild::NotGreen,
-        );
-        let v = ready_value(out);
-        assert_eq!(v["backend_used"], "sqlite");
-        assert_eq!(v["reason"], "LiveGraphStatsDivergence");
-    }
-
-    // DAEMON-CANCEL-2: a peer-disconnect DURING the cert-build SQL (`build_cert` returns Cancelled) must
-    // propagate as StatsOutcome::Cancelled WITHOUT then running the SQLite fallback. (Replaces the old
-    // `build_failed_falls_back` ladder test: a build failure is now folded into `CertBuild::NotGreen`
-    // INSIDE build_and_store_stats_cert, so it is no longer distinguishable at the ladder boundary —
-    // `stats_fastpath_stale_build_red_falls_back` already covers the not-green fallback.)
-    #[test]
-    fn stats_fastpath_stale_build_cancelled_propagates_cancelled() {
-        let out = stats_fastpath_or_sqlite(
-            &mut NoEmit,
-            true,
-            FallbackReason::LiveGraphUnavailable,
-            StatsCertState::StaleOrMissing,
-            || panic!("a cancelled build must NOT serve LiveGraph"),
-            |_e, _r| panic!("a cancelled build must NOT then run the SQLite fallback"),
-            |_e| CertBuild::Cancelled,
-        );
-        assert!(matches!(out, Ok(StatsOutcome::Cancelled)));
-    }
-
     // DAEMON-CANCEL-2: a peer-disconnect DURING the SQLite fallback (`serve_sqlite` returns Cancelled)
-    // must propagate as StatsOutcome::Cancelled.
+    // must propagate as StatsOutcome::Cancelled. (The cert-build cancellation moved to
+    // `stats_cert_eligibility` — covered by the eligibility tests in `wb_epoch_coherence`.)
     #[test]
     fn stats_fastpath_sqlite_cancelled_propagates_cancelled() {
         let out = stats_fastpath_or_sqlite(
             &mut NoEmit,
             false, // precondition unmet ⇒ straight to serve_sqlite
             FallbackReason::LiveGraphPartial,
-            StatsCertState::ValidGreen,
+            true, // epoch_eligible (ignored when the precondition is unmet)
             || panic!("must NOT serve LiveGraph when the precondition is unmet"),
             |_e, _r| Ok(StatsOutcome::Cancelled),
-            |_e| panic!("must NOT build the cert when the precondition is unmet"),
         );
         assert!(matches!(out, Ok(StatsOutcome::Cancelled)));
     }

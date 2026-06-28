@@ -1418,23 +1418,27 @@ impl ServiceDispatcher {
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
-        // Get latest snapshot
+        // Get latest snapshot. W-B-EPOCH-IMPL-2B: resolve the AGENT `AgentSnapshot` DTO (the
+        // `AgentStorageRead` trait — same READY-row selection as the inherent method) so the `auto` path can
+        // wrap it in a `RequestEpoch`. The explicit engines below use only `snapshot.snapshot_uid` (a &str),
+        // unchanged.
         let snapshot_start = Instant::now();
-        let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
-                );
-            }
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        let snapshot =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snap)) => snap,
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
         // STATS-LIVEGRAPH-IMPL-1: engine routing. DEFAULT (no flags == `auto`) = the cert-gated LiveGraph
@@ -1449,14 +1453,39 @@ impl ServiceDispatcher {
                 // DAEMON-CANCEL-2: the DEFAULT path. On a GREEN cert it serves the LiveGraph stats
                 // (no SQL). On the SQLite fallback (non-resident / non-`Exact` LiveGraph, or a RED/stale
                 // cert) it runs `compute_module_stats` under the supervisor, so a peer-disconnect
-                // mid-aggregation aborts the in-flight SELECT and returns `Cancelled` — the iteration-0
-                // gap (default route ran heavy SQL to completion after disconnect) is closed.
+                // mid-aggregation aborts the in-flight SELECT and returns `Cancelled`.
+                //
+                // W-B-EPOCH-IMPL-2B (SC-B): capture the request epoch ONCE — the pinned snapshot + the
+                // BUILD-THEN-PEEK stats-cert eligibility witness (`stats_cert_eligibility`, which runs the
+                // cert build under the SAME supervisor so it still cancels mid-aggregation) — and serve
+                // under it. The EV-A gate in `stats_auto_response` fails soft to the pinned SQLite snapshot
+                // on a fingerprint mismatch, closing the capture-LG-stats-then-lazy-cert-build TOCTOU.
+                let fingerprint = match crate::livegraph_feed::stats_cert_eligibility(
+                    emitter,
+                    &repo_state,
+                    &snapshot.snapshot_uid,
+                ) {
+                    crate::livegraph_feed::StatsEligibility::Witness(fp) => fp,
+                    crate::livegraph_feed::StatsEligibility::Cancelled => {
+                        return DispatchResult::error(
+                            &request.id,
+                            ErrorDetail::new(
+                                ErrorCode::Cancelled,
+                                "stats query cancelled (client disconnected during aggregation)",
+                            ),
+                        );
+                    }
+                };
+                let epoch = crate::livegraph_feed::RequestEpoch {
+                    snapshot,
+                    fingerprint,
+                };
                 return match crate::livegraph_feed::stats_auto_response(
                     emitter,
                     &repo_state,
                     &repo_uid,
                     &display_name,
-                    &snapshot.snapshot_uid,
+                    &epoch,
                 ) {
                     Ok(crate::livegraph_feed::StatsOutcome::Ready(v)) => {
                         DispatchResult::success(&request.id, v)
@@ -1627,23 +1656,27 @@ impl ServiceDispatcher {
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
-        // Get latest snapshot
+        // Get latest snapshot. W-B-EPOCH-IMPL-2B: resolve the AGENT `AgentSnapshot` DTO (the
+        // `AgentStorageRead` trait — same READY-row selection as the inherent method) so the `auto` path can
+        // wrap it in a `RequestEpoch`. The explicit engines below use only `snapshot.snapshot_uid` (a &str),
+        // unchanged.
         let snapshot_start = Instant::now();
-        let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
-                );
-            }
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        let snapshot =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snap)) => snap,
+                Ok(None) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    );
+                }
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
         // CYCLES-LIVEGRAPH-CLI-1 + CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: engine/kind routing. DEFAULT
@@ -1759,14 +1792,30 @@ impl ServiceDispatcher {
             // answer (byte-identical, CYCLES-OUTPUT-CONTRACT-1) with a labelled `fallback_reason`.
             ("auto", "") | ("auto", "module-import") => {
                 // DAEMON-CANCEL-1: thread the in-loop checkpoint into the DEFAULT route's Tarjan
-                // loops — the LiveGraph module-cycle SCC and (on fallback) the SQLite SCC. This is
-                // the path the iteration-0 review flagged as still running uncheckpointed.
+                // loops — the LiveGraph module-cycle SCC and (on fallback) the SQLite SCC.
                 let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
+                // W-B-EPOCH-IMPL-2B (SC-B): capture the request epoch ONCE — the pinned snapshot + the
+                // BUILD-THEN-PEEK cycles-cert eligibility witness (`cycles_cert_eligibility`, which threads
+                // the SAME checkpoint so the first-call cert build still cancels mid-Tarjan) — and serve
+                // under it. The EV-A gate in `cycles_auto_response` fails soft to the pinned SQLite snapshot
+                // on a fingerprint mismatch, closing the capture-LG-cycles-then-lazy-cert-build TOCTOU.
+                let fingerprint = match crate::livegraph_feed::cycles_cert_eligibility(
+                    &repo_state,
+                    &snapshot.snapshot_uid,
+                    &mut checkpoint,
+                ) {
+                    Ok(fp) => fp,
+                    Err(e) => return cyc_result(Err(e)),
+                };
+                let epoch = crate::livegraph_feed::RequestEpoch {
+                    snapshot,
+                    fingerprint,
+                };
                 return cyc_result(crate::livegraph_feed::cycles_auto_response(
                     &repo_state,
                     &repo_uid,
                     &display_name,
-                    &snapshot.snapshot_uid,
+                    &epoch,
                     &mut checkpoint,
                 ));
             }

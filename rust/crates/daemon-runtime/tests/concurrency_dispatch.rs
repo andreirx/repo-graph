@@ -852,20 +852,22 @@ fn dispatched_default_cycles_cancels_via_livegraph_module_tarjan() {
     assert_cancelled_in_flight(&result, "default cycles (livegraph module tarjan)");
 }
 
-/// DEFAULT `cycles` (no `--engine`), FIRST-CALL CERT BUILD (review iteration 1's gap): with a resident
-/// LiveGraph whose module-cycle answer is `Exact`, `cycles_auto_response`'s precondition passes, then — on a
-/// stale/missing cert — it runs `build_and_store_cycles_cert_cancellable`, whose SHARED compare data runs a
-/// SQLite Tarjan (`find_cycles_cancellable`) over the module graph. Iteration 1 found THIS cert-build Tarjan
-/// was the LAST uncheckpointed loop on the default route: a disconnect AFTER the precondition but DURING the
-/// cert build ran the SCC pass to completion (`build_and_store_cycles_cert` → the non-cancellable
-/// `module_cycle_compare_data`). This proves it now cancels MID-cert-build.
+/// DEFAULT `cycles` (no `--engine`), FIRST-CALL CERT BUILD (review iteration 1's gap; W-B-EPOCH-IMPL-2B
+/// relocated WHERE the build runs): the default route now captures the request epoch via the BUILD-THEN-PEEK
+/// `cycles_cert_eligibility` BEFORE serving — its WARM step runs `build_and_store_cycles_cert_cancellable`
+/// (threaded with the SAME `finding_cycles` checkpoint), whose SHARED compare data runs a SQLite Tarjan
+/// (`find_cycles_cancellable`) over the module graph. Iteration 1 found THIS cert-build Tarjan was the LAST
+/// uncheckpointed loop on the default route (a disconnect during it ran the SCC pass to completion); the
+/// build-then-peek capture keeps it cancellable — a disconnect mid-cert-build returns `Err(Cancelled)` from
+/// the eligibility capture, mapped to `ErrorCode::Cancelled`. This proves it still cancels MID-cert-build
+/// after the relocation.
 ///
-/// The fixture separates the two phases so the cancel deterministically lands in the cert build, NOT the
-/// precondition: a TINY resident LiveGraph ring (2 modules ⇒ the precondition Tarjan runs fewer than the
-/// 256-step checkpoint interval ⇒ emits ZERO heartbeats) and a LARGE SQLite module ring (1000 modules ⇒ the
-/// cert build's `find_cycles_cancellable` Tarjan emits many). `FailAfter(1)` therefore lets the 0-heartbeat
-/// precondition complete, then fails inside the cert-build SCC pass. The cert is reset to missing before the
-/// cancel call so the StaleOrMissing cert-BUILD path is taken (not a cached-cert serve).
+/// The fixture sizes the cert build so the cancel deterministically lands in its SQLite SCC pass: a TINY
+/// resident LiveGraph ring (2 modules ⇒ the compare's LiveGraph SCC runs fewer than the 256-step checkpoint
+/// interval ⇒ emits ZERO heartbeats) and a LARGE SQLite module ring (1000 modules ⇒ the compare's
+/// `find_cycles_cancellable` Tarjan emits many). `FailAfter(1)` therefore lets the first cert-build heartbeat
+/// pass and the second fail inside the SQLite SCC pass. The cert is reset to missing before the cancel call
+/// so the eligibility WARM takes the (re)build path (not a cached-cert peek).
 #[test]
 fn dispatched_default_cycles_cancels_during_cert_build() {
     let (dispatcher, state, _state_root) = isolated();
