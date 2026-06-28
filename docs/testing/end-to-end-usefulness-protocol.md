@@ -42,7 +42,10 @@ caught by "does it run".)
    grow with it.
 3. **Evaluate** each command's output against KNOWN ground truth, per the rubric below. The
    evaluation is a JUDGMENT by an agent/human who knows the repo — not an assertion a script can make.
-4. **Record** a usefulness report and **file a product follow-up for every gap**.
+4. **Run the track-level evaluation gate** (below) — two-agent (evaluator + reviewer take) over
+   VISION alignment, current-architecture fit, and net tech-debt balance.
+5. **Record** a usefulness report (per-command rubric + the track-level gate) and **file a product
+   follow-up for every gap**.
 
 ## The rubric (score each command × repo)
 
@@ -57,11 +60,43 @@ caught by "does it run".)
 
 A command can be honest (passes layering) yet useless (fails usefulness/density) — score every row.
 
+## Track-level evaluation — the gate (two-agent)
+
+The per-command rubric scores individual outputs. On top of it, the track **as a whole** must pass a
+track-level evaluation before it is "done" / merge-ready — and this evaluation is **two-agent**
+(mirroring the relay's `decision-review`): an **evaluator** agent produces the analysis, and the
+**reviewer model gives an independent take that challenges it**. Disagreement is surfaced to the
+human, not averaged away.
+
+Four questions — all answered, with evidence:
+
+1. **VISION alignment.** Does the track's net effect serve the stated VISION (`docs/VISION.md`) —
+   orientation an agent can trust, honest layering, the right knowledge at the right layer? Cite the
+   VISION sections; name any output that contradicts them.
+2. **Current-architecture fit.** Do the outputs respect and advance the CURRENT architecture
+   (`docs/ARCHITECTURE.md` — the layer model, the daemon model, the boundaries)? Surface any drift or
+   architecture violation the track introduced or revealed.
+3. **Net tech-debt balance.** Across the track, is debt **net-removed**? List both sides explicitly —
+   debt RESOLVED (entries closed in `docs/TECH-DEBT.md`) vs debt INTRODUCED (new entries, deferred
+   work, shortcuts). **A track that adds more load-bearing debt than it removes does NOT pass** — fix
+   or re-scope before merge. (Cost is load-bearing assumptions disturbed, not lines of code.)
+4. **Two-agent verdict.** The evaluator's analysis of (1)–(3) plus the reviewer model's independent
+   challenge of it. Converged → pass; contested → the human adjudicates (the evaluator may have
+   missed a violation, or the reviewer may be wrong — show both arguments).
+
+This is a **GATE**: a major track is not merge-ready until the track-level evaluation passes (or its
+gaps are filed + accepted by the human). It is the track analogue of the relay's per-decision review
+(see agent-manager `CLAUDE.md` → decision-review).
+
 ## Output
 
 - A usefulness report — e.g. `docs/testing/usefulness-eval-<track>.md` — table of command × repo ×
   rubric, with the concrete evidence (quote the output, compare to the known truth).
-- One product follow-up per gap (overclaim, mis-layer, thin/non-dense output, missing signal).
+- The **track-level gate** result: VISION alignment, current-architecture fit, and the **net
+  tech-debt balance** (debt resolved vs introduced, both sides named) — plus the **two-agent verdict**
+  (evaluator analysis + reviewer challenge; converged or contested).
+- One product follow-up per gap (overclaim, mis-layer, thin/non-dense output, missing signal,
+  architecture drift, net-debt-positive).
 
 ## First run (arch/scip-substrate-pivot)
 

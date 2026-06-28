@@ -121,6 +121,17 @@ When a slice's code work is done, run the three phases defined in
 To run `rmap` when no repo is indexed (the `error: repo not indexed` case), use the
 isolated dogfood — never index into the operator's real registry to test.
 
+## End-of-Track Gate (major branch/track)
+
+When a **major branch or track** (a multi-slice arc) is done, BEFORE merge, run the
+End-to-End Usefulness Protocol (`docs/testing/end-to-end-usefulness-protocol.md`) — the
+per-track analogue of the per-slice procedure. Beyond the per-command usefulness rubric it is
+a **two-agent GATE** (an evaluator agent's analysis + an independent reviewer-model take that
+challenges it) over: **VISION alignment**, **current-architecture fit**, and **net tech-debt
+balance** — debt resolved vs introduced, both sides named; *a track that adds more load-bearing
+debt than it removes does NOT pass*. A track is not merge-ready until the gate passes or its
+gaps are filed + accepted by the human.
+
 ## Persistence Completeness
 
 Persisted feature is incomplete without: write path, read path, refresh behavior, trust impact, CLI visibility, validation.
@@ -172,3 +183,4 @@ Stop and report if:
 - `agent_docs/architecture.md` — full architecture rules
 - `agent_docs/rmap-orientation.md` — CLI patterns
 - `docs/testing/end-of-slice-procedure.md` — Test → Install → Cleanup + isolated `rmap` dogfood
+- `docs/testing/end-to-end-usefulness-protocol.md` — per-track usefulness + the two-agent GATE (VISION / architecture / net tech-debt balance)
