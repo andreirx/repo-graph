@@ -64,9 +64,9 @@ A command can be honest (passes layering) yet useless (fails usefulness/density)
 
 The per-command rubric scores individual outputs. On top of it, the track **as a whole** must pass a
 track-level evaluation before it is "done" / merge-ready — and this evaluation is **two-agent**
-(mirroring the relay's `decision-review`): an **evaluator** agent produces the analysis, and the
-**reviewer model gives an independent take that challenges it**. Disagreement is surfaced to the
-human, not averaged away.
+(analogous to the relay's `decision-review`, though lighter — no mandatory rebuttal round): an
+**evaluator** agent produces the analysis, and the **reviewer model gives an independent take that
+challenges it** (the evaluator MAY rebut). Disagreement is surfaced to the human, not averaged away.
 
 Four questions — all answered, with evidence:
 
@@ -74,19 +74,24 @@ Four questions — all answered, with evidence:
    orientation an agent can trust, honest layering, the right knowledge at the right layer? Cite the
    VISION sections; name any output that contradicts them.
 2. **Current-architecture fit.** Do the outputs respect and advance the CURRENT architecture
-   (`docs/ARCHITECTURE.md` — the layer model, the daemon model, the boundaries)? Surface any drift or
-   architecture violation the track introduced or revealed.
+   (`agent_docs/architecture.md` + `docs/architecture/*` + the VISION's Product Layer Model — the
+   layer model, the daemon model, the boundaries)? Surface any drift or architecture violation the
+   track introduced or revealed.
 3. **Net tech-debt balance.** Across the track, is debt **net-removed**? List both sides explicitly —
    debt RESOLVED (entries closed in `docs/TECH-DEBT.md`) vs debt INTRODUCED (new entries, deferred
-   work, shortcuts). **A track that adds more load-bearing debt than it removes does NOT pass** — fix
-   or re-scope before merge. (Cost is load-bearing assumptions disturbed, not lines of code.)
+   work, shortcuts). **Score by SEVERITY, not count** (TECH-DEBT uses P1/P2/P3): introducing a debt
+   of severity ≥ the highest resolved this track means the track is **net-debt-positive and does NOT
+   pass** — e.g. a new P1 requires a P1 resolved (or an explicit human waiver, below). (Cost is
+   load-bearing assumptions disturbed, not lines of code.)
 4. **Two-agent verdict.** The evaluator's analysis of (1)–(3) plus the reviewer model's independent
    challenge of it. Converged → pass; contested → the human adjudicates (the evaluator may have
    missed a violation, or the reviewer may be wrong — show both arguments).
 
-This is a **GATE**: a major track is not merge-ready until the track-level evaluation passes (or its
-gaps are filed + accepted by the human). It is the track analogue of the relay's per-decision review
-(see agent-manager `CLAUDE.md` → decision-review).
+This is a **GATE with one explicit escape**: a major track is not merge-ready until the track-level
+evaluation **passes** — OR a failing/contested result is **explicitly waived by the human** (each gap
+filed in `docs/TECH-DEBT.md` and the waiver recorded). "Passes" and "human-waived" are the only two
+ways forward; an unaddressed failure is NOT a pass. It is the track analogue of the relay's
+per-decision review (see agent-manager `CLAUDE.md` → decision-review).
 
 ## Output
 
