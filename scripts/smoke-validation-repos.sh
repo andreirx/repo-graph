@@ -240,7 +240,8 @@ shift
 # path/imports/modules show) need a per-repo symbol/file — pass them explicitly.
 if [[ $# -eq 0 ]]; then
     COMMANDS=(
-        "orient --full" "check --full" "trust"
+        "orient --budget small" "orient --budget medium" "orient --budget large" "orient --full"
+        "check --full" "trust"
         "modules list" "modules violations" "stats" "cycles"
         "churn" "hotspots" "risk"
         "dead" "violations" "gate" "assess"
