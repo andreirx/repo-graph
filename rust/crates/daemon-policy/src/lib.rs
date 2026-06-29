@@ -16,7 +16,11 @@
 //! # Key Properties
 //!
 //! - Multiple readers can proceed concurrently
-//! - Writers are exclusive (block readers and other writers)
+//! - `Writing` (index/prune) is exclusive — it blocks readers and other writers
+//! - **W-B (DAEMON-W-B-EPOCH-1): a `Refreshing` writer admits concurrent readers** — a refresh
+//!   (or background enrich) and readers coexist; each reader proceeds against its captured request
+//!   epoch so a mid-request publish of N+1 stays coherent at N. Writers remain serialized against
+//!   the refresh (a second refresh/index still waits).
 //! - Writers are served FIFO (first queued, first granted)
 //! - Readers arriving while a writer is queued must wait (prevents writer starvation)
 //!

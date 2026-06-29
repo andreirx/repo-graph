@@ -712,4 +712,121 @@ mod tests {
         // Writer should have had exclusive access (no readers)
         assert_eq!(reader_count.load(Ordering::SeqCst), 0);
     }
+
+    // ── W-B (DAEMON-W-B-EPOCH-1): read-during-refresh ───────────────
+
+    /// THE read-during-refresh proof at the coordinator level (deterministic, single-thread). With a
+    /// refresh guard held, `acquire_read()` is ADMITTED and RETURNS — under W-A it returned
+    /// `Blocked` and a single thread would deadlock (it cannot release the refresh while parked in
+    /// `acquire_read`). That this call returns AT ALL on one thread IS the proof the `Refreshing`
+    /// read-block is gone. The state becomes `RefreshingWithReaders(1)`: a refresh and a reader
+    /// coexisting on the same repo.
+    #[test]
+    fn reader_admitted_during_refresh() {
+        let coord = RepoCoordinator::new();
+        let refresh = coord.acquire_refresh();
+        assert_eq!(coord.state(), CoordinatorState::Refreshing);
+
+        let read = coord.acquire_read();
+        assert_eq!(coord.state(), CoordinatorState::RefreshingWithReaders(1));
+
+        // The reader leaving first returns to the still-in-flight refresh.
+        drop(read);
+        assert_eq!(coord.state(), CoordinatorState::Refreshing);
+        drop(refresh);
+        assert_eq!(coord.state(), CoordinatorState::Idle);
+    }
+
+    #[test]
+    fn try_acquire_read_succeeds_during_refresh() {
+        let coord = RepoCoordinator::new();
+        let _refresh = coord.acquire_refresh();
+        // Bind the guard so the read permit stays held for the state assertion (an unbound
+        // temporary would drop immediately and release it back to `Refreshing`).
+        let read = coord.try_acquire_read();
+        assert!(read.is_some(), "W-B: a refresh admits readers");
+        assert_eq!(coord.state(), CoordinatorState::RefreshingWithReaders(1));
+    }
+
+    #[test]
+    fn multiple_readers_admitted_during_refresh_then_drain() {
+        let coord = RepoCoordinator::new();
+        let _refresh = coord.acquire_refresh();
+        let r1 = coord.acquire_read();
+        let r2 = coord.acquire_read();
+        assert_eq!(coord.state(), CoordinatorState::RefreshingWithReaders(2));
+        drop(r1);
+        assert_eq!(coord.state(), CoordinatorState::RefreshingWithReaders(1));
+        drop(r2);
+        assert_eq!(coord.state(), CoordinatorState::Refreshing);
+    }
+
+    /// The refresh completing while a reader is still admitted leaves the reader active as a plain
+    /// `Reading(1)` — the refresh's exclusion lifts and the reader continues uninterrupted.
+    #[test]
+    fn refresh_release_with_reader_present_leaves_reader_active() {
+        let coord = RepoCoordinator::new();
+        let refresh = coord.acquire_refresh();
+        let read = coord.acquire_read();
+        assert_eq!(coord.state(), CoordinatorState::RefreshingWithReaders(1));
+        drop(refresh);
+        assert_eq!(coord.state(), CoordinatorState::Reading(1));
+        drop(read);
+        assert_eq!(coord.state(), CoordinatorState::Idle);
+    }
+
+    /// W-B non-regression: `Writing` (index/prune) STILL excludes readers — only `Refreshing` is
+    /// relaxed. (Companion to `try_acquire_read_when_writing_fails`, named for the W-B contract.)
+    #[test]
+    fn writing_still_blocks_readers_under_w_b() {
+        let coord = RepoCoordinator::new();
+        let _write = coord.acquire_write();
+        assert!(
+            coord.try_acquire_read().is_none(),
+            "Writing (index/prune) still excludes readers under W-B"
+        );
+    }
+
+    /// Writer serialization is UNCHANGED under W-B: a second writer queued while a
+    /// refresh-with-readers is in flight does NOT run concurrently with the refresh — it waits for
+    /// the refresh (and then the reader) to release. Proven by the queued writer not acquiring while
+    /// the refresh is active.
+    #[test]
+    fn writer_serialized_while_refreshing_with_readers() {
+        let coord = Arc::new(RepoCoordinator::new());
+        let refresh = coord.acquire_refresh();
+        let read = coord.acquire_read();
+        assert_eq!(coord.state(), CoordinatorState::RefreshingWithReaders(1));
+
+        let coord2 = Arc::clone(&coord);
+        let acquired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let acquired2 = Arc::clone(&acquired);
+        let handle = thread::spawn(move || {
+            let _w = coord2.acquire_write();
+            acquired2.store(true, Ordering::SeqCst);
+        });
+
+        // Poll until the writer has queued (proves it started); it must NOT have acquired while the
+        // refresh is in flight.
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while coord.queued_writers() == 0 {
+            if Instant::now() > deadline {
+                panic!("writer never queued");
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            !acquired.load(Ordering::SeqCst),
+            "writer must wait for the in-flight refresh (serialization unchanged)"
+        );
+
+        // Refresh done → readers remain (Reading(1)); the writer still waits for the reader.
+        drop(refresh);
+        assert!(!acquired.load(Ordering::SeqCst));
+        // Reader done → the writer finally acquires.
+        drop(read);
+        handle.join().unwrap();
+        assert!(acquired.load(Ordering::SeqCst));
+        assert_eq!(coord.state(), CoordinatorState::Idle);
+    }
 }

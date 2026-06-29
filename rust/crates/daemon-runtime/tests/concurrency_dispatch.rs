@@ -1764,3 +1764,83 @@ fn live_peer_trust_and_check_return_identical_results() {
         "live-peer check must be deterministic + transparent across the worker boundary"
     );
 }
+
+// ── W-B-EPOCH-IMPL-3: read-during-refresh through the REAL dispatcher ─────────────
+//
+// The end-to-end proof of the WB-A flip: a reader request driven through the real
+// `ServiceDispatcher::dispatch` is ADMITTED and returns a coherent last-good answer WHILE a
+// refresh guard is held on the SAME repo's coordinator. Under W-A the reader's `acquire_read`
+// was excluded by `Refreshing`, so this dispatch would block for the whole refresh (here, until
+// the test drops the guard) and the `recv_timeout` would fire. Under W-B (this slice) it returns
+// immediately while the refresh is STILL held — proving the flip on the real dispatch path + real
+// coordinator, not only the state machine. Deterministic: the proof is that the result ARRIVES
+// while the refresh is still held; the timeout only guards against a W-A regression (a block).
+
+/// A real `callers` request is admitted + coherent through the dispatcher while a refresh is in
+/// flight on the same repo (previously it would block under W-A — `reader_admitted_*` names).
+#[test]
+fn reader_admitted_through_dispatch_while_refresh_in_flight() {
+    let (dispatcher, state, _state_root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_s1(&repo_dir);
+
+    let indexed = expect_success(run(
+        &dispatcher,
+        "idx",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let canonical = indexed["canonical_path"].as_str().unwrap().to_string();
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+
+    // The coherent last-good answer, captured with NO refresh in flight (the steady state).
+    let baseline = expect_success(callers(&dispatcher, "base", &canonical, "helperFunction"));
+
+    // Resolve the SAME cached RepoState the dispatcher will resolve for the reader request, and
+    // hold a refresh guard on its coordinator for the whole reader dispatch — a deterministic
+    // stand-in for a long in-flight refresh (no producer needed).
+    let repo_state = state
+        .load_repo(Path::new(&db_path), &repo_uid)
+        .expect("load (cache) the repo state");
+    let refresh = repo_state.coordinator.acquire_refresh();
+    assert!(
+        repo_state.coordinator.state().is_write_active(),
+        "a refresh is in flight on the repo coordinator"
+    );
+
+    // Drive a real `callers` request on a worker thread; under W-B it is ADMITTED rather than
+    // blocked by the in-flight refresh.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader = {
+        let dispatcher = Arc::clone(&dispatcher);
+        let repo = canonical.clone();
+        thread::spawn(move || {
+            let _ = tx.send(callers(&dispatcher, "rd", &repo, "helperFunction"));
+        })
+    };
+
+    // Under W-B the dispatch returns while the refresh is STILL held; under W-A it would block
+    // until we drop the guard, so this recv would time out.
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("W-B: a reader admitted during a refresh must RETURN (W-A would block -> timeout)");
+
+    // The refresh is STILL in flight (not yet dropped) — proving the reader was admitted
+    // CONCURRENTLY with it, not after it ended.
+    assert!(
+        repo_state.coordinator.state().is_write_active(),
+        "the refresh is still held; the reader was admitted concurrently with it"
+    );
+
+    // ...and the admitted reader served the SAME coherent last-good answer as the no-refresh read.
+    let body = expect_success(result);
+    assert_eq!(
+        body, baseline,
+        "the admitted reader serves the coherent last-good answer (identical to a no-refresh read)"
+    );
+
+    drop(refresh);
+    reader.join().unwrap();
+}

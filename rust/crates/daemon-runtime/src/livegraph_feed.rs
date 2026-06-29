@@ -3844,6 +3844,176 @@ mod tests {
                 "the SQLite fallback is stamped with the PINNED snapshot"
             );
         }
+
+        // ── W-B-EPOCH-IMPL-3: the §6 whole-request join coherence + read-during-refresh ──────────
+
+        /// THE §6 whole-request join-coherence proof — the IMPL-3 acceptance (closes the cross-store
+        /// split-brain the B1 review withdrew W-B over). A reader captures epoch N; a concurrent writer
+        /// then PUBLISHES a REAL new SQLite READY snapshot N+1 (create + flip-ready, the prior snapshot
+        /// retained — mirroring a real refresh) AND swaps the in-memory LiveGraph. Both
+        /// independently-versioned stores move. Assert:
+        ///   (a) the in-flight reader's WHOLE request stays coherent at N — its pinned `snapshot_uid` is
+        ///       unchanged, the swapped LiveGraph no longer matches its captured fingerprint so the leaf
+        ///       fails soft (EV-A) to SQLite@N, and the served caller is N's (never N+1, never the
+        ///       swapped graph); AND
+        ///   (b) a NEW request issued AFTER the publish sees N+1 (`get_latest_snapshot` returns N+1 and a
+        ///       fresh epoch capture pins N+1).
+        /// The EV-A sibling tests above only swap the LiveGraph and re-check the same pinned uid; this
+        /// test actually publishes a new SQLite READY snapshot N+1 mid-request, proving CROSS-STORE
+        /// N→N+1 coherence, not just a LiveGraph re-validation (the packet's explicit requirement).
+        #[test]
+        fn whole_request_join_coherence_across_real_sqlite_n_plus_1_publish() {
+            let f = test_fixture::build_fixture(false);
+            let storage = f.state.storage().unwrap();
+            let snapshot_uid_n = f.snapshot_uid.clone();
+
+            // The in-flight reader captures epoch N (pinned snapshot N + GREEN callgraph eligibility).
+            let fingerprint = callgraph_cert_eligibility(&f.state, &snapshot_uid_n);
+            assert!(fingerprint.is_some(), "GREEN fixture -> a witness at N");
+            let epoch_n = capture(&f.state, &snapshot_uid_n, fingerprint);
+
+            // ── A concurrent writer publishes epoch N+1 across BOTH stores ──────────────────────────
+            // SQLite: push N's created_at into the past so `get_latest_snapshot` (ORDER BY created_at
+            // DESC) deterministically returns N+1, then create + flip-ready a REAL new snapshot. The
+            // prior READY snapshot N is retained (a real refresh prunes it only later), so BOTH rows
+            // exist and the pinned reader can still read N by uid.
+            storage
+                .execute_raw(&format!(
+                    "UPDATE snapshots SET created_at = '2000-01-01T00:00:00.000Z' \
+                     WHERE snapshot_uid = '{snapshot_uid_n}'"
+                ))
+                .unwrap();
+            let snap_n1 = storage
+                .create_snapshot(&repo_graph_storage::types::CreateSnapshotInput {
+                    repo_uid: test_fixture::REPO.to_string(),
+                    kind: "full".to_string(),
+                    basis_ref: None,
+                    basis_commit: None,
+                    parent_snapshot_uid: Some(snapshot_uid_n.clone()),
+                    label: None,
+                    toolchain_json: None,
+                })
+                .unwrap();
+            storage
+                .update_snapshot_status(&repo_graph_storage::types::UpdateSnapshotStatusInput {
+                    snapshot_uid: snap_n1.snapshot_uid.clone(),
+                    status: "ready".to_string(),
+                    completed_at: None,
+                })
+                .unwrap();
+            // LiveGraph: the refresh swaps the in-memory graph (epoch bumped in place).
+            swap_livegraph(&f.state);
+
+            // ── (a) the in-flight reader's whole request is STILL coherent at N ─────────────────────
+            assert_eq!(
+                epoch_n.snapshot_uid(),
+                snapshot_uid_n,
+                "the pinned SQLite identity never moves, even though N+1 was published"
+            );
+            // The swap moved the resident fingerprint off the captured witness -> EV-A must fail soft.
+            let resident_fp_now = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(
+                    &guard.as_ref().unwrap().live_partitions(),
+                    epoch_n.snapshot_uid(),
+                )
+            };
+            assert_ne!(
+                Some(&resident_fp_now),
+                epoch_n.fingerprint.as_ref(),
+                "the N+1 LiveGraph swap moved the resident fingerprint off the captured epoch"
+            );
+            let target = resolved(&test_fixture::callee_key(), "calleeFn");
+            let edge = ["CALLS"];
+            let in_flight = callers_engine_response(
+                Engine::Auto,
+                &f.state,
+                &epoch_n,
+                &target,
+                || storage.find_direct_callers(epoch_n.snapshot_uid(), &target.stable_key, &edge),
+                "calleeFn",
+                "",
+            )
+            .unwrap();
+            assert_eq!(
+                in_flight["backend_used"], "sqlite",
+                "EV-A: a swapped LiveGraph fails soft to the PINNED SQLite snapshot (N)"
+            );
+            assert_eq!(
+                in_flight["callers"][0]["stable_key"],
+                test_fixture::caller_key(),
+                "the in-flight reader serves N's caller, never N+1 nor the swapped graph"
+            );
+
+            // ── (b) a NEW request issued AFTER the publish sees N+1 ─────────────────────────────────
+            let latest_now = AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                latest_now.snapshot_uid, snap_n1.snapshot_uid,
+                "a new request resolves 'latest' to the freshly-published N+1"
+            );
+            assert_ne!(
+                latest_now.snapshot_uid, snapshot_uid_n,
+                "the new request is NOT pinned to the in-flight reader's N"
+            );
+            let new_epoch = RequestEpoch {
+                snapshot: latest_now,
+                fingerprint: callgraph_cert_eligibility(&f.state, &snap_n1.snapshot_uid),
+            };
+            assert_eq!(
+                new_epoch.snapshot_uid(),
+                snap_n1.snapshot_uid,
+                "a fresh capture pins N+1 (the new request is coherent at N+1, not N)"
+            );
+        }
+
+        /// Read-during-refresh at the daemon (`RepoState`) level: with a refresh guard HELD on the repo's
+        /// coordinator, a reader is ADMITTED (single thread — under W-A `acquire_read` returned `Blocked`
+        /// and this would DEADLOCK) AND serves a coherent last-good answer against its captured epoch. The
+        /// VISION's "orientation in milliseconds even during a background refresh". Previously this would
+        /// block for the whole refresh.
+        #[test]
+        fn reader_admitted_and_coherent_during_refresh() {
+            let f = test_fixture::build_fixture(false);
+            let storage = f.state.storage().unwrap();
+            let fingerprint = callgraph_cert_eligibility(&f.state, &f.snapshot_uid);
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+
+            // A refresh is in flight on THIS repo's coordinator.
+            let _refresh = f.state.coordinator.acquire_refresh();
+            // W-B: the reader is admitted alongside it — this returning at all on one thread IS the proof
+            // (under W-A it blocked). The coordinator is now "a refresh + 1 reader": write-active AND one
+            // admitted reader (== RefreshingWithReaders(1)).
+            let _read = f.state.coordinator.acquire_read();
+            let coord_state = f.state.coordinator.state();
+            assert!(
+                coord_state.is_write_active(),
+                "the refresh is still in flight while the reader is admitted"
+            );
+            assert_eq!(
+                coord_state.reader_count(),
+                1,
+                "exactly one reader admitted during the refresh (RefreshingWithReaders(1))"
+            );
+
+            // ...and it serves a coherent last-good answer at the captured epoch (LiveGraph fastpath; the
+            // refresh has not swapped the graph yet).
+            let target = resolved(&test_fixture::callee_key(), "calleeFn");
+            let edge = ["CALLS"];
+            let v = callers_engine_response(
+                Engine::Auto,
+                &f.state,
+                &epoch,
+                &target,
+                || storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge),
+                "calleeFn",
+                "",
+            )
+            .unwrap();
+            assert_eq!(v["backend_used"], "livegraph");
+            assert_eq!(v["callers"][0]["stable_key"], test_fixture::caller_key());
+        }
     }
 
     // ── CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 + W-B-EPOCH-IMPL-2B: the PURE fastpath/SQLite ladder ──
