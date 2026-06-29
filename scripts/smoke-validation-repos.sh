@@ -241,10 +241,11 @@ shift
 if [[ $# -eq 0 ]]; then
     COMMANDS=(
         "orient --full" "check --full" "trust"
-        "modules list" "stats" "cycles"
+        "modules list" "modules violations" "stats" "cycles"
         "churn" "hotspots" "risk"
         "dead" "violations" "gate" "assess"
-        "surfaces list" "docs list" "inferences list" "deps list"
+        "surfaces list" "boundaries list" "boundaries summary" "resource list"
+        "docs list" "inferences list" "deps list"
     )
 else
     COMMANDS=("$@")
