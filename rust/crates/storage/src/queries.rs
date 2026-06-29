@@ -1171,6 +1171,73 @@ impl StorageConnection {
         Ok(langs)
     }
 
+    /// W-B-EPOCH-IMPL-2D: the SNAPSHOT-SCOPED variant of [`distinct_file_languages`] -- the DISTINCT non-null
+    /// `files.language` values for the files PRESENT IN snapshot `snapshot_uid`, joined through `file_versions`
+    /// (composite PK `(snapshot_uid, file_uid)` -- the snapshot's immutable file manifest). The cycle-completeness
+    /// audit uses THIS, not the repo-scoped sibling, so its language baseline is bound to ONE snapshot under W-B
+    /// (serve-reads-during-refresh) -- where the repo-scoped `distinct_file_languages` would straddle epochs (an
+    /// audit comparing `find_cycles@N` against a language inventory from a different epoch -> a FALSE
+    /// incompleteness; harmless only under the W-A read-block, which excludes concurrent writers).
+    ///
+    /// Why the result is epoch-invariant -- TWO DISTINCT mechanisms (the precision review-2 required). The result
+    /// is the multiset `{ files.language : file_uid in snapshot N's manifest }`. BOTH the file SET and the language
+    /// VALUE per file_uid are pinned to N, but by SEPARATE mechanisms -- and the second is NOT this query.
+    ///
+    /// MECHANISM 1 (the file SET) is pinned BY THE JOIN. `file_versions` rows are keyed by the composite PK
+    /// `(snapshot_uid, file_uid)` and are never rewritten for a committed snapshot, so `WHERE fv.snapshot_uid = ?`
+    /// selects exactly N's file_uids. A later re-index that adds a file in snapshot N+1 inserts an
+    /// `(N+1, file_uid)` row, NOT an `(N, ...)` row -- it cannot enter N's set. (Proven by
+    /// `distinct_file_languages_for_snapshot_pins_and_does_not_drop_no_node_files`.)
+    ///
+    /// MECHANISM 2 (the language VALUE) is pinned by an UPSTREAM INVARIANT, not by this query. This query reads
+    /// `f.language` from the repo-scoped, MUTABLE `files` table, and `upsert_files` DOES rewrite that column
+    /// `ON CONFLICT(file_uid) DO UPDATE SET language = excluded.language` (crud/files.rs:51-55) -- so the row IS
+    /// written by a re-index. It is nonetheless epoch-invariant because `files.language` is FUNCTIONALLY DETERMINED
+    /// by the IMMUTABLE `file_uid`: file_uid is `"{repo_uid}:{rel_path}"` (orchestrator.rs:531/784/1574;
+    /// invalidation.rs:248; resolver.rs:771), so a fixed file_uid is a fixed path; and `language` is
+    /// `detect_language(rel_path)` (orchestrator.rs:532/787/1577), where `detect_language(file_path: &str)` is a
+    /// PURE FUNCTION of the path's EXTENSION -- a closed `match` on `get_extension`, with NO content parameter in
+    /// its signature (routing.rs:154-170; the mapping is locked by the `detect_language_*` tests there). It
+    /// STRUCTURALLY cannot observe content; making it content-sensitive would require a signature change visible at
+    /// EVERY call site. Therefore a re-index of the SAME path (the SAME file_uid) recomputes the IDENTICAL
+    /// language, and the `ON CONFLICT ... SET language` write is value-preserving for the language column -- a
+    /// later re-index can NEVER give snapshot N's file_uid a DIFFERENT language. (Proven by
+    /// `distinct_file_languages_for_snapshot_is_epoch_invariant_under_existing_file_reindex`, which also pins the
+    /// boundary: the STORAGE layer does NOT enforce this -- the upstream `detect_language` invariant does.)
+    ///
+    /// So the precise claim is NOT "a concurrent `files` write cannot happen" (it can -- ON CONFLICT rewrites the
+    /// row); it is "the only value such a write can put in `files.language` for N's file_uid is the one N already
+    /// has." This is the SAME `file_versions ⋈ files.language` pattern already shipped and relied upon in
+    /// `compute_path_summary` and the orient language read (agent_impl.rs:279-284, 674-680) -- the invariant is
+    /// not novel to this slice.
+    ///
+    /// Why `file_versions`, not `nodes` (the no-drop property -- load-bearing for the audit's conservatism): the
+    /// indexer pushes a `file_versions` row for EVERY tracked file in a snapshot, INCLUDING a non-TS code
+    /// file that produced ZERO graph nodes (orchestrator.rs:568-578 pushes a `FileVersion` per file with
+    /// `parse_status = Skipped` when no extractor routes the file, and orchestrator.rs:531-532 set its `file_uid`
+    /// and `detect_language` language). So `file_versions ⋈ files` does NOT drop a no-node non-TS file the way a
+    /// `nodes ⋈ files` join would -- the CONSERVATIVE non-TS inventory the audit needs (any non-TS code language
+    /// -> `has_non_ts_cycle_source`, never a false `Complete`) is preserved. Read-only; never consulted by the
+    /// SQLite-free certificate evaluator.
+    pub fn distinct_file_languages_for_snapshot(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT DISTINCT f.language
+             FROM files f
+             JOIN file_versions fv ON fv.file_uid = f.file_uid
+             WHERE fv.snapshot_uid = ? AND f.language IS NOT NULL
+             ORDER BY f.language ASC",
+        )?;
+        let langs = stmt
+            .query_map(rusqlite::params![snapshot_uid], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(langs)
+    }
+
     /// Compute per-module structural metrics.
     ///
     /// Mirrors the TS `computeModuleStats` (sqlite-storage.ts:2846-2964).
@@ -2526,6 +2593,220 @@ mod tests {
             .unwrap();
 
         (storage, snap_uid.to_string())
+    }
+
+    // W-B-EPOCH-IMPL-2D: `distinct_file_languages_for_snapshot` PINS the language inventory to one snapshot
+    // via `file_versions ⋈ files`. Two load-bearing properties, both proven here:
+    //   (1) NO-DROP: a non-TS code file that produced ZERO nodes (parse_status='skipped') is STILL counted --
+    //       it has a `file_versions` row (the audit's conservative non-TS inventory must never miss it).
+    //   (2) SNAPSHOT-SCOPING: a file present only in a LATER snapshot (N+1) is EXCLUDED from snapshot N -- so a
+    //       concurrent re-index cannot pollute a reader pinned to N (the repo-scoped sibling CAN, proven by the
+    //       contrast assertion). This is the pin that closes the resolve->capture straddle.
+    #[test]
+    fn distinct_file_languages_for_snapshot_pins_and_does_not_drop_no_node_files() {
+        use crate::crud::test_helpers::{make_file_version, make_repo};
+        use crate::types::{CreateSnapshotInput, TrackedFile};
+
+        let mut storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+
+        let mk_snap = |s: &mut StorageConnection| -> String {
+            s.create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid
+        };
+        let snap_n = mk_snap(&mut storage);
+        let snap_n1 = mk_snap(&mut storage);
+
+        let mk_file = |path: &str, lang: &str| TrackedFile {
+            file_uid: format!("r1:{path}"),
+            repo_uid: "r1".to_string(),
+            path: path.to_string(),
+            language: Some(lang.to_string()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        };
+        // Repo-scoped `files`: a TS file, a non-TS (rust) code file, and a later-only python file.
+        storage
+            .upsert_files(&[
+                mk_file("src/a.ts", "typescript"),
+                mk_file("src/lib.rs", "rust"),
+                mk_file("src/extra.py", "python"),
+            ])
+            .unwrap();
+
+        // Snapshot N's manifest = {a.ts, lib.rs}. The rust file produced no nodes -> parse_status 'skipped'
+        // (mirrors orchestrator.rs:574-578), but it STILL gets a file_versions row.
+        let mut fv_rust_n = make_file_version(&snap_n, "r1:src/lib.rs");
+        fv_rust_n.parse_status = "skipped".to_string();
+        storage
+            .upsert_file_versions(&[make_file_version(&snap_n, "r1:src/a.ts"), fv_rust_n])
+            .unwrap();
+        // Snapshot N+1's manifest adds the python file (a concurrent re-index's newer snapshot).
+        let mut fv_rust_n1 = make_file_version(&snap_n1, "r1:src/lib.rs");
+        fv_rust_n1.parse_status = "skipped".to_string();
+        storage
+            .upsert_file_versions(&[
+                make_file_version(&snap_n1, "r1:src/a.ts"),
+                fv_rust_n1,
+                make_file_version(&snap_n1, "r1:src/extra.py"),
+            ])
+            .unwrap();
+
+        // (1) NO-DROP + (2) SNAPSHOT-SCOPING: snapshot N sees [rust, typescript] -- the no-node rust file IS
+        //     counted, and python (only in N+1) is EXCLUDED.
+        assert_eq!(
+            storage
+                .distinct_file_languages_for_snapshot(&snap_n)
+                .unwrap(),
+            vec!["rust".to_string(), "typescript".to_string()],
+            "snapshot N: no-node rust counted; later python excluded"
+        );
+        // Snapshot N+1 sees the python file too.
+        assert_eq!(
+            storage
+                .distinct_file_languages_for_snapshot(&snap_n1)
+                .unwrap(),
+            vec![
+                "python".to_string(),
+                "rust".to_string(),
+                "typescript".to_string()
+            ],
+            "snapshot N+1: the later python file is present"
+        );
+        // CONTRAST: the repo-scoped sibling leaks N+1's python into a reader that should be pinned to N --
+        // exactly the cross-epoch straddle the snapshot-scoped query exists to prevent.
+        assert_eq!(
+            storage.distinct_file_languages("r1").unwrap(),
+            vec![
+                "python".to_string(),
+                "rust".to_string(),
+                "typescript".to_string()
+            ],
+            "repo-scoped read is NOT snapshot-pinned (the unsafe-under-W-B behavior)"
+        );
+    }
+
+    // W-B-EPOCH-IMPL-2D (review-2 #1): the EXISTING-FILE re-index case the prior test omitted. The snapshot-scoped
+    // query reads `f.language` from the MUTABLE `files` table, so review-2 asked: can a later re-index of a file
+    // ALREADY IN snapshot N's manifest shift N's language baseline? It cannot -- `files.language` is functionally
+    // determined by the immutable `file_uid` (file_uid = "{repo}:{path}"; language = detect_language(path);
+    // detect_language is a pure function of the extension -- routing.rs:154-170). A re-index of the same path
+    // recomputes the IDENTICAL language, so the ON CONFLICT rewrite is value-preserving. This test proves
+    //   (a) N's baseline is STABLE when its OWN file_uids are re-upserted (the realistic re-index), and
+    //   (b) the BOUNDARY: the storage layer does NOT enforce the invariant -- a hypothetical DIFFERENT-language
+    //       upsert for an existing file_uid WOULD shift the read -- so the protection is the UPSTREAM
+    //       detect_language invariant, made explicit here rather than left silent.
+    #[test]
+    fn distinct_file_languages_for_snapshot_is_epoch_invariant_under_existing_file_reindex() {
+        use crate::crud::test_helpers::{make_file_version, make_repo};
+        use crate::types::{CreateSnapshotInput, TrackedFile};
+
+        let mut storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap_n = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid;
+
+        // detect_language is a pure function of the path's extension; mirror it locally so the test upserts the
+        // language a REAL re-index would compute for each path (not an arbitrary one). Kept local because storage
+        // is a layer BELOW the indexer crate -- it must not call `indexer::routing::detect_language` directly.
+        let lang_of = |path: &str| -> &'static str {
+            match path.rsplit('.').next() {
+                Some("ts") => "typescript",
+                Some("rs") => "rust",
+                _ => "other",
+            }
+        };
+        let mk_file = |path: &str| TrackedFile {
+            file_uid: format!("r1:{path}"),
+            repo_uid: "r1".to_string(),
+            path: path.to_string(),
+            language: Some(lang_of(path).to_string()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        };
+
+        // Snapshot N's manifest = {a.ts (typescript), lib.rs (rust, no-node -> 'skipped')}.
+        storage
+            .upsert_files(&[mk_file("src/a.ts"), mk_file("src/lib.rs")])
+            .unwrap();
+        let mut fv_rust = make_file_version(&snap_n, "r1:src/lib.rs");
+        fv_rust.parse_status = "skipped".to_string();
+        storage
+            .upsert_file_versions(&[make_file_version(&snap_n, "r1:src/a.ts"), fv_rust])
+            .unwrap();
+
+        let baseline_n = vec!["rust".to_string(), "typescript".to_string()];
+        assert_eq!(
+            storage
+                .distinct_file_languages_for_snapshot(&snap_n)
+                .unwrap(),
+            baseline_n,
+            "snapshot N baseline = [rust, typescript]"
+        );
+
+        // (a) A LATER re-index RE-UPSERTS the SAME file_uids (same paths -> same detect_language languages), as the
+        //     indexer does every run. This fires the `ON CONFLICT(file_uid) DO UPDATE SET language` path on N's
+        //     EXISTING rows. N's baseline must be UNCHANGED -- a re-index of an existing snapshot file does not
+        //     pollute it (the rewrite is value-preserving because the path, hence detect_language, is unchanged).
+        storage
+            .upsert_files(&[mk_file("src/a.ts"), mk_file("src/lib.rs")])
+            .unwrap();
+        assert_eq!(
+            storage
+                .distinct_file_languages_for_snapshot(&snap_n)
+                .unwrap(),
+            baseline_n,
+            "re-upserting N's OWN file_uids with their path-derived languages leaves N's baseline unchanged"
+        );
+
+        // (b) BOUNDARY (where the pin actually comes from): the storage layer does NOT itself enforce
+        //     file_uid -> language. If something upserts an EXISTING file_uid with a DIFFERENT language -- which the
+        //     indexer NEVER does, since detect_language(path) is fixed for a fixed path embedded in the file_uid --
+        //     the snapshot-scoped read WOULD reflect it. Asserting this makes the dependency on the upstream
+        //     invariant EXPLICIT: the value-pin is detect_language (mechanism 2 in the query doc), not this query
+        //     being immutable. (Mechanism 1 -- the file SET -- is genuinely pinned by the join; see the prior test.)
+        storage
+            .upsert_files(&[TrackedFile {
+                file_uid: "r1:src/a.ts".to_string(), // SAME file_uid that is in N's manifest
+                repo_uid: "r1".to_string(),
+                path: "src/a.ts".to_string(),
+                // A value `detect_language("src/a.ts")` would NEVER produce -- a deliberate violation of the
+                // upstream invariant, possible ONLY because we bypass the indexer and call upsert_files directly.
+                language: Some("javascript".to_string()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            }])
+            .unwrap();
+        assert_eq!(
+            storage
+                .distinct_file_languages_for_snapshot(&snap_n)
+                .unwrap(),
+            vec!["javascript".to_string(), "rust".to_string()],
+            "the snapshot-scoped read reflects the LIVE files.language; safety is the UPSTREAM detect_language \
+             invariant (file_uid embeds the path), NOT storage-layer immutability"
+        );
     }
 
     // ── SB-7B: URL percent-encoding decode tests ────────────────

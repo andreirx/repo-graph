@@ -264,7 +264,7 @@ impl Dispatcher for ServiceDispatcher {
             "callees" => self.handle_callees(request),
             "livegraph_preload" => self.handle_livegraph_preload(request),
             "livegraph_refresh" => self.handle_livegraph_refresh(request),
-            "cycle_completeness_audit" => self.handle_cycle_completeness_audit(request),
+            "cycle_completeness_audit" => self.handle_cycle_completeness_audit(request, emitter),
             "imports" => self.handle_imports(request),
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "stats" => self.handle_stats(request, emitter),
@@ -937,7 +937,11 @@ impl ServiceDispatcher {
     /// SQLite-free certificate for the CURRENT in-memory LiveGraph. Does NOT refresh/load partitions (the
     /// caller loads them first via `livegraph_refresh`) and changes NO default. Mirrors the ratified
     /// boundary: the audit reads SQLite; the certificate evaluator never does.
-    fn handle_cycle_completeness_audit(&self, request: &Request) -> DispatchResult {
+    fn handle_cycle_completeness_audit(
+        &self,
+        request: &Request,
+        emitter: &mut dyn ProgressEmitter,
+    ) -> DispatchResult {
         let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -951,10 +955,12 @@ impl ServiceDispatcher {
             .get("include_fixtures")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        // DAEMON-CONCURRENCY-IMPL-1: this dev-only handler reads SQLite + the LiveGraph. Under
-        // concurrent accept it takes the standard read guard (W-A) like every other read handler, so a
-        // concurrent refresh/preload (now coordinator-aware) cannot swap state mid-audit; then one
-        // fresh per-operation connection (consistent for the request under the guard).
+        // DAEMON-CONCURRENCY-IMPL-1 + W-B-EPOCH-IMPL-2D: this dev-only mixed-read handler reads SQLite
+        // (snapshot-pinned `find_cycles` + the snapshot-pinned language inventory) AND the LiveGraph (module
+        // cycles). Under W-A the read guard excludes a concurrent refresh/preload for the request's whole
+        // duration; this slice ALSO captures a RAW resident-LiveGraph epoch-IDENTITY witness so the audit
+        // stays coherent once IMPL-3 relaxes W-B — it verifies the identity did not move across the whole
+        // audit, else honest-degrades (never a false incompleteness from SQLite@N vs LiveGraph@N+1).
         let _read_guard = repo_state.coordinator.acquire_read();
         let storage = match repo_state.storage() {
             Ok(s) => s,
@@ -980,17 +986,41 @@ impl ServiceDispatcher {
                 );
             }
         };
+        // Capture the audit's single-coherent-epoch IDENTITY ONCE under the read guard: the pinned snapshot uid
+        // (which pins BOTH SQLite reads — `find_cycles` AND the snapshot-scoped language baseline) + the RAW
+        // resident LiveGraph fingerprint (GREEN-or-RED — an epoch-identity witness, NOT the GREEN
+        // serve-eligibility one; the audit MUST run on RED repos). INFALLIBLE: it reads only the in-memory
+        // LiveGraph. Mirrors the other handlers' capture-under-guard, with a raw-identity witness distinct from
+        // `RequestEpoch.fingerprint`.
+        let epoch = crate::cycle_completeness_audit::AuditEpoch::capture(
+            &repo_state,
+            &snapshot.snapshot_uid,
+        );
+        // DAEMON-CANCEL-1: thread a cooperative checkpoint into the audit's two Tarjan SCC traversals (the
+        // LiveGraph module cycles + the SQLite module cycles), so a peer disconnect surfaces as Cancelled
+        // (mapped to `ErrorCode::Cancelled`, never `InternalError`) — like the other Tarjan-running handlers.
+        let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "cycle_completeness_audit");
         match crate::cycle_completeness_audit::cycle_completeness_audit_response(
             &repo_state,
+            &storage,
             &repo_uid,
-            &snapshot.snapshot_uid,
+            &epoch,
             &repo_root,
             include_fixtures,
+            &mut checkpoint,
         ) {
             Ok(v) => DispatchResult::success(&request.id, v),
-            Err(e) => {
-                DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
-            }
+            Err(repo_graph_storage::error::StorageError::Cancelled) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::Cancelled,
+                    "cycle completeness audit cancelled (client disconnected during traversal)",
+                ),
+            ),
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
         }
     }
 
