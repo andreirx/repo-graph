@@ -728,6 +728,40 @@ LG against `fingerprint_N`, serving N or falling back to SQLite N. The enrich's 
 reader. ⇒ E-A composes via the **same** epoch + W-B seam — **zero** enrich-specific code in this slice (D-EA, §8;
 re-ratifies DAEMON-CONCURRENCY-1 §8 D-E = E-A, which §14 deferred to here).
 
+### 7.3 Pre-flip mixed-read handler enumeration (AUTHORITATIVE — the flip's precondition)
+
+The relaxation (§7.1) is global: it admits **every** `acquire_read` reader during `Refreshing`. It is therefore
+safe **only** once every reader is either (a) an epoch-safe mixed-read handler, or (b) SQLite-only (inherently
+coherent — single store, WAL, READY-snapshot filter). This enumeration is the binding precondition. **Method
+(load-bearing):** classify by tracing every file that reads the LiveGraph field crate-wide (`rg -l` on
+`repo_state.livegraph` / `.livegraph.read()`), **not** by grepping `dispatch.rs` alone — a handler can be
+mixed-read via a *called* module (audit hid exactly this way: its LiveGraph read is inside
+`cycle_completeness_audit_response`, invisible to a dispatch-local grep). Two successive undercounts (trust, then
+audit) were caught only by the decision-review re-enumerating independently; this is the corrected, complete list.
+
+**MIXED-READ — all 10 epoch-safe under W-A (the flip's precondition, now MET):**
+
+| Handler | Made epoch-safe by | Witness |
+|---|---|---|
+| orient, explain, callers, callees | IMPL-1 | `RequestEpoch.fingerprint` (GREEN no-loss-cert eligibility; serve-or-SQLite-fallback) |
+| path, imports | IMPL-2A | same (`path` carries `fingerprint: None` — no CALLS∪IMPORTS cert) |
+| stats, cycles | IMPL-2B | same |
+| trust | IMPL-2C | same (LiveGraph posture leaf; honest-unavailable on mismatch) |
+| **cycle_completeness_audit** | IMPL-2D | **`AuditEpoch` — raw resident-fingerprint IDENTITY**, NOT GREEN-eligibility (it is a COMPARATOR, must audit RED/incomplete repos; honest-degrade `incoherent_epoch` on mismatch) |
+
+The audit's witness is **deliberately distinct** from `RequestEpoch.fingerprint`: a server needs GREEN-or-fallback,
+a comparator needs same-epoch identity. Conflating them (storing a raw fingerprint in the GREEN-documented field)
+was a Fact-Certainty contract lie — caught and rejected by the decision-review before code (ratified
+AUDIT-EPOCH-WITNESS = honest identity witness, 2026-06-29).
+
+**SQLITE-ONLY — inherently coherent under the relax (no epoch needed):** daemon_info, load/unload/list_loaded/
+resolve/list_repos, repo_info/alias/remove, gate, docs_list/extract, resource_list/readers/writers, contracts_
+list/show/elements/usages, inferences_list, deps_list/why/drift, surfaces_list/show, boundaries_list/show/summary/
+links, modules_files/deps/violations/unowned/show/list. (Verified: none reads the LiveGraph field via any module.)
+
+**WRITERS (not readers; serialize under `Writing`/`Refreshing`):** index, refresh, enrich, livegraph_preload,
+livegraph_refresh. **Verdict: the mixed-read set is CLOSED at ten — no 11th exists.** IMPL-3 may flip WB-A.
+
 ---
 
 ## 8. Decisions to surface (DECISION_REQUIRED — operator ratifies; the IMPL does NOT re-decide)
