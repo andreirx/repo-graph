@@ -67,11 +67,16 @@ This track closes them. Context for every item: `docs/TECH-DEBT.md`
     decision review refuted a "these paths are light" hypothesis (cited) → confirmed Option A.
     Every heavy query path now cancels mid-flight on peer-disconnect; honest large-fixture
     in-flight tests throughout.
-  - **`DAEMON-W-B-EPOCH-1`** (deferred, depends on B1) — capture a request-level
-    `(ready_snapshot_uid, livegraph_fingerprint)` epoch once and thread it through every
-    SQLite + LiveGraph read in a request; prove whole-request join coherence (amend
-    daemon-concurrency-1 §6); then re-enable W-B (serve last-good during refresh) + E-A
-    (the ENRICH-LIFECYCLE-1 shared seam). The deferred relaxation, not lost.
+  - **`DAEMON-W-B-EPOCH-1` — SHIPPED** (2026-06-29; decision-reviewed + ratified §14). A
+    request-level `(ready_snapshot_uid, livegraph_fingerprint)` epoch captured once and threaded
+    through every SQLite + LiveGraph read; whole-request join coherence proven with a real SQLite
+    N+1 publish mid-request. W-B re-enabled: **read-during-refresh** (`Refreshing` admits readers
+    via `RefreshingWithReaders(n)`; `Writing` still serializes). Delivered as IMPL-1 → 2A → 2B →
+    2C (trust) → 2D (cycle_completeness_audit) → 3 (flip) — the "all mixed-read handlers" scope
+    grew from an assumed 8 to the authoritative **10** as the per-slice pre-flip enumeration
+    (re-verified by the reviewer) caught two missed handlers; §7.3 records the closed set. E-A
+    (enrich shares the seam) documented in the coordinator contract; ENRICH-LIFECYCLE-1 is the
+    remaining consumer. **The daemon robustness arc — serial → B1 → B2 → W-B — is COMPLETE.**
   - **`WORKTREE-SUPPORT-1`** (spec — ties to the multi-agent daemon) — does repo-graph serve
     git **worktrees** correctly? Agents increasingly work in worktrees (parallel/isolated
     work; the relay's own worktree isolation), and B1 just made the daemon concurrent for

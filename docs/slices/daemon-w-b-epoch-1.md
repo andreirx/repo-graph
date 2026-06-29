@@ -1213,3 +1213,28 @@ ordered epoch-first / relax-last so the coordinator is relaxed ONLY after every 
 Each IMPL slice STOPs + surfaces if it needs a NEW crate/module boundary beyond the `RequestEpoch` value (CLAUDE.md
 Decision Autonomy; the packet STOP_CONDITIONs). The full decision-review audit trail (challenge/rebuttal/packet) is in
 the slice's `.agent-manager/` working dir.
+
+### 14a. Delivery — W-B COMPLETE (2026-06-29)
+
+The arc shipped, but the decomposition GREW under evidence: the planned IMPL-2 split, and the SC-B "all mixed-read
+handlers" scope grew from an assumed 8 to the **authoritative 10** (§7.3) as the per-slice pre-flip enumeration —
+re-verified independently by the reviewer each time — found two handlers the original slate missed. That friction is
+the safety mechanism, not a defect: each STOP converted a latent split-brain into a ratified fix before the flip.
+
+- **IMPL-1** (`77f8017`) — `RequestEpoch` foundation (EP-A/EV-A/RET-A) + build-then-peek for orient/explain/callers/
+  callees, under W-A; orient double-resolve removed.
+- **IMPL-2A** (`9e94e86`) — path (pinned-SQLite under the epoch, no LG fastpath) + imports.
+- **IMPL-2B** (`716ebee`) — stats + cycles build-then-peek.
+- **IMPL-2C** (`17373ee`) — **trust** (9th mixed-read handler, found by IMPL-3's pre-flip enumeration): RequestEpoch
+  + honest-unavailable LiveGraph posture on mismatch.
+- **IMPL-2D** (`883d4bf`) — **cycle_completeness_audit** (10th, found by the enumeration): a ratified **`AuditEpoch`
+  raw-identity witness** (a comparator, not a server — must audit RED repos; the decision-review rejected overloading
+  the GREEN `RequestEpoch.fingerprint`) + whole-epoch SQLite pinning.
+- **IMPL-3** (`6cb743d`) — flip **WB-A**: `Refreshing` admits readers via `RefreshingWithReaders(n)`; `Writing`
+  stays exclusive. Strong proof `whole_request_join_coherence_across_real_sqlite_n_plus_1_publish` (real N+1 publish
+  mid-request) + dispatch/coordinator admission proofs. E-A documented (no enrich code).
+
+**W-B is LIVE: read-during-refresh, whole-request cross-store coherence proven, `Writing` still serializes.** The
+daemon robustness arc (serial → B1 concurrent → B2 cancellable → W-B read-during-refresh) is complete. Remaining seam
+consumer: ENRICH-LIFECYCLE-1 (composes via E-A; separate slice). Deferred speed lever: the CALLS∪IMPORTS path-parity
+cert (re-enable path's LG fastpath) — a NON-blocker, named in §13/the D-CC refinement.
