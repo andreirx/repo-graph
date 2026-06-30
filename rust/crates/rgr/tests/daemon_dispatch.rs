@@ -1113,6 +1113,263 @@ fn stats_success_returns_module_metrics() {
             "module_stats missing symbol_count"
         );
     }
+
+    // HONEST-DEGRADATION-IMPL-1 (D4): the response carries the repo-level all-SYMBOL count
+    // (sourced from compute_repo_summary — the same value orient shows), injected by the handler.
+    assert!(
+        result.get("total_symbols").is_some(),
+        "stats response missing total_symbols (D4): {}",
+        stats_output
+    );
+    assert!(
+        result["total_symbols"].as_u64().is_some(),
+        "total_symbols must be a number, got {}",
+        result["total_symbols"]
+    );
+}
+
+#[test]
+fn stats_total_symbols_counts_all_symbols_via_repo_summary() {
+    // HONEST-DEGRADATION-IMPL-1 (D4) — end-to-end through the real daemon: the Summary `total_symbols`
+    // is the repo-level all-SYMBOL count (the value orient shows), injected by the handler. The fixture
+    // has one EXPORTED and one NON-EXPORTED function; total_symbols must count BOTH (== 2) — it is the
+    // all-symbol count, not an export-filtered one. (The per-module symbol_count CTE discrimination is
+    // proved deterministically in the storage unit test
+    // `compute_module_stats_symbol_count_is_all_symbols_not_exports`, which does not depend on
+    // directory module-discovery heuristics that a flat repo would not trigger.)
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("all-symbols-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("main.ts"),
+        "export function hello() {}\nfunction secret() {}\n",
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+    let index_request = format!(
+        r#"{{"id":"all-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let stats_request = format!(
+        r#"{{"id":"all-2","method":"stats","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&stats_request], state);
+    let last_line = results[0].lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let result = &parsed["result"];
+
+    // total_symbols = repo-level all-SYMBOL COUNT(*); both functions are SYMBOL nodes -> exactly 2.
+    let total_symbols = result["total_symbols"]
+        .as_u64()
+        .expect("total_symbols present and numeric");
+    assert_eq!(
+        total_symbols, 2,
+        "repo-level total must count BOTH functions (all symbols, not exports): {}",
+        results[0]
+    );
+}
+
+#[test]
+fn stats_total_symbols_equals_orient_and_repo_level_count() {
+    // HONEST-DEGRADATION-IMPL-1 (D4) — the cross-surface coherence proof the slice exists to produce
+    // (reviewer required-change #1): for ONE indexed snapshot, prove the THREE-way equality
+    //   stats.total_symbols  ==  repo-level all-SYMBOL COUNT(*)  ==  orient's MODULE_SUMMARY symbol_count
+    // — one canonical "symbols" number across surfaces, no longer the 3977-vs-1816 split (§3 C4). The
+    // repo-level number is queried STRAIGHT from the snapshot DB (the literal COUNT(*) the reviewer
+    // named), not re-derived. Fixture: three functions (two exported, one not) -> three SYMBOL nodes,
+    // ALL counted (the export filter is dropped — D4).
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("coherent-count-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("main.ts"),
+        "export function a() {}\nexport function b() {}\nfunction c() {}\n",
+    )
+    .unwrap();
+
+    let index_request = format!(
+        r#"{{"id":"cc-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_dir.to_string_lossy()
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let index_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let db_path = index_parsed["result"]["db_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let snapshot_uid = index_parsed["result"]["snapshot_uid"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let canonical_path = index_parsed["result"]["canonical_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // (1) Repo-level all-SYMBOL COUNT(*), read directly from the snapshot DB (read-only) — the
+    // canonical number `compute_repo_summary` (and hence BOTH stats + orient) source from.
+    let conn =
+        rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    let repo_level_symbols: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM nodes WHERE snapshot_uid = ?1 AND kind = 'SYMBOL'",
+            rusqlite::params![snapshot_uid],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        repo_level_symbols, 3,
+        "fixture has three functions = three SYMBOL nodes"
+    );
+
+    // (2) stats.total_symbols (D4: the repo-level COUNT, injected by handle_stats).
+    let stats_request = format!(
+        r#"{{"id":"cc-2","method":"stats","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&stats_request], Arc::clone(&state));
+    let stats_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let stats_total = stats_parsed["result"]["total_symbols"]
+        .as_i64()
+        .expect("stats total_symbols present and numeric");
+
+    // (3) orient's MODULE_SUMMARY symbol_count (the headline "N symbols" number).
+    let orient_request = format!(
+        r#"{{"id":"cc-3","method":"orient","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], state);
+    let orient_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let signals = orient_parsed["result"]["value"]["signals"]
+        .as_array()
+        .expect("orient value.signals is an array");
+    let orient_symbols = signals
+        .iter()
+        .find(|leaf| leaf["value"]["code"] == "MODULE_SUMMARY")
+        .and_then(|leaf| leaf["value"]["evidence"]["symbol_count"].as_i64())
+        .expect("orient MODULE_SUMMARY carries symbol_count");
+
+    // The triple equality — ONE canonical "symbols" number, agreed across surfaces.
+    assert_eq!(
+        stats_total, repo_level_symbols,
+        "stats.total_symbols must equal the repo-level all-SYMBOL COUNT(*)"
+    );
+    assert_eq!(
+        orient_symbols, repo_level_symbols,
+        "orient symbol_count must equal the repo-level all-SYMBOL COUNT(*)"
+    );
+    assert_eq!(
+        stats_total, orient_symbols,
+        "stats and orient must report the SAME canonical symbol count for the same snapshot"
+    );
+}
+
+#[test]
+fn stats_low_import_graph_attaches_real_posture_and_caveat() {
+    // HONEST-DEGRADATION-IMPL-1 (D1) — end-to-end through the real daemon AND the real renderer
+    // (reviewer required-change #3): a repo with an unresolved import drives import-graph reliability
+    // LOW via the SAME compute_trust_overlay_for_snapshot that trust/orient consume. We prove BOTH
+    // halves of the ratified contract:
+    //   (a) the stats JSON carries that REAL posture (level LOW + the named reason), and
+    //   (b) feeding the REAL daemon JSON through the REAL StatsResponse::render_human() emits the
+    //       reason-specific caveat ABOVE the dependency sections.
+    // This closes the gap the reviewer flagged: the posture is no longer proven only against a
+    // hand-built StatsResponse — it flows from a genuine LOW index through the renderer.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("low-import-repo");
+    // Two top-level source directories (each with source files) so directory-module inference produces
+    // the per-module dependency rows the caveat sits above. `./missing` does not exist -> an unresolved
+    // IMPORTS edge -> imports_file_not_found diagnostic -> import-graph reliability LOW
+    // (reason `unresolved_imports=N`).
+    std::fs::create_dir_all(repo_dir.join("core")).unwrap();
+    std::fs::create_dir_all(repo_dir.join("util")).unwrap();
+    std::fs::write(
+        repo_dir.join("core/a.ts"),
+        "import { gone } from \"./missing\";\nexport function a() { return gone; }\n",
+    )
+    .unwrap();
+    std::fs::write(repo_dir.join("core/b.ts"), "export function b() {}\n").unwrap();
+    std::fs::write(repo_dir.join("util/c.ts"), "export function c() {}\n").unwrap();
+    std::fs::write(repo_dir.join("util/d.ts"), "export function d() {}\n").unwrap();
+
+    let index_request = format!(
+        r#"{{"id":"low-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_dir.to_string_lossy()
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let stats_request = format!(
+        r#"{{"id":"low-2","method":"stats","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&stats_request], state);
+    let parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let result = &parsed["result"];
+
+    // (a) JSON carries the REAL import-graph posture from the trust overlay: level LOW + named reason.
+    let axis = &result["import_graph_reliability"];
+    assert_eq!(
+        axis["level"], "LOW",
+        "an unresolved import must drive import-graph reliability LOW: {}",
+        results[0]
+    );
+    let reasons = axis["reasons"]
+        .as_array()
+        .expect("axis.reasons is an array");
+    assert!(
+        reasons.iter().any(|r| r
+            .as_str()
+            .is_some_and(|s| s.starts_with("unresolved_imports="))),
+        "the LOW reason must name the unresolved imports: {}",
+        results[0]
+    );
+
+    // (b) The REAL JSON, deserialized into the REAL renderer DTO, emits the caveat ABOVE the sections.
+    let resp: repo_graph_rgr::presentation::stats::StatsResponse =
+        serde_json::from_value(result.clone())
+            .expect("stats result deserializes into the StatsResponse renderer DTO");
+    let human = resp.render_human();
+    let caveat_pos = human
+        .find("treat these as directional")
+        .expect("the dependency-section caveat must be present in human output");
+    let fanin_pos = human
+        .find("By fan-in")
+        .expect("the fan-in section must be present");
+    assert!(
+        caveat_pos < fanin_pos,
+        "the caveat must precede the dependency sections: {human}"
+    );
+    // And the degenerate zero-degree coupling (no resolved cross-module edges on this LOW index)
+    // renders `unknown` end-to-end through the real renderer — never a fabricated `0.00` (the D1
+    // never-a-bare-0 rule, proven on real daemon JSON, not a hand-built response).
+    assert!(
+        human.contains("D=unknown") && human.contains("I=unknown"),
+        "degenerate coupling must render unknown through the real renderer: {human}"
+    );
+    assert!(
+        !human.contains("D=0.00") && !human.contains("I=0.00"),
+        "must NOT render a fabricated 0.00 for undefined coupling: {human}"
+    );
 }
 
 #[test]

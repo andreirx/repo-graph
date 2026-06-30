@@ -1471,6 +1471,38 @@ impl ServiceDispatcher {
             };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
+        // ── HONEST-DEGRADATION-IMPL-1 (D1 + D4): snapshot-level honesty signals ──────────────────────
+        // Computed ONCE here and injected into EVERY engine path's response, because both are
+        // engine-independent — they describe the snapshot, not the backend. Reusing the SAME
+        // `compute_repo_summary` / `compute_trust_overlay_for_snapshot` that `orient`/`trust` already
+        // consume makes the three surfaces report ONE coherent symbol count and ONE coherent
+        // import-graph posture (the cross-surface incoherence this slice exists to remove).
+        //
+        // D4 — `total_symbols`: the repo-level all-SYMBOL COUNT(*) (the number `orient` shows), NOT a
+        // per-module row-sum (rows are module-owned; a sum loses symbols in unowned files). On a
+        // summary error we OMIT the field rather than inject 0 — a false zero is the very bug we fix.
+        let total_symbols_field: Option<u64> =
+            repo_graph_agent::AgentStorageRead::compute_repo_summary(
+                &storage,
+                &snapshot.snapshot_uid,
+            )
+            .ok()
+            .map(|s| s.symbol_count);
+
+        // D1 — the import-graph reliability axis (level + reasons), serialized to JSON HERE so the
+        // response sites need not name the trust type. The renderer renders a reason-specific caveat
+        // above the dependency sections when level != HIGH. Overlay-assembly failure -> None -> no
+        // caveat: we never fabricate a posture we could not compute (honest degradation, not silence).
+        let import_graph_reliability_field: Option<serde_json::Value> = match storage
+            .get_latest_snapshot(&repo_uid)
+        {
+            Ok(Some(snap)) => {
+                compute_trust_overlay_for_snapshot(&storage, &repo_uid, &snap, "CALLS+IMPORTS")
+                    .and_then(|overlay| serde_json::to_value(overlay.reliability.import_graph).ok())
+            }
+            _ => None,
+        };
+
         // STATS-LIVEGRAPH-IMPL-1: engine routing. DEFAULT (no flags == `auto`) = the cert-gated LiveGraph
         // module-stats FASTPATH (`stats_auto_response`): serves the LiveGraph stats WITHOUT
         // `compute_module_stats` on a GREEN repo cert at the current fingerprint, else a labelled SQLite
@@ -1517,7 +1549,12 @@ impl ServiceDispatcher {
                     &display_name,
                     &epoch,
                 ) {
-                    Ok(crate::livegraph_feed::StatsOutcome::Ready(v)) => {
+                    Ok(crate::livegraph_feed::StatsOutcome::Ready(mut v)) => {
+                        Self::inject_stats_summary_fields(
+                            &mut v,
+                            total_symbols_field,
+                            import_graph_reliability_field.as_ref(),
+                        );
                         DispatchResult::success(&request.id, v)
                     }
                     Ok(crate::livegraph_feed::StatsOutcome::Cancelled) => DispatchResult::error(
@@ -1534,15 +1571,18 @@ impl ServiceDispatcher {
                 };
             }
             "livegraph" => {
-                return DispatchResult::success(
-                    &request.id,
-                    crate::livegraph_feed::stats_livegraph_response(
-                        &repo_state,
-                        &repo_uid,
-                        &display_name,
-                        &snapshot.snapshot_uid,
-                    ),
+                let mut v = crate::livegraph_feed::stats_livegraph_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
                 );
+                Self::inject_stats_summary_fields(
+                    &mut v,
+                    total_symbols_field,
+                    import_graph_reliability_field.as_ref(),
+                );
+                return DispatchResult::success(&request.id, v);
             }
             "compare" => {
                 let repo_root = Self::get_optional_string_param(&request.params, "repo")
@@ -1556,7 +1596,12 @@ impl ServiceDispatcher {
                     &snapshot.snapshot_uid,
                     &repo_root,
                 ) {
-                    Ok(crate::livegraph_feed::StatsOutcome::Ready(v)) => {
+                    Ok(crate::livegraph_feed::StatsOutcome::Ready(mut v)) => {
+                        Self::inject_stats_summary_fields(
+                            &mut v,
+                            total_symbols_field,
+                            import_graph_reliability_field.as_ref(),
+                        );
                         DispatchResult::success(&request.id, v)
                     }
                     Ok(crate::livegraph_feed::StatsOutcome::Cancelled) => DispatchResult::error(
@@ -1642,16 +1687,42 @@ impl ServiceDispatcher {
             query_ms
         );
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "repo_uid": repo_uid,
-                "snapshot_uid": snapshot.snapshot_uid,
-                "display_name": display_name,
-                "stats": stats,
-                "count": stats.len(),
-            }),
-        )
+        let mut body = serde_json::json!({
+            "repo_uid": repo_uid,
+            "snapshot_uid": snapshot.snapshot_uid,
+            "display_name": display_name,
+            "stats": stats,
+            "count": stats.len(),
+        });
+        Self::inject_stats_summary_fields(
+            &mut body,
+            total_symbols_field,
+            import_graph_reliability_field.as_ref(),
+        );
+        DispatchResult::success(&request.id, body)
+    }
+
+    /// HONEST-DEGRADATION-IMPL-1 (D1 + D4): attach the snapshot-level honesty fields to a `stats`
+    /// response body. Shared across every engine path so the human/JSON output is coherent regardless
+    /// of backend. `total_symbols` (D4) is the repo-level all-SYMBOL count (== `orient`); it is
+    /// OMITTED when unavailable — never injected as `0` (a false zero is the bug we fix).
+    /// `import_graph_reliability` (D1) is the axis the renderer gates its dependency caveat on; it is
+    /// OMITTED when the overlay could not be assembled (no fabricated posture). Both are additive; the
+    /// human renderer strips them, surfacing only the derived Summary total + the caveat.
+    fn inject_stats_summary_fields(
+        body: &mut serde_json::Value,
+        total_symbols: Option<u64>,
+        import_graph_reliability: Option<&serde_json::Value>,
+    ) {
+        let Some(obj) = body.as_object_mut() else {
+            return;
+        };
+        if let Some(total) = total_symbols {
+            obj.insert("total_symbols".to_string(), serde_json::json!(total));
+        }
+        if let Some(axis) = import_graph_reliability {
+            obj.insert("import_graph_reliability".to_string(), axis.clone());
+        }
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.

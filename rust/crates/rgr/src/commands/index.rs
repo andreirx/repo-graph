@@ -124,9 +124,11 @@ pub fn run_index(args: &[String]) -> ExitCode {
             let snapshot_uid = result["snapshot_uid"].as_str().unwrap_or("unknown");
             let repo_uid = result["repo_uid"].as_str().unwrap_or("unknown");
 
+            // HONEST-DEGRADATION-IMPL-1 (D4): "nodes (all kinds)" label — rationale + unit test in
+            // `format_index_summary`.
             eprintln!(
-                "indexed {} files, {} nodes, {} edges ({} unresolved)",
-                files_total, nodes_total, edges_total, edges_unresolved,
+                "{}",
+                format_index_summary(files_total, nodes_total, edges_total, edges_unresolved)
             );
             eprintln!("  repo: {}", repo_uid);
             eprintln!("  snapshot: {}", snapshot_uid);
@@ -516,6 +518,41 @@ fn format_copy_forward_summary(
     vec![format!("  copy-forward: {}", parts.join(", "))]
 }
 
+/// Format the one-line `index` completion summary written to stderr.
+///
+/// HONEST-DEGRADATION-IMPL-1 (D4): the node count is labelled **"nodes (all kinds)"** — it is
+/// `nodes_total` = `COUNT(*)` over EVERY node kind (SYMBOL + FILE + MODULE …), a superset of
+/// "symbols". Without the qualifier an agent can misread it as a symbol count (e.g. nginx: 4393 nodes
+/// vs 3977 symbols), one of the three divergent "symbol"/"node" numbers this slice reconciles.
+/// Extracted as a pure function so the label is unit-testable without capturing stderr; the command
+/// only prints the returned line.
+fn format_index_summary(
+    files_total: u64,
+    nodes_total: u64,
+    edges_total: u64,
+    edges_unresolved: u64,
+) -> String {
+    format!(
+        "indexed {} files, {} nodes (all kinds), {} edges ({} unresolved)",
+        files_total, nodes_total, edges_total, edges_unresolved,
+    )
+}
+
+/// Format the one-line `refresh` completion summary written to stderr. Same "nodes (all kinds)"
+/// labelling as [`format_index_summary`] (HONEST-DEGRADATION-IMPL-1 D4), plus the resulting snapshot.
+fn format_refresh_summary(
+    files_total: u64,
+    nodes_total: u64,
+    edges_total: u64,
+    edges_unresolved: u64,
+    snapshot_uid: &str,
+) -> String {
+    format!(
+        "refreshed {} files, {} nodes (all kinds), {} edges ({} unresolved) → {}",
+        files_total, nodes_total, edges_total, edges_unresolved, snapshot_uid,
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
@@ -523,6 +560,37 @@ mod tests {
     use repo_graph_indexer::types::{
         ArtifactCopyForward, ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult,
     };
+
+    // HONEST-DEGRADATION-IMPL-1 (D4): the `index`/`refresh` node count is labelled "nodes (all kinds)"
+    // — never "symbols" — so an agent cannot misread the all-kinds COUNT(*) (e.g. nginx's 4393) as the
+    // symbol count (3977). These assert the label on the exact line the commands print to stderr.
+    #[test]
+    fn index_summary_labels_nodes_all_kinds_not_symbols() {
+        let line = format_index_summary(3, 28, 7, 0);
+        assert_eq!(
+            line, "indexed 3 files, 28 nodes (all kinds), 7 edges (0 unresolved)",
+            "{line}"
+        );
+        assert!(line.contains("28 nodes (all kinds)"), "{line}");
+        assert!(
+            !line.contains("28 symbols") && !line.contains("nodes,"),
+            "the node count must NOT be presented as symbols, nor a bare unqualified `nodes`: {line}"
+        );
+    }
+
+    #[test]
+    fn refresh_summary_labels_nodes_all_kinds_not_symbols() {
+        let line = format_refresh_summary(3, 28, 7, 0, "snap_x");
+        assert!(line.contains("28 nodes (all kinds)"), "{line}");
+        assert!(
+            line.contains("→ snap_x"),
+            "refresh names the resulting snapshot: {line}"
+        );
+        assert!(
+            !line.contains("28 symbols") && !line.contains("nodes,"),
+            "the node count must NOT be presented as symbols, nor a bare unqualified `nodes`: {line}"
+        );
+    }
 
     #[test]
     fn format_none_returns_empty() {
@@ -835,9 +903,16 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             let edges_unresolved = result["edges_unresolved"].as_u64().unwrap_or(0);
             let snapshot_uid = result["snapshot_uid"].as_str().unwrap_or("unknown");
 
+            // HONEST-DEGRADATION-IMPL-1 (D4): "nodes (all kinds)" label — see `format_refresh_summary`.
             eprintln!(
-                "refreshed {} files, {} nodes, {} edges ({} unresolved) → {}",
-                files_total, nodes_total, edges_total, edges_unresolved, snapshot_uid,
+                "{}",
+                format_refresh_summary(
+                    files_total,
+                    nodes_total,
+                    edges_total,
+                    edges_unresolved,
+                    snapshot_uid
+                )
             );
 
             // Print copy-forward summary if present (refresh-specific)

@@ -341,37 +341,60 @@ pub struct CycleNode {
 ///
 /// Used by BOTH backends: [`StorageConnection::compute_module_stats`] (the SQLite path) AND the
 /// LiveGraph stats fastpath (which maps its raw per-module counts through this exact helper). Sharing
-/// the arithmetic makes a GREEN field-exact stats cert compare BIT-IDENTICAL floats — no float jitter
+/// the arithmetic makes a GREEN field-exact stats cert compare BIT-IDENTICAL values — no jitter
 /// can force a spurious RED, and a GREEN cert provably equals what the SQLite path would have produced
-/// (the no-loss contract, RISK-5).
+/// (the no-loss contract, RISK-5). The degenerate-`None` guard below lives HERE, in the one shared
+/// chokepoint, so both backends convert identically — never diverge.
 ///
-/// - `instability  = fan_out / (fan_in + fan_out)` (0 when the total degree is 0)
-/// - `abstractness = abstract_count / type_count`  (0 when `type_count` is 0)
-/// - `distance     = |abstractness + instability - 1.0|`
+/// - `instability  = fan_out / (fan_in + fan_out)` — `None` (unknown) when the total degree is 0
+/// - `abstractness = abstract_count / type_count`  — `0` when `type_count` is 0 (always a number)
+/// - `distance     = |abstractness + instability - 1.0|` — `None` (unknown) when instability is
+///
+/// HONEST-DEGRADATION-IMPL-1 (D1, ratified honest-degradation-1.md §12 + `agent_docs/architecture.md`
+/// Mandatory Rule #6 — "`null` = unknown, empty = known-zero. Never conflate."): when a module has
+/// zero resolved import degree (`fan_in + fan_out == 0`), `instability` is `fan_out / 0` —
+/// mathematically UNDEFINED — and on an unresolved import graph that zero degree is a pure artifact of
+/// non-resolution, not a measured "perfectly stable" module. So instability is `unknown` (`None`),
+/// never a bare `0.0`; distance, being `|A + I − 1|`, is then likewise not computable → `None`. A
+/// module with real degree keeps its real numbers (annotate-not-suppress for a partial graph).
+/// Abstractness is a symbol-classification metric independent of the import graph, so it stays a
+/// concrete number even at zero degree.
+///
+/// **Degenerate-zero contract scope (ratified §12 D1 rider + packet cell #5).** The `unknown`
+/// conversion is scoped to the metrics that are mathematically UNDEFINED at zero degree —
+/// `instability` (the `0/0` the packet names as "the degenerate value the guard converts") and the
+/// `distance` derived from it. The degree counts `fan_in`/`fan_out` are NOT converted (and are not
+/// outputs of this helper): a `fan_in = 0` is a genuine count of zero RESOLVED import edges — Rule
+/// #6's "empty = known-zero", a TRUE number, not a fabricated one — made honest by the
+/// dependency-section caveat the renderer attaches when import-graph reliability != HIGH, not by
+/// nulling. The ratified "never a bare `0`" targets the FABRICATED `0.0` the old `else { 0.0 }` branch
+/// emitted for the undefined `0/0`, never the real edge counts.
 pub fn martin_metrics(
     fan_in: i64,
     fan_out: i64,
     abstract_count: i64,
     type_count: i64,
-) -> (f64, f64, f64) {
-    let total = fan_in + fan_out;
-    let instability_raw = if total > 0 {
-        fan_out as f64 / total as f64
-    } else {
-        0.0
-    };
+) -> (Option<f64>, f64, Option<f64>) {
+    // Abstractness is import-graph-independent (a symbol-classification ratio); always a number.
     let abstractness_raw = if type_count > 0 {
         abstract_count as f64 / type_count as f64
     } else {
         0.0
     };
-    let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
-
     // Round to 2 decimal places: mirrors TS Math.round(x * 100) / 100.
-    let instability = (instability_raw * 100.0).round() / 100.0;
     let abstractness = (abstractness_raw * 100.0).round() / 100.0;
+
+    // Degenerate zero-degree case: instability (0/0) and the distance derived from it are UNKNOWN.
+    let total = fan_in + fan_out;
+    if total == 0 {
+        return (None, abstractness, None);
+    }
+
+    let instability_raw = fan_out as f64 / total as f64;
+    let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
+    let instability = (instability_raw * 100.0).round() / 100.0;
     let distance = (distance_raw * 100.0).round() / 100.0;
-    (instability, abstractness, distance)
+    (Some(instability), abstractness, Some(distance))
 }
 
 /// Per-module structural metrics.
@@ -385,10 +408,16 @@ pub struct ModuleStatsResult {
     pub module: String,
     pub fan_in: i64,
     pub fan_out: i64,
-    pub instability: f64,
+    /// HONEST-DEGRADATION-IMPL-1 (D1): `None` (serializes to JSON `null` = unknown) when the module
+    /// has zero resolved import degree — the `0/0` instability is undefined, never a bare `0.0`.
+    pub instability: Option<f64>,
     pub abstractness: f64,
-    pub distance_from_main_sequence: f64,
+    /// HONEST-DEGRADATION-IMPL-1 (D1): `None` (JSON `null`) when instability is unknown (distance
+    /// `|A + I − 1|` is not computable without `I`).
+    pub distance_from_main_sequence: Option<f64>,
     pub file_count: i64,
+    /// HONEST-DEGRADATION-IMPL-1 (D4): count of ALL `kind='SYMBOL'` nodes owned by the module (the
+    /// `visibility='export'` filter was dropped — that filter undercounted on C and zeroed on Java).
     pub symbol_count: i64,
 }
 
@@ -1278,10 +1307,14 @@ impl StorageConnection {
             ),
 
             -- CTE 2: Pre-aggregate symbol stats per file (single pass over symbols)
+            -- HONEST-DEGRADATION-IMPL-1 (D4): `symbol_count` is ALL kind='SYMBOL' nodes in the file
+            -- (the WHERE already restricts to SYMBOL, so COUNT(*) is the all-symbols count). The prior
+            -- visibility='export' filter undercounted on C (externally-linked funcs only) and zeroed
+            -- on Java (never emits Export) -- a TS-centric public-surface notion agents rarely want.
             file_stats AS (
                 SELECT
                     n.file_uid,
-                    SUM(CASE WHEN n.visibility = 'export' THEN 1 ELSE 0 END) AS export_count,
+                    COUNT(*) AS symbol_count,
                     SUM(CASE WHEN n.subtype IN ('INTERFACE', 'TYPE_ALIAS')
                              AND n.parent_node_uid IS NULL THEN 1 ELSE 0 END) AS abstract_count,
                     SUM(CASE WHEN n.subtype IN ('INTERFACE', 'TYPE_ALIAS', 'CLASS', 'ENUM')
@@ -1296,7 +1329,7 @@ impl StorageConnection {
             module_symbol_stats AS (
                 SELECT
                     mf.module_uid,
-                    SUM(COALESCE(fs.export_count, 0)) AS symbol_count,
+                    SUM(COALESCE(fs.symbol_count, 0)) AS symbol_count,
                     SUM(COALESCE(fs.abstract_count, 0)) AS abstract_count,
                     SUM(COALESCE(fs.type_count, 0)) AS type_count
                 FROM module_files mf
@@ -2550,11 +2583,77 @@ mod tests {
     #[test]
     fn martin_metrics_matches_the_inline_arithmetic() {
         // instability = fan_out/(fan_in+fan_out); abstractness = abstract/type; distance = |a+i-1|, 2dp.
-        assert_eq!(martin_metrics(0, 0, 0, 0), (0.0, 0.0, 1.0)); // total=0 -> i=0; type=0 -> a=0; |0+0-1|=1
-        assert_eq!(martin_metrics(1, 3, 1, 4), (0.75, 0.25, 0.0)); // |0.25+0.75-1|=0
-        assert_eq!(martin_metrics(3, 1, 0, 2), (0.25, 0.0, 0.75)); // |0+0.25-1|=0.75
-                                                                   // Rounding to 2dp mirrors TS Math.round(x*100)/100: 1/3 -> 0.33.
-        assert_eq!(martin_metrics(2, 1, 0, 0).0, 0.33);
+        assert_eq!(martin_metrics(1, 3, 1, 4), (Some(0.75), 0.25, Some(0.0))); // |0.25+0.75-1|=0
+        assert_eq!(martin_metrics(3, 1, 0, 2), (Some(0.25), 0.0, Some(0.75))); // |0+0.25-1|=0.75
+                                                                               // Rounding to 2dp mirrors TS Math.round(x*100)/100: 1/3 -> 0.33.
+        assert_eq!(martin_metrics(2, 1, 0, 0).0, Some(0.33));
+    }
+
+    // HONEST-DEGRADATION-IMPL-1 (D1): zero resolved import degree (fan_in+fan_out==0) makes instability
+    // (0/0) and distance UNDEFINED -> they MUST be `None` (JSON `null` = unknown, architecture Rule #6),
+    // never a bare 0.0 read as a measured "perfectly stable / on the main sequence" module. Abstractness,
+    // an import-graph-independent classification ratio, stays a concrete number even at zero degree.
+    #[test]
+    fn martin_metrics_degenerate_zero_degree_is_unknown_not_zero() {
+        // No types, no degree: I unknown, A=0, D unknown.
+        assert_eq!(martin_metrics(0, 0, 0, 0), (None, 0.0, None));
+        // The nginx face of it: A=1.00 (abstract==type) at zero degree previously rendered D=0.00 I=0.00
+        // as if "on the main sequence". Now I and D are unknown; only A (a classification metric) remains.
+        assert_eq!(martin_metrics(0, 0, 3, 3), (None, 1.0, None));
+    }
+
+    // HONEST-DEGRADATION-IMPL-1 (D4): the stats symbol CTE counts ALL kind='SYMBOL' nodes owned by a
+    // module, NOT only `visibility='export'` ones. A module owning one EXPORTED + one NON-EXPORTED
+    // symbol must report symbol_count == 2 (under the dropped export filter it would have been 1) —
+    // and that equals the repo-level all-SYMBOL COUNT(*) (the canonical number orient/stats share).
+    #[test]
+    fn compute_module_stats_symbol_count_is_all_symbols_not_exports() {
+        let (storage, snap) = setup_db_with_snapshot();
+        // m_src OWNS file_main (the OWNS target carries file_uid); main.ts holds two symbols — one
+        // `export`, one `private` — so the export filter, if present, would miss `secret`.
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path) VALUES ('r1:src/main.ts', 'r1', 'src/main.ts'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, qualified_name) \
+                 VALUES ('m_src', '{snap}', 'r1', 'r1:src:MODULE', 'src', 'MODULE', 'src'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) \
+                 VALUES ('file_main', '{snap}', 'r1', 'r1:src/main.ts:FILE', 'main.ts', 'FILE', 'r1:src/main.ts'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid, visibility) \
+                 VALUES ('sym_hello', '{snap}', 'r1', 'r1:src/main.ts:hello', 'hello', 'SYMBOL', 'r1:src/main.ts', 'export'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid, visibility) \
+                 VALUES ('sym_secret', '{snap}', 'r1', 'r1:src/main.ts:secret', 'secret', 'SYMBOL', 'r1:src/main.ts', 'private'); \
+                 INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor) \
+                 VALUES ('e_owns', '{snap}', 'r1', 'm_src', 'file_main', 'OWNS', 'static', 'test:1');"
+            ))
+            .unwrap();
+
+        let stats = storage.compute_module_stats(&snap).unwrap();
+        assert_eq!(stats.len(), 1, "one module owns files");
+        assert_eq!(stats[0].module, "src");
+        assert_eq!(
+            stats[0].symbol_count, 2,
+            "must count BOTH the exported and the non-exported symbol (export filter dropped)"
+        );
+
+        // The same all-SYMBOL number the repo-level summary (and orient) report — the canonical count.
+        let repo_symbol_count: i64 = storage
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM nodes WHERE snapshot_uid = ? AND kind = 'SYMBOL'",
+                rusqlite::params![snap],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(repo_symbol_count, 2);
+        assert_eq!(
+            stats[0].symbol_count, repo_symbol_count,
+            "all symbols are owned here, so the module count equals the repo-level all-SYMBOL count"
+        );
+
+        // Bonus: this module has zero import degree -> the degenerate guard makes coupling unknown.
+        assert_eq!(stats[0].instability, None);
+        assert_eq!(stats[0].distance_from_main_sequence, None);
     }
 
     /// Insert a minimal node directly so resolve_symbol can be tested

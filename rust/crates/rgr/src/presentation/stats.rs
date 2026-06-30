@@ -68,6 +68,30 @@ pub struct StatsResponse {
     pub stats: Vec<ModuleStats>,
     #[serde(default)]
     pub count: usize,
+    /// HONEST-DEGRADATION-IMPL-1 (D4): the repo-level all-SYMBOL count — the canonical "symbols"
+    /// number `orient` also shows, sourced from `compute_repo_summary` (NOT a per-module row-sum,
+    /// which loses symbols in files owned by no module). `None` on older/explicit paths → the
+    /// renderer falls back to summing the rows (so a missing field never reads as a false zero).
+    #[serde(default)]
+    pub total_symbols: Option<i64>,
+    /// HONEST-DEGRADATION-IMPL-1 (D1): the import-graph reliability posture for this snapshot (the
+    /// SAME axis `trust`/`orient` consume). When `level != HIGH`, the dependency sections carry a
+    /// reason-specific caveat. `None` → the daemon could not assemble the overlay → no caveat (we
+    /// never fabricate a posture we did not compute).
+    #[serde(default)]
+    pub import_graph_reliability: Option<StatsReliabilityAxis>,
+}
+
+/// HONEST-DEGRADATION-IMPL-1 (D1): the import-graph reliability axis carried inline on the stats
+/// response. A reader-side mirror of `repo_graph_trust::ReliabilityAxisScore` (deserialized from the
+/// daemon JSON — `level` is the serialized `ReliabilityLevel`, e.g. "HIGH"/"LOW"; `reasons` are the
+/// machine reason codes the renderer humanizes per-reason, e.g. `unresolved_imports=944`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StatsReliabilityAxis {
+    #[serde(default)]
+    pub level: String,
+    #[serde(default)]
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,9 +99,12 @@ pub struct ModuleStats {
     pub module: String,
     pub fan_in: i64,
     pub fan_out: i64,
-    pub instability: f64,
+    /// HONEST-DEGRADATION-IMPL-1 (D1): `None` (JSON `null` = unknown) when the module has zero
+    /// resolved import degree — the `0/0` instability is undefined, never a bare `0.0`.
+    pub instability: Option<f64>,
     pub abstractness: f64,
-    pub distance_from_main_sequence: f64,
+    /// HONEST-DEGRADATION-IMPL-1 (D1): `None` (JSON `null`) when instability is unknown.
+    pub distance_from_main_sequence: Option<f64>,
     pub file_count: i64,
     pub symbol_count: i64,
 }
@@ -126,7 +153,13 @@ impl StatsResponse {
         out.push_str(&format!("  directory groups: {}\n", self.stats.len()));
 
         let total_files: i64 = self.stats.iter().map(|m| m.file_count).sum();
-        let total_symbols: i64 = self.stats.iter().map(|m| m.symbol_count).sum();
+        // HONEST-DEGRADATION-IMPL-1 (D4): prefer the repo-level all-SYMBOL count the daemon attaches
+        // (== orient's headline); fall back to summing the module-owned rows only when the field is
+        // absent. The row-sum can undercount (it omits symbols in files no module owns), so the
+        // repo-level count is the canonical, cross-surface-coherent number.
+        let total_symbols: i64 = self
+            .total_symbols
+            .unwrap_or_else(|| self.stats.iter().map(|m| m.symbol_count).sum());
         out.push_str(&format!("  total_files: {}\n", total_files));
         out.push_str(&format!("  total_symbols: {}\n", total_symbols));
         out.push('\n');
@@ -169,6 +202,16 @@ impl StatsResponse {
         }
         out.push('\n');
 
+        // ── Dependency-section reliability caveat (HONEST-DEGRADATION-IMPL-1 D1) ──
+        // fan-in/out, instability, and distance all ride the resolved IMPORTS graph. When that graph
+        // is not fully resolved (import-graph axis != HIGH), the coupling numbers below are partial —
+        // attach a reason-specific reader-context caveat (mirroring orient/trust's posture) so the
+        // reader treats them as directional, not as measured architectural fact.
+        if let Some(caveat) = self.dependency_reliability_caveat() {
+            out.push_str(&caveat);
+            out.push('\n');
+        }
+
         // ── By fan-in ──────────────────────────────────────────────
         out.push_str(&heading("By fan-in"));
         let mut by_fan_in = self.stats.clone();
@@ -202,13 +245,71 @@ impl StatsResponse {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         for m in &by_distance {
+            // HONEST-DEGRADATION-IMPL-1 (D1): a degenerate (zero-degree) module has unknown
+            // instability/distance — render "unknown", never "0.00" read as "on the main sequence".
+            // Abstractness is import-graph-independent, so it stays a concrete number.
             out.push_str(&format!(
-                "  {}  D={:.2}  I={:.2}  A={:.2}\n",
-                m.module, m.distance_from_main_sequence, m.instability, m.abstractness
+                "  {}  D={}  I={}  A={:.2}\n",
+                m.module,
+                fmt_metric(m.distance_from_main_sequence),
+                fmt_metric(m.instability),
+                m.abstractness
             ));
         }
 
         out
+    }
+
+    /// HONEST-DEGRADATION-IMPL-1 (D1): the reader-context caveat for the dependency sections, or
+    /// `None` when the import-graph posture is HIGH / unavailable (no noise on a resolved graph).
+    /// One clause per non-HIGH reason actually present (each gated on its own trigger), mirroring
+    /// `orient`'s reason-by-reason humanization — so it states only what is true and can NEVER print
+    /// "0 imports unresolved". When the level is non-HIGH but no reason is recognized, a generic
+    /// directional note (claiming no count) is emitted.
+    fn dependency_reliability_caveat(&self) -> Option<String> {
+        let axis = self.import_graph_reliability.as_ref()?;
+        if axis.level == "HIGH" {
+            return None;
+        }
+        let mut clauses: Vec<String> = Vec::new();
+        for reason in &axis.reasons {
+            if let Some(rest) = reason.strip_prefix("unresolved_imports=") {
+                // The ONLY clause that names a count — and only when N > 0 (never "0 imports unresolved").
+                if let Ok(n) = rest.parse::<u64>() {
+                    if n > 0 {
+                        clauses.push(format!(
+                            "{n} imports are unresolved (e.g. external libraries / unresolved #include), so module coupling is under-counted"
+                        ));
+                    }
+                }
+            } else if reason == "alias_resolution_suspicion" {
+                clauses.push(
+                    "some import paths use aliases that may resolve to the wrong module, so coupling may be misattributed".to_string(),
+                );
+            } else if reason == "registry_pattern_suspicion" {
+                clauses.push(
+                    "registry/factory wiring does not appear as imports, so coupling may be under-counted through that indirection".to_string(),
+                );
+            }
+        }
+        let detail = if clauses.is_empty() {
+            String::new()
+        } else {
+            format!(" — {}", clauses.join("; "))
+        };
+        Some(format!(
+            "Dependency metrics below reflect only the imports resolved on this index{detail}; treat these as directional.\n"
+        ))
+    }
+}
+
+/// HONEST-DEGRADATION-IMPL-1 (D1): render a coupling metric as a fixed-2dp number, or `unknown` when
+/// it is `None` (a value that is a pure artifact of an unresolved import graph — architecture Rule #6:
+/// `null` = unknown, never a bare `0`).
+fn fmt_metric(value: Option<f64>) -> String {
+    match value {
+        Some(v) => format!("{v:.2}"),
+        None => "unknown".to_string(),
     }
 }
 
@@ -222,14 +323,16 @@ mod tests {
             snapshot_uid: "snap_456".to_string(),
             display_name: Some("my-service".to_string()),
             count: 3,
+            total_symbols: None,
+            import_graph_reliability: None,
             stats: vec![
                 ModuleStats {
                     module: "src/handlers".to_string(),
                     fan_in: 5,
                     fan_out: 8,
-                    instability: 0.62,
+                    instability: Some(0.62),
                     abstractness: 0.0,
-                    distance_from_main_sequence: 0.38,
+                    distance_from_main_sequence: Some(0.38),
                     file_count: 45,
                     symbol_count: 892,
                 },
@@ -237,9 +340,9 @@ mod tests {
                     module: "src/models".to_string(),
                     fan_in: 12,
                     fan_out: 2,
-                    instability: 0.14,
+                    instability: Some(0.14),
                     abstractness: 0.0,
-                    distance_from_main_sequence: 0.86,
+                    distance_from_main_sequence: Some(0.86),
                     file_count: 38,
                     symbol_count: 634,
                 },
@@ -247,9 +350,9 @@ mod tests {
                     module: "src/utils".to_string(),
                     fan_in: 18,
                     fan_out: 0,
-                    instability: 0.0,
+                    instability: Some(0.0),
                     abstractness: 0.5,
-                    distance_from_main_sequence: 0.5,
+                    distance_from_main_sequence: Some(0.5),
                     file_count: 10,
                     symbol_count: 120,
                 },
@@ -375,6 +478,8 @@ mod tests {
             snapshot_uid: "s1".to_string(),
             display_name: Some("empty-repo".to_string()),
             count: 0,
+            total_symbols: None,
+            import_graph_reliability: None,
             stats: vec![],
         };
         let output = resp.render_human();
@@ -390,9 +495,147 @@ mod tests {
             snapshot_uid: "s1".to_string(),
             display_name: None,
             count: 0,
+            total_symbols: None,
+            import_graph_reliability: None,
             stats: vec![],
         };
         let output = resp.render_human();
         assert!(output.contains("Module Stats: repo_abc123"));
+    }
+
+    // ── HONEST-DEGRADATION-IMPL-1 (D4) — total_symbols uses the canonical repo count ──────────────
+
+    #[test]
+    fn render_human_prefers_repo_level_total_symbols_over_row_sum() {
+        // D4: when the daemon attaches the repo-level all-SYMBOL count, the Summary shows THAT
+        // (== orient), not the per-module row-sum. Here rows sum to 1646 but the repo count is 3977
+        // (the divergence ownership-incompleteness produces) — the renderer must show 3977.
+        let mut resp = sample_stats();
+        resp.total_symbols = Some(3977);
+        let output = resp.render_human();
+        assert!(
+            output.contains("total_symbols: 3977"),
+            "Summary must use the repo-level count, not the row sum: {output}"
+        );
+        assert!(
+            !output.contains("total_symbols: 1646"),
+            "row-sum must NOT win when the repo-level count is present: {output}"
+        );
+    }
+
+    #[test]
+    fn render_human_falls_back_to_row_sum_when_total_absent() {
+        // Defensive: a missing field must never read as a false zero — fall back to the row sum.
+        let resp = sample_stats(); // total_symbols: None
+        let output = resp.render_human();
+        assert!(output.contains("total_symbols: 1646"), "{output}"); // 892 + 634 + 120
+    }
+
+    // ── HONEST-DEGRADATION-IMPL-1 (D1) — LOW caveat + degenerate-unknown (human side) ─────────────
+
+    /// A single degenerate (zero-degree) module — its coupling metrics are unknown.
+    fn degenerate_module() -> ModuleStats {
+        ModuleStats {
+            module: "src/core".to_string(),
+            fan_in: 0,
+            fan_out: 0,
+            instability: None, // 0/0 — undefined
+            abstractness: 1.0, // a classification artifact (kept, scoped out of D1)
+            distance_from_main_sequence: None,
+            file_count: 12,
+            symbol_count: 340,
+        }
+    }
+
+    fn axis(level: &str, reasons: &[&str]) -> StatsReliabilityAxis {
+        StatsReliabilityAxis {
+            level: level.to_string(),
+            reasons: reasons.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn render_human_degenerate_coupling_is_unknown_not_zero() {
+        // The nginx face of C1: fan_in=fan_out=0 must render I/D as `unknown`, never `0.00` (which
+        // reads as "on the main sequence"). Abstractness stays a number (import-graph-independent).
+        let resp = StatsResponse {
+            repo_uid: "r".into(),
+            snapshot_uid: "s".into(),
+            display_name: Some("nginx".into()),
+            count: 1,
+            total_symbols: Some(3977),
+            import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
+            stats: vec![degenerate_module()],
+        };
+        let output = resp.render_human();
+        let distance_section = output
+            .split("By distance from main sequence")
+            .nth(1)
+            .expect("distance section present");
+        assert!(
+            distance_section.contains("D=unknown") && distance_section.contains("I=unknown"),
+            "degenerate coupling must render unknown: {output}"
+        );
+        assert!(
+            !distance_section.contains("D=0.00") && !distance_section.contains("I=0.00"),
+            "must NOT render a bare 0.00 for an undefined metric: {output}"
+        );
+        // Abstractness (the kept classification metric) is still a concrete number.
+        assert!(distance_section.contains("A=1.00"), "{output}");
+    }
+
+    #[test]
+    fn render_human_low_import_graph_attaches_reason_specific_caveat() {
+        let resp = StatsResponse {
+            repo_uid: "r".into(),
+            snapshot_uid: "s".into(),
+            display_name: Some("nginx".into()),
+            count: 1,
+            total_symbols: Some(3977),
+            import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
+            stats: vec![degenerate_module()],
+        };
+        let output = resp.render_human();
+        // The caveat sits ABOVE the dependency sections and names the real count + the direction.
+        let caveat_pos = output
+            .find("1090 imports are unresolved")
+            .expect("unresolved-imports caveat present");
+        let fanin_pos = output.find("By fan-in").expect("fan-in section present");
+        assert!(
+            caveat_pos < fanin_pos,
+            "caveat must precede the sections: {output}"
+        );
+        assert!(output.contains("under-counted"), "{output}");
+        assert!(output.contains("treat these as directional"), "{output}");
+    }
+
+    #[test]
+    fn render_human_high_import_graph_shows_no_caveat() {
+        // No noise on a fully-resolved repo: HIGH posture → no dependency caveat.
+        let mut resp = sample_stats();
+        resp.import_graph_reliability = Some(axis("HIGH", &[]));
+        let output = resp.render_human();
+        assert!(
+            !output.contains("treat these as directional"),
+            "HIGH posture must not emit a caveat: {output}"
+        );
+    }
+
+    #[test]
+    fn render_human_caveat_never_prints_zero_imports_unresolved() {
+        // review-1 #1 guard: a non-HIGH axis whose cause is alias-suspicion (unresolved count = 0)
+        // must show the alias clause and NEVER the false string "0 imports unresolved".
+        let mut resp = sample_stats();
+        resp.import_graph_reliability = Some(axis("LOW", &["alias_resolution_suspicion"]));
+        let output = resp.render_human();
+        assert!(
+            output.contains("treat these as directional"),
+            "caveat present: {output}"
+        );
+        assert!(output.contains("aliases"), "alias clause present: {output}");
+        assert!(
+            !output.contains("imports are unresolved") && !output.contains("0 imports"),
+            "must never manufacture an unresolved-count claim: {output}"
+        );
     }
 }

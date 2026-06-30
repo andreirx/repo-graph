@@ -4192,9 +4192,9 @@ mod tests {
             module: "src/a".to_string(),
             fan_in: 0,
             fan_out: 1,
-            instability: 1.0,
+            instability: Some(1.0),
             abstractness: 0.5,
-            distance_from_main_sequence: 0.5,
+            distance_from_main_sequence: Some(0.5),
             file_count: 2,
             symbol_count: 3,
         }];
@@ -4207,6 +4207,50 @@ mod tests {
         assert_eq!(out["stats"][0]["symbol_count"], 3);
         // The DTO field names mirror the SQLite ModuleStatsResult exactly (the renderer is untouched).
         assert!(out["stats"][0]["distance_from_main_sequence"].is_number());
+    }
+
+    #[test]
+    fn degenerate_module_stats_serialize_metrics_as_json_null_not_zero() {
+        // HONEST-DEGRADATION-IMPL-1 (D1 ratified rider, honest-degradation-1.md §12): the
+        // degenerate-`unknown` MUST reach JSON consumers as `null` (architecture Rule #6 at the DTO
+        // layer), never a bare `0` that reads as a known value. A zero-degree module produced by the
+        // shared helper carries `None` instability + distance; serialized, those are JSON `null`.
+        //
+        // CONTRACT BOUNDARY (the reviewer's degenerate-DTO question, resolved per the ratified text):
+        // the `unknown` conversion is scoped to the metrics that are mathematically UNDEFINED at zero
+        // degree — `instability` (the `0/0` the packet names as "the degenerate value the guard
+        // converts") and the `distance` derived from it. The degree counts `fan_in`/`fan_out` are NOT
+        // nulled: each is a genuine count of zero RESOLVED import edges (Rule #6 "empty = known-zero" —
+        // a TRUE number, not the fabricated `0.0` the old `else` branch emitted for `0/0`), made honest
+        // by the dependency-section caveat the renderer attaches when import-graph reliability != HIGH.
+        // So below: I/D serialize as `null` AND fan_in/fan_out stay 0; abstractness stays a number.
+        let rows = livegraph_module_stats_dto(&[ModuleStatRow {
+            module: "src/core".to_string(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 12,
+            symbol_count: 340,
+            abstract_count: 3,
+            type_count: 3,
+        }]);
+        assert_eq!(rows[0].instability, None);
+        assert_eq!(rows[0].distance_from_main_sequence, None);
+        let out = serve_stats_fastpath("repo", "disp", "snap", &rows);
+        assert!(
+            out["stats"][0]["instability"].is_null(),
+            "degenerate instability must serialize as JSON null, got {}",
+            out["stats"][0]["instability"]
+        );
+        assert!(
+            out["stats"][0]["distance_from_main_sequence"].is_null(),
+            "degenerate distance must serialize as JSON null, got {}",
+            out["stats"][0]["distance_from_main_sequence"]
+        );
+        // The genuine zero-degree counts (Rule #6 "empty = known-zero") stay 0 — NOT nulled — for BOTH
+        // fan_in and fan_out; the import-graph-independent abstractness stays a concrete number.
+        assert_eq!(out["stats"][0]["fan_in"], 0);
+        assert_eq!(out["stats"][0]["fan_out"], 0);
+        assert_eq!(out["stats"][0]["abstractness"], 1.0);
     }
 
     #[test]
@@ -4229,9 +4273,9 @@ mod tests {
         assert_eq!(dto[0].instability, i);
         assert_eq!(dto[0].abstractness, a);
         assert_eq!(dto[0].distance_from_main_sequence, d);
-        assert_eq!(dto[0].instability, 0.75);
+        assert_eq!(dto[0].instability, Some(0.75));
         assert_eq!(dto[0].abstractness, 0.25);
-        assert_eq!(dto[0].distance_from_main_sequence, 0.0);
+        assert_eq!(dto[0].distance_from_main_sequence, Some(0.0));
         // The integer fields pass through unchanged.
         assert_eq!(dto[0].fan_in, 1);
         assert_eq!(dto[0].file_count, 5);
