@@ -1,9 +1,51 @@
 # Technical Debt and Known Limitations
 
-> The first section below — **Pre-Merge Hardening + E2E Usefulness Findings** — is
-> the newest, cross-cutting backlog (placed first deliberately: these are
-> first-class product/VISION problems, not per-subsystem notes). The per-subsystem
-> catalogue follows, starting at *Extraction — TypeScript*.
+> The first two sections below — **Checkpoint Smoke + Two-Agent Gate** (2026-06-29, newest)
+> and **Pre-Merge Hardening + E2E Usefulness Findings** — are the cross-cutting backlog
+> (placed first deliberately: these are first-class product/VISION problems, not per-subsystem
+> notes). The per-subsystem catalogue follows, starting at *Extraction — TypeScript*.
+
+## Checkpoint Smoke (v0.3.1, nginx) + Two-Agent Usefulness Gate — 2026-06-29
+
+Second run of the End-to-End Usefulness Protocol, AFTER the daemon-robustness arc shipped: a
+full repo-wide-surface smoke on the **nginx** source tree (C) + an independent **Codex** reviewer
+pass (the protocol's two-agent gate). Evidence: `smoke-runs/2026-06-29T12-42-18Z/` + the Codex
+verdict. Headline: the orientation + honesty CORE is strong (`trust` grades reliability and
+refuses unsafe call/dead claims; `dead` is honestly disabled; boundaries/resources/complexity
+are useful orientation), but several surfaces **render unresolved / unsupported relationship data
+as known-zero or exact fact** — a Fact-Certainty violation BOTH agents flagged as a trust-contract
+breach, not polish. The honesty lapses (C1-C4) are consolidated into **`HONEST-DEGRADATION-1`** (a
+cross-surface honest-degradation contract spec) and PROMOTED ahead of capability (ENRICH-LIFECYCLE-1)
+by the gate. None is a regression from v0.3.1 (all pre-existing) — the patch shipped narrowly as
+daemon robustness; these are the next track.
+
+- **C1. `stats` renders resolution-derived zeros with NO caveat (P1).** Every package group shows
+  `fan_in=0/fan_out=0` and Martin `D/I/A` (`A=1.00`) while `trust` reports import-graph reliability
+  LOW + 6 zero-connectivity modules — resolution-failure presented as measured architectural absence.
+  Codex: "the clearest VISION violation." Extends #6. → HONEST-DEGRADATION-1.
+- **C2. `deps list` labels non-JS repos `ecosystem: npm` (P2).** nginx (C): `ecosystem:"npm", count:0,
+  total_external_imports:56` — a wrong-ecosystem label that risks implying "npm graph evaluated and
+  empty." Render side of R3 (no C manifest reader). → HONEST-DEGRADATION-1 (label) + a C-manifest
+  reader (separate capability slice).
+- **C3. `orient` footer `Certainty: exact/fresh` collapses freshness with semantic certainty (P2, NEW).**
+  The same answer carries inferred (0.7) modules, LOW call-graph reliability, and LiveGraph-unavailable,
+  yet the footer reads as global factual certainty. (Found by the Codex pass — missed in the first
+  analyst read.) → HONEST-DEGRADATION-1.
+- **C4. Cross-surface symbol-count mismatch (P2, NEW).** Same snapshot: `index` 4393 nodes / `orient`
+  "3977 symbols" / `stats` "1816 symbols" (files 396/397/396). All say "symbols" to the reader with no
+  explanation of what each counts — a semantic-contract defect (the reader cannot tell which to trust),
+  regardless of whether the counts are intentionally different. → HONEST-DEGRADATION-1.
+- **C5. `orient` budget tiers are bimodal (P3, NEW — usability).** small=8 / medium=12 / large=390 /
+  full=390 lines: a ~32x cliff with no true middle tier. Honesty + wording stay consistent across tiers;
+  this is progressive-disclosure usability, not correctness. → separate orient-density slice.
+- **C6. `rmap enrich` is not in the loop and not ergonomic (P2).** Index emits "...(13023 unresolved)"
+  with NO next-step advice; `rmap enrich` requires `<db_path> <repo_uid>` positionally (does not resolve
+  repo from cwd like every other command) and supports `rust|typescript|java` only — no C resolver,
+  though clangd is installed on the machine. Extends R4. → ENRICH-LIFECYCLE-1.
+- **C7. The smoke harness conflates non-zero exit with failure (P3, NEW — tooling).** It marked nginx
+  "failed" because `check` exited 1 (found a real reliability issue) and `dead` exited 2 (intentionally
+  disabled) — the same over-counting shape as R1. → smoke-harness fix (distinguish "errored" from
+  "reported findings / disabled").
 
 ## Pre-Merge Hardening + E2E Usefulness Findings (arch/scip-substrate-pivot)
 
