@@ -399,6 +399,10 @@ EOF
 
     # Run each command from the repo directory (CWD-based resolution)
     REPO_FAILED=false
+    # C7: commands whose non-zero exit is a designed VERDICT/status, NOT a harness error
+    # (check = reliability/gate verdict; dead = intentionally disabled; gate = gate pass/fail).
+    # A non-zero exit for these is still recorded in per-repo meta, but does not fail the repo.
+    VERDICT_COMMANDS=" check dead gate "
     for CMD in "${COMMANDS[@]}"; do
         echo ""
         echo "Command: $CMD"
@@ -435,9 +439,15 @@ EOF
         REPO_META_COMMANDS+="\"$CMD\":{\"exit_code\":$CMD_EXIT,\"seconds\":$CMD_TIME}"
 
         if [[ "$CMD_EXIT" -ne 0 ]]; then
-            echo "FAIL: $CMD (exit $CMD_EXIT)"
-            display_truncated "$CMD_OUTPUT" 20
-            REPO_FAILED=true
+            if [[ "$VERDICT_COMMANDS" == *" ${CMD_ARGS[0]} "* ]]; then
+                # non-zero is a designed verdict/status (check FAIL, dead disabled, gate fail) — not a harness error
+                echo "NOTE: $CMD exit $CMD_EXIT (command verdict/status — not a harness error)"
+                display_truncated "$CMD_OUTPUT" 30
+            else
+                echo "FAIL: $CMD (exit $CMD_EXIT)"
+                display_truncated "$CMD_OUTPUT" 20
+                REPO_FAILED=true
+            fi
         else
             display_truncated "$CMD_OUTPUT" 30
         fi
