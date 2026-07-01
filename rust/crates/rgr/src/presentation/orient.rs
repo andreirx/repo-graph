@@ -50,13 +50,19 @@ use serde::Deserialize;
 
 use crate::presentation::{bullet, heading, kv_line};
 
-/// How much DEPTH the dense `orient` renders (ORIENT-DENSITY-1 §5).
+/// How much DEPTH the dense `orient` renders — the progressive-disclosure
+/// ladder (ORIENT-DENSITY-1). Every tier leads with the same load-bearing
+/// HEADLINE (named structure, complexity centers, cycles, docs, one reliability
+/// caveat, the relationship next-action) and NEVER strips it to thin meta; the
+/// tier only trades DEPTH below, each a genuine superset of the previous:
+/// - `Small`  — the headline alone ("where to look first").
+/// - `Medium` — + the scannable KEY STRUCTURE: package-group topology, the
+///   declared/inferred module list, a complexity top-slice, limits/next-steps.
+/// - `Large`  — + the DETAILED TABLES: a larger (capped) complexity table, the
+///   per-axis reliability breakdown, the remaining signals.
+/// - `Full`   — `large` with the complexity table uncapped (the only uncapped tier).
 ///
-/// A budget is a density contract: every tier leads with the same
-/// dense, load-bearing HEADLINE (named structure, complexity centers,
-/// cycles, docs, and one reliability caveat); the tier only trades how
-/// much DEPTH is appended below it. It NEVER strips the headline down
-/// to thin meta. Mirrors the CLI `--budget` / `--full` selection.
+/// Mirrors the CLI `--budget` / `--full` selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrientDepth {
     Small,
@@ -77,19 +83,21 @@ impl OrientDepth {
         }
     }
 
-    /// `true` for the tiers that append the full detail breakdown
-    /// (per-axis reliability, module file-counts, the COMPLETE complexity
-    /// centers, the remaining signals, the full certainty/provenance block).
-    /// `large` and `--full` both render the complete detail. `pub(super)` so the
-    /// `orient_sections` renderers can drop the headline's "+N more" pointer when
-    /// the full breakdown section follows.
+    /// `true` for the tiers (`large` / `--full`) that append the DETAILED TABLES
+    /// on top of medium's key structure — the per-axis reliability breakdown
+    /// (`render_degradation`), the remaining non-headline signals, and the full
+    /// serving footer. (The complexity cap is owned by `complexity_breakdown_cap`.)
+    /// `pub(super)` so `render_orient_envelope` can gate the footer expansion.
     pub(super) fn shows_full_detail(self) -> bool {
         matches!(self, Self::Large | Self::Full)
     }
 
-    /// `true` for tiers above `small`, where the mid-depth sections
-    /// (limits, next steps) are appended below the headline.
-    fn shows_detail(self) -> bool {
+    /// `true` for `medium` and up, where the KEY-STRUCTURE sections append below
+    /// the headline: limits/next-steps, the package-group topology, the module
+    /// list, and the complexity table (capped per tier). `pub(super)` so
+    /// `complexity_line` can drop its headline "+N more" once the dedicated
+    /// complexity section follows (no double pointer).
+    pub(super) fn shows_detail(self) -> bool {
         !matches!(self, Self::Small)
     }
 
@@ -103,16 +111,28 @@ impl OrientDepth {
         }
     }
 
-    /// How many complexity-center files the HEADLINE line names. This stays
-    /// BOUNDED at every tier — a headline is a dense one-liner, never a dump of
-    /// hundreds of symbols. At `large`/`--full` the COMPLETE above-threshold set
-    /// rides the dedicated `complexity_breakdown_section` instead (review-1 #2),
-    /// so the headline cap does not need to grow to MAX.
-    /// `pub(super)` so the `orient_sections` renderers can read it.
+    /// How many complexity-center files the HEADLINE line names — BOUNDED at
+    /// every tier (a headline is a one-liner, never a dump). The fuller set rides
+    /// the dedicated `complexity_breakdown_section` instead, so this cap need not
+    /// grow to MAX. `pub(super)` so the `orient_sections` renderers can read it.
     pub(super) fn complexity_center_cap(self) -> usize {
         match self {
             Self::Small => 3,
             Self::Medium | Self::Large | Self::Full => 5,
+        }
+    }
+
+    /// The per-tier render cap for the complexity-centers SECTION (distinct from
+    /// the headline cap above) — the knob that makes the ladder progressive below
+    /// the headline: `medium` a top-slice, `large` a larger table, `--full`
+    /// uncapped. `None` = uncapped; `small` never renders the section (unused).
+    /// Re-composition only: a PREFIX of the SAME `top_complex` evidence + a tail.
+    fn complexity_breakdown_cap(self) -> Option<usize> {
+        match self {
+            Self::Small => None,
+            Self::Medium => Some(10),
+            Self::Large => Some(50),
+            Self::Full => None,
         }
     }
 }
@@ -330,15 +350,13 @@ pub struct ReliabilityAxis {
 }
 
 impl OrientResponse {
-    /// Render the DENSE orient response (ORIENT-DENSITY-1).
-    ///
-    /// Leads with the load-bearing, NAMED orientation (§3): high-severity
-    /// alerts, then structure (repo · files · named modules), complexity
-    /// centers (named files), cycles + docs, and ONE compressed
-    /// reliability caveat. Budget trades DEPTH below that — `small` is the
-    /// dense headline alone; `medium` adds limits + next steps; `large` /
-    /// `--full` add the per-module breakdown, per-axis reliability, and the
-    /// remaining signals. The headline is NEVER stripped to thin meta.
+    /// Render the DENSE orient response as the progressive four-tier ladder — see
+    /// [`OrientDepth`] for the per-tier contract. Every tier leads with the
+    /// load-bearing, NAMED HEADLINE (§3: alerts, structure, complexity centers,
+    /// cycles + docs, one reliability caveat, the relationship next-action) and
+    /// trades only DEPTH below it. The headline is NEVER stripped to thin meta,
+    /// and the honesty posture (reliability caveat, next-action, and — via the
+    /// envelope wrapper — the serving footer) rides EVERY tier.
     pub fn render_human(&self, depth: OrientDepth) -> String {
         let mut out = String::new();
 
@@ -376,7 +394,10 @@ impl OrientResponse {
             out.push('\n');
         }
 
-        // ── DEPTH: mid sections (medium and up) ────────────────────
+        // ── DEPTH: KEY STRUCTURE (medium and up) ───────────────────
+        // The scannable middle tier: limits/next-steps, package-group topology,
+        // the module list, and a complexity top-slice — re-composed from the SAME
+        // sections `large` uses, only capped tighter (see `complexity_breakdown_cap`).
         if depth.shows_detail() {
             if !self.limits.is_empty() {
                 out.push('\n');
@@ -386,13 +407,8 @@ impl OrientResponse {
                 out.push('\n');
                 out.push_str(&self.render_next_steps());
             }
-        }
-
-        // ── DEPTH: full detail (large / --full) ────────────────────
-        if depth.shows_full_detail() {
-            // Package groups first (the Layer-0/1 directory TOPOLOGY the headline
-            // leads with), then the declared/inferred module_candidates breakdown
-            // — two separately-labelled notions (MODULE-MODEL-1).
+            // Package groups (Layer-0/1 directory TOPOLOGY) then the declared/
+            // inferred module_candidates breakdown — two labelled notions (MODULE-MODEL-1).
             let pkg_groups = self.package_groups_section();
             if !pkg_groups.is_empty() {
                 out.push('\n');
@@ -403,14 +419,19 @@ impl OrientResponse {
                 out.push('\n');
                 out.push_str(&breakdown);
             }
-            // The COMPLETE complexity centers (review-1 #2): the agent now
-            // carries every above-threshold center in the evidence at
-            // large/--full, so this section is the full set — no "+N more".
-            let complexity = self.complexity_breakdown_section();
+            // Complexity centers, capped per tier (top-slice / larger / uncapped);
+            // the cap carries an honest "+N more — rmap hotspots" tail.
+            let complexity = self.complexity_breakdown_section(depth.complexity_breakdown_cap());
             if !complexity.is_empty() {
                 out.push('\n');
                 out.push_str(&complexity);
             }
+        }
+
+        // ── DEPTH: DETAILED TABLES (large / --full) ────────────────
+        // On top of medium's key structure: the per-axis reliability breakdown
+        // and the remaining non-headline signals (complexity already expanded above).
+        if depth.shows_full_detail() {
             if let Some(trust) = &self.trust_briefing {
                 let degradation = self.render_degradation(trust);
                 if !degradation.is_empty() {
@@ -423,8 +444,10 @@ impl OrientResponse {
                 out.push('\n');
                 out.push_str(&others);
             }
-        } else {
-            // Small / medium: the headline is complete; point to the depth.
+        }
+
+        // Small / medium have not yet reached the detailed tables — point there.
+        if !depth.shows_full_detail() {
             out.push_str(
                 "\n[--full for the complete breakdown; rmap hotspots / modules / cycles to drill down]\n",
             );
@@ -458,3 +481,9 @@ impl OrientResponse {
 #[cfg(test)]
 #[path = "orient_tests.rs"]
 mod tests;
+
+// The progressive budget-ladder tests live in a sibling file (via `#[path]`) so
+// neither test module grows past the >500-line structural guardrail (review-1).
+#[cfg(test)]
+#[path = "orient_density_tests.rs"]
+mod density_tests;

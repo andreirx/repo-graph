@@ -1,16 +1,14 @@
 //! Dense-headline + depth section renderers for the `orient` command (ORIENT-DENSITY-1).
 //!
 //! Split out of `orient.rs` to keep each module under the 500-line structural
-//! guardrail — the same idiom `explain.rs` / `explain_sections.rs` already use.
-//! This is a SECOND `impl OrientResponse` block: inherent impls may span modules
-//! within the defining crate, so `orient.rs` keeps the response structs, the
-//! `OrientDepth` budget→depth map, the `render_orient_envelope` wrapper, and the
-//! `render_human` orchestrator, while the per-section renderers it calls live here.
+//! guardrail — the `explain.rs` / `explain_sections.rs` idiom. This is a SECOND
+//! `impl OrientResponse` block (inherent impls may span modules within the crate):
+//! `orient.rs` keeps the structs, the `OrientDepth` map, the
+//! `render_orient_envelope` wrapper, and the `render_human` orchestrator; the
+//! per-section renderers it calls live here.
 //!
-//! Visibility contract: methods invoked by `render_human` (in the sibling `orient`
-//! module) are `pub(super)` — visible to `presentation` and its descendants, no
-//! wider; the helpers they call internally stay private. No behavior changed in the
-//! split; it is pure relocation, verified by the orient render tests.
+//! Visibility: methods `render_human` invokes are `pub(super)`; their internal
+//! helpers stay private. Pure relocation — no behavior changed.
 
 use super::orient::{OrientDepth, OrientResponse, ReliabilityAxis, Signal};
 use super::{bullet, heading, DisplaySeverity};
@@ -39,20 +37,17 @@ fn plural(n: u64) -> &'static str {
 }
 
 /// Short label for a module: its last path segment (`src/http` → `http`).
-/// Collisions are acceptable for the dense headline (module discovery is
-/// fuzzy-by-design, VISION); the full paths appear in the breakdown at
-/// `--full`.
+/// Collisions are fine for the dense headline (fuzzy-by-design, VISION); full
+/// paths appear in the breakdown.
 fn module_short_name(path: &str) -> &str {
     path.rsplit('/').find(|s| !s.is_empty()).unwrap_or(path)
 }
 
 /// The labelled declared/inferred-module count phrase from a MODULE_SUMMARY
-/// evidence payload — e.g. `1 declared module`, `5 inferred modules`,
-/// `3 modules` (MODULE-MODEL-1). This is the `module_candidates` notion
-/// (Layer 1/2), kept DISTINCT from the directory/package topology so the two
-/// are never conflated. The kind word is applied only when the WHOLE set is one
-/// kind (honest; a mixed set stays the bare `module(s)`). `None` when there is
-/// no module-discovery data — the topology still names the structure.
+/// payload — e.g. `1 declared module`, `5 inferred modules`, `3 modules`. The
+/// `module_candidates` notion (Layer 1/2), kept DISTINCT from the package
+/// topology (MODULE-MODEL-1). The kind word applies only when the WHOLE set is
+/// one kind (else the bare `module(s)`). `None` when no module-discovery data.
 fn declared_module_phrase(ev: &serde_json::Value) -> Option<String> {
     let count = ev.get("discovered_module_count").and_then(|v| v.as_u64())?;
     let kind_count = |k: &str| -> u64 {
@@ -89,9 +84,8 @@ impl OrientResponse {
     }
 
     /// High-severity alert lines (gate failure / boundary violations) —
-    /// load-bearing governance facts surfaced FIRST. Empty for a clean
-    /// repo (e.g. nginx). Honest: these are the truth-audit's own signals,
-    /// rendered verbatim from each signal's summary.
+    /// load-bearing governance facts surfaced FIRST, rendered verbatim from each
+    /// signal's summary. Empty for a clean repo.
     pub(super) fn headline_alerts(&self) -> Vec<String> {
         let mut out = Vec::new();
         for leaf in &self.signals {
@@ -108,14 +102,10 @@ impl OrientResponse {
 
     /// The dense STRUCTURE line (MODULE-MODEL-1 D2(i)): `<repo> · <N> files[,
     /// <M> symbols] · <P> package groups: a, b, c · <D> declared modules`.
-    ///
-    /// LEADS with the directory/package TOPOLOGY (Layer 0/1 — where the code
-    /// physically lives, the load-bearing structure an agent orients by), NAMED.
-    /// Package names are capped by depth; `package_groups.len()` is the true
-    /// total and drives the `+N more` tail. The declared/inferred
-    /// `module_candidates` count rides as a SEPARATE, self-labelled secondary
-    /// fact — never collapsed into the topology (the cross-command coherence
-    /// fix: an agent can tell the two notions apart from the line alone).
+    /// LEADS with the directory/package TOPOLOGY (Layer 0/1), NAMED; package
+    /// names are capped by depth, `package_groups.len()` drives the `+N more`
+    /// tail. The declared/inferred `module_candidates` count rides as a SEPARATE,
+    /// self-labelled fact — never collapsed into the topology (MODULE-MODEL-1).
     pub(super) fn structure_line(&self, depth: OrientDepth) -> String {
         let repo = self.display_name.as_deref().unwrap_or(&self.repo);
         let mut line = repo.to_string();
@@ -196,11 +186,10 @@ impl OrientResponse {
         }
 
         let mut line = format!("Complexity centers: {}", shown.join(", "));
-        // The "+N more" pointer is honest at small/medium (the headline is the
-        // ONLY complexity surface there). At large/--full it is SUPPRESSED: the
-        // dedicated `complexity_breakdown_section` below renders the COMPLETE set
-        // (review-1 #2 — `--full` is complete, not "+338 more").
-        if !depth.shows_full_detail() {
+        // The headline "+N more" pointer is honest ONLY at `small` (the sole
+        // complexity surface there); at `medium`+ the dedicated section carries
+        // the tail, so the headline stays clean (no double "+N more").
+        if !depth.shows_detail() {
             if let Some(total) = ev.get("high_complexity_count").and_then(|v| v.as_u64()) {
                 let shown_n = shown.len() as u64;
                 if total > shown_n {
@@ -214,14 +203,13 @@ impl OrientResponse {
         Some(line)
     }
 
-    /// The COMPLETE complexity centers, NAMED with cyclomatic complexity, shown
-    /// at `large` / `--full` (ORIENT-DENSITY-1 §5, review-1 #2). The agent now
-    /// carries EVERY above-threshold center in the evidence at these budgets, so
-    /// this section is the full set — no truncation pointer. Empty when no
-    /// complexity signal is present (clean repo / measurements unavailable).
-    /// Mirrors `module_breakdown_section`: the headline names the top few; this
-    /// section is the authoritative complete list.
-    pub(super) fn complexity_breakdown_section(&self) -> String {
+    /// The complexity centers, NAMED with cyclomatic complexity (ORIENT-DENSITY-1).
+    /// `cap` is the per-tier render limit (`OrientDepth::complexity_breakdown_cap`):
+    /// `Some(n)` a top-`n` slice (`medium` / `large`), `None` every carried center
+    /// (`--full`). When more remain above threshold than shown, an honest
+    /// "+N more — rmap hotspots" tail follows, keyed on `high_complexity_count` to
+    /// match the headline. Empty when no complexity signal is present.
+    pub(super) fn complexity_breakdown_section(&self, cap: Option<usize>) -> String {
         let Some(ev) = self.signal_evidence("HIGH_COMPLEXITY") else {
             return String::new();
         };
@@ -232,8 +220,10 @@ impl OrientResponse {
             return String::new();
         }
 
+        let limit = cap.unwrap_or(top.len());
         let mut out = heading("Complexity centers (by cyclomatic complexity)");
-        for entry in top {
+        let mut shown: u64 = 0;
+        for entry in top.iter().take(limit) {
             let cx = entry
                 .get("complexity")
                 .and_then(|v| v.as_u64())
@@ -250,6 +240,17 @@ impl OrientResponse {
                 (None, None) => continue,
             };
             out.push_str(&bullet(&line));
+            shown += 1;
+        }
+        // Honest tail: centers still above threshold beyond what this section
+        // shows, keyed on `high_complexity_count` (absent count → no tail).
+        if let Some(total) = ev.get("high_complexity_count").and_then(|v| v.as_u64()) {
+            if total > shown {
+                out.push_str(&bullet(&format!(
+                    "+{} more above threshold — rmap hotspots",
+                    total - shown
+                )));
+            }
         }
         out
     }
@@ -302,11 +303,10 @@ impl OrientResponse {
             .collect()
     }
 
-    /// The single compressed RELIABILITY caveat (ORIENT-DENSITY-1 §3.5):
-    /// one honest line (the real call-resolution rate + level + "verify
-    /// against source"), NOT three degradation lines. `None` when trust is
-    /// high (clean) or no briefing is present. The full per-axis breakdown
-    /// still renders at `--full` via [`render_degradation`].
+    /// The single compressed RELIABILITY caveat (ORIENT-DENSITY-1 §3.5): one
+    /// honest line (real call-resolution rate + level + "verify against source"),
+    /// NOT the three-axis block. `None` when trust is high or no briefing. The
+    /// full per-axis breakdown still renders at `--full` via [`render_degradation`].
     pub(super) fn reliability_caveat_line(&self) -> Option<String> {
         let trust = self.trust_briefing.as_ref()?;
 
@@ -380,12 +380,10 @@ impl OrientResponse {
     }
 
     /// The full package-group breakdown (NAMED, with file + test counts), shown
-    /// at `large` / `--full` (MODULE-MODEL-1 D4). The directory/package TOPOLOGY
-    /// (Layer 0/1 — where the code physically lives), the structure the headline
-    /// leads with. DISTINCT from `module_breakdown_section` below (the
-    /// declared/inferred `module_candidates` notion). Empty when no directory
-    /// owns files. Mirrors the headline: it names the top few; this is the
-    /// authoritative complete list.
+    /// at `medium` and up — the scannable KEY STRUCTURE (ORIENT-DENSITY-1;
+    /// MODULE-MODEL-1 D4): the directory/package TOPOLOGY (Layer 0/1). DISTINCT
+    /// from `module_breakdown_section` below (the declared/inferred notion).
+    /// Empty when no directory owns files.
     pub(super) fn package_groups_section(&self) -> String {
         let Some(ev) = self.module_summary_evidence() else {
             return String::new();
@@ -424,11 +422,10 @@ impl OrientResponse {
         out
     }
 
-    /// The full per-module breakdown (NAMED, with file counts) for the
-    /// declared/inferred `module_candidates` notion (Layer 1/2), shown at
-    /// `large` / `--full`. DISTINCT from `package_groups_section` above (the
-    /// physical directory topology) — separately labelled, never collapsed
-    /// (MODULE-MODEL-1 coherence). Empty when no module discovery data exists.
+    /// The full per-module breakdown (NAMED, with file counts) for the declared/
+    /// inferred `module_candidates` notion (Layer 1/2), shown at `medium` and up.
+    /// DISTINCT from `package_groups_section` above (the physical topology) —
+    /// separately labelled, never collapsed (MODULE-MODEL-1). Empty when none.
     pub(super) fn module_breakdown_section(&self) -> String {
         let Some(ev) = self.module_summary_evidence() else {
             return String::new();

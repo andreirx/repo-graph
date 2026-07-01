@@ -61,9 +61,9 @@ fn sig(
 }
 
 /// A realistic nginx-shaped repo response: NAMED modules, named complexity
-/// centers, cycles, docs, and a degraded call-graph. Used by the density +
-/// budget-depth tests (the End-to-End Usefulness Protocol fixture).
-fn nginx_like() -> OrientResponse {
+/// centers, cycles, docs, and a degraded call-graph. `pub(super)` so the sibling
+/// `density_tests` module reuses this fixture (the E2E Usefulness Protocol shape).
+pub(super) fn nginx_like() -> OrientResponse {
     use serde_json::json;
     let mut r = minimal_response();
     r.repo = "nginx".to_string();
