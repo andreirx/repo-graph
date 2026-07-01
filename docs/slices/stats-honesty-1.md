@@ -1,7 +1,11 @@
 # STATS-HONESTY-1: stop `stats` rendering unknowns as facts — SPEC
 
 Slice: STATS-HONESTY-1
-Status: **SPEC** (design; the IMPL is the relay slice that follows)
+Status: **SUPERSEDED** by `honest-degradation-1.md` (2026-07-01). The stats decisions here (D1-D4) were
+folded into the cross-surface honest-degradation contract and SHIPPED via HONEST-DEGRADATION-IMPL-1
+(`cf73d6e`: symbol count reconciled to one canonical all-SYMBOL number; degenerate zero-degree coupling →
+`unknown` / JSON `null`, never known-zero). Retained for its analysis; the binding contract is
+`honest-degradation-1.md` §12. (Was: **SPEC**, design; the IMPL is the relay slice that follows.)
 Track: Product-surface honesty (`docs/ROADMAP.md` → Current priority, P2 "stats false-zero" +
 P2 "stats reliability marker"). Coordinates with the queued `RELIABILITY-REFRAME-1` (Resolution &
 attribution track) — the scope boundary is **surfaced and recommended in §6 + D2, pending operator

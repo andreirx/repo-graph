@@ -47,6 +47,19 @@ daemon robustness; these are the next track.
   disabled) — the same over-counting shape as R1. → smoke-harness fix (distinguish "errored" from
   "reported findings / disabled").
 
+### Resolution (2026-07-01)
+
+The honesty lapses C1-C4 shipped as the ratified **HONEST-DEGRADATION-1** contract (spec `c1a539e`,
+two-agent decision-reviewed, D1-D5): **C1 + C4 RESOLVED** by IMPL-1 (`cf73d6e` — stats count reconciled
+to one canonical number; degenerate zero-degree → `unknown` / JSON `null`, never known-zero); **C2 + C3
+RESOLVED** by IMPL-2 (`c8f1f1c` — deps ecosystem honest, no false `npm`; orient `Serving:` relabel), with
+the pure helpers extracted to a module (`3952c49`, un-bloating dispatch.rs). This also RESOLVES the older
+stats debts **#5** (false-zero) and **#6** (fan-in/out overclaim) — subsumed by IMPL-1 (D1+D4). **C5
+RESOLVED** (`2872c4a` — progressive orient budget ladder, real medium tier). **C7 RESOLVED** (`a2fb02c` —
+verdict-exit handling: check/dead/gate non-zero no longer fail the repo). **C6 DEFERRED to
+ENRICH-LIFECYCLE-1** (the `rmap enrich` cwd-resolving ergonomics folded into the enrich-path rework to
+avoid touching it twice). All items from this pass are dispositioned.
+
 ## Pre-Merge Hardening + E2E Usefulness Findings (arch/scip-substrate-pivot)
 
 Items surfaced during the pre-merge hardening pass and the **first run of the

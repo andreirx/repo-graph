@@ -42,6 +42,16 @@ The branch proved the gaps are on the agent-facing surface and that they pass CI
 This track closes them. Context for every item: `docs/TECH-DEBT.md`
 § _Pre-Merge Hardening + E2E Usefulness Findings_ (numbered #1–#9).
 
+**SHIPPED (2026-07-01, since v0.3.1) — the honesty core.** A second E2E smoke (nginx) + the two-agent
+usefulness gate drove the ratified **HONEST-DEGRADATION-1** contract (D1-D5): `stats` now renders
+unknowns as `unknown`/`null` not known-zero + one canonical symbol count (**#5/#6/C1/C4**); `deps` no
+longer mislabels a C repo `npm` (**C2**); `orient`'s footer is a scoped `Serving:` not a global "exact"
+(**C3**); every posture-bearing surface carries a toolchain-aware honest next-action; and `orient` gained
+a progressive budget ladder (**C5**), the smoke harness stopped miscounting verdict exits (**C7**). See
+`docs/slices/honest-degradation-1.md` §12 + TECH-DEBT § _Checkpoint Smoke … Resolution_. **Still open
+below:** orient under-segmentation (#3/#4), the reliability reframe, and capability (enrichment /
+manifest readers) — no longer honesty, but depth.
+
 **P1 — headline**
 
 - **orient module under-segmentation** — `orient` reports "1 module" on deeply-nested
