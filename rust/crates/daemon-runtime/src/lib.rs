@@ -64,6 +64,10 @@ pub mod orient_coherence;
 pub mod orient_lg_decisions;
 pub mod orient_serve;
 pub mod partition_discovery;
+// HONEST-DEGRADATION-IMPL-2-REFACTOR: pure reader-context label helpers (D2 + D5), extracted verbatim
+// from the oversized `dispatch.rs`. Crate-internal (all public items are `pub(crate)`); `dispatch`
+// re-exports them so existing call sites resolve unchanged.
+pub(crate) mod reader_context;
 pub mod registry;
 pub mod resource_metrics;
 pub mod state;

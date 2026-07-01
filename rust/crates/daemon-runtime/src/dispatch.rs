@@ -7882,15 +7882,18 @@ fn map_extracted_to_storage(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HONEST-DEGRADATION-IMPL-2 (D2 + D5) — reader-context derivation
+// HONEST-DEGRADATION-IMPL-2 (D2 + D5) — configured-resolver source
 //
-// `docs/slices/honest-degradation-1.md` §12 (RATIFIED). These helpers CONSUME existing values (the
-// daemon's configured resolvers, the repo's extracted languages, the already-counted external imports,
-// the trust reliability posture) and turn them into honest reader-context text. They compute NO new
-// posture and run NO resolver. They live here — beside `handle_enrich` / `handle_deps_list` /
-// `handle_stats`, the surfaces that own them — per the ratified "no new module" constraint (the prior
-// `reader_context` module mirrored the resolver-registration rule; that mirror is removed in favor of
-// the single source `configured_resolver_languages` below, which `handle_enrich` itself registers from).
+// `docs/slices/honest-degradation-1.md` §12 (RATIFIED). `configured_resolver_languages` is the SINGLE
+// source of which enrichment languages have a CONFIGURED resolver on this daemon; `handle_enrich`
+// registers from it and the D5 next-action line keys on it — so no surface promises an enrichment remedy
+// the enrich path cannot deliver. It lives here beside `handle_enrich`, its primary caller.
+//
+// The pure reader-context LABEL helpers that CONSUME this value (D2 ecosystem/note, D5 next-action line)
+// were extracted to `reader_context.rs` (HONEST-DEGRADATION-IMPL-2-REFACTOR) to stop appending to this
+// oversized file (agent_docs/architecture.md — Prohibited Patterns); their behavior is unchanged. They
+// are re-exported `pub(crate)` just below so the call sites in this module — and the `crate::dispatch::…`
+// references in `orient_coherence` — resolve exactly as before.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// SINGLE source of truth: which enrichment languages have a CONFIGURED resolver on this daemon, given
@@ -7902,7 +7905,10 @@ fn map_extracted_to_storage(
 /// Rust + TypeScript resolvers are compiled into the binary (unconditional); the Java (JDTLS) resolver
 /// is configured only when a `jdtls_path` is present. `Some("")` counts as present, matching
 /// `handle_enrich`'s `if let Some(path) = &jdtls_path` (faithfulness to the source over a nicety).
-fn configured_resolver_languages(jdtls_path: Option<&str>) -> Vec<EnrichmentLanguage> {
+///
+/// `pub(crate)` so the extracted `reader_context` unit tests import it as `crate::dispatch::…`
+/// (HONEST-DEGRADATION-IMPL-2-REFACTOR — visibility-only widening, no behavior change).
+pub(crate) fn configured_resolver_languages(jdtls_path: Option<&str>) -> Vec<EnrichmentLanguage> {
     let mut langs = vec![EnrichmentLanguage::Rust, EnrichmentLanguage::TypeScript];
     if jdtls_path.is_some() {
         langs.push(EnrichmentLanguage::Java);
@@ -7918,378 +7924,12 @@ pub(crate) fn configured_resolver_languages_from_env() -> Vec<EnrichmentLanguage
     configured_resolver_languages(std::env::var("JDTLS_PATH").ok().as_deref())
 }
 
-/// Map an indexer `files.language` token (`indexer::routing::detect_language`'s output, e.g.
-/// `"typescript"`, `"tsx"`, `"c"`) to the enrichment language whose resolver covers it, or `None` if no
-/// resolver exists for it on ANY build (C / C++ / Python / …). The resolver-FAMILY grouping is deferred
-/// to the enrichment crate's own [`EnrichmentLanguage::from_extension`] (the single source for
-/// `ts|tsx|js|jsx → TypeScript` etc.) by mapping each language token to a representative file extension —
-/// so the family definition is never duplicated here, only the indexer's word-token spelling is named.
-fn token_enrichment_language(token: &str) -> Option<EnrichmentLanguage> {
-    let representative_ext = match token {
-        // Word-tokens whose spelling differs from any file extension:
-        "typescript" => "ts",
-        "javascript" => "js",
-        "rust" => "rs",
-        // `tsx`/`jsx`/`java` are already extension-shaped tokens `from_extension` recognizes directly;
-        // any other token (`c`/`cpp`/`python`/…) yields `None` from `from_extension` (no resolver).
-        other => other,
-    };
-    EnrichmentLanguage::from_extension(representative_ext)
-}
-
-/// Reader-facing display name for an indexer language token (`None` for a token with no stable display
-/// name, so a raw internal token is never shown to the reader). Used by the D2 deps note and the D5
-/// no-resolution-path line.
-fn language_display_name(token: &str) -> Option<&'static str> {
-    Some(match token {
-        "c" => "C",
-        "cpp" => "C++",
-        "python" => "Python",
-        "java" => "Java",
-        "rust" => "Rust",
-        "typescript" | "tsx" => "TypeScript",
-        "javascript" | "jsx" => "JavaScript",
-        "go" => "Go",
-        "kotlin" => "Kotlin",
-        "scala" => "Scala",
-        "ruby" => "Ruby",
-        "swift" => "Swift",
-        "objc" => "Objective-C",
-        _ => return None,
-    })
-}
-
-/// Join the display names of `languages` deterministically (sorted, de-duplicated, `/`-separated),
-/// skipping tokens with no display name. Empty when none are nameable.
-fn display_language_names(languages: &[String]) -> String {
-    let mut names: Vec<&'static str> = languages
-        .iter()
-        .filter_map(|l| language_display_name(l))
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    names.join("/")
-}
-
-/// HONEST-DEGRADATION-IMPL-2 (D2): derive the dependency `ecosystem` from the repo's extracted languages
-/// instead of the old hardcoded `"npm"` default. A dependency-manifest reader exists only for npm (the
-/// TypeScript/JavaScript family incl. `tsx`/`jsx` → `package.json`) and Cargo (Rust → `Cargo.toml`); any
-/// other language has none on this build → `"none-detected"`.
-///
-/// NOTE: this is a MANIFEST-ecosystem mapping, deliberately INDEPENDENT of [`token_enrichment_language`]'s
-/// resolver mapping — they share the TS/JS token set only by coincidence (a Python *enrichment* resolver,
-/// if added, must not imply a Python *manifest* reader). Keep them separate.
-fn detect_deps_ecosystem(languages: &[String]) -> &'static str {
-    let has_npm = languages
-        .iter()
-        .any(|l| matches!(l.as_str(), "typescript" | "tsx" | "javascript" | "jsx"));
-    let has_cargo = languages.iter().any(|l| l == "rust");
-    if has_npm {
-        "npm"
-    } else if has_cargo {
-        "cargo"
-    } else {
-        "none-detected"
-    }
-}
-
-/// HONEST-DEGRADATION-IMPL-2 (D2): the reader-context note for a repo with no dependency-manifest reader.
-/// Names the language(s) and surfaces the EXISTING external-import count honestly — observed, not
-/// attributed (no resolver ran; attribution numbers unchanged). `external_imports` is the already-counted
-/// `total_external_imports`.
-fn deps_reader_context_note(languages: &[String], external_imports: usize) -> String {
-    let names = display_language_names(languages);
-    let lang = if names.is_empty() {
-        "this language".to_string()
-    } else {
-        names
-    };
-    format!(
-        "no dependency-manifest reader for {lang} on this build; {external_imports} external includes \
-         observed, not attributed to packages"
-    )
-}
-
-/// HONEST-DEGRADATION-IMPL-2 (D5): is any of the three resolution-driven relationship axes (call-graph /
-/// import-graph / change-impact) LOW? `dead_code` is excluded (a derived confidence axis, not a
-/// resolution axis). Matches the ratified "when relationship reliability is LOW" trigger — LOW, not
-/// merely non-HIGH (a MEDIUM axis emits no next-action).
-pub(crate) fn relationship_reliability_is_low(
-    reliability: &repo_graph_trust::types::TrustReliability,
-) -> bool {
-    use repo_graph_trust::types::ReliabilityLevel::LOW;
-    reliability.call_graph.level == LOW
-        || reliability.import_graph.level == LOW
-        || reliability.change_impact.level == LOW
-}
-
-/// HONEST-DEGRADATION-IMPL-2 (D5): the honest next-action line for a LOW-relationship-reliability repo,
-/// keyed on the repo's language(s) × the daemon's CONFIGURED resolvers. `configured` MUST come from
-/// [`configured_resolver_languages`] / [`configured_resolver_languages_from_env`] (the SAME source
-/// `handle_enrich` registers from) — passed in so this stays pure + unit-testable across the jdtls matrix.
-/// `None` when no relationship axis is LOW (no noise on a resolved repo), or when no honest statement
-/// applies (an unknown-only language set — no false promise either way).
-///
-/// One line, by priority:
-/// 1. some present language maps to a CONFIGURED resolver (Rust / the TS-JS family always; Java iff JDTLS)
-///    → suggest enrichment (a STATEMENT only — auto-run is ENRICH-LIFECYCLE-1). `rmap enrich` auto-selects
-///    the resolvable languages, so "resolve more" is honestly partial, never a per-language promise.
-/// 2. Java is present but its resolver is NOT configured (no JDTLS) → name the JDTLS requirement instead
-///    of a blind enrich suggestion (a `languages:["java"]` enrich would error without JDTLS).
-/// 3. no resolver exists for any present language (C / C++ / Python / …) → state the dead-end, naming the
-///    language(s); never a false promise.
-pub(crate) fn relationship_next_action_line(
-    reliability: &repo_graph_trust::types::TrustReliability,
-    repo_languages: &[String],
-    configured: &[EnrichmentLanguage],
-) -> Option<String> {
-    if !relationship_reliability_is_low(reliability) {
-        return None;
-    }
-
-    let enrichable_now = repo_languages
-        .iter()
-        .any(|t| match token_enrichment_language(t) {
-            Some(lang) => configured.contains(&lang),
-            None => false,
-        });
-    if enrichable_now {
-        return Some(
-            "relationship facts are low-confidence on this index; run `rmap enrich` to resolve more"
-                .to_string(),
-        );
-    }
-
-    let java_present = repo_languages
-        .iter()
-        .any(|t| token_enrichment_language(t) == Some(EnrichmentLanguage::Java));
-    if java_present {
-        // Java has a resolver, but it is JDTLS-gated and not configured on this build.
-        return Some(
-            "semantic enrichment for Java requires JDTLS (`jdtls_path` / `JDTLS_PATH`) configured; \
-             until then these relationship facts remain low-confidence"
-                .to_string(),
-        );
-    }
-
-    // No resolver exists for any present language (C / C++ / Python / …).
-    let names = display_language_names(repo_languages);
-    if names.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "no semantic-resolution path exists for {names} on this build; these relationship facts remain \
-         low-confidence"
-    ))
-}
-
-#[cfg(test)]
-mod honest_degradation_tests {
-    //! HONEST-DEGRADATION-IMPL-2 (D2 + D5) pure-helper unit tests. The full branch matrix (incl.
-    //! Java-WITH-JDTLS, which the surface tests cannot exercise without a process-global env race) is
-    //! covered here deterministically by INJECTING the configured-resolver set; the daemon-runtime
-    //! SURFACE proofs (real index → `deps list` / `stats`) live in `tests/honest_degradation_impl2.rs`.
-    use super::*;
-    use repo_graph_trust::types::{ReliabilityAxisScore, ReliabilityLevel, TrustReliability};
-
-    fn axis(level: ReliabilityLevel) -> ReliabilityAxisScore {
-        ReliabilityAxisScore {
-            level,
-            reasons: vec![],
-        }
-    }
-    fn high() -> TrustReliability {
-        TrustReliability {
-            import_graph: axis(ReliabilityLevel::HIGH),
-            call_graph: axis(ReliabilityLevel::HIGH),
-            dead_code: axis(ReliabilityLevel::HIGH),
-            change_impact: axis(ReliabilityLevel::HIGH),
-        }
-    }
-    fn call_low() -> TrustReliability {
-        let mut r = high();
-        r.call_graph = axis(ReliabilityLevel::LOW);
-        r
-    }
-    fn langs(ts: &[&str]) -> Vec<String> {
-        ts.iter().map(|s| s.to_string()).collect()
-    }
-    /// The built-in-only configured set (no JDTLS), as `configured_resolver_languages(None)` returns.
-    fn builtin_only() -> Vec<EnrichmentLanguage> {
-        configured_resolver_languages(None)
-    }
-    /// The configured set WITH a JDTLS path present.
-    fn with_jdtls() -> Vec<EnrichmentLanguage> {
-        configured_resolver_languages(Some("/opt/jdtls"))
-    }
-
-    // ── the shared source ───────────────────────────────────────
-    #[test]
-    fn configured_source_is_builtin_plus_jdtls_gated_java() {
-        assert_eq!(
-            configured_resolver_languages(None),
-            vec![EnrichmentLanguage::Rust, EnrichmentLanguage::TypeScript]
-        );
-        assert_eq!(
-            configured_resolver_languages(Some("/p")),
-            vec![
-                EnrichmentLanguage::Rust,
-                EnrichmentLanguage::TypeScript,
-                EnrichmentLanguage::Java
-            ]
-        );
-        // `Some("")` counts as configured (faithful to handle_enrich's `if let Some(path)`).
-        assert!(configured_resolver_languages(Some("")).contains(&EnrichmentLanguage::Java));
-    }
-
-    // ── token → enrichment language (defers family to from_extension) ──
-    #[test]
-    fn token_map_covers_word_tokens_and_react_family() {
-        assert_eq!(
-            token_enrichment_language("typescript"),
-            Some(EnrichmentLanguage::TypeScript)
-        );
-        assert_eq!(
-            token_enrichment_language("javascript"),
-            Some(EnrichmentLanguage::TypeScript)
-        );
-        // React `.tsx`/`.jsx` carry distinct tokens yet ARE the TS/JS family (one resolver).
-        assert_eq!(
-            token_enrichment_language("tsx"),
-            Some(EnrichmentLanguage::TypeScript)
-        );
-        assert_eq!(
-            token_enrichment_language("jsx"),
-            Some(EnrichmentLanguage::TypeScript)
-        );
-        assert_eq!(
-            token_enrichment_language("rust"),
-            Some(EnrichmentLanguage::Rust)
-        );
-        assert_eq!(
-            token_enrichment_language("java"),
-            Some(EnrichmentLanguage::Java)
-        );
-        assert_eq!(token_enrichment_language("c"), None);
-        assert_eq!(token_enrichment_language("cpp"), None);
-        assert_eq!(token_enrichment_language("python"), None);
-    }
-
-    // ── D2 ──────────────────────────────────────────────────────
-    #[test]
-    fn detect_ecosystem_maps_languages() {
-        assert_eq!(detect_deps_ecosystem(&langs(&["typescript"])), "npm");
-        assert_eq!(detect_deps_ecosystem(&langs(&["javascript"])), "npm");
-        // A pure-React repo must NOT regress to none-detected.
-        assert_eq!(detect_deps_ecosystem(&langs(&["tsx"])), "npm");
-        assert_eq!(detect_deps_ecosystem(&langs(&["jsx"])), "npm");
-        assert_eq!(detect_deps_ecosystem(&langs(&["rust"])), "cargo");
-        assert_eq!(detect_deps_ecosystem(&langs(&["c"])), "none-detected");
-        assert_eq!(detect_deps_ecosystem(&langs(&["java"])), "none-detected");
-        assert_eq!(detect_deps_ecosystem(&[]), "none-detected");
-    }
-
-    #[test]
-    fn deps_note_names_language_and_keeps_count() {
-        let note = deps_reader_context_note(&langs(&["c"]), 56);
-        assert!(
-            note.contains("no dependency-manifest reader for C on this build"),
-            "{note}"
-        );
-        assert!(
-            note.contains("56 external includes observed, not attributed"),
-            "{note}"
-        );
-        assert!(!note.contains("npm"), "must not mention npm: {note}");
-    }
-
-    // ── D5 line selection (configured set injected — deterministic, no env) ──
-    #[test]
-    fn d5_none_when_reliability_high() {
-        assert!(
-            relationship_next_action_line(&high(), &langs(&["rust"]), &builtin_only()).is_none()
-        );
-        assert!(relationship_next_action_line(&high(), &langs(&["c"]), &builtin_only()).is_none());
-    }
-
-    #[test]
-    fn d5_builtin_languages_suggest_enrich() {
-        for l in ["rust", "typescript", "javascript", "tsx", "jsx"] {
-            let line =
-                relationship_next_action_line(&call_low(), &langs(&[l]), &builtin_only()).unwrap();
-            assert!(line.contains("rmap enrich"), "{l}: {line}");
-        }
-    }
-
-    #[test]
-    fn d5_c_repo_states_no_path() {
-        let line =
-            relationship_next_action_line(&call_low(), &langs(&["c"]), &builtin_only()).unwrap();
-        assert!(
-            line.contains("no semantic-resolution path exists for C"),
-            "{line}"
-        );
-        assert!(
-            !line.contains("rmap enrich"),
-            "must not suggest enrich on C: {line}"
-        );
-    }
-
-    #[test]
-    fn d5_cpp_python_named_no_enrich() {
-        let line =
-            relationship_next_action_line(&call_low(), &langs(&["cpp", "python"]), &builtin_only())
-                .unwrap();
-        assert!(line.contains("C++/Python"), "{line}");
-        assert!(!line.contains("rmap enrich"), "{line}");
-    }
-
-    #[test]
-    fn d5_java_without_jdtls_says_configure_jdtls() {
-        // The false-promise guard: Java with NO configured resolver must NOT suggest a (blind) enrich.
-        let line =
-            relationship_next_action_line(&call_low(), &langs(&["java"]), &builtin_only()).unwrap();
-        assert!(line.contains("requires JDTLS"), "{line}");
-        assert!(line.contains("JDTLS_PATH"), "{line}");
-        assert!(!line.contains("rmap enrich"), "{line}");
-    }
-
-    #[test]
-    fn d5_java_with_jdtls_suggests_enrich() {
-        // With JDTLS configured (Java in the set), enrich IS the remedy.
-        let line =
-            relationship_next_action_line(&call_low(), &langs(&["java"]), &with_jdtls()).unwrap();
-        assert!(line.contains("rmap enrich"), "{line}");
-    }
-
-    #[test]
-    fn d5_mixed_builtin_and_no_resolver_prefers_enrich() {
-        // Rust + C: enrichment helps the Rust part → suggest it ("resolve more", honestly partial).
-        let line =
-            relationship_next_action_line(&call_low(), &langs(&["c", "rust"]), &builtin_only())
-                .unwrap();
-        assert!(line.contains("rmap enrich"), "{line}");
-    }
-
-    #[test]
-    fn d5_unknown_only_language_emits_nothing() {
-        assert!(
-            relationship_next_action_line(&call_low(), &langs(&["other"]), &builtin_only())
-                .is_none()
-        );
-        assert!(relationship_next_action_line(&call_low(), &[], &builtin_only()).is_none());
-    }
-
-    #[test]
-    fn d5_triggers_on_import_or_change_axis_and_not_medium() {
-        let mut import_low = high();
-        import_low.import_graph = axis(ReliabilityLevel::LOW);
-        assert!(
-            relationship_next_action_line(&import_low, &langs(&["rust"]), &builtin_only())
-                .is_some()
-        );
-        let mut medium = high();
-        medium.call_graph = axis(ReliabilityLevel::MEDIUM);
-        assert!(relationship_next_action_line(&medium, &langs(&["c"]), &builtin_only()).is_none());
-    }
-}
+// HONEST-DEGRADATION-IMPL-2-REFACTOR: the pure reader-context label helpers (D2 ecosystem + note, D5
+// next-action line) and their unit tests moved to `reader_context.rs` — behavior unchanged. Re-exported
+// `pub(crate)` so this module's call sites (`detect_deps_ecosystem`, `deps_reader_context_note`,
+// `relationship_next_action_line`) AND `orient_coherence`'s `crate::dispatch::relationship_reliability_is_low`
+// / `…::relationship_next_action_line` resolve exactly as before (a compile-time path alias only).
+pub(crate) use crate::reader_context::{
+    deps_reader_context_note, detect_deps_ecosystem, relationship_next_action_line,
+    relationship_reliability_is_low,
+};
