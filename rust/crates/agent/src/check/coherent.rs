@@ -135,6 +135,8 @@ pub fn check_to_coherent(
         truncated,
         // check has NO daemon trust overlay (D-CHECK-2): the field stays absent on the wire.
         trust_briefing: None,
+        // D5 (IMPL-2) next-action is an orient/stats surface; check never renders it.
+        relationship_next_action: None,
     };
 
     CoherenceEnvelope::new(value, provenance, trust, freshness)

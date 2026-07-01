@@ -29,6 +29,7 @@ fn minimal_response() -> OrientResponse {
         next: vec![],
         truncated: false,
         trust_briefing: None,
+        relationship_next_action: None,
     }
 }
 
@@ -443,9 +444,9 @@ fn deserialize_from_daemon_json() {
 // ── The CoherenceEnvelope wrapper wire shape (preserved, depth-aware) ──
 
 #[test]
-fn wrapper_full_renders_dense_body_certainty_block_and_degradation() {
+fn wrapper_full_renders_dense_body_serving_block_and_degradation() {
     // The full daemon wire shape, rendered at --full: dense headline + the
-    // expanded per-axis Degradation + the full Certainty/provenance block.
+    // expanded per-axis Degradation + the full Serving/provenance block (D3 relabel).
     let json = r#"{
             "value": {
                 "schema": "rgr.agent.v1",
@@ -491,15 +492,22 @@ fn wrapper_full_renders_dense_body_certainty_block_and_degradation() {
     // Full per-axis Degradation present at --full.
     assert!(out.contains("Degradation"));
     assert!(out.contains("Call resolution rate: 78%"));
-    // Full Certainty/provenance block from the ROOT axes (lowercased).
-    assert!(out.contains("Certainty"));
-    assert!(out.contains("class partial, freshness precisionpending"));
-    assert!(out.contains("sources: livegraph, sqlite"));
+    // HONEST-DEGRADATION-IMPL-2 (D3): the footer is SERVING/provenance, NOT "Certainty"; the answer-class
+    // is scoped ("answer basis partial"), never a bare global word; freshness + sources are preserved.
+    assert!(out.contains("Serving"), "{out}");
+    assert!(
+        !out.contains("Certainty"),
+        "the global-certainty label must be gone: {out}"
+    );
+    assert!(out.contains("answer basis partial"), "{out}");
+    assert!(out.contains("some required inputs incomplete"), "{out}");
+    assert!(out.contains("freshness precisionpending"), "{out}");
+    assert!(out.contains("sources: livegraph, sqlite"), "{out}");
 }
 
 #[test]
-fn wrapper_small_has_compressed_certainty_no_degradation() {
-    // Not degraded, small budget: one-line compressed certainty, no Degradation block.
+fn wrapper_small_has_compressed_serving_no_degradation() {
+    // Not degraded, small budget: one-line compressed Serving posture (D3 relabel), no Degradation block.
     let json = r#"{
             "value": {
                 "schema": "rgr.agent.v1",
@@ -522,8 +530,41 @@ fn wrapper_small_has_compressed_certainty_no_degradation() {
     let out = render_orient_envelope(&env, OrientDepth::Small);
     assert!(out.contains("clean-app"));
     assert!(!out.contains("Degradation"));
-    // Compressed one-line certainty (not the multi-line block).
-    assert!(out.contains("Certainty: exact/fresh · sources: sqlite"));
+    // HONEST-DEGRADATION-IMPL-2 (D3): compressed one-line Serving posture — scoped answer-basis, NOT a
+    // bare global "exact" under "Certainty".
+    assert!(
+        out.contains("Serving: answer basis exact, freshness fresh · sources: sqlite"),
+        "{out}"
+    );
+    assert!(!out.contains("Certainty"), "{out}");
+}
+
+// ── HONEST-DEGRADATION-IMPL-2 (D5) — toolchain-aware next-action line renders ──────────────────────
+
+#[test]
+fn relationship_next_action_renders_in_headline() {
+    // D5: the daemon-supplied next-action renders in the dense headline (present at every budget). The
+    // daemon decides WHICH line (here the C no-path case); the renderer surfaces it verbatim.
+    let mut resp = minimal_response();
+    resp.relationship_next_action = Some(
+        "no semantic-resolution path exists for C on this build; these relationship facts remain \
+         low-confidence"
+            .to_string(),
+    );
+    let out = resp.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("no semantic-resolution path exists for C"),
+        "{out}"
+    );
+}
+
+#[test]
+fn relationship_next_action_absent_renders_nothing() {
+    // None (resolved repo / no honest statement) → no line, no noise.
+    let resp = minimal_response(); // relationship_next_action: None
+    let out = resp.render_human(OrientDepth::Small);
+    assert!(!out.contains("semantic-resolution"), "{out}");
+    assert!(!out.contains("rmap enrich"), "{out}");
 }
 
 // ── ORIENT-DENSITY-1 review-1 #1: docs are a load-bearing headline fact ──

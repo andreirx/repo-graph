@@ -189,6 +189,13 @@ pub struct CoherentOrientResult {
     /// (absent on the wire) unless degraded; disjoint from the envelope root `trust: TrustPosture`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trust_briefing: Option<serde_json::Value>,
+    /// HONEST-DEGRADATION-IMPL-2 (D5): the daemon's toolchain-aware honest next-action line for a
+    /// LOW-relationship-reliability repo (e.g. "run `rmap enrich` to resolve more" / "no
+    /// semantic-resolution path exists for C on this build"). Carried as plain text (the daemon owns the
+    /// resolver-availability keying; the agent crate stays toolchain-agnostic). Populated post-fold by the
+    /// daemon adapter, like `display_name` / `trust_briefing`; `None` (absent on the wire) unless rendered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relationship_next_action: Option<String>,
 }
 
 // ── Source classification (pure, by signal code) ──────────────────
@@ -523,6 +530,8 @@ pub fn to_coherent(
             next_omitted_count,
             truncated,
             trust_briefing,
+            // D5 (IMPL-2) next-action is populated post-fold by the daemon adapter (build_orient_envelope).
+            relationship_next_action: None,
         };
         return CoherenceEnvelope::resolution_only(value);
     }
@@ -583,6 +592,8 @@ pub fn to_coherent(
         next_omitted_count,
         truncated,
         trust_briefing,
+        // D5 (IMPL-2) next-action is populated post-fold by the daemon adapter (build_orient_envelope).
+        relationship_next_action: None,
     };
 
     CoherenceEnvelope::new(value, root_provenance, root_trust, root_freshness)

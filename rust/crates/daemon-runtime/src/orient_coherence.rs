@@ -133,9 +133,15 @@ pub(crate) fn build_orient_envelope(
         }
     }
 
-    let trust_briefing = compute_trust_briefing(repo_state, repo_uid, &snapshot_uid);
+    let (trust_briefing, relationship_next_action) =
+        compute_briefing_and_remedy(repo_state, repo_uid, &snapshot_uid);
 
-    to_coherent(result, &decisions, trust_briefing, stale)
+    let mut envelope = to_coherent(result, &decisions, trust_briefing, stale);
+    // HONEST-DEGRADATION-IMPL-2 (D5): place the daemon-computed next-action onto the value (populated
+    // post-fold, like `display_name`). It rides the value as a reader hint, NOT a coherence leaf, so it
+    // does not participate in the MEET fold.
+    envelope.value.relationship_next_action = relationship_next_action;
+    envelope
 }
 
 /// The symbol stable key when the focus resolved to a SYMBOL node (CALLERS/CALLEES targets); else `None`.
@@ -232,9 +238,56 @@ pub(crate) fn compute_trust_briefing(
     let storage = repo_state.storage().ok()?;
     let snapshot = storage.get_snapshot(snapshot_uid).ok().flatten()?;
     let trust = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS")?;
-    if trust.has_degradation() || !trust.caveats.is_empty() {
-        serde_json::to_value(&trust).ok()
+    briefing_json(&trust)
+}
+
+/// The degraded-only briefing gate, extracted so orient (via [`compute_briefing_and_remedy`]) and explain
+/// (via [`compute_trust_briefing`]) apply the SAME rule: `Some(overlay-as-json)` iff any axis is non-HIGH
+/// or a caveat is present; else `None` (absent on the wire).
+fn briefing_json(overlay: &repo_graph_trust::TrustOverlaySummary) -> Option<serde_json::Value> {
+    if overlay.has_degradation() || !overlay.caveats.is_empty() {
+        serde_json::to_value(overlay).ok()
     } else {
         None
     }
+}
+
+/// HONEST-DEGRADATION-IMPL-2 (D5): compute orient's degraded-state briefing AND its toolchain-aware
+/// next-action line from ONE overlay — orient assembles the trust overlay only ONCE (no double assembly on
+/// the primary surface). The next-action uses the SAME dispatch helper (`relationship_next_action_line`,
+/// keyed on `configured_resolver_languages_from_env`) `stats` uses, so the two surfaces render ONE
+/// coherent line for the same repo. `None`/`None` on any read failure (honest silence).
+fn compute_briefing_and_remedy(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    snapshot_uid: &str,
+) -> (Option<serde_json::Value>, Option<String>) {
+    let Ok(storage) = repo_state.storage() else {
+        return (None, None);
+    };
+    let Some(snapshot) = storage.get_snapshot(snapshot_uid).ok().flatten() else {
+        return (None, None);
+    };
+    let Some(overlay) =
+        compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS")
+    else {
+        return (None, None);
+    };
+    let briefing = briefing_json(&overlay);
+    // Only fetch the repo languages when a relationship axis is actually LOW — this guards the
+    // repo-summary COUNT off the healthy-repo hot path. (The line helper re-checks LOW for safety.)
+    let remedy = if crate::dispatch::relationship_reliability_is_low(&overlay.reliability) {
+        let languages =
+            repo_graph_agent::AgentStorageRead::compute_repo_summary(&storage, snapshot_uid)
+                .map(|s| s.languages)
+                .unwrap_or_default();
+        crate::dispatch::relationship_next_action_line(
+            &overlay.reliability,
+            &languages,
+            &crate::dispatch::configured_resolver_languages_from_env(),
+        )
+    } else {
+        None
+    };
+    (briefing, remedy)
 }

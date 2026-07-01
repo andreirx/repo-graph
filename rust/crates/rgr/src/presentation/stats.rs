@@ -80,6 +80,12 @@ pub struct StatsResponse {
     /// never fabricate a posture we did not compute).
     #[serde(default)]
     pub import_graph_reliability: Option<StatsReliabilityAxis>,
+    /// HONEST-DEGRADATION-IMPL-2 (D5): the daemon's toolchain-aware honest next-action line, present only
+    /// when relationship reliability is LOW. Rendered beneath the dependency caveat. `None` (absent on the
+    /// wire) on a resolved repo or when no honest statement applies. Coherent with `orient`'s line (same
+    /// daemon helper).
+    #[serde(default)]
+    pub relationship_next_action: Option<String>,
 }
 
 /// HONEST-DEGRADATION-IMPL-1 (D1): the import-graph reliability axis carried inline on the stats
@@ -211,6 +217,12 @@ impl StatsResponse {
             out.push_str(&caveat);
             out.push('\n');
         }
+        // HONEST-DEGRADATION-IMPL-2 (D5): the toolchain-aware honest next-action, beneath the dependency
+        // caveat (the daemon emits it only when relationship reliability is LOW; coherent with `orient`).
+        if let Some(line) = &self.relationship_next_action {
+            out.push_str(line);
+            out.push('\n');
+        }
 
         // ── By fan-in ──────────────────────────────────────────────
         out.push_str(&heading("By fan-in"));
@@ -325,6 +337,7 @@ mod tests {
             count: 3,
             total_symbols: None,
             import_graph_reliability: None,
+            relationship_next_action: None,
             stats: vec![
                 ModuleStats {
                     module: "src/handlers".to_string(),
@@ -480,6 +493,7 @@ mod tests {
             count: 0,
             total_symbols: None,
             import_graph_reliability: None,
+            relationship_next_action: None,
             stats: vec![],
         };
         let output = resp.render_human();
@@ -497,6 +511,7 @@ mod tests {
             count: 0,
             total_symbols: None,
             import_graph_reliability: None,
+            relationship_next_action: None,
             stats: vec![],
         };
         let output = resp.render_human();
@@ -565,6 +580,7 @@ mod tests {
             count: 1,
             total_symbols: Some(3977),
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
+            relationship_next_action: None,
             stats: vec![degenerate_module()],
         };
         let output = resp.render_human();
@@ -593,6 +609,7 @@ mod tests {
             count: 1,
             total_symbols: Some(3977),
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
+            relationship_next_action: None,
             stats: vec![degenerate_module()],
         };
         let output = resp.render_human();
@@ -637,5 +654,39 @@ mod tests {
             !output.contains("imports are unresolved") && !output.contains("0 imports"),
             "must never manufacture an unresolved-count claim: {output}"
         );
+    }
+
+    // ── HONEST-DEGRADATION-IMPL-2 (D5) — toolchain-aware next-action line renders ──────────────────
+
+    #[test]
+    fn render_human_renders_relationship_next_action_beneath_caveat() {
+        // D5: the daemon-supplied next-action renders in the reliability-context area (after the
+        // dependency caveat, before the fan-in section). The daemon owns WHICH line; the renderer just
+        // surfaces it (here the C no-path case).
+        let mut resp = sample_stats();
+        resp.import_graph_reliability = Some(axis("LOW", &["unresolved_imports=1090"]));
+        resp.relationship_next_action = Some(
+            "no semantic-resolution path exists for C on this build; these relationship facts remain \
+             low-confidence"
+                .to_string(),
+        );
+        let output = resp.render_human();
+        let action_pos = output
+            .find("no semantic-resolution path exists for C")
+            .expect("next-action present");
+        let fanin_pos = output.find("By fan-in").expect("fan-in section present");
+        assert!(
+            action_pos < fanin_pos,
+            "next-action must precede fan-in: {output}"
+        );
+    }
+
+    #[test]
+    fn render_human_omits_next_action_when_absent() {
+        // None (resolved repo / no honest statement) → nothing rendered, no noise.
+        let resp = sample_stats(); // relationship_next_action: None
+        let output = resp.render_human();
+        assert!(!output.contains("semantic-resolution"), "{output}");
+        assert!(!output.contains("rmap enrich"), "{output}");
     }
 }

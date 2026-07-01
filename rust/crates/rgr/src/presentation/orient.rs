@@ -117,16 +117,32 @@ impl OrientDepth {
     }
 }
 
+/// HONEST-DEGRADATION-IMPL-2 (D3): a reader-context gloss for the serving `AnswerClass`, faithful to its
+/// `repo-graph-trust-model` doc-comments — it describes the answer's required-INPUT basis + serving epoch,
+/// NOT a global certainty. Empty for an unrecognized class (the bare scoped `answer basis {class}` then
+/// stands on its own). Deliberately NOT a "served from snapshot" gloss (the ratified D3 correction).
+fn answer_class_phrase(class: &str) -> &'static str {
+    match class {
+        "exact" => "required inputs complete for this query",
+        "partial" => "some required inputs incomplete",
+        "stale" => "served from last-good epoch (refresh in flight)",
+        "unavailable" => "not answerable from current state",
+        _ => "",
+    }
+}
+
 /// Render orient's coherence-wrapped daemon response, DENSE (ORIENT-DENSITY-1).
 ///
 /// The body (`render_human`) now LEADS with the dense, NAMED, load-bearing
-/// orientation and trades DEPTH by budget. This wrapper appends the CERTAINTY
-/// footer from the ROOT axes (`trust` / `freshness` / `provenance.source`) —
-/// W4: certainty axes render from `root.trust`, the degradation from
-/// `value.trust_briefing`. The footer is COMPRESSED to one honest line at
-/// small/medium budget and expands to the full provenance block at
-/// large/`--full` (§5: budget trades depth, the provenance is never dropped,
-/// only condensed).
+/// orientation and trades DEPTH by budget. This wrapper appends the SERVING /
+/// provenance footer from the ROOT axes (`trust` / `freshness` /
+/// `provenance.source`) — HONEST-DEGRADATION-IMPL-2 (D3): these are
+/// serving/answer-basis facts (the answer's required-input completeness +
+/// freshness + sources), NOT global certainty; the relationship reliability
+/// rides the separate Degradation section from `value.trust_briefing`. The
+/// footer is COMPRESSED to one honest line at small/medium budget and expands
+/// to the full provenance block at large/`--full` (§5: budget trades depth, the
+/// provenance is never dropped, only condensed).
 pub fn render_orient_envelope(
     env: &CoherenceEnvelope<OrientResponse>,
     depth: OrientDepth,
@@ -142,11 +158,25 @@ pub fn render_orient_envelope(
         .map(|s| format!("{s:?}").to_lowercase())
         .collect();
 
+    // HONEST-DEGRADATION-IMPL-2 (D3): this footer is SERVING/provenance, not global certainty. The
+    // answer-class is `AnswerClass` — "every required basis is complete for the query and data is fresh"
+    // for `Exact` (`repo-graph-trust-model`), i.e. the answer's INPUT BASIS + freshness, NOT the
+    // call/import reliability (which rides the separate Degradation/Reliability sections). Heading +
+    // scoped "answer basis {class}" so it never reads as a bare global "exact".
+    let phrase = answer_class_phrase(&class);
     if depth.shows_full_detail() {
-        // Full provenance block (large / --full).
+        // Full serving/provenance block (large / --full).
         out.push_str("\n\n");
-        out.push_str(&heading("Certainty"));
-        out.push_str(&bullet(&format!("class {class}, freshness {freshness}")));
+        out.push_str(&heading("Serving"));
+        if phrase.is_empty() {
+            out.push_str(&bullet(&format!(
+                "answer basis {class}; freshness {freshness}"
+            )));
+        } else {
+            out.push_str(&bullet(&format!(
+                "answer basis {class} ({phrase}); freshness {freshness}"
+            )));
+        }
         if !sources.is_empty() {
             out.push_str(&bullet(&format!("sources: {}", sources.join(", "))));
         }
@@ -154,13 +184,15 @@ pub fn render_orient_envelope(
             out.push_str(&bullet(&format!("fallback: {}", reason.as_str())));
         }
     } else {
-        // Compressed one-line certainty (small / medium) — honest, not dropped.
+        // Compressed one-line serving posture (small / medium) — honest, not dropped.
         let src = if sources.is_empty() {
             String::new()
         } else {
             format!(" · sources: {}", sources.join(", "))
         };
-        out.push_str(&format!("\n\nCertainty: {class}/{freshness}{src}"));
+        out.push_str(&format!(
+            "\n\nServing: answer basis {class}, freshness {freshness}{src}"
+        ));
     }
     out.trim_end().to_string()
 }
@@ -202,6 +234,11 @@ pub struct OrientResponse {
     /// the envelope ROOT `trust` (rendered separately by [`render_orient_envelope`]).
     #[serde(default)]
     pub trust_briefing: Option<TrustOverlay>,
+    /// HONEST-DEGRADATION-IMPL-2 (D5): the daemon's toolchain-aware honest next-action line, present only
+    /// when relationship reliability is LOW. Rendered beneath the headline reliability caveat. `None`
+    /// (absent on the wire) on a resolved repo or when no honest statement applies.
+    #[serde(default)]
+    pub relationship_next_action: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,6 +367,12 @@ impl OrientResponse {
         }
         if let Some(line) = self.reliability_caveat_line() {
             out.push_str(&line);
+            out.push('\n');
+        }
+        // HONEST-DEGRADATION-IMPL-2 (D5): the toolchain-aware honest next-action, beneath the reliability
+        // caveat (rendered at every budget — a next-action is load-bearing at any depth).
+        if let Some(line) = &self.relationship_next_action {
+            out.push_str(line);
             out.push('\n');
         }
 
