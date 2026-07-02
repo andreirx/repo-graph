@@ -3790,3 +3790,46 @@ error: InternalError: git churn failed: failed to spawn git: No such file or dir
 
 **Verification:** All quality commands (churn, hotspots, risk, coverage) working
 on live daemon with launchd service.
+
+---
+
+## Fresh-Eyes Review (2026-07-02, v0.4.0 self-dogfood)
+
+A fresh-eyes review at v0.4.0 (VISION distilled → `docs/FUTURE-ITERATIONS.md`;
+codebase audit; rmap self-dogfood on an isolated index of repo-graph itself).
+Findings F1–F4; dispositions inline.
+
+**F1 — `orient --budget medium` does not cap the package-groups section (P2).**
+On repo-graph's self-index (316 package groups) `medium` printed ALL groups
+(~450 lines); on nginx (15 groups) medium is 53 lines. The C5 progressive
+ladder caps other sections but not this one, so information density collapses
+exactly on high-group-count repos. Fix direction: cap groups at medium (top-N
+by size + "+N more — rmap stats"), uncap only at large/full.
+**Disposition: OPEN — quick-win candidate (ORIENT-DENSITY follow-up class).**
+
+**F2 — Complexity is emitted only by the C and TS extractors (P1, honesty).**
+`rust-extractor`, `java-extractor`, `python-extractor` emit no complexity
+measurements; top-500 complexity on the self-index contains zero Rust
+functions while `orient`/`hotspots` render the ranking as repo-wide fact.
+Same violation class as HONEST-DEGRADATION-1 D1 (partial measurement rendered
+total). **Disposition: SLICED — `docs/slices/metric-lang-coverage-1.md`
+(coverage caveat mechanism + Rust emission; Java/Python follow-ups).**
+
+**F3 — No "retired tree" concept in the module/orientation model (P3).**
+There is no way to tell the index that a tracked tree is legacy (downweight /
+label in orientation). Made acute by the TS prototype (F4); after
+TS-PROTOTYPE-RETIREMENT-1 deletes it, the general need may not recur — do not
+build the mechanism speculatively (VISION acid test).
+**Disposition: WATCH — revisit only if a real retained-legacy case appears.**
+
+**F4 — The legacy TS prototype dominates every self-index signal (P1, focus).**
+~90k LOC (`src/` + `test/` + `parity-fixtures/`), stale since 2026-04-26: all
+complexity centers, all top hotspots, 4/6 module cycles, and ~60 package
+groups point into it. **Disposition: SLICED —
+`docs/slices/ts-prototype-retirement-1.md` (verify-then-delete; git history
+is the archive).**
+
+Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
+still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
+on self-index with the D5 next-action line correctly pointing at `rmap enrich`
+(ENRICH-LIFECYCLE-1 remains the fix for the lifecycle half).

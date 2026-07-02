@@ -52,6 +52,23 @@ a progressive budget ladder (**C5**), the smoke harness stopped miscounting verd
 below:** orient under-segmentation (#3/#4), the reliability reframe, and capability (enrichment /
 manifest readers) — no longer honesty, but depth.
 
+**Focus corrections — fresh-eyes review (2026-07-02, v0.4.0).** The v0.4.0 review (VISION distilled —
+speculative directions moved to `docs/FUTURE-ITERATIONS.md`; governance surface frozen) + a
+self-dogfood (rmap on repo-graph) added three slices. Context: TECH-DEBT § _Fresh-Eyes Review_ (F1–F4).
+
+- **METRIC-LANG-COVERAGE-1** (P1 — honesty class) — complexity is emitted only by the C/TS
+  extractors; on a Rust repo `orient`/`hotspots`/`metrics` rank ONLY the legacy TS and say
+  nothing. Fix: data-driven per-language measurement-coverage caveat + Rust cyclomatic
+  emission. `docs/slices/metric-lang-coverage-1.md`. _(F2)_
+- **TS-PROTOTYPE-RETIREMENT-1** (P1 — focus) — bury the ~90k-LOC TS prototype
+  (`src/`, `test/`, `parity-fixtures/`): it dominates every self-index signal
+  (all complexity centers/hotspots, 4/6 cycles). Verify-then-delete; git history is the
+  archive. `docs/slices/ts-prototype-retirement-1.md`. _(F4)_
+- **ENGINE-CONSOLIDATION-1** (P2 — SPEC) — name the end-state for the two coexisting
+  read engines (SQLite pipeline vs LiveGraph stack): read-path inventory → fact-class
+  ownership (honoring the RED floor) → checkable "consolidated" definition + milestones →
+  DECISION_REQUIRED list for ratification. `docs/slices/engine-consolidation-1.md`.
+
 **P1 — headline**
 
 - **orient module under-segmentation** — `orient` reports "1 module" on deeply-nested
