@@ -70,6 +70,21 @@ self-dogfood (rmap on repo-graph) added three slices. Context: TECH-DEBT § _Fre
   ownership (honoring the RED floor) → checkable "consolidated" definition + milestones →
   DECISION_REQUIRED list for ratification. `docs/slices/engine-consolidation-1.md`.
 
+**Field findings — first real install on a second Mac (2026-07-02).** A fresh install +
+first index of a 160k-file repo surfaced four truth/visibility failures on the
+distribution surface, sliced as:
+
+- **INSTALL-ROBUSTNESS-2** (P1 — installer truth) — version resolution dies on the
+  GitHub API rate limit (403; resolve via `github.com` redirect + `GITHUB_TOKEN`
+  fallback), and the daemon-start retry loop reports "failed" while the daemon is
+  actually running (socket liveness must be the predicate).
+  `docs/slices/install-robustness-2.md`.
+- **DAEMON-VISIBILITY-1** (P1 — long-op honesty) — `rmap index` reported a live 160k-file
+  index as "timed out after 300s" (it completed ~10 min later); `doctor` showed no
+  in-progress operation, no enrichment status, and reported the daemon-held database as
+  "error opening database". Exposure of coordinator state + honest timeout behavior +
+  doctor contention truth. `docs/slices/daemon-visibility-1.md`.
+
 **P1 — headline**
 
 - **orient module under-segmentation** — `orient` reports "1 module" on deeply-nested
