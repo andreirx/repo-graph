@@ -12,9 +12,13 @@ Evidence (self-index of repo-graph, v0.4.0, isolated state):
   TypeScript. `orient`'s "Complexity centers" and `hotspots` likewise show
   only TS files, on a repo whose product code is ~250k LOC of Rust
   (`dispatch.rs` alone: 7,935 lines, 131 match arms — absent).
-- Root cause verified in source: only `c-extractor` and `ts-extractor` have a
-  `metrics.rs`; the **Rust, Java, and Python extractors emit no complexity
-  measurements at all**.
+- Root cause (corrected 2026-07-02 by the build's evidence — the original
+  "Rust/Java/Python all unmeasured" premise was wrong): **only the Rust
+  extractor lacked complexity emission**. `java-extractor` has `metrics.rs`
+  and `python-extractor` computes cyclomatic inline; they simply have no
+  files in this repo. Part A is therefore honesty *infrastructure* guarding
+  the general case (future unsupported languages, bodyless-heavy snapshots),
+  not a patch for a specific Java/Python gap.
 - No rendering surface says so. `orient` presents "Complexity centers (by
   cyclomatic complexity)" as repo-wide fact; `hotspots` scores
   `lines_changed × sum_complexity` where unmeasured languages contribute
@@ -54,8 +58,9 @@ arms, `?`, `if let` chains). Emit the same measurement kinds c-extractor
 emits where they transfer (at minimum cyclomatic; nesting/length/params if
 the shared pattern provides them cheaply).
 
-**Out of scope:** Java and Python emission (follow-up slices — the part A
-mechanism already reports them honestly); cognitive complexity for Rust;
+**Out of scope:** Java and Python emission (already shipped, per the corrected
+premise above — the part A mechanism reports any future gap honestly);
+cognitive complexity for Rust;
 any change to hotspot formula; enrichment; the TS prototype (separate slice).
 
 ## 3. Stop conditions

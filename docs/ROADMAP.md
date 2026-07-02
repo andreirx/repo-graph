@@ -56,10 +56,11 @@ manifest readers) — no longer honesty, but depth.
 speculative directions moved to `docs/FUTURE-ITERATIONS.md`; governance surface frozen) + a
 self-dogfood (rmap on repo-graph) added three slices. Context: TECH-DEBT § _Fresh-Eyes Review_ (F1–F4).
 
-- **METRIC-LANG-COVERAGE-1** (P1 — honesty class) — complexity is emitted only by the C/TS
-  extractors; on a Rust repo `orient`/`hotspots`/`metrics` rank ONLY the legacy TS and say
-  nothing. Fix: data-driven per-language measurement-coverage caveat + Rust cyclomatic
-  emission. `docs/slices/metric-lang-coverage-1.md`. _(F2)_
+- **METRIC-LANG-COVERAGE-1** (P1 — honesty class) — only the Rust extractor lacked
+  complexity emission (premise corrected 2026-07-02: Java/Python already emit); on a Rust
+  repo `orient`/`hotspots`/`metrics` ranked ONLY the legacy TS and said nothing. Fix:
+  data-driven per-language measurement-coverage caveat (general honesty infrastructure) +
+  Rust cyclomatic emission. `docs/slices/metric-lang-coverage-1.md`. _(F2)_
 - **TS-PROTOTYPE-RETIREMENT-1** (P1 — focus) — bury the ~90k-LOC TS prototype
   (`src/`, `test/`, `parity-fixtures/`): it dominates every self-index signal
   (all complexity centers/hotspots, 4/6 cycles). Verify-then-delete; git history is the

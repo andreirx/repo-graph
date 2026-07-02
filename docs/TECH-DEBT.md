@@ -3807,13 +3807,16 @@ exactly on high-group-count repos. Fix direction: cap groups at medium (top-N
 by size + "+N more — rmap stats"), uncap only at large/full.
 **Disposition: OPEN — quick-win candidate (ORIENT-DENSITY follow-up class).**
 
-**F2 — Complexity is emitted only by the C and TS extractors (P1, honesty).**
-`rust-extractor`, `java-extractor`, `python-extractor` emit no complexity
-measurements; top-500 complexity on the self-index contains zero Rust
-functions while `orient`/`hotspots` render the ranking as repo-wide fact.
-Same violation class as HONEST-DEGRADATION-1 D1 (partial measurement rendered
-total). **Disposition: SLICED — `docs/slices/metric-lang-coverage-1.md`
-(coverage caveat mechanism + Rust emission; Java/Python follow-ups).**
+**F2 — The Rust extractor emitted no complexity (P1, honesty).**
+*(Premise corrected 2026-07-02 by METRIC-LANG-COVERAGE-1's build evidence:
+the original claim that Java/Python were also unmeasured was WRONG —
+`java-extractor` has `metrics.rs`, `python-extractor` computes cyclomatic
+inline; the audit grep never covered those crates.)* Top-500 complexity on
+the self-index contained zero Rust functions while `orient`/`hotspots`
+rendered the ranking as repo-wide fact. Same violation class as
+HONEST-DEGRADATION-1 D1. **Disposition: SLICED —
+`docs/slices/metric-lang-coverage-1.md` (data-driven coverage-caveat
+mechanism as general honesty infrastructure + Rust emission).**
 
 **F3 — No "retired tree" concept in the module/orientation model (P3).**
 There is no way to tell the index that a tracked tree is legacy (downweight /
