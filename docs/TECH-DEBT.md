@@ -3832,6 +3832,20 @@ groups point into it. **Disposition: SLICED —
 `docs/slices/ts-prototype-retirement-1.md` (verify-then-delete; git history
 is the archive).**
 
+**F5 — SUSPECTED DEFECT: indexes never reach READY on the second machine (P1, investigate before next release).**
+(2026-07-03, v0.4.0 installed build.) Two consecutive `rmap index` runs on the
+160k-file repo — the second left running for HOURS — produced snapshots that
+`orient` will not serve ("no READY snapshot"); `doctor` counts 2 snapshots.
+Snapshots are created `building` and flip to `ready` only at finalize
+(`storage/src/crud/snapshots.rs`), so either (H1) finalize is dying on that
+machine (sleep/panic/OOM — daemon.log will show it) or (H2) a daemon index
+path in 0.4.0 completes without calling `update_snapshot_status(ready)`, or
+(H3) repo-identity mismatch (snapshots attached to a different repo_uid than
+orient resolves). Diagnosis kit issued (daemon.log tail + repo info --json +
+read-only snapshots/repos query). DAEMON-VISIBILITY-1 (in flight) exposes the
+state but does not fix a finalize defect. **Disposition: OPEN — diagnose on
+the second machine; if H2, hotfix slice BEFORE the next release.**
+
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
 on self-index with the D5 next-action line correctly pointing at `rmap enrich`
