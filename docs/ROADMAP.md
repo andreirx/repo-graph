@@ -79,6 +79,12 @@ distribution surface, sliced as:
   fallback), and the daemon-start retry loop reports "failed" while the daemon is
   actually running (socket liveness must be the predicate).
   `docs/slices/install-robustness-2.md`.
+- **INDEX-DISCONNECT-1** (P0 — HOTFIX, gates the next release; ratified: detached completion)
+  — the client's 300s timeout ABORTS the in-flight index (progress-emit failure returns
+  `ControlFlow::Break`): hours of work die on a broken pipe, snapshots stay `building`
+  forever, registration is never persisted (TECH-DEBT F5, root-caused from the second
+  machine's daemon.log). Fix: best-effort emission, up-front registration persistence, no
+  `building` limbo, explicit cancel unchanged. `docs/slices/index-disconnect-1.md`.
 - **DAEMON-VISIBILITY-1** (P1 — long-op honesty) — `rmap index` reported a live 160k-file
   index as "timed out after 300s" (it completed ~10 min later); `doctor` showed no
   in-progress operation, no enrichment status, and reported the daemon-held database as
