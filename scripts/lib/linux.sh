@@ -17,6 +17,12 @@ LINUX_LOG_DIR="${HOME}/.local/share/rmap/logs"
 LINUX_SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 LINUX_SERVICE_NAME="rmapd.service"
 LINUX_PID_FILE="${LINUX_DATA_DIR}/daemon.pid"
+# Daemon Unix socket. MUST match platform-paths::compute_socket_path_from_home
+# (Linux canonical: <home>/.local/share/rmap/daemon.sock). Used ONLY as the canonical
+# DEFAULT for the honest daemon-start failure message (INSTALL-ROBUSTNESS-2 B), under a
+# RMAP_SOCKET_PATH override — the liveness predicate itself is the socket_ping probe
+# read from `rmap doctor --json` (see daemon_socket_answers in install.template.sh).
+LINUX_SOCKET_PATH="${LINUX_DATA_DIR}/daemon.sock"
 
 # Service mode: "systemd" or "manual"
 LINUX_SERVICE_MODE=""
@@ -107,6 +113,13 @@ install_systemd_unit() {
 }
 
 # Enable and start the daemon via systemd.
+#
+# INSTALL-ROBUSTNESS-2 (B): systemctl's exit code is deliberately NOT the
+# daemon-health verdict (same rationale as macOS launchctl bootstrap). A nonzero
+# `start` can still be followed by a daemon that answers within the retry budget,
+# and the source of truth is the caller's verify_daemon_health socket-probe loop.
+# So a nonzero `start` is a WARNING, never a fatal `error`: `error` calls exit 1
+# and would abort the install BEFORE the socket is ever probed.
 start_systemd_service() {
     info "Starting daemon service..."
 
@@ -118,12 +131,13 @@ start_systemd_service() {
         warn "Failed to enable service"
     fi
 
-    # Start
-    if ! systemctl --user start "${LINUX_SERVICE_NAME}"; then
-        error "Failed to start systemd service"
+    # Request start. Do NOT abort on a nonzero start — the socket probe in
+    # setup_linux_daemon_service is the arbiter of success/failure.
+    if systemctl --user start "${LINUX_SERVICE_NAME}"; then
+        info "  Service started: ${LINUX_SERVICE_NAME}"
+    else
+        warn "  systemctl --user start returned nonzero — continuing; the daemon socket probe decides."
     fi
-
-    info "  Service started: ${LINUX_SERVICE_NAME}"
 }
 
 # Stop and disable the daemon via systemd.
@@ -276,38 +290,15 @@ get_daemon_pid() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Daemon Health Verification
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Verify daemon is healthy after startup.
-# Retries up to max_attempts with delay between.
-verify_daemon_health() {
-    local max_attempts="${1:-5}"
-    local delay="${2:-2}"
-    local attempt=1
-
-    info "Verifying daemon health..."
-
-    while [[ ${attempt} -le ${max_attempts} ]]; do
-        if is_daemon_running; then
-            local pid
-            pid="$(get_daemon_pid)"
-            info "  Daemon is running (pid: ${pid})"
-            return 0
-        fi
-
-        info "  Attempt ${attempt}/${max_attempts}: waiting ${delay}s..."
-        sleep "${delay}"
-        ((attempt++))
-    done
-
-    warn "Daemon health check failed after ${max_attempts} attempts"
-    warn "Check logs: ${LINUX_LOG_DIR}/daemon.log"
-
-    if [[ "${LINUX_SERVICE_MODE}" == "systemd" ]]; then
-        warn "Check service: systemctl --user status ${LINUX_SERVICE_NAME}"
-    fi
-
-    return 1
-}
+#
+# INSTALL-ROBUSTNESS-2 (B): verify_daemon_health MOVED to the shared template
+# (install.template.sh) so there is ONE definition in the bundled installer — the
+# old copy here collided with lib/macos.sh's under injection (this Linux copy won
+# and ran on macOS, statting the Linux pidfile that never exists there → a running
+# daemon reported "failed"). The predicate is now socket liveness (the socket_ping
+# probe from `rmap doctor --json`, in daemon_socket_answers), which is platform-
+# agnostic. is_daemon_running()/get_daemon_pid() above stay for potential lifecycle
+# callers but no longer drive the install-time health verdict.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Full Service Setup (called by install.sh)
@@ -316,13 +307,27 @@ verify_daemon_health() {
 # Complete Linux daemon service setup.
 # Called by install.sh when BINARY_ONLY is false.
 # Sets LINUX_SERVICE_MODE and returns it for manifest writing.
+# INSTALL-ROBUSTNESS-2 (B): socket liveness is the source of truth. Sets the
+# DAEMON_OUTCOME global (started / already running / failed) for the final summary.
 setup_linux_daemon_service() {
     # Ensure log directory exists
     mkdir -p "${LINUX_LOG_DIR}"
     chmod 700 "${LINUX_LOG_DIR}"
 
-    # Detect available service mode
+    # Detect service mode FIRST so the install manifest reflects reality on every
+    # path — including the already-running short-circuit below — and export it.
     detect_systemd
+    export LINUX_SERVICE_MODE
+
+    # Already running? If the socket answers (a prior run / manual start / systemd
+    # got there first), do NOT start anything — report it and succeed.
+    if daemon_socket_answers; then
+        local pid
+        pid="$(daemon_pid_best_effort)"
+        info "Daemon already running (pid: ${pid:-unknown}) — leaving it in place."
+        DAEMON_OUTCOME="already running"
+        return 0
+    fi
 
     if [[ "${LINUX_SERVICE_MODE}" == "systemd" ]]; then
         install_systemd_unit
@@ -331,19 +336,35 @@ setup_linux_daemon_service() {
         start_manual_daemon
     fi
 
-    if ! verify_daemon_health 5 2; then
-        warn ""
-        warn "Daemon did not start successfully."
-        warn "You can start it manually: rmapd"
-        if [[ "${LINUX_SERVICE_MODE}" == "systemd" ]]; then
-            warn "Or check: systemctl --user status ${LINUX_SERVICE_NAME}"
-        fi
-        return 1
+    # The retry predicate is the socket probe, NOT the launcher's exit status.
+    if verify_daemon_health 5 2; then
+        local pid
+        pid="$(daemon_pid_best_effort)"
+        info "  Daemon is answering on the socket (pid: ${pid:-unknown})"
+        DAEMON_OUTCOME="started"
+        return 0
     fi
 
-    # Export for manifest writing
-    export LINUX_SERVICE_MODE
-    return 0
+    # Report failure ONLY when the socket never answered — name the ACTUAL probed
+    # path by asking rgr which socket it resolved (resolved_socket_path parses
+    # `rmap doctor --json`) rather than reconstructing it here: rgr's resolver can pick
+    # the LEGACY socket over canonical in the migration case (canonical unreachable,
+    # legacy reachable-but-ping-fails), so a bash ${RMAP_SOCKET_PATH:-${LINUX_SOCKET_PATH}}
+    # could name the WRONG path. The canonical default is passed only as the last-resort
+    # fallback (JSON unparseable); it still honors an RMAP_SOCKET_PATH override, which rgr
+    # reports back verbatim.
+    local probed_socket_path
+    probed_socket_path="$(resolved_socket_path "${RMAP_SOCKET_PATH:-${LINUX_SOCKET_PATH}}")"
+    DAEMON_OUTCOME="failed"
+    warn ""
+    warn "Daemon did not answer on its socket after the retry budget."
+    warn "  Socket probed: ${probed_socket_path}"
+    warn "  Daemon log:    ${LINUX_LOG_DIR}/daemon.log"
+    warn "  Start manually: rmapd"
+    if [[ "${LINUX_SERVICE_MODE}" == "systemd" ]]; then
+        warn "  Inspect service: systemctl --user status ${LINUX_SERVICE_NAME}"
+    fi
+    return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

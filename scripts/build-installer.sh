@@ -90,8 +90,27 @@ info "Building bundled installer..."
 info "  Template: ${TEMPLATE}"
 info "  Output: ${OUTPUT_FILE}"
 
-# Ensure output directory exists
-mkdir -p "$(dirname "${OUTPUT_FILE}")"
+# Ensure output directory exists.
+output_dir="$(dirname "${OUTPUT_FILE}")"
+mkdir -p "${output_dir}" || die "Cannot create output directory: ${output_dir}"
+
+# INSTALL-ROBUSTNESS-2 (assembler honesty, review iteration 5 §5): generate into a
+# FRESH temp file in the SAME directory, validate THAT, then atomically move it into
+# place. The previous code wrote the group's stdout straight to ${OUTPUT_FILE} with
+# `{ ...; } > "${OUTPUT_FILE}"` and then grepped ${OUTPUT_FILE}. If the redirect could
+# not open the output for writing (read-only dir/file, sandbox EPERM/EACCES) the write
+# produced NOTHING — yet under `set -e` bash does NOT abort on a compound-command
+# redirect-open failure (reproduced on bash 3.2: "Permission denied" then "Success!",
+# exit 0). So a STALE-but-valid previous ${OUTPUT_FILE} survived, the post-gen checks
+# validated the STALE file, and the assembler reported success for an assembly that
+# never happened — the repo's cardinal sin of presenting inferred state as observed.
+# mktemp in the same dir fails LOUDLY when the dir is unwritable; validating the temp
+# means we never validate a stale file; the final mv fails LOUDLY when the destination
+# is unwritable — so a write failure now aborts with a named cause and NO false success,
+# and a broken/half-written installer never clobbers the last-good ${OUTPUT_FILE}.
+tmp_output="$(mktemp "${output_dir}/.install.sh.XXXXXX")" \
+    || die "Cannot create a temp output file in ${output_dir} (directory unwritable?)"
+trap 'rm -f "${tmp_output}"' EXIT
 
 # Build the installer by processing template line by line
 {
@@ -180,9 +199,9 @@ MODULES_FOOTER
         die "Marker was not processed (should not happen)"
     fi
 
-} > "${OUTPUT_FILE}"
+} > "${tmp_output}" || die "Failed to write the generated installer to ${tmp_output}"
 
-chmod +x "${OUTPUT_FILE}"
+chmod +x "${tmp_output}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-generation Validation
@@ -190,27 +209,38 @@ chmod +x "${OUTPUT_FILE}"
 
 info "Validating generated installer..."
 
+# Validation runs against the FRESH temp (never a stale ${OUTPUT_FILE}); only after all
+# checks pass is the temp moved into place.
+
 # 1. Verify no unresolved markers remain
-if grep -q "__INJECT_" "${OUTPUT_FILE}"; then
+if grep -q "__INJECT_" "${tmp_output}"; then
     die "Unresolved injection marker found in output"
 fi
 
 # 2. Verify required functions exist
 for func in "${REQUIRED_FUNCTIONS[@]}"; do
-    if ! grep -q "^${func}()" "${OUTPUT_FILE}"; then
+    if ! grep -q "^${func}()" "${tmp_output}"; then
         die "Required function not found in output: ${func}"
     fi
 done
 
 # 3. Shell syntax check
-if ! bash -n "${OUTPUT_FILE}"; then
+if ! bash -n "${tmp_output}"; then
     die "Shell syntax check failed"
 fi
 
 # 4. Verify the bundled modules header is present
-if ! grep -q "BUNDLED PLATFORM MODULES" "${OUTPUT_FILE}"; then
+if ! grep -q "BUNDLED PLATFORM MODULES" "${tmp_output}"; then
     die "Bundled modules header not found in output"
 fi
+
+# All checks passed on the fresh temp — atomically move it into place. A failure here
+# (e.g. destination directory read-only) aborts LOUDLY via die rather than leaving the
+# stale ${OUTPUT_FILE} while claiming success. Same-directory rename = atomic swap, so a
+# reader never sees a half-written installer.
+mv -f "${tmp_output}" "${OUTPUT_FILE}" \
+    || die "Failed to move the generated installer into place: ${OUTPUT_FILE} (destination unwritable?)"
+trap - EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Summary

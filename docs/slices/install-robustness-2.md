@@ -1,6 +1,27 @@
 # INSTALL-ROBUSTNESS-2 — Installer tells the truth and survives GitHub's API
 
-Status: SPECIFIED (2026-07-02) · Track: Distribution robustness
+Status: **DELIVERED (2026-07-03)** · Track: Distribution robustness
+
+## 0. Delivery record (2026-07-03)
+
+Shipped via target-owned relay (builder claude, reviewer codex, approved
+iteration 8) + operator verification. `resolve_version()` is redirect-first
+(`github.com/…/releases/latest` Location header) with API fallback carrying
+`GITHUB_TOKEN` when set; the escape-hatch error preserved. Daemon start truth:
+`daemon_socket_answers` socket probe is the predicate (pre-start
+already-running check; probe between retries; re-probe after the final sleep),
+platform launchers warn-not-fail, summary states started / already running /
+failed. Evidence: 19/19 harness scenarios (`scripts/
+test-install-robustness-2.sh` — stubbed curl for redirect/API/double-failure;
+socket fixtures for the three outcomes), reviewer-executed in-memory function
+spot checks, `build-installer.sh` assembly + bundled-script syntax verified by
+builder, reviewer, AND operator independently; dogfood-isolated green; the
+operator's real daemon untouched throughout. NOTE: the fix reaches end users
+only when `scripts/dist/install.sh` is uploaded to the next release. Process
+note: this slice's review grind exposed the relay evidence-transport gap
+(gitignored build reports invisible to git-based review) — fixed in
+agent-manager (4bb03dc); the builder's tracked-report workaround
+(`test-install-robustness-2.report.md`) is superseded and not committed.
 Origin: real install failures on the operator's second Mac (2026-07-02)
 Prior art: `dist-1-distribution-install-contract.md`, `mac-1-macos-installer.md`,
 `dev-install-doctor-wait-1.md`, `daemon-socket-health-1.md`

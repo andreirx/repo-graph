@@ -48,6 +48,10 @@ fi
 REPO_OWNER="${RMAP_REPO_OWNER:-andreirx}"
 REPO_NAME="repo-graph"
 RELEASES_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases"
+# INSTALL-ROBUSTNESS-2 (A): resolve "latest" from this github.com redirect FIRST
+# (same host as the binary download below — effectively not rate-limited), before
+# ever touching the 60/hr/IP api.github.com endpoint.
+LATEST_RELEASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest"
 DOWNLOAD_BASE="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download"
 
 # Default install directory (user-local, no sudo required)
@@ -79,6 +83,10 @@ BINARY_ONLY="${RMAP_BINARY_ONLY:-false}"
 NON_INTERACTIVE="${RMAP_NON_INTERACTIVE:-false}"
 BUILD_FROM_SOURCE=false
 INTEGRATE_HOSTS=""
+# Resolved by resolve_version (A) / set by the platform daemon setup (B) so the
+# final summary can state which daemon-start case occurred.
+RESOLVED_TAG=""
+DAEMON_OUTCOME=""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utilities
@@ -260,6 +268,19 @@ detect_toolchains() {
 # Version Resolution
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Resolve VERSION to a concrete release tag when it is empty or "latest".
+#
+# INSTALL-ROBUSTNESS-2 (A): the OLD path resolved "latest" via a SINGLE
+# api.github.com call. Unauthenticated GitHub API calls are capped at 60/hr/IP;
+# on a shared IP the install died with 403 for the sake of ONE string — while the
+# actual binary host (github.com, used by download_binary) worked fine. The fix
+# resolves the tag from github.com FIRST (same host as the download, effectively
+# not rate-limited), and only falls back to the API (now GITHUB_TOKEN-aware).
+#
+# Orchestration only: the two network mechanisms live in resolve_version_via_redirect
+# (primary) and resolve_version_via_api (fallback) — split so a bash test harness can
+# stub each independently (see scripts/test-install-robustness-2.sh). Each sets the
+# RESOLVED_TAG global and NEVER aborts, so the fallback decision stays here.
 resolve_version() {
     if [[ -n "${VERSION}" && "${VERSION}" != "latest" ]]; then
         info "Using specified version: ${VERSION}"
@@ -272,43 +293,99 @@ resolve_version() {
         error "curl is required but not found"
     fi
 
-    # Network step: resolve the latest release tag from the GitHub API.
-    #
-    # Observability + fail-fast (the reported silent-hang fix):
-    #   - Log the exact URL before the request so a stall here is attributable.
-    #   - Bound the request with --connect-timeout/--max-time so an unreachable,
-    #     IPv6-stalled, proxied, or rate-limited api.github.com FAILS in seconds
-    #     instead of hanging forever (this curl previously had NO timeout).
-    #   - The curl is split out of the parse pipeline so its exit code is
-    #     observable: a "curl | grep | sed" pipeline assigned via `local` masks
-    #     curl's exit status, which is exactly why the failure was invisible.
-    #     The resolution logic (URL, tag_name parse, 'v'-prefix strip) is
-    #     unchanged — only the plumbing that exposes the exit code differs.
-    #   - 2>/dev/null is dropped so curl's own -S error line (e.g. "curl: (28)
-    #     ...") surfaces alongside our actionable message.
-    # NOTE: api.github.com is the ONLY host this step uses; the binary download
-    # (download_binary) uses github.com. An error here therefore points at the
-    # API host specifically, which distinguishes a rate limit from no connectivity.
-    info "  GET ${RELEASES_URL}/latest"
+    # Primary: github.com redirect (no API, effectively not rate-limited).
+    RESOLVED_TAG=""
+    resolve_version_via_redirect
 
-    local api_response curl_exit
-    api_response="$(curl -fsSL --connect-timeout 10 --max-time 30 "${RELEASES_URL}/latest")" && curl_exit=0 || curl_exit=$?
+    # Fallback: the api.github.com call (rate-limited; GITHUB_TOKEN-authenticated
+    # when the token is set), only if the redirect did not yield a tag.
+    if [[ -z "${RESOLVED_TAG}" ]]; then
+        warn "Could not resolve the version from the github.com redirect; falling back to the GitHub API."
+        resolve_version_via_api
+    fi
+
+    if [[ -z "${RESOLVED_TAG}" ]]; then
+        error "Could not determine the latest version from github.com (redirect) or api.github.com (API) — likely a network/proxy issue or the GitHub API rate limit (60/hr/IP unauthenticated). Retry, set GITHUB_TOKEN to raise the API limit, or pin the version to skip the lookup entirely: RMAP_VERSION=<ver> curl -fsSL <install-url> | bash"
+    fi
+
+    # Remove 'v' prefix (tags are published as vX.Y.Z).
+    VERSION="${RESOLVED_TAG#v}"
+    info "Latest version: ${VERSION}"
+}
+
+# PRIMARY resolver: parse the latest tag from the redirect Location of
+# github.com/<owner>/<repo>/releases/latest via a HEAD request — the SAME host as
+# the binary download, so it is not subject to the api.github.com rate limit.
+# Sets RESOLVED_TAG on success; leaves it empty on any failure so resolve_version
+# can fall back. Returns 0 unconditionally (failure is signalled via empty
+# RESOLVED_TAG, never a nonzero exit — resolve_version owns the fallback decision).
+#
+# Observability discipline (preserved from the api-only version — its comment
+# history records WHY): the curl is split OUT of the parse so its exit code is
+# observable (a "curl | sed" pipeline assigned via `local` masks curl's status);
+# the URL is logged before the request; -S surfaces curl's own error line; and the
+# --connect-timeout/--max-time bounds are NOT weakened (a stall fails in seconds).
+resolve_version_via_redirect() {
+    RESOLVED_TAG=""
+    info "  HEAD ${LATEST_RELEASE_URL}"
+
+    # -I  = HEAD (do not download the release page body).
+    # -o /dev/null + -w '%{redirect_url}' = emit ONLY the 302 Location target,
+    #   e.g. https://github.com/<owner>/<repo>/releases/tag/vX.Y.Z. No -L: we do
+    #   NOT follow the redirect — we only want the tag out of the redirect target.
+    local redirect_url curl_exit
+    redirect_url="$(curl -fsSI -o /dev/null -w '%{redirect_url}' \
+        --connect-timeout 10 --max-time 30 "${LATEST_RELEASE_URL}")" && curl_exit=0 || curl_exit=$?
 
     if [[ "${curl_exit}" -ne 0 ]]; then
-        error "Could not reach api.github.com (curl exit ${curl_exit}) — likely a network/proxy issue or the GitHub API rate limit. This step is the ONLY one that contacts api.github.com (the binary download uses github.com), so this points at the API host specifically. Retry, or pin the version to skip the API lookup: RMAP_VERSION=<ver> curl -fsSL <install-url> | bash"
+        warn "  github.com redirect probe failed (curl exit ${curl_exit})"
+        return 0
     fi
 
-    # Parse the resolved tag from the API response (logic unchanged).
-    local latest_tag
-    latest_tag="$(printf '%s' "${api_response}" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+    # Parse the tag out of .../releases/tag/<tag>. If the redirect shape is not the
+    # expected /releases/tag/<tag> (e.g. GitHub changed it), leave RESOLVED_TAG
+    # empty so the API fallback runs — do NOT ship a guessed tag.
+    if [[ "${redirect_url}" == *"/releases/tag/"* ]]; then
+        local tag="${redirect_url##*/releases/tag/}"
+        tag="${tag%%[/?#]*}"     # strip any trailing path / query / fragment
+        RESOLVED_TAG="${tag}"
+    else
+        warn "  Unexpected redirect target (no /releases/tag/): ${redirect_url:-<empty>}"
+    fi
+    return 0
+}
 
-    if [[ -z "${latest_tag}" ]]; then
-        error "Could not determine latest version (api.github.com was reachable but the response had no tag_name). Specify version with --version or RMAP_VERSION"
+# FALLBACK resolver: the original api.github.com/releases/latest call, now sending
+# Authorization: Bearer $GITHUB_TOKEN when GITHUB_TOKEN is set (raises the 60/hr/IP
+# unauthenticated cap). Sets RESOLVED_TAG on success; leaves it empty on failure.
+# Same split-curl observable-exit-code discipline as the redirect path. Returns 0
+# unconditionally (see resolve_version_via_redirect).
+resolve_version_via_api() {
+    RESOLVED_TAG=""
+    info "  GET ${RELEASES_URL}/latest"
+
+    local -a curl_args=(-fsSL --connect-timeout 10 --max-time 30)
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+        info "  (authenticating with GITHUB_TOKEN)"
     fi
 
-    # Remove 'v' prefix
-    VERSION="${latest_tag#v}"
-    info "Latest version: ${VERSION}"
+    local api_response curl_exit
+    api_response="$(curl "${curl_args[@]}" "${RELEASES_URL}/latest")" && curl_exit=0 || curl_exit=$?
+
+    if [[ "${curl_exit}" -ne 0 ]]; then
+        warn "  api.github.com request failed (curl exit ${curl_exit}) — network/proxy issue or the API rate limit (set GITHUB_TOKEN to raise it)."
+        return 0
+    fi
+
+    # Parse tag_name from the API JSON (parse logic unchanged from the original).
+    # The trailing `|| true` guards against `pipefail`: grep exits 1 when the
+    # response has no tag_name, which would otherwise abort under `set -o pipefail`
+    # instead of leaving RESOLVED_TAG empty for an honest error.
+    local tag
+    tag="$(printf '%s' "${api_response}" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)"
+    RESOLVED_TAG="${tag}"
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -560,6 +637,162 @@ setup_path() {
     else
         warn "Add to PATH manually: export PATH=\"${INSTALL_DIR}:\$PATH\""
     fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Daemon Socket Liveness (INSTALL-ROBUSTNESS-2 B) — shared, platform-agnostic
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# These live in the TEMPLATE (injected ONCE) on purpose. The old daemon-start
+# retry loop was duplicated in BOTH lib/macos.sh and lib/linux.sh; the bundled
+# installer injects both, so the Linux copy shadowed the macOS one and a macOS
+# install ran Linux health logic (stat of a ~/.local/share/rmap/daemon.pid file
+# that never exists on macOS) → the daemon was reported "failed" while launchd
+# had it running. The predicate is not platform-specific — it is "does the daemon
+# answer on its Unix socket?" — so it is defined once, here.
+
+# Source of truth for "is the daemon usable": does it ANSWER a ping ON ITS UNIX SOCKET?
+# This MUST be a PURE socket-liveness predicate — success iff the daemon answers on the
+# socket — INDEPENDENT of (a) the binary/dir/launchd-service/plist checks AND (b) the
+# ambient RMAP_TRANSPORT.
+#
+# It reads ONLY the `socket_ping` probe out of `rmap doctor --json`. NOT the doctor exit
+# code: `rmap doctor` is an AGGREGATE health verdict — it exits nonzero unless ALL probes
+# pass (binaries present, dirs present, launchd/plist healthy, socket answering, storage,
+# …; see rgr::commands::doctor::execute_doctor, healthy = 0 fails). A daemon can ANSWER on
+# the socket while doctor still exits nonzero (e.g. the plist or a binary-dir probe fails
+# on a partial/relocated install) — using doctor's exit code would misreport a RUNNING
+# daemon as failed, the exact honesty bug this slice removes.
+#
+# WHY the `RMAP_TRANSPORT=socket` prefix is load-bearing: the `socket_ping` probe issues
+# its ping() through the CLI's DaemonClient, whose transport is chosen by RMAP_TRANSPORT
+# (rgr daemon_client::transport — verified: `stdio` ⇒ SPAWN an `rmapd` subprocess and talk
+# over stdio; `socket` ⇒ the Unix socket with NO fallback; unset ⇒ socket-then-stdio only
+# on EPERM/EACCES). So if RMAP_TRANSPORT=stdio is present in the environment, `socket_ping`
+# can pass by pinging a freshly-SPAWNED subprocess while the real socket daemon is wedged —
+# i.e. "success without an answering socket", which this slice's stop condition forbids.
+# This is NOT hypothetical: scripts/dogfood-isolated.sh EXPORTS RMAP_TRANSPORT=stdio as its
+# isolation lever, so a probe that trusted the ambient value would be fooled in that very
+# environment. Forcing RMAP_TRANSPORT=socket for THIS one invocation makes `socket_ping`
+# pass IFF the socket daemon itself answered a ping. (The socket_connect probe that gates
+# socket_ping — a real connect() to the RESOLVED path — has already proven the socket is
+# bound; forcing socket transport makes the ping travel that same socket instead of a
+# subprocess.) The prefix is command-scoped, so it never leaks into the installer env.
+#
+# The probe resolves the socket via RMAP_SOCKET_PATH → canonical → legacy, so it honors
+# RMAP_SOCKET_PATH (the isolated-daemon tests and a field install both probe the right
+# socket). `rmap doctor --json` ALWAYS prints the full per-probe JSON regardless of the
+# aggregate verdict, then sets its exit code — so we ignore the exit code and read the
+# socket_ping verdict from the body. No jq dependency: the JSON is serde pretty-printed
+# with `name` immediately before `passed` in each probe object (ProbeOutput field order),
+# so the first `"passed":` line after `"name": "socket_ping"` is socket_ping's own — a
+# two-line awk match, robust to whitespace. `|| true` keeps a nonzero doctor exit (expected
+# on any unhealthy aggregate) from tripping `set -e` under `pipefail`; the verdict is the
+# captured socket_ping value, not the pipeline status.
+daemon_socket_answers() {
+    local ping_passed
+    ping_passed="$(RMAP_TRANSPORT=socket "${INSTALL_DIR}/rmap" doctor --json 2>/dev/null | awk '
+        /"name": "socket_ping"/ { in_ping = 1; next }
+        in_ping && /"passed":/  { print ($0 ~ /true/) ? "true" : "false"; exit }
+    ')" || true
+    [[ "${ping_passed}" == "true" ]]
+}
+
+# Best-effort daemon PID for the REPORT ONLY (never the liveness predicate). Uses
+# pgrep (present on macOS and Linux) rather than the platform get_daemon_pid()
+# helpers, which collide by name across the two bundled platform modules.
+daemon_pid_best_effort() {
+    # `|| true`: under `set -o pipefail`, pgrep exits nonzero when no rmapd matches
+    # (e.g. a TOCTOU race after the socket answered), which would otherwise abort at
+    # the `pid="$(...)"` call site. The PID is report-only, so absence is fine.
+    pgrep -x rmapd 2>/dev/null | head -1 || true
+}
+
+# Report-only: the ACTUAL daemon socket path `rmap` resolved and probed, for the honest
+# daemon-start FAILURE message. It parses rgr's OWN `socket_path` probe out of the SAME
+# `rmap doctor --json` the liveness predicate reads — so the message names the path that
+# was REALLY probed, not a value reconstructed in bash.
+#
+# WHY parse instead of reconstructing as ${RMAP_SOCKET_PATH:-<canonical>}: rgr's resolver
+# (platform-paths::resolve_socket_path — verified) can pick the LEGACY $HOME socket over
+# the canonical one in the migration case — canonical UNreachable but legacy reachable,
+# where "reachable" is a BARE connect() with no ping. So a legacy socket that connects but
+# whose ping fails is exactly the FAILURE path here, and its chosen path is the legacy one
+# while the canonical default differs — a bash ${RMAP_SOCKET_PATH:-<canonical>} would name
+# the WRONG socket. Reading rgr's chosen path keeps the message truthful in that case and
+# under an RMAP_SOCKET_PATH override alike.
+#
+# Forces RMAP_TRANSPORT=socket for parity with daemon_socket_answers (path resolution is
+# transport-independent, but keeping the two calls identical avoids surprises). The
+# `socket_path` probe message is "<path> (exists)" | "<path> (not found)"; the awk strips
+# the JSON key, the quotes, and the trailing status. $1 is the canonical default, used ONLY
+# if the JSON yields no absolute path (a stable default beats an empty line). NEVER the
+# liveness predicate — reporting only.
+resolved_socket_path() {
+    local default_path="$1"
+    local parsed
+    parsed="$(RMAP_TRANSPORT=socket "${INSTALL_DIR}/rmap" doctor --json 2>/dev/null | awk '
+        /"name": "socket_path"/ { in_sp = 1; next }
+        in_sp && /"message":/ {
+            line = $0
+            sub(/^[[:space:]]*"message":[[:space:]]*"/, "", line)   # strip key + opening quote
+            sub(/".*$/, "", line)                                    # strip closing quote + trailing
+            sub(/ \(exists\)$/, "", line)                            # strip the resolution-status suffix
+            sub(/ \(not found\)$/, "", line)
+            print line
+            exit
+        }
+    ')" || true
+    # Accept only an absolute path (guards the degenerate "could not determine" message and
+    # any parse miss); otherwise fall back to the caller's canonical default.
+    if [[ "${parsed}" == /* ]]; then
+        printf '%s' "${parsed}"
+    else
+        printf '%s' "${default_path}"
+    fi
+}
+
+# Wait up to max_attempts × delay for the daemon socket to answer. The predicate is
+# socket liveness (daemon_socket_answers), NOT the launcher's exit status: a
+# late-arriving daemon (launchd/systemd throttling, slow first spawn) flips this to
+# success within the budget. Returns 0 as soon as the socket answers, else 1.
+#
+# INSTALL-ROBUSTNESS-2 (B), review-7 fix — the FINAL-WINDOW RACE: this loop must END on a
+# probe, never on a sleep. It probes once up front, then performs max_attempts waits, each
+# followed by a RE-PROBE — INCLUDING a probe AFTER the last wait. So a daemon that comes up
+# during the final wait window is caught (→ "started"), and failure is returned ONLY
+# immediately after a probe that just observed the socket NOT answering. The old loop slept
+# AFTER its last probe and then returned failure with no probe following that sleep, so a
+# daemon that arrived during the final ~delay seconds was misreported "failed" while the
+# socket was in fact answering — the exact violation of this slice's stop condition
+# "never report failure while the socket answers" (and contract B.3/B.4). The wait budget is
+# unchanged (max_attempts waits × delay ≈ the old ~10s); the fix adds one probe at the end
+# and removes the trailing dead sleep.
+verify_daemon_health() {
+    local max_attempts="${1:-5}"
+    local delay="${2:-2}"
+    local attempt=0
+
+    info "Verifying daemon health (probing the socket)..."
+
+    # Probe up front — catches a socket that answers immediately (e.g. the daemon came up
+    # between the launcher call and now) with no wait.
+    if daemon_socket_answers; then
+        return 0
+    fi
+    # Then wait-and-re-probe up to max_attempts times. The re-probe runs AFTER each sleep,
+    # including the last one, so the loop's final action before `return 1` is always a fresh
+    # probe — never a sleep whose window a late-arriving daemon could slip through unseen.
+    while [[ ${attempt} -lt ${max_attempts} ]]; do
+        attempt=$((attempt + 1))
+        info "  Attempt ${attempt}/${max_attempts}: daemon socket not answering yet, waiting ${delay}s..."
+        sleep "${delay}"
+        if daemon_socket_answers; then
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -817,7 +1050,14 @@ main() {
 
     if [[ "${BINARY_ONLY}" != "true" ]]; then
         create_directories
-        setup_daemon_service  # Must run before write_manifest (sets LINUX_SERVICE_MODE)
+        # INSTALL-ROBUSTNESS-2 (B): daemon-start is best-effort for REACHING the final
+        # summary. A genuine failure sets DAEMON_OUTCOME=failed and prints an actionable
+        # block (socket path + log) at the point of failure; `|| true` stops `set -e` from
+        # aborting BEFORE the summary renders the started/already-running/failed verdict.
+        # DAEMON_OUTCOME is a global set on every path, so the outcome survives `|| true`.
+        # The pre-slice failure signal is preserved: main still exits 1 on `failed` AFTER
+        # the report (see end of main). started/already-running return 0 → `|| true` no-op.
+        setup_daemon_service || true  # also sets LINUX_SERVICE_MODE for write_manifest
         write_manifest
         detect_hosts
     fi
@@ -826,11 +1066,27 @@ main() {
 
     echo ""
     echo "===================="
-    echo "Installation complete"
+    # INSTALL-ROBUSTNESS-2 (B): the binaries install independently of the daemon
+    # service, so the banner must not overclaim when the daemon failed to start. The
+    # daemon-failure block above already gave the actionable detail; here we qualify the
+    # headline so "complete" is not read as "everything is healthy".
+    if [[ "${BINARY_ONLY}" != "true" && "${DAEMON_OUTCOME}" == "failed" ]]; then
+        echo "Installation complete — binaries installed; daemon service NOT running (see above)"
+    else
+        echo "Installation complete"
+    fi
     echo ""
     echo "  CLI:     ${INSTALL_DIR}/rmap"
     echo "  Daemon:  ${INSTALL_DIR}/rmapd"
     echo "  Version: ${VERSION}"
+    # INSTALL-ROBUSTNESS-2 (B): state which daemon-start case occurred — started /
+    # already running / failed. The socket probe (daemon_socket_answers) is the arbiter,
+    # so this line NEVER says "failed" while the socket answers. A genuine "failed" also
+    # self-reported the socket path + daemon log in the block above; main exits nonzero
+    # after this summary (see below) so scripted installs still detect it.
+    if [[ "${BINARY_ONLY}" != "true" && -n "${DAEMON_OUTCOME}" ]]; then
+        echo "  Service: daemon ${DAEMON_OUTCOME}"
+    fi
     echo ""
     echo "Quick start:"
     echo "  rmap --help          # Show available commands"
@@ -850,6 +1106,15 @@ main() {
         echo "  rm -rf ${DATA_DIR}"
     fi
     echo ""
+
+    # INSTALL-ROBUSTNESS-2 (B): the daemon-start verdict was rendered honestly in the
+    # summary above (never "failed" while the socket answers). Preserve the pre-slice
+    # failure signal — a genuine daemon-start failure exits nonzero AFTER the full report
+    # + actionable block, so scripted installs still detect it. Binaries install
+    # regardless; started / already running exit 0.
+    if [[ "${BINARY_ONLY}" != "true" && "${DAEMON_OUTCOME}" == "failed" ]]; then
+        exit 1
+    fi
 }
 
 main "$@"

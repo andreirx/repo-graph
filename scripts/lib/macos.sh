@@ -16,6 +16,13 @@ MACOS_LOG_DIR="${HOME}/Library/Logs/repo-graph"
 MACOS_LAUNCHAGENTS_DIR="${HOME}/Library/LaunchAgents"
 MACOS_SERVICE_LABEL="com.repo-graph.rmapd"
 MACOS_PLIST_NAME="${MACOS_SERVICE_LABEL}.plist"
+# Daemon Unix socket. MUST match platform-paths::compute_socket_path_from_home
+# (macOS canonical: <home>/Library/Application Support/repo-graph/daemon.sock) and
+# scripts/dev-install-local.sh. Used ONLY as the canonical DEFAULT for the honest
+# daemon-start failure message (INSTALL-ROBUSTNESS-2 B), under a RMAP_SOCKET_PATH
+# override — the liveness predicate itself is the socket_ping probe read from
+# `rmap doctor --json` (see daemon_socket_answers in install.template.sh).
+MACOS_SOCKET_PATH="${MACOS_CONFIG_DIR}/daemon.sock"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # launchd Service Management
@@ -99,6 +106,16 @@ install_launchd_plist() {
 
 # Load and start the daemon via launchctl.
 # Uses bootstrap for modern launchctl (macOS 10.10+).
+#
+# INSTALL-ROBUSTNESS-2 (B): launchctl bootstrap's exit code is deliberately NOT
+# treated as the daemon-health verdict. bootstrap routinely returns nonzero for
+# reasons that do NOT mean the daemon failed — the label is already bootstrapped
+# (a prior run / launchd got there first), a transient bootstrap race, etc. —
+# even when the daemon is up or is about to come up. The source of truth is the
+# caller's verify_daemon_health socket-probe loop (a late-arriving daemon still
+# flips it to success). So a nonzero here is a WARNING, never a fatal `error`:
+# `error` calls exit 1 and would abort the whole install BEFORE the socket is
+# ever probed — the exact false-failure this slice removes.
 start_launchd_service() {
     local plist_path="${MACOS_LAUNCHAGENTS_DIR}/${MACOS_PLIST_NAME}"
     local gui_uid
@@ -110,12 +127,13 @@ start_launchd_service() {
     # Unload if already loaded (handles upgrades gracefully)
     launchctl bootout "gui/${gui_uid}/${MACOS_SERVICE_LABEL}" 2>/dev/null || true
 
-    # Load and start
-    if ! launchctl bootstrap "gui/${gui_uid}" "${plist_path}"; then
-        error "Failed to load launchd service"
+    # Request load/start. Do NOT abort on a nonzero bootstrap — the socket probe
+    # in setup_macos_daemon_service is the arbiter of success/failure.
+    if launchctl bootstrap "gui/${gui_uid}" "${plist_path}"; then
+        info "  Service loaded: ${MACOS_SERVICE_LABEL}"
+    else
+        warn "  launchctl bootstrap returned nonzero — continuing; the daemon socket probe decides."
     fi
-
-    info "  Service loaded: ${MACOS_SERVICE_LABEL}"
 }
 
 # Stop and unload the daemon via launchctl.
@@ -179,33 +197,17 @@ get_daemon_pid() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Daemon Health Verification
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Verify daemon is healthy after startup.
-# Retries up to max_attempts with delay between.
-verify_daemon_health() {
-    local max_attempts="${1:-5}"
-    local delay="${2:-2}"
-    local attempt=1
-
-    info "Verifying daemon health..."
-
-    while [[ ${attempt} -le ${max_attempts} ]]; do
-        if is_daemon_running; then
-            local pid
-            pid="$(get_daemon_pid)"
-            info "  Daemon is running (pid: ${pid})"
-            return 0
-        fi
-
-        info "  Attempt ${attempt}/${max_attempts}: waiting ${delay}s..."
-        sleep "${delay}"
-        ((attempt++))
-    done
-
-    warn "Daemon health check failed after ${max_attempts} attempts"
-    warn "Check logs: ${MACOS_LOG_DIR}/daemon.log"
-    return 1
-}
+#
+# INSTALL-ROBUSTNESS-2 (B): verify_daemon_health MOVED to the shared template
+# (install.template.sh) so there is ONE definition in the bundled installer. The
+# old copy here and its twin in lib/linux.sh collided under injection — the Linux
+# copy won and ran on macOS, statting a Linux pidfile that never exists here and
+# reporting a running daemon as "failed". The new predicate is socket liveness (the
+# socket_ping probe from `rmap doctor --json`, in daemon_socket_answers), which is
+# platform-agnostic, so it is defined once, in the template. is_daemon_running()/
+# get_daemon_pid() above are now UNUSED by the install path (kept for potential
+# external/lifecycle callers; the report's PID comes from the collision-free
+# daemon_pid_best_effort() in the template).
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Gatekeeper Handling
@@ -231,23 +233,56 @@ remove_quarantine_attributes() {
 
 # Complete macOS daemon service setup.
 # Called by install.sh when BINARY_ONLY is false.
+#
+# INSTALL-ROBUSTNESS-2 (B): socket liveness is the source of truth. Sets the
+# DAEMON_OUTCOME global (started / already running / failed) for the final summary.
 setup_macos_daemon_service() {
     # Ensure log directory exists
     mkdir -p "${MACOS_LOG_DIR}"
     chmod 700 "${MACOS_LOG_DIR}"
 
+    # Already running? If the socket answers (launchd got there first, or a prior
+    # run started the daemon), do NOT start anything — report it and succeed.
+    if daemon_socket_answers; then
+        local pid
+        pid="$(daemon_pid_best_effort)"
+        info "Daemon already running (pid: ${pid:-unknown}) — leaving it in place."
+        DAEMON_OUTCOME="already running"
+        return 0
+    fi
+
     install_launchd_plist
     start_launchd_service
 
-    if ! verify_daemon_health 5 2; then
-        warn ""
-        warn "Daemon did not start successfully."
-        warn "You can start it manually: rmapd"
-        warn "Or check: launchctl print gui/$(id -u)/${MACOS_SERVICE_LABEL}"
-        return 1
+    # The retry predicate is the socket probe, NOT start_launchd_service's exit
+    # status — a late-arriving daemon (launchd throttling) flips this to success.
+    if verify_daemon_health 5 2; then
+        local pid
+        pid="$(daemon_pid_best_effort)"
+        info "  Daemon is answering on the socket (pid: ${pid:-unknown})"
+        DAEMON_OUTCOME="started"
+        return 0
     fi
 
-    return 0
+    # Report failure ONLY when the socket never answered after the retry budget —
+    # and name the two facts the user needs to act: the socket path probed and where
+    # the daemon log lives. Name the ACTUAL probed path by asking rgr which socket it
+    # resolved (resolved_socket_path parses `rmap doctor --json`) rather than
+    # reconstructing it here: rgr's resolver can pick the LEGACY socket over canonical
+    # in the migration case (canonical unreachable, legacy reachable-but-ping-fails), so
+    # a bash ${RMAP_SOCKET_PATH:-${MACOS_SOCKET_PATH}} could name the WRONG path. The
+    # canonical default is passed only as the last-resort fallback (JSON unparseable);
+    # it still honors an RMAP_SOCKET_PATH override, which rgr reports back verbatim.
+    local probed_socket_path
+    probed_socket_path="$(resolved_socket_path "${RMAP_SOCKET_PATH:-${MACOS_SOCKET_PATH}}")"
+    DAEMON_OUTCOME="failed"
+    warn ""
+    warn "Daemon did not answer on its socket after the retry budget."
+    warn "  Socket probed: ${probed_socket_path}"
+    warn "  Daemon log:    ${MACOS_LOG_DIR}/daemon.log"
+    warn "  Start manually:  rmapd"
+    warn "  Inspect service: launchctl print gui/$(id -u)/${MACOS_SERVICE_LABEL}"
+    return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
