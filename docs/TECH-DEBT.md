@@ -3841,10 +3841,21 @@ Snapshots are created `building` and flip to `ready` only at finalize
 machine (sleep/panic/OOM — daemon.log will show it) or (H2) a daemon index
 path in 0.4.0 completes without calling `update_snapshot_status(ready)`, or
 (H3) repo-identity mismatch (snapshots attached to a different repo_uid than
-orient resolves). Diagnosis kit issued (daemon.log tail + repo info --json +
-read-only snapshots/repos query). DAEMON-VISIBILITY-1 (in flight) exposes the
-state but does not fix a finalize defect. **Disposition: OPEN — diagnose on
-the second machine; if H2, hotfix slice BEFORE the next release.**
+orient resolves). **ROOT CAUSE FOUND (2026-07-03, from the machine's daemon.log — 2x "Write
+error to (unnamed): broken pipe (os error 32)" and nothing else):** the index
+progress callback in `daemon-runtime/src/dispatch.rs` (`handle_index`) returns
+`ControlFlow::Break` when `emitter.emit()` fails. A >300s silent phase on a
+big repo times out the CLI (default read timeout) -> client closes the socket
+-> the daemon's NEXT progress emit gets broken pipe -> Break -> **the index
+aborts mid-flight**. The `building` snapshot + extracted GBs remain (doctor:
+"2 snapshots, 4 GB"); the ready-flip never runs (orient: "no READY snapshot");
+`record_index` + `registry.save()` live only in the success branch (repo info:
+"repo not indexed", even by uid). The client's own timeout KILLS the work it
+is waiting for. Smoke never catches it: no validation repo has a >300s silent
+phase. **Disposition: INDEX-DISCONNECT-1 hotfix required BEFORE the next
+release (design decision — detached completion vs cancel-with-cleanup — needs
+operator ratification); DAEMON-VISIBILITY-1 (in flight) fixes the reporting
+half (client timeout honesty + progress exposure).**
 
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
