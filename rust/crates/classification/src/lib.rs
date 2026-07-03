@@ -275,6 +275,7 @@ pub mod coverage_matcher;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod hotspot_scorer;
+pub mod measurement_coverage;
 pub mod module_edges;
 pub mod module_rollup;
 pub mod risk_scorer;

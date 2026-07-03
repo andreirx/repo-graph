@@ -22,6 +22,8 @@
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
+use repo_graph_classification::measurement_coverage::LanguageFunctionCount;
+
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
 
@@ -2414,6 +2416,68 @@ impl StorageConnection {
             .map_err(StorageError::from)
     }
 
+    /// Per-language function/method counts and how many carry a
+    /// `cyclomatic_complexity` measurement — the raw input for the language
+    /// measurement-coverage caveat (METRIC-LANG-COVERAGE-1 part A).
+    ///
+    /// Returns one row per non-null `files.language`, each carrying the count of
+    /// FUNCTION/METHOD symbols in that language and the subset of them measured.
+    /// The result is the boundary DTO
+    /// [`repo_graph_classification::measurement_coverage::LanguageFunctionCount`]
+    /// (storage already depends on `classification`, outer→inner) — the pure
+    /// verdict (`compute_measurement_coverage`) consumes it verbatim, so the three
+    /// complexity surfaces (orient / hotspots / metrics) share one shape.
+    ///
+    /// ## Denominator = function/method SYMBOL nodes
+    ///
+    /// The measured share is computed over FUNCTION/METHOD symbols specifically
+    /// (slice §2.A: "group function/method symbols by file language"), matching
+    /// what the extractors measure. `measured` is a `LEFT JOIN` so an unmeasured
+    /// language still yields a row (`measured_count = 0`) — the honest signal.
+    ///
+    /// ## Why `COUNT(DISTINCT …)`
+    ///
+    /// `nodes(snapshot_uid, stable_key)` is UNIQUE, so a function is one row; but
+    /// the `measurements` `(snapshot_uid, target_stable_key, kind)` index is NOT
+    /// unique, so a hypothetical duplicate complexity row would fan the join out.
+    /// `COUNT(DISTINCT n.node_uid)` / `COUNT(DISTINCT m.target_stable_key)` keep
+    /// `measured_count <= function_count` regardless — the invariant the pure
+    /// verdict relies on. Read-only; no schema change (existing nodes⋈files⋈
+    /// measurements tables, the same join `query_complexity_by_file` uses).
+    pub fn query_measurement_coverage(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<LanguageFunctionCount>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT f.language,
+                    COUNT(DISTINCT n.node_uid) AS function_count,
+                    COUNT(DISTINCT m.target_stable_key) AS measured_count
+             FROM nodes n
+             JOIN files f ON n.file_uid = f.file_uid
+             LEFT JOIN measurements m
+                    ON m.target_stable_key = n.stable_key
+                   AND m.snapshot_uid = n.snapshot_uid
+                   AND m.kind = 'cyclomatic_complexity'
+             WHERE n.snapshot_uid = ?
+               AND n.kind = 'SYMBOL'
+               AND n.subtype IN ('FUNCTION', 'METHOD')
+               AND f.language IS NOT NULL
+             GROUP BY f.language
+             ORDER BY f.language",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            Ok(LanguageFunctionCount {
+                language: row.get(0)?,
+                function_count: row.get::<_, i64>(1)? as u64,
+                measured_count: row.get::<_, i64>(2)? as u64,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
     pub fn find_imports_between_paths(
         &self,
         snapshot_uid: &str,
@@ -2692,6 +2756,62 @@ mod tests {
             .unwrap();
 
         (storage, snap_uid.to_string())
+    }
+
+    // METRIC-LANG-COVERAGE-1 (part A): `query_measurement_coverage` groups FUNCTION/METHOD symbols by
+    // file language and counts how many carry a cyclomatic_complexity measurement. This locks the three
+    // load-bearing SQL properties: (1) the denominator is FUNCTION/METHOD ONLY (a STRUCT is excluded),
+    // (2) `COUNT(DISTINCT …)` keeps a function from double-counting when it has >1 measurement row, and
+    // (3) an unmeasured language still yields a row (LEFT JOIN, measured_count=0). Then the pure verdict
+    // mints the data-driven caveat over the real query output.
+    #[test]
+    fn query_measurement_coverage_counts_function_symbols_by_language() {
+        let (storage, snap) = setup_db_with_snapshot();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path, language) VALUES \
+                   ('r1:a.rs', 'r1', 'a.rs', 'rust'), \
+                   ('r1:h.py', 'r1', 'h.py', 'python'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, file_uid) VALUES \
+                   ('n_fn1', '{snap}', 'r1', 'r1:a.rs#fn1', 'SYMBOL', 'FUNCTION', 'fn1', 'r1:a.rs'), \
+                   ('n_fn2', '{snap}', 'r1', 'r1:a.rs#fn2', 'SYMBOL', 'FUNCTION', 'fn2', 'r1:a.rs'), \
+                   ('n_m1',  '{snap}', 'r1', 'r1:a.rs#m1',  'SYMBOL', 'METHOD',   'm1',  'r1:a.rs'), \
+                   ('n_s1',  '{snap}', 'r1', 'r1:a.rs#S1',  'SYMBOL', 'STRUCT',   'S1',  'r1:a.rs'), \
+                   ('n_pf1', '{snap}', 'r1', 'r1:h.py#pf1', 'SYMBOL', 'FUNCTION', 'pf1', 'r1:h.py'), \
+                   ('n_pf2', '{snap}', 'r1', 'r1:h.py#pf2', 'SYMBOL', 'FUNCTION', 'pf2', 'r1:h.py'); \
+                 INSERT INTO measurements (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at) VALUES \
+                   ('meas1',  '{snap}', 'r1', 'r1:a.rs#fn1', 'cyclomatic_complexity', '{{\"value\":5}}', 'test', '2024-01-01T00:00:00Z'), \
+                   ('meas1b', '{snap}', 'r1', 'r1:a.rs#fn1', 'cyclomatic_complexity', '{{\"value\":5}}', 'test', '2024-01-01T00:00:00Z'), \
+                   ('meas2',  '{snap}', 'r1', 'r1:a.rs#fn2', 'cyclomatic_complexity', '{{\"value\":3}}', 'test', '2024-01-01T00:00:00Z'), \
+                   ('meas3',  '{snap}', 'r1', 'r1:a.rs#m1',  'cyclomatic_complexity', '{{\"value\":7}}', 'test', '2024-01-01T00:00:00Z');"
+            ))
+            .unwrap();
+
+        let rows = storage.query_measurement_coverage(&snap).unwrap();
+        // Ordered by language ASC: python, then rust.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].language, "python");
+        assert_eq!(rows[0].function_count, 2);
+        assert_eq!(
+            rows[0].measured_count, 0,
+            "no python measurement rows in this snapshot -> LEFT JOIN yields measured_count=0"
+        );
+        assert_eq!(rows[1].language, "rust");
+        assert_eq!(
+            rows[1].function_count, 3,
+            "the STRUCT is excluded and fn1 is NOT double-counted despite two measurement rows"
+        );
+        assert_eq!(rows[1].measured_count, 3);
+
+        // End-to-end: the real query output through the pure verdict.
+        let cov =
+            repo_graph_classification::measurement_coverage::compute_measurement_coverage(rows);
+        let caveat = cov
+            .caveat
+            .expect("python unmeasured + significant -> caveat");
+        assert!(caveat.contains("Python (40% of functions)"), "{caveat}");
+        assert!(caveat.contains("measured for Rust only"), "{caveat}");
     }
 
     // W-B-EPOCH-IMPL-2D: `distinct_file_languages_for_snapshot` PINS the language inventory to one snapshot

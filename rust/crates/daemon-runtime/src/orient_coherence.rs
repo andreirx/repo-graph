@@ -141,6 +141,25 @@ pub(crate) fn build_orient_envelope(
     // post-fold, like `display_name`). It rides the value as a reader hint, NOT a coherence leaf, so it
     // does not participate in the MEET fold.
     envelope.value.relationship_next_action = relationship_next_action;
+
+    // METRIC-LANG-COVERAGE-1 (part A): when orient emits a complexity ranking (HIGH_COMPLEXITY present),
+    // attach the per-language measurement-coverage block so the ranking never reads as repo-wide while a
+    // whole language is unmeasured. Same post-fold reader-hint placement as above (NOT a coherence leaf: it
+    // is a straight snapshot count, not an LG/SQLite-provenance value). Data-driven caveat (no hardcoded
+    // language list) that disappears by itself once every significant language is measured. Gated on
+    // `present_complexity` — no complexity surface, nothing to caveat. The block is ALWAYS PRESENT once
+    // there IS a complexity surface (review-6 item 2): a query failure yields an explicit `unavailable`
+    // block inside `measurement_coverage_json`, and a storage-OPEN failure yields one here — never a silent
+    // gap, which a consumer would read as complete coverage. One fresh per-operation connection (the orient
+    // read guard keeps it snapshot-consistent).
+    if present_complexity {
+        let block = match repo_state.storage() {
+            Ok(storage) => crate::util::measurement_coverage_json(&storage, &snapshot_uid),
+            Err(_) => crate::util::measurement_coverage_unavailable_json(),
+        };
+        envelope.value.measurement_coverage = Some(block);
+    }
+
     envelope
 }
 

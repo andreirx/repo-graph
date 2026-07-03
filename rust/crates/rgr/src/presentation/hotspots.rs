@@ -16,6 +16,7 @@
 //! - Full output, no truncation
 //! - `--json` preserved for machine mode
 
+use repo_graph_classification::measurement_coverage::MeasurementCoverageBlock;
 use serde::Deserialize;
 
 // ── Response Types ───────────────────────────────────────────────────────────
@@ -35,6 +36,14 @@ pub struct HotspotsResponse {
     pub filtering: Option<HotspotsFiltering>,
     pub results: Vec<HotspotEntry>,
     pub count: usize,
+    /// METRIC-LANG-COVERAGE-1 (part A): per-language complexity measurement coverage.
+    /// The hotspot score is churn × complexity, so an unmeasured language scores 0 and
+    /// drops out of the ranking; the block's honesty line (`caveat_line`) states that
+    /// omission (or that coverage could not be read). ALWAYS present on the wire (the
+    /// daemon attaches an `available`/`unavailable` block unconditionally); the `Option`
+    /// is only `#[serde(default)]` robustness for an older/absent field.
+    #[serde(default)]
+    pub measurement_coverage: Option<MeasurementCoverageBlock>,
 }
 
 /// Filtering metadata when exclusion flags are active.
@@ -75,6 +84,20 @@ impl HotspotsResponse {
         // Count line
         let file_word = if self.count == 1 { "file" } else { "files" };
         out.push_str(&format!("{} {} scored\n", self.count, file_word));
+
+        // METRIC-LANG-COVERAGE-1 (part A): state which languages are unmeasured — they
+        // contribute complexity 0 and drop out of the churn×complexity ranking, so the
+        // score is not repo-wide (or state that coverage could not be read). Reader-frame
+        // wording from `classification`; it disappears by itself once every significant
+        // language is measured. Shown even at 0 files scored (an unmeasured language can be
+        // *why* the list is empty).
+        if let Some(line) = self
+            .measurement_coverage
+            .as_ref()
+            .and_then(|b| b.caveat_line())
+        {
+            out.push_str(&format!("\n{}\n", line));
+        }
 
         // Filtering section (only if active)
         if let Some(ref f) = self.filtering {
@@ -196,6 +219,7 @@ mod tests {
             filtering,
             results: entries.clone(),
             count: entries.len(),
+            measurement_coverage: None,
         }
     }
 
@@ -351,5 +375,70 @@ mod tests {
         assert!(out.contains("long/path/file.rs"));
         // Large numbers present
         assert!(out.contains("9999999999"));
+    }
+
+    // ── METRIC-LANG-COVERAGE-1 (part A): coverage caveat rendering ──
+
+    use repo_graph_classification::measurement_coverage::{
+        LanguageFunctionCount, MeasurementCoverageBlock,
+    };
+
+    fn count(lang: &str, functions: u64, measured: u64) -> LanguageFunctionCount {
+        LanguageFunctionCount {
+            language: lang.to_string(),
+            function_count: functions,
+            measured_count: measured,
+        }
+    }
+
+    #[test]
+    fn render_measurement_coverage_caveat_when_language_unmeasured() {
+        let mut resp = make_response(
+            vec![make_entry("src/a.ts", 100, 50, 5000)],
+            "90.days.ago",
+            None,
+        );
+        // Rust unmeasured (72%), TS measured — the repo-graph shape.
+        resp.measurement_coverage = Some(MeasurementCoverageBlock::from_counts(vec![
+            count("rust", 72, 0),
+            count("typescript", 28, 28),
+        ]));
+        let out = resp.render_human();
+        assert!(out.contains("Rust (72% of functions)"), "{out}");
+        assert!(out.contains("not yet measured"), "{out}");
+        assert!(out.contains("rankings omit it"), "{out}");
+    }
+
+    #[test]
+    fn render_no_caveat_when_coverage_complete() {
+        let mut resp = make_response(
+            vec![make_entry("src/a.rs", 100, 50, 5000)],
+            "90.days.ago",
+            None,
+        );
+        // Everything measured → caveat is None → nothing rendered.
+        resp.measurement_coverage = Some(MeasurementCoverageBlock::from_counts(vec![
+            count("rust", 72, 72),
+            count("typescript", 28, 28),
+        ]));
+        let out = resp.render_human();
+        assert!(!out.contains("not yet measured"), "{out}");
+    }
+
+    #[test]
+    fn render_unavailable_coverage_states_it_explicitly() {
+        // review-6 item 2 (human surface): when coverage could not be read, the ranking
+        // must SAY SO — never render as if coverage were complete.
+        let mut resp = make_response(
+            vec![make_entry("src/a.rs", 100, 50, 5000)],
+            "90.days.ago",
+            None,
+        );
+        resp.measurement_coverage = Some(MeasurementCoverageBlock::unavailable());
+        let out = resp.render_human();
+        assert!(
+            out.contains("could not be read"),
+            "unavailable coverage must be stated on the hotspots surface: {out}"
+        );
     }
 }

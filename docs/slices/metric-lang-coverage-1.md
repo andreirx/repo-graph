@@ -1,7 +1,27 @@
 # METRIC-LANG-COVERAGE-1 — Quality signals state their language coverage; Rust joins the measured set
 
-Status: SPECIFIED (2026-07-02) · Track: Product-surface honesty + measurement depth
+Status: **DELIVERED (2026-07-03)** · Track: Product-surface honesty + measurement depth
 Origin: fresh-eyes v0.4.0 self-dogfood (2026-07-02), operator review
+
+## 0. Delivery record (2026-07-03)
+
+Shipped via target-owned relay (builder claude, reviewer codex, 12 iterations)
++ operator close-out. The reviewer confirmed scope + code + full `cargo test`
+in its sandbox across the final cycles but could not execute
+build/clippy/dogfood there (read-only sandbox: cargo-lock, `/private/tmp`);
+the **operator executed the remaining gates**: `cargo fmt --check`,
+`cargo build`, `cargo clippy --all-targets -- -D warnings`, full
+`cargo test --workspace` — all green — and `./scripts/dogfood-isolated.sh`
+(green; real registry verified untouched). Self-dogfood (builder, executed):
+top-30 complexity on repo-graph's self-index = 28 Rust + 2 TS (pre-slice:
+zero Rust); `dispatch` cx 66 ranked; coverage block `available` on
+`metrics`/`orient --json`/`hotspots --json`; fully-measured snapshot →
+`unmeasured=[]`, caveat absent (the "disappears by itself" contract).
+Mid-slice the build **disproved the original premise** (Java/Python already
+emit complexity; only Rust lacked it) — ratified as Option A and corrected in
+this doc / ROADMAP / TECH-DEBT (commit 37c5090). Review-driven hardening:
+explicit `unavailable` coverage state (no silent block drop), end-to-end
+mixed-language fixture proofs, accurate test naming.
 
 ## 1. Problem — the quality signals are silently blind to entire languages
 

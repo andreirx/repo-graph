@@ -13,6 +13,7 @@ use repo_graph_indexer::types::{
 use tree_sitter::{Node, Parser};
 
 use crate::builtins::rust_runtime_builtins;
+use crate::metrics::compute_function_metrics;
 
 /// Extractor name and version. Mirrors `EXTRACTOR_VERSIONS.rust`
 /// from the TS side.
@@ -446,9 +447,11 @@ fn extract_function(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
         return;
     }
 
-    // Extract calls from function body
+    // Extract calls from function body and compute complexity metrics.
     if let Some(body) = node.child_by_field_name("body") {
         extract_calls_from_node(&body, source, ctx, &graph_node.node_uid);
+        let metrics = compute_function_metrics(&body, params.as_ref());
+        ctx.metrics.insert(graph_node.stable_key.clone(), metrics);
     }
 }
 
@@ -583,7 +586,17 @@ fn extract_trait_method(
         metadata_json: None,
     };
 
-    emit_node(method_node, ctx);
+    let stable_key = method_node.stable_key.clone();
+    if !emit_node(method_node, ctx) {
+        return;
+    }
+
+    // Default trait methods (`function_item`) have a body; bare signatures
+    // (`function_signature_item`) do not. Measure the ones that do.
+    if let Some(body) = node.child_by_field_name("body") {
+        let metrics = compute_function_metrics(&body, params.as_ref());
+        ctx.metrics.insert(stable_key, metrics);
+    }
 }
 
 // -- Impl block extraction --------------------------------------------------
@@ -708,9 +721,11 @@ fn extract_impl_method(
         });
     }
 
-    // Extract calls from method body
+    // Extract calls from method body and compute complexity metrics.
     if let Some(body) = node.child_by_field_name("body") {
         extract_calls_from_node(&body, source, ctx, &method_node.node_uid);
+        let metrics = compute_function_metrics(&body, params.as_ref());
+        ctx.metrics.insert(method_node.stable_key.clone(), metrics);
     }
 }
 

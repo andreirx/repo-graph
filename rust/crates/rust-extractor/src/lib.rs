@@ -50,7 +50,11 @@
 //! Visibility: items with `pub` (or `pub(crate)`, `pub(super)`, etc.)
 //! are marked EXPORT; items without are PRIVATE.
 //!
-//! Does not compute complexity metrics in v1 (returns empty metrics map).
+//! Complexity metrics: emits `cyclomatic_complexity`, `parameter_count`, and
+//! `max_nesting_depth` per function/method/default-trait-method, using the same
+//! decision-point counting rules as the C/TS extractors so values are
+//! comparable (METRIC-LANG-COVERAGE-1). See `metrics.rs`. `function_length` and
+//! `cognitive_complexity` remain unmeasured for Rust (mirrors c-extractor).
 //!
 //! -- Dedup contract -----------------------------------------------
 //!
@@ -61,5 +65,6 @@
 
 mod builtins;
 mod extractor;
+mod metrics;
 
 pub use extractor::RustExtractor;

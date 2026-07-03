@@ -45,6 +45,7 @@
 //!   - rmap explain src/core/auth/session.ts
 //! ```
 
+use repo_graph_classification::measurement_coverage::MeasurementCoverageBlock;
 use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
@@ -259,6 +260,16 @@ pub struct OrientResponse {
     /// (absent on the wire) on a resolved repo or when no honest statement applies.
     #[serde(default)]
     pub relationship_next_action: Option<String>,
+    /// METRIC-LANG-COVERAGE-1 (part A): per-language complexity measurement coverage,
+    /// present when orient renders complexity centers. Its honesty line (`caveat_line`)
+    /// renders beside the complexity headline so the ranking never reads as repo-wide
+    /// while a whole language is unmeasured (or states that coverage could not be read);
+    /// it disappears by itself once every significant language is measured. Deserialized
+    /// from the daemon's opaque JSON into the shared `classification` block (the daemon
+    /// serialized the same `available`/`unavailable` block). `None` only when orient has
+    /// no complexity centers to describe.
+    #[serde(default)]
+    pub measurement_coverage: Option<MeasurementCoverageBlock>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -376,6 +387,13 @@ impl OrientResponse {
         out.push_str(&self.structure_line(depth));
         out.push('\n');
         if let Some(line) = self.complexity_line(depth) {
+            out.push_str(&line);
+            out.push('\n');
+        }
+        // METRIC-LANG-COVERAGE-1 (part A): the measurement-coverage caveat rides the
+        // headline beside the complexity centers, at EVERY tier — an honesty caveat is
+        // load-bearing at any depth, and it names the languages the ranking omits.
+        if let Some(line) = self.measurement_coverage_caveat_line() {
             out.push_str(&line);
             out.push('\n');
         }

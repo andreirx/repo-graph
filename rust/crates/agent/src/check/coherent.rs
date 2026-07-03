@@ -137,6 +137,8 @@ pub fn check_to_coherent(
         trust_briefing: None,
         // D5 (IMPL-2) next-action is an orient/stats surface; check never renders it.
         relationship_next_action: None,
+        // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; check never renders it.
+        measurement_coverage: None,
     };
 
     CoherenceEnvelope::new(value, provenance, trust, freshness)

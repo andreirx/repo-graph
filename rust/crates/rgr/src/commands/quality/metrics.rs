@@ -179,7 +179,7 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
     rows.truncate(parsed.limit);
 
     let count = rows.len();
-    let output = match build_envelope(
+    let mut output = match build_envelope(
         &storage,
         "metrics",
         repo_uid,
@@ -194,6 +194,22 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    // METRIC-LANG-COVERAGE-1 (part A): attach the ALWAYS-PRESENT per-language measurement-coverage block so a
+    // metrics listing states which languages carry complexity measurements and which do not — the SAME
+    // data-driven verdict orient/hotspots carry, via the shared `classification` block over the shared storage
+    // query. metrics has no human renderer, so the block rides the JSON envelope. Self-labels its `kind`
+    // (`cyclomatic_complexity`); a read/serialize failure yields the explicit `unavailable` block, never a
+    // dropped one (review-6 item 2 — an absent block would read as complete coverage). `build_envelope`
+    // always yields a JSON object, so the block is always inserted.
+    let coverage_block =
+        repo_graph_classification::measurement_coverage::MeasurementCoverageBlock::from_result(
+            storage.query_measurement_coverage(&snapshot.snapshot_uid),
+        )
+        .into_json_value();
+    if let Some(obj) = output.as_object_mut() {
+        obj.insert("measurement_coverage".to_string(), coverage_block);
+    }
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {

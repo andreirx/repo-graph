@@ -8,7 +8,12 @@
 #   - Uses tree-sitter-rust grammar
 #   - Produces ExtractedNode, ExtractedEdge, ImportBinding
 #   - Advertises language: ["rust"]
-#   - No metrics in v1 (matches TS-side rust-extractor)
+#   - Emits complexity metrics (cyclomatic_complexity, parameter_count,
+#     max_nesting_depth) via metrics.rs -- added by METRIC-LANG-COVERAGE-1,
+#     mirroring c-extractor's counting rules so values are cross-language
+#     comparable. A Rust-native addition beyond the TS-side extractor (which
+#     emits none); the "mirrors the TS RustExtractor" note below is about the
+#     node/edge/import shape, not metrics.
 #
 # Architecture:
 #   - This crate is an OUTER-LAYER ADAPTER. It depends on the
@@ -20,7 +25,8 @@
 #   src/adapters/extractors/rust/rust-extractor.ts
 #
 # NOT in scope:
-#   - Complexity metrics (deferred)
+#   - Cognitive complexity and function_length for Rust (deferred, as in
+#     c-extractor; cyclomatic/params/nesting ARE emitted -- see metrics.rs)
 #   - Attribute metadata extraction (framework detection slice)
 #   - Macro expansion or proc-macro analysis
 #   - Type inference or trait resolution

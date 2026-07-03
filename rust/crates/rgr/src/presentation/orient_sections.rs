@@ -255,6 +255,19 @@ impl OrientResponse {
         out
     }
 
+    /// METRIC-LANG-COVERAGE-1 (part A): the per-language measurement-coverage caveat
+    /// shown beside the complexity centers. The reader-frame sentence is built in
+    /// `classification` (e.g. "Complexity is measured for C and TypeScript only on this
+    /// snapshot — Rust (72% of functions) is not yet measured; rankings omit it."), so
+    /// the wording is identical across orient / hotspots / metrics. `None` when coverage
+    /// is complete or absent — the caveat disappears by itself once every significant
+    /// language is measured (the data-driven, no-hardcoded-list contract). When coverage
+    /// could not be read at all, the block's `caveat_line` states that instead of `None`,
+    /// so the surface never silently reads as fully measured.
+    pub(super) fn measurement_coverage_caveat_line(&self) -> Option<String> {
+        self.measurement_coverage.as_ref()?.caveat_line()
+    }
+
     /// The combined CYCLES + DOCS line. `None` when neither is present.
     pub(super) fn cycles_docs_line(&self) -> Option<String> {
         let mut parts: Vec<String> = Vec::new();

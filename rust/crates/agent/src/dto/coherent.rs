@@ -196,6 +196,18 @@ pub struct CoherentOrientResult {
     /// daemon adapter, like `display_name` / `trust_briefing`; `None` (absent on the wire) unless rendered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relationship_next_action: Option<String>,
+    /// METRIC-LANG-COVERAGE-1 (part A): orient's per-language measurement-coverage
+    /// block, surfaced beside the complexity centers so the ranking never reads as
+    /// repo-wide when a whole language is unmeasured. Carried as opaque
+    /// `serde_json::Value` (the daemon serializes
+    /// `repo_graph_classification::measurement_coverage::MeasurementCoverage` into
+    /// it) — same technique as `trust_briefing`, so the agent crate keeps its
+    /// no-dependency-on-`classification` boundary. Populated post-fold by the
+    /// daemon adapter only when orient emits HIGH_COMPLEXITY; `None` (absent on the
+    /// wire) otherwise, so the caveat disappears by itself once every significant
+    /// language is measured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measurement_coverage: Option<serde_json::Value>,
 }
 
 // ── Source classification (pure, by signal code) ──────────────────
@@ -532,6 +544,9 @@ pub fn to_coherent(
             trust_briefing,
             // D5 (IMPL-2) next-action is populated post-fold by the daemon adapter (build_orient_envelope).
             relationship_next_action: None,
+            // METRIC-LANG-COVERAGE-1: also populated post-fold; a zero-signal
+            // (ambiguous / no-match) orient has no complexity surface to caveat.
+            measurement_coverage: None,
         };
         return CoherenceEnvelope::resolution_only(value);
     }
@@ -594,6 +609,9 @@ pub fn to_coherent(
         trust_briefing,
         // D5 (IMPL-2) next-action is populated post-fold by the daemon adapter (build_orient_envelope).
         relationship_next_action: None,
+        // METRIC-LANG-COVERAGE-1: populated post-fold by build_orient_envelope
+        // when the HIGH_COMPLEXITY signal is present.
+        measurement_coverage: None,
     };
 
     CoherenceEnvelope::new(value, root_provenance, root_trust, root_freshness)

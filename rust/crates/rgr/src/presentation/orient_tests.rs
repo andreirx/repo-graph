@@ -30,6 +30,7 @@ fn minimal_response() -> OrientResponse {
         truncated: false,
         trust_briefing: None,
         relationship_next_action: None,
+        measurement_coverage: None,
     }
 }
 
@@ -666,5 +667,70 @@ fn full_complexity_breakdown_complete_headline_bounded() {
     assert!(
         !small.contains("Complexity centers (by cyclomatic"),
         "the full breakdown section is depth, absent at small"
+    );
+}
+
+// ── METRIC-LANG-COVERAGE-1 (part A): coverage caveat on the primary surface ──
+
+#[test]
+fn measurement_coverage_caveat_rides_headline_at_every_tier() {
+    use repo_graph_classification::measurement_coverage::{
+        LanguageFunctionCount, MeasurementCoverageBlock,
+    };
+    let mut r = nginx_like();
+    // Rust unmeasured (72%), TS measured — the repo-graph self-index shape.
+    r.measurement_coverage = Some(MeasurementCoverageBlock::from_counts(vec![
+        LanguageFunctionCount {
+            language: "rust".to_string(),
+            function_count: 72,
+            measured_count: 0,
+        },
+        LanguageFunctionCount {
+            language: "typescript".to_string(),
+            function_count: 28,
+            measured_count: 28,
+        },
+    ]));
+    // The caveat is load-bearing at every depth — present at small AND full.
+    for depth in [OrientDepth::Small, OrientDepth::Full] {
+        let out = r.render_human(depth);
+        assert!(
+            out.contains("Rust (72% of functions)") && out.contains("not yet measured"),
+            "coverage caveat must ride the headline at {depth:?}:\n{out}"
+        );
+    }
+}
+
+#[test]
+fn no_measurement_coverage_caveat_when_all_measured() {
+    use repo_graph_classification::measurement_coverage::{
+        LanguageFunctionCount, MeasurementCoverageBlock,
+    };
+    let mut r = nginx_like();
+    r.measurement_coverage = Some(MeasurementCoverageBlock::from_counts(vec![
+        LanguageFunctionCount {
+            language: "rust".to_string(),
+            function_count: 100,
+            measured_count: 100,
+        },
+    ]));
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        !out.contains("not yet measured"),
+        "no caveat when every significant language is measured:\n{out}"
+    );
+}
+
+#[test]
+fn measurement_coverage_unavailable_is_stated_not_silent() {
+    // review-6 item 2 (orient human surface): a coverage read failure must SAY SO on the
+    // headline, never render as if the complexity centers covered the whole repo.
+    use repo_graph_classification::measurement_coverage::MeasurementCoverageBlock;
+    let mut r = nginx_like();
+    r.measurement_coverage = Some(MeasurementCoverageBlock::unavailable());
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains("could not be read"),
+        "unavailable coverage must be stated on the orient headline:\n{out}"
     );
 }

@@ -342,6 +342,8 @@ pub fn explain_to_coherent(
             trust_briefing,
             // D5 (IMPL-2) next-action is an orient/stats surface; explain never renders it.
             relationship_next_action: None,
+            // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; explain never renders it.
+            measurement_coverage: None,
         };
         return CoherenceEnvelope::resolution_only(value);
     }
@@ -402,6 +404,8 @@ pub fn explain_to_coherent(
         trust_briefing,
         // D5 (IMPL-2) next-action is an orient/stats surface; explain never renders it.
         relationship_next_action: None,
+        // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; explain never renders it.
+        measurement_coverage: None,
     };
 
     CoherenceEnvelope::new(value, root_provenance, root_trust, root_freshness)

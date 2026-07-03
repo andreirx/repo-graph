@@ -240,5 +240,13 @@ pub fn handle_hotspots(state: &DaemonState, request: &Request) -> DispatchResult
         });
     }
 
+    // METRIC-LANG-COVERAGE-1 (part A): the hotspot score is churn × complexity, so an unmeasured language
+    // contributes complexity 0 and silently vanishes from the ranking. Attach the ALWAYS-PRESENT per-language
+    // measurement-coverage block (data-driven caveat; disappears by itself when every significant language is
+    // measured; explicit `unavailable` on a read failure — never a silent gap, which a consumer would read as
+    // complete coverage) so the omission is always stated.
+    response["measurement_coverage"] =
+        crate::util::measurement_coverage_json(&storage, &snapshot.snapshot_uid);
+
     DispatchResult::success(&request.id, response)
 }
