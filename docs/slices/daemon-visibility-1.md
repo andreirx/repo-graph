@@ -30,6 +30,17 @@ opening database" — lock contention / busy presented as a health failure.
 A diagnostics surface that cries wolf during normal operation trains the
 reader to ignore it.
 
+**F — A non-READY snapshot is invisible, and `orient` gaslights about it
+(day-2 finding, same machine, 2026-07-03).** The next day `doctor` reported
+"storage db 4 GB, 1 snapshot" — but `rmap orient` said "no READY snapshot
+for repo id … index the repo first." So a 4 GB snapshot exists in some
+non-READY state (the previous day's index was evidently interrupted before
+finalize — daemon restart / machine sleep — or finalize failed), and:
+- no surface shows the snapshot's STATE or the last index's OUTCOME;
+- `orient`'s error says "index the repo first" to a user who indexed for
+  15 minutes yesterday — it does not mention that a snapshot exists, what
+  state it is in, or that 4 GB of disk is held by it.
+
 ## 2. Contract
 
 **C — Honest long-op client behavior.**
@@ -68,6 +79,19 @@ reader to ignore it.
 ("in use by daemon — indexing <repo>", cross-referencing D); (c) open OK.
 No "error opening database" while a live daemon holds it.
 
+**F — Snapshot state and last-index outcome are first-class facts.**
+1. `doctor` (and `rmap repo info`) report, per repo: each snapshot's state
+   (READY / in-progress / interrupted-partial), its size on disk, and the
+   LAST INDEX OUTCOME (completed <time> / interrupted at <phase> /
+   failed: <reason>). "1 snapshot, 4 GB" without its state is a non-answer.
+2. `orient` (and any READY-snapshot-requiring surface) on a repo with only
+   non-READY snapshots states the truth in reader frame: "a snapshot from
+   <time> exists but was interrupted before completion (state: <X>, 4.0 GB)
+   — re-run `rmap index`; reclaim the partial with `rmap maintenance
+   prune`." NEVER a bare "index the repo first" while a snapshot exists.
+3. Non-READY snapshots are visible to `rmap maintenance prune` (prunable,
+   with size shown) so interrupted indexes do not silently hold disk.
+
 **Out of scope:** the installer (INSTALL-ROBUSTNESS-2); auto-enrichment
 (ENRICH-LIFECYCLE-1); cancellation semantics (shipped, DAEMON-CANCEL);
 progress persistence across daemon restarts; fancy TTY progress bars
@@ -95,6 +119,10 @@ progress persistence across daemon restarts; fancy TTY progress bars
   snapshot.
 - **Doctor-contention proof (named test):** doctor against a daemon-held
   database reports healthy-in-use, not an error.
+- **Snapshot-state proof (named test):** with an interrupted (non-READY)
+  snapshot fixture: doctor/repo-info name its state + size + last-index
+  outcome; orient's error names the existing snapshot and both next actions
+  (re-index / prune); `maintenance prune` lists it as prunable.
 - **Enrichment-line proof (named test):** post-index report/doctor includes
   the enrichment status line with the D5-style next action.
 - `./scripts/dogfood-isolated.sh` green; self-dogfood: index repo-graph in

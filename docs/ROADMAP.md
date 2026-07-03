@@ -82,8 +82,17 @@ distribution surface, sliced as:
 - **DAEMON-VISIBILITY-1** (P1 — long-op honesty) — `rmap index` reported a live 160k-file
   index as "timed out after 300s" (it completed ~10 min later); `doctor` showed no
   in-progress operation, no enrichment status, and reported the daemon-held database as
-  "error opening database". Exposure of coordinator state + honest timeout behavior +
-  doctor contention truth. `docs/slices/daemon-visibility-1.md`.
+  "error opening database". Day-2 (2026-07-03): a 4 GB **non-READY** snapshot invisible
+  everywhere while `orient` says "index the repo first" — snapshot STATE + last-index
+  OUTCOME become first-class facts on doctor/repo-info/orient errors, prunable when
+  partial. Exposure of coordinator state + honest timeout behavior + doctor contention
+  truth. `docs/slices/daemon-visibility-1.md`.
+- **Enrich invocation is registry-resolved** (folds into ENRICH-LIFECYCLE-1; field finding
+  2026-07-03) — `rmap enrich` still demands positional `<db_path> <repo_uid>` while the
+  REG-1 registry deliberately hides both (`repo info` human mode: "internal storage
+  identifiers are hidden"). A user cannot legally invoke enrich. ENRICH-LIFECYCLE-1's
+  manual path must resolve from cwd/alias like every other command (same REG-1 debt class
+  as `metrics`). Interim: `rmap repo info <repo> --json` exposes the identifiers.
 
 **P1 — headline**
 
