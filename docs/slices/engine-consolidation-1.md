@@ -54,6 +54,29 @@ least: the fact-class ownership table; whether any mixed-read handler remains
 permanently mixed; what happens to per-surface `*-LIVEGRAPH-*` slice plans
 that the end-state supersedes.
 
+## 2b. Operator direction (2026-07-04) — candidate end-state to evaluate seriously
+
+The operator's proposed split, to be weighed as a primary candidate in §4:
+
+- **SQLite keeps the STRUCTURE skeleton:** modules, files, functions with
+  signatures, file→module ownership, and per-function AGGREGATES (fan-in/
+  fan-out counts, complexity value) — the slow-changing, small,
+  orient/stats/hotspots-serving layer.
+- **LiveGraph owns function INTERNALS:** body-level call sites and edge
+  lists (what callers/callees/path walk) — the fast-changing, blob-heavy,
+  per-file-rebuildable layer, persisted only via the warm cache.
+- **Snapshot degrades to a provenance stamp on the current state** (identity
+  for comparability/toolchain/epochs), not retained copies —
+  SNAPSHOT-RETENTION-1 already enforces current + delta-base only.
+
+Named collision the spec MUST resolve, not skirt: the RED floor (unresolved-
+call disposition is SQLite-only, ratified) is a body-level fact class. Either
+disposition rows stay behind as a compact SQLite exception (size the cost),
+or re-opening the floor is proposed as an explicit DECISION_REQUIRED with the
+persistence story (files-are-system-of-record applies to the warm cache too).
+Also size the win: estimate DB footprint and per-refresh write volume under
+this split for a kernel-scale repo vs today.
+
 ## 3. Stop conditions
 
 - NO code, schema, or contract changes in this slice — spec only.
