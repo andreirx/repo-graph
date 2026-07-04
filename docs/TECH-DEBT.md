@@ -3857,6 +3857,17 @@ release (design decision — detached completion vs cancel-with-cleanup — need
 operator ratification); DAEMON-VISIBILITY-1 (in flight) fixes the reporting
 half (client timeout honesty + progress exposure).**
 
+**F6 — `rmap check` F2 residual (ratified 2026-07-04, DAEMON-VISIBILITY-1 dv1-check-f2-scope = C).**
+`check`'s READY-requiring error still says "No READY snapshot. Index the repo
+first." without naming an existing non-READY partial (state/size/next
+actions), because the message lives in `rust/crates/agent` (out of the
+slice's ratified scope; daemon-side text wrapping was rejected as verdict-
+ownership drift). Every other READY-requiring surface (orient, explain,
+enrich, governance/inventory handlers) is F2-compliant, and
+INDEX-DISCONNECT-1 removes the main producer of lingering partials.
+**Disposition: FAST-FOLLOW — fold the agent-crate F2 message into the next
+agent-crate slice; the pure helper (snapshot_facts) already exists to call.**
+
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
 on self-index with the D5 next-action line correctly pointing at `rmap enrich`
