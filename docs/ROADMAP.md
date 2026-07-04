@@ -93,6 +93,13 @@ distribution surface, sliced as:
   OUTCOME become first-class facts on doctor/repo-info/orient errors, prunable when
   partial. Exposure of coordinator state + honest timeout behavior + doctor contention
   truth. `docs/slices/daemon-visibility-1.md`.
+- **SNAPSHOT-RETENTION-1** (P1 — RATIFIED 2026-07-04: current-state only; "git has
+  history — I want DISCOVERY") — the retention model is shipped but never runs; every
+  index adds multi-GB snapshots forever. Auto background retention pass after every
+  successful write op: keep current + delta-parent (+ user-marked baselines), prune the
+  rest incl. auto-baselines, threshold-gated VACUUM, doctor-visible, reclaim reported.
+  Steady state ≤2 snapshots/repo. Queued after INDEX-DISCONNECT-1 (small, fast-converge),
+  before ENRICH-LIFECYCLE-1. `docs/slices/snapshot-retention-1.md`.
 - **ENRICH-LIFECYCLE-1** (P1 — RATIFIED 2026-07-04: auto-enrich after every index/refresh,
   toolchain-aware honest skips, opt-out; queued next after INDEX-DISCONNECT-1; headlines
   the release AFTER the field-fix release) — enrichment is the largest available
