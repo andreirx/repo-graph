@@ -93,12 +93,15 @@ distribution surface, sliced as:
   OUTCOME become first-class facts on doctor/repo-info/orient errors, prunable when
   partial. Exposure of coordinator state + honest timeout behavior + doctor contention
   truth. `docs/slices/daemon-visibility-1.md`.
-- **Enrich invocation is registry-resolved** (folds into ENRICH-LIFECYCLE-1; field finding
-  2026-07-03) — `rmap enrich` still demands positional `<db_path> <repo_uid>` while the
-  REG-1 registry deliberately hides both (`repo info` human mode: "internal storage
-  identifiers are hidden"). A user cannot legally invoke enrich. ENRICH-LIFECYCLE-1's
-  manual path must resolve from cwd/alias like every other command (same REG-1 debt class
-  as `metrics`). Interim: `rmap repo info <repo> --json` exposes the identifiers.
+- **ENRICH-LIFECYCLE-1** (P1 — RATIFIED 2026-07-04: auto-enrich after every index/refresh,
+  toolchain-aware honest skips, opt-out; queued next after INDEX-DISCONNECT-1; headlines
+  the release AFTER the field-fix release) — enrichment is the largest available
+  resolution win (~81% of unknown receivers; self-index sits at 21% call resolution
+  without it) yet never runs: opt-in AND invocable only via the positional
+  `<db_path> <repo_uid>` identifiers REG-1 deliberately hides. Auto background pass as a
+  normal write op (activity-stamped, cancellable, detached-completion), registry-resolved
+  manual form, full lifecycle truth on doctor. `docs/slices/enrich-lifecycle-1.md`.
+  Interim: `rmap repo info <repo> --json` exposes the identifiers.
 
 **P1 — headline**
 
