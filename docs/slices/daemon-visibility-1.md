@@ -1,6 +1,31 @@
 # DAEMON-VISIBILITY-1 — Long operations are visible, and never reported as dead
 
-Status: SPECIFIED (2026-07-02) · Track: Product-surface honesty (daemon ops)
+Status: **DELIVERED (2026-07-04)** · Track: Product-surface honesty (daemon ops)
+
+## 0. Delivery record (2026-07-04)
+
+Shipped via target-owned relay (builder claude, reviewer codex, 7 iterations
+incl. one true escalate) + operator review-and-ratify close-out (the final
+codex round was skipped as information-free: its pre-committed approval
+condition was precisely the operator ratification below). What shipped:
+**C** — the client's 300s deadline is now a SILENCE detector (progress frames
+reset it; `RMAP_LONG_OP_READ_TIMEOUT_SECS` override), with throttled progress
+rendering and a distinct still-running exit path that probes the daemon
+instead of reporting failure. **D** — activity registry (`activity.rs`) +
+additive `daemon_info` fields; doctor renders active ops and idle-with-last-
+snapshot; enrichment next-action line on the storage probe. **E** — doctor
+distinguishes absent/corrupt vs daemon-held (healthy in-use) vs open-OK.
+**F** — snapshot state + last-index outcome on doctor/repo-info; READY-
+requiring surfaces name existing partials (state/size/next actions);
+`maintenance prune` reclaims orphaned non-READY snapshots behind TWO gates
+(activity registry clear + non-blocking DB write lock — covers the initial-
+index race the single-gate rule missed), with a WAL-aware VACUUM so reclaimed
+bytes are real and reported. Escalations resolved: dv1-prune-delete = A
+(actual reclaim, orphan-only); dv1-check-f2-scope = C (`rmap check` residual
+→ TECH-DEBT F6 fast-follow). Evidence: operator-executed gates — fmt/build/
+clippy clean, **4813/0 workspace tests**, dogfood-isolated green, real-
+transport `scripts/dv1-inflight-e2e.sh` all assertions + registry-isolation
+proof; reviewer OBSERVED each mechanism across reviews 2-6.
 Origin: real first-run on a 160k-file repo, operator's second Mac (2026-07-02)
 Prior art: `rmapd-perf-1-timeout.md`, `daemon-socket-health-1.md`,
 `dev-install-doctor-wait-1.md`; the in-code TODO at

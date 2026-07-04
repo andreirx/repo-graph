@@ -46,6 +46,7 @@
 //! }
 //! ```
 
+pub mod activity;
 pub mod callgraph_cert;
 pub mod cancel;
 pub mod check_coherence;
@@ -70,6 +71,7 @@ pub mod partition_discovery;
 pub(crate) mod reader_context;
 pub mod registry;
 pub mod resource_metrics;
+pub mod snapshot_facts;
 pub mod state;
 pub mod trust_coherence;
 pub mod util;
@@ -84,6 +86,11 @@ mod explain_serve_tests;
 // + total `databases/` disk + repo count through the full dispatch path.
 #[cfg(test)]
 mod daemon_info_resource_tests;
+
+// DAEMON-VISIBILITY-1: proves the activity/status surface (D) + doctor contention truth (E)
+// through the real dispatch/handler path.
+#[cfg(test)]
+mod activity_visibility_tests;
 
 pub use dispatch::ServiceDispatcher;
 pub use registry::{RegistryEntry, RegistryError, RepoRegistry};

@@ -86,6 +86,26 @@ pub trait Transport {
         timeout_secs: u64,
     ) -> Result<serde_json::Value, DaemonClientError>;
 
+    /// Send a request and render progress events as they arrive (DAEMON-VISIBILITY-1 contract C2).
+    ///
+    /// The daemon already emits `progress` frames during a long index/refresh; the default request
+    /// path silently discards them, which is what made `rmap index` "block silently for minutes".
+    /// This variant invokes `on_progress` for each frame so the CLI can surface coarse progress while
+    /// attached. Progress frames also keep the socket read alive, so the read timeout only trips on a
+    /// genuinely silent stall.
+    ///
+    /// DEFAULT: ignore progress and delegate to [`request_with_timeout`](Self::request_with_timeout)
+    /// — correct for transports (e.g. stdio) where attached progress rendering is not wired.
+    fn request_with_progress(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+        _on_progress: &mut dyn FnMut(&serde_json::Value),
+    ) -> Result<serde_json::Value, DaemonClientError> {
+        self.request_with_timeout(method, params, timeout_secs)
+    }
+
     /// Send a ping request to verify the daemon is responsive.
     fn ping(&mut self) -> Result<(), DaemonClientError>;
 

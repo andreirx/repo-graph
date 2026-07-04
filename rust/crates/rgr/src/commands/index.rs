@@ -11,8 +11,64 @@
 
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
+
+/// Per-read stall timeout for a long index/refresh, in seconds. Progress frames reset this deadline
+/// (contract C2), so it is effectively "abort if the daemon goes SILENT for this long", at which
+/// point the still-running probe (contract C1) reports the truth. Matches the transport default.
+const LONG_OP_READ_TIMEOUT_SECS: u64 = 300;
+
+/// Environment override for [`LONG_OP_READ_TIMEOUT_SECS`].
+///
+/// Two concrete users: (1) the still-running E2E proof forces a short timeout so a real in-flight
+/// index trips the contract-C path deterministically instead of waiting 5 minutes; (2) an operator on
+/// a slow machine / flaky link can widen the stall window. Default (unset / unparsable) = 300s. A
+/// value of 0 is clamped to 1 (the transport rejects a 0-duration read timeout).
+fn long_op_read_timeout_secs() -> u64 {
+    match std::env::var("RMAP_LONG_OP_READ_TIMEOUT_SECS") {
+        Ok(v) => v
+            .trim()
+            .parse::<u64>()
+            .map(|n| n.max(1))
+            .unwrap_or(LONG_OP_READ_TIMEOUT_SECS),
+        Err(_) => LONG_OP_READ_TIMEOUT_SECS,
+    }
+}
+
+/// DAEMON-VISIBILITY-1 (contract C2): a throttled stderr renderer for the daemon's progress frames.
+///
+/// Renders on every phase change and at most once every 2s within a phase, so a long index surfaces
+/// coarse progress ("extracting: 42000/160000") instead of blocking silently — without flooding the
+/// terminal when the pipeline emits per-file events.
+fn make_progress_renderer() -> impl FnMut(&serde_json::Value) {
+    let mut last_render = Instant::now();
+    let mut last_phase = String::new();
+    let mut first = true;
+    move |p: &serde_json::Value| {
+        let phase = p
+            .get("phase")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let current = p.get("current").and_then(|v| v.as_u64()).unwrap_or(0);
+        let total = p.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        let phase_changed = phase != last_phase;
+        if first || phase_changed || last_render.elapsed() >= Duration::from_secs(2) {
+            if total > 0 {
+                eprintln!("  {}: {}/{}", phase, current, total);
+            } else if current > 0 {
+                eprintln!("  {}: {}", phase, current);
+            } else if !phase.is_empty() {
+                eprintln!("  {}…", phase);
+            }
+            last_render = Instant::now();
+            last_phase = phase;
+            first = false;
+        }
+    }
+}
 
 /// Run the `rmap index` command (REG-1 contract).
 ///
@@ -113,8 +169,15 @@ pub fn run_index(args: &[String]) -> ExitCode {
         }
     };
 
-    // Transport selection (socket vs stdio) happens in request() via ensure_connected()
-    match client.request("index", Some(params)) {
+    // Transport selection (socket vs stdio) happens in request() via ensure_connected().
+    // DAEMON-VISIBILITY-1 (C2): render the daemon's progress frames while attached.
+    let mut on_progress = make_progress_renderer();
+    match client.request_with_progress(
+        "index",
+        Some(params),
+        long_op_read_timeout_secs(),
+        &mut on_progress,
+    ) {
         Ok(result) => {
             // Extract fields from daemon response
             let files_total = result["files_total"].as_u64().unwrap_or(0);
@@ -132,6 +195,12 @@ pub fn run_index(args: &[String]) -> ExitCode {
             );
             eprintln!("  repo: {}", repo_uid);
             eprintln!("  snapshot: {}", snapshot_uid);
+            // DAEMON-VISIBILITY-1 (D3): every completed index states whether enrichment ran. A fresh
+            // index has NOT been enriched (enrichment is a separate pass), so this is honest and
+            // definite. When ENRICH-LIFECYCLE-1 wires auto-enrichment, this line reports it running.
+            eprintln!(
+                "  enrichment: not run — run `rmap enrich` for resolved call types (types/library attribution)"
+            );
 
             // Print contract summary if present
             if let Some(contracts) = result.get("contracts") {
@@ -145,6 +214,11 @@ pub fn run_index(args: &[String]) -> ExitCode {
 
             ExitCode::SUCCESS
         }
+        // DAEMON-VISIBILITY-1 (contract C): a read timeout on a long index is NOT a failure. Probe
+        // the daemon; if the index is still running, say so truthfully with a DISTINCT exit status.
+        Err(DaemonClientError::Timeout { timeout_secs }) => {
+            report_long_op_timeout(&repo_path_canon, "index", timeout_secs)
+        }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
             ExitCode::from(2)
@@ -153,6 +227,117 @@ pub fn run_index(args: &[String]) -> ExitCode {
             eprintln!("error: {}", e);
             ExitCode::from(2)
         }
+    }
+}
+
+/// DAEMON-VISIBILITY-1 (contract C): the client's read timed out on a long index/refresh. Probe the
+/// daemon (a FRESH connection — the timed-out one is still mid-request daemon-side; the daemon is
+/// concurrent so a second connection is served) and report the truth:
+///
+/// - daemon reachable + an active op for THIS repo → "still running" + a DISTINCT exit status
+///   ([`EXIT_STILL_RUNNING`], not the failure code). The operation survived the client timeout.
+/// - daemon reachable + no active op → it likely just completed between the timeout and the probe;
+///   still not a failure.
+/// - daemon unreachable → it stopped/crashed mid-operation → a genuine failure ([`EXIT_RUNTIME_ERROR`]).
+///
+/// This is the fix for the field bug where a live 160k-file index printed "timed out after 300s"
+/// and exited as a failure while `rmapd` kept indexing.
+fn report_long_op_timeout(repo_path_canon: &Path, op_label: &str, timeout_secs: u64) -> ExitCode {
+    let repo_str = repo_path_canon.to_string_lossy();
+
+    // A short-timeout `daemon_info` probe on a fresh connection.
+    let probe = DaemonClient::new()
+        .ok()
+        .and_then(|mut c| c.request_with_timeout("daemon_info", None, 10).ok());
+
+    let status = classify_long_op_timeout(probe.as_ref(), &repo_str);
+    match status {
+        LongOpStatus::StillRunning => {
+            // The honest truth: the op is STILL RUNNING (the client's read timed out, not the op).
+            eprintln!(
+                "note: {op_label} of {repo_str} is STILL RUNNING on the daemon — the client's {timeout_secs}s read timed out, the operation did not."
+            );
+            if let Some(op) = probe
+                .as_ref()
+                .and_then(|info| find_active_op(info, &repo_str))
+            {
+                let phase = op.get("phase").and_then(|v| v.as_str());
+                let current = op.get("current").and_then(|v| v.as_u64()).unwrap_or(0);
+                let total = op.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+                match (phase, total) {
+                    (Some(ph), t) if t > 0 => eprintln!("      progress: {ph} {current}/{t}"),
+                    (Some(ph), _) if current > 0 => eprintln!("      progress: {ph} {current}"),
+                    (Some(ph), _) => eprintln!("      progress: {ph}"),
+                    (None, _) => {}
+                }
+            }
+            eprintln!("      it continues in the background — follow it with `rmap doctor`.");
+        }
+        LongOpStatus::ReachableNoOp => {
+            eprintln!(
+                "note: the client's {timeout_secs}s read timed out, but the daemon is reachable and reports no"
+            );
+            eprintln!(
+                "      active {op_label} for {repo_str} — it may have just completed. Check with `rmap doctor`."
+            );
+        }
+        LongOpStatus::Unreachable => {
+            eprintln!(
+                "error: {op_label} timed out after {timeout_secs}s and the daemon is no longer reachable —"
+            );
+            eprintln!(
+                "       the operation may have failed. Run `rmap doctor` to check daemon health."
+            );
+        }
+    }
+    ExitCode::from(status.exit_code())
+}
+
+/// The three honest outcomes of a long-op read timeout (contract C). Only [`Unreachable`] is a
+/// failure; a still-running (or just-completed) op is a DISTINCT non-failure status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LongOpStatus {
+    /// Daemon reachable + an active op for this repo → still running in the background.
+    StillRunning,
+    /// Daemon reachable, no active op for this repo → likely just completed.
+    ReachableNoOp,
+    /// Daemon no longer reachable after our timeout → it stopped mid-operation.
+    Unreachable,
+}
+
+impl LongOpStatus {
+    fn exit_code(self) -> u8 {
+        match self {
+            // Both "still running" and "just completed" are NON-failures (the op was not lost).
+            LongOpStatus::StillRunning | LongOpStatus::ReachableNoOp => {
+                crate::daemon_command::EXIT_STILL_RUNNING
+            }
+            LongOpStatus::Unreachable => crate::daemon_command::EXIT_RUNTIME_ERROR,
+        }
+    }
+}
+
+/// Find the active daemon operation for `repo_str` in a `daemon_info` response, if any.
+fn find_active_op<'a>(
+    info: &'a serde_json::Value,
+    repo_str: &str,
+) -> Option<&'a serde_json::Value> {
+    info.get("active_operations")
+        .and_then(|v| v.as_array())
+        .and_then(|ops| {
+            ops.iter()
+                .find(|op| op.get("repo").and_then(|v| v.as_str()) == Some(repo_str))
+        })
+}
+
+/// Pure classifier for a long-op timeout given the `daemon_info` probe result (contract C).
+///
+/// `probe` is `None` when the daemon could not be reached after the timeout.
+fn classify_long_op_timeout(probe: Option<&serde_json::Value>, repo_str: &str) -> LongOpStatus {
+    match probe {
+        None => LongOpStatus::Unreachable,
+        Some(info) if find_active_op(info, repo_str).is_some() => LongOpStatus::StillRunning,
+        Some(_) => LongOpStatus::ReachableNoOp,
     }
 }
 
@@ -557,9 +742,53 @@ fn format_refresh_summary(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::daemon_command::{EXIT_RUNTIME_ERROR, EXIT_STILL_RUNNING};
     use repo_graph_indexer::types::{
         ArtifactCopyForward, ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult,
     };
+
+    // DAEMON-VISIBILITY-1 (contract C) — the still-running proof. A client read-timeout on a long op
+    // is classified from a fresh `daemon_info` probe: a live op → "still running" with a DISTINCT
+    // exit status (NOT the failure code); an unreachable daemon → the failure code. This is the fix
+    // for a 160k-file index that printed "timed out after 300s" and exited as a failure while the
+    // daemon kept indexing.
+    #[test]
+    fn still_running_timeout_yields_distinct_non_failure_exit_status() {
+        let repo = "/repos/big";
+
+        // Daemon reachable + an active index for THIS repo → still running.
+        let with_op = serde_json::json!({
+            "active_operations": [
+                { "kind": "index", "repo": repo, "phase": "extracting",
+                  "current": 42_000, "total": 160_000, "started_secs_ago": 360 }
+            ]
+        });
+        let status = classify_long_op_timeout(Some(&with_op), repo);
+        assert_eq!(status, LongOpStatus::StillRunning);
+        assert_eq!(status.exit_code(), EXIT_STILL_RUNNING);
+
+        // Reachable, but the op is for a DIFFERENT repo → not this repo's op (just-completed case).
+        let other = serde_json::json!({
+            "active_operations": [ { "kind": "index", "repo": "/repos/other" } ]
+        });
+        assert_eq!(
+            classify_long_op_timeout(Some(&other), repo),
+            LongOpStatus::ReachableNoOp
+        );
+        assert_eq!(
+            classify_long_op_timeout(Some(&other), repo).exit_code(),
+            EXIT_STILL_RUNNING,
+            "just-completed is still NOT a failure"
+        );
+
+        // Daemon unreachable after the timeout → genuine failure.
+        let unreachable = classify_long_op_timeout(None, repo);
+        assert_eq!(unreachable, LongOpStatus::Unreachable);
+        assert_eq!(unreachable.exit_code(), EXIT_RUNTIME_ERROR);
+
+        // The "still running" status is DISTINCT from the failure status.
+        assert_ne!(EXIT_STILL_RUNNING, EXIT_RUNTIME_ERROR);
+    }
 
     // HONEST-DEGRADATION-IMPL-1 (D4): the `index`/`refresh` node count is labelled "nodes (all kinds)"
     // — never "symbols" — so an agent cannot misread the all-kinds COUNT(*) (e.g. nginx's 4393) as the
@@ -893,8 +1122,15 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         }
     };
 
-    // Transport selection (socket vs stdio) happens in request() via ensure_connected()
-    match client.request("refresh", Some(params)) {
+    // Transport selection (socket vs stdio) happens in request() via ensure_connected().
+    // DAEMON-VISIBILITY-1 (C2): render the daemon's progress frames while attached.
+    let mut on_progress = make_progress_renderer();
+    match client.request_with_progress(
+        "refresh",
+        Some(params),
+        long_op_read_timeout_secs(),
+        &mut on_progress,
+    ) {
         Ok(result) => {
             // Extract fields from daemon response
             let files_total = result["files_total"].as_u64().unwrap_or(0);
@@ -914,6 +1150,10 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
                     snapshot_uid
                 )
             );
+            // DAEMON-VISIBILITY-1 (D3): enrichment honesty on the refresh completion report too.
+            eprintln!(
+                "  enrichment: not run — run `rmap enrich` for resolved call types (types/library attribution)"
+            );
 
             // Print copy-forward summary if present (refresh-specific)
             if let Some(copy_forward) = result.get("artifact_copy_forward") {
@@ -931,6 +1171,10 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             }
 
             ExitCode::SUCCESS
+        }
+        // DAEMON-VISIBILITY-1 (contract C): a read timeout on a long refresh is NOT a failure.
+        Err(DaemonClientError::Timeout { timeout_secs }) => {
+            report_long_op_timeout(Path::new(&repo_path), "refresh", timeout_secs)
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {

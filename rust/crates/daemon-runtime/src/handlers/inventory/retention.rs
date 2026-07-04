@@ -24,8 +24,18 @@
 //!
 //! - Never prunes: current, parent, baseline_auto, baseline_user
 //! - Stale-epoch snapshots are prunable because classification made them so
-//! - Prune is post-snapshot-success only
+//! - READY-retention prune is post-snapshot-success only
 //! - Prune is idempotent (no-op if no prunable snapshots)
+//!
+//! # DAEMON-VISIBILITY-1 (F3) amendment — interrupted-snapshot reclaim (operator Option A, 2026-07-03)
+//!
+//! The READY-retention invariants above are unchanged. This handler ALSO reclaims ORPHANED non-READY
+//! (interrupted / failed) snapshots — the day-2 field bug was a 4 GB `building` snapshot invisible to
+//! the READY model that silently held disk. "Prune is post-snapshot-success only" therefore no longer
+//! describes the whole handler: it governs the READY path; the non-READY reclaim is gated instead on
+//! "no live write op on this DB" (the operator's ratified safety rule — consult the activity registry
+//! AND hold the DB write lock, so an in-flight index's `building` snapshot is never touched). See
+//! `reclaim_orphaned_non_ready` below and `docs/slices/daemon-visibility-1.md` §2 F3.
 //!
 //! # References
 //!
@@ -233,6 +243,38 @@ pub fn handle_classify_retention(state: &DaemonState, request: &Request) -> Disp
         }
     };
 
+    // DAEMON-VISIBILITY-1 (F3): non-READY (interrupted) snapshots are OUTSIDE the READY retention
+    // model — `classify_repo_retention` only classifies `status='ready'` and `prune_prunable_snapshots`
+    // only deletes `retention_class='prunable'`, so an interrupted 4 GB `building` snapshot is invisible
+    // to it and silently holds disk (the day-2 field bug). Enumerate them here (pre-reclaim, so the
+    // report can NAME state + when even after they are deleted), then RECLAIM the orphaned ones.
+    let interrupted: Vec<serde_json::Value> = storage
+        .list_snapshots(repo_uid)
+        .unwrap_or_default()
+        .iter()
+        .filter(|s| s.status != "ready")
+        .map(|s| {
+            json!({
+                "snapshot_uid": s.snapshot_uid,
+                "status": s.status,
+                "state": crate::snapshot_facts::snapshot_state_label(&s.status, false),
+                "created_at": s.created_at,
+                "files_total": s.files_total,
+            })
+        })
+        .collect();
+
+    // F3 (operator Option A): actually delete + reclaim the orphaned non-READY snapshots. Gated so a
+    // live index's `building` snapshot is NEVER touched (see `reclaim_orphaned_non_ready`). This runs
+    // AFTER the enumeration above and re-queries under the DB lock, so the reported list is stable.
+    let reclaim =
+        reclaim_orphaned_non_ready(state, &storage, db_path, repo_uid, !interrupted.is_empty());
+
+    // Measured AFTER the reclaim: the honest "storage this repo holds now" (post-VACUUM if we ran one).
+    let db_size_bytes = std::fs::metadata(&entry.db_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
     let response = json!({
         "classified": result.classified,
         "pruned_count": result.pruned_count,
@@ -244,8 +286,87 @@ pub fn handle_classify_retention(state: &DaemonState, request: &Request) -> Disp
             "prunable": result.stats.prunable,
             "total": result.stats.total,
         },
+        // F3: interrupted snapshots that were present (named for the report), + the reclaim outcome.
+        "interrupted_snapshots": interrupted,
+        "non_ready_reclaim": reclaim,
+        "db_size_bytes": db_size_bytes,
         "repo_path": entry.canonical_path
     });
 
     DispatchResult::success(&request.id, response)
+}
+
+/// DAEMON-VISIBILITY-1 (F3, operator Option A): delete + reclaim the ORPHANED non-READY snapshots for
+/// this repo, returning a reader-frame outcome object for the prune response.
+///
+/// # Safety (two gates, both required before any deletion)
+///
+/// The operator's ratified rule: delete a non-READY snapshot only when NO live operation is attached.
+/// An initial index coordinates on the DB-level write lock — NOT the `RepoCoordinator` this handler
+/// already holds — so the repo write lock alone is blind to it. We therefore require BOTH:
+///
+/// 1. **Activity registry clear** — no index/refresh/enrich has stamped an in-flight op on this DB
+///    (`state.activity().active_for_db`). Every write handler stamps this at entry.
+/// 2. **DB write lock free** — `try_acquire_write()` (NON-blocking) on the same `DatabaseState` lock an
+///    initial index takes. `try_lock` cannot deadlock against the repo write lock we already hold, and
+///    holding it for the deletion + VACUUM excludes any index that would start mid-reclaim.
+///
+/// If either gate is closed, we SKIP deletion and report "not reclaimed — an operation is in progress"
+/// (honest: the interrupted snapshot is still listed; the operator re-runs prune when idle). A live
+/// index's in-flight `building` snapshot is thus never reachable by the delete.
+///
+/// On success it deletes every non-READY snapshot (reusing storage's transactional cascade), runs
+/// `VACUUM` to realise the on-disk reclaim (SQLite does not shrink on DELETE), and reports the byte
+/// delta. READY snapshots are never touched (the storage query filters `status != 'ready'`).
+fn reclaim_orphaned_non_ready(
+    state: &DaemonState,
+    storage: &StorageConnection,
+    db_path: &Path,
+    repo_uid: &str,
+    has_interrupted: bool,
+) -> serde_json::Value {
+    let skipped = |reason: &str| json!({ "reclaimed": false, "skipped_reason": reason, "deleted_count": 0, "reclaimed_bytes": 0 });
+    if !has_interrupted {
+        return json!({ "reclaimed": false, "deleted_count": 0, "reclaimed_bytes": 0 });
+    }
+    // Gate 1 — operator's named rule: never delete while a live op writes this DB.
+    if state.activity().active_for_db(db_path).is_some() {
+        return skipped("an operation is in progress on this repo");
+    }
+    // Gate 2 — take the DB write lock non-blockingly (excludes an initial index coordinating on it).
+    let db_runtime = match state.get_or_create_db_runtime(db_path) {
+        Ok(r) => r,
+        Err(e) => return skipped(&format!("could not resolve db runtime: {e}")),
+    };
+    let _db_guard = match db_runtime.try_acquire_write() {
+        Some(g) => g,
+        None => return skipped("an operation is in progress on this repo"),
+    };
+
+    let size_before = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+    let deleted = match storage.prune_non_ready_snapshots(repo_uid) {
+        Ok(uids) => uids,
+        Err(e) => return skipped(&format!("delete failed: {e}")),
+    };
+    if deleted.is_empty() {
+        // Raced away between enumeration and the lock (e.g. a just-finalized index): nothing to do.
+        return json!({ "reclaimed": true, "deleted_count": 0, "reclaimed_bytes": 0 });
+    }
+    // Realise the reclaim on disk. If VACUUM fails the rows are still gone; report honestly.
+    if let Err(e) = storage.vacuum() {
+        return json!({
+            "reclaimed": true,
+            "deleted_count": deleted.len(),
+            "reclaimed_bytes": 0,
+            "vacuum_error": e.to_string(),
+        });
+    }
+    let size_after = std::fs::metadata(db_path)
+        .map(|m| m.len())
+        .unwrap_or(size_before);
+    json!({
+        "reclaimed": true,
+        "deleted_count": deleted.len(),
+        "reclaimed_bytes": size_before.saturating_sub(size_after),
+    })
 }

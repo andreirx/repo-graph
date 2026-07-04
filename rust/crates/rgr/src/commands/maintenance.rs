@@ -37,6 +37,42 @@ struct PruneOutput {
     duration_ms: u64,
     /// Retention stats after prune
     retention: RetentionStats,
+    /// DAEMON-VISIBILITY-1 (F3): interrupted (non-READY) snapshots that were present when prune ran.
+    /// These sit OUTSIDE the normal READY retention model (never classified, never auto-pruned).
+    /// Named here (state + when) so the reclaim report can list what it freed even after deletion.
+    #[serde(default)]
+    interrupted_snapshots: Vec<InterruptedSnapshot>,
+    /// DAEMON-VISIBILITY-1 (F3, operator Option A): the outcome of reclaiming those orphaned non-READY
+    /// snapshots — whether they were deleted and how much disk was freed, or why it was skipped.
+    #[serde(default)]
+    non_ready_reclaim: NonReadyReclaim,
+    /// Repo DB size on disk (whole file; per-snapshot bytes are not tracked). Measured AFTER reclaim.
+    #[serde(default)]
+    db_size_bytes: u64,
+}
+
+/// DAEMON-VISIBILITY-1 (F3): an interrupted (non-READY) snapshot surfaced by prune.
+#[derive(Debug, Serialize, Deserialize)]
+struct InterruptedSnapshot {
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    created_at: String,
+}
+
+/// DAEMON-VISIBILITY-1 (F3, operator Option A): the daemon's reclaim outcome for orphaned non-READY
+/// snapshots. `reclaimed=false` with a `skipped_reason` means a live operation blocked deletion (safe:
+/// the interrupted snapshot is still listed and prune can be re-run when idle).
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct NonReadyReclaim {
+    #[serde(default)]
+    reclaimed: bool,
+    #[serde(default)]
+    deleted_count: u64,
+    #[serde(default)]
+    reclaimed_bytes: u64,
+    #[serde(default)]
+    skipped_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -194,12 +230,48 @@ fn execute_prune(client: &mut DaemonClient) -> Result<PruneOutput, String> {
         total: retention.get("total").and_then(|v| v.as_i64()).unwrap_or(0),
     };
 
+    // DAEMON-VISIBILITY-1 (F3 visibility): interrupted (non-READY) snapshots + repo DB size.
+    let interrupted_snapshots: Vec<InterruptedSnapshot> = response
+        .get("interrupted_snapshots")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|s| InterruptedSnapshot {
+                    state: s
+                        .get("state")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("non-READY")
+                        .to_string(),
+                    created_at: s
+                        .get("created_at")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let db_size_bytes = response
+        .get("db_size_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    // DAEMON-VISIBILITY-1 (F3): the reclaim outcome (deleted count + freed bytes, or skip reason).
+    let non_ready_reclaim: NonReadyReclaim = response
+        .get("non_ready_reclaim")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
     Ok(PruneOutput {
         repo_path,
         classified,
         pruned_count,
         duration_ms,
         retention: stats,
+        interrupted_snapshots,
+        non_ready_reclaim,
+        db_size_bytes,
     })
 }
 
@@ -219,6 +291,78 @@ fn print_prune_human(output: &PruneOutput) {
     println!("  baseline_auto:{}", output.retention.baseline_auto);
     println!("  baseline_user:{}", output.retention.baseline_user);
     println!("  total:        {}", output.retention.total);
+
+    // DAEMON-VISIBILITY-1 (F3 visibility): surface interrupted (non-READY) snapshots so they no
+    // longer silently hold disk.
+    for line in interrupted_report_lines(output) {
+        println!("{line}");
+    }
+}
+
+/// DAEMON-VISIBILITY-1 (F3, operator Option A): the interrupted-snapshots section of the prune report
+/// (pure, testable). Empty when there were none. Reports the ACTUAL reclaim outcome:
+///
+/// - **reclaimed**: "reclaimed N interrupted snapshot(s), freed X on disk" + the list — the orphaned
+///   partials were deleted and their disk returned to the OS (the operator's field complaint fixed);
+/// - **skipped**: "N interrupted snapshot(s) not reclaimed — <reason>" — a live operation blocked the
+///   safe delete; the snapshots are still listed and prune can be re-run when the repo is idle.
+fn interrupted_report_lines(output: &PruneOutput) -> Vec<String> {
+    if output.interrupted_snapshots.is_empty() {
+        return Vec::new();
+    }
+    let reclaim = &output.non_ready_reclaim;
+    let n = output.interrupted_snapshots.len();
+    let mut lines = vec![String::new()];
+
+    if reclaim.reclaimed {
+        lines.push(format!(
+            "reclaimed {} interrupted snapshot(s), freed {} on disk:",
+            reclaim.deleted_count,
+            format_bytes(reclaim.reclaimed_bytes)
+        ));
+        for snap in &output.interrupted_snapshots {
+            lines.push(format!("  - {}, created {}", snap.state, snap.created_at));
+        }
+        lines.push(format!(
+            "  repo DB now holds {} on disk.",
+            format_bytes(output.db_size_bytes)
+        ));
+    } else {
+        let reason = reclaim
+            .skipped_reason
+            .as_deref()
+            .unwrap_or("an operation is in progress on this repo");
+        lines.push(format!(
+            "interrupted snapshots ({n}, not reclaimed — {reason}):"
+        ));
+        for snap in &output.interrupted_snapshots {
+            lines.push(format!("  - {}, created {}", snap.state, snap.created_at));
+        }
+        lines.push(format!(
+            "  note: an interrupted index never finalized; the repo DB holds {} on disk.",
+            format_bytes(output.db_size_bytes)
+        ));
+        lines.push(
+            "  re-run `rmap maintenance prune` when the repo is idle to reclaim them.".to_string(),
+        );
+    }
+    lines
+}
+
+/// Humanise a byte count (GB/MB/KB) for the prune report.
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn print_usage() {
@@ -262,4 +406,99 @@ Examples:
   rmap maintenance prune           # prune and show human output
   rmap maintenance prune --json    # prune and show JSON output"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_output(interrupted: Vec<InterruptedSnapshot>, reclaim: NonReadyReclaim) -> PruneOutput {
+        PruneOutput {
+            repo_path: "/repos/big".to_string(),
+            classified: true,
+            pruned_count: 0,
+            duration_ms: 1,
+            retention: RetentionStats {
+                current: 1,
+                parent: 0,
+                baseline_auto: 0,
+                baseline_user: 0,
+                total: 2,
+            },
+            interrupted_snapshots: interrupted,
+            non_ready_reclaim: reclaim,
+            db_size_bytes: 4_000_000_000,
+        }
+    }
+
+    fn one_interrupted() -> Vec<InterruptedSnapshot> {
+        vec![InterruptedSnapshot {
+            state: "interrupted".to_string(),
+            created_at: "2026-07-02T10:00:00Z".to_string(),
+        }]
+    }
+
+    // DAEMON-VISIBILITY-1 (F3, operator Option A): when the daemon deleted the orphaned non-READY
+    // snapshot(s), `rmap maintenance prune` reports the ACTUAL reclaim — count + bytes freed — not a
+    // "not available yet" stub. This is the operator's field complaint (a 4 GB partial holding disk) fixed.
+    #[test]
+    fn prune_reports_actual_reclaim_when_deleted() {
+        let output = base_output(
+            one_interrupted(),
+            NonReadyReclaim {
+                reclaimed: true,
+                deleted_count: 1,
+                reclaimed_bytes: 4_000_000_000,
+                skipped_reason: None,
+            },
+        );
+        let joined = interrupted_report_lines(&output).join("\n");
+        assert!(
+            joined.contains("reclaimed 1 interrupted snapshot(s)"),
+            "states the delete happened: {joined}"
+        );
+        assert!(
+            joined.contains("freed 3.7 GB"),
+            "states the disk freed: {joined}"
+        );
+        assert!(
+            joined.contains("interrupted, created 2026-07-02"),
+            "names the reclaimed snapshot: {joined}"
+        );
+        assert!(
+            !joined.contains("not available yet"),
+            "must NOT be the old deferred stub: {joined}"
+        );
+    }
+
+    // DAEMON-VISIBILITY-1 (F3): when a live operation blocked the safe delete, prune says so honestly
+    // and points to re-running when idle — it never silently claims a reclaim it did not do.
+    #[test]
+    fn prune_reports_skip_when_operation_in_progress() {
+        let output = base_output(
+            one_interrupted(),
+            NonReadyReclaim {
+                reclaimed: false,
+                deleted_count: 0,
+                reclaimed_bytes: 0,
+                skipped_reason: Some("an operation is in progress on this repo".to_string()),
+            },
+        );
+        let joined = interrupted_report_lines(&output).join("\n");
+        assert!(
+            joined.contains("not reclaimed — an operation is in progress"),
+            "explains the skip honestly: {joined}"
+        );
+        assert!(
+            joined.contains("re-run `rmap maintenance prune` when the repo is idle"),
+            "gives the retry action: {joined}"
+        );
+        assert!(joined.contains("3.7 GB"), "still shows disk held: {joined}");
+    }
+
+    #[test]
+    fn prune_report_empty_when_no_interrupted() {
+        let lines = interrupted_report_lines(&base_output(vec![], NonReadyReclaim::default()));
+        assert!(lines.is_empty());
+    }
 }

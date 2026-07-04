@@ -133,6 +133,44 @@ impl StorageConnection {
         }
     }
 
+    /// DAEMON-VISIBILITY-1 (F): list ALL snapshots for a repo (any status), newest first.
+    ///
+    /// Unlike [`get_latest_snapshot`] (READY-only) this returns `building` / `stale` / `failed`
+    /// rows too — the whole point of F, which surfaces interrupted/partial snapshots that every
+    /// existing query filters out. Read-only; the `Snapshot` DTO already carries `status`,
+    /// `created_at`, `completed_at`, and the `*_total` counts, so no schema change is needed.
+    pub fn list_snapshots(&self, repo_uid: &str) -> Result<Vec<Snapshot>, StorageError> {
+        let conn = self.connection();
+        let mut stmt =
+            conn.prepare("SELECT * FROM snapshots WHERE repo_uid = ? ORDER BY created_at DESC")?;
+        let rows = stmt.query_map(rusqlite::params![repo_uid], Snapshot::from_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::Sqlite)
+    }
+
+    /// DAEMON-VISIBILITY-1 (F2): the latest snapshot for a repo REGARDLESS of status.
+    ///
+    /// Companion to [`get_latest_snapshot`] (READY-only). When orient/explain find no READY
+    /// snapshot, this surfaces the newest non-READY row so the error can NAME the partial (its
+    /// state, when it was created) instead of a bare "index the repo first". Read-only.
+    pub fn get_latest_snapshot_any_state(
+        &self,
+        repo_uid: &str,
+    ) -> Result<Option<Snapshot>, StorageError> {
+        let result = self.connection().query_row(
+            "SELECT * FROM snapshots \
+			 WHERE repo_uid = ? \
+			 ORDER BY created_at DESC LIMIT 1",
+            rusqlite::params![repo_uid],
+            Snapshot::from_row,
+        );
+        match result {
+            Ok(s) => Ok(Some(s)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Sqlite(e)),
+        }
+    }
+
     /// Update a snapshot's status and completed_at timestamp.
     /// Mirrors TS `updateSnapshotStatus` (sqlite-storage.ts:296).
     ///
@@ -332,6 +370,51 @@ mod tests {
             latest.is_none(),
             "BUILDING snapshot must NOT be returned by get_latest_snapshot"
         );
+    }
+
+    // DAEMON-VISIBILITY-1 (F): `list_snapshots` returns EVERY state (the point of F — surfacing
+    // interrupted/partial snapshots that the READY-only queries hide).
+    #[test]
+    fn list_snapshots_returns_all_states() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        // One building (interrupted) + one ready.
+        let _building = create_test_snapshot(&storage);
+        let ready = create_test_snapshot(&storage);
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: ready.snapshot_uid.clone(),
+                status: SNAPSHOT_STATUS_READY.to_string(),
+                completed_at: None,
+            })
+            .unwrap();
+
+        let all = storage.list_snapshots("r1").unwrap();
+        assert_eq!(
+            all.len(),
+            2,
+            "list_snapshots must return non-READY rows too"
+        );
+        let statuses: Vec<&str> = all.iter().map(|s| s.status.as_str()).collect();
+        assert!(statuses.contains(&SNAPSHOT_STATUS_BUILDING));
+        assert!(statuses.contains(&SNAPSHOT_STATUS_READY));
+    }
+
+    // DAEMON-VISIBILITY-1 (F2): the latest snapshot regardless of state names the partial that
+    // `get_latest_snapshot` (READY-only) returns None for.
+    #[test]
+    fn get_latest_snapshot_any_state_returns_the_interrupted_partial() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let building = create_test_snapshot(&storage);
+
+        // READY-only view sees nothing…
+        assert!(storage.get_latest_snapshot("r1").unwrap().is_none());
+        // …but the any-state view surfaces the interrupted (building) snapshot.
+        let any = storage.get_latest_snapshot_any_state("r1").unwrap();
+        let any = any.expect("any-state latest must surface the building snapshot");
+        assert_eq!(any.snapshot_uid, building.snapshot_uid);
+        assert_eq!(any.status, SNAPSHOT_STATUS_BUILDING);
     }
 
     #[test]

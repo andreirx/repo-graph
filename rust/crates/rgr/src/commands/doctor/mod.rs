@@ -21,6 +21,10 @@ use crate::platform::{
 /// guardrail. `format_size` (defined below) is shared into it via `super::`.
 mod daemon_info;
 
+/// `storage_health`-derived storage probe (DAEMON-VISIBILITY-1 E + F). Extracted into a child
+/// module for the same 500-line-guardrail reason; `format_size` is shared via `super::`.
+mod storage_probe;
+
 /// Doctor output for JSON mode.
 #[derive(Debug, Serialize)]
 struct DoctorOutput {
@@ -204,40 +208,7 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         }
     };
 
-    // Parse response (DEV-INSTALL-DOCTOR-WAIT-1: flat `storage_health` shape).
-    let db_size = response
-        .get("db_size_bytes")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let snapshot_count = response
-        .get("total_snapshots")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-
-    // CACHE-SEMANTICS-1: prunable snapshot count
-    let prunable_count = response
-        .get("prunable_snapshots")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-
-    let size_human = format_size(db_size);
-
-    // Include prunable count if > 0
-    let message = if prunable_count > 0 {
-        format!(
-            "db: {}, {} snapshots ({} prunable)",
-            size_human, snapshot_count, prunable_count
-        )
-    } else {
-        format!("db: {}, {} snapshots", size_human, snapshot_count)
-    };
-
-    Some(ProbeResult {
-        name: "storage".to_string(),
-        passed: true,
-        message,
-        details: None,
-    })
+    Some(storage_probe::storage_probe_from_facts(&response))
 }
 
 /// Format size in human-readable form.
@@ -291,6 +262,8 @@ fn print_human_output(output: &DoctorOutput) {
                     | "transport"
                     | "state_root"
                     | "authority_policy"
+                    // DAEMON-VISIBILITY-1 (D): "what is the daemon doing right now" line.
+                    | "activity"
             )
         })
         .collect();

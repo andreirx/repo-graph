@@ -247,6 +247,21 @@ impl DaemonClient {
         transport.request_with_timeout(method, params, timeout_secs)
     }
 
+    /// Send a request, rendering the daemon's progress frames via `on_progress` as they arrive
+    /// (DAEMON-VISIBILITY-1 contract C2). Used by `index`/`refresh` so a long operation surfaces
+    /// coarse progress while attached instead of blocking silently. On the stdio transport this
+    /// falls back to the default (no progress) — attached progress is a socket-daemon nicety.
+    pub fn request_with_progress(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+        on_progress: &mut dyn FnMut(&serde_json::Value),
+    ) -> Result<serde_json::Value, DaemonClientError> {
+        let transport = self.ensure_connected()?;
+        transport.request_with_progress(method, params, timeout_secs, on_progress)
+    }
+
     /// Ping the daemon to verify it's responsive.
     ///
     /// Uses the same code path as all other requests.

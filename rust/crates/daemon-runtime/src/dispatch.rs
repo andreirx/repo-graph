@@ -230,6 +230,45 @@ impl ServiceDispatcher {
 
         Ok((repo_state, repo_uid.clone(), display_name))
     }
+
+    /// DAEMON-VISIBILITY-1 (F2): the shared "no READY snapshot" error for EVERY READY-requiring
+    /// dispatch surface (orient/explain/callers/callees/imports/stats/cycles/path/trust/gate/resource/
+    /// contracts/inferences/deps/surfaces/boundaries/modules and the cycle-completeness audit).
+    ///
+    /// # Why this helper exists (abstraction ledger)
+    ///
+    /// - **What:** builds ONE `SnapshotNotFound` `ErrorDetail` whose message is the honest F2 text
+    ///   (`snapshot_facts::no_ready_snapshot_message`) — NAMES an existing non-READY partial (state,
+    ///   when, on-disk size) + both next actions, or the plain "index it first" when the repo was
+    ///   genuinely never indexed.
+    /// - **Concrete current users:** the 34 READY-requiring surfaces above (32 that formerly emitted the
+    ///   bare `"no snapshot found"` + orient + explain, which previously each hand-built the message).
+    /// - **Named axis of variation:** none — this is DEDUP of one identical `(code, honest-message)`
+    ///   pairing across 34 sites. The force is the reviewer's consistency requirement: the bare message
+    ///   was the exact copy-paste that reintroduced the day-2 gaslighting; a single definition removes
+    ///   the vector.
+    /// - **Rejected simpler alternative:** inline `ErrorDetail::new(SnapshotNotFound,
+    ///   no_ready_snapshot_message(..))` at all 34 sites — rejected: 34× duplication of a non-trivial
+    ///   (query-any-state + stat + format) pairing, and a fresh copy-paste site could silently reinstate
+    ///   the bare message.
+    ///
+    /// `SnapshotNotFound` (not `InternalError`) is the honest code: a missing READY snapshot is an
+    /// expected user-facing state, not an internal fault. Every non-`RepoNotFound` code renders on the
+    /// client as `error: <code>: <message>` (verified in `daemon_command::print_daemon_error` and the
+    /// orient/explain inline handlers), so the honest message reaches the reader verbatim.
+    ///
+    /// Pure w.r.t. `self` (associated fn): callers pass the `storage`/`db_path`/`repo_uid` already in
+    /// scope. Runs only on the cold no-READY-snapshot error path.
+    fn no_ready_snapshot_detail(
+        storage: &StorageConnection,
+        db_path: &Path,
+        repo_uid: &str,
+    ) -> ErrorDetail {
+        ErrorDetail::new(
+            ErrorCode::SnapshotNotFound,
+            crate::snapshot_facts::no_ready_snapshot_message(storage, db_path, repo_uid),
+        )
+    }
 }
 
 impl Dispatcher for ServiceDispatcher {
@@ -425,8 +464,42 @@ impl ServiceDispatcher {
         let registry = self.state.registry();
         let repo_count = registry.list().len() as u64;
         let db_dir = registry.db_dir().to_path_buf();
+        // DAEMON-VISIBILITY-1 (D2): the most-recently-completed snapshot across all repos, for the
+        // idle "idle; last snapshot <repo> @ <time>" doctor line. Sourced from the registry's
+        // `last_indexed_at` (set ONLY on a successful index — `record_index` runs in `handle_index`'s
+        // Ok arm), so it is an honest "last completed" fact with NO DB open / no lock. ISO8601
+        // (`toISOString`) sorts lexicographically = chronologically, so `max_by_key` on the timestamp
+        // picks the latest. `repo` is the reader-frame display name (alias, else path basename) — never
+        // the internal `repo_uid`. `None` (no repo ever indexed) renders as a bare "idle".
+        let last_snapshot = registry
+            .list()
+            .iter()
+            .filter(|e| e.last_indexed_at.is_some())
+            .max_by_key(|e| e.last_indexed_at.clone().unwrap_or_default())
+            .map(|e| {
+                let repo = e.alias.clone().unwrap_or_else(|| {
+                    e.canonical_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(&e.repo_uid)
+                        .to_string()
+                });
+                serde_json::json!({ "repo": repo, "at": e.last_indexed_at })
+            });
         drop(registry);
         let databases_total_bytes = crate::resource_metrics::directory_size_bytes(&db_dir);
+
+        // DAEMON-VISIBILITY-1 (D): the daemon's current activity. Lock-light (a brief Vec mutex,
+        // no repo read guard) so this stays responsive DURING an index — which is exactly when
+        // `rmap doctor` and the still-running client probe (C) ask "what are you doing?". Empty
+        // array = idle (known-empty, never a false "nothing indexed").
+        let active_operations: Vec<serde_json::Value> = self
+            .state
+            .activity()
+            .snapshot()
+            .iter()
+            .map(|op| op.to_json())
+            .collect();
 
         DispatchResult::success(
             &request.id,
@@ -439,6 +512,10 @@ impl ServiceDispatcher {
                 "rss_peak_bytes": rss_peak_bytes,
                 "databases_total_bytes": databases_total_bytes,
                 "repo_count": repo_count,
+                // DAEMON-VISIBILITY-1 (D) additive fields:
+                "active_operations": active_operations,
+                // Idle "last snapshot <repo> @ <time>" fact (null when no repo ever indexed).
+                "last_snapshot": last_snapshot,
             }),
         )
     }
@@ -594,6 +671,15 @@ impl ServiceDispatcher {
 
                 let loaded = self.state.get_repo_by_key(&key).is_some();
 
+                // DAEMON-VISIBILITY-1 (F): per-snapshot state/outcome/size for `rmap repo info`.
+                // Nested under `storage` (additive — existing fields unchanged). Short-circuits to
+                // "in use by daemon" during an active index rather than erroring on the busy open.
+                let storage_facts = crate::snapshot_facts::collect_snapshot_facts(
+                    &self.state,
+                    Path::new(&entry.db_path),
+                    &entry.repo_uid,
+                );
+
                 DispatchResult::success(
                     &request.id,
                     serde_json::json!({
@@ -604,6 +690,7 @@ impl ServiceDispatcher {
                         "last_indexed_at": entry.last_indexed_at,
                         "last_snapshot_uid": entry.last_snapshot_uid,
                         "loaded": loaded,
+                        "storage": storage_facts,
                     }),
                 )
             }
@@ -976,7 +1063,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -1067,7 +1154,7 @@ impl ServiceDispatcher {
                 Ok(None) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -1173,7 +1260,7 @@ impl ServiceDispatcher {
                 Ok(None) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -1272,7 +1359,7 @@ impl ServiceDispatcher {
                 Ok(None) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -1459,7 +1546,7 @@ impl ServiceDispatcher {
                 Ok(None) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -1800,7 +1887,7 @@ impl ServiceDispatcher {
                 Ok(None) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -2082,7 +2169,7 @@ impl ServiceDispatcher {
                 Ok(None) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -2297,6 +2384,18 @@ impl ServiceDispatcher {
         };
         let _db_write_guard = db_runtime.acquire_write();
 
+        // DAEMON-VISIBILITY-1 (D): record this index as in-flight so `rmap doctor` and the
+        // still-running client probe can see it (op kind, repo, started-at, live phase/counters
+        // teed below). The guard deregisters on every exit path (RAII). Repo identity is already
+        // resolved above (registry.register) — the coordinator never records it (index coordinates
+        // on the DB `Mutex<()>`, not `RepoCoordinator`), which is why this record exists.
+        let _activity = self.state.activity().begin(
+            crate::activity::OpKind::Index,
+            canonical_path.to_string_lossy().to_string(),
+            Some(repo_uid.clone()),
+            db_path.clone(),
+        );
+
         // Compute storage_root_path relative to DB location
         let storage_root_path = match compute_storage_root_path(&canonical_path, &db_path) {
             Ok(p) => Some(p),
@@ -2327,7 +2426,11 @@ impl ServiceDispatcher {
         };
 
         // Create progress callback that maps repo-index events to daemon protocol.
+        // DAEMON-VISIBILITY-1 (D): also tee the phase + counters into the activity record so
+        // `rmap doctor` renders live progress ("extraction 42k/160k files") for an ATTACHED-less
+        // observer — the same event already sent to the attached client, no new instrumentation.
         let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
+            _activity.update(&event.phase, event.current, event.total);
             match emitter.emit(ProgressDetail {
                 phase: event.phase.clone(),
                 current: event.current,
@@ -2530,6 +2633,25 @@ impl ServiceDispatcher {
             );
         }
 
+        // DAEMON-VISIBILITY-1 (D): record this refresh as in-flight (RAII-cleared on exit). The
+        // activity record's `repo_display` is documented "canonical repo path — what the operator
+        // recognises". The reconstructed `repo_path` above is DB-relative (db_parent + stored
+        // `root_path`, so it carries `../..`); canonicalize it for the status line so refresh MATCHES
+        // `handle_index` (which stamps the already-canonical registry path) — otherwise `rmap doctor`
+        // shows `…/databases/../../repo` for a refresh but a clean path for an index. Display only: the
+        // refresh work below still uses `repo_path`. Falls back to the raw path if canonicalization
+        // fails (never blocks — the dir existence was just checked). Surfaced by the review-6 in-flight
+        // refresh status proof.
+        let _activity = self.state.activity().begin(
+            crate::activity::OpKind::Refresh,
+            std::fs::canonicalize(&repo_path)
+                .unwrap_or_else(|_| repo_path.clone())
+                .to_string_lossy()
+                .to_string(),
+            Some(repo_uid.clone()),
+            canonical_db_path.to_path_buf(),
+        );
+
         // Parse optional include_roots
         let c_include_roots: Vec<String> = request
             .params
@@ -2560,9 +2682,16 @@ impl ServiceDispatcher {
         };
 
         // Create progress callback that maps repo-index events to daemon protocol.
-        // Returns Continue on successful emit, Break on transport failure.
-        // Break causes the orchestrator to abort at this checkpoint.
+        // DAEMON-VISIBILITY-1 (C/D, review-6): also tee the phase + counters into the activity record
+        // — the SAME event already sent to the attached client — so `rmap doctor` and the still-running
+        // client probe render live refresh progress ("refreshing <repo>: <phase> …") for an
+        // ATTACHED-less observer, exactly as `handle_index` does. Exposure, not instrumentation: no new
+        // bookkeeping, the coordinator / W-B epoch are untouched. Without this tee an in-flight refresh
+        // reported a null phase on the status surface (the review-6 gap).
+        // Returns Continue on successful emit, Break on transport failure (which aborts the
+        // orchestrator at this checkpoint).
         let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
+            _activity.update(&event.phase, event.current, event.total);
             match emitter.emit(ProgressDetail {
                 phase: event.phase.clone(),
                 current: event.current,
@@ -2718,6 +2847,18 @@ impl ServiceDispatcher {
 
         // Then acquire repo refresh lock (enrich is a write operation on existing snapshot)
         let _refresh_guard = repo_state.coordinator.acquire_refresh();
+
+        // DAEMON-VISIBILITY-1 (D): record this enrich as in-flight (RAII-cleared on exit).
+        // Enrich's pipeline does not stream per-phase progress, so the record carries op kind +
+        // repo + started-at (no live counters) — enough for `rmap doctor` to say "enriching <repo>".
+        // Keyed by repo_uid (enrich is uid-addressed); the canonical path is not resolved here.
+        let _activity = self.state.activity().begin(
+            crate::activity::OpKind::Enrich,
+            repo_uid.to_string(),
+            Some(repo_uid.to_string()),
+            db_path.to_path_buf(),
+        );
+
         let storage = match repo_state.storage() {
             Ok(s) => s,
             Err(e) => {
@@ -2830,12 +2971,22 @@ impl ServiceDispatcher {
                         snap.snapshot_uid
                     }
                     Ok(None) => {
+                        // DAEMON-VISIBILITY-1 (F2, review-4): enrich is a READY-requiring surface
+                        // too — never a bare "no snapshot found" when a non-READY partial exists.
+                        // Route through the SAME shared helper as orient/explain and the
+                        // quality/governance handlers: it NAMES the interrupted partial (state +
+                        // when + on-disk size) and BOTH next actions (`rmap index` /
+                        // `rmap maintenance prune`) under the honest `SnapshotNotFound` code.
+                        // `get_latest_snapshot` is READY-only (documented parity-critical), so a
+                        // lingering non-READY snapshot lands here — the exact day-2 gaslighting path
+                        // for enrich, previously the last bare "no snapshot found" in this crate.
                         return DispatchResult::error(
                             &request.id,
-                            ErrorDetail::invalid_request(format!(
-                                "no snapshot found for repo '{}'",
-                                repo_uid
-                            )),
+                            Self::no_ready_snapshot_detail(
+                                &storage,
+                                repo_state.db_path(),
+                                repo_uid,
+                            ),
                         );
                     }
                     Err(e) => {
@@ -3177,15 +3328,13 @@ impl ServiceDispatcher {
                     }
                 }
                 Ok(None) => {
+                    // DAEMON-VISIBILITY-1 (F2): never a bare "index the repo first" when a partial
+                    // snapshot exists. The shared helper NAMES the interrupted snapshot (state, when,
+                    // size) + both next actions under the honest `SnapshotNotFound` code (the daemon,
+                    // unlike the pure agent use case, has the DB path for size).
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(
-                            ErrorCode::InternalError,
-                            repo_graph_agent::OrientError::NoSnapshot {
-                                repo_uid: repo_uid.clone(),
-                            }
-                            .to_string(),
-                        ),
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                     );
                 }
                 Err(e) => {
@@ -3612,10 +3761,16 @@ impl ServiceDispatcher {
                         ),
                     );
                 }
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
+                // DAEMON-VISIBILITY-1 (F2): explain is also a READY-requiring surface — its NoSnapshot
+                // gets the SAME honest partial-naming detail as orient (shared helper, `SnapshotNotFound`
+                // code); a genuine internal explain failure stays `InternalError`.
+                let detail = match &e {
+                    repo_graph_agent::ExplainError::NoSnapshot { .. } => {
+                        Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid)
+                    }
+                    _ => ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                };
+                return DispatchResult::error(&request.id, detail);
             }
         };
 
@@ -3684,7 +3839,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -3921,7 +4076,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4280,7 +4435,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4359,7 +4514,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4455,7 +4610,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4551,7 +4706,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4640,7 +4795,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4754,7 +4909,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4880,7 +5035,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -4982,7 +5137,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -5082,7 +5237,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -5268,7 +5423,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -5514,7 +5669,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -5647,7 +5802,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -5803,7 +5958,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -5973,7 +6128,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6080,7 +6235,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6165,7 +6320,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6235,7 +6390,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6314,7 +6469,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6486,7 +6641,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6620,7 +6775,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6752,7 +6907,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -6930,7 +7085,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {
@@ -7286,7 +7441,7 @@ impl ServiceDispatcher {
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                    Self::no_ready_snapshot_detail(&storage, repo_state.db_path(), &repo_uid),
                 );
             }
             Err(e) => {

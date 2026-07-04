@@ -79,19 +79,21 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
     // Get snapshot
     let snapshot = match storage.get_latest_snapshot(&repo_uid) {
         Ok(Some(snap)) if snap.status == "ready" => snap,
-        Ok(Some(snap)) => {
+        // DAEMON-VISIBILITY-1 (F2): no READY snapshot on a READY-requiring surface — NAME any existing
+        // partial (state, when, on-disk size) + BOTH next actions via the shared helper, never the bare
+        // day-2 gaslighting string. `get_latest_snapshot` is READY-only, so the non-ready `Ok(Some(_))`
+        // is unreachable today; folded in so a future non-READY leak is honest too.
+        Ok(Some(_)) | Ok(None) => {
             return DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(
                     ErrorCode::SnapshotNotFound,
-                    format!("latest snapshot is not ready (status: {})", snap.status),
+                    crate::snapshot_facts::no_ready_snapshot_message(
+                        &storage,
+                        repo_state.db_path(),
+                        &repo_uid,
+                    ),
                 ),
-            );
-        }
-        Ok(None) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
             );
         }
         Err(e) => {

@@ -158,6 +158,12 @@ fn run_repo_info(args: &[String]) -> ExitCode {
             println!("Last indexed: {}", last_indexed);
             println!("Loaded: {}", if loaded { "yes" } else { "no" });
 
+            // DAEMON-VISIBILITY-1 (F): per-snapshot state + outcome + repo storage size. Internal
+            // identifiers (snapshot_uid) stay hidden; STATE/OUTCOME are first-class facts.
+            if let Some(storage) = result.get("storage") {
+                print_repo_storage(storage);
+            }
+
             ExitCode::SUCCESS
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
@@ -173,6 +179,89 @@ fn run_repo_info(args: &[String]) -> ExitCode {
             eprintln!("error: {}", e);
             ExitCode::from(2)
         }
+    }
+}
+
+/// DAEMON-VISIBILITY-1 (F): render the per-repo storage/snapshot facts for `rmap repo info`.
+///
+/// Shows the repo's on-disk size and each snapshot's reader-frame STATE + OUTCOME (READY /
+/// interrupted). Internal identifiers (`snapshot_uid`) stay hidden per the REG-1 human-mode
+/// convention. Short-circuits to an "in use by daemon" note during an active index (contract E).
+fn print_repo_storage(storage: &serde_json::Value) {
+    let size = storage
+        .get("db_size_bytes")
+        .and_then(|v| v.as_u64())
+        .map(format_bytes);
+
+    if storage
+        .get("in_use_by_daemon")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let verb = match storage
+            .get("operation")
+            .and_then(|o| o.get("kind"))
+            .and_then(|v| v.as_str())
+        {
+            Some("index") => "indexing",
+            Some("refresh") => "refreshing",
+            Some("enrich") => "enriching",
+            _ => "using",
+        };
+        println!(
+            "Storage: {} (daemon is {} this repo now — snapshot detail available after it completes)",
+            size.as_deref().unwrap_or("?"),
+            verb
+        );
+        return;
+    }
+
+    if let Some(reason) = storage.get("read_error").and_then(|v| v.as_str()) {
+        println!(
+            "Storage: {} (cannot read snapshots: {})",
+            size.as_deref().unwrap_or("?"),
+            reason
+        );
+        return;
+    }
+
+    if let Some(s) = &size {
+        println!("Storage: {s}");
+    }
+    let snapshots = storage
+        .get("snapshots")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if snapshots.is_empty() {
+        println!("Snapshots: none");
+        return;
+    }
+    println!("Snapshots ({}):", snapshots.len());
+    for snap in &snapshots {
+        let state = snap.get("state").and_then(|v| v.as_str()).unwrap_or("?");
+        let outcome = snap.get("outcome").and_then(|v| v.as_str()).unwrap_or("");
+        let created = snap
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        println!("  - {state}: {outcome} (created {created})");
+    }
+}
+
+/// Humanise a byte count (GB/MB/KB) for `repo info` storage lines.
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
     }
 }
 

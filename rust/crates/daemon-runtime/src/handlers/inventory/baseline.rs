@@ -136,11 +136,15 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
             match storage.get_latest_snapshot(repo_uid) {
                 Ok(Some(snap)) => snap.snapshot_uid,
                 Ok(None) => {
+                    // DAEMON-VISIBILITY-1 (F2): baseline is READY-requiring — NAME any existing partial
+                    // (state, when, on-disk size) + both next actions, never the bare day-2 string.
                     return DispatchResult::error(
                         &request.id,
                         ErrorDetail::new(
                             ErrorCode::SnapshotNotFound,
-                            format!("no snapshot found for repo '{}'", repo_uid),
+                            crate::snapshot_facts::no_ready_snapshot_message(
+                                &storage, db_path, repo_uid,
+                            ),
                         ),
                     );
                 }

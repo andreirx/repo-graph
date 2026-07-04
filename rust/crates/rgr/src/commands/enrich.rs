@@ -16,7 +16,7 @@ use rust_analyzer_resolver::RustAnalyzerResolver;
 use serde::Serialize;
 use tsserver_resolver::TsServerResolver;
 
-use crate::cli::open_storage;
+use crate::cli::{no_ready_snapshot_hint, open_storage};
 
 /// Run the `rmap enrich` command.
 ///
@@ -102,7 +102,16 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
                     snap.snapshot_uid
                 }
                 Ok(None) => {
-                    eprintln!("error: no snapshot found for repo '{}'", parsed.repo_uid);
+                    // DAEMON-VISIBILITY-1 (F2): NAME any interrupted partial (state + size) + BOTH
+                    // next actions, never a bare "no snapshot found" to a user who indexed already.
+                    eprintln!(
+                        "error: {}",
+                        no_ready_snapshot_hint(
+                            &storage,
+                            Path::new(&parsed.db_path),
+                            &parsed.repo_uid
+                        )
+                    );
                     return ExitCode::from(2);
                 }
                 Err(e) => {

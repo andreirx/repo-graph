@@ -43,6 +43,14 @@ pub const EXIT_USAGE_ERROR: u8 = 1;
 /// Exit code for runtime errors (daemon unavailable, repo not found, timeout).
 pub const EXIT_RUNTIME_ERROR: u8 = 2;
 
+/// DAEMON-VISIBILITY-1 (contract C): distinct exit status for "the client read timed out but the
+/// daemon is alive and the operation is STILL RUNNING". This is NOT a failure — the index/refresh
+/// survived the client's read timeout and continues in the background; the caller should follow it
+/// with `rmap doctor`. Kept distinct from `EXIT_RUNTIME_ERROR` (2) so scripts/agents can tell
+/// "still running in the background" apart from "the operation failed". No exit code >= 3 existed
+/// before this slice.
+pub const EXIT_STILL_RUNNING: u8 = 3;
+
 // ── Repo resolution ──────────────────────────────────────────────────────────
 
 /// Resolve the repository path from the current working directory.

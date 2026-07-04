@@ -76,9 +76,84 @@ impl StorageConnection {
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
+        self.delete_snapshots_cascade(&snapshot_uids)?;
+        Ok(snapshot_uids.len() as i64)
+    }
+
+    /// DAEMON-VISIBILITY-1 (F3, operator Option A): delete every NON-READY (interrupted / failed /
+    /// stale-building) snapshot for a repo and return the deleted UIDs.
+    ///
+    /// # Why this is separate from [`prune_prunable_snapshots`]
+    ///
+    /// The retention model only classifies + prunes `status='ready'` snapshots — an interrupted
+    /// `building`/`failed` snapshot is invisible to it and silently holds disk (the day-2 field bug:
+    /// a 4 GB non-READY snapshot never reclaimed). This deletes exactly those, reusing the SAME
+    /// transactional per-snapshot cascade so the two paths cannot drift on the orphan-table set.
+    ///
+    /// # SAFETY — this is a raw mechanism; the daemon owns the "is it orphaned?" decision
+    ///
+    /// This method deletes ALL non-READY rows unconditionally. It MUST be called only when NO live
+    /// write operation is writing this DB, which the daemon guarantees by (a) consulting its activity
+    /// registry and (b) holding the DB-level write lock before calling (see
+    /// `handlers::inventory::retention`). A live index's in-flight `building` snapshot is therefore
+    /// never reachable here. READY snapshots are never touched (the `status != 'ready'` filter).
+    /// Call [`vacuum`](Self::vacuum) afterwards to realise the on-disk reclaim.
+    pub fn prune_non_ready_snapshots(&self, repo_uid: &str) -> Result<Vec<String>, StorageError> {
+        let conn = self.connection();
+        let snapshot_uids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT snapshot_uid FROM snapshots \
+                 WHERE repo_uid = ?1 AND status != 'ready'",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![repo_uid], |row| row.get(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        self.delete_snapshots_cascade(&snapshot_uids)?;
+        Ok(snapshot_uids)
+    }
+
+    /// Reclaim free pages back to the filesystem by rewriting the database file (`VACUUM`).
+    ///
+    /// SQLite does NOT shrink the file on `DELETE` — freed pages are reused by later writes but the
+    /// file stays the same size. `VACUUM` compacts the file so the space a pruned snapshot held is
+    /// actually returned to the OS (the operator's field complaint was a 4 GB partial holding disk).
+    ///
+    /// # Why the journal-mode round-trip (WAL subtlety)
+    ///
+    /// In WAL mode a plain `VACUUM` writes the compacted image into the **WAL**, so the main DB file
+    /// is not shrunk until a later checkpoint — a `std::fs::metadata(db)` reclaim measurement right
+    /// after would show ZERO bytes freed. Switching to a rollback journal (`journal_mode=DELETE`) for
+    /// the `VACUUM` makes it rewrite + TRUNCATE the main file directly, so the reclaim is realised on
+    /// disk immediately; WAL is then restored. (The next `StorageConnection::open` re-asserts WAL
+    /// regardless, so leaving it set is belt-and-suspenders.)
+    ///
+    /// # Concurrency
+    ///
+    /// `VACUUM` and the `journal_mode` switch both require exclusive access and must not run inside a
+    /// transaction. The caller must hold the DB write lock, ensure no live op is on the DB, and open
+    /// no other transaction on this connection; the daemon's retention handler satisfies all three.
+    pub fn vacuum(&self) -> Result<(), StorageError> {
+        let conn = self.connection();
+        // Rollback journal → VACUUM truncates the main file directly → restore WAL.
+        conn.execute_batch("PRAGMA journal_mode = DELETE;")?;
+        conn.execute_batch("VACUUM;")?;
+        conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+        Ok(())
+    }
+
+    /// Delete a set of snapshots and all their dependent rows, one snapshot per transaction.
+    ///
+    /// Shared by [`prune_prunable_snapshots`] (READY retention prune) and
+    /// [`prune_non_ready_snapshots`] (F3 interrupted-snapshot reclaim) so the correctness-critical
+    /// orphan-cleanup table set (tables lacking `ON DELETE CASCADE` on `snapshot_uid`) lives in ONE
+    /// place. Per-snapshot transactions avoid giant single-statement deletes that can hang on tables
+    /// with 1M+ rows; each snapshot is removed atomically. No-op on an empty input.
+    fn delete_snapshots_cascade(&self, snapshot_uids: &[String]) -> Result<(), StorageError> {
         if snapshot_uids.is_empty() {
-            return Ok(0);
+            return Ok(());
         }
+        let conn = self.connection();
 
         // Tables without ON DELETE CASCADE on snapshot_uid FK.
         // Must delete explicitly before deleting the snapshot.
@@ -91,10 +166,7 @@ impl StorageConnection {
             "boundary_interaction_links",
         ];
 
-        // Process one snapshot at a time.
-        // This prevents giant deletes that can hang on tables with 1M+ rows.
-        // Each snapshot is deleted atomically within its own transaction.
-        for snapshot_uid in &snapshot_uids {
+        for snapshot_uid in snapshot_uids {
             // Begin transaction for this snapshot's deletion.
             let tx = conn.unchecked_transaction()?;
 
@@ -122,6 +194,6 @@ impl StorageConnection {
             tx.commit()?;
         }
 
-        Ok(snapshot_uids.len() as i64)
+        Ok(())
     }
 }

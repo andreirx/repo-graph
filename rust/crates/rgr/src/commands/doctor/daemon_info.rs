@@ -47,8 +47,8 @@ pub(super) fn probes() -> Vec<ProbeResult> {
 /// Degraded probe set when `daemon_info` cannot be reached.
 ///
 /// `authority_policy` FAILS (preserves the pre-existing daemon-down contract, so the
-/// health verdict still flips); `daemon_memory` + `total_storage` degrade to a PASSING
-/// "unavailable" (resource diagnostics never flip `healthy`).
+/// health verdict still flips); `daemon_memory` + `total_storage` + `activity` degrade to a
+/// PASSING "unavailable" (diagnostics never flip `healthy`).
 fn unreachable_probes(authority_msg: &str, detail: String) -> Vec<ProbeResult> {
     vec![
         ProbeResult {
@@ -69,7 +69,118 @@ fn unreachable_probes(authority_msg: &str, detail: String) -> Vec<ProbeResult> {
             message: "unavailable".to_string(),
             details: Some("daemon unreachable".to_string()),
         },
+        ProbeResult {
+            name: "activity".to_string(),
+            passed: true,
+            message: "unavailable".to_string(),
+            details: Some("daemon unreachable".to_string()),
+        },
     ]
+}
+
+/// Humanise a large count for the activity line (42000 → "42k", 1_600_000 → "1.6M").
+fn humanize_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 10_000 {
+        format!("{}k", n / 1000)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Humanise an elapsed duration for "started N ago".
+fn humanize_secs_ago(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else {
+        format!("{}h{}m ago", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+/// DAEMON-VISIBILITY-1 (D): the daemon's current activity line for `rmap doctor`.
+///
+/// Renders the daemon's in-flight write op(s) from `daemon_info.active_operations`:
+/// "indexing <repo>: <phase> 42k/160k files, started 6m ago", or "idle" when nothing is
+/// running. ALWAYS passes (activity is informational — it never flips the health verdict).
+fn activity_probe(response: &serde_json::Value) -> ProbeResult {
+    let ops = response
+        .get("active_operations")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if ops.is_empty() {
+        // DAEMON-VISIBILITY-1 (D2): idle daemon reports "idle; last snapshot <repo> @ <time>" so the
+        // reader who "indexed 15 minutes ago" sees completion is observable — NOT a bare "idle" that
+        // reads like "nothing ever happened". `last_snapshot` is null (bare "idle") only when no repo
+        // has ever completed an index.
+        let message = match response.get("last_snapshot") {
+            Some(ls) if ls.is_object() => {
+                let repo = ls.get("repo").and_then(|v| v.as_str()).unwrap_or("<repo>");
+                let at = ls
+                    .get("at")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown time");
+                format!("idle; last snapshot {repo} @ {at}")
+            }
+            _ => "idle".to_string(),
+        };
+        return ProbeResult {
+            name: "activity".to_string(),
+            passed: true,
+            message,
+            details: None,
+        };
+    }
+
+    let render_op = |op: &serde_json::Value| -> String {
+        // Reader-frame verb + repo. `kind` is a machine token; map it to a gerund.
+        let verb = match op.get("kind").and_then(|v| v.as_str()) {
+            Some("index") => "indexing",
+            Some("refresh") => "refreshing",
+            Some("enrich") => "enriching",
+            _ => "working on",
+        };
+        let repo = op.get("repo").and_then(|v| v.as_str()).unwrap_or("<repo>");
+        let ago = op
+            .get("started_secs_ago")
+            .and_then(|v| v.as_u64())
+            .map(humanize_secs_ago)
+            .unwrap_or_else(|| "just now".to_string());
+
+        // Phase + counters: "extraction 42k/160k files". `total == 0` = unknown denominator.
+        let phase = op.get("phase").and_then(|v| v.as_str());
+        let current = op.get("current").and_then(|v| v.as_u64()).unwrap_or(0);
+        let total = op.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        let progress = match (phase, total) {
+            (Some(ph), t) if t > 0 => {
+                format!(
+                    "{ph} {}/{} files, ",
+                    humanize_count(current),
+                    humanize_count(t)
+                )
+            }
+            (Some(ph), 0) if current > 0 => format!("{ph} {} files, ", humanize_count(current)),
+            (Some(ph), _) => format!("{ph}, "),
+            (None, _) => String::new(),
+        };
+        format!("{verb} {repo}: {progress}started {ago}")
+    };
+
+    let mut message = render_op(&ops[0]);
+    if ops.len() > 1 {
+        message.push_str(&format!(" (+{} more)", ops.len() - 1));
+    }
+
+    ProbeResult {
+        name: "activity".to_string(),
+        passed: true,
+        message,
+        details: None,
+    }
 }
 
 /// Build the daemon-info-derived probes from a successful `daemon_info` response.
@@ -149,6 +260,9 @@ fn probes_from_response(response: &serde_json::Value) -> Vec<ProbeResult> {
         message: storage_message,
         details: None,
     });
+
+    // DAEMON-VISIBILITY-1 (D): what the daemon is doing right now (idle / indexing <repo> …).
+    probes.push(activity_probe(response));
 
     probes
 }
@@ -250,5 +364,78 @@ mod tests {
         assert!(find(&probes, "daemon_memory").passed);
         assert!(find(&probes, "total_storage").passed);
         assert_eq!(find(&probes, "daemon_memory").message, "unavailable");
+    }
+
+    // DAEMON-VISIBILITY-1 (D): idle daemon with NO prior index → bare "idle" (last_snapshot null).
+    #[test]
+    fn activity_probe_idle_when_no_ops() {
+        let response = json!({ "active_operations": [] });
+        let probe = activity_probe(&response);
+        assert!(probe.passed);
+        assert_eq!(probe.message, "idle");
+    }
+
+    // DAEMON-VISIBILITY-1 (D2): idle daemon WITH a completed index → "idle; last snapshot <repo> @
+    // <time>". This is the completion-observable fact the day-2 reader (who "indexed 15 minutes ago")
+    // needs — a bare "idle" reads like "nothing ever happened".
+    #[test]
+    fn activity_probe_idle_reports_last_snapshot() {
+        let response = json!({
+            "active_operations": [],
+            "last_snapshot": { "repo": "my-repo", "at": "2026-07-04T09:15:00.000Z" }
+        });
+        let probe = activity_probe(&response);
+        assert!(probe.passed, "activity never flips health");
+        assert_eq!(
+            probe.message, "idle; last snapshot my-repo @ 2026-07-04T09:15:00.000Z",
+            "idle must name the last snapshot's repo + time: {}",
+            probe.message
+        );
+    }
+
+    // Idle with a `null` last_snapshot (field present but null) still degrades to the bare "idle".
+    #[test]
+    fn activity_probe_idle_null_last_snapshot_is_bare_idle() {
+        let response = json!({ "active_operations": [], "last_snapshot": serde_json::Value::Null });
+        let probe = activity_probe(&response);
+        assert_eq!(probe.message, "idle");
+    }
+
+    // DAEMON-VISIBILITY-1 (D): an in-flight index renders "indexing <repo>: <phase> N/M files,
+    // started …" — the headline `rmap doctor` activity line.
+    #[test]
+    fn activity_probe_renders_in_flight_index() {
+        let response = json!({
+            "active_operations": [
+                { "kind": "index", "repo": "/repos/big", "phase": "extracting",
+                  "current": 42_000, "total": 160_000, "started_secs_ago": 372 }
+            ]
+        });
+        let probe = activity_probe(&response);
+        assert!(probe.passed, "activity never flips health");
+        assert!(
+            probe.message.contains("indexing /repos/big"),
+            "{}",
+            probe.message
+        );
+        assert!(
+            probe.message.contains("extracting 42k/160k files"),
+            "{}",
+            probe.message
+        );
+        assert!(
+            probe.message.contains("started 6m ago"),
+            "{}",
+            probe.message
+        );
+    }
+
+    #[test]
+    fn humanizers_are_coarse() {
+        assert_eq!(humanize_count(42_000), "42k");
+        assert_eq!(humanize_count(1_600_000), "1.6M");
+        assert_eq!(humanize_count(500), "500");
+        assert_eq!(humanize_secs_ago(45), "45s ago");
+        assert_eq!(humanize_secs_ago(372), "6m ago");
     }
 }

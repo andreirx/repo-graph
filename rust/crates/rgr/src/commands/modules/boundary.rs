@@ -17,7 +17,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::shared::ModuleQueryContext;
-use crate::cli::{open_storage, utc_now_iso8601};
+use crate::cli::{no_ready_snapshot_hint, open_storage, utc_now_iso8601};
 
 // ── modules boundary command ─────────────────────────────────────
 
@@ -67,7 +67,12 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
     let snapshot = match storage.get_latest_snapshot(repo_uid) {
         Ok(Some(snap)) => snap,
         Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+            // DAEMON-VISIBILITY-1 (F2): NAME any interrupted partial (state + size) + BOTH next
+            // actions, never a bare "no snapshot found".
+            eprintln!(
+                "error: {}",
+                no_ready_snapshot_hint(&storage, db_path, repo_uid)
+            );
             return ExitCode::from(2);
         }
         Err(e) => {

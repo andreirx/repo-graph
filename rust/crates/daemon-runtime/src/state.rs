@@ -371,6 +371,12 @@ pub struct DaemonState {
     /// needed: registry critical sections are short and contention is negligible vs
     /// the per-request query work.
     registry: Mutex<RepoRegistry>,
+
+    /// DAEMON-VISIBILITY-1 (contract D): in-flight write operations (index/refresh/enrich),
+    /// stamped by their handlers and read by the visibility surfaces (`daemon_info`,
+    /// `storage_health`, `repo_info`). Interior-mutable (own `Mutex`), so this field does not
+    /// affect `DaemonState: Send + Sync`. See `crate::activity`.
+    activity: crate::activity::ActivityRegistry,
 }
 
 impl DaemonState {
@@ -395,6 +401,7 @@ impl DaemonState {
             repos: RwLock::new(HashMap::new()),
             db_runtimes: RwLock::new(HashMap::new()),
             registry: Mutex::new(registry),
+            activity: crate::activity::ActivityRegistry::new(),
         }
     }
 
@@ -408,7 +415,16 @@ impl DaemonState {
             repos: RwLock::new(HashMap::new()),
             db_runtimes: RwLock::new(HashMap::new()),
             registry: Mutex::new(registry),
+            activity: crate::activity::ActivityRegistry::new(),
         }
+    }
+
+    /// Access the in-flight-operation registry (DAEMON-VISIBILITY-1 contract D).
+    ///
+    /// Write handlers call `activity().begin(..)` on entry (the returned guard deregisters on
+    /// drop); the visibility surfaces call `activity().snapshot()` / `active_for_db(..)`.
+    pub fn activity(&self) -> &crate::activity::ActivityRegistry {
+        &self.activity
     }
 
     // ── State Root Mode (STATE-ROOT-SEPARATION-1) ───────────────────

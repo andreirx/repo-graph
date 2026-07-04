@@ -114,11 +114,15 @@ impl SocketTransport {
     }
 
     /// Send request and read response (internal implementation).
+    ///
+    /// `on_progress` is invoked for each progress frame (DAEMON-VISIBILITY-1 C2); the default
+    /// request paths pass a no-op. Progress frames are consumed and NOT returned.
     fn send_request(
         &mut self,
         method: &str,
         params: Option<serde_json::Value>,
         timeout_secs: u64,
+        on_progress: &mut dyn FnMut(&serde_json::Value),
     ) -> Result<serde_json::Value, DaemonClientError> {
         let id = uuid::Uuid::new_v4().to_string();
 
@@ -166,8 +170,9 @@ impl SocketTransport {
                 )));
             }
 
-            // Skip progress events
-            if response.progress.is_some() {
+            // Progress frames: surface them to the caller (C2), then keep waiting for the result.
+            if let Some(ref progress) = response.progress {
+                on_progress(progress);
                 continue;
             }
 
@@ -190,7 +195,7 @@ impl Transport for SocketTransport {
         method: &str,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, DaemonClientError> {
-        self.send_request(method, params, READ_TIMEOUT_SECS)
+        self.send_request(method, params, READ_TIMEOUT_SECS, &mut |_| {})
     }
 
     fn request_with_timeout(
@@ -199,6 +204,16 @@ impl Transport for SocketTransport {
         params: Option<serde_json::Value>,
         timeout_secs: u64,
     ) -> Result<serde_json::Value, DaemonClientError> {
+        self.request_with_progress(method, params, timeout_secs, &mut |_| {})
+    }
+
+    fn request_with_progress(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+        on_progress: &mut dyn FnMut(&serde_json::Value),
+    ) -> Result<serde_json::Value, DaemonClientError> {
         // Temporarily change read timeout
         self.stream
             .set_read_timeout(Some(Duration::from_secs(timeout_secs)))
@@ -206,7 +221,7 @@ impl Transport for SocketTransport {
                 DaemonClientError::ConnectionFailed(format!("failed to set read timeout: {}", e))
             })?;
 
-        let result = self.send_request(method, params, timeout_secs);
+        let result = self.send_request(method, params, timeout_secs, on_progress);
 
         // Restore default timeout (best effort)
         let _ = self
