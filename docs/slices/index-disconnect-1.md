@@ -1,7 +1,21 @@
 # INDEX-DISCONNECT-1 — An index survives its client (detached completion)
 
-Status: SPECIFIED (2026-07-03) · Track: Daemon correctness — HOTFIX, gates the
-next release · Ratified: detached completion (operator, 2026-07-03)
+Status: **DELIVERED (2026-07-05)** · Track: Daemon correctness — HOTFIX,
+gated the release · Ratified: detached completion (operator, 2026-07-03)
+
+## 0. Delivery record (2026-07-05)
+
+Shipped via target-owned relay (builder claude, reviewer codex, approved at
+cycle 2 — first slice under the 3-cycle checkpoint discipline) + operator
+gates. `index`/`refresh` progress-emit failures latch `client_gone`, log one
+reader-frame detached-continuation line, and Continue — transport failure
+never aborts write work. Registration is fail-fast persisted BEFORE indexing.
+`detached.rs` holds the shared seam (two callers + test capture). Proofs:
+failing emitter mid-index → snapshot READY + `record_index` persisted;
+refresh parity; post-registration failure → terminal-state snapshot; explicit
+cancel unchanged; real-transport kill-the-client extension in
+`dv1-inflight-e2e.sh`. Operator gates: fmt/clippy clean, 4/4 disconnect
+tests, 4830/0 workspace tests.
 Origin: TECH-DEBT F5 root cause (second-machine field failure, 160k-file repo)
 
 ## 1. Problem — the client's timeout kills the daemon's work

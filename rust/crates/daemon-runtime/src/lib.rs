@@ -52,6 +52,9 @@ pub mod cancel;
 pub mod check_coherence;
 pub mod cycle_completeness_audit;
 pub mod cycle_output;
+// INDEX-DISCONNECT-1: the shared "client vanished; write op continues detached" notice + its
+// parallel-safe test-capture seam, used by handle_index/handle_refresh's best-effort callbacks.
+pub mod detached;
 pub mod dispatch;
 pub mod explain_coherence;
 pub mod explain_lg_identity;

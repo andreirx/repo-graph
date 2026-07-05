@@ -2344,32 +2344,61 @@ impl ServiceDispatcher {
         // Register in registry (or get existing entry)
         let (canonical_path, db_path, repo_uid) = {
             let mut registry = self.state.registry_mut();
-            let entry = if let Some(alias_str) = alias {
-                match registry.register_with_alias(repo_path, alias_str.to_string()) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        return DispatchResult::error(
-                            &request.id,
-                            ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                        );
+            // Scope the `&RegistryEntry` borrow so it is released before `registry.save()`
+            // (register* return an immutable borrow; save needs `&mut registry`).
+            let resolved = {
+                let entry = if let Some(alias_str) = alias {
+                    match registry.register_with_alias(repo_path, alias_str.to_string()) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            return DispatchResult::error(
+                                &request.id,
+                                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                            );
+                        }
                     }
-                }
-            } else {
-                match registry.register(repo_path) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        return DispatchResult::error(
-                            &request.id,
-                            ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                        );
+                } else {
+                    match registry.register(repo_path) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            return DispatchResult::error(
+                                &request.id,
+                                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                            );
+                        }
                     }
-                }
+                };
+                (
+                    entry.canonical_path.clone(),
+                    entry.db_path.clone(),
+                    entry.repo_uid.clone(),
+                )
             };
-            (
-                entry.canonical_path.clone(),
-                entry.db_path.clone(),
-                entry.repo_uid.clone(),
-            )
+            // INDEX-DISCONNECT-1 (contract item 2): persist the registration UP-FRONT, before
+            // indexing. The repo must exist in the on-disk registry even if the index later fails or
+            // the client disconnects — otherwise a failed index leaves the repo unregistered (the F5
+            // field bug: `repo info` reported "repo not indexed" by path AND uid because both
+            // `record_index` and `save` lived only in the success branch). `record_index` + `save`
+            // still run on success (below); this save guarantees the identity survives a failure.
+            // review-0 change #1: the up-front save IS the durability guarantee ("registration
+            // persists up-front"), so a failure here is a REAL failure — do NOT proceed to index a
+            // repo whose registration did not persist. Proceeding would recreate the exact F5 window
+            // this slice closes: the identity would survive only if the index reached its success
+            // branch (which also saves). Fail fast, BEFORE any indexing work. (The success-branch save
+            // stays best-effort: by the time it runs the repo is already registered here and the
+            // snapshot already durable, so it only refreshes `last_snapshot_uid`.) `register()` above
+            // is idempotent, so a retried index re-registers and re-saves — the in-memory entry left
+            // behind on this error path is harmless and self-heals on the next successful save.
+            if let Err(e) = registry.save() {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to persist repo registration before indexing: {e}"),
+                    ),
+                );
+            }
+            resolved
         };
 
         // Acquire DB write coordination (DB file may not exist yet)
@@ -2429,16 +2458,38 @@ impl ServiceDispatcher {
         // DAEMON-VISIBILITY-1 (D): also tee the phase + counters into the activity record so
         // `rmap doctor` renders live progress ("extraction 42k/160k files") for an ATTACHED-less
         // observer — the same event already sent to the attached client, no new instrumentation.
+        //
+        // INDEX-DISCONNECT-1 (contract item 1): progress emission is BEST-EFFORT. An index is a
+        // durable mutation; a dead client's closed socket (read timeout, closed terminal, machine
+        // sleep) must NEVER abort it — the pre-fix `Err(_) => Break` turned a broken pipe into an
+        // aborted index (TECH-DEBT F5). On the FIRST emit failure we log ONE reader-frame line, mark
+        // the client gone, and thereafter skip the (doomed) emit entirely so the index runs to
+        // completion detached. The activity tee keeps running so `rmap doctor` still renders live
+        // progress for other observers. This callback therefore NEVER returns `Break` on transport
+        // failure; the orchestrator's `Break`→abort seam is untouched, so an explicit cancel remains
+        // the one deliberate way to stop a write op (contract item 4).
+        let mut client_gone = false;
         let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
             _activity.update(&event.phase, event.current, event.total);
-            match emitter.emit(ProgressDetail {
-                phase: event.phase.clone(),
-                current: event.current,
-                total: event.total,
-            }) {
-                Ok(()) => ControlFlow::Continue(()),
-                Err(_) => ControlFlow::Break(()),
+            if client_gone {
+                // Client already disconnected: skip the emit cheaply, keep indexing.
+                return ControlFlow::Continue(());
             }
+            if emitter
+                .emit(ProgressDetail {
+                    phase: event.phase.clone(),
+                    current: event.current,
+                    total: event.total,
+                })
+                .is_err()
+            {
+                client_gone = true;
+                // review-0 change #3: emit the ONE reader-frame line via the shared helper, which
+                // also feeds the parallel-safe test-capture seam so the named F5 test observes the
+                // actual logged line (not just the emit-call count).
+                crate::detached::log_detached_continuation("index", &repo_uid);
+            }
+            ControlFlow::Continue(())
         };
 
         // Execute index under DB write lock (with progress)
@@ -2546,6 +2597,10 @@ impl ServiceDispatcher {
 
                 DispatchResult::success(&request.id, response)
             }
+            // INDEX-DISCONNECT-1: after the best-effort callback change above, transport failure no
+            // longer produces `Aborted` — this arm is now only reachable if the orchestrator's
+            // `Break`→abort seam is driven by a deliberate explicit cancel. Retained (not removed) so
+            // that mapping stays correct; on the daemon path it is unreachable.
             Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(
@@ -2688,18 +2743,32 @@ impl ServiceDispatcher {
         // ATTACHED-less observer, exactly as `handle_index` does. Exposure, not instrumentation: no new
         // bookkeeping, the coordinator / W-B epoch are untouched. Without this tee an in-flight refresh
         // reported a null phase on the status surface (the review-6 gap).
-        // Returns Continue on successful emit, Break on transport failure (which aborts the
-        // orchestrator at this checkpoint).
+        //
+        // INDEX-DISCONNECT-1 (contract item 1): refresh shares `handle_index`'s emitter pattern and is
+        // a WRITE op, so its progress emission is BEST-EFFORT too. A dead client's closed socket must
+        // NEVER abort a refresh: on the first emit failure log ONCE, mark the client gone, then skip
+        // subsequent emits and run to completion detached. NEVER returns `Break` on transport failure
+        // (the previous `Err(_) => Break` aborted the refresh mid-flight, same F5 class as index).
+        let mut client_gone = false;
         let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
             _activity.update(&event.phase, event.current, event.total);
-            match emitter.emit(ProgressDetail {
-                phase: event.phase.clone(),
-                current: event.current,
-                total: event.total,
-            }) {
-                Ok(()) => ControlFlow::Continue(()),
-                Err(_) => ControlFlow::Break(()),
+            if client_gone {
+                return ControlFlow::Continue(());
             }
+            if emitter
+                .emit(ProgressDetail {
+                    phase: event.phase.clone(),
+                    current: event.current,
+                    total: event.total,
+                })
+                .is_err()
+            {
+                client_gone = true;
+                // review-0 change #3: same shared helper as handle_index (op label "refresh"); the
+                // capture seam lets the refresh named test observe the actual logged line.
+                crate::detached::log_detached_continuation("refresh", &repo_uid);
+            }
+            ControlFlow::Continue(())
         };
 
         // Execute refresh under both locks (with progress)
@@ -2780,6 +2849,10 @@ impl ServiceDispatcher {
 
                 DispatchResult::success(&request.id, response)
             }
+            // INDEX-DISCONNECT-1: as in `handle_index`, transport failure no longer yields `Aborted`
+            // (best-effort callback above); this arm is now only reachable via a deliberate explicit
+            // cancel driving the orchestrator's abort seam. Unreachable on the daemon path, retained
+            // so the mapping stays correct.
             Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(

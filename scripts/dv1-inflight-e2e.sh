@@ -22,6 +22,12 @@
 #                     exit status 3. STRICT: exit 0 and exit 2 both FAIL; only exit 3 + "STILL RUNNING"
 #                     passes (no race, no exit-0 escape hatch). The pure classifier is also unit-tested
 #                     in rgr; the real in-flight status surface is integration-tested in daemon-runtime.
+#   ID1  disconnect : INDEX-DISCONNECT-1 real-transport proof. Kill the CLIENT (SIGKILL, NOT the daemon)
+#                     mid-index of a FRESH repoD → the daemon finishes the index DETACHED: repoD becomes
+#                     registered + READY (orient answers) and the daemon logs a detached-continuation
+#                     line — the F5 fix (a dead client never aborts a durable write). The strict
+#                     "exactly one detached line per op" is unit-tested in daemon-runtime
+#                     (tests/index_disconnect.rs); here we assert the end-to-end socket behaviour.
 #   F1/F3 field-repro: kill the daemon mid-reindex (the day-2 restart/sleep scenario) → an interrupted
 #                     snapshot survives → after restart `doctor`/`repo info` NAME it, and
 #                     `rmap maintenance prune` deletes + reclaims it (READY snapshots untouched).
@@ -300,6 +306,65 @@ wait "${HOLD_B}" 2>/dev/null || true
 # The prober's own index (queued behind the holder, then detached when its client timed out) finishes
 # in the background (INDEX-DISCONNECT-1) — let it settle before the next proof.
 sleep 1
+
+# ── Proof ID1 (INDEX-DISCONNECT-1): kill the CLIENT mid-index → daemon completes DETACHED to READY ──
+# The F5 field bug: a client disconnect (read timeout / closed terminal / machine sleep) made the
+# daemon's next progress emit fail (EPIPE) and ABORT the in-flight index — hours of work lost, the repo
+# left unregistered, the snapshot stuck non-READY. Fix: progress emission is BEST-EFFORT, so a dead
+# client never aborts a durable write. Here we index a FRESH repoD over the real socket, SIGKILL the
+# CLIENT (not the daemon) mid-index, and prove the daemon finishes the index DETACHED: repoD reaches
+# READY (orient answers) and stays registered, and the daemon logs the detached continuation.
+hr
+echo ">>> [ID1] kill the CLIENT mid-index — the daemon must finish the index detached to READY"
+gen_fixture "${FIXROOT}/repoD" "${FIXTURE_FILES}"
+# Count prior detached-continuation lines (proof C's timed-out prober also detaches) so we can assert
+# repoD adds at least one more. The per-op "exactly one" is unit-tested (tests/index_disconnect.rs).
+DETACHED_BEFORE="$(grep -c "continues detached" "${OUT}/rmapd.log" 2>/dev/null || true)"
+# Launch the index client DIRECTLY (no subshell) so $! is the rmap CLIENT pid we can SIGKILL.
+"${RMAP_BIN}" index "${FIXROOT}/repoD" >"${OUT}/indexD-client.txt" 2>&1 &
+CLIENT_D=$!
+if wait_until_indexing "${FIXROOT}/repoD" 80; then
+    note "repoD index is in flight — SIGKILL the CLIENT (pid ${CLIENT_D}); the daemon keeps the work"
+    kill -9 "${CLIENT_D}" 2>/dev/null || true
+    wait "${CLIENT_D}" 2>/dev/null || true
+    # Poll until the DETACHED index finishes: `orient` exits 0 only when a READY snapshot exists (it
+    # resolves the repo from cwd). A regression (disconnect aborts the index) never reaches READY here,
+    # so this stays non-zero → the loop times out → FAIL.
+    D_READY=false
+    for _ in $(seq 1 120); do
+        if (cd "${FIXROOT}/repoD" && "${RMAP_BIN}" orient) >"${OUT}/orient-D.txt" 2>&1; then
+            D_READY=true
+            break
+        fi
+        sleep 0.5
+    done
+    if [[ "${D_READY}" == "true" ]]; then
+        pass "ID1: daemon finished the index DETACHED after the client was killed — repoD orient answers (READY)"
+    else
+        fail "ID1: repoD never reached READY after the client was killed (the disconnect aborted the work — F5 regression)"
+        echo "    --- orient repoD (last attempt) ---"; sed 's/^/    /' "${OUT}/orient-D.txt"
+    fi
+    # Registration persisted over the real transport: repo info resolves repoD (never 'not indexed').
+    (cd "${FIXROOT}/repoD" && "${RMAP_BIN}" repo info) >"${OUT}/repo-info-D.txt" 2>&1 || true
+    echo "    --- rmap repo info (repoD, after client kill) ---"
+    sed 's/^/    /' "${OUT}/repo-info-D.txt"
+    if grep -qi "not indexed" "${OUT}/repo-info-D.txt"; then
+        fail "ID1: repoD is 'not indexed' — the up-front registration did not persist"
+    else
+        pass "ID1: repoD is registered (repo info resolves it, never 'not indexed')"
+    fi
+    # The detached-continuation path executed: at least one NEW 'continues detached' line for repoD.
+    DETACHED_AFTER="$(grep -c "continues detached" "${OUT}/rmapd.log" 2>/dev/null || true)"
+    if [[ "$(( DETACHED_AFTER - DETACHED_BEFORE ))" -ge 1 ]]; then
+        pass "ID1: the daemon logged the detached continuation (${DETACHED_BEFORE} → ${DETACHED_AFTER})"
+    else
+        fail "ID1: no detached-continuation log line for the killed-client index (${DETACHED_BEFORE} → ${DETACHED_AFTER})"
+    fi
+else
+    fail "ID1: could not catch repoD mid-index within ~20s — raise FIXTURE_FILES/FNS_PER_FILE"
+    kill -9 "${CLIENT_D}" 2>/dev/null || true
+    wait "${CLIENT_D}" 2>/dev/null || true
+fi
 
 # ── Proof F1/F3: kill daemon mid-index → interrupted snapshot → prune reclaims ─
 hr

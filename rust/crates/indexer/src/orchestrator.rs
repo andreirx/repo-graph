@@ -3077,6 +3077,100 @@ mod tests {
         );
     }
 
+    /// INDEX-DISCONNECT-1 (contract item 4 + item 3 terminal-state): an EXPLICIT cancel — a progress
+    /// callback that returns `Break` while the pipeline is in flight (the orchestrator's abort seam,
+    /// which this slice deliberately leaves untouched) — still stops the index AND leaves the snapshot
+    /// in a terminal `Failed` state, never a stuck `Building` limbo. This is the "cancel still cancels"
+    /// guarantee: the daemon's write-op callback no longer maps transport failure to `Break`
+    /// (INDEX-DISCONNECT-1), but the orchestrator's response to a genuine `Break` is unchanged.
+    /// `snapshot_facts` renders `Failed` as "interrupted (index failed or was aborted)", so the two
+    /// visibility views agree (coordination with DAEMON-VISIBILITY-1).
+    #[test]
+    fn explicit_cancel_during_pipeline_leaves_failed_snapshot() {
+        let mut storage = MockStorage::default();
+        let mut ext = MockExtractor::new(vec!["typescript".into()]);
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+        let files = vec![
+            FileInput {
+                rel_path: "src/a.ts".into(),
+                content: "export const a = 1;".into(),
+                content_hash: "h1".into(),
+                size_bytes: 20,
+                line_count: 1,
+                package_dependencies: None,
+                tsconfig_aliases: None,
+            },
+            FileInput {
+                rel_path: "src/b.ts".into(),
+                content: "export const b = 2;".into(),
+                content_hash: "h2".into(),
+                size_bytes: 20,
+                line_count: 1,
+                package_dependencies: None,
+                tsconfig_aliases: None,
+            },
+            FileInput {
+                rel_path: "src/c.ts".into(),
+                content: "export const c = 3;".into(),
+                content_hash: "h3".into(),
+                size_bytes: 20,
+                line_count: 1,
+                package_dependencies: None,
+                tsconfig_aliases: None,
+            },
+        ];
+
+        // Break on the 2nd Extracting event: the 1st is the pre-snapshot checkpoint (no snapshot yet),
+        // the 2nd is emitted from INSIDE `run_pipeline`, so the snapshot already exists (`Building`) and
+        // the abort must transition it to the terminal `Failed` — proving no `Building` limbo survives
+        // a cancel.
+        let mut extract_seen = 0u32;
+        let mut progress_callback =
+            move |evt: &crate::types::IndexProgressEvent| -> ControlFlow<()> {
+                if evt.phase == crate::types::IndexPhase::Extracting {
+                    extract_seen += 1;
+                    if extract_seen >= 2 {
+                        return ControlFlow::Break(());
+                    }
+                }
+                ControlFlow::Continue(())
+            };
+
+        let mut opts = IndexOptions {
+            on_progress: Some(&mut progress_callback),
+            ..IndexOptions::default()
+        };
+
+        let result = index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &files,
+            &[],
+            &mut opts,
+            None,
+        );
+
+        // The explicit cancel still stops the index.
+        assert!(
+            matches!(result, Err(IndexError::Aborted)),
+            "an explicit Break must still abort the index, got {:?}",
+            result
+        );
+
+        // A snapshot was created, then transitioned to a TERMINAL state — never left `Building`.
+        let snap = storage
+            .snapshots
+            .last()
+            .expect("a snapshot was created before the in-pipeline abort");
+        assert_eq!(
+            snap.status,
+            SnapshotStatus::Failed,
+            "a cancelled/aborted index leaves a terminal Failed snapshot, not a Building limbo"
+        );
+    }
+
     // ── refresh_repo tests ───────────────────────────────────
 
     #[test]
