@@ -154,6 +154,82 @@ fn prune_non_ready_then_vacuum_reclaims_disk_and_keeps_ready() {
     assert_eq!(snaps[0].status, "ready");
 }
 
+// SNAPSHOT-RETENTION-1: `reclaimable_bytes` reports the freelist bytes a VACUUM would return to the
+// OS (`freelist_count × page_size`) — the honest VACUUM-gate input measured WITHOUT paying the
+// VACUUM. After pruning a bloated snapshot the freed pages sit on the freelist (file NOT yet shrunk)
+// so reclaimable jumps; after VACUUM the file shrinks and reclaimable drops back toward zero.
+#[test]
+fn reclaimable_bytes_tracks_freelist_then_drops_after_vacuum() {
+    use crate::connection::StorageConnection;
+    use crate::types::{CreateSnapshotInput, GraphNode, UpdateSnapshotStatusInput};
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("reclaimable.db");
+
+    let building_uid;
+    {
+        let mut storage = StorageConnection::open(&db_path).unwrap();
+        insert_repo(&storage, "r1");
+        // A READY snapshot to keep + a big interrupted one to prune.
+        let ready = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap();
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: ready.snapshot_uid.clone(),
+                status: "ready".to_string(),
+                completed_at: None,
+            })
+            .unwrap();
+
+        let building = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap();
+        building_uid = building.snapshot_uid.clone();
+        let bloat: Vec<GraphNode> = (0..8_000)
+            .map(|i| bloat_node(&building_uid, &format!("bloat-{i}")))
+            .collect();
+        storage.insert_nodes(&bloat).unwrap();
+        // Drop → last-connection WAL checkpoint folds the bloat into the main DB file.
+    }
+
+    let storage = StorageConnection::open(&db_path).unwrap();
+    let before_prune = storage.reclaimable_bytes().unwrap();
+
+    // Prune the bloated non-READY snapshot: its rows move to the freelist; the file is NOT yet shrunk.
+    let deleted = storage.prune_non_ready_snapshots("r1").unwrap();
+    assert_eq!(deleted.len(), 1);
+    let after_prune = storage.reclaimable_bytes().unwrap();
+    assert!(
+        after_prune > before_prune && after_prune > 64 * 1024,
+        "pruning frees pages onto the freelist: before={before_prune} after={after_prune}"
+    );
+
+    // VACUUM returns those pages to the OS → reclaimable drops back toward zero.
+    storage.vacuum().unwrap();
+    let after_vacuum = storage.reclaimable_bytes().unwrap();
+    assert!(
+        after_vacuum < after_prune,
+        "vacuum realises the reclaim: after_prune={after_prune} after_vacuum={after_vacuum}"
+    );
+}
+
 /// A padded SYMBOL node — the text fields grow the row so a few thousand of them make a measurable
 /// file-size difference for the reclaim assertion.
 #[cfg(test)]
@@ -191,17 +267,18 @@ fn prune_prunable_snapshots_deletes_marked() {
 
     storage.classify_repo_retention("r1").unwrap();
 
-    // Before prune: s1, s2 are prunable (s4=current, s3=baseline_auto, no parent)
+    // SNAPSHOT-RETENTION-1: independent snapshots (no parent chain) → s4=current only; s1/s2/s3 all
+    // prune (auto-baseline no longer retained).
     let stats_before = storage.get_retention_stats("r1").unwrap();
-    assert_eq!(stats_before.prunable, 2);
+    assert_eq!(stats_before.prunable, 3);
     assert_eq!(stats_before.total, 4);
 
     // Prune
     let pruned = storage.prune_prunable_snapshots("r1").unwrap();
-    assert_eq!(pruned, 2);
+    assert_eq!(pruned, 3);
 
     // After prune
     let stats_after = storage.get_retention_stats("r1").unwrap();
     assert_eq!(stats_after.prunable, 0);
-    assert_eq!(stats_after.total, 2);
+    assert_eq!(stats_after.total, 1);
 }

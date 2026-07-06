@@ -26,11 +26,29 @@ use tempfile::{tempdir, TempDir};
 ///
 /// Returns both the state and the temp dir (to keep it alive).
 fn create_isolated_state() -> (Arc<DaemonState>, TempDir) {
+    disable_auto_retention_for_dispatch_tests();
     let temp = tempdir().expect("failed to create temp dir");
     let registry =
         RepoRegistry::with_state_root(temp.path()).expect("failed to create temp registry");
     let state = Arc::new(DaemonState::with_registry(registry));
     (state, temp)
+}
+
+/// SNAPSHOT-RETENTION-1: disable the automatic background retention pass for this binary.
+///
+/// These tests assert dispatch RESPONSE SHAPE (coherence envelopes, kind filters, error codes) after a
+/// real in-process `index`. Retention is IRRELEVANT to every one of those assertions, but with it ON a
+/// `handle_index` here spawns a background classify/prune pass that races the very next dispatched READ
+/// in the same shared state: `StorageConnection::open` sets no `busy_timeout`, so an open that lands in
+/// the pass's write-transaction commit window returns a raw `database is locked` — a load-flaky failure
+/// (these tests pass single-threaded / on a quiet machine, fail under parallel load). This is the same
+/// treatment `daemon-runtime`'s `daemon_visibility` / `concurrency_dispatch` / `index_disconnect` apply,
+/// and it is sanctioned: retention is disabled ONLY where irrelevant, while the PRODUCTION reader honesty
+/// (a coordinated reader arriving during the pass's VACUUM blocks and reads correct data — never a raw
+/// busy) is asserted directly in `daemon-runtime`'s `retention_pass` reader-vs-VACUUM proofs. Process-
+/// global atomic; every state constructor calls it, so the whole binary runs with the pass off.
+fn disable_auto_retention_for_dispatch_tests() {
+    repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
 }
 
 /// Run a single daemon request with an isolated state.
@@ -287,6 +305,7 @@ fn load_repo_missing_params_returns_invalid_request() {
 
 /// Create isolated daemon state from a temp state root.
 fn create_isolated_state_in(state_temp: &TempDir) -> Arc<DaemonState> {
+    disable_auto_retention_for_dispatch_tests();
     let registry = RepoRegistry::with_state_root(state_temp.path())
         .expect("failed to create isolated registry");
     Arc::new(DaemonState::with_registry(registry))

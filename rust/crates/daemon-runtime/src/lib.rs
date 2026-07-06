@@ -74,6 +74,7 @@ pub mod partition_discovery;
 pub(crate) mod reader_context;
 pub mod registry;
 pub mod resource_metrics;
+pub mod retention_pass;
 pub mod snapshot_facts;
 pub mod state;
 pub mod trust_coherence;

@@ -39,6 +39,11 @@ pub enum OpKind {
     Index,
     Refresh,
     Enrich,
+    /// SNAPSHOT-RETENTION-1: the background snapshot-retention pass (prune + threshold VACUUM). Not a
+    /// client request — the daemon spawns it after a successful index/refresh — but stamped in the
+    /// SAME registry so `rmap doctor` shows it as an in-flight op like any other write, and so the
+    /// two-gate contention check (`active_for_db`) sees a concurrent index/refresh.
+    Retention,
 }
 
 impl OpKind {
@@ -48,6 +53,7 @@ impl OpKind {
             OpKind::Index => "indexing",
             OpKind::Refresh => "refreshing",
             OpKind::Enrich => "enriching",
+            OpKind::Retention => "reclaiming",
         }
     }
 
@@ -57,6 +63,7 @@ impl OpKind {
             OpKind::Index => "index",
             OpKind::Refresh => "refresh",
             OpKind::Enrich => "enrich",
+            OpKind::Retention => "retention",
         }
     }
 }
@@ -308,5 +315,6 @@ mod tests {
         assert_eq!(OpKind::Index.gerund(), "indexing");
         assert_eq!(OpKind::Refresh.gerund(), "refreshing");
         assert_eq!(OpKind::Enrich.gerund(), "enriching");
+        assert_eq!(OpKind::Retention.gerund(), "reclaiming");
     }
 }

@@ -108,6 +108,12 @@ impl ProgressEmitter for ParkOnceEmitter {
 }
 
 fn isolated() -> (Arc<ServiceDispatcher>, Arc<DaemonState>, TempDir) {
+    // SNAPSHOT-RETENTION-1: these DAEMON-VISIBILITY proofs assert the daemon is IDLE right after an
+    // index (no active op) and that the DB write lock is free for a parked re-index. The auto-retention
+    // pass is a NEW background write-lock + activity actor that would perturb both, so disable it here
+    // (this binary tests index/refresh visibility, not retention — the retention pass, incl. its honest
+    // reader-vs-VACUUM behavior, is proven directly in the `retention_pass` lib tests).
+    repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

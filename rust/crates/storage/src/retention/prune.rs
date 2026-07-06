@@ -142,6 +142,23 @@ impl StorageConnection {
         Ok(())
     }
 
+    /// Bytes [`vacuum`](Self::vacuum) would return to the OS if run right now:
+    /// `freelist_count × page_size`.
+    ///
+    /// SNAPSHOT-RETENTION-1: SQLite parks pages freed by a `DELETE` (pruning a snapshot) on the
+    /// **freelist** — reused by later writes but NOT returned to the OS until a `VACUUM` rewrites the
+    /// file. This is the retention pass's honest "how much would a VACUUM reclaim?" gate input,
+    /// measured WITHOUT paying the VACUUM, so the pass can skip the expensive full-file rewrite when
+    /// the reclaimable amount is below threshold (the freed pages are simply reused by the next
+    /// index). Read-only; safe to call under the DB write lock. `PRAGMA freelist_count` reflects the
+    /// current logical DB state (WAL included) on this connection.
+    pub fn reclaimable_bytes(&self) -> Result<u64, StorageError> {
+        let conn = self.connection();
+        let freelist_pages: i64 = conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+        let page_size: i64 = conn.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+        Ok((freelist_pages.max(0) as u64).saturating_mul(page_size.max(0) as u64))
+    }
+
     /// Delete a set of snapshots and all their dependent rows, one snapshot per transaction.
     ///
     /// Shared by [`prune_prunable_snapshots`] (READY retention prune) and

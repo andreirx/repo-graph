@@ -7,8 +7,8 @@
 //! # Whole-Snapshot Invalidation
 //!
 //! Snapshots with stale `derived_cache_epoch` are excluded from
-//! protected roles (current, parent, baseline_auto). They can only
-//! be marked as `prunable` or preserved as `baseline_user`.
+//! protected roles (current, parent). They can only be marked as
+//! `prunable` or preserved as `baseline_user`.
 //!
 //! A snapshot is considered "valid epoch" if:
 //! - `derived_cache_epoch == CURRENT_CACHE_EPOCH`, OR
@@ -50,18 +50,31 @@ impl StorageConnection {
 
     /// Classify retention for all snapshots of a repo based on relationships.
     ///
-    /// This assigns:
-    /// - `current`: the most recent ready snapshot with valid epoch
-    /// - `parent`: the parent of current (if valid epoch)
-    /// - `baseline_auto`: the most recent valid-epoch snapshot not current/parent
-    /// - `prunable`: all other ready snapshots
+    /// SNAPSHOT-RETENTION-1 (ratified 2026-07-04, "git has history — I want
+    /// DISCOVERY"): the keep-set is **current-state only**. This assigns:
+    /// - `current`: the most recent ready snapshot with valid epoch;
+    /// - `parent`: the parent of current (the delta-refresh base) when it has a
+    ///   valid epoch — kept as *mechanics* (it makes the next refresh cheap), not
+    ///   as history. If current has no parent, or the parent's epoch is stale, no
+    ///   snapshot takes the `parent` role and the old parent falls to `prunable`;
+    /// - `prunable`: **everything else**, including what earlier policy protected as
+    ///   an auto-selected comparison baseline. The operator explicitly does not want
+    ///   retained comparison history; cross-snapshot "what changed" recomputes from a
+    ///   git baseline on demand (VISION: "git owns history").
     ///
-    /// Does not modify snapshots already marked as `baseline_user`.
+    /// Steady state is ≤ 2 ready snapshots per repo (current + delta base).
+    ///
+    /// Does not modify snapshots already marked as `baseline_user` — an explicit
+    /// human "keep this" that survives every reclassification.
+    ///
+    /// The `baseline_auto` class is no longer *assigned* (the ratified keep-set
+    /// dropped it); the enum variant is retained only so legacy rows still parse and
+    /// are reclassified to `prunable` on the next pass. No schema migration.
     ///
     /// **Whole-snapshot invalidation**: Snapshots with stale `derived_cache_epoch`
-    /// are excluded from classification candidates. They cannot become `current`,
-    /// `parent`, or `baseline_auto` - only `prunable`. This enforces the semantic
-    /// rule that epoch mismatch invalidates the entire snapshot's derived cache.
+    /// are excluded from the protected roles (`current`, `parent`) — they can only
+    /// be `prunable` (or preserved as `baseline_user`). Epoch mismatch invalidates
+    /// the entire snapshot's derived cache.
     ///
     /// # Transactional Guarantee
     ///
@@ -100,12 +113,11 @@ impl StorageConnection {
             }
         };
 
-        // CACHE-SEMANTICS-1: Only valid-epoch snapshots can be current/parent/baseline_auto.
+        // CACHE-SEMANTICS-1 + SNAPSHOT-RETENTION-1: only valid-epoch snapshots can be current/parent.
         // Stale-epoch snapshots are always prunable (unless baseline_user).
 
         let mut current_uid: Option<&str> = None;
         let mut parent_uid: Option<&str> = None;
-        let mut baseline_auto_uid: Option<&str> = None;
 
         // Find current: most recent valid-epoch snapshot (not user baseline)
         for (uid, parent, retention, epoch) in &snapshots {
@@ -124,27 +136,8 @@ impl StorageConnection {
             }
         }
 
-        // Find baseline_auto: first valid-epoch snapshot that is not current, parent, or user_baseline
-        if current_uid.is_some() {
-            for (uid, _, retention, epoch) in &snapshots {
-                if !is_valid_epoch(epoch) {
-                    continue; // Skip stale epochs
-                }
-                let is_current = current_uid.map(|c| c == uid.as_str()).unwrap_or(false);
-                let is_parent = parent_uid.map(|p| p == uid.as_str()).unwrap_or(false);
-                let is_user_baseline = retention
-                    .as_ref()
-                    .map(|r| r == "baseline_user")
-                    .unwrap_or(false);
-
-                if !is_current && !is_parent && !is_user_baseline {
-                    baseline_auto_uid = Some(uid.as_str());
-                    break;
-                }
-            }
-        }
-
-        // Validate parent has valid epoch; if not, clear it
+        // Validate parent has valid epoch; if not, clear it — delta refresh is then inapplicable,
+        // so the old parent falls through to `prunable` (ratified: parent kept ONLY as delta base).
         if let Some(p_uid) = parent_uid {
             let parent_valid = snapshots
                 .iter()
@@ -169,15 +162,14 @@ impl StorageConnection {
                 continue;
             }
 
-            // Stale-epoch snapshots are always prunable
+            // Stale-epoch snapshots are always prunable; otherwise current + delta-base parent are
+            // the ONLY protected roles (ratified keep-set) — everything else prunes.
             let class = if !is_valid_epoch(epoch) {
                 RetentionClass::Prunable
             } else if Some(uid.as_str()) == current_uid {
                 RetentionClass::Current
             } else if Some(uid.as_str()) == parent_uid {
                 RetentionClass::Parent
-            } else if Some(uid.as_str()) == baseline_auto_uid {
-                RetentionClass::BaselineAuto
             } else {
                 RetentionClass::Prunable
             };

@@ -264,6 +264,10 @@ fn print_human_output(output: &DoctorOutput) {
                     | "authority_policy"
                     // DAEMON-VISIBILITY-1 (D): "what is the daemon doing right now" line.
                     | "activity"
+                    // SNAPSHOT-RETENTION-1: "what did the background cleanup pass last do" line
+                    // (pruned N / reclaimed X / nothing to prune). Pairs with `activity`; without
+                    // this arm the probe is counted but never shown in HUMAN output (JSON had it).
+                    | "retention"
             )
         })
         .collect();

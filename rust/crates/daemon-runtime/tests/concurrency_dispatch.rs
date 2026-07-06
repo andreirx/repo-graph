@@ -121,6 +121,15 @@ impl ProgressEmitter for ParkOnceEmitter {
 /// Isolated daemon: a temp state root (registry + databases never touch the operator's real state),
 /// a `DaemonState`, and a thread-shareable `Arc<ServiceDispatcher>`.
 fn isolated() -> (Arc<ServiceDispatcher>, Arc<DaemonState>, TempDir) {
+    // SNAPSHOT-RETENTION-1: these concurrency/cancellation proofs open RAW SQLite connections to the
+    // daemon DB (fixture injection, snapshot-status reads) that DELIBERATELY bypass the repo
+    // coordinator. PRODUCTION reads take the coordinator read-lock, so the pass's VACUUM excludes them
+    // honestly — proven in `retention_pass`'s reader-vs-VACUUM tests
+    // (`vacuum_defers_to_an_active_reader_then_runs_when_idle`,
+    // `reader_arriving_during_vacuum_window_blocks_then_reads_correct_data`). A raw connection has no
+    // such guard and would race the VACUUM's exclusive lock, so disable the background actor here: this
+    // binary tests dispatch concurrency, not retention, and its raw readers are a harness artifact.
+    repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

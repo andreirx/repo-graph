@@ -1,7 +1,28 @@
 # SNAPSHOT-RETENTION-1 — The database keeps current-state, not history
 
-Status: SPECIFIED (2026-07-04) · Track: Storage discipline (VISION: "git owns
-history; latest full + minimal transient comparison state")
+Status: **DELIVERED (2026-07-06)** · Track: Storage discipline (VISION: "git
+owns history; latest full + minimal transient comparison state")
+
+## 0. Delivery record (2026-07-06)
+
+Shipped via target-owned relay + operator close-out (review-1 escalate
+resolved here per the ratified corollary). What shipped: background retention
+actor (`retention_pass.rs`, activity kind `retention`) queued after every
+successful index/refresh; policy keeps current + valid delta-parent +
+`baseline_user`, assigns no `baseline_auto`; threshold-gated WAL-aware
+VACUUM; doctor renders the last retention outcome; two-gate contention
+safety. **Contract amendment (escalation `completion-report-retention-result`,
+ratified: accept):** the synchronous completion report says retention was
+QUEUED (with candidate count); the pruned/reclaimed RESULT appears on
+`rmap doctor` and in the daemon log — final numbers cannot exist
+synchronously without violating the ratified never-on-foreground invariant;
+the original DoD text double-promised (drafting error, reviewer-caught).
+Evidence: operator-executed fmt/clippy clean, **4856/0** workspace tests,
+dogfood green, and a live 3×-index isolated transcript ending `ready|1`
+(steady state: ONE snapshot after three indexes; honest below-threshold
+VACUUM deferral). Cycle-1 also root-caused the 1-in-4848 load flake (the
+auto-pass contaminating unrelated dispatch shape-tests; disabled there under
+the ratified irrelevant-to-assertion rule).
 Ratified intent (operator, 2026-07-04): "I don't care about history — git has
 history. I want DISCOVERY. Keep one snapshot; narrow to what changed."
 
@@ -40,11 +61,13 @@ VISION forbids.
    (e.g. reclaimable ≥ 25% of file size or ≥ 1 GB — builder proposes the
    threshold with rationale) so the file actually shrinks without paying
    VACUUM on every small refresh. Doctor/report show reclaimed bytes.
-4. **Honesty surface:** the retention pass reports like every op — doctor
-   shows it running; the post-index completion report includes "retention:
-   pruned N snapshots, reclaimed X GB" (or "nothing to prune"). Opt-out
-   switch consistent with ENRICH-LIFECYCLE-1's config precedent (default
-   ON — the ratified posture is aggressive cleanup).
+4. **Honesty surface (amended 2026-07-06, ratified):** the retention pass
+   reports like every op — the post-index completion report states that
+   cleanup was QUEUED (with the candidate count when known); the RESULT
+   ("pruned N, reclaimed X" / deferral reason) appears on `rmap doctor` and
+   in the daemon log once the background pass completes. Opt-out switch
+   consistent with ENRICH-LIFECYCLE-1's config precedent (default ON — the
+   ratified posture is aggressive cleanup).
 
 ## 3. Out of scope / stop conditions
 

@@ -21,21 +21,22 @@ fn classify_then_prune_sequence_works() {
     // Step 1: Classify
     storage.classify_repo_retention("r1").unwrap();
 
-    // Verify: s5=current, s4=baseline_auto, s1/s2/s3=prunable
+    // SNAPSHOT-RETENTION-1: these 5 snapshots are INDEPENDENT (no parent chain), so there is no
+    // delta base — only current (s5) is kept; s1..s4 all prune (auto-baseline is no longer retained).
     let stats_pre = storage.get_retention_stats("r1").unwrap();
     assert_eq!(stats_pre.current, 1);
-    assert_eq!(stats_pre.baseline_auto, 1);
-    assert_eq!(stats_pre.prunable, 3);
+    assert_eq!(stats_pre.baseline_auto, 0);
+    assert_eq!(stats_pre.prunable, 4);
 
     // Step 2: Prune
     let pruned = storage.prune_prunable_snapshots("r1").unwrap();
-    assert_eq!(pruned, 3);
+    assert_eq!(pruned, 4);
 
-    // Verify: only current + baseline_auto remain
+    // Verify: only current remains
     let stats_post = storage.get_retention_stats("r1").unwrap();
-    assert_eq!(stats_post.total, 2);
+    assert_eq!(stats_post.total, 1);
     assert_eq!(stats_post.current, 1);
-    assert_eq!(stats_post.baseline_auto, 1);
+    assert_eq!(stats_post.baseline_auto, 0);
     assert_eq!(stats_post.prunable, 0);
 }
 
@@ -50,7 +51,7 @@ fn classify_then_prune_is_idempotent() {
     // First run
     storage.classify_repo_retention("r1").unwrap();
     let pruned1 = storage.prune_prunable_snapshots("r1").unwrap();
-    assert_eq!(pruned1, 1); // s1 pruned
+    assert_eq!(pruned1, 2); // s1, s2 pruned (independent → only current s3 kept)
 
     // Second run: no change
     storage.classify_repo_retention("r1").unwrap();
@@ -62,9 +63,9 @@ fn classify_then_prune_is_idempotent() {
     let pruned3 = storage.prune_prunable_snapshots("r1").unwrap();
     assert_eq!(pruned3, 0);
 
-    // Total should be 2 (current + baseline_auto)
+    // Total should be 1 (current only — no parent chain, no auto-baseline)
     let stats = storage.get_retention_stats("r1").unwrap();
-    assert_eq!(stats.total, 2);
+    assert_eq!(stats.total, 1);
 }
 
 #[test]
@@ -126,21 +127,22 @@ fn classify_then_prune_preserves_all_protected_classes() {
     // Classify
     storage.classify_repo_retention("r1").unwrap();
     let stats_pre = storage.get_retention_stats("r1").unwrap();
-    // s5=current, s4=baseline_auto, s1=baseline_user, s2/s3=prunable
+    // SNAPSHOT-RETENTION-1: s5=current, s1=baseline_user (explicit human keep), s2/s3/s4=prunable
+    // (independent snapshots → no delta base; auto-baseline no longer retained).
     assert_eq!(stats_pre.current, 1); // s5
-    assert_eq!(stats_pre.baseline_auto, 1); // s4
+    assert_eq!(stats_pre.baseline_auto, 0);
     assert_eq!(stats_pre.baseline_user, 1); // s1
-    assert_eq!(stats_pre.prunable, 2); // s2, s3
+    assert_eq!(stats_pre.prunable, 3); // s2, s3, s4
 
     // Prune
     let pruned = storage.prune_prunable_snapshots("r1").unwrap();
-    assert_eq!(pruned, 2); // s2, s3 pruned
+    assert_eq!(pruned, 3); // s2, s3, s4 pruned
 
-    // Verify all protected remain
+    // Verify protected remain (current + user baseline)
     let stats_post = storage.get_retention_stats("r1").unwrap();
-    assert_eq!(stats_post.total, 3);
+    assert_eq!(stats_post.total, 2);
     assert_eq!(stats_post.current, 1); // s5
-    assert_eq!(stats_post.baseline_auto, 1); // s4
+    assert_eq!(stats_post.baseline_auto, 0);
     assert_eq!(stats_post.baseline_user, 1); // s1
     assert_eq!(stats_post.prunable, 0);
 }

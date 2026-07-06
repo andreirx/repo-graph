@@ -79,6 +79,13 @@ impl ProgressEmitter for FailAfter {
 }
 
 fn isolated() -> (ServiceDispatcher, TempDir) {
+    // SNAPSHOT-RETENTION-1: this suite opens a RAW SQLite connection (bypassing the repo coordinator) to
+    // read terminal snapshot status, and creates non-READY snapshots the auto-retention pass would
+    // reclaim — changing the very terminal state it asserts. Disable the background actor: this binary
+    // tests INDEX-DISCONNECT, not retention. (Production reads go through the coordinator, so the pass's
+    // VACUUM excludes them honestly — proven in `retention_pass`'s reader-vs-VACUUM tests; a raw
+    // connection has no such guard, which is why the disable is honest here, not a papered-over race.)
+    repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

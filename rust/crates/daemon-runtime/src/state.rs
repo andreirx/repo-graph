@@ -377,6 +377,13 @@ pub struct DaemonState {
     /// `storage_health`, `repo_info`). Interior-mutable (own `Mutex`), so this field does not
     /// affect `DaemonState: Send + Sync`. See `crate::activity`.
     activity: crate::activity::ActivityRegistry,
+
+    /// SNAPSHOT-RETENTION-1: the most-recent completed background retention pass, for the `rmap
+    /// doctor` "cleanup: pruned N, reclaimed X" honesty line. The pass is async (spawned after the
+    /// index response is sent), so the synchronous index reply cannot carry its result — doctor reads
+    /// this instead. Most-recent-wins across repos, mirroring the daemon_info `last_snapshot` single
+    /// global line. Interior-mutable (own `Mutex`), so it does not affect `DaemonState: Send + Sync`.
+    last_retention: Mutex<Option<crate::retention_pass::RetentionReport>>,
 }
 
 impl DaemonState {
@@ -402,6 +409,7 @@ impl DaemonState {
             db_runtimes: RwLock::new(HashMap::new()),
             registry: Mutex::new(registry),
             activity: crate::activity::ActivityRegistry::new(),
+            last_retention: Mutex::new(None),
         }
     }
 
@@ -416,6 +424,7 @@ impl DaemonState {
             db_runtimes: RwLock::new(HashMap::new()),
             registry: Mutex::new(registry),
             activity: crate::activity::ActivityRegistry::new(),
+            last_retention: Mutex::new(None),
         }
     }
 
@@ -425,6 +434,19 @@ impl DaemonState {
     /// drop); the visibility surfaces call `activity().snapshot()` / `active_for_db(..)`.
     pub fn activity(&self) -> &crate::activity::ActivityRegistry {
         &self.activity
+    }
+
+    /// SNAPSHOT-RETENTION-1: record the outcome of a completed background retention pass. Most-recent
+    /// wins; `rmap doctor` reads it via [`Self::last_retention_json`]. Called by the detached pass, so
+    /// it never blocks a request path.
+    pub fn record_retention_report(&self, report: crate::retention_pass::RetentionReport) {
+        *self.last_retention.lock() = Some(report);
+    }
+
+    /// The most-recent background retention pass outcome as `daemon_info.last_retention` JSON (`None`
+    /// if no pass has completed since the daemon started).
+    pub fn last_retention_json(&self) -> Option<serde_json::Value> {
+        self.last_retention.lock().as_ref().map(|r| r.to_json())
     }
 
     // ── State Root Mode (STATE-ROOT-SEPARATION-1) ───────────────────

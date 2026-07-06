@@ -202,6 +202,11 @@ pub fn run_index(args: &[String]) -> ExitCode {
                 "  enrichment: not run — run `rmap enrich` for resolved call types (types/library attribution)"
             );
 
+            // SNAPSHOT-RETENTION-1: report the queued background cleanup pass (async; result on doctor).
+            if let Some(line) = format_retention_line(result.get("retention")) {
+                eprintln!("{line}");
+            }
+
             // Print contract summary if present
             if let Some(contracts) = result.get("contracts") {
                 print_contract_summary_from_daemon(contracts);
@@ -738,6 +743,34 @@ fn format_refresh_summary(
     )
 }
 
+/// SNAPSHOT-RETENTION-1: the retention line on the index/refresh completion report.
+///
+/// The automatic cleanup pass is **asynchronous** — it never runs on the foreground request path
+/// (REFRESH-HANG-1) — so this line reports that cleanup was QUEUED (with the current prunable backlog
+/// the queued pass will clear) or is DISABLED via `RMAP_AUTO_RETENTION`. It NEVER fabricates
+/// pruned/reclaimed numbers, because they do not exist yet when this reply is sent: the RESULT
+/// surfaces on `rmap doctor` (which shows the pass running and its last outcome) and the daemon log.
+/// Returns `None` when the daemon carried no retention block (older daemon) — nothing to print.
+fn format_retention_line(retention: Option<&serde_json::Value>) -> Option<String> {
+    let retention = retention?;
+    let auto_pass = retention.get("auto_pass").and_then(|v| v.as_str())?;
+    match auto_pass {
+        "queued" => {
+            let prunable = retention
+                .get("prunable_count")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            Some(if prunable > 0 {
+                format!("  retention: background cleanup queued ({prunable} snapshot(s) to reclaim) — see `rmap doctor`")
+            } else {
+                "  retention: background cleanup queued — see `rmap doctor`".to_string()
+            })
+        }
+        "disabled" => Some("  retention: auto-cleanup disabled (RMAP_AUTO_RETENTION)".to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
@@ -819,6 +852,48 @@ mod tests {
             !line.contains("28 symbols") && !line.contains("nodes,"),
             "the node count must NOT be presented as symbols, nor a bare unqualified `nodes`: {line}"
         );
+    }
+
+    // SNAPSHOT-RETENTION-1: the completion-report retention line reports the QUEUED (async) pass —
+    // never fabricated pruned/reclaimed numbers (those surface on `rmap doctor`).
+    #[test]
+    fn retention_line_reports_queued_with_backlog() {
+        let r = serde_json::json!({ "auto_pass": "queued", "prunable_count": 3 });
+        let line = format_retention_line(Some(&r)).unwrap();
+        assert!(line.contains("queued"), "{line}");
+        assert!(line.contains("3 snapshot(s) to reclaim"), "{line}");
+        assert!(line.contains("rmap doctor"), "{line}");
+        assert!(
+            !line.contains("reclaimed") && !line.contains("pruned "),
+            "must NOT fabricate a result before the async pass ran: {line}"
+        );
+    }
+
+    #[test]
+    fn retention_line_queued_without_backlog() {
+        let r = serde_json::json!({ "auto_pass": "queued", "prunable_count": 0 });
+        let line = format_retention_line(Some(&r)).unwrap();
+        assert!(
+            line.contains("queued") && !line.contains("to reclaim"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn retention_line_disabled() {
+        let r = serde_json::json!({ "auto_pass": "disabled" });
+        let line = format_retention_line(Some(&r)).unwrap();
+        assert!(
+            line.contains("disabled") && line.contains("RMAP_AUTO_RETENTION"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn retention_line_absent_when_no_block_or_unknown() {
+        assert!(format_retention_line(None).is_none());
+        assert!(format_retention_line(Some(&serde_json::json!({}))).is_none());
+        assert!(format_retention_line(Some(&serde_json::json!({ "auto_pass": "??" }))).is_none());
     }
 
     #[test]
@@ -1154,6 +1229,11 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             eprintln!(
                 "  enrichment: not run — run `rmap enrich` for resolved call types (types/library attribution)"
             );
+
+            // SNAPSHOT-RETENTION-1: report the queued background cleanup pass (async; result on doctor).
+            if let Some(line) = format_retention_line(result.get("retention")) {
+                eprintln!("{line}");
+            }
 
             // Print copy-forward summary if present (refresh-specific)
             if let Some(copy_forward) = result.get("artifact_copy_forward") {

@@ -39,8 +39,11 @@ fn classify_repo_retention_with_parent() {
     assert_eq!(stats.prunable, 0);
 }
 
+// SNAPSHOT-RETENTION-1 (ratified keep-set): with a chain s1←s2←s3, only current (s3) + the
+// delta-base parent (s2) are kept; the older s1 that earlier policy protected as `baseline_auto`
+// is now `prunable`. Steady state ≤ 2 ready snapshots.
 #[test]
-fn classify_repo_retention_with_baseline_auto() {
+fn classify_repo_retention_prunes_beyond_current_and_parent() {
     let storage = setup_storage();
     insert_repo(&storage, "r1");
     insert_current_epoch_snapshot(&storage, "s1", "r1", None, "2025-01-01T00:00:00Z");
@@ -52,9 +55,12 @@ fn classify_repo_retention_with_baseline_auto() {
     let stats = storage.get_retention_stats("r1").unwrap();
     assert_eq!(stats.total, 3);
     assert_eq!(stats.current, 1); // s3
-    assert_eq!(stats.parent, 1); // s2
-    assert_eq!(stats.baseline_auto, 1); // s1
-    assert_eq!(stats.prunable, 0);
+    assert_eq!(stats.parent, 1); // s2 (delta base)
+    assert_eq!(
+        stats.baseline_auto, 0,
+        "auto-baseline is no longer retained"
+    );
+    assert_eq!(stats.prunable, 1); // s1
 }
 
 #[test]
@@ -72,9 +78,9 @@ fn classify_repo_retention_marks_excess_as_prunable() {
     let stats = storage.get_retention_stats("r1").unwrap();
     assert_eq!(stats.total, 5);
     assert_eq!(stats.current, 1); // s5
-    assert_eq!(stats.parent, 1); // s4
-    assert_eq!(stats.baseline_auto, 1); // s3
-    assert_eq!(stats.prunable, 2); // s1, s2
+    assert_eq!(stats.parent, 1); // s4 (delta base)
+    assert_eq!(stats.baseline_auto, 0); // ratified: no auto-baseline
+    assert_eq!(stats.prunable, 3); // s1, s2, s3
 }
 
 #[test]

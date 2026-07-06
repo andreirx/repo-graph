@@ -516,6 +516,9 @@ impl ServiceDispatcher {
                 "active_operations": active_operations,
                 // Idle "last snapshot <repo> @ <time>" fact (null when no repo ever indexed).
                 "last_snapshot": last_snapshot,
+                // SNAPSHOT-RETENTION-1: the most-recent background retention pass outcome (null until
+                // the daemon has run one) — the honesty surface for "pruned N / reclaimed X".
+                "last_retention": self.state.last_retention_json(),
             }),
         )
     }
@@ -2307,6 +2310,46 @@ impl ServiceDispatcher {
 
     // ── Write operations ────────────────────────────────────────────
 
+    /// SNAPSHOT-RETENTION-1: queue the background retention pass for a just-completed write op, then
+    /// annotate + return the success response. The pass NEVER runs on this foreground path — it
+    /// detaches (`spawn_auto_retention`), yields to any live op via the two-gate discipline, and
+    /// reports pruned/reclaimed on `rmap doctor` + the daemon log. The synchronous reply therefore
+    /// only states that cleanup was `queued` (or `disabled` when opted out via `RMAP_AUTO_RETENTION`);
+    /// the numbers are async and surface on doctor. `db_path` MUST be the SAME path this handler
+    /// stamped into the activity registry, so the pass's gate-1 `active_for_db` check matches.
+    fn finish_write_with_retention(
+        &self,
+        request_id: &str,
+        mut response: serde_json::Value,
+        db_path: &Path,
+        repo_uid: &str,
+        repo_display: String,
+    ) -> DispatchResult {
+        let auto_pass = if crate::retention_pass::auto_retention_enabled() {
+            crate::retention_pass::spawn_auto_retention(
+                Arc::clone(&self.state),
+                db_path.to_path_buf(),
+                repo_uid.to_string(),
+                repo_display,
+            );
+            "queued"
+        } else {
+            "disabled"
+        };
+        match response
+            .get_mut("retention")
+            .and_then(|v| v.as_object_mut())
+        {
+            Some(obj) => {
+                obj.insert("auto_pass".to_string(), serde_json::json!(auto_pass));
+            }
+            None => {
+                response["retention"] = serde_json::json!({ "auto_pass": auto_pass });
+            }
+        }
+        DispatchResult::success(request_id, response)
+    }
+
     /// Index a repository (REG-1 contract).
     ///
     /// Request: `{"method": "index", "params": {"repo_path": "...", "alias": "..."}}`
@@ -2567,7 +2610,15 @@ impl ServiceDispatcher {
                                     "warning: retention classification skipped (storage open failed) for {}: {}",
                                     repo_uid, e
                                 );
-                                return DispatchResult::success(&request.id, response);
+                                // Retention still queues: the background pass opens its own storage
+                                // connection, so this per-op read failure does not block cleanup.
+                                return self.finish_write_with_retention(
+                                    &request.id,
+                                    response,
+                                    &db_path,
+                                    &repo_uid,
+                                    canonical_path.to_string_lossy().to_string(),
+                                );
                             }
                         };
                         match classify_retention_only(&storage, &repo_uid) {
@@ -2595,7 +2646,14 @@ impl ServiceDispatcher {
                     }
                 };
 
-                DispatchResult::success(&request.id, response)
+                // SNAPSHOT-RETENTION-1: queue the background retention pass (never foreground).
+                self.finish_write_with_retention(
+                    &request.id,
+                    response,
+                    &db_path,
+                    &repo_uid,
+                    canonical_path.to_string_lossy().to_string(),
+                )
             }
             // INDEX-DISCONNECT-1: after the best-effort callback change above, transport failure no
             // longer produces `Aborted` — this arm is now only reachable if the orchestrator's
@@ -2847,7 +2905,16 @@ impl ServiceDispatcher {
                     }
                 }
 
-                DispatchResult::success(&request.id, response)
+                // SNAPSHOT-RETENTION-1: queue the background retention pass for the refreshed repo
+                // (never foreground). `canonical_db_path` is the SAME path stamped into the activity
+                // registry above, so the pass's gate-1 contention check matches.
+                self.finish_write_with_retention(
+                    &request.id,
+                    response,
+                    canonical_db_path,
+                    &repo_uid,
+                    repo_path.display().to_string(),
+                )
             }
             // INDEX-DISCONNECT-1: as in `handle_index`, transport failure no longer yields `Aborted`
             // (best-effort callback above); this arm is now only reachable via a deliberate explicit

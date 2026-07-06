@@ -14,12 +14,14 @@ fn marking_current_as_baseline_user_promotes_new_current() {
     insert_current_epoch_snapshot(&storage, "s2", "r1", None, "2025-01-02T00:00:00Z");
     insert_current_epoch_snapshot(&storage, "s3", "r1", None, "2025-01-03T00:00:00Z");
 
-    // Initial classification: s3=current, s2=baseline_auto, s1=prunable
+    // SNAPSHOT-RETENTION-1: independent snapshots → s3=current, s1/s2=prunable (no delta base, no
+    // auto-baseline).
     storage.classify_repo_retention("r1").unwrap();
     let stats = storage.get_retention_stats("r1").unwrap();
     assert_eq!(stats.current, 1);
-    assert_eq!(stats.baseline_auto, 1);
+    assert_eq!(stats.baseline_auto, 0);
     assert_eq!(stats.baseline_user, 0);
+    assert_eq!(stats.prunable, 2);
 
     // Mark s3 (current) as user baseline
     storage
@@ -34,10 +36,9 @@ fn marking_current_as_baseline_user_promotes_new_current() {
     assert_eq!(stats_after.baseline_user, 1);
     // A new current must be assigned (s2, the next most recent valid snapshot)
     assert_eq!(stats_after.current, 1);
-    // s1 is now baseline_auto (s2 is current, s3 is user baseline)
-    assert_eq!(stats_after.baseline_auto, 1);
-    // No prunable since all 3 are accounted for
-    assert_eq!(stats_after.prunable, 0);
+    // No auto-baseline retained; s1 (independent, not current) prunes.
+    assert_eq!(stats_after.baseline_auto, 0);
+    assert_eq!(stats_after.prunable, 1); // s1
 }
 
 #[test]

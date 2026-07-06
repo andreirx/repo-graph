@@ -75,6 +75,12 @@ fn unreachable_probes(authority_msg: &str, detail: String) -> Vec<ProbeResult> {
             message: "unavailable".to_string(),
             details: Some("daemon unreachable".to_string()),
         },
+        ProbeResult {
+            name: "retention".to_string(),
+            passed: true,
+            message: "unavailable".to_string(),
+            details: Some("daemon unreachable".to_string()),
+        },
     ]
 }
 
@@ -142,6 +148,7 @@ fn activity_probe(response: &serde_json::Value) -> ProbeResult {
             Some("index") => "indexing",
             Some("refresh") => "refreshing",
             Some("enrich") => "enriching",
+            Some("retention") => "reclaiming",
             _ => "working on",
         };
         let repo = op.get("repo").and_then(|v| v.as_str()).unwrap_or("<repo>");
@@ -177,6 +184,75 @@ fn activity_probe(response: &serde_json::Value) -> ProbeResult {
 
     ProbeResult {
         name: "activity".to_string(),
+        passed: true,
+        message,
+        details: None,
+    }
+}
+
+/// SNAPSHOT-RETENTION-1 (honesty surface): the last background retention pass outcome for `rmap
+/// doctor`.
+///
+/// The auto retention pass is asynchronous, so the `rmap index` reply only says cleanup was "queued";
+/// the pruned/reclaimed RESULT lands here (fed by `daemon_info.last_retention`). Renders, keyed on the
+/// honest `vacuum_status`:
+/// - "cleanup: pruned N snapshot(s), reclaimed X on disk, T ago"  (VACUUM ran)
+/// - "cleanup: pruned N snapshot(s) (disk reclaim deferred — below threshold), T ago"  (recyclable)
+/// - "cleanup: pruned N snapshot(s) (disk reclaim deferred — repo was being read), T ago"  (reader-safe)
+/// - "cleanup: last pass had nothing to prune, T ago"
+/// - "cleanup: none yet"  (no pass since daemon start).
+///
+/// The two "deferred" reasons are kept DISTINCT so the operator can tell a cheap-and-correct skip
+/// (below threshold; pages recycle) from a reader-yield (a VACUUM the next pass will retry). ALWAYS
+/// passes (informational — never flips `healthy`).
+fn retention_probe(response: &serde_json::Value) -> ProbeResult {
+    let message = match response.get("last_retention") {
+        Some(lr) if lr.is_object() => {
+            let pruned = lr.get("pruned_count").and_then(|v| v.as_i64()).unwrap_or(0);
+            let non_ready = lr
+                .get("non_ready_reclaimed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let removed = pruned + non_ready as i64;
+            let reclaimed = lr
+                .get("reclaimed_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            // `vacuum_status` is the authoritative fate; fall back to `reclaimed > 0` only for an older
+            // daemon that predates the field (so the line stays honest across a version skew).
+            let vacuum_status = lr.get("vacuum_status").and_then(|v| v.as_str());
+            let ago = lr
+                .get("finished_secs_ago")
+                .and_then(|v| v.as_u64())
+                .map(humanize_secs_ago)
+                .unwrap_or_else(|| "recently".to_string());
+            if removed == 0 {
+                format!("cleanup: last pass had nothing to prune, {ago}")
+            } else {
+                let ran = matches!(vacuum_status, Some("ran"))
+                    || (vacuum_status.is_none() && reclaimed > 0);
+                if ran {
+                    format!(
+                        "cleanup: pruned {removed} snapshot(s), reclaimed {} on disk, {ago}",
+                        format_size(reclaimed as i64)
+                    )
+                } else {
+                    let reason = match vacuum_status {
+                        Some("deferred_readers_active") => " — repo was being read",
+                        Some("below_threshold") => " — below threshold",
+                        _ => "",
+                    };
+                    format!(
+                        "cleanup: pruned {removed} snapshot(s) (disk reclaim deferred{reason}), {ago}"
+                    )
+                }
+            }
+        }
+        // Field present-but-null, or absent (older daemon) → no pass has completed yet.
+        _ => "cleanup: none yet".to_string(),
+    };
+    ProbeResult {
+        name: "retention".to_string(),
         passed: true,
         message,
         details: None,
@@ -263,6 +339,9 @@ fn probes_from_response(response: &serde_json::Value) -> Vec<ProbeResult> {
 
     // DAEMON-VISIBILITY-1 (D): what the daemon is doing right now (idle / indexing <repo> …).
     probes.push(activity_probe(response));
+
+    // SNAPSHOT-RETENTION-1 (D): what the last background cleanup pass reclaimed.
+    probes.push(retention_probe(response));
 
     probes
 }
@@ -427,6 +506,105 @@ mod tests {
             probe.message.contains("started 6m ago"),
             "{}",
             probe.message
+        );
+    }
+
+    // SNAPSHOT-RETENTION-1 (review-0 #4): the doctor activity line renders an in-flight background
+    // retention pass as "reclaiming <repo>" — the honesty surface for "doctor shows the pass as an
+    // active op". The daemon stamps `OpKind::Retention` (slug "retention") in the SAME activity
+    // registry as index/refresh; this proves the doctor render path speaks the reader's frame
+    // ("reclaiming"), not the internal slug. Pairs with the daemon-runtime
+    // `daemon_info_surfaces_the_active_retention_op` proof that the daemon actually emits it.
+    #[test]
+    fn activity_probe_renders_in_flight_retention() {
+        let response = json!({
+            "active_operations": [
+                { "kind": "retention", "repo": "my-repo", "phase": serde_json::Value::Null,
+                  "current": 0, "total": 0, "started_secs_ago": 3 }
+            ]
+        });
+        let probe = activity_probe(&response);
+        assert!(probe.passed, "activity never flips health");
+        assert!(
+            probe.message.contains("reclaiming my-repo"),
+            "the retention pass renders in the reader's frame, not the internal slug: {}",
+            probe.message
+        );
+    }
+
+    // SNAPSHOT-RETENTION-1: the doctor cleanup line reports the last pass's pruned/reclaimed — the
+    // honesty surface for the async pass (the `rmap index` reply only says "queued").
+    #[test]
+    fn retention_probe_reports_last_pass() {
+        let response = json!({
+            "last_retention": {
+                "repo": "my-repo", "pruned_count": 1, "non_ready_reclaimed": 0,
+                "reclaimed_bytes": 1_610_612_736_u64, "vacuum_status": "ran", "finished_secs_ago": 45
+            }
+        });
+        let probe = retention_probe(&response);
+        assert!(probe.passed, "retention line never flips health");
+        assert!(
+            probe.message.contains("pruned 1 snapshot(s)"),
+            "{}",
+            probe.message
+        );
+        assert!(
+            probe.message.contains("reclaimed 1.50 GB"),
+            "{}",
+            probe.message
+        );
+        assert!(probe.message.contains("45s ago"), "{}", probe.message);
+    }
+
+    #[test]
+    fn retention_probe_none_yet_and_nothing_pruned() {
+        // No pass yet (field absent) or field present-but-null → "none yet".
+        assert_eq!(retention_probe(&json!({})).message, "cleanup: none yet");
+        assert_eq!(
+            retention_probe(&json!({ "last_retention": serde_json::Value::Null })).message,
+            "cleanup: none yet"
+        );
+        // A pass that pruned nothing says so honestly.
+        let nothing = json!({ "last_retention": {
+            "pruned_count": 0, "non_ready_reclaimed": 0, "reclaimed_bytes": 0, "finished_secs_ago": 3
+        }});
+        assert!(
+            retention_probe(&nothing)
+                .message
+                .contains("nothing to prune"),
+            "{}",
+            retention_probe(&nothing).message
+        );
+    }
+
+    #[test]
+    fn retention_probe_deferred_vacuum_is_honest() {
+        // Rows pruned but VACUUM deferred BELOW THRESHOLD (the recyclable steady-state case) → says so
+        // with its reason; no fabricated reclaim.
+        let below = json!({ "last_retention": {
+            "pruned_count": 2, "non_ready_reclaimed": 0, "reclaimed_bytes": 0,
+            "vacuum_status": "below_threshold", "finished_secs_ago": 10
+        }});
+        let below_msg = retention_probe(&below).message;
+        assert!(
+            below_msg.contains("pruned 2 snapshot(s)")
+                && below_msg.contains("deferred — below threshold"),
+            "{below_msg}"
+        );
+
+        // Rows pruned but VACUUM deferred because a READER was active → the operator sees the reason is
+        // reader contention (a VACUUM the next pass retries), NOT a below-threshold skip. This is the
+        // honest reader-vs-VACUUM surface (never a raw busy error).
+        let readers = json!({ "last_retention": {
+            "pruned_count": 1, "non_ready_reclaimed": 0, "reclaimed_bytes": 0,
+            "vacuum_status": "deferred_readers_active", "finished_secs_ago": 4
+        }});
+        let readers_msg = retention_probe(&readers).message;
+        assert!(
+            readers_msg.contains("pruned 1 snapshot(s)")
+                && readers_msg.contains("deferred — repo was being read"),
+            "{readers_msg}"
         );
     }
 

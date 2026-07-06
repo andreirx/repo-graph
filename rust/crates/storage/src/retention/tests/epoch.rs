@@ -114,10 +114,10 @@ fn stale_epoch_parent_skipped_for_valid_epoch_grandparent() {
     assert_eq!(stats.current, 1); // s3
                                   // s2 cannot be parent (stale epoch), so no parent assigned
     assert_eq!(stats.parent, 0);
-    // s1 could be baseline_auto (valid epoch, not current/parent)
-    assert_eq!(stats.baseline_auto, 1); // s1
-                                        // s2 is prunable (stale epoch)
-    assert_eq!(stats.prunable, 1);
+    // SNAPSHOT-RETENTION-1: s1 is valid-epoch but neither current nor delta-base parent → prunable
+    // (auto-baseline no longer retained); s2 is prunable for its stale epoch.
+    assert_eq!(stats.baseline_auto, 0);
+    assert_eq!(stats.prunable, 2); // s1 (not kept) + s2 (stale)
     assert_eq!(stats.stale_epoch, 1);
 }
 
