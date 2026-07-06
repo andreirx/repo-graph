@@ -3902,7 +3902,12 @@ indexer's 87,280:
 - (b) Repo genuinely has ~87k tracked files: real postpass memory bounding needed (promotes #8 from
   perf to stability — batch/stream dominant postpasses, memory ceiling with honest degradation).
 Interim operator guidance: index scoped subtrees via `--include-root` until fixed.
-**RESOLVED to branch (b) (2026-07-06): `git ls-files` = 151,765 — MORE than the indexer's 87,280
+**ROOT CAUSE FOUND (2026-07-06, operator profile on legacy-codebases/linux): `fatal runtime
+error: stack overflow, aborting` at `persisting: 5/8` = `persist_boundary_interactions` (BI-1A
+re-parse postpass, recursive AST descent — depth scales with tree, deterministic at kernel scale;
+RSS was a red herring: peaked 10 GB in extraction then FELL before death). Fix:
+`docs/slices/persist-recursion-1.md` (iterative walks + depth guard + honest per-file skip).**
+Prior branch analysis (kept for the record): `git ls-files` = 151,765 — MORE than the indexer's 87,280
 (the extractor-routed subset). The repo is genuinely kernel-scale; postpass memory bounding is the
 real work → POSTPASS-MEMORY-1 (P0). The scanner's root-only-gitignore gap (walkdir +
 `load_root_gitignore`; no nested .gitignore, no .git/info/exclude, nothing at all without a root
