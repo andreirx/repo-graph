@@ -3891,6 +3891,20 @@ Postpass memory (peak 5.8 GB on 87k files) escalates existing debt #8 from perf 
 **Disposition: SLICED — `docs/slices/daemon-crash-recovery-1.md` (F7/F8/F10/F11/F12; F9 folded);
 postpass memory tracked under #8, promoted if the clean-slate retry crashes again.**
 
+**F13 — REPRODUCIBLE: daemon dies mid-postpass on the 87k-file repo (P0 — blocks indexing entirely on that machine).**
+(2026-07-06, v0.5.0.) Clean slate (`repo remove --delete-db`) + re-index reproduced the death: new
+database, same wreckage. Two branch hypotheses, discriminated by `git ls-files | wc -l` vs the
+indexer's 87,280:
+- (a) **Inventory walks ignored trees** (node_modules/build/vendored): explains file count, 11 GB db,
+  5.8 GB postpass peak, and the crash — fix is ignore-respecting inventory (cheap, and a VISION fix:
+  orientation is about the reader's code, not library internals). ALSO suspect for the day-1
+  "160k-file" repo.
+- (b) Repo genuinely has ~87k tracked files: real postpass memory bounding needed (promotes #8 from
+  perf to stability — batch/stream dominant postpasses, memory ceiling with honest degradation).
+Interim operator guidance: index scoped subtrees via `--include-root` until fixed.
+**Disposition: OPEN — awaiting the discriminating count; slice follows the branch. Preempts the queue
+behind the in-flight ENRICH-LIFECYCLE-1 checkpoint.**
+
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
 on self-index with the D5 next-action line correctly pointing at `rmap enrich`
