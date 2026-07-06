@@ -100,6 +100,12 @@ distribution surface, sliced as:
   rest incl. auto-baselines, threshold-gated VACUUM, doctor-visible, reclaim reported.
   Steady state ≤2 snapshots/repo. Queued after INDEX-DISCONNECT-1 (small, fast-converge),
   before ENRICH-LIFECYCLE-1. `docs/slices/snapshot-retention-1.md`.
+- **DAEMON-CRASH-RECOVERY-1** (P0 — gates the release after v0.5.0) — a daemon crash
+  mid-index leaves wreckage no shipped tool can see or reclaim (F7-F12: 3 orphaned
+  `building` snapshots/11 GB invisible to every retention class; prune says "no prunable";
+  orient's bare error bypasses F2; the daemon log is mute on operations). Startup
+  reconciliation + op lifecycle in the LOG + F2-bypass audit + stats naming + lock-race
+  probe case. `docs/slices/daemon-crash-recovery-1.md`.
 - **ENRICH-LIFECYCLE-1** (P1 — RATIFIED 2026-07-04: auto-enrich after every index/refresh,
   toolchain-aware honest skips, opt-out; queued next after INDEX-DISCONNECT-1; headlines
   the release AFTER the field-fix release) — enrichment is the largest available

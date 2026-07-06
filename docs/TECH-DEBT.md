@@ -3868,6 +3868,29 @@ INDEX-DISCONNECT-1 removes the main producer of lingering partials.
 **Disposition: FAST-FOLLOW — fold the agent-crate F2 message into the next
 agent-crate slice; the pure helper (snapshot_facts) already exists to call.**
 
+**F7-F12 — Daemon crash mid-index leaves unreconcilable state (2026-07-06, v0.5.0 second-machine, 87k-file repo).**
+Extraction completed (progress streaming + honest timeout worked as shipped); the daemon then died
+mid-postpass (peak 5.8 GB; "daemon startup (cold)" mid-log + vanished file lock = restart; no macOS
+crash record — memory-pressure kills are often unlogged). Aftermath, each its own defect:
+- **F7 (P0): no startup reconciliation.** INDEX-DISCONNECT-1's "no building limbo" holds only for
+  deaths the daemon survives. Crash-orphaned `building` snapshots (3 of them, 11 GB) are invisible:
+  retention stats show total=3 with ZERO in every class; `maintenance prune` says "no prunable
+  snapshots found." Next boot must detect building-with-no-live-op, mark interrupted(daemon-restart),
+  log it, and make them prunable.
+- **F8 (P1): daemon log is mute on operations.** The whole incident's log: startup + 3 broken pipes.
+  Op lifecycle lines (start/phase transitions/outcome) must go to the LOG, not only doctor — forensics
+  cannot depend on doctor being healthy.
+- **F9 (P2): doctor storage probe rendered the restart race as raw FAIL** ("failed to open storage
+  connection: database is locked" while the dying process held the lock) — reader-frame case needed.
+- **F10 (P1): orient's no-READY error on this path bypassed F2** — bare "index the repo first" while
+  an 11 GB partial sat there (the exact gaslighting F2 was built to kill). Find and fix the path.
+- **F11 (P0, = F7 mechanism): prune's interrupted-detection requires evidence a crash never wrote.**
+- **F12 (P2): retention stats render 0-in-every-class with total=3 without naming the states** — the
+  table should say "3 building (orphaned)" instead of implying an empty store.
+Postpass memory (peak 5.8 GB on 87k files) escalates existing debt #8 from perf to stability.
+**Disposition: SLICED — `docs/slices/daemon-crash-recovery-1.md` (F7/F8/F10/F11/F12; F9 folded);
+postpass memory tracked under #8, promoted if the clean-slate retry crashes again.**
+
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
 on self-index with the D5 next-action line correctly pointing at `rmap enrich`
