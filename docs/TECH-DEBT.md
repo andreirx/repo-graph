@@ -3902,8 +3902,13 @@ indexer's 87,280:
 - (b) Repo genuinely has ~87k tracked files: real postpass memory bounding needed (promotes #8 from
   perf to stability — batch/stream dominant postpasses, memory ceiling with honest degradation).
 Interim operator guidance: index scoped subtrees via `--include-root` until fixed.
-**Disposition: OPEN — awaiting the discriminating count; slice follows the branch. Preempts the queue
-behind the in-flight ENRICH-LIFECYCLE-1 checkpoint.**
+**RESOLVED to branch (b) (2026-07-06): `git ls-files` = 151,765 — MORE than the indexer's 87,280
+(the extractor-routed subset). The repo is genuinely kernel-scale; postpass memory bounding is the
+real work → POSTPASS-MEMORY-1 (P0). The scanner's root-only-gitignore gap (walkdir +
+`load_root_gitignore`; no nested .gitignore, no .git/info/exclude, nothing at all without a root
+file) stays filed as a LATENT defect — fix by moving to the `ignore` crate's WalkBuilder when
+touched. Operator profiling run on legacy-codebases/linux to name the dominant postpass before
+slicing. Interim on affected machines: `--include-root` scoping.**
 
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
