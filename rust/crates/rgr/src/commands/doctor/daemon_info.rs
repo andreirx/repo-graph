@@ -81,6 +81,12 @@ fn unreachable_probes(authority_msg: &str, detail: String) -> Vec<ProbeResult> {
             message: "unavailable".to_string(),
             details: Some("daemon unreachable".to_string()),
         },
+        ProbeResult {
+            name: "enrichment".to_string(),
+            passed: true,
+            message: "unavailable".to_string(),
+            details: Some("daemon unreachable".to_string()),
+        },
     ]
 }
 
@@ -259,6 +265,138 @@ fn retention_probe(response: &serde_json::Value) -> ProbeResult {
     }
 }
 
+/// Render the per-language honest skips of a COMPLETED mixed run (slice §3.2) as reader-frame
+/// "; skipped <lang>: <reason>" clauses — the `reason` already carries the install next-action
+/// ("jdtls not found — set JDTLS_PATH to your jdtls launcher"). Empty when nothing was skipped.
+///
+/// This is what makes a MIXED run (e.g. Rust resolved, Java toolchain-absent) show WHY Java was
+/// skipped and how to fix it on `rmap doctor` — not just the bare language name (review-0 item 2).
+/// The all-skipped state (nothing ran) surfaces the same reasons via its own branch below.
+fn skip_detail_clauses(skipped: Option<&Vec<serde_json::Value>>) -> String {
+    match skipped {
+        Some(arr) if !arr.is_empty() => arr
+            .iter()
+            .filter_map(|s| {
+                let lang = s.get("language").and_then(|v| v.as_str())?;
+                let reason = s.get("reason").and_then(|v| v.as_str())?;
+                Some(format!("; skipped {lang}: {reason}"))
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+/// ENRICH-LIFECYCLE-1 (D3): the enrichment lifecycle line for `rmap doctor`, from
+/// `daemon_info.{last_enrichment, enrichment_enabled, enrichment_activity}`. The full lifecycle
+/// across states (shown here as the DISPLAYED doctor line):
+/// - "enrichment: disabled (RMAP_AUTO_ENRICH)"  (opted out)
+/// - "enrichment: queued — a background pass is scheduled"  (spawned, not yet holding the write lock)
+/// - "enrichment: running — resolving receiver types now"  (first pass, before it records)
+/// - "enrichment: resolved N/M receiver types, promoted P, T ago"  (completed;
+///   "; skipped <lang>: <reason>" per toolchain-absent language on a mixed run)
+/// - "enrichment: skipped — <reason>, T ago"  (every eligible language had no toolchain)
+/// - "enrichment: none yet — runs after the next index"  (no pass, none in flight)
+///
+/// The `"enrichment: "` prefix on each displayed line is supplied by the doctor renderer's probe
+/// LABEL (`[ok] enrichment: …`, `print_probe_labeled` keyed on `name`). This probe's `message`
+/// therefore carries only the state text (e.g. "disabled (RMAP_AUTO_ENRICH)"), NOT the label — if
+/// the message repeated its own name the line would render "enrichment: enrichment: …". (The
+/// retention probe follows the same rule: its message leads with "cleanup:", a different word.)
+///
+/// `enrichment_activity` ("idle"|"queued"|"running") is what lets this line tell "queued" from the
+/// false "none yet — runs after the next index" (review-0 item 1): a pass IS in flight, so "none yet"
+/// would be a lie. A running pass is ALSO shown by the `activity` line ("enriching <repo>"); "queued"
+/// is not, so a queued pass behind a last-completed one is surfaced here too. ALWAYS passes
+/// (informational — never flips `healthy`); a missing toolchain is an honest skip, not a health failure.
+fn enrichment_probe(response: &serde_json::Value) -> ProbeResult {
+    // Disabled wins: nothing runs, so no last-pass line would be honest.
+    let enabled = response
+        .get("enrichment_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    // The live lifecycle activity (slice §3.7). Absent (older daemon) → "idle", preserving the
+    // pre-`enrichment_activity` rendering byte-for-byte.
+    let activity = response
+        .get("enrichment_activity")
+        .and_then(|v| v.as_str())
+        .unwrap_or("idle");
+    let message = if !enabled {
+        "disabled (RMAP_AUTO_ENRICH)".to_string()
+    } else {
+        match response.get("last_enrichment") {
+            Some(le) if le.is_object() => {
+                let ago = le
+                    .get("finished_secs_ago")
+                    .and_then(|v| v.as_u64())
+                    .map(humanize_secs_ago)
+                    .unwrap_or_else(|| "recently".to_string());
+                let skipped = le.get("skipped").and_then(|v| v.as_array());
+                let base = match le.get("state").and_then(|v| v.as_str()) {
+                    Some("skipped") => {
+                        // No language ran — surface the reader-frame reason(s) + install next-action.
+                        let reasons: Vec<String> = skipped
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|s| s.get("reason").and_then(|v| v.as_str()))
+                            .map(|r| r.to_string())
+                            .collect();
+                        let why = if reasons.is_empty() {
+                            "no resolver toolchain for the eligible languages".to_string()
+                        } else {
+                            reasons.join("; ")
+                        };
+                        format!("skipped — {why}, {ago}")
+                    }
+                    _ => {
+                        let enriched = le
+                            .get("enriched_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let eligible = le
+                            .get("eligible_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let promoted = le
+                            .get("promoted_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        // A mixed run shows the missing-toolchain reason + next action per skipped
+                        // language, not just its name (review-0 item 2; slice §3.2).
+                        let skip = skip_detail_clauses(skipped);
+                        if eligible == 0 {
+                            format!("up to date (nothing to resolve), {ago}{skip}")
+                        } else {
+                            format!(
+                                "resolved {enriched}/{eligible} receiver types, promoted {promoted}, {ago}{skip}"
+                            )
+                        }
+                    }
+                };
+                // A newer pass may be queued behind the last-completed one (running is already on the
+                // `activity` line as "enriching <repo>"; queued is not, so surface it here).
+                match activity {
+                    "queued" => format!("{base}; a newer pass is queued"),
+                    _ => base,
+                }
+            }
+            // No pass has recorded yet — but one may be queued/running RIGHT NOW, in which case "none
+            // yet" is false (review-0 item 1). Speak the live state.
+            _ => match activity {
+                "running" => "running — resolving receiver types now".to_string(),
+                "queued" => "queued — a background pass is scheduled".to_string(),
+                _ => "none yet — runs after the next index".to_string(),
+            },
+        }
+    };
+    ProbeResult {
+        name: "enrichment".to_string(),
+        passed: true,
+        message,
+        details: None,
+    }
+}
+
 /// Build the daemon-info-derived probes from a successful `daemon_info` response.
 ///
 /// Pure (no I/O) — this is the parse/format seam the doctor probe tests target.
@@ -342,6 +480,9 @@ fn probes_from_response(response: &serde_json::Value) -> Vec<ProbeResult> {
 
     // SNAPSHOT-RETENTION-1 (D): what the last background cleanup pass reclaimed.
     probes.push(retention_probe(response));
+
+    // ENRICH-LIFECYCLE-1 (D3): the enrichment lifecycle (completed / skipped / disabled / none yet).
+    probes.push(enrichment_probe(response));
 
     probes
 }
@@ -605,6 +746,202 @@ mod tests {
             readers_msg.contains("pruned 1 snapshot(s)")
                 && readers_msg.contains("deferred — repo was being read"),
             "{readers_msg}"
+        );
+    }
+
+    // ── ENRICH-LIFECYCLE-1: the enrichment lifecycle line across states ────────────────────────────
+
+    #[test]
+    fn enrichment_probe_disabled_wins() {
+        // Opt-out is authoritative: nothing runs, so no last-pass line would be honest.
+        let response =
+            json!({ "enrichment_enabled": false, "last_enrichment": serde_json::Value::Null });
+        let probe = enrichment_probe(&response);
+        assert!(probe.passed, "enrichment line never flips health");
+        // The message carries only the state; the doctor renderer's LABEL adds "enrichment: ".
+        assert_eq!(probe.message, "disabled (RMAP_AUTO_ENRICH)");
+    }
+
+    #[test]
+    fn enrichment_probe_reports_completed_pass() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 12
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("resolved 81/100 receiver types") && msg.contains("promoted 40"),
+            "{msg}"
+        );
+        assert!(msg.contains("12s ago"), "{msg}");
+    }
+
+    #[test]
+    fn enrichment_probe_reports_toolchain_skip_with_reason() {
+        // A language had eligible edges but no toolchain → the reader-frame skip + install next-action.
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "skipped",
+                "eligible_count": 0, "enriched_count": 0, "promoted_count": 0, "enrichment_rate": 0.0,
+                "skipped": [{ "language": "rust", "reason": "rust-analyzer not found — install rust-analyzer (rustup component add rust-analyzer)" }],
+                "finished_secs_ago": 5
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.starts_with("skipped — rust-analyzer not found"),
+            "the skip surfaces the reader-frame reason (no self-prefixed label): {msg}"
+        );
+        assert!(msg.contains("rustup component add rust-analyzer"), "{msg}");
+    }
+
+    #[test]
+    fn enrichment_probe_none_yet_when_no_pass() {
+        // No pass yet (absent or null) with enrichment ON → "none yet".
+        assert_eq!(
+            enrichment_probe(&json!({ "enrichment_enabled": true })).message,
+            "none yet — runs after the next index"
+        );
+        assert_eq!(
+            enrichment_probe(
+                &json!({ "enrichment_enabled": true, "last_enrichment": serde_json::Value::Null })
+            )
+            .message,
+            "none yet — runs after the next index"
+        );
+    }
+
+    // Regression (ENRICH-LIFECYCLE-1 operator finding): the doctor line must read "enrichment: …"
+    // ONCE, not "enrichment: enrichment: …". The renderer prepends the probe `name` as a label
+    // (`print_probe_labeled`), so the message must NOT itself begin with "enrichment:". Compose the
+    // displayed line the way the renderer does and assert a single prefix, across every state.
+    #[test]
+    fn enrichment_probe_message_never_double_prefixes_the_label() {
+        let states = [
+            json!({ "enrichment_enabled": false, "last_enrichment": serde_json::Value::Null }),
+            json!({ "enrichment_enabled": true }),
+            json!({ "enrichment_enabled": true, "last_enrichment": {
+                "repo": "r", "state": "completed", "eligible_count": 100, "enriched_count": 81,
+                "promoted_count": 40, "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 3
+            }}),
+            json!({ "enrichment_enabled": true, "last_enrichment": {
+                "repo": "r", "state": "skipped", "eligible_count": 0, "enriched_count": 0,
+                "promoted_count": 0, "enrichment_rate": 0.0,
+                "skipped": [{ "language": "rust", "reason": "rust-analyzer not found — install it" }],
+                "finished_secs_ago": 3
+            }}),
+        ];
+        for state in states {
+            let probe = enrichment_probe(&state);
+            assert!(
+                !probe.message.starts_with("enrichment:"),
+                "message must not carry the label (the renderer adds it): {}",
+                probe.message
+            );
+            // The renderer prints "{name}: {message}" → this is the displayed doctor line.
+            let displayed = format!("{}: {}", probe.name, probe.message);
+            assert!(
+                !displayed.contains("enrichment: enrichment:"),
+                "doctor line double-prefixed: {displayed}"
+            );
+        }
+    }
+
+    // review-0 item 2 / slice §3.2: a MIXED run — some languages resolved, others toolchain-absent —
+    // must surface the missing-toolchain reason + install next-action for EACH skipped language on
+    // doctor, not just the bare language name. Here Rust resolved; Java was skipped for want of jdtls.
+    #[test]
+    fn enrichment_probe_reports_mixed_run_with_skip_reasons() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "enrichment_activity": "idle",
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 50, "enriched_count": 40, "promoted_count": 12,
+                "enrichment_rate": 80.0,
+                "skipped": [{ "language": "java", "reason": "jdtls not found — set JDTLS_PATH to your jdtls launcher" }],
+                "finished_secs_ago": 8
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("resolved 40/50 receiver types") && msg.contains("promoted 12"),
+            "the run that DID happen is still reported: {msg}"
+        );
+        // The skip is NOT just the language name — it carries the reason AND the install next-action.
+        assert!(
+            msg.contains("skipped java: jdtls not found"),
+            "a mixed-run skip names the language AND why: {msg}"
+        );
+        assert!(
+            msg.contains("set JDTLS_PATH to your jdtls launcher"),
+            "a mixed-run skip carries the install next-action, not just the language name: {msg}"
+        );
+    }
+
+    // review-0 item 1 / slice §3.7: a queued-but-not-yet-recorded pass must NOT render as the false
+    // "none yet — runs after the next index". With no last_enrichment but `enrichment_activity` =
+    // "queued", the line tells the truth: a pass is scheduled.
+    #[test]
+    fn enrichment_probe_queued_is_not_none_yet() {
+        let response = json!({ "enrichment_enabled": true, "enrichment_activity": "queued" });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("queued") && !msg.contains("none yet"),
+            "a queued pass must not render as 'none yet': {msg}"
+        );
+    }
+
+    // review-0 item 1: the FIRST pass, running before it records, is likewise not "none yet".
+    #[test]
+    fn enrichment_probe_running_first_pass_is_not_none_yet() {
+        let response = json!({ "enrichment_enabled": true, "enrichment_activity": "running" });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("running") && !msg.contains("none yet"),
+            "a running first pass must not render as 'none yet': {msg}"
+        );
+    }
+
+    // review-0 item 1: a newer pass queued BEHIND a last-completed one is surfaced (the completed line
+    // stays truthful; the queued state is appended — running is left to the `activity` line).
+    #[test]
+    fn enrichment_probe_surfaces_queued_behind_completed() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "enrichment_activity": "queued",
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 30
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("resolved 81/100 receiver types")
+                && msg.contains("a newer pass is queued"),
+            "the last result stays truthful AND the newer queued pass is surfaced: {msg}"
+        );
+    }
+
+    // review-0 item 1 (regression): with nothing in flight ("idle", or the field absent on an older
+    // daemon) the null-report line is UNCHANGED — still "none yet — runs after the next index".
+    #[test]
+    fn enrichment_probe_idle_is_still_none_yet() {
+        assert_eq!(
+            enrichment_probe(&json!({ "enrichment_enabled": true, "enrichment_activity": "idle" }))
+                .message,
+            "none yet — runs after the next index"
+        );
+        // Older daemon (no `enrichment_activity` field) defaults to idle → byte-for-byte unchanged.
+        assert_eq!(
+            enrichment_probe(&json!({ "enrichment_enabled": true })).message,
+            "none yet — runs after the next index"
         );
     }
 

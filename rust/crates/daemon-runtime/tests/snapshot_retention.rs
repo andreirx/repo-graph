@@ -7,8 +7,9 @@
 //! (`run_retention_pass` / `try_retention_attempt` on a hand-built `StorageConnection`): they prove the
 //! ratified keep-set, the two contention gates, the threshold-gated VACUUM, and the two reader-vs-VACUUM
 //! production-interaction cases. What they CANNOT prove is the wiring one layer up: that a real
-//! `handle_index` dispatch actually **auto-triggers** the pass (`finish_write_with_retention` →
-//! `spawn_auto_retention`) and that a long-lived daemon converges accumulated real-indexed snapshots to
+//! `handle_index` dispatch actually **auto-triggers** the pass (`finish_write_with_maintenance` →
+//! `spawn_auto_retention`, with enrichment forced off here — see the determinism notes) and that a
+//! long-lived daemon converges accumulated real-indexed snapshots to
 //! the ratified steady state. That is the gap this binary closes — the operator's explicit remaining
 //! item: "auto-trigger (completed index queues the background retention op), contention yield, threshold
 //! VACUUM in the pass" at the daemon integration level, against a REAL in-flight write (not a
@@ -49,8 +50,14 @@
 //!
 //! - `set_auto_retention_for_test` is a PROCESS-GLOBAL atomic. Cargo runs a binary's tests in parallel,
 //!   and this binary mixes an ON test with OFF tests, so every test serializes on [`RETENTION_SERIAL`]
-//!   and sets the override it needs while holding it. Without that, an OFF test would flip the global
-//!   out from under the ON test.
+//!   and sets the override it needs (via [`set_overrides`]) while holding it. Without that, an OFF test
+//!   would flip the global out from under the ON test.
+//! - **Enrichment is forced OFF in every test here** (via [`set_overrides`]). ENRICH-LIFECYCLE-1 made
+//!   auto-enrichment a default-ON background pass that `finish_write_with_maintenance` spawns on every
+//!   index; this binary tests RETENTION, not enrichment, so a stray enrich thread taking the write lock
+//!   would make these tests' synchronous retention passes YIELD (observed: a ~1-in-8
+//!   `Yielded(another operation is writing this repo)` flake). Forcing enrich OFF is the mirror of the
+//!   `set_auto_retention_for_test(false)` isolation `tests/enrich_lifecycle.rs` uses for the reverse case.
 //! - The only test that lets the pass run on its own detached thread is the auto-trigger one; it waits
 //!   for the pass to RECORD its report before returning, so no pass thread is left racing the tempdir
 //!   teardown. The convergence + contention tests drive `try_retention_attempt` SYNCHRONOUSLY (no
@@ -63,6 +70,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use repo_graph_daemon_runtime::activity::OpKind;
+use repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test;
 use repo_graph_daemon_runtime::retention_pass::{
     set_auto_retention_for_test, try_retention_attempt, RetentionAttempt,
 };
@@ -86,6 +94,17 @@ fn serial_guard() -> MutexGuard<'static, ()> {
     RETENTION_SERIAL
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Set the maintenance-pass overrides every test in this binary wants, while holding the serial lock:
+/// retention as the test needs (`retention_on`), and **enrichment always OFF**. Enrichment is a
+/// default-ON background pass (ENRICH-LIFECYCLE-1) spawned by `finish_write_with_maintenance` on every
+/// index; this binary tests retention, so a stray enrich thread would take the write lock and make the
+/// synchronous retention passes YIELD. Mirror of `enrich_lifecycle.rs`'s `set_overrides` (which forces
+/// retention OFF for the reverse reason). See the module-level determinism notes.
+fn set_overrides(retention_on: bool) {
+    set_auto_retention_for_test(retention_on);
+    set_auto_enrich_for_test(false);
 }
 
 // ── Harness (mirrors tests/daemon_visibility.rs) ─────────────────────────────────────────────────
@@ -263,7 +282,7 @@ fn wait_for_retention_report(state: &DaemonState, timeout: Duration) -> Value {
 #[test]
 fn auto_trigger_queues_pass_and_records_report() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(true); // force ON (default posture), race-free vs the OFF tests
+    set_overrides(true); // retention ON (default posture), race-free vs the OFF tests; enrich OFF
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();
@@ -303,7 +322,7 @@ fn auto_trigger_queues_pass_and_records_report() {
 #[test]
 fn three_real_indexes_prune_to_current_only() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(false); // OFF during indexing: no background pass races our sync pass
+    set_overrides(false); // both passes OFF during indexing: no background pass races our sync pass
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();
@@ -407,7 +426,7 @@ fn three_real_indexes_prune_to_current_only() {
 #[test]
 fn retention_yields_to_a_real_inflight_index_then_runs() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(false); // we drive the pass by hand; no stray auto spawns
+    set_overrides(false); // we drive the pass by hand; no stray auto spawns (retention or enrich)
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();
@@ -490,7 +509,7 @@ fn retention_yields_to_a_real_inflight_index_then_runs() {
 #[test]
 fn opt_out_disables_the_auto_trigger() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(false); // opt-out ON (retention OFF)
+    set_overrides(false); // opt-out ON (retention OFF); enrich OFF too
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();
@@ -541,7 +560,7 @@ fn opt_out_disables_the_auto_trigger() {
 #[test]
 fn a_dispatched_read_blocks_while_the_pass_holds_writing_then_reads_correct_data() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(false); // we drive the coordinator by hand; no stray auto spawns
+    set_overrides(false); // we drive the coordinator by hand; no stray auto spawns (retention or enrich)
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();
@@ -614,7 +633,7 @@ fn a_dispatched_read_blocks_while_the_pass_holds_writing_then_reads_correct_data
 #[test]
 fn threshold_gated_vacuum_runs_above_and_skips_below_through_the_daemon_pass() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(false); // synchronous pass; no background racer
+    set_overrides(false); // synchronous pass; no background racer (retention or enrich)
 
     let (dispatcher, state, _root) = isolated();
 
@@ -718,7 +737,7 @@ fn threshold_gated_vacuum_runs_above_and_skips_below_through_the_daemon_pass() {
 #[test]
 fn daemon_info_surfaces_the_active_retention_op() {
     let _serial = serial_guard();
-    set_auto_retention_for_test(false);
+    set_overrides(false);
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();

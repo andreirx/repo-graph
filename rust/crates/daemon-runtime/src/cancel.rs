@@ -215,7 +215,7 @@ pub fn loop_checkpoint<'a>(
 /// other writes.
 ///
 /// [`checkpoint`]: CancelFlag::checkpoint
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct CancelFlag(Arc<AtomicBool>);
 
 impl CancelFlag {

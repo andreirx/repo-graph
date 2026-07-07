@@ -195,12 +195,13 @@ pub fn run_index(args: &[String]) -> ExitCode {
             );
             eprintln!("  repo: {}", repo_uid);
             eprintln!("  snapshot: {}", snapshot_uid);
-            // DAEMON-VISIBILITY-1 (D3): every completed index states whether enrichment ran. A fresh
-            // index has NOT been enriched (enrichment is a separate pass), so this is honest and
-            // definite. When ENRICH-LIFECYCLE-1 wires auto-enrichment, this line reports it running.
-            eprintln!(
-                "  enrichment: not run — run `rmap enrich` for resolved call types (types/library attribution)"
-            );
+            // ENRICH-LIFECYCLE-1 (D3): every completed index states whether the background enrichment
+            // pass was QUEUED (auto-run, async — the result surfaces on `rmap doctor`) or is DISABLED
+            // via `RMAP_AUTO_ENRICH`. It never fabricates the resolved/promoted numbers here (they do
+            // not exist yet — same discipline as retention).
+            if let Some(line) = format_enrichment_line(result.get("enrichment")) {
+                eprintln!("{line}");
+            }
 
             // SNAPSHOT-RETENTION-1: report the queued background cleanup pass (async; result on doctor).
             if let Some(line) = format_retention_line(result.get("retention")) {
@@ -771,6 +772,26 @@ fn format_retention_line(retention: Option<&serde_json::Value>) -> Option<String
     }
 }
 
+/// ENRICH-LIFECYCLE-1: the enrichment line on the index/refresh completion report.
+///
+/// The automatic enrichment pass is **asynchronous** (never on the foreground request path), so this
+/// line reports that enrichment was QUEUED (auto-run in the background — the resolved/promoted result
+/// and any toolchain skip surface on `rmap doctor`) or is DISABLED via `RMAP_AUTO_ENRICH`. It NEVER
+/// fabricates the resolved/promoted numbers here — they do not exist when this reply is sent (same
+/// discipline as `format_retention_line`). Returns `None` when the daemon carried no enrichment block
+/// (older daemon) — nothing to print.
+fn format_enrichment_line(enrichment: Option<&serde_json::Value>) -> Option<String> {
+    let auto_pass = enrichment?.get("auto_pass").and_then(|v| v.as_str())?;
+    match auto_pass {
+        "queued" => Some(
+            "  enrichment: background pass queued (resolved call types) — see `rmap doctor`"
+                .to_string(),
+        ),
+        "disabled" => Some("  enrichment: auto-enrichment disabled (RMAP_AUTO_ENRICH)".to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
@@ -1225,10 +1246,10 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
                     snapshot_uid
                 )
             );
-            // DAEMON-VISIBILITY-1 (D3): enrichment honesty on the refresh completion report too.
-            eprintln!(
-                "  enrichment: not run — run `rmap enrich` for resolved call types (types/library attribution)"
-            );
+            // ENRICH-LIFECYCLE-1 (D3): enrichment lifecycle on the refresh completion report too.
+            if let Some(line) = format_enrichment_line(result.get("enrichment")) {
+                eprintln!("{line}");
+            }
 
             // SNAPSHOT-RETENTION-1: report the queued background cleanup pass (async; result on doctor).
             if let Some(line) = format_retention_line(result.get("retention")) {

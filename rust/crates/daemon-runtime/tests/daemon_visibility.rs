@@ -114,6 +114,12 @@ fn isolated() -> (Arc<ServiceDispatcher>, Arc<DaemonState>, TempDir) {
     // (this binary tests index/refresh visibility, not retention — the retention pass, incl. its honest
     // reader-vs-VACUUM behavior, is proven directly in the `retention_pass` lib tests).
     repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
+    // ENRICH-LIFECYCLE-1: auto-enrichment is the SECOND background write-lock + activity actor spawned
+    // on index/refresh completion (same class as auto-retention above). It stamps an `Enrich` op and
+    // holds the write lock, so the "idle after completion" `daemon_info` assertions here would see a
+    // non-empty activity list and flake. This binary tests index/refresh VISIBILITY, not enrichment
+    // (enrichment's own lifecycle is proven directly in `enrich_lifecycle`), so disable it too.
+    repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

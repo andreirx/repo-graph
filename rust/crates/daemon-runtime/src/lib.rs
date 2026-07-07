@@ -56,6 +56,9 @@ pub mod cycle_output;
 // parallel-safe test-capture seam, used by handle_index/handle_refresh's best-effort callbacks.
 pub mod detached;
 pub mod dispatch;
+// ENRICH-LIFECYCLE-1: the automatic background enrichment pass (toolchain-aware, activity-stamped,
+// two-gate contention), spawned after every successful index/refresh — mirrors `retention_pass`.
+pub mod enrich_pass;
 pub mod explain_coherence;
 pub mod explain_lg_identity;
 pub mod explain_lg_serve;

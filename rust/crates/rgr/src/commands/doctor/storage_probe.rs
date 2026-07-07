@@ -114,10 +114,12 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
         );
     }
     if ready > 0 {
-        // D3 enrichment honesty (next-action form). Auto-enrichment is not yet wired
-        // (ENRICH-LIFECYCLE-1); this line will report running/completed once it lands.
+        // ENRICH-LIFECYCLE-1: auto-enrichment now runs after every index/refresh. The full lifecycle
+        // (completed / skipped-with-reason / disabled) is the authoritative Daemon-section
+        // `enrichment` line (daemon_info); this Storage-section pointer just states it is automatic
+        // so the old "not run automatically" claim is no longer a standing (now-false) statement.
         detail_lines.push(
-            "enrichment: not run automatically — run `rmap enrich` for resolved call types"
+            "enrichment: runs automatically after each index (see the Daemon 'enrichment' line)"
                 .to_string(),
         );
     }
@@ -226,9 +228,13 @@ mod tests {
         );
     }
 
-    // Contract D3: a READY snapshot carries the enrichment next-action line.
+    // Contract D3 (ENRICH-LIFECYCLE-1): a READY snapshot's Storage-section enrichment line states that
+    // enrichment runs AUTOMATICALLY and points at the authoritative Daemon `enrichment` lifecycle line.
+    // Pre-slice this was a manual "run `rmap enrich`" next-action; that claim is now FALSE (enrichment
+    // auto-runs after every index), so the line — and this assertion — moved to the automatic form. The
+    // manual next-action (install a toolchain) now lives on the Daemon `enrichment` line (daemon_info).
     #[test]
-    fn ready_snapshot_carries_enrichment_next_action() {
+    fn ready_snapshot_notes_enrichment_runs_automatically() {
         let response = json!({
             "db_size_bytes": 1_000_000_u64,
             "in_use_by_daemon": false,
@@ -241,7 +247,14 @@ mod tests {
         let probe = storage_probe_from_facts(&response);
         let details = probe.details.expect("enrichment line present");
         assert!(details.contains("enrichment:"), "{details}");
-        assert!(details.contains("rmap enrich"), "{details}");
+        assert!(
+            details.contains("runs automatically"),
+            "the Storage line states enrichment is automatic, not a manual next-action: {details}"
+        );
+        assert!(
+            details.contains("Daemon 'enrichment' line"),
+            "and points at the authoritative Daemon lifecycle line: {details}"
+        );
     }
 
     // Contract E: a genuine (non-contention) read failure is a real FAIL, distinct from in-use.

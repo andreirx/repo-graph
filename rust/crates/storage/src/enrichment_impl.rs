@@ -435,23 +435,45 @@ impl EnrichmentStoragePort for StorageConnection {
         snapshot_uid: &str,
         class_stable_key: &str,
     ) -> Result<Vec<(String, SymbolInfo)>, EnrichmentStorageError> {
-        // First find the class node_uid
+        // Find the class node's uid AND name. The name drives the language-agnostic method
+        // association below (Rust methods link to their type by qualified_name, not parent link).
         let conn = self.connection();
 
-        let class_node_uid: Option<String> = conn
+        let class_row: Option<(String, String)> = conn
             .query_row(
-                "SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND stable_key = ?2",
+                "SELECT node_uid, name FROM nodes WHERE snapshot_uid = ?1 AND stable_key = ?2",
                 rusqlite::params![snapshot_uid, class_stable_key],
-                |row| row.get(0),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    ))
+                },
             )
             .ok();
 
-        let class_node_uid = match class_node_uid {
-            Some(uid) => uid,
+        let (class_node_uid, class_name) = match class_row {
+            Some(pair) => pair,
             None => return Ok(Vec::new()),
         };
 
-        // Find all method-like children of this class
+        // Find this type's method-like symbols. Two association shapes, because extractors parent
+        // methods differently by language:
+        //   - parent_node_uid = <class node>            → TS/JS class members (the extractor sets
+        //     the parent link when the method is lexically inside the class body).
+        //   - qualified_name = "<TypeName>.<method>"    → Rust `impl` methods, which the
+        //     rust-extractor emits with parent_node_uid = NULL ("No parent node for impl methods
+        //     in v1" — impl blocks live apart from the type definition, often in another file, so
+        //     no node_uid link is available at extraction time). The owning type is carried in the
+        //     method's qualified_name instead.
+        //
+        // Without the second branch, promotion Gate 6 ("method maps to exactly one METHOD on the
+        // class") finds ZERO methods for every Rust receiver, so an auto-enrich pass resolves
+        // receiver types but promotes nothing (the ENRICH-LIFECYCLE-1 `promoted=0` defect). The
+        // `?3 <> ''` guard prevents a name-less class from matching ".<method>". Precision holds: an
+        // EXACT "<name>.<method>" equality (not a prefix) can at worst pull in a homonym type's
+        // method, which the gate's own uniqueness check then rejects as ambiguous — never a
+        // mis-promotion (VISION: precision matters for the call graph).
         let sql = r#"
             SELECT
                 node_uid,
@@ -461,24 +483,30 @@ impl EnrichmentStoragePort for StorageConnection {
                 subtype
             FROM nodes
             WHERE snapshot_uid = ?1
-              AND parent_node_uid = ?2
               AND kind = 'SYMBOL'
               AND subtype IN ('METHOD', 'GETTER', 'SETTER', 'FUNCTION')
+              AND (
+                  parent_node_uid = ?2
+                  OR (?3 <> '' AND qualified_name = ?3 || '.' || name)
+              )
             ORDER BY name
         "#;
 
         let mut stmt = conn.prepare(sql).map_err(StorageError::from)?;
 
         let rows = stmt
-            .query_map(rusqlite::params![snapshot_uid, class_node_uid], |row| {
-                Ok(RawMethodInfo {
-                    node_uid: row.get(0)?,
-                    stable_key: row.get(1)?,
-                    name: row.get(2)?,
-                    qualified_name: row.get(3)?,
-                    subtype: row.get(4)?,
-                })
-            })
+            .query_map(
+                rusqlite::params![snapshot_uid, class_node_uid, class_name],
+                |row| {
+                    Ok(RawMethodInfo {
+                        node_uid: row.get(0)?,
+                        stable_key: row.get(1)?,
+                        name: row.get(2)?,
+                        qualified_name: row.get(3)?,
+                        subtype: row.get(4)?,
+                    })
+                },
+            )
             .map_err(StorageError::from)?;
 
         let mut methods = Vec::new();
@@ -761,5 +789,188 @@ mod tests {
         let count = EnrichmentStoragePort::insert_promoted_edges(&conn, &[]).unwrap();
 
         assert_eq!(count, 0);
+    }
+
+    // ── ENRICH-LIFECYCLE-1 promotion: Rust `impl` methods (unparented) ─────────────────────────
+    //
+    // The rust-extractor emits `impl` methods with parent_node_uid = NULL (methods live in a
+    // separate impl block, often another file). The type↔method link is carried in the method's
+    // `qualified_name` ("Type.method"). These tests pin that `load_class_methods` finds those
+    // methods, so promotion Gate 6 sees them and a Rust receiver actually promotes. Before the fix,
+    // `load_class_methods` matched only by parent_node_uid → zero methods → `promoted=0`.
+
+    use crate::types::{CreateSnapshotInput, GraphNode, Repo, UpdateSnapshotStatusInput};
+
+    /// A struct/method node the way the rust-extractor writes it: uppercase subtype, methods
+    /// unparented (`parent_node_uid = None`) with the type in `qualified_name`.
+    fn rust_node(
+        node_uid: &str,
+        stable_key: &str,
+        subtype: &str,
+        name: &str,
+        qualified_name: &str,
+        snap: &str,
+    ) -> GraphNode {
+        GraphNode {
+            node_uid: node_uid.to_string(),
+            snapshot_uid: snap.to_string(),
+            repo_uid: "r1".to_string(),
+            stable_key: stable_key.to_string(),
+            kind: "SYMBOL".to_string(),
+            subtype: Some(subtype.to_string()),
+            name: name.to_string(),
+            qualified_name: Some(qualified_name.to_string()),
+            file_uid: None,
+            parent_node_uid: None, // the rust-extractor's "no parent for impl methods" shape
+            location: None,
+            signature: None,
+            visibility: Some("export".to_string()),
+            doc_comment: None,
+            metadata_json: None,
+        }
+    }
+
+    /// Seed a ready snapshot with an `Engine` struct + its unparented `Engine.run` impl method,
+    /// plus a decoy `Other.run` on a different type. Returns (storage, snapshot_uid, engine_key).
+    fn seed_rust_type_with_impl_method() -> (StorageConnection, String, String) {
+        let mut storage = setup_test_db();
+        storage
+            .add_repo(&Repo {
+                repo_uid: "r1".to_string(),
+                name: "repo".to_string(),
+                root_path: "/tmp/r1".to_string(),
+                default_branch: None,
+                created_at: "2026-07-06T00:00:00Z".to_string(),
+                metadata_json: None,
+            })
+            .unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                parent_snapshot_uid: None,
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid;
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: snap.clone(),
+                status: "ready".to_string(),
+                completed_at: Some("2026-07-06T00:01:00Z".to_string()),
+            })
+            .unwrap();
+
+        let engine_key = "r1:src/engine.rs#Engine:SYMBOL:CLASS".to_string();
+        storage
+            .insert_nodes(&[
+                // Rust struct → NodeSubtype::Class → "CLASS" (extractor.rs: "Closest mapping").
+                rust_node("n-engine", &engine_key, "CLASS", "Engine", "Engine", &snap),
+                // The impl method we WANT to find (unparented; qualified_name "Engine.run").
+                rust_node(
+                    "n-engine-run",
+                    "r1:src/engine.rs#Engine.run:SYMBOL:METHOD",
+                    "METHOD",
+                    "run",
+                    "Engine.run",
+                    &snap,
+                ),
+                // A homonym method on a DIFFERENT type — must NOT be attributed to Engine.
+                rust_node(
+                    "n-other-run",
+                    "r1:src/other.rs#Other.run:SYMBOL:METHOD",
+                    "METHOD",
+                    "run",
+                    "Other.run",
+                    &snap,
+                ),
+            ])
+            .unwrap();
+
+        (storage, snap, engine_key)
+    }
+
+    #[test]
+    fn load_class_methods_finds_unparented_rust_impl_method_by_qualified_name() {
+        let (storage, snap, engine_key) = seed_rust_type_with_impl_method();
+
+        let methods =
+            EnrichmentStoragePort::load_class_methods(&storage, &snap, &engine_key).unwrap();
+
+        // Exactly the Engine.run method — NOT the homonym Other.run (exact "<type>.<method>" match).
+        assert_eq!(
+            methods.len(),
+            1,
+            "found the unparented impl method by qualified_name, and only Engine's: {methods:?}"
+        );
+        assert_eq!(methods[0].0, "run");
+        assert_eq!(methods[0].1.node_uid, "n-engine-run");
+    }
+
+    #[test]
+    fn rust_impl_method_receiver_promotes_end_to_end() {
+        // Faithfully reconstructs EnrichmentPipeline::run_promotion's context build (load symbols →
+        // for each CLASS, load its methods), then runs the real 8-gate filter. This is the actual
+        // ENRICH-LIFECYCLE-1 defect: a resolved Rust receiver must PROMOTE (bank a resolved CALLS
+        // edge), not just resolve. Before the load_class_methods fix, Gate 6 found no methods and
+        // promoted.len() was 0.
+        use enrichment::{promote_edges, PromotionContext};
+
+        let (storage, snap, _engine_key) = seed_rust_type_with_impl_method();
+
+        // Build the promotion context exactly as the pipeline does.
+        let mut ctx = PromotionContext::new();
+        let symbols =
+            EnrichmentStoragePort::load_symbols_by_names(&storage, &snap, &["Engine".to_string()])
+                .unwrap();
+        for sym in symbols {
+            let is_class = sym.subtype == SymbolSubtype::Class;
+            let key = sym.stable_key.clone();
+            ctx.add_symbol(sym);
+            if is_class {
+                for (mname, minfo) in
+                    EnrichmentStoragePort::load_class_methods(&storage, &snap, &key).unwrap()
+                {
+                    ctx.add_class_method(&key, &mname, minfo);
+                }
+            }
+        }
+
+        // A resolved `engine.run()` receiver (what rust-analyzer produces: internal type "Engine").
+        let candidate = PromotionCandidate {
+            edge_uid: "e1".to_string(),
+            snapshot_uid: snap.clone(),
+            repo_uid: "r1".to_string(),
+            source_node_uid: "n-caller".to_string(),
+            target_key: "engine.run".to_string(),
+            line_start: Some(10),
+            col_start: Some(4),
+            line_end: Some(10),
+            col_end: Some(20),
+            category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            enrichment: EnrichmentMetadata {
+                receiver_type: Some("Engine".to_string()),
+                type_display_name: Some("Engine".to_string()),
+                is_external_type: false,
+                origin: ReceiverTypeOrigin::Compiler,
+                failure_reason: None,
+            },
+        };
+
+        let result = promote_edges(&[candidate], &ctx);
+
+        assert_eq!(
+            result.promoted.len(),
+            1,
+            "a resolved Rust impl-method receiver now promotes; skipped: {:?}",
+            result.skipped_reasons
+        );
+        assert_eq!(
+            result.promoted[0].target_node_uid, "n-engine-run",
+            "the promoted CALLS edge targets the resolved impl method"
+        );
     }
 }

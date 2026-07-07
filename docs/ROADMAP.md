@@ -100,6 +100,12 @@ distribution surface, sliced as:
   rest incl. auto-baselines, threshold-gated VACUUM, doctor-visible, reclaim reported.
   Steady state ≤2 snapshots/repo. Queued after INDEX-DISCONNECT-1 (small, fast-converge),
   before ENRICH-LIFECYCLE-1. `docs/slices/snapshot-retention-1.md`.
+- **ENRICH-YIELD-1** (P2 — follow-up filed 2026-07-07 at ENRICH-LIFECYCLE-1 delivery) —
+  the auto-pass resolves 74% of unknown receiver types but promotion passes only ~3.5% of
+  resolutions (261/7435 on self-index; +0.3pp call resolution). Investigate promotion
+  criteria (confidence/ambiguity) + whether resolved-but-unpromoted types can land as
+  Layer-2 inferences with basis, per the certainty model. Call-graph reliability stays
+  LOW until yield improves.
 - **DAEMON-CRASH-RECOVERY-1** (P0 — gates the release after v0.5.0) — a daemon crash
   mid-index leaves wreckage no shipped tool can see or reclaim (F7-F12: 3 orphaned
   `building` snapshots/11 GB invisible to every retention class; prune says "no prunable";

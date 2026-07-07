@@ -268,6 +268,9 @@ fn print_human_output(output: &DoctorOutput) {
                     // (pruned N / reclaimed X / nothing to prune). Pairs with `activity`; without
                     // this arm the probe is counted but never shown in HUMAN output (JSON had it).
                     | "retention"
+                    // ENRICH-LIFECYCLE-1: the enrichment lifecycle line (completed / skipped /
+                    // disabled / none yet). Same reason as `retention` — must be listed to render.
+                    | "enrichment"
             )
         })
         .collect();

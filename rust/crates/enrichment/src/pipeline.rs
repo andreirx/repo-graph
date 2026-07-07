@@ -140,11 +140,42 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
     }
 
     /// Run enrichment for a repository/snapshot.
+    ///
+    /// The manual (client-driven) path: runs to completion. Delegates to
+    /// [`run_cancellable`](Self::run_cancellable) with a cancel check that never fires,
+    /// so this is byte-for-byte the same work — resolution is grouped identically, and a
+    /// never-cancelling run persists every batch and promotes once, exactly as before.
     pub fn run(
         &mut self,
         repo_uid: &str,
         snapshot_uid: &str,
         config: &EnrichmentConfig,
+    ) -> Result<EnrichmentReport, PipelineError> {
+        self.run_cancellable(repo_uid, snapshot_uid, config, &|| false)
+    }
+
+    /// Run enrichment, yielding cooperatively at batch boundaries when `cancel` fires
+    /// (ENRICH-LIFECYCLE-1 running-yield).
+    ///
+    /// `cancel` is polled at TWO boundary classes so an explicit index/refresh can make a
+    /// running background pass release the DB write lock without a mid-LSP-request abort:
+    /// 1. **Between languages** — here, before initializing the next language's resolver.
+    /// 2. **Within a language** — threaded into `resolve_batch`, which polls it before
+    ///    starting each per-project LSP session (never pays a fresh warm-up on cancel) and
+    ///    before each per-edge resolve (yields within one LSP request).
+    ///
+    /// **Each language's persist is a complete additive fact** (`persist_enrichments` is an
+    /// additive per-edge `metadata_json` UPDATE): a cancelled pass leaves the batches it
+    /// finished durably enriched, never a torn state. On cancel the trailing promotion is
+    /// **skipped** — the superseding index re-enriches and re-promotes the fresh snapshot,
+    /// so promoting a doomed snapshot would only lengthen the yield. A completed
+    /// (never-cancelled) run persists every batch and promotes once at the end, unchanged.
+    pub fn run_cancellable(
+        &mut self,
+        repo_uid: &str,
+        snapshot_uid: &str,
+        config: &EnrichmentConfig,
+        cancel: &dyn Fn() -> bool,
     ) -> Result<EnrichmentReport, PipelineError> {
         let mut builder = ReportBuilder::new(repo_uid.to_string(), snapshot_uid.to_string());
 
@@ -179,65 +210,72 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
             }
         }
 
-        // Resolve each language batch
-        let mut all_results: Vec<ReceiverTypeResult> = Vec::new();
-
+        // Resolve each language batch, persisting the batch before moving on (a complete
+        // additive fact). Between languages, honor a yield request.
+        let mut persisted_total = 0usize;
         for (lang, lang_edges) in &edges_by_language {
-            if let Some(resolver) = self.registry.get_mut(*lang) {
-                // Initialize resolver
-                resolver.initialize(repo_path)?;
+            if cancel() {
+                break;
+            }
 
-                // Resolve batch
-                let results = resolver.resolve_batch(repo_path, lang_edges, None);
+            let batch_results: Vec<ReceiverTypeResult> =
+                if let Some(resolver) = self.registry.get_mut(*lang) {
+                    // Initialize resolver
+                    resolver.initialize(repo_path)?;
 
-                // Record results
-                for result in &results {
-                    if result.is_success() {
-                        let type_name = result
-                            .type_display_name
-                            .as_ref()
-                            .or(result.receiver_type.as_ref())
-                            .map(|s| s.as_str())
-                            .unwrap_or("unknown");
-                        builder.record_success(*lang, type_name, result.is_external_type);
-                    } else {
-                        let reason = result.failure_reason.as_deref().unwrap_or("unknown");
-                        builder.record_failure(*lang, reason);
+                    // Resolve batch (cancel threaded into the resolver's own per-session /
+                    // per-edge boundaries; a cancelled batch returns partial results).
+                    let results = resolver.resolve_batch(repo_path, lang_edges, None, Some(cancel));
+
+                    // Record results
+                    for result in &results {
+                        if result.is_success() {
+                            let type_name = result
+                                .type_display_name
+                                .as_ref()
+                                .or(result.receiver_type.as_ref())
+                                .map(|s| s.as_str())
+                                .unwrap_or("unknown");
+                            builder.record_success(*lang, type_name, result.is_external_type);
+                        } else {
+                            let reason = result.failure_reason.as_deref().unwrap_or("unknown");
+                            builder.record_failure(*lang, reason);
+                        }
                     }
-                }
 
-                all_results.extend(results);
+                    // Shutdown resolver
+                    resolver.shutdown();
+                    results
+                } else {
+                    // No resolver for this language - mark all as failed
+                    let mut results = Vec::with_capacity(lang_edges.len());
+                    for edge in lang_edges {
+                        builder.record_failure(*lang, "no_resolver_available");
+                        results.push(ReceiverTypeResult::failed(
+                            edge.edge_uid.clone(),
+                            "no resolver available",
+                        ));
+                    }
+                    results
+                };
 
-                // Shutdown resolver
-                resolver.shutdown();
-            } else {
-                // No resolver for this language - mark all as failed
-                for edge in lang_edges {
-                    builder.record_failure(*lang, "no_resolver_available");
-                    all_results.push(ReceiverTypeResult::failed(
-                        edge.edge_uid.clone(),
-                        "no resolver available",
-                    ));
-                }
+            // Persist this batch (skip in dry-run mode — persistence not attempted, which
+            // leaves persisted_count as None so has_storage_discrepancy() cannot misfire).
+            if !config.dry_run {
+                let updates: Vec<_> = batch_results
+                    .iter()
+                    .map(|r| (r.edge_uid.clone(), EnrichmentMetadata::from(r)))
+                    .collect();
+                persisted_total += self.storage.persist_enrichments(&updates)?;
             }
         }
 
-        // Persist enrichments (skip in dry-run mode)
-        if config.dry_run {
-            // In dry-run mode, do not set persisted_count.
-            // Leaving it as None signals "persistence not attempted" and
-            // prevents has_storage_discrepancy() from falsely triggering.
-        } else {
-            let updates: Vec<_> = all_results
-                .iter()
-                .map(|r| (r.edge_uid.clone(), EnrichmentMetadata::from(r)))
-                .collect();
+        if !config.dry_run {
+            builder.set_persisted_count(persisted_total);
 
-            let persisted_count = self.storage.persist_enrichments(&updates)?;
-            builder.set_persisted_count(persisted_count);
-
-            // Run promotion if requested (also skipped in dry-run)
-            if config.promote {
+            // Promote once over everything persisted — unless we yielded (a superseding
+            // index will re-enrich + re-promote the fresh snapshot; skipping bounds the yield).
+            if config.promote && !cancel() {
                 let promotion_report = self.run_promotion(snapshot_uid)?;
                 builder.set_promotion(promotion_report);
             }
@@ -422,6 +460,125 @@ mod tests {
         assert!(
             !report.has_storage_discrepancy(),
             "dry-run must not trigger storage discrepancy"
+        );
+    }
+
+    // ── ENRICH-LIFECYCLE-1 running-yield: run_cancellable batch-boundary cancellation ──────────────
+
+    fn eligible(uid: &str, lang: EnrichmentLanguage) -> EligibleEdge {
+        EligibleEdge {
+            edge_uid: uid.to_string(),
+            snapshot_uid: "snap-1".to_string(),
+            repo_uid: "repo-1".to_string(),
+            source_node_uid: "src".to_string(),
+            target_key: "obj.method".to_string(),
+            source_file_path: "src/main.ts".to_string(),
+            line_start: 1,
+            col_start: 1,
+            category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            language: lang,
+        }
+    }
+
+    /// A fake resolver that SUCCEEDS on every edge and honors the cancel check at its per-edge
+    /// boundary — the hermetic stand-in for a real LSP resolver (no rust-analyzer/tsserver process),
+    /// so the pipeline's batch-boundary cancellation is provable deterministically.
+    struct CountingResolver {
+        lang: EnrichmentLanguage,
+    }
+    impl crate::resolver::ReceiverTypeResolver for CountingResolver {
+        fn language(&self) -> EnrichmentLanguage {
+            self.lang
+        }
+        fn resolve_batch(
+            &self,
+            _repo_root: &Path,
+            edges: &[EligibleEdge],
+            _progress: Option<&dyn crate::resolver::ResolverProgress>,
+            cancel: Option<&dyn Fn() -> bool>,
+        ) -> Vec<ReceiverTypeResult> {
+            let mut out = Vec::new();
+            for e in edges {
+                if cancel.is_some_and(|c| c()) {
+                    break;
+                }
+                out.push(ReceiverTypeResult::success(
+                    e.edge_uid.clone(),
+                    "SomeType".to_string(),
+                    Some("SomeType".to_string()),
+                    false,
+                ));
+            }
+            out
+        }
+        fn initialize(&mut self, _repo_root: &Path) -> Result<(), ResolverError> {
+            Ok(())
+        }
+        fn shutdown(&mut self) {}
+    }
+
+    // A yield that fires at the between-language boundary stops before any resolution AND skips
+    // promotion (the loop breaks before `run_promotion` is ever reached).
+    #[test]
+    fn run_cancellable_breaks_the_language_loop_on_immediate_cancel() {
+        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        for i in 0..3 {
+            storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
+        }
+        let mut pipeline = EnrichmentPipeline::new(storage);
+        pipeline.registry_mut().register(Box::new(CountingResolver {
+            lang: EnrichmentLanguage::TypeScript,
+        }));
+
+        let report = pipeline
+            .run_cancellable(
+                "repo-1",
+                "snap-1",
+                &EnrichmentConfig::new().with_promotion(),
+                &|| true,
+            )
+            .unwrap();
+
+        assert_eq!(report.eligible_count, 3, "eligible is recorded up front");
+        assert_eq!(
+            report.enriched_count + report.failed_count,
+            0,
+            "cancel before the language body → nothing processed, promotion skipped"
+        );
+    }
+
+    // A yield that fires mid-resolution stops the batch partway — the completed edges are a partial,
+    // additive commit; the rest are abandoned.
+    #[test]
+    fn run_cancellable_stops_within_the_batch_on_mid_cancel() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        for i in 0..8 {
+            storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
+        }
+        let mut pipeline = EnrichmentPipeline::new(storage);
+        pipeline.registry_mut().register(Box::new(CountingResolver {
+            lang: EnrichmentLanguage::TypeScript,
+        }));
+
+        // Trip after a few polls (one between-language poll + per-edge polls threaded into the
+        // resolver) so the batch stops partway — robust to the exact poll count via a range assert.
+        let polls = AtomicUsize::new(0);
+        let cancel = || polls.fetch_add(1, Ordering::SeqCst) >= 4;
+        let report = pipeline
+            .run_cancellable(
+                "repo-1",
+                "snap-1",
+                &EnrichmentConfig::new().with_promotion(),
+                &cancel,
+            )
+            .unwrap();
+
+        assert_eq!(report.eligible_count, 8, "all recorded eligible");
+        let processed = report.enriched_count + report.failed_count;
+        assert!(
+            processed > 0 && processed < 8,
+            "cancel stopped the batch partway (processed {processed}/8)"
         );
     }
 }

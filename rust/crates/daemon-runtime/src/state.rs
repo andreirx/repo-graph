@@ -384,6 +384,12 @@ pub struct DaemonState {
     /// this instead. Most-recent-wins across repos, mirroring the daemon_info `last_snapshot` single
     /// global line. Interior-mutable (own `Mutex`), so it does not affect `DaemonState: Send + Sync`.
     last_retention: Mutex<Option<crate::retention_pass::RetentionReport>>,
+
+    /// ENRICH-LIFECYCLE-1: daemon-global enrichment-lifecycle coordination — the per-repo trigger
+    /// generation (supersede rule), the "one background enrichment at a time per daemon" run slot,
+    /// and the most-recent completed pass for the `rmap doctor` lifecycle line. Own interior
+    /// mutability (see `EnrichCoordinator`), so it does not affect `DaemonState: Send + Sync`.
+    enrich: crate::enrich_pass::EnrichCoordinator,
 }
 
 impl DaemonState {
@@ -410,6 +416,7 @@ impl DaemonState {
             registry: Mutex::new(registry),
             activity: crate::activity::ActivityRegistry::new(),
             last_retention: Mutex::new(None),
+            enrich: crate::enrich_pass::EnrichCoordinator::new(),
         }
     }
 
@@ -425,6 +432,7 @@ impl DaemonState {
             registry: Mutex::new(registry),
             activity: crate::activity::ActivityRegistry::new(),
             last_retention: Mutex::new(None),
+            enrich: crate::enrich_pass::EnrichCoordinator::new(),
         }
     }
 
@@ -447,6 +455,26 @@ impl DaemonState {
     /// if no pass has completed since the daemon started).
     pub fn last_retention_json(&self) -> Option<serde_json::Value> {
         self.last_retention.lock().as_ref().map(|r| r.to_json())
+    }
+
+    /// ENRICH-LIFECYCLE-1: the daemon-global enrichment coordinator (trigger generations, the
+    /// one-at-a-time run slot, and the last-completed pass). The auto-enrich pass drives it;
+    /// `rmap doctor` reads the last pass via [`Self::last_enrichment_json`].
+    pub fn enrich_coord(&self) -> &crate::enrich_pass::EnrichCoordinator {
+        &self.enrich
+    }
+
+    /// Record the outcome of a completed background enrichment pass. Most-recent wins; `rmap doctor`
+    /// reads it via [`Self::last_enrichment_json`]. Called by the detached pass, so it never blocks a
+    /// request path.
+    pub fn record_enrichment_report(&self, report: crate::enrich_pass::EnrichmentReport) {
+        self.enrich.record(report);
+    }
+
+    /// The most-recent background enrichment pass outcome as `daemon_info.last_enrichment` JSON
+    /// (`None` if no pass has completed since the daemon started).
+    pub fn last_enrichment_json(&self) -> Option<serde_json::Value> {
+        self.enrich.last_json()
     }
 
     // ── State Root Mode (STATE-ROOT-SEPARATION-1) ───────────────────

@@ -34,21 +34,37 @@ pub trait ReceiverTypeResolver: Send + Sync {
     ///
     /// # Contract
     ///
-    /// - Returns exactly one result per input edge
+    /// - Returns one result per input edge — **except** when `cancel` fires: a
+    ///   cancelled batch returns results only for the edges resolved before the
+    ///   cancel point (the tail is abandoned, never fabricated as failed).
     /// - Results are in the same order as inputs
     /// - Failures are reported via `ReceiverTypeResult::failed()`
     /// - Partial success is acceptable
+    ///
+    /// # Cancellation (ENRICH-LIFECYCLE-1)
+    ///
+    /// `cancel` is polled at the resolver's own batch boundaries — before starting a
+    /// new per-project LSP session (so a cancel never pays a fresh warm-up) and before
+    /// each per-edge resolve within a warmed session (so an in-flight resolution yields
+    /// within one LSP request). It is **cooperative + checkpoint-granular**, mirroring
+    /// the query-path cancel seam (`daemon-runtime::cancel`): no mid-LSP-request abort;
+    /// the loop bails at its next boundary. `None` = never cancel (the manual
+    /// `EnrichmentPipeline::run` path and every unit test pass `None`). The daemon's
+    /// auto-enrich pass passes `Some(&|| flag.is_cancelled())` so an explicit
+    /// index/refresh can make a running background pass yield the DB write lock.
     ///
     /// # Arguments
     ///
     /// * `repo_root` - Absolute path to the repository root
     /// * `edges` - Eligible edges to resolve (all matching this resolver's language)
     /// * `progress` - Optional callback for progress reporting
+    /// * `cancel` - Optional cooperative stop check, polled at batch boundaries
     fn resolve_batch(
         &self,
         repo_root: &std::path::Path,
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Vec<ReceiverTypeResult>;
 
     /// Initialize the resolver for a repository.
@@ -240,11 +256,21 @@ impl ReceiverTypeResolver for NullResolver {
         _repo_root: &std::path::Path,
         edges: &[EligibleEdge],
         _progress: Option<&dyn ResolverProgress>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Vec<ReceiverTypeResult> {
-        edges
-            .iter()
-            .map(|e| ReceiverTypeResult::failed(e.edge_uid.clone(), "null resolver"))
-            .collect()
+        // Honor cooperative cancellation per-edge (the boundary a real resolver polls),
+        // returning results only for the edges processed before the cancel point.
+        let mut out = Vec::new();
+        for e in edges {
+            if cancel.is_some_and(|c| c()) {
+                break;
+            }
+            out.push(ReceiverTypeResult::failed(
+                e.edge_uid.clone(),
+                "null resolver",
+            ));
+        }
+        out
     }
 
     fn initialize(&mut self, _repo_root: &std::path::Path) -> Result<(), ResolverError> {
@@ -288,12 +314,44 @@ mod tests {
             make_edge("edge-2", EnrichmentLanguage::TypeScript),
         ];
 
-        let results = resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None);
+        let results = resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, None);
 
         assert_eq!(results.len(), 2);
         assert!(!results[0].is_success());
         assert!(!results[1].is_success());
         assert_eq!(results[0].failure_reason, Some("null resolver".to_string()));
+    }
+
+    // ENRICH-LIFECYCLE-1 running-yield: a resolver honors the cancel check at its per-edge boundary,
+    // returning results ONLY for the edges processed before the cancel point (the tail is abandoned,
+    // never fabricated as failed). This is the "stops within a batch" mechanism the real resolvers
+    // share; proving it on `NullResolver` keeps it hermetic (the real resolvers' per-session +
+    // per-edge boundaries wrap the same check).
+    #[test]
+    fn resolve_batch_stops_within_the_batch_on_cancel() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let resolver = NullResolver::new(EnrichmentLanguage::TypeScript);
+        let edges = vec![
+            make_edge("e1", EnrichmentLanguage::TypeScript),
+            make_edge("e2", EnrichmentLanguage::TypeScript),
+            make_edge("e3", EnrichmentLanguage::TypeScript),
+            make_edge("e4", EnrichmentLanguage::TypeScript),
+        ];
+        // Cancel trips on the 3rd per-edge poll (old value 2 >= 2), so edges 0 and 1 are processed
+        // and the rest abandoned.
+        let polls = AtomicUsize::new(0);
+        let cancel = || polls.fetch_add(1, Ordering::SeqCst) >= 2;
+        let results =
+            resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, Some(&cancel));
+        assert_eq!(
+            results.len(),
+            2,
+            "cancel after 2 edges → 2 results, the tail is abandoned (not fabricated)"
+        );
+
+        // None (never cancel) processes every edge — the unchanged manual/never-cancel behavior.
+        let all = resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, None);
+        assert_eq!(all.len(), 4, "no cancel → one result per input edge");
     }
 
     #[test]

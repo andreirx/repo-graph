@@ -26,7 +26,7 @@ use tempfile::{tempdir, TempDir};
 ///
 /// Returns both the state and the temp dir (to keep it alive).
 fn create_isolated_state() -> (Arc<DaemonState>, TempDir) {
-    disable_auto_retention_for_dispatch_tests();
+    disable_background_maintenance_for_dispatch_tests();
     let temp = tempdir().expect("failed to create temp dir");
     let registry =
         RepoRegistry::with_state_root(temp.path()).expect("failed to create temp registry");
@@ -34,7 +34,8 @@ fn create_isolated_state() -> (Arc<DaemonState>, TempDir) {
     (state, temp)
 }
 
-/// SNAPSHOT-RETENTION-1: disable the automatic background retention pass for this binary.
+/// SNAPSHOT-RETENTION-1 + ENRICH-LIFECYCLE-1: disable the automatic background maintenance passes
+/// (retention AND enrichment) for this binary.
 ///
 /// These tests assert dispatch RESPONSE SHAPE (coherence envelopes, kind filters, error codes) after a
 /// real in-process `index`. Retention is IRRELEVANT to every one of those assertions, but with it ON a
@@ -47,8 +48,14 @@ fn create_isolated_state() -> (Arc<DaemonState>, TempDir) {
 /// (a coordinated reader arriving during the pass's VACUUM blocks and reads correct data — never a raw
 /// busy) is asserted directly in `daemon-runtime`'s `retention_pass` reader-vs-VACUUM proofs. Process-
 /// global atomic; every state constructor calls it, so the whole binary runs with the pass off.
-fn disable_auto_retention_for_dispatch_tests() {
+fn disable_background_maintenance_for_dispatch_tests() {
     repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
+    // ENRICH-LIFECYCLE-1: auto-enrichment is the SECOND background write-lock actor `handle_index`
+    // spawns on completion (same class as retention, same failure mode described above — its write-lock
+    // hold makes the next dispatched READ's uncoordinated `StorageConnection::open` return a raw
+    // `database is locked` under parallel load). Disable it too; enrichment's lifecycle is proven in
+    // `daemon-runtime`'s `enrich_lifecycle`.
+    repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
 }
 
 /// Run a single daemon request with an isolated state.
@@ -305,7 +312,7 @@ fn load_repo_missing_params_returns_invalid_request() {
 
 /// Create isolated daemon state from a temp state root.
 fn create_isolated_state_in(state_temp: &TempDir) -> Arc<DaemonState> {
-    disable_auto_retention_for_dispatch_tests();
+    disable_background_maintenance_for_dispatch_tests();
     let registry = RepoRegistry::with_state_root(state_temp.path())
         .expect("failed to create isolated registry");
     Arc::new(DaemonState::with_registry(registry))

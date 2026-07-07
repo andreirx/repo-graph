@@ -1,10 +1,15 @@
 //! DAEMON-VISIBILITY-1 (F2) named proofs for the DIRECT-STORAGE client commands.
 //!
-//! review-5 required change: the three direct-storage client paths that resolve a READY snapshot
-//! (`rmap enrich`, `rmap metrics`, `rmap modules boundary`) used to print a bare
+//! review-5 required change: the direct-storage client paths that resolve a READY snapshot
+//! (`rmap metrics`, `rmap modules boundary`) used to print a bare
 //! `"no snapshot found for repo '<uid>'"` when only a non-READY (interrupted) snapshot existed — the
-//! exact gaslighting F2 forbids, on the actual user-facing commands wired in `main.rs` (the daemon
-//! `enrich` dispatch test does NOT cover these; they never send a daemon request).
+//! exact gaslighting F2 forbids, on the actual user-facing commands wired in `main.rs`.
+//!
+//! NOTE (ENRICH-LIFECYCLE-1 §3.6, REG-1 closure): `rmap enrich` was the third command here but is NO
+//! LONGER direct-storage — it is now a registry-resolved daemon client (like `orient`), so its F2
+//! behavior is the daemon's, not this client path's. Its former direct-storage F2 proof was removed
+//! with the transport change; whether the daemon-routed enrich preserves the same honest partial
+//! message is raised for verification in the build report (DECISION_REQUIRED: enrich-f2-via-daemon).
 //!
 //! These proofs drive the REAL compiled `rmap` binary (`CARGO_BIN_EXE_rmap`) against a fixture repo
 //! whose only snapshot is non-READY, and assert stderr NAMES the partial (state + on-disk size) and
@@ -111,20 +116,9 @@ fn db(path: &Path) -> &str {
     path.to_str().unwrap()
 }
 
-// ── enrich (the review-5 emphasis: the actual `rmap enrich` command) ──────────
-
-#[test]
-fn enrich_direct_storage_on_only_non_ready_snapshot_names_the_partial() {
-    let (_dir, db_path, repo_uid) = repo_with_only_non_ready_snapshot();
-    let out = run_rmap(&["enrich", db(&db_path), &repo_uid]);
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "runtime-error exit preserved: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_names_partial(&String::from_utf8_lossy(&out.stderr));
-}
+// ── enrich: removed — no longer a direct-storage command (ENRICH-LIFECYCLE-1 §3.6, REG-1). It is now
+//    a registry-resolved daemon client, so `rmap enrich <db> <uid>` no longer opens storage to reach
+//    the F2 path; driving it here would send a request to the operator's real daemon. See module doc.
 
 // ── metrics ───────────────────────────────────────────────────────────────────
 
@@ -166,11 +160,14 @@ fn modules_boundary_direct_storage_on_only_non_ready_snapshot_names_the_partial(
 }
 
 // ── honest fallback: never-indexed repo is NOT gaslit as a partial ──────────────
+// Uses `metrics` (a still-direct-storage command sharing the F2 `snapshot_hint` path); the original
+// used `enrich`, which is now daemon-routed (ENRICH-LIFECYCLE-1 §3.6) and would send a request to the
+// operator's real daemon. `metrics` exercises the identical never-indexed honest-fallback behavior.
 
 #[test]
 fn direct_storage_never_indexed_repo_gets_plain_index_first_not_a_fake_partial() {
     let (_dir, db_path, repo_uid) = repo_never_indexed();
-    let out = run_rmap(&["enrich", db(&db_path), &repo_uid]);
+    let out = run_rmap(&["metrics", db(&db_path), &repo_uid]);
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(

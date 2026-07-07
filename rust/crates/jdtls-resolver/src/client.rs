@@ -172,6 +172,7 @@ impl ReceiverTypeResolver for JdtlsResolver {
         repo_root: &Path,
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Vec<ReceiverTypeResult> {
         if edges.is_empty() {
             return Vec::new();
@@ -201,7 +202,13 @@ impl ReceiverTypeResolver for JdtlsResolver {
         let total = edges.len();
         let mut processed = 0;
 
-        for (workspace_root, (context, group_edges)) in groups {
+        'groups: for (workspace_root, (context, group_edges)) in groups {
+            // ENRICH-LIFECYCLE-1 batch boundary: yield to an explicit index/refresh BEFORE
+            // starting a new jdtls session (never pay a fresh warm-up on cancel); the groups
+            // resolved so far are returned as a partial batch (session Drop stops it).
+            if cancel.is_some_and(|c| c()) {
+                break 'groups;
+            }
             // Report progress: starting session
             if let Some(p) = progress {
                 p.report(enrichment::Progress {
@@ -267,6 +274,10 @@ impl ReceiverTypeResolver for JdtlsResolver {
 
             // Resolve types for this group
             for edge in &group_edges {
+                // Batch boundary within a warmed session: yield within one LSP request.
+                if cancel.is_some_and(|c| c()) {
+                    break 'groups;
+                }
                 if let Some(p) = progress {
                     p.report(enrichment::Progress {
                         phase: enrichment::ProgressPhase::ResolvingTypes,

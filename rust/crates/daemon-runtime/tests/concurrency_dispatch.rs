@@ -130,6 +130,12 @@ fn isolated() -> (Arc<ServiceDispatcher>, Arc<DaemonState>, TempDir) {
     // such guard and would race the VACUUM's exclusive lock, so disable the background actor here: this
     // binary tests dispatch concurrency, not retention, and its raw readers are a harness artifact.
     repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
+    // ENRICH-LIFECYCLE-1: auto-enrichment is the SECOND background write-lock + activity actor spawned
+    // on index/refresh completion (same class as auto-retention above). Its write-lock hold races the
+    // raw SQLite readers this binary injects — an uncoordinated `StorageConnection::open` landing in the
+    // pass's write window returns a raw `database is locked`. This binary tests dispatch concurrency,
+    // not enrichment (enrichment's contention is proven in `enrich_lifecycle`), so disable it too.
+    repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

@@ -1,7 +1,23 @@
 # ENRICH-LIFECYCLE-1 — Enrichment runs itself (auto after index/refresh)
 
-Status: SPECIFIED (2026-07-04) · Track: Resolution capability (R4) — headline
-of the release AFTER the field-fix release
+Status: **DELIVERED (2026-07-07)** · Track: Resolution capability (R4)
+
+## 0. Delivery record (2026-07-07)
+
+Shipped via target-owned relay (2 escalation-resolving ratifications:
+batch-boundary cancel-of-running; see §log) + operator proof. Live isolated
+transcript: index completes in 15s → "enrichment: queued" → "running —
+resolving receiver types now" (~4 min, activity-stamped) → "resolved
+7435/9985 receiver types, promoted 261; skipped java: jdtls not found — set
+JDTLS_PATH to your jdtls launcher". Trust: 13,896 → 14,157 resolved calls
+(+261, exactly the promoted count). Review-caught fixes: promoted=0 (Rust
+unparented impl-method qualified-name matching), a lost-yield race in the
+acquire→register window (pending-marker registry), doctor label dedupe.
+Gates: 4879/0 workspace, fmt/clippy clean. FOLLOW-UP FILED (ENRICH-YIELD-1,
+not this slice's regression): promotion criteria pass only 261 of 7435
+resolutions (~3.5%) — investigate thresholds/ambiguity rules and whether
+resolved-but-unpromoted types can land as Layer-2 inferences per the
+certainty model; call-graph reliability stays LOW until the yield improves.
 Ratified (operator, 2026-07-04): **auto-enrich after every index/refresh**,
 toolchain-aware with honest skips, opt-out available; queued next after
 INDEX-DISCONNECT-1.

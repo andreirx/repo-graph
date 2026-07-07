@@ -9,8 +9,11 @@
 //!   non-READY snapshots, and — under the repo coordinator's `Writing` state so concurrent reads block
 //!   honestly instead of hitting the VACUUM's exclusive lock — threshold-gates a rare VACUUM so disk
 //!   shrinks when it is majority-dead, without paying a full-file rewrite on every small refresh.
-//! - **Concrete current users:** `dispatch::ServiceDispatcher::finish_write_with_retention` (called on
-//!   every index/refresh success), via [`spawn_auto_retention`]. The gate + pass core
+//! - **Concrete current users:** spawned via [`spawn_auto_retention`] from two sites — chained by
+//!   `enrich_pass::run_auto_enrich` after each enrichment pass (the default enrich-ON path, so retention
+//!   never contends with a long enrichment for the write lock), and directly by
+//!   `dispatch::ServiceDispatcher::finish_write_with_maintenance` when enrichment is opted out — i.e. on
+//!   every index/refresh success either way. The gate + pass core
 //!   ([`try_retention_attempt`] / [`run_retention_pass`]) are also driven directly by the named
 //!   steady-state / baseline-user / contention / threshold tests AND the two reader-vs-VACUUM
 //!   production-interaction proofs (`vacuum_defers_to_an_active_reader_then_runs_when_idle`,

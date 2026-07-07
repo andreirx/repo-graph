@@ -109,6 +109,7 @@ impl ReceiverTypeResolver for RustAnalyzerResolver {
         repo_root: &Path,
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Vec<ReceiverTypeResult> {
         if edges.is_empty() {
             return Vec::new();
@@ -121,7 +122,14 @@ impl ReceiverTypeResolver for RustAnalyzerResolver {
         let total = edges.len();
         let mut processed = 0;
 
-        for (cargo_root, group_edges) in groups {
+        'groups: for (cargo_root, group_edges) in groups {
+            // ENRICH-LIFECYCLE-1 batch boundary: an explicit index/refresh can ask a running
+            // background pass to yield. Check BEFORE starting a new rust-analyzer session, so a
+            // cancel never pays a fresh (expensive) warm-up; the already-resolved groups are
+            // returned as a partial batch (the session Drop stops the current process).
+            if cancel.is_some_and(|c| c()) {
+                break 'groups;
+            }
             // Report progress: starting session
             if let Some(p) = progress {
                 p.report(enrichment::Progress {
@@ -186,6 +194,10 @@ impl ReceiverTypeResolver for RustAnalyzerResolver {
 
             // Resolve types for this group
             for edge in &group_edges {
+                // Batch boundary within a warmed session: yield within one LSP request.
+                if cancel.is_some_and(|c| c()) {
+                    break 'groups;
+                }
                 if let Some(p) = progress {
                     p.report(enrichment::Progress {
                         phase: enrichment::ProgressPhase::ResolvingTypes,

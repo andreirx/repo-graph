@@ -519,6 +519,16 @@ impl ServiceDispatcher {
                 // SNAPSHOT-RETENTION-1: the most-recent background retention pass outcome (null until
                 // the daemon has run one) — the honesty surface for "pruned N / reclaimed X".
                 "last_retention": self.state.last_retention_json(),
+                // ENRICH-LIFECYCLE-1: the most-recent background enrichment pass outcome (null until
+                // one completes) — the lifecycle surface for "enriched N / promoted P / skipped: …".
+                "last_enrichment": self.state.last_enrichment_json(),
+                // Whether auto-enrichment is enabled on this daemon (RMAP_AUTO_ENRICH) — lets the
+                // doctor render the "disabled" lifecycle state honestly (slice §3.7).
+                "enrichment_enabled": crate::enrich_pass::auto_enrich_enabled(),
+                // ENRICH-LIFECYCLE-1 (slice §3.7): whether an auto pass is currently queued/running,
+                // so doctor tells "queued" from the false "none yet — runs after the next index"
+                // (review-0 item 1). "idle" | "queued" | "running".
+                "enrichment_activity": self.state.enrich_coord().activity_state(),
             }),
         )
     }
@@ -2310,14 +2320,20 @@ impl ServiceDispatcher {
 
     // ── Write operations ────────────────────────────────────────────
 
-    /// SNAPSHOT-RETENTION-1: queue the background retention pass for a just-completed write op, then
-    /// annotate + return the success response. The pass NEVER runs on this foreground path — it
-    /// detaches (`spawn_auto_retention`), yields to any live op via the two-gate discipline, and
-    /// reports pruned/reclaimed on `rmap doctor` + the daemon log. The synchronous reply therefore
-    /// only states that cleanup was `queued` (or `disabled` when opted out via `RMAP_AUTO_RETENTION`);
-    /// the numbers are async and surface on doctor. `db_path` MUST be the SAME path this handler
-    /// stamped into the activity registry, so the pass's gate-1 `active_for_db` check matches.
-    fn finish_write_with_retention(
+    /// ENRICH-LIFECYCLE-1 + SNAPSHOT-RETENTION-1: queue the background maintenance passes for a
+    /// just-completed write op, then annotate + return the success response. NEITHER pass runs on this
+    /// foreground path.
+    ///
+    /// **Sequencing (slice §3, verified):** the enrichment pass CHAINS the retention pass on its own
+    /// completion (`enrich_pass::run_auto_enrich`), so the two never contend for the write lock —
+    /// retention's bounded requeue is never starved by a long enrichment. When enrichment is opted
+    /// out (`RMAP_AUTO_ENRICH=off`), retention is triggered DIRECTLY here (its SNAPSHOT-RETENTION-1
+    /// site, unchanged) so cleanup still runs. Both passes yield to any live op via the two-gate
+    /// discipline and report their async results on `rmap doctor` + the daemon log; the synchronous
+    /// reply therefore only states `queued` / `disabled` (final numbers surface on doctor — the
+    /// ratified never-on-foreground invariant). `db_path` MUST be the SAME path this handler stamped
+    /// into the activity registry, so each pass's gate-1 `active_for_db` check matches.
+    fn finish_write_with_maintenance(
         &self,
         request_id: &str,
         mut response: serde_json::Value,
@@ -2325,8 +2341,9 @@ impl ServiceDispatcher {
         repo_uid: &str,
         repo_display: String,
     ) -> DispatchResult {
-        let auto_pass = if crate::retention_pass::auto_retention_enabled() {
-            crate::retention_pass::spawn_auto_retention(
+        let enrichment_state = if crate::enrich_pass::auto_enrich_enabled() {
+            // Enrichment chains retention on completion — one queued call covers both passes.
+            crate::enrich_pass::spawn_auto_enrich(
                 Arc::clone(&self.state),
                 db_path.to_path_buf(),
                 repo_uid.to_string(),
@@ -2334,20 +2351,38 @@ impl ServiceDispatcher {
             );
             "queued"
         } else {
+            // Enrichment off → it will NOT chain retention, so trigger retention directly here.
+            crate::retention_pass::spawn_auto_retention(
+                Arc::clone(&self.state),
+                db_path.to_path_buf(),
+                repo_uid.to_string(),
+                repo_display,
+            );
             "disabled"
         };
-        match response
-            .get_mut("retention")
-            .and_then(|v| v.as_object_mut())
-        {
+        // Retention runs (chained after enrich, or directly above) iff retention itself is enabled.
+        let retention_state = if crate::retention_pass::auto_retention_enabled() {
+            "queued"
+        } else {
+            "disabled"
+        };
+        Self::annotate_auto_pass(&mut response, "enrichment", enrichment_state);
+        Self::annotate_auto_pass(&mut response, "retention", retention_state);
+        DispatchResult::success(request_id, response)
+    }
+
+    /// Merge an `auto_pass` state token into a named reply block, preserving any fields the block
+    /// already carries (e.g. retention's foreground `classify_retention_only` counts). The CLI
+    /// completion report reads `<block>.auto_pass` (see `rgr::commands::index::format_*_line`).
+    fn annotate_auto_pass(response: &mut serde_json::Value, block: &str, state: &str) {
+        match response.get_mut(block).and_then(|v| v.as_object_mut()) {
             Some(obj) => {
-                obj.insert("auto_pass".to_string(), serde_json::json!(auto_pass));
+                obj.insert("auto_pass".to_string(), serde_json::json!(state));
             }
             None => {
-                response["retention"] = serde_json::json!({ "auto_pass": auto_pass });
+                response[block] = serde_json::json!({ "auto_pass": state });
             }
         }
-        DispatchResult::success(request_id, response)
     }
 
     /// Index a repository (REG-1 contract).
@@ -2454,7 +2489,18 @@ impl ServiceDispatcher {
                 );
             }
         };
+        // ENRICH-LIFECYCLE-1 (running-yield, slice §3.4): explicit writes win against a RUNNING
+        // background enrichment. Ask any enrichment pass on this DB to yield BEFORE we block on the
+        // write lock — it polls this flag at its next batch boundary and releases the lock, and we
+        // proceed. Must be BEFORE acquire_write (a lock-holding pass never sees our still-unstamped
+        // activity op). No-op if none is running. See enrich_pass::EnrichCoordinator.
+        self.state.enrich_coord().request_yield_for_db(&db_path);
         let _db_write_guard = db_runtime.acquire_write();
+        // Now that we own the write lock, drop any PENDING yield marker for this DB. While we hold the
+        // lock no enrichment pass can be mid-registration (mutual exclusion on the same lock), so a
+        // marker is stale — and must not make the pass THIS index is about to queue yield spuriously
+        // (ENRICH-LIFECYCLE-1 review-1: close the acquire→register window without a self-inflicted yield).
+        self.state.enrich_coord().clear_pending_yield(&db_path);
 
         // DAEMON-VISIBILITY-1 (D): record this index as in-flight so `rmap doctor` and the
         // still-running client probe can see it (op kind, repo, started-at, live phase/counters
@@ -2612,7 +2658,7 @@ impl ServiceDispatcher {
                                 );
                                 // Retention still queues: the background pass opens its own storage
                                 // connection, so this per-op read failure does not block cleanup.
-                                return self.finish_write_with_retention(
+                                return self.finish_write_with_maintenance(
                                     &request.id,
                                     response,
                                     &db_path,
@@ -2647,7 +2693,7 @@ impl ServiceDispatcher {
                 };
 
                 // SNAPSHOT-RETENTION-1: queue the background retention pass (never foreground).
-                self.finish_write_with_retention(
+                self.finish_write_with_maintenance(
                     &request.id,
                     response,
                     &db_path,
@@ -2698,7 +2744,14 @@ impl ServiceDispatcher {
                 );
             }
         };
+        // ENRICH-LIFECYCLE-1 (running-yield, slice §3.4): a refresh is an explicit write; make any
+        // RUNNING background enrichment on this DB yield before we block on the write lock (same
+        // rationale as handle_index — the pass can't see our not-yet-stamped activity op).
+        self.state.enrich_coord().request_yield_for_db(db_path);
         let _db_write_guard = db_runtime.acquire_write();
+        // Drop any stale PENDING yield marker now that we own the write lock (see handle_index): it
+        // must not make the next enrichment pass yield spuriously (ENRICH-LIFECYCLE-1 review-1).
+        self.state.enrich_coord().clear_pending_yield(db_path);
 
         // Then acquire repo refresh lock (blocks new readers, waits for active readers)
         let _refresh_guard = repo_state.coordinator.acquire_refresh();
@@ -2908,7 +2961,7 @@ impl ServiceDispatcher {
                 // SNAPSHOT-RETENTION-1: queue the background retention pass for the refreshed repo
                 // (never foreground). `canonical_db_path` is the SAME path stamped into the activity
                 // registry above, so the pass's gate-1 contention check matches.
-                self.finish_write_with_retention(
+                self.finish_write_with_maintenance(
                     &request.id,
                     response,
                     canonical_db_path,
@@ -2940,38 +2993,59 @@ impl ServiceDispatcher {
         request: &Request,
         emitter: &mut dyn ProgressEmitter,
     ) -> DispatchResult {
-        let db_path_str = match Self::get_string_param(&request.params, "db_path") {
-            Ok(p) => p,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
-        let repo_uid = match Self::get_string_param(&request.params, "repo_uid") {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
-
-        let db_path = Path::new(db_path_str);
-
-        // Build composite key
-        let key = match RepoKey::new(db_path, repo_uid) {
-            Ok(k) => k,
-            Err(e) => {
-                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
+        // ENRICH-LIFECYCLE-1 (REG-1 closure, slice §3.6): prefer the registry-resolved `repo` param
+        // (cwd/alias, like every other command — `resolve_and_load_repo` auto-loads it); fall back to
+        // the legacy positional `db_path` + `repo_uid` for compatibility (kept working, dropped from
+        // `--help`). The two forms converge on `(repo_state, repo_uid, db_path)` for the rest of the
+        // handler.
+        let (repo_state, repo_uid_owned, db_path_buf) = if request.params.get("repo").is_some() {
+            match self.resolve_and_load_repo(&request.params) {
+                Ok((state, uid)) => {
+                    let db = state.db_path().to_path_buf();
+                    (state, uid, db)
+                }
+                Err(e) => return DispatchResult::error(&request.id, e),
             }
+        } else {
+            let db_path_str = match Self::get_string_param(&request.params, "db_path") {
+                Ok(p) => p,
+                Err(_) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::invalid_request(
+                            "enrich requires a `repo` (registry-resolved) or the legacy `db_path` + `repo_uid`",
+                        ),
+                    )
+                }
+            };
+            let repo_uid = match Self::get_string_param(&request.params, "repo_uid") {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
+            let db_path = Path::new(db_path_str);
+            let key = match RepoKey::new(db_path, repo_uid) {
+                Ok(k) => k,
+                Err(e) => {
+                    return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
+                }
+            };
+            // Legacy contract preserved: the repo must already be loaded (unchanged error).
+            let repo_state = match self.state.get_repo_by_key(&key) {
+                Some(s) => s,
+                None => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::RepoNotFound,
+                            format!("repo not loaded: {}:{}", db_path_str, repo_uid),
+                        ),
+                    );
+                }
+            };
+            (repo_state, repo_uid.to_string(), db_path.to_path_buf())
         };
-
-        // Get repo state (must be loaded)
-        let repo_state = match self.state.get_repo_by_key(&key) {
-            Some(s) => s,
-            None => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::RepoNotFound,
-                        format!("repo not loaded: {}:{}", db_path_str, repo_uid),
-                    ),
-                );
-            }
-        };
+        let repo_uid: &str = &repo_uid_owned;
+        let db_path: &Path = &db_path_buf;
 
         // Acquire DB write coordination first
         let db_runtime = match self.state.get_or_create_db_runtime(db_path) {
@@ -3139,7 +3213,13 @@ impl ServiceDispatcher {
             }
         };
 
-        // Emit initial progress
+        // ENRICH-LIFECYCLE-1: enrich is a write op with detached completion (INDEX-DISCONNECT-1
+        // semantics) — a client disconnect must NOT abort it. Progress emission is best-effort: on
+        // the first emit failure log ONE reader-frame line and continue under the write lock; the
+        // pass runs to completion regardless of whether the client is still attached.
+        let mut client_gone = false;
+
+        // Emit initial progress (best-effort).
         if emitter
             .emit(ProgressDetail {
                 phase: "initializing".to_string(),
@@ -3147,14 +3227,10 @@ impl ServiceDispatcher {
                 total: 1,
             })
             .is_err()
+            && !client_gone
         {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(
-                    ErrorCode::ProgressDeliveryFailed,
-                    "progress delivery failed",
-                ),
-            );
+            crate::detached::log_detached_continuation("enrich", repo_uid);
+            client_gone = true;
         }
 
         // Build resolver registry. The set of languages with a CONFIGURED resolver is the SINGLE source
@@ -3208,7 +3284,7 @@ impl ServiceDispatcher {
             );
         }
 
-        // Emit resolving progress
+        // Emit resolving progress (best-effort — detached completion, see above).
         if emitter
             .emit(ProgressDetail {
                 phase: "resolving".to_string(),
@@ -3216,14 +3292,10 @@ impl ServiceDispatcher {
                 total: 0,
             })
             .is_err()
+            && !client_gone
         {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(
-                    ErrorCode::ProgressDeliveryFailed,
-                    "progress delivery failed",
-                ),
-            );
+            crate::detached::log_detached_continuation("enrich", repo_uid);
+            client_gone = true;
         }
 
         // Build config
@@ -3275,12 +3347,14 @@ impl ServiceDispatcher {
             }
         };
 
-        // Emit completion progress
-        let _ = emitter.emit(ProgressDetail {
-            phase: "complete".to_string(),
-            current: 1,
-            total: 1,
-        });
+        // Emit completion progress (best-effort; skip if the client already departed).
+        if !client_gone {
+            let _ = emitter.emit(ProgressDetail {
+                phase: "complete".to_string(),
+                current: 1,
+                total: 1,
+            });
+        }
 
         // Build result matching CLI EnrichOutput contract exactly:
         // - by_language: Vec<(String, LanguageStats)> serializes as [["rust", {...}], ...]
