@@ -61,3 +61,7 @@ pub mod react_detector;
 pub mod refresh_policy;
 pub mod scanner;
 pub mod state_boundary_hook;
+
+/// Iterative AST-walk helper shared by the in-crate re-parse detectors
+/// (PERSIST-RECURSION-1).
+mod walk;

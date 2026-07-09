@@ -59,6 +59,9 @@ pub mod lexical_scope;
 mod metrics;
 pub mod nats_detector;
 
+/// Iterative AST-walk helpers shared by the detectors (PERSIST-RECURSION-1).
+mod walk;
+
 pub use amqp_detector::{
     extract_amqp_boundary_calls, is_amqp_boundary_pattern, RawAmqpBoundaryCall,
 };

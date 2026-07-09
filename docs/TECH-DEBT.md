@@ -3915,7 +3915,41 @@ file) stays filed as a LATENT defect — fix by moving to the `ignore` crate's W
 touched. Operator profiling run on legacy-codebases/linux to name the dominant postpass before
 slicing. Interim on affected machines: `--include-root` scoping.**
 
+**F14 — Main-extractor deep-file residual (P1, follow-up to PERSIST-RECURSION-1).**
+Main extraction skips files > 1 MB (`indexer/src/routing.rs MAX_FILE_SIZE_BYTES`), which is why F13
+only ever fired in the (unfiltered) re-parse postpasses. A ≤ 1 MB yet pathologically deep file would
+still overflow a MAIN extractor during "extracting" — same uncatchable abort class. Postpasses are now
+iterative + depth-guarded (PERSIST-RECURSION-1); the main extractors are not. Not reproduced in the
+field. **Disposition: follow-up slice — extend the iterative/guarded pattern (or a depth pre-check) to
+the main extractor walks.**
+
 Related (not new): REG-1 help truth confirmed live (`rmap metrics` usage is
 still positional `<db_path> <repo_uid>`); call-graph 21% resolved pre-enrichment
 on self-index with the D5 next-action line correctly pointing at `rmap enrich`
 (ENRICH-LIFECYCLE-1 remains the fix for the lifecycle half).
+
+**F14 — LATENT (same stack-overflow class as F13, but on the EXTRACTING phase; discovered by the
+PERSIST-RECURSION-1 audit, 2026-07-08). NOT fixed by PERSIST-RECURSION-1 (scoped to postpasses).**
+The PERSIST-RECURSION-1 audit (deterministic grep + AST read; basis inlined in
+`.agent-manager/slices/PERSIST-RECURSION-1/build-1.md` §Audit) converted every re-parse **postpass**
+walker to iterative and confirmed **0 residual recursion** on the postpass path. It ALSO found the
+main **extractors** (the `IndexPhase::Extracting` phase, reached from `indexer/orchestrator.rs:591`
+`extractor.extract(...)`) still contain **19 self-/mutually-recursive input-depth AST walkers**, none
+depth-guarded — the identical overflow class. Highest-risk are the per-body metrics walks and
+call-attribution walks (e.g. `ts-extractor/src/extractor.rs:1607 extract_calls_from_node` self-call
+`:1657`; `c-extractor/src/extractor.rs:482 walk_for_calls` self-call `:499`; `rust-extractor/src/
+metrics.rs:80 walk` self-call `:123`; full list in build-1.md).
+- **Why the F13 crash surfaced in "persisting", not "extracting":** main extraction **skips files >
+  1 MB** (`indexer/src/orchestrator.rs:546`, `MAX_FILE_SIZE_BYTES = 1_000_000` per `routing.rs:19`);
+  the re-parse postpasses re-parse `file_inputs` with **no size filter**, so a large-and-deep
+  generated file reached only the postpass → overflowed there. PERSIST-RECURSION-1's per-file depth
+  guard now catches deep files in the postpasses regardless of size.
+- **Residual risk:** a **≤1 MB yet pathologically deep** file (the ~200 KB / 50k-nesting shape of the
+  slice's own regression fixtures) would still overflow a **main extractor** during "extracting" —
+  the same uncatchable daemon abort. Not reproduced in the field (F13's reproductions were all
+  postpass; the Linux-kernel index completes to READY), but structurally live.
+- **Disposition (P1, follow-up slice recommended):** extend the iterative-walk + depth-guard treatment
+  to the main extractors (or close the 1 MB blind spot with a depth pre-check on the extract path).
+  Deliberately deferred here — PERSIST-RECURSION-1 is scoped to the re-parse postpasses
+  (`FILES_OUT_OF_SCOPE: extraction pipeline proper`), and the REPRODUCED daemon-killer (F13) IS closed
+  by the postpass fix. Surfaced, not silently carried.

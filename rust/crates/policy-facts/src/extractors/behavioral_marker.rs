@@ -68,18 +68,11 @@ fn walk_preproc_for_functions(
     repo_uid: &str,
     results: &mut Vec<BehavioralMarker>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "function_definition" => {
-                extract_markers_from_function(&child, source, file_path, repo_uid, results);
-            }
-            "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-                walk_preproc_for_functions(&child, source, file_path, repo_uid, results);
-            }
-            _ => {}
-        }
-    }
+    // PERSIST-RECURSION-1: iterative descent through preprocessor blocks (was
+    // recursive on preproc-nesting depth). Order and emitted markers unchanged.
+    super::walk::for_each_preproc_function(*node, |func_node| {
+        extract_markers_from_function(&func_node, source, file_path, repo_uid, results);
+    });
 }
 
 /// Extract markers from a single function definition.
@@ -188,37 +181,36 @@ fn find_loops_recursive(
     symbol_key: &str,
     results: &mut Vec<BehavioralMarker>,
 ) {
+    // PERSIST-RECURSION-1: iterative descent (was recursive on body-nesting
+    // depth). Only loop and container nodes are descended into — exactly the
+    // selective recursion of the prior form — and retry-loop markers are emitted
+    // in the same document order (a loop is emitted, then its subtree explored).
+    let mut stack: Vec<tree_sitter::Node> = Vec::new();
+    push_loop_frames(*node, &mut stack);
+    while let Some(n) = stack.pop() {
+        if let "while_statement" | "for_statement" | "do_statement" = n.kind() {
+            if let Some(marker) =
+                try_extract_retry_loop(&n, source, file_path, function_name, symbol_key)
+            {
+                results.push(marker);
+            }
+        }
+        // Loop nodes descend for nested loops; container nodes descend for loops
+        // within them. Both go through the same selective push.
+        push_loop_frames(n, &mut stack);
+    }
+}
+
+/// Push a frame node's loop and container children — the only kinds
+/// `find_loops_recursive` descends into — in reverse document order.
+fn push_loop_frames<'a>(node: tree_sitter::Node<'a>, stack: &mut Vec<tree_sitter::Node<'a>>) {
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
+    let children: Vec<tree_sitter::Node<'a>> = node.children(&mut cursor).collect();
+    for child in children.into_iter().rev() {
         match child.kind() {
-            "while_statement" | "for_statement" | "do_statement" => {
-                if let Some(marker) =
-                    try_extract_retry_loop(&child, source, file_path, function_name, symbol_key)
-                {
-                    results.push(marker);
-                }
-                // Also check for nested loops inside this loop
-                find_loops_recursive(
-                    &child,
-                    source,
-                    file_path,
-                    function_name,
-                    symbol_key,
-                    results,
-                );
-            }
-            // Recurse into other compound structures
-            "compound_statement" | "if_statement" | "switch_statement" | "case_statement"
-            | "preproc_if" | "preproc_ifdef" | "preproc_else" | "preproc_elif" => {
-                find_loops_recursive(
-                    &child,
-                    source,
-                    file_path,
-                    function_name,
-                    symbol_key,
-                    results,
-                );
-            }
+            "while_statement" | "for_statement" | "do_statement" | "compound_statement"
+            | "if_statement" | "switch_statement" | "case_statement" | "preproc_if"
+            | "preproc_ifdef" | "preproc_else" | "preproc_elif" => stack.push(child),
             _ => {}
         }
     }
@@ -356,19 +348,20 @@ fn find_sleep_in_loop(
 
 /// Recursively search for sleep calls.
 fn find_sleep_recursive(node: &tree_sitter::Node, source: &[u8]) -> Option<(String, Option<u64>)> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "call_expression" {
-            if let Some(result) = check_call_for_sleep(&child, source) {
-                return Some(result);
+    // PERSIST-RECURSION-1: iterative pre-order search (was recursive on subtree
+    // depth). `node` is the loop node, never a `call_expression`, so visiting the
+    // root is a no-op; the first sleep call found is the same as before.
+    let mut found: Option<(String, Option<u64>)> = None;
+    super::walk::visit_preorder(*node, |n| {
+        if n.kind() == "call_expression" {
+            if let Some(result) = check_call_for_sleep(&n, source) {
+                found = Some(result);
+                return std::ops::ControlFlow::Break(());
             }
         }
-        // Recurse
-        if let Some(result) = find_sleep_recursive(&child, source) {
-            return Some(result);
-        }
-    }
-    None
+        std::ops::ControlFlow::Continue(())
+    });
+    found
 }
 
 /// Check if a call expression is a sleep/delay call.
@@ -588,12 +581,19 @@ fn extract_break_condition(loop_node: &tree_sitter::Node, source: &[u8]) -> Opti
 
 /// Find break condition from if-break pattern in loop body.
 fn find_break_condition_in_body(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "if_statement" {
+    // PERSIST-RECURSION-1: iterative descent (was recursive on compound-nesting
+    // depth). Only `compound_statement` children are descended into and only
+    // `if_statement` children are inspected — matching the prior selective
+    // recursion — so the first break-condition found is unchanged.
+    let mut stack: Vec<tree_sitter::Node> = Vec::new();
+    push_break_frames(*node, &mut stack);
+    while let Some(n) = stack.pop() {
+        if n.kind() == "if_statement" {
             // Check if this if leads to a break
-            if contains_break(&child) {
-                if let Some(cond) = child.child_by_field_name("condition") {
+            if contains_break(&n) {
+                if let Some(cond) = n.child_by_field_name("condition") {
+                    // Preserve the recursive `?`: a UTF-8 error here returned
+                    // `None` from the whole function, stopping the search.
                     let cond_text = cond.utf8_text(source).ok()?.trim().to_string();
                     let cleaned = cond_text
                         .strip_prefix('(')
@@ -606,29 +606,42 @@ fn find_break_condition_in_body(node: &tree_sitter::Node, source: &[u8]) -> Opti
                     }
                 }
             }
-        }
-        // Recurse into compound statements
-        if child.kind() == "compound_statement" {
-            if let Some(cond) = find_break_condition_in_body(&child, source) {
-                return Some(cond);
-            }
+        } else {
+            // compound_statement: descend for nested if/compound.
+            push_break_frames(n, &mut stack);
         }
     }
     None
 }
 
-/// Check if a node contains a break statement.
-fn contains_break(node: &tree_sitter::Node) -> bool {
-    if node.kind() == "break_statement" {
-        return true;
-    }
+/// Push a frame node's `if_statement` and `compound_statement` children — the
+/// only kinds `find_break_condition_in_body` inspects or descends into — in
+/// reverse document order.
+fn push_break_frames<'a>(node: tree_sitter::Node<'a>, stack: &mut Vec<tree_sitter::Node<'a>>) {
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if contains_break(&child) {
-            return true;
+    let children: Vec<tree_sitter::Node<'a>> = node.children(&mut cursor).collect();
+    for child in children.into_iter().rev() {
+        match child.kind() {
+            "if_statement" | "compound_statement" => stack.push(child),
+            _ => {}
         }
     }
-    false
+}
+
+/// Check if a node contains a break statement.
+fn contains_break(node: &tree_sitter::Node) -> bool {
+    // PERSIST-RECURSION-1: iterative pre-order search (was recursive on subtree
+    // depth). Checks `node` itself and every descendant for a `break_statement`.
+    let mut found = false;
+    super::walk::visit_preorder(*node, |n| {
+        if n.kind() == "break_statement" {
+            found = true;
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    });
+    found
 }
 
 // =============================================================================
@@ -656,25 +669,19 @@ fn find_curl_resume_recursive(
     symbol_key: &str,
     results: &mut Vec<BehavioralMarker>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "call_expression" {
+    // PERSIST-RECURSION-1: iterative pre-order visit (was recursive on subtree
+    // depth). `node` is the function body, never a `call_expression`, so the root
+    // visit is a no-op; resume-offset markers are emitted in the same order.
+    super::walk::visit_preorder(*node, |n| {
+        if n.kind() == "call_expression" {
             if let Some(marker) =
-                try_extract_resume_offset(&child, source, file_path, function_name, symbol_key)
+                try_extract_resume_offset(&n, source, file_path, function_name, symbol_key)
             {
                 results.push(marker);
             }
         }
-        // Recurse
-        find_curl_resume_recursive(
-            &child,
-            source,
-            file_path,
-            function_name,
-            symbol_key,
-            results,
-        );
-    }
+        std::ops::ControlFlow::Continue(())
+    });
 }
 
 /// Try to extract a RESUME_OFFSET marker from a call expression.
@@ -734,6 +741,31 @@ mod tests {
         let language: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
         parser.set_language(&language).unwrap();
         parser.parse(source, None).unwrap()
+    }
+
+    /// PERSIST-RECURSION-1 regression: a deeply nested function body must NOT
+    /// overflow the behavioral-marker walks (`find_loops_recursive`,
+    /// `find_sleep_recursive`, `contains_break`, `find_break_condition_in_body`,
+    /// `find_curl_resume_recursive`). These descend the compound-statement chain,
+    /// which the former recursion grew the call stack with. Runs on the default
+    /// test-thread stack, so a still-recursive walk would abort the test process.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from("void deep() {\n");
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" while (rc != 0) { sleep(1); if (done) { break; } } ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n}\n");
+
+        let tree = parse_c(&source);
+        // The assertion is reaching this line at all — a recursive walk aborts.
+        let markers = extract_behavioral_markers(&tree, source.as_bytes(), "deep.c", "repo");
+        assert!(markers.len() <= 1);
     }
 
     // =========================================================================

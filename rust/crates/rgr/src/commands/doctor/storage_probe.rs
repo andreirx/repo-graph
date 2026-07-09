@@ -124,6 +124,21 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
         );
     }
 
+    // PERSIST-RECURSION-1: honest degradation from the latest index — files skipped for
+    // pathological AST nesting, or an isolated postpass failure. The index COMPLETED, so this
+    // is NOT a health failure (`passed` stays true); the reader is simply told which facts are
+    // missing and why. The reader-language lines are computed daemon-side (snapshot_facts) and
+    // printed verbatim — this is a trivial array extraction, no reader-language logic here.
+    if let Some(lines) = response
+        .get("extraction_degradations")
+        .and_then(|d| d.get("lines"))
+        .and_then(|v| v.as_array())
+    {
+        for line in lines.iter().filter_map(|l| l.as_str()) {
+            detail_lines.push(line.to_string());
+        }
+    }
+
     ProbeResult {
         name: "storage".to_string(),
         passed: true,
@@ -254,6 +269,37 @@ mod tests {
         assert!(
             details.contains("Daemon 'enrichment' line"),
             "and points at the authoritative Daemon lifecycle line: {details}"
+        );
+    }
+
+    // PERSIST-RECURSION-1: a deep-nesting skip (or isolated postpass failure) from the latest
+    // index is surfaced as an honest reader-frame line in the storage details — NOT a health
+    // failure (the index completed), just a statement of which facts are missing and why.
+    #[test]
+    fn extraction_degradation_is_surfaced_but_not_a_failure() {
+        let response = json!({
+            "db_size_bytes": 1_000_000_u64,
+            "in_use_by_daemon": false,
+            "total_snapshots": 1,
+            "ready_snapshots": 1,
+            "prunable_snapshots": 0,
+            "interrupted_snapshots": [],
+            "snapshots": [ { "state": "ready", "outcome": "completed", "created_at": "t" } ],
+            "extraction_degradations": {
+                "deep_nesting_skips": { "boundary_facts": 1 },
+                "postpass_errors": {},
+                "lines": [ "boundary facts skipped for 1 file (pathological nesting)" ],
+            },
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(
+            probe.passed,
+            "an honest skip is not a health failure: {probe:?}"
+        );
+        let details = probe.details.expect("degradation detail present");
+        assert!(
+            details.contains("boundary facts skipped for 1 file (pathological nesting)"),
+            "the reader-frame line is rendered in doctor's storage details: {details}"
         );
     }
 

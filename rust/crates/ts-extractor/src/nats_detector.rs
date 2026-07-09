@@ -102,38 +102,42 @@ pub fn is_nats_boundary_pattern(name: &str) -> bool {
 /// - `const nats = require('nats')`
 /// - `require('nats')` (bare require)
 pub fn has_nats_import(root: &tree_sitter::Node, src: &[u8]) -> bool {
-    has_nats_import_recursive(root, src)
-}
-
-fn has_nats_import_recursive(node: &tree_sitter::Node, src: &[u8]) -> bool {
-    match node.kind() {
-        // ESM import: import ... from 'nats'
-        "import_statement" => {
-            if let Some(source) = node.child_by_field_name("source") {
-                if let Ok(text) = source.utf8_text(src) {
-                    let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
-                    if trimmed == "nats" {
-                        return true;
+    // PERSIST-RECURSION-1: iterative pre-order search (was recursive on AST
+    // depth). Order-insensitive boolean OR; the first `nats` import/require
+    // short-circuits, and non-matching import/call nodes still descend.
+    let mut found = false;
+    crate::walk::visit_preorder(*root, |node| {
+        match node.kind() {
+            // ESM import: import ... from 'nats'
+            "import_statement" => {
+                if let Some(source) = node.child_by_field_name("source") {
+                    if let Ok(text) = source.utf8_text(src) {
+                        let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
+                        if trimmed == "nats" {
+                            found = true;
+                            return std::ops::ControlFlow::Break(());
+                        }
                     }
                 }
             }
-        }
 
-        // CommonJS require: require('nats')
-        "call_expression" => {
-            if let Some(function) = node.child_by_field_name("function") {
-                if function.kind() == "identifier" {
-                    if let Ok(name) = function.utf8_text(src) {
-                        if name == "require" {
-                            if let Some(args) = node.child_by_field_name("arguments") {
-                                for i in 0..args.child_count() {
-                                    if let Some(arg) = args.child(i) {
-                                        if arg.kind() == "string" {
-                                            if let Ok(text) = arg.utf8_text(src) {
-                                                let trimmed =
-                                                    text.trim_matches(|c| c == '"' || c == '\'');
-                                                if trimmed == "nats" {
-                                                    return true;
+            // CommonJS require: require('nats')
+            "call_expression" => {
+                if let Some(function) = node.child_by_field_name("function") {
+                    if function.kind() == "identifier" {
+                        if let Ok(name) = function.utf8_text(src) {
+                            if name == "require" {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    for i in 0..args.child_count() {
+                                        if let Some(arg) = args.child(i) {
+                                            if arg.kind() == "string" {
+                                                if let Ok(text) = arg.utf8_text(src) {
+                                                    let trimmed = text
+                                                        .trim_matches(|c| c == '"' || c == '\'');
+                                                    if trimmed == "nats" {
+                                                        found = true;
+                                                        return std::ops::ControlFlow::Break(());
+                                                    }
                                                 }
                                             }
                                         }
@@ -144,21 +148,12 @@ fn has_nats_import_recursive(node: &tree_sitter::Node, src: &[u8]) -> bool {
                     }
                 }
             }
+
+            _ => {}
         }
-
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if has_nats_import_recursive(&child, src) {
-                return true;
-            }
-        }
-    }
-
-    false
+        std::ops::ControlFlow::Continue(())
+    });
+    found
 }
 
 // ── Import binding resolution ───────────────────────────────────────────────
@@ -202,53 +197,47 @@ impl NatsImportBindings {
 /// This replaces the simple `has_nats_import` check with precise binding tracking.
 /// Shadowing is handled at call-site resolution via `ScopeTree`, not here.
 fn extract_nats_import_bindings(root: &tree_sitter::Node, src: &[u8]) -> NatsImportBindings {
+    // PERSIST-RECURSION-1: iterative pre-order collect (was recursive on AST
+    // depth). Bindings are HashSet inserts — order-insensitive — so traversal
+    // order does not affect the result. The `lexical_declaration` arm inspects
+    // declarators locally, and the walk still descends into those same
+    // declarators (a `variable_declarator` matches no arm → harmless); both are
+    // preserved exactly as in the recursive form.
     let mut bindings = NatsImportBindings::default();
-    extract_bindings_recursive(root, src, &mut bindings);
+    crate::walk::visit_preorder(*root, |node| {
+        match node.kind() {
+            // ESM import: import ... from 'nats'
+            "import_statement" => {
+                if let Some(source) = node.child_by_field_name("source") {
+                    if let Ok(text) = source.utf8_text(src) {
+                        let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
+                        if trimmed == "nats" {
+                            // This is a NATS import — extract the bindings
+                            extract_esm_import_bindings(&node, src, &mut bindings);
+                        }
+                    }
+                }
+            }
+
+            // CommonJS: const ... = require('nats')
+            "lexical_declaration" | "variable_declaration" => {
+                // Check if this is a require('nats') assignment
+                for i in 0..node.child_count() {
+                    if let Some(declarator) = node.child(i) {
+                        if declarator.kind() == "variable_declarator"
+                            && is_nats_require_declarator(&declarator, src)
+                        {
+                            extract_commonjs_bindings(&declarator, src, &mut bindings);
+                        }
+                    }
+                }
+            }
+
+            _ => {}
+        }
+        std::ops::ControlFlow::Continue(())
+    });
     bindings
-}
-
-fn extract_bindings_recursive(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    bindings: &mut NatsImportBindings,
-) {
-    match node.kind() {
-        // ESM import: import ... from 'nats'
-        "import_statement" => {
-            if let Some(source) = node.child_by_field_name("source") {
-                if let Ok(text) = source.utf8_text(src) {
-                    let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
-                    if trimmed == "nats" {
-                        // This is a NATS import — extract the bindings
-                        extract_esm_import_bindings(node, src, bindings);
-                    }
-                }
-            }
-        }
-
-        // CommonJS: const ... = require('nats')
-        "lexical_declaration" | "variable_declaration" => {
-            // Check if this is a require('nats') assignment
-            for i in 0..node.child_count() {
-                if let Some(declarator) = node.child(i) {
-                    if declarator.kind() == "variable_declarator"
-                        && is_nats_require_declarator(&declarator, src)
-                    {
-                        extract_commonjs_bindings(&declarator, src, bindings);
-                    }
-                }
-            }
-        }
-
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_bindings_recursive(&child, src, bindings);
-        }
-    }
 }
 
 /// Extract bindings from ESM import statement.
@@ -493,76 +482,72 @@ fn extract_nats_connection_vars(
     bindings: &NatsImportBindings,
     scope_tree: &ScopeTree,
 ) -> NatsConnectionVars {
+    // PERSIST-RECURSION-1: iterative pre-order collect (was recursive on AST
+    // depth). Connection vars are HashSet inserts — order-insensitive — and
+    // `bindings` / `scope_tree` are read-only, so the result is unchanged.
     let mut vars = NatsConnectionVars::default();
-    extract_connection_vars_recursive(root, src, bindings, scope_tree, &mut vars);
-    vars
-}
+    crate::walk::visit_preorder(*root, |node| {
+        // Look for variable_declarator: const nc = connect(...) or const nc = await connect(...)
+        if node.kind() == "variable_declarator" {
+            if let (Some(name_node), Some(value_node)) = (
+                node.child_by_field_name("name"),
+                node.child_by_field_name("value"),
+            ) {
+                // Only track simple identifier names (not destructuring patterns)
+                if name_node.kind() == "identifier" {
+                    // Check if value is a call to connect() or await connect()
+                    let call_node = if value_node.kind() == "await_expression" {
+                        // await connect(...)
+                        value_node.child(1) // Skip "await" keyword, get the expression
+                    } else if value_node.kind() == "call_expression" {
+                        // connect(...)
+                        Some(value_node)
+                    } else {
+                        None
+                    };
 
-fn extract_connection_vars_recursive(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    bindings: &NatsImportBindings,
-    scope_tree: &ScopeTree,
-    vars: &mut NatsConnectionVars,
-) {
-    // Look for variable_declarator: const nc = connect(...) or const nc = await connect(...)
-    if node.kind() == "variable_declarator" {
-        if let (Some(name_node), Some(value_node)) = (
-            node.child_by_field_name("name"),
-            node.child_by_field_name("value"),
-        ) {
-            // Only track simple identifier names (not destructuring patterns)
-            if name_node.kind() == "identifier" {
-                // Check if value is a call to connect() or await connect()
-                let call_node = if value_node.kind() == "await_expression" {
-                    // await connect(...)
-                    value_node.child(1) // Skip "await" keyword, get the expression
-                } else if value_node.kind() == "call_expression" {
-                    // connect(...)
-                    Some(value_node)
-                } else {
-                    None
-                };
+                    if let Some(call) = call_node {
+                        if call.kind() == "call_expression" {
+                            if let Some(function) = call.child_by_field_name("function") {
+                                // Determine scope at this call site for shadow checking
+                                let call_scope = scope_tree.scope_containing(call.start_byte());
 
-                if let Some(call) = call_node {
-                    if call.kind() == "call_expression" {
-                        if let Some(function) = call.child_by_field_name("function") {
-                            // Determine scope at this call site for shadow checking
-                            let call_scope = scope_tree.scope_containing(call.start_byte());
-
-                            // Check if it's a direct call to `connect`
-                            if function.kind() == "identifier" {
-                                if let Ok(fn_name) = function.utf8_text(src) {
-                                    // CRITICAL: Verify this is the NATS-imported connect
-                                    // AND it is not shadowed at this scope
-                                    if bindings.direct_connect_identifiers.contains(fn_name)
-                                        && !scope_tree.is_shadowed_at(fn_name, call_scope)
-                                    {
-                                        if let Ok(var_name) = name_node.utf8_text(src) {
-                                            vars.connection_vars.insert(var_name.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                            // Check for nats.connect() pattern
-                            else if function.kind() == "member_expression" {
-                                if let (Some(object), Some(property)) = (
-                                    function.child_by_field_name("object"),
-                                    function.child_by_field_name("property"),
-                                ) {
-                                    if let (Ok(receiver_name), Ok(method_name)) =
-                                        (object.utf8_text(src), property.utf8_text(src))
-                                    {
-                                        // CRITICAL: Verify receiver is a NATS namespace import
+                                // Check if it's a direct call to `connect`
+                                if function.kind() == "identifier" {
+                                    if let Ok(fn_name) = function.utf8_text(src) {
+                                        // CRITICAL: Verify this is the NATS-imported connect
                                         // AND it is not shadowed at this scope
-                                        if method_name == "connect"
-                                            && bindings
-                                                .namespace_identifiers
-                                                .contains(receiver_name)
-                                            && !scope_tree.is_shadowed_at(receiver_name, call_scope)
+                                        if bindings.direct_connect_identifiers.contains(fn_name)
+                                            && !scope_tree.is_shadowed_at(fn_name, call_scope)
                                         {
                                             if let Ok(var_name) = name_node.utf8_text(src) {
                                                 vars.connection_vars.insert(var_name.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                                // Check for nats.connect() pattern
+                                else if function.kind() == "member_expression" {
+                                    if let (Some(object), Some(property)) = (
+                                        function.child_by_field_name("object"),
+                                        function.child_by_field_name("property"),
+                                    ) {
+                                        if let (Ok(receiver_name), Ok(method_name)) =
+                                            (object.utf8_text(src), property.utf8_text(src))
+                                        {
+                                            // CRITICAL: Verify receiver is a NATS namespace import
+                                            // AND it is not shadowed at this scope
+                                            if method_name == "connect"
+                                                && bindings
+                                                    .namespace_identifiers
+                                                    .contains(receiver_name)
+                                                && !scope_tree
+                                                    .is_shadowed_at(receiver_name, call_scope)
+                                            {
+                                                if let Ok(var_name) = name_node.utf8_text(src) {
+                                                    vars.connection_vars
+                                                        .insert(var_name.to_string());
+                                                }
                                             }
                                         }
                                     }
@@ -573,14 +558,10 @@ fn extract_connection_vars_recursive(
                 }
             }
         }
-    }
 
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_connection_vars_recursive(&child, src, bindings, scope_tree, vars);
-        }
-    }
+        std::ops::ControlFlow::Continue(())
+    });
+    vars
 }
 
 /// Extract NATS boundary calls from a parsed TS/JS file.
@@ -609,69 +590,19 @@ pub fn extract_nats_boundary_calls(
     // Guard 2 prep: extract tracked connection variables with scope-aware provenance
     let connection_vars = extract_nats_connection_vars(root, src, &bindings, &scope_tree);
 
+    // PERSIST-RECURSION-1: iterative pre-order walk with enclosing-function
+    // tracking (was recursive on AST depth). Byte-for-byte identical output.
     let mut results = Vec::new();
-    let mut enclosing_function = String::new();
-
-    extract_from_node(
-        root,
-        src,
-        &mut enclosing_function,
-        &connection_vars,
-        &mut results,
-    );
-
-    results
-}
-
-fn extract_from_node(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    enclosing_function: &mut String,
-    connection_vars: &NatsConnectionVars,
-    results: &mut Vec<RawNatsBoundaryCall>,
-) {
-    match node.kind() {
-        // Track enclosing function for stable key construction
-        "function_declaration" | "method_definition" | "arrow_function" => {
-            let prev_enclosing = enclosing_function.clone();
-
-            // Try to extract function name
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(src) {
-                    *enclosing_function = name.to_string();
-                }
-            }
-
-            // Recurse into body
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    extract_from_node(&child, src, enclosing_function, connection_vars, results);
-                }
-            }
-
-            // Restore enclosing function
-            *enclosing_function = prev_enclosing;
-            return; // Already recursed
-        }
-
+    crate::walk::visit_with_enclosing(*root, src, |node, enclosing| {
         // Detect `nc.publish(...)`, `nc.subscribe(...)`, etc.
-        "call_expression" => {
-            if let Some(call) =
-                try_extract_nats_call(node, src, enclosing_function, connection_vars)
-            {
+        if node.kind() == "call_expression" {
+            if let Some(call) = try_extract_nats_call(&node, src, enclosing, &connection_vars) {
                 results.push(call);
             }
         }
+    });
 
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_from_node(&child, src, enclosing_function, connection_vars, results);
-        }
-    }
+    results
 }
 
 /// Try to extract a NATS boundary call from a `call_expression` node.
@@ -780,6 +711,33 @@ mod tests {
             .expect("Error loading TypeScript grammar");
         let tree = parser.parse(source, None).expect("Failed to parse");
         extract_nats_boundary_calls(&tree.root_node(), source.as_bytes(), "test.ts")
+    }
+
+    /// PERSIST-RECURSION-1 regression: a deeply nested NATS file must NOT
+    /// overflow. This exercises ALL of the NATS walks on 50_000 nesting levels —
+    /// `has_nats_import`, `extract_nats_import_bindings`, and
+    /// `extract_nats_connection_vars` (shared `visit_preorder`),
+    /// `ScopeTree::build` (iterative `build_recursive`), and `extract_from_node`
+    /// (shared `visit_with_enclosing`). Runs on the default test-thread stack, so
+    /// any still-recursive walk would abort the test process here.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from(
+            "import { connect } from 'nats';\nasync function deep() {\n  const nc = await connect();\n",
+        );
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" nc.publish(\"subject\", data); ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n}\n");
+
+        // Reaching here proves no stack overflow across the whole NATS pipeline.
+        let calls = parse_and_extract(&source);
+        assert_eq!(calls.len(), 1);
     }
 
     fn parse_and_check_import(source: &str) -> bool {

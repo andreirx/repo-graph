@@ -77,39 +77,45 @@ pub fn is_amqp_boundary_pattern(name: &str) -> bool {
 ///
 /// Returns `true` if any amqplib import is found.
 pub fn has_amqplib_import(root: &tree_sitter::Node, src: &[u8]) -> bool {
-    has_amqplib_import_recursive(root, src)
-}
-
-fn has_amqplib_import_recursive(node: &tree_sitter::Node, src: &[u8]) -> bool {
-    match node.kind() {
-        // ESM import: import ... from 'amqplib'
-        "import_statement" => {
-            if let Some(source) = node.child_by_field_name("source") {
-                if let Ok(text) = source.utf8_text(src) {
-                    let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
-                    if trimmed == "amqplib" {
-                        return true;
+    // PERSIST-RECURSION-1: iterative pre-order search (was recursive on AST
+    // depth). The result is an order-insensitive boolean OR, so traversal order
+    // is immaterial; the first `amqplib` import/require short-circuits. A
+    // non-matching import/call still descends — a `require('amqplib')` can be
+    // nested inside a larger expression — because the visitor visits every node.
+    let mut found = false;
+    crate::walk::visit_preorder(*root, |node| {
+        match node.kind() {
+            // ESM import: import ... from 'amqplib'
+            "import_statement" => {
+                if let Some(source) = node.child_by_field_name("source") {
+                    if let Ok(text) = source.utf8_text(src) {
+                        let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
+                        if trimmed == "amqplib" {
+                            found = true;
+                            return std::ops::ControlFlow::Break(());
+                        }
                     }
                 }
             }
-        }
 
-        // CommonJS require: require('amqplib')
-        "call_expression" => {
-            if let Some(function) = node.child_by_field_name("function") {
-                if function.kind() == "identifier" {
-                    if let Ok(name) = function.utf8_text(src) {
-                        if name == "require" {
-                            if let Some(args) = node.child_by_field_name("arguments") {
-                                // Check first argument
-                                for i in 0..args.child_count() {
-                                    if let Some(arg) = args.child(i) {
-                                        if arg.kind() == "string" {
-                                            if let Ok(text) = arg.utf8_text(src) {
-                                                let trimmed =
-                                                    text.trim_matches(|c| c == '"' || c == '\'');
-                                                if trimmed == "amqplib" {
-                                                    return true;
+            // CommonJS require: require('amqplib')
+            "call_expression" => {
+                if let Some(function) = node.child_by_field_name("function") {
+                    if function.kind() == "identifier" {
+                        if let Ok(name) = function.utf8_text(src) {
+                            if name == "require" {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    // Check first argument
+                                    for i in 0..args.child_count() {
+                                        if let Some(arg) = args.child(i) {
+                                            if arg.kind() == "string" {
+                                                if let Ok(text) = arg.utf8_text(src) {
+                                                    let trimmed = text
+                                                        .trim_matches(|c| c == '"' || c == '\'');
+                                                    if trimmed == "amqplib" {
+                                                        found = true;
+                                                        return std::ops::ControlFlow::Break(());
+                                                    }
                                                 }
                                             }
                                         }
@@ -120,21 +126,12 @@ fn has_amqplib_import_recursive(node: &tree_sitter::Node, src: &[u8]) -> bool {
                     }
                 }
             }
+
+            _ => {}
         }
-
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if has_amqplib_import_recursive(&child, src) {
-                return true;
-            }
-        }
-    }
-
-    false
+        std::ops::ControlFlow::Continue(())
+    });
+    found
 }
 
 /// Extract AMQP boundary calls from a parsed TS/JS file.
@@ -158,60 +155,19 @@ pub fn extract_amqp_boundary_calls(
         return Vec::new();
     }
 
+    // PERSIST-RECURSION-1: iterative pre-order walk with enclosing-function
+    // tracking (was recursive on AST depth). Byte-for-byte identical output.
     let mut results = Vec::new();
-    let mut enclosing_function = String::new();
-
-    extract_from_node(root, src, &mut enclosing_function, &mut results);
-
-    results
-}
-
-fn extract_from_node(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    enclosing_function: &mut String,
-    results: &mut Vec<RawAmqpBoundaryCall>,
-) {
-    match node.kind() {
-        // Track enclosing function for stable key construction
-        "function_declaration" | "method_definition" | "arrow_function" => {
-            let prev_enclosing = enclosing_function.clone();
-
-            // Try to extract function name
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(src) {
-                    *enclosing_function = name.to_string();
-                }
-            }
-
-            // Recurse into body
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    extract_from_node(&child, src, enclosing_function, results);
-                }
-            }
-
-            // Restore enclosing function
-            *enclosing_function = prev_enclosing;
-            return; // Already recursed
-        }
-
+    crate::walk::visit_with_enclosing(*root, src, |node, enclosing| {
         // Detect `channel.sendToQueue(...)`, `channel.publish(...)`, etc.
-        "call_expression" => {
-            if let Some(call) = try_extract_amqp_call(node, src, enclosing_function) {
+        if node.kind() == "call_expression" {
+            if let Some(call) = try_extract_amqp_call(&node, src, enclosing) {
                 results.push(call);
             }
         }
+    });
 
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_from_node(&child, src, enclosing_function, results);
-        }
-    }
+    results
 }
 
 /// Try to extract an AMQP boundary call from a `call_expression` node.

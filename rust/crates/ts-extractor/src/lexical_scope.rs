@@ -116,51 +116,28 @@ impl ScopeTree {
         }
     }
 
-    /// Build scope tree recursively.
+    /// Build the scope tree iteratively (PERSIST-RECURSION-1).
+    ///
+    /// Was recursive on AST depth (→ stack overflow at scale). Scope indices are
+    /// assigned in the SAME pre-order as before — a node's scope is pushed before
+    /// any of its children's, and siblings are visited left-to-right — so
+    /// `scope_containing` (which relies on child scopes having higher indices
+    /// than their parents) and the entire scope tree are byte-for-byte identical.
     fn build_recursive(&mut self, node: &tree_sitter::Node, src: &[u8], current_scope: usize) {
-        // Check if this node creates a new scope
-        let new_scope = match node.kind() {
-            // Function-like constructs create new scopes
-            "function_declaration"
-            | "function"
-            | "arrow_function"
-            | "method_definition"
-            | "generator_function_declaration"
-            | "generator_function" => {
-                let scope_idx = self.scopes.len();
-                self.scopes.push(LexicalScope {
-                    declarations: HashSet::new(),
-                    start_byte: node.start_byte(),
-                    end_byte: node.end_byte(),
-                    parent: Some(current_scope),
-                });
-
-                // Extract parameters into the new scope
-                self.extract_parameters(node, src, scope_idx);
-
-                Some(scope_idx)
-            }
-
-            // Block statements create new scopes for let/const
-            // But we track all declarations uniformly for simplicity
-            "statement_block" => {
-                // Only create new scope if not directly under a function
-                // (function body blocks share scope with function)
-                let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
-
-                if matches!(
-                    parent_kind,
-                    "function_declaration"
-                        | "function"
-                        | "arrow_function"
-                        | "method_definition"
-                        | "generator_function_declaration"
-                        | "generator_function"
-                ) {
-                    // Function body — scope already created by function node
-                    None
-                } else {
-                    // Standalone block (if, for, while, etc.)
+        // Each work item carries the scope its children belong to. There is no
+        // post-order action (the scope index is threaded down by value, never
+        // restored), so a plain (node, scope) stack suffices.
+        let mut stack: Vec<(tree_sitter::Node, usize)> = vec![(*node, current_scope)];
+        while let Some((node, current_scope)) = stack.pop() {
+            // Check if this node creates a new scope
+            let new_scope = match node.kind() {
+                // Function-like constructs create new scopes
+                "function_declaration"
+                | "function"
+                | "arrow_function"
+                | "method_definition"
+                | "generator_function_declaration"
+                | "generator_function" => {
                     let scope_idx = self.scopes.len();
                     self.scopes.push(LexicalScope {
                         declarations: HashSet::new(),
@@ -168,22 +145,58 @@ impl ScopeTree {
                         end_byte: node.end_byte(),
                         parent: Some(current_scope),
                     });
+
+                    // Extract parameters into the new scope
+                    self.extract_parameters(&node, src, scope_idx);
+
                     Some(scope_idx)
                 }
-            }
 
-            _ => None,
-        };
+                // Block statements create new scopes for let/const
+                // But we track all declarations uniformly for simplicity
+                "statement_block" => {
+                    // Only create new scope if not directly under a function
+                    // (function body blocks share scope with function)
+                    let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
 
-        let scope_for_children = new_scope.unwrap_or(current_scope);
+                    if matches!(
+                        parent_kind,
+                        "function_declaration"
+                            | "function"
+                            | "arrow_function"
+                            | "method_definition"
+                            | "generator_function_declaration"
+                            | "generator_function"
+                    ) {
+                        // Function body — scope already created by function node
+                        None
+                    } else {
+                        // Standalone block (if, for, while, etc.)
+                        let scope_idx = self.scopes.len();
+                        self.scopes.push(LexicalScope {
+                            declarations: HashSet::new(),
+                            start_byte: node.start_byte(),
+                            end_byte: node.end_byte(),
+                            parent: Some(current_scope),
+                        });
+                        Some(scope_idx)
+                    }
+                }
 
-        // Extract declarations in current scope
-        self.extract_declarations(node, src, scope_for_children);
+                _ => None,
+            };
 
-        // Recurse into children
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                self.build_recursive(&child, src, scope_for_children);
+            let scope_for_children = new_scope.unwrap_or(current_scope);
+
+            // Extract declarations in current scope
+            self.extract_declarations(&node, src, scope_for_children);
+
+            // Push children in reverse so the left-most is popped (visited)
+            // first — preserving the recursive pre-order scope assignment.
+            for i in (0..node.child_count()).rev() {
+                if let Some(child) = node.child(i) {
+                    stack.push((child, scope_for_children));
+                }
             }
         }
     }
@@ -264,41 +277,48 @@ impl ScopeTree {
 
     /// Extract names from a binding pattern (handles destructuring).
     fn extract_binding_pattern(&mut self, node: tree_sitter::Node, src: &[u8], scope_idx: usize) {
-        match node.kind() {
-            "identifier" => {
-                if let Ok(name) = node.utf8_text(src) {
-                    self.scopes[scope_idx].declarations.insert(name.to_string());
+        // PERSIST-RECURSION-1: iterative descent through nested destructuring
+        // patterns (was recursive on pattern nesting → could overflow on
+        // `const [[[[[…]]]]] = …`). Names are inserted into a `HashSet` —
+        // order-insensitive — so the resulting declarations are unchanged.
+        let mut stack: Vec<tree_sitter::Node> = vec![node];
+        while let Some(n) = stack.pop() {
+            match n.kind() {
+                "identifier" => {
+                    if let Ok(name) = n.utf8_text(src) {
+                        self.scopes[scope_idx].declarations.insert(name.to_string());
+                    }
                 }
-            }
 
-            // Object destructuring: const { a, b } = ...
-            "object_pattern" => {
-                for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
-                        if child.kind() == "shorthand_property_identifier_pattern" {
-                            if let Ok(name) = child.utf8_text(src) {
-                                self.scopes[scope_idx].declarations.insert(name.to_string());
-                            }
-                        } else if child.kind() == "pair_pattern" {
-                            // const { a: renamed } = ... — extract 'renamed'
-                            if let Some(value) = child.child_by_field_name("value") {
-                                self.extract_binding_pattern(value, src, scope_idx);
+                // Object destructuring: const { a, b } = ...
+                "object_pattern" => {
+                    for i in 0..n.child_count() {
+                        if let Some(child) = n.child(i) {
+                            if child.kind() == "shorthand_property_identifier_pattern" {
+                                if let Ok(name) = child.utf8_text(src) {
+                                    self.scopes[scope_idx].declarations.insert(name.to_string());
+                                }
+                            } else if child.kind() == "pair_pattern" {
+                                // const { a: renamed } = ... — extract 'renamed'
+                                if let Some(value) = child.child_by_field_name("value") {
+                                    stack.push(value);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Array destructuring: const [a, b] = ...
-            "array_pattern" => {
-                for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
-                        self.extract_binding_pattern(child, src, scope_idx);
+                // Array destructuring: const [a, b] = ...
+                "array_pattern" => {
+                    for i in 0..n.child_count() {
+                        if let Some(child) = n.child(i) {
+                            stack.push(child);
+                        }
                     }
                 }
-            }
 
-            _ => {}
+                _ => {}
+            }
         }
     }
 

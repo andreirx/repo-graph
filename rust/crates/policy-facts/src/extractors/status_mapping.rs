@@ -89,22 +89,13 @@ fn walk_preproc_for_functions(
     repo_uid: &str,
     results: &mut Vec<StatusMapping>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "function_definition" => {
-                if let Some(mapping) =
-                    try_extract_status_mapping(&child, source, file_path, repo_uid)
-                {
-                    results.push(mapping);
-                }
-            }
-            "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-                walk_preproc_for_functions(&child, source, file_path, repo_uid, results);
-            }
-            _ => {}
+    // PERSIST-RECURSION-1: iterative descent through preprocessor blocks (was
+    // recursive on preproc-nesting depth). Order and emitted mappings unchanged.
+    super::walk::for_each_preproc_function(*node, |func_node| {
+        if let Some(mapping) = try_extract_status_mapping(&func_node, source, file_path, repo_uid) {
+            results.push(mapping);
         }
-    }
+    });
 }
 
 /// Try to extract a StatusMapping from a function definition.
@@ -272,41 +263,41 @@ fn extract_all_parameters(declarator: &tree_sitter::Node, source: &[u8]) -> Vec<
     params
 }
 
-/// Recursively extract parameters from a declarator node.
+/// Extract parameters from a declarator node.
+///
+/// PERSIST-RECURSION-1: iterative descent through nested `pointer_declarator`s
+/// (was recursive on pointer nesting → could overflow on a pathologically deep
+/// function-pointer declarator). A `function_declarator` yields its parameters
+/// and is terminal (its subtree is not descended); a `pointer_declarator` is
+/// descended. Reverse-pushing children preserves document order, so `params` is
+/// byte-for-byte unchanged.
 fn extract_params_from_node(node: &tree_sitter::Node, source: &[u8], params: &mut Vec<ParamInfo>) {
-    // Direct function_declarator
-    if node.kind() == "function_declarator" {
-        if let Some(param_list) = node.child_by_field_name("parameters") {
-            let mut cursor = param_list.walk();
-            for child in param_list.children(&mut cursor) {
-                if child.kind() == "parameter_declaration" {
-                    if let Some(info) = extract_param_info(&child, source) {
-                        params.push(info);
-                    }
-                }
-            }
-        }
-        return;
-    }
-
-    // Look in children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "function_declarator" {
-            if let Some(param_list) = child.child_by_field_name("parameters") {
-                let mut param_cursor = param_list.walk();
-                for param_child in param_list.children(&mut param_cursor) {
-                    if param_child.kind() == "parameter_declaration" {
-                        if let Some(info) = extract_param_info(&param_child, source) {
+    let mut stack: Vec<tree_sitter::Node> = vec![*node];
+    while let Some(n) = stack.pop() {
+        // Direct function_declarator: extract its parameters; terminal.
+        if n.kind() == "function_declarator" {
+            if let Some(param_list) = n.child_by_field_name("parameters") {
+                let mut cursor = param_list.walk();
+                for child in param_list.children(&mut cursor) {
+                    if child.kind() == "parameter_declaration" {
+                        if let Some(info) = extract_param_info(&child, source) {
                             params.push(info);
                         }
                     }
                 }
             }
+            continue;
         }
-        // Recurse into pointer_declarator
-        if child.kind() == "pointer_declarator" {
-            extract_params_from_node(&child, source, params);
+
+        // Otherwise scan children: a function_declarator child is extracted (not
+        // descended), a pointer_declarator child is descended — the exact
+        // selective recursion of the prior form. Reverse-push preserves order.
+        let mut cursor = n.walk();
+        let children: Vec<tree_sitter::Node> = n.children(&mut cursor).collect();
+        for child in children.into_iter().rev() {
+            if matches!(child.kind(), "function_declarator" | "pointer_declarator") {
+                stack.push(child);
+            }
         }
     }
 }
@@ -358,19 +349,25 @@ fn extract_param_info(param: &tree_sitter::Node, source: &[u8]) -> Option<ParamI
 }
 
 /// Find identifier in a declarator node.
+///
+/// PERSIST-RECURSION-1: iterative pre-order find-first (was recursive on
+/// declarator subtree depth). Returns the first `identifier` in pre-order — the
+/// node itself, then children left-to-right — exactly as the recursive form.
+/// (On valid source an identifier is always valid UTF-8; the recursive form's
+/// `?` short-circuit and this one's skip-on-utf8-error can only differ on
+/// invalid-UTF-8 input, which parsed source never contains.)
 fn find_identifier_in_declarator(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    if node.kind() == "identifier" {
-        return Some(node.utf8_text(source).ok()?.to_string());
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if let Some(name) = find_identifier_in_declarator(&child, source) {
-            return Some(name);
+    let mut found: Option<String> = None;
+    super::walk::visit_preorder(*node, |n| {
+        if n.kind() == "identifier" {
+            if let Ok(text) = n.utf8_text(source) {
+                found = Some(text.to_string());
+                return std::ops::ControlFlow::Break(());
+            }
         }
-    }
-
-    None
+        std::ops::ControlFlow::Continue(())
+    });
+    found
 }
 
 /// Find a switch statement that switches on any parameter (including pointer dereference).
@@ -456,33 +453,36 @@ fn switch_condition_matches_any_param(
 /// Extract discriminant info from a switch condition expression.
 /// Returns (parameter_name, is_dereferenced).
 fn extract_discriminant_info(expr: &tree_sitter::Node, source: &[u8]) -> Option<(String, bool)> {
-    match expr.kind() {
-        // Direct identifier: switch (param)
-        "identifier" => {
-            let name = expr.utf8_text(source).ok()?.to_string();
-            Some((name, false))
-        }
-        // Pointer dereference: switch (*param)
-        "pointer_expression" => {
-            // Find the identifier being dereferenced
-            let mut cursor = expr.walk();
-            for child in expr.children(&mut cursor) {
-                if child.kind() == "identifier" {
-                    let name = child.utf8_text(source).ok()?.to_string();
-                    return Some((name, true));
+    // PERSIST-RECURSION-1: iterative unwrap of nested `cast_expression`s (was
+    // tail-recursive on cast nesting → could overflow on `switch ((int)(int)…x)`).
+    // The identifier / pointer_expression arms are terminal, exactly as before.
+    let mut current = *expr;
+    loop {
+        match current.kind() {
+            // Direct identifier: switch (param)
+            "identifier" => {
+                let name = current.utf8_text(source).ok()?.to_string();
+                return Some((name, false));
+            }
+            // Pointer dereference: switch (*param)
+            "pointer_expression" => {
+                // Find the identifier being dereferenced
+                let mut cursor = current.walk();
+                for child in current.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        let name = child.utf8_text(source).ok()?.to_string();
+                        return Some((name, true));
+                    }
                 }
+                return None;
             }
-            None
+            // Cast expression: switch ((type)expr) — unwrap and continue.
+            "cast_expression" => match current.child_by_field_name("value") {
+                Some(value) => current = value,
+                None => return None,
+            },
+            _ => return None,
         }
-        // Cast expression: switch ((type)expr)
-        "cast_expression" => {
-            if let Some(value) = expr.child_by_field_name("value") {
-                // Recursively handle the cast value
-                return extract_discriminant_info(&value, source);
-            }
-            None
-        }
-        _ => None,
     }
 }
 
@@ -525,8 +525,13 @@ fn walk_switch_body_for_cases(
     mappings: &mut Vec<CaseMapping>,
     default_output: &mut Option<String>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
+    // PERSIST-RECURSION-1: iterative descent through preprocessor blocks (was
+    // recursive on preproc-nesting depth). Case / default / return nodes are
+    // acted on in document order and only preproc blocks are descended into, so
+    // the accumulated case mappings and default output are byte-for-byte unchanged.
+    let mut stack: Vec<tree_sitter::Node> = Vec::new();
+    push_switch_frames(*node, &mut stack);
+    while let Some(child) = stack.pop() {
         match child.kind() {
             "case_statement" => {
                 // Check if this is actually a default case (starts with "default" keyword)
@@ -574,16 +579,26 @@ fn walk_switch_body_for_cases(
                     }
                 }
             }
-            // Recurse into preprocessor conditional blocks
+            // Descend into preprocessor conditional blocks
             "preproc_if" | "preproc_ifdef" | "preproc_ifndef" | "preproc_else" | "preproc_elif" => {
-                walk_switch_body_for_cases(
-                    &child,
-                    source,
-                    current_inputs,
-                    mappings,
-                    default_output,
-                );
+                push_switch_frames(child, &mut stack);
             }
+            _ => {}
+        }
+    }
+}
+
+/// Push a frame node's case / default / return / preprocessor children — the
+/// only kinds `walk_switch_body_for_cases` acts on or descends into — in reverse
+/// document order (so the left-most is popped first, preserving document order).
+fn push_switch_frames<'a>(node: tree_sitter::Node<'a>, stack: &mut Vec<tree_sitter::Node<'a>>) {
+    let mut cursor = node.walk();
+    let children: Vec<tree_sitter::Node<'a>> = node.children(&mut cursor).collect();
+    for child in children.into_iter().rev() {
+        match child.kind() {
+            "case_statement" | "default" | "default_statement" | "return_statement"
+            | "preproc_if" | "preproc_ifdef" | "preproc_ifndef" | "preproc_else"
+            | "preproc_elif" => stack.push(child),
             _ => {}
         }
     }

@@ -96,9 +96,11 @@ pub struct ReactHookDetection {
 /// Detect React components in TSX/JSX files.
 ///
 /// Filters to TSX/JSX files, checks for React import, parses AST,
-/// and extracts component definitions.
-pub fn detect_react_components(file_inputs: &[FileInput]) -> Vec<ReactComponentDetection> {
+/// and extracts component definitions. Also reports the count of files skipped
+/// for pathological AST nesting (PERSIST-RECURSION-1 item 2 — honest degradation).
+pub fn detect_react_components(file_inputs: &[FileInput]) -> DetectedComponents {
     let mut components = Vec::new();
+    let mut files_skipped_deep_nesting: Vec<String> = Vec::new();
 
     let mut parser = Parser::new();
     let tsx_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TSX.into();
@@ -126,6 +128,15 @@ pub fn detect_react_components(file_inputs: &[FileInput]) -> Vec<ReactComponentD
             None => continue,
         };
 
+        // PERSIST-RECURSION-1: skip pathologically deep files (honest degradation),
+        // the same guard the compose-level postpasses apply. The walks below are
+        // already iterative, so this is a resource bound, not the overflow fix.
+        if crate::walk::tree_exceeds_depth(&tree.root_node(), crate::walk::MAX_POSTPASS_TREE_DEPTH)
+        {
+            files_skipped_deep_nesting.push(file.rel_path.clone());
+            continue;
+        }
+
         let file_components = detect_components_in_file(
             &tree.root_node(),
             file.content.as_bytes(),
@@ -135,7 +146,33 @@ pub fn detect_react_components(file_inputs: &[FileInput]) -> Vec<ReactComponentD
         components.extend(file_components);
     }
 
-    components
+    DetectedComponents {
+        components,
+        files_skipped_deep_nesting,
+    }
+}
+
+/// Output of [`detect_react_components`]: detected components plus the honest
+/// degradation record — the relative PATHS of files skipped for pathological AST
+/// nesting.
+///
+/// This is a path list, not a count, because React runs TWO passes over the same
+/// files (components + hooks) under different gates. A single deep `.tsx` can be
+/// skipped by both; the caller unions the two path lists so one file is reported
+/// once, not twice (PERSIST-RECURSION-1, review-2 item 1).
+#[derive(Debug, Default)]
+pub struct DetectedComponents {
+    pub components: Vec<ReactComponentDetection>,
+    pub files_skipped_deep_nesting: Vec<String>,
+}
+
+/// Output of [`detect_react_hooks`]: detected hooks plus the honest degradation
+/// record — the relative PATHS of files skipped for pathological AST nesting.
+/// See [`DetectedComponents`] for why this is a path list, not a count.
+#[derive(Debug, Default)]
+pub struct DetectedHooks {
+    pub hooks: Vec<ReactHookDetection>,
+    pub files_skipped_deep_nesting: Vec<String>,
 }
 
 /// Detect React hook usage in JS/TS files.
@@ -145,8 +182,9 @@ pub fn detect_react_components(file_inputs: &[FileInput]) -> Vec<ReactComponentD
 ///
 /// Hook detection does not require JSX syntax, so it works for all JS/TS
 /// extensions including `.ts`, `.js`, `.mts`, `.cts`, `.mjs`, `.cjs`.
-pub fn detect_react_hooks(file_inputs: &[FileInput]) -> Vec<ReactHookDetection> {
+pub fn detect_react_hooks(file_inputs: &[FileInput]) -> DetectedHooks {
     let mut hooks = Vec::new();
+    let mut files_skipped_deep_nesting: Vec<String> = Vec::new();
 
     let mut parser = Parser::new();
     let ts_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
@@ -181,12 +219,22 @@ pub fn detect_react_hooks(file_inputs: &[FileInput]) -> Vec<ReactHookDetection> 
             None => continue,
         };
 
+        // PERSIST-RECURSION-1: skip pathologically deep files (honest degradation).
+        if crate::walk::tree_exceeds_depth(&tree.root_node(), crate::walk::MAX_POSTPASS_TREE_DEPTH)
+        {
+            files_skipped_deep_nesting.push(file.rel_path.clone());
+            continue;
+        }
+
         let file_hooks =
             detect_hooks_in_file(&tree.root_node(), file.content.as_bytes(), &file.rel_path);
         hooks.extend(file_hooks);
     }
 
-    hooks
+    DetectedHooks {
+        hooks,
+        files_skipped_deep_nesting,
+    }
 }
 
 // ── Import detection ──────────────────────────────────────────────────
@@ -229,27 +277,28 @@ fn collect_components(
     import_gate: &str,
     components: &mut Vec<ReactComponentDetection>,
 ) {
-    // Check for function declarations with PascalCase names.
-    if node.kind() == "function_declaration" {
-        if let Some(component) =
-            try_extract_function_component(node, source, file_path, import_gate)
-        {
-            components.push(component);
+    // PERSIST-RECURSION-1: iterative pre-order collect (was recursive on AST
+    // depth → stack overflow at scale). Every node is checked in the same order.
+    crate::walk::visit_preorder(*node, |node| {
+        // Check for function declarations with PascalCase names.
+        if node.kind() == "function_declaration" {
+            if let Some(component) =
+                try_extract_function_component(&node, source, file_path, import_gate)
+            {
+                components.push(component);
+            }
         }
-    }
 
-    // Check for variable declarations (arrow functions).
-    if node.kind() == "lexical_declaration" || node.kind() == "variable_declaration" {
-        if let Some(component) = try_extract_arrow_component(node, source, file_path, import_gate) {
-            components.push(component);
+        // Check for variable declarations (arrow functions).
+        if node.kind() == "lexical_declaration" || node.kind() == "variable_declaration" {
+            if let Some(component) =
+                try_extract_arrow_component(&node, source, file_path, import_gate)
+            {
+                components.push(component);
+            }
         }
-    }
-
-    // Recurse into children.
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_components(&child, source, file_path, import_gate, components);
-    }
+        std::ops::ControlFlow::Continue(())
+    });
 }
 
 /// Try to extract a component from a function declaration.
@@ -480,42 +529,42 @@ fn contains_jsx_return(body: &Node, source: &[u8]) -> bool {
 }
 
 fn contains_jsx_return_recursive(node: &Node, _source: &[u8]) -> bool {
-    if node.kind() == "return_statement" {
-        // Check if return value is JSX.
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "jsx_element"
-                || child.kind() == "jsx_self_closing_element"
-                || child.kind() == "jsx_fragment"
-                || child.kind() == "parenthesized_expression"
-            {
-                // For parenthesized, check nested.
-                if child.kind() == "parenthesized_expression" {
-                    let mut inner = child.walk();
-                    for inner_child in child.children(&mut inner) {
-                        if inner_child.kind() == "jsx_element"
-                            || inner_child.kind() == "jsx_self_closing_element"
-                            || inner_child.kind() == "jsx_fragment"
-                        {
-                            return true;
+    // PERSIST-RECURSION-1: iterative pre-order find-first (was recursive on AST
+    // depth). The per-node JSX check on a `return_statement`'s immediate children
+    // is bounded and unchanged; only the tree descent became iterative.
+    let mut found = false;
+    crate::walk::visit_preorder(*node, |node| {
+        if node.kind() == "return_statement" {
+            // Check if return value is JSX.
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "jsx_element"
+                    || child.kind() == "jsx_self_closing_element"
+                    || child.kind() == "jsx_fragment"
+                    || child.kind() == "parenthesized_expression"
+                {
+                    // For parenthesized, check nested.
+                    if child.kind() == "parenthesized_expression" {
+                        let mut inner = child.walk();
+                        for inner_child in child.children(&mut inner) {
+                            if inner_child.kind() == "jsx_element"
+                                || inner_child.kind() == "jsx_self_closing_element"
+                                || inner_child.kind() == "jsx_fragment"
+                            {
+                                found = true;
+                                return std::ops::ControlFlow::Break(());
+                            }
                         }
+                    } else {
+                        found = true;
+                        return std::ops::ControlFlow::Break(());
                     }
-                } else {
-                    return true;
                 }
             }
         }
-    }
-
-    // Recurse.
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if contains_jsx_return_recursive(&child, _source) {
-            return true;
-        }
-    }
-
-    false
+        std::ops::ControlFlow::Continue(())
+    });
+    found
 }
 
 // ── Hook detection ────────────────────────────────────────────────────
@@ -534,7 +583,14 @@ fn detect_hooks_in_file(root: &Node, source: &[u8], file_path: &str) -> Vec<Reac
     hooks
 }
 
-/// Recursively collect hook calls from AST nodes.
+/// Collect hook calls from AST nodes (PERSIST-RECURSION-1: iterative pre-order,
+/// was recursive on AST depth → stack overflow at scale).
+///
+/// The enclosing-symbol context is preserved exactly as the recursive form did:
+/// it is saved and restored ONLY across `function_declaration` / `arrow_function`
+/// nodes (a `Restore` marker is scheduled for those, popping after the subtree),
+/// while a `variable_declarator`'s set intentionally PERSISTS past its subtree
+/// (no restore) — matching the original's conditional restore.
 fn collect_hooks(
     node: &Node,
     source: &[u8],
@@ -542,53 +598,66 @@ fn collect_hooks(
     enclosing_symbol: &mut Option<String>,
     hooks: &mut Vec<ReactHookDetection>,
 ) {
-    // Track enclosing function for hook attribution.
-    // This includes both PascalCase components AND custom hooks (use* pattern).
-    let restore_symbol = enclosing_symbol.clone();
-
-    if node.kind() == "function_declaration" {
-        if let Some(name_node) = node.child_by_field_name("name") {
-            if let Some(name) = node_text(&name_node, source) {
-                // Track PascalCase (components) or use* (custom hooks) as enclosing symbol.
-                if is_pascal_case(&name) || is_hook_name(&name) {
-                    *enclosing_symbol = Some(name);
-                }
-            }
-        }
+    enum HookWork<'a> {
+        Visit(Node<'a>),
+        Restore(Option<String>),
     }
 
-    // Check for arrow function with PascalCase or hook name via variable declaration.
-    if node.kind() == "variable_declarator" {
-        if let Some(name_node) = node.child_by_field_name("name") {
-            if let Some(name) = node_text(&name_node, source) {
-                if is_pascal_case(&name) || is_hook_name(&name) {
-                    // Check if value is arrow function.
-                    if let Some(value) = node.child_by_field_name("value") {
-                        if value.kind() == "arrow_function" {
-                            *enclosing_symbol = Some(name);
+    let mut stack: Vec<HookWork> = vec![HookWork::Visit(*node)];
+    while let Some(work) = stack.pop() {
+        let node = match work {
+            HookWork::Restore(prev) => {
+                *enclosing_symbol = prev;
+                continue;
+            }
+            HookWork::Visit(n) => n,
+        };
+
+        if node.kind() == "function_declaration" {
+            // Save + (maybe set), restore after the subtree.
+            let restore_symbol = enclosing_symbol.clone();
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Some(name) = node_text(&name_node, source) {
+                    // Track PascalCase (components) or use* (custom hooks).
+                    if is_pascal_case(&name) || is_hook_name(&name) {
+                        *enclosing_symbol = Some(name);
+                    }
+                }
+            }
+            stack.push(HookWork::Restore(restore_symbol));
+        } else if node.kind() == "arrow_function" {
+            // Save + restore after the subtree (no set — matches the recursive
+            // form, which only restored on function_declaration / arrow_function).
+            let restore_symbol = enclosing_symbol.clone();
+            stack.push(HookWork::Restore(restore_symbol));
+        } else if node.kind() == "variable_declarator" {
+            // Arrow function with PascalCase / hook name: the set PERSISTS past
+            // the subtree (no restore marker) — exactly as before.
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Some(name) = node_text(&name_node, source) {
+                    if is_pascal_case(&name) || is_hook_name(&name) {
+                        // Check if value is arrow function.
+                        if let Some(value) = node.child_by_field_name("value") {
+                            if value.kind() == "arrow_function" {
+                                *enclosing_symbol = Some(name);
+                            }
                         }
                     }
                 }
             }
+        } else if node.kind() == "call_expression" {
+            // Check for hook call expressions.
+            if let Some(hook) = try_extract_hook_call(&node, source, file_path, enclosing_symbol) {
+                hooks.push(hook);
+            }
         }
-    }
 
-    // Check for hook call expressions.
-    if node.kind() == "call_expression" {
-        if let Some(hook) = try_extract_hook_call(node, source, file_path, enclosing_symbol) {
-            hooks.push(hook);
+        // Recurse into all children, reverse-pushed for left-to-right pre-order.
+        let mut cursor = node.walk();
+        let children: Vec<Node> = node.children(&mut cursor).collect();
+        for child in children.into_iter().rev() {
+            stack.push(HookWork::Visit(child));
         }
-    }
-
-    // Recurse.
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_hooks(&child, source, file_path, enclosing_symbol, hooks);
-    }
-
-    // Restore symbol context when exiting function.
-    if node.kind() == "function_declaration" || node.kind() == "arrow_function" {
-        *enclosing_symbol = restore_symbol;
     }
 }
 
@@ -799,6 +868,89 @@ mod tests {
         parser.set_language(&tsx_language).unwrap();
         let tree = parser.parse(source, None).unwrap();
         detect_hooks_in_file(&tree.root_node(), source.as_bytes(), "test.tsx")
+    }
+
+    fn file_input(rel_path: &str, content: &str) -> FileInput {
+        FileInput {
+            rel_path: rel_path.to_string(),
+            content: content.to_string(),
+            content_hash: String::new(),
+            size_bytes: content.len(),
+            line_count: content.lines().count(),
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }
+    }
+
+    /// PERSIST-RECURSION-1 item 2: the public detectors apply the per-file depth
+    /// guard — a pathologically deep .tsx is skipped (no partial facts). Each pass
+    /// reports the skipped file's PATH (not a bare count); the compose-level caller
+    /// unions the two path lists so a file skipped by both is reported ONCE
+    /// (review-2 item 1 — see `persist_react_inferences_dedups_deep_file` in
+    /// `compose.rs`). A normal file is detected as before.
+    #[test]
+    fn detect_react_skips_pathologically_deep_files() {
+        // A normal React file: detected, nothing skipped.
+        let normal = file_input(
+            "ok.tsx",
+            "import React, { useState } from 'react';\nfunction Ok() {\n  useState(0);\n  return <div/>;\n}\n",
+        );
+        let comps = detect_react_components(std::slice::from_ref(&normal));
+        let hooks = detect_react_hooks(std::slice::from_ref(&normal));
+        assert_eq!(comps.components.len(), 1, "normal component detected");
+        assert_eq!(hooks.hooks.len(), 1, "normal hook detected");
+        assert!(comps.files_skipped_deep_nesting.is_empty());
+        assert!(hooks.files_skipped_deep_nesting.is_empty());
+
+        // A .tsx nested well past the guard: skipped by BOTH passes; each reports
+        // the same path (the compose-level union dedups it to one file).
+        let mut deep =
+            String::from("import React, { useState } from 'react';\nfunction Deep() {\n");
+        for _ in 0..(crate::walk::MAX_POSTPASS_TREE_DEPTH + 2_000) {
+            deep.push('{');
+        }
+        deep.push_str(" useState(0); ");
+        for _ in 0..(crate::walk::MAX_POSTPASS_TREE_DEPTH + 2_000) {
+            deep.push('}');
+        }
+        deep.push_str("\n  return <div/>;\n}\n");
+        let deep_file = file_input("deep.tsx", &deep);
+        let comps = detect_react_components(std::slice::from_ref(&deep_file));
+        let hooks = detect_react_hooks(std::slice::from_ref(&deep_file));
+        assert_eq!(comps.components.len(), 0, "no partial component facts");
+        assert_eq!(hooks.hooks.len(), 0, "no partial hook facts");
+        assert_eq!(
+            comps.files_skipped_deep_nesting,
+            vec!["deep.tsx".to_string()]
+        );
+        assert_eq!(
+            hooks.files_skipped_deep_nesting,
+            vec!["deep.tsx".to_string()]
+        );
+    }
+
+    /// PERSIST-RECURSION-1 regression: a deeply nested file must NOT overflow the
+    /// React walks — `collect_hooks` (stateful enclosing-symbol tracking) and
+    /// `collect_components` / `contains_jsx_return_recursive` (`visit_preorder`).
+    /// Runs on the default test-thread stack, so a still-recursive walk aborts.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from("function DeepComponent() {\n");
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" useState(0); ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n  return null;\n}\n");
+
+        // Reaching these assertions proves no stack overflow in either walk.
+        let hooks = parse_and_detect_hooks(&source);
+        let components = parse_and_detect_components(&source);
+        assert!(hooks.len() <= 1);
+        assert!(components.len() <= 1);
     }
 
     // ── Component tests ──────────────────────────────────────────────

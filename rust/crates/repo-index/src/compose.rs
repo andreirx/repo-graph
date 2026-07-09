@@ -55,8 +55,10 @@ use repo_graph_indexer::proto_indexer::ProtoFileInput;
 use repo_graph_indexer::pyproject::{self, PyprojectModule};
 use repo_graph_indexer::routing;
 use repo_graph_indexer::settings_gradle::{self, GradleModule};
-use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
-use repo_graph_indexer::types::{IndexOptions, IndexPhase, IndexProgressEvent, IndexResult};
+use repo_graph_indexer::storage_port::{SnapshotLifecyclePort, UpdateSnapshotStatusInput};
+use repo_graph_indexer::types::{
+    IndexOptions, IndexPhase, IndexProgressEvent, IndexResult, SnapshotStatus,
+};
 use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_policy_facts::{
     extractors::behavioral_marker::extract_behavioral_markers,
@@ -1478,6 +1480,178 @@ fn persist_spring_liveness_inferences(
 
 // ── Post-index policy-facts extraction ───────────────────────────
 
+// ── PERSIST-RECURSION-1: re-parse postpass depth guard + failure isolation ──
+//
+// The per-file depth guard (`MAX_POSTPASS_TREE_DEPTH` / `tree_exceeds_depth`) lives
+// in `crate::walk` so the compose-level postpasses (below) and the in-crate
+// detectors (`express_detector`, `react_detector`) apply the SAME bound.
+use crate::walk::{tree_exceeds_depth, MAX_POSTPASS_TREE_DEPTH};
+
+/// Read-modify-write the snapshot's `extraction_diagnostics_json` blob — the
+/// existing honest-degradation channel (the same free-form JSON the orchestrator
+/// builds at finalize and `persist_read_failures` extends with `files_read_failed`).
+/// Merging a key needs NO schema change: the blob is free-form and the typed
+/// `ExtractionDiagnostics` reader ignores unknown keys.
+///
+/// **FALLIBLE (PERSIST-RECURSION-1 review-3):** this blob IS the honest-degradation
+/// signal. If we cannot read/parse/write it, a skipped-facts degradation would be
+/// silently lost — a READY snapshot claiming completeness it does not have. So every
+/// failure PROPAGATES; the caller decides what a persist failure means (for the
+/// postpass path it demotes the snapshot out of READY — see `isolate_postpass`). A
+/// prior version swallowed all three failures (`.ok().flatten()` / `if let Ok` /
+/// `let _ =`), which review-3 flagged as a false-completeness hole.
+///
+/// The blob normally exists (the orchestrator writes it at finalize before the
+/// postpasses run), but if the column is still NULL we START FROM AN EMPTY OBJECT and
+/// write it, rather than dropping the diagnostic — the snapshot row exists, so the
+/// `UPDATE` lands. On the NON-pathological path this fn is never called (both callers
+/// gate on `count > 0` or the postpass-error arm), so making it fallible cannot change
+/// byte-for-byte output on existing fixtures.
+fn merge_extraction_diagnostics(
+    storage: &mut StorageConnection,
+    snapshot_uid: &str,
+    mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) -> Result<(), ComposeError> {
+    use repo_graph_trust::TrustStorageRead;
+    let existing = TrustStorageRead::get_snapshot_extraction_diagnostics(storage, snapshot_uid)
+        .map_err(ComposeError::Storage)?;
+    let mut value = match existing {
+        Some(json_str) => serde_json::from_str::<serde_json::Value>(&json_str).map_err(|e| {
+            ComposeError::Index(format!(
+                "extraction diagnostics blob is not valid JSON: {}",
+                e
+            ))
+        })?,
+        None => serde_json::Value::Object(serde_json::Map::new()),
+    };
+    let obj = value.as_object_mut().ok_or_else(|| {
+        ComposeError::Index("extraction diagnostics blob is not a JSON object".to_string())
+    })?;
+    mutate(obj);
+    let serialized = serde_json::to_string(&value)
+        .map_err(|e| ComposeError::Index(format!("serialize extraction diagnostics: {}", e)))?;
+    SnapshotLifecyclePort::update_snapshot_extraction_diagnostics(
+        storage,
+        snapshot_uid,
+        &serialized,
+    )
+    .map_err(ComposeError::Storage)
+}
+
+/// Record that `count` files were skipped by a postpass because their AST
+/// exceeded `MAX_POSTPASS_TREE_DEPTH` (PERSIST-RECURSION-1 honest degradation).
+/// The count accumulates into `key` in the extraction-diagnostics blob.
+///
+/// FALLIBLE (review-3): a skip that cannot be recorded must NOT be silently dropped
+/// — that would present a READY snapshot as complete when it skipped pathological
+/// files. The persist failure propagates; the caller (each postpass, via `?`) turns
+/// it into the postpass outcome, which `isolate_postpass` then treats as an
+/// infrastructure failure. `count == 0` stays a no-op (no key written), preserving
+/// byte-equality on non-pathological input.
+fn record_files_skipped_deep_nesting(
+    storage: &mut StorageConnection,
+    snapshot_uid: &str,
+    key: &str,
+    count: u64,
+) -> Result<(), ComposeError> {
+    if count == 0 {
+        return Ok(());
+    }
+    merge_extraction_diagnostics(storage, snapshot_uid, |obj| {
+        let current = obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+        obj.insert(key.to_string(), serde_json::json!(current + count));
+    })
+}
+
+/// Run a fallible re-parse postpass so an ordinary postpass failure NEVER aborts the
+/// index (PERSIST-RECURSION-1 item 3). `Aborted` (transport / cancellation) still
+/// propagates; any other error runs the caller's compensating `cleanup` and is
+/// recorded as an extraction diagnostic, and the index keeps its snapshot MINUS that
+/// postpass's facts. The stack overflow the slice fixes bypassed this entirely by
+/// killing the process — item 1 (iterative walks) is the real fix; this is the
+/// failure-isolation contract made explicit.
+///
+/// ## Why `cleanup` (review-2 item 2 — atomicity)
+///
+/// A postpass that writes several tables does so through several storage methods,
+/// and each opens its OWN transaction (`connection().transaction()` = `BEGIN`).
+/// SQLite forbids a nested `BEGIN`, so the postpass's writes CANNOT be wrapped in
+/// one outer transaction. That means a postpass can fail after some of its writers
+/// already committed — a partial subset (e.g. `persist_policy_facts` after
+/// `status_mappings` committed but `behavioral_markers` failed; `persist_express_
+/// surfaces` after surfaces committed but evidence failed). `outcome` alone can't
+/// tell us that happened. So each call site passes a `cleanup` that DELETES all of
+/// that postpass's facts for the snapshot; we run it on the isolatable-error path,
+/// leaving the snapshot with NONE of the postpass's facts (the contract) instead of
+/// a half-written mix.
+///
+/// ## When the isolation mechanism ITSELF fails (review-3 item 1)
+///
+/// `cleanup` (drop partial facts) and `merge_extraction_diagnostics` (record the
+/// degradation) ARE the mechanism that keeps a failed postpass honest. If either
+/// FAILS, completing would leave a READY snapshot that is silently wrong — partial
+/// facts survive, or the missing-facts degradation is unrecorded (a false Layer-0
+/// completeness claim). Both are now fallible and both propagate.
+///
+/// But propagating alone is not enough here: **the snapshot is already `Ready`.**
+/// `index_repo` finalizes it to READY (`orchestrator.rs`) BEFORE these postpasses
+/// run, the daemon's error arm does not touch snapshot status, and the served
+/// snapshot is `get_latest_snapshot` = the latest `status = 'ready'` row. So a mere
+/// `Err` return would still SERVE the dishonest snapshot. On this infrastructure-
+/// failure path we therefore DEMOTE the snapshot out of READY (to `Failed`, the
+/// orchestrator's own fatal-error state — same `update_snapshot_status` idiom it uses
+/// on its fatal paths) so `get_latest_snapshot` excludes it; on refresh, serving
+/// falls back to the last-good parent (untouched during refresh). The demotion is
+/// best-effort (if it too fails the DB is unwritable); the original infra error still
+/// propagates. This path triggers ONLY on a compounded infra failure, never the
+/// normal postpass-failure path.
+fn isolate_postpass(
+    storage: &mut StorageConnection,
+    snapshot_uid: &str,
+    postpass: &str,
+    error_key: &str,
+    outcome: Result<usize, ComposeError>,
+    cleanup: impl FnOnce(&mut StorageConnection) -> Result<(), ComposeError>,
+) -> Result<(), ComposeError> {
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(ComposeError::Aborted) => Err(ComposeError::Aborted),
+        Err(e) => {
+            perf_log!(
+                "[PERSIST-RECURSION-1] {} postpass failed; index continues without its facts: {}",
+                postpass,
+                e
+            );
+            // The isolation mechanism: drop any partial facts, THEN record the
+            // failure as a diagnostic. Either failing is an infrastructure failure.
+            let mut isolation = cleanup(storage);
+            if isolation.is_ok() {
+                let message = e.to_string();
+                isolation = merge_extraction_diagnostics(storage, snapshot_uid, |obj| {
+                    obj.insert(error_key.to_string(), serde_json::json!(message));
+                });
+            }
+            match isolation {
+                Ok(()) => Ok(()),
+                Err(infra) => {
+                    // Demote out of READY so the silently-dishonest snapshot is not
+                    // served (see the doc comment). Best-effort, mirroring the
+                    // orchestrator's own fatal-error demotion idiom.
+                    let _ = SnapshotLifecyclePort::update_snapshot_status(
+                        storage,
+                        &UpdateSnapshotStatusInput {
+                            snapshot_uid: snapshot_uid.to_string(),
+                            status: SnapshotStatus::Failed,
+                            completed_at: None,
+                        },
+                    );
+                    Err(infra)
+                }
+            }
+        }
+    }
+}
+
 /// Extract and persist policy facts from C files.
 ///
 /// TEMPORARY postpass: Re-parses C files after extraction to
@@ -1507,6 +1681,8 @@ fn persist_policy_facts(
     let mut all_mappings = Vec::new();
     let mut all_markers = Vec::new();
     let mut all_fates = Vec::new();
+    // PERSIST-RECURSION-1: count files whose facts are skipped for pathological depth.
+    let mut skipped_deep: u64 = 0;
 
     for file in file_inputs {
         // Policy-facts scope: C files only (.c and .h).
@@ -1526,6 +1702,18 @@ fn persist_policy_facts(
             None => continue, // Parse failed, skip.
         };
 
+        // PERSIST-RECURSION-1: skip pathologically deep files entirely for this
+        // postpass (honest degradation), never let it walk the file at all.
+        if tree_exceeds_depth(&tree.root_node(), MAX_POSTPASS_TREE_DEPTH) {
+            skipped_deep += 1;
+            perf_log!(
+                "[PERSIST-RECURSION-1] policy-facts: skipping deeply nested file {} (AST depth > {})",
+                file.rel_path,
+                MAX_POSTPASS_TREE_DEPTH
+            );
+            continue;
+        }
+
         // PF-1: Extract STATUS_MAPPING facts.
         let mappings =
             extract_status_mappings(&tree, file.content.as_bytes(), &file.rel_path, repo_uid);
@@ -1540,6 +1728,13 @@ fn persist_policy_facts(
         let fates = extract_return_fates(&tree, file.content.as_bytes(), &file.rel_path, repo_uid);
         all_fates.extend(fates);
     }
+
+    record_files_skipped_deep_nesting(
+        storage,
+        snapshot_uid,
+        "policy_facts_files_skipped_deep_nesting",
+        skipped_deep,
+    )?;
 
     let mut total_count = 0;
 
@@ -1569,6 +1764,15 @@ fn persist_policy_facts(
 
     Ok(total_count)
 }
+
+/// Extractor tags stamped on every boundary-interaction surface, and the SINGLE
+/// source of truth for them. Each is written by its postpass's `EmitterContext`
+/// AND matched by that postpass's failure-isolation cleanup
+/// (`delete_boundary_facts_by_extractor`). The writer and the deleter MUST agree:
+/// a drifted literal would make the cleanup match the wrong rows (over- or
+/// under-delete the postpass's own facts), so they share one constant each.
+const C_BOUNDARY_EXTRACTOR: &str = "c-ipc:0.1.0";
+const TS_BOUNDARY_EXTRACTOR: &str = "ts-worker:0.1.0";
 
 /// BI-1A: Extract and persist boundary interaction facts from C files.
 ///
@@ -1602,9 +1806,11 @@ fn persist_boundary_interactions(
     let context = EmitterContext {
         snapshot_uid: snapshot_uid.to_string(),
         repo_uid: repo_uid.to_string(),
-        extractor: "c-ipc:0.1.0".to_string(),
+        extractor: C_BOUNDARY_EXTRACTOR.to_string(),
     };
     let mut emitter = BoundaryInteractionEmitter::new(context);
+    // PERSIST-RECURSION-1: count files whose facts are skipped for pathological depth.
+    let mut skipped_deep: u64 = 0;
 
     for file in file_inputs {
         // Boundary interaction scope: C files only (.c and .h).
@@ -1618,6 +1824,17 @@ fn persist_boundary_interactions(
             Some(t) => t,
             None => continue, // Parse failed, skip.
         };
+
+        // PERSIST-RECURSION-1: skip pathologically deep files (honest degradation).
+        if tree_exceeds_depth(&tree.root_node(), MAX_POSTPASS_TREE_DEPTH) {
+            skipped_deep += 1;
+            perf_log!(
+                "[PERSIST-RECURSION-1] boundary-interaction: skipping deeply nested file {} (AST depth > {})",
+                file.rel_path,
+                MAX_POSTPASS_TREE_DEPTH
+            );
+            continue;
+        }
 
         // Extract raw boundary calls.
         let raw_calls =
@@ -1770,6 +1987,13 @@ fn persist_boundary_interactions(
         }
     }
 
+    record_files_skipped_deep_nesting(
+        storage,
+        snapshot_uid,
+        "boundary_facts_files_skipped_deep_nesting",
+        skipped_deep,
+    )?;
+
     // Collect emitted facts.
     let surfaces: Vec<_> = emitter.surfaces().cloned().collect();
     let channels: Vec<_> = emitter.channels().cloned().collect();
@@ -1870,9 +2094,11 @@ fn persist_ts_boundary_interactions(
     let context = EmitterContext {
         snapshot_uid: snapshot_uid.to_string(),
         repo_uid: repo_uid.to_string(),
-        extractor: "ts-worker:0.1.0".to_string(),
+        extractor: TS_BOUNDARY_EXTRACTOR.to_string(),
     };
     let mut emitter = BoundaryInteractionEmitter::new(context);
+    // PERSIST-RECURSION-1: count files whose facts are skipped for pathological depth.
+    let mut skipped_deep: u64 = 0;
 
     for file in file_inputs {
         // Boundary interaction scope: TS/JS files only.
@@ -1900,6 +2126,19 @@ fn persist_ts_boundary_interactions(
             Some(t) => t,
             None => continue, // Parse failed, skip.
         };
+
+        // PERSIST-RECURSION-1: skip pathologically deep files (honest
+        // degradation). Guards ALL of this postpass's walks — SAB/Atomics,
+        // AMQP, Kafka, NATS — before any of them descends the file.
+        if tree_exceeds_depth(&tree.root_node(), MAX_POSTPASS_TREE_DEPTH) {
+            skipped_deep += 1;
+            perf_log!(
+                "[PERSIST-RECURSION-1] ts-boundary-interaction: skipping deeply nested file {} (AST depth > {})",
+                file.rel_path,
+                MAX_POSTPASS_TREE_DEPTH
+            );
+            continue;
+        }
 
         // Extract SharedArrayBuffer/Atomics boundary calls (BI-1C).
         let raw_calls =
@@ -1965,6 +2204,13 @@ fn persist_ts_boundary_interactions(
             }
         }
     }
+
+    record_files_skipped_deep_nesting(
+        storage,
+        snapshot_uid,
+        "ts_boundary_facts_files_skipped_deep_nesting",
+        skipped_deep,
+    )?;
 
     // Collect emitted facts.
     let surfaces: Vec<_> = emitter.surfaces().cloned().collect();
@@ -2155,8 +2401,20 @@ fn persist_express_surfaces(
         return Ok(0);
     }
 
-    // Detect Express routes.
-    let routes = detect_express_routes(file_inputs);
+    // Detect Express routes. PERSIST-RECURSION-1: `detect_express_routes` applies
+    // the per-file depth guard internally (it owns the parse) and reports how many
+    // files it skipped for pathological nesting; record that honestly (before any
+    // early return) so the skip surfaces to the reader even if no route resolved.
+    let crate::express_detector::DetectedRoutes {
+        routes,
+        files_skipped_deep_nesting,
+    } = detect_express_routes(file_inputs);
+    record_files_skipped_deep_nesting(
+        storage,
+        snapshot_uid,
+        "express_surface_facts_files_skipped_deep_nesting",
+        files_skipped_deep_nesting,
+    )?;
     if routes.is_empty() {
         return Ok(0);
     }
@@ -2281,9 +2539,32 @@ fn persist_react_inferences(
     snapshot_uid: &str,
     file_inputs: &[FileInput],
 ) -> Result<usize, ComposeError> {
-    // Detect components and hooks.
-    let components = detect_react_components(file_inputs);
-    let hooks = detect_react_hooks(file_inputs);
+    // Detect components and hooks. PERSIST-RECURSION-1: each detector applies the
+    // per-file depth guard internally (they own the parse) and returns the PATHS of
+    // the files it skipped. React runs TWO passes over the same files (components +
+    // hooks, different gates), so a single ultra-deep .tsx can be skipped by both.
+    // We UNION the two path lists and record the count of DISTINCT files skipped — a
+    // file skipped by both passes is one skipped file, not two (review-2 item 1;
+    // the reader frame says "React inferences skipped for N files"). Recorded before
+    // any early return so the skip surfaces even if no inference resolved.
+    let crate::react_detector::DetectedComponents {
+        components,
+        files_skipped_deep_nesting: components_skipped_deep,
+    } = detect_react_components(file_inputs);
+    let crate::react_detector::DetectedHooks {
+        hooks,
+        files_skipped_deep_nesting: hooks_skipped_deep,
+    } = detect_react_hooks(file_inputs);
+    let distinct_skipped_deep: std::collections::BTreeSet<String> = components_skipped_deep
+        .into_iter()
+        .chain(hooks_skipped_deep)
+        .collect();
+    record_files_skipped_deep_nesting(
+        storage,
+        snapshot_uid,
+        "react_inference_facts_files_skipped_deep_nesting",
+        distinct_skipped_deep.len() as u64,
+    )?;
 
     if components.is_empty() && hooks.is_empty() {
         return Ok(0);
@@ -2858,31 +3139,76 @@ pub fn index_into_storage_with_progress(
     emit_progress(&mut progress, "persisting", 4, 8)?; // about to persist policy facts
                                                        // PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
                                                        // TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
-    persist_policy_facts(
+    let policy_facts_outcome = persist_policy_facts(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.file_inputs,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "policy-facts",
+        "policy_facts_postpass_error",
+        policy_facts_outcome,
+        // Compensating cleanup: policy facts span three tables via three
+        // separately-committing writers — clear all three for the snapshot.
+        |s| {
+            s.delete_policy_facts(&result.snapshot_uid)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     emit_progress(&mut progress, "persisting", 5, 8)?; // about to persist C boundary interactions
                                                        // BI-1A: Extract and persist boundary interaction facts from C files.
                                                        // TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
-    persist_boundary_interactions(
+    let boundary_outcome = persist_boundary_interactions(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.file_inputs,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "boundary-interaction",
+        "boundary_facts_postpass_error",
+        boundary_outcome,
+        // Compensating cleanup: the boundary writer inserts surfaces then channels
+        // as separate autocommitting statements, so a failure can leave a partial
+        // subset. Scope the delete to THIS postpass's own extractor — C and TS
+        // boundary facts share this table, so a snapshot-wide delete would erase the
+        // sibling postpass's already-committed facts.
+        |s| {
+            s.delete_boundary_facts_by_extractor(&result.snapshot_uid, C_BOUNDARY_EXTRACTOR)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     emit_progress(&mut progress, "persisting", 6, 8)?; // about to persist TS boundary interactions
                                                        // BI-1C: Extract and persist boundary interaction facts from TS/JS files.
                                                        // SharedArrayBuffer, Worker, postMessage, Atomics patterns.
-    persist_ts_boundary_interactions(
+    let ts_boundary_outcome = persist_ts_boundary_interactions(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.file_inputs,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "ts-boundary-interaction",
+        "ts_boundary_facts_postpass_error",
+        ts_boundary_outcome,
+        // Compensating cleanup: same table as the C postpass — scope to THIS
+        // postpass's extractor so a TS failure never deletes the C boundary facts.
+        |s| {
+            s.delete_boundary_facts_by_extractor(&result.snapshot_uid, TS_BOUNDARY_EXTRACTOR)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     emit_progress(&mut progress, "persisting", 7, 9)?; // about to persist Cargo modules
@@ -2907,20 +3233,51 @@ pub fn index_into_storage_with_progress(
 
     // FD-1A: Extract and persist Express route surfaces from TS/JS files.
     // Must come after npm modules are persisted (FK constraint on module_candidate_uid).
-    persist_express_surfaces(
+    // PERSIST-RECURSION-1 item 3: a re-parse postpass failure never aborts the index.
+    let express_outcome = persist_express_surfaces(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.file_inputs,
         &prepared.npm_modules,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "express-surfaces",
+        "express_surface_facts_postpass_error",
+        express_outcome,
+        // Compensating cleanup: surfaces are inserted then evidence keyed by them —
+        // clear both (evidence deleted explicitly, then surfaces).
+        |s| {
+            s.delete_project_surface_facts(&result.snapshot_uid)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     // FD-1B: Extract and persist React component/hook inferences from TSX/JSX files.
-    persist_react_inferences(
+    let react_outcome = persist_react_inferences(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.file_inputs,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "react-inferences",
+        "react_inference_facts_postpass_error",
+        react_outcome,
+        // Compensating cleanup: React writes inferences of two kinds — clear both.
+        |s| {
+            s.delete_inferences_by_kind(
+                &result.snapshot_uid,
+                &["react_component", "react_hook_usage"],
+            )
+            .map(|_| ())
+            .map_err(ComposeError::Storage)
+        },
     )?;
 
     emit_progress(&mut progress, "persisting", 9, 11)?; // about to persist pyproject modules
@@ -3450,33 +3807,78 @@ pub fn refresh_into_storage_with_progress(
                                                        // PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
                                                        // TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
                                                        // Only extract from changed files; unchanged files copied forward.
-    persist_policy_facts(
+    let policy_facts_outcome = persist_policy_facts(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &changed_files_owned,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "policy-facts",
+        "policy_facts_postpass_error",
+        policy_facts_outcome,
+        // Compensating cleanup: policy facts span three tables via three
+        // separately-committing writers — clear all three for the snapshot.
+        |s| {
+            s.delete_policy_facts(&result.snapshot_uid)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     emit_progress(&mut progress, "persisting", 5, 8)?; // about to persist C boundary interactions
                                                        // BI-1A: Extract and persist boundary interaction facts from C files.
                                                        // TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
                                                        // Only extract from changed files; unchanged files copied forward.
-    persist_boundary_interactions(
+    let boundary_outcome = persist_boundary_interactions(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &changed_files_owned,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "boundary-interaction",
+        "boundary_facts_postpass_error",
+        boundary_outcome,
+        // Compensating cleanup: the boundary writer inserts surfaces then channels
+        // as separate autocommitting statements, so a failure can leave a partial
+        // subset. Scope the delete to THIS postpass's own extractor — C and TS
+        // boundary facts share this table, so a snapshot-wide delete would erase the
+        // sibling postpass's already-committed facts.
+        |s| {
+            s.delete_boundary_facts_by_extractor(&result.snapshot_uid, C_BOUNDARY_EXTRACTOR)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     emit_progress(&mut progress, "persisting", 6, 8)?; // about to persist TS boundary interactions
                                                        // BI-1C: Extract and persist boundary interaction facts from TS/JS files.
                                                        // SharedArrayBuffer, Worker, postMessage, Atomics patterns.
                                                        // Only extract from changed files; unchanged files copied forward.
-    persist_ts_boundary_interactions(
+    let ts_boundary_outcome = persist_ts_boundary_interactions(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &changed_files_owned,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "ts-boundary-interaction",
+        "ts_boundary_facts_postpass_error",
+        ts_boundary_outcome,
+        // Compensating cleanup: same table as the C postpass — scope to THIS
+        // postpass's extractor so a TS failure never deletes the C boundary facts.
+        |s| {
+            s.delete_boundary_facts_by_extractor(&result.snapshot_uid, TS_BOUNDARY_EXTRACTOR)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     let early_postpass_ms = postpass_start.elapsed().as_millis();
@@ -3511,21 +3913,52 @@ pub fn refresh_into_storage_with_progress(
     // FD-1A: Extract and persist Express route surfaces from TS/JS files.
     // Only extract from changed files; unchanged files copied forward.
     // Must come after npm modules are persisted (FK constraint on module_candidate_uid).
-    persist_express_surfaces(
+    // PERSIST-RECURSION-1 item 3: a re-parse postpass failure never aborts the index.
+    let express_outcome = persist_express_surfaces(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &changed_files_owned,
         &prepared.npm_modules,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "express-surfaces",
+        "express_surface_facts_postpass_error",
+        express_outcome,
+        // Compensating cleanup: surfaces are inserted then evidence keyed by them —
+        // clear both (evidence deleted explicitly, then surfaces).
+        |s| {
+            s.delete_project_surface_facts(&result.snapshot_uid)
+                .map(|_| ())
+                .map_err(ComposeError::Storage)
+        },
     )?;
 
     // FD-1B: Extract and persist React component/hook inferences from TSX/JSX files.
     // Only extract from changed files; unchanged files copied forward via inference copy-forward.
-    persist_react_inferences(
+    let react_outcome = persist_react_inferences(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &changed_files_owned,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "react-inferences",
+        "react_inference_facts_postpass_error",
+        react_outcome,
+        // Compensating cleanup: React writes inferences of two kinds — clear both.
+        |s| {
+            s.delete_inferences_by_kind(
+                &result.snapshot_uid,
+                &["react_component", "react_hook_usage"],
+            )
+            .map(|_| ())
+            .map_err(ComposeError::Storage)
+        },
     )?;
 
     // rust-module-parity Phase 2c: Persist pyproject.toml-derived module candidates and file ownership.
@@ -3665,6 +4098,673 @@ fn ensure_repo(
 mod tests {
     use super::*;
     use std::fs;
+
+    /// PERSIST-RECURSION-1: the per-file depth guard detects pathologically deep
+    /// trees iteratively — it never recurses, so the check itself cannot overflow
+    /// — and leaves normal-depth trees untouched.
+    #[test]
+    fn tree_exceeds_depth_flags_only_pathological_nesting() {
+        fn parse_c(source: &str) -> tree_sitter::Tree {
+            let mut parser = tree_sitter::Parser::new();
+            let lang: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
+            parser.set_language(&lang).unwrap();
+            parser.parse(source, None).unwrap()
+        }
+
+        // An ordinary shallow file is well under the guard.
+        let shallow = parse_c("int main() { return 0; }");
+        assert!(!tree_exceeds_depth(
+            &shallow.root_node(),
+            MAX_POSTPASS_TREE_DEPTH
+        ));
+
+        // A file nested far past the guard is flagged — and the check completes
+        // (it is iterative, so it does not overflow while measuring the depth).
+        let mut deep = String::from("void deep() {\n");
+        for _ in 0..(MAX_POSTPASS_TREE_DEPTH + 5_000) {
+            deep.push('{');
+        }
+        for _ in 0..(MAX_POSTPASS_TREE_DEPTH + 5_000) {
+            deep.push('}');
+        }
+        deep.push_str("\n}\n");
+        let deep_tree = parse_c(&deep);
+        assert!(tree_exceeds_depth(
+            &deep_tree.root_node(),
+            MAX_POSTPASS_TREE_DEPTH
+        ));
+
+        // The bound is honored, not hard-coded: a tiny limit is exceeded even by
+        // the shallow tree.
+        assert!(tree_exceeds_depth(&shallow.root_node(), 1));
+    }
+
+    /// PERSIST-RECURSION-1 item 3: a fallible postpass failure must NEVER abort
+    /// the index. `isolate_postpass` converts a non-`Aborted` error into `Ok`
+    /// after recording it as an extraction diagnostic, so the index completes
+    /// without that postpass's facts; `Aborted` (transport / cancellation) still
+    /// propagates so a real cancel is honored, not swallowed.
+    #[test]
+    fn isolate_postpass_records_failure_but_never_aborts_index() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        // A non-Aborted postpass error is ISOLATED: Ok returned (index continues),
+        // the compensating cleanup RUNS (so any partial facts are removed), and the
+        // failure is recorded in the extraction-diagnostics blob under the postpass's
+        // error key.
+        let cleaned = std::cell::Cell::new(false);
+        let outcome = isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "test-postpass",
+            "test_postpass_error",
+            Err(ComposeError::Index("simulated postpass failure".into())),
+            |_s| {
+                cleaned.set(true);
+                Ok(())
+            },
+        );
+        assert!(
+            outcome.is_ok(),
+            "a non-Aborted postpass failure must be isolated, not propagated"
+        );
+        assert!(
+            cleaned.get(),
+            "cleanup must run on an isolatable failure so no partial facts survive"
+        );
+
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .expect("diagnostics blob is present after a normal index");
+        let value: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            value.get("test_postpass_error").and_then(|v| v.as_str()),
+            Some("index: simulated postpass failure"),
+            "the isolated failure is recorded as an extraction diagnostic"
+        );
+
+        // Aborted STILL propagates — isolation must not swallow cancellation — and
+        // cleanup does NOT run (the whole index is tearing down; DAEMON-CRASH-
+        // RECOVERY-1 reconciles the orphaned snapshot).
+        let cleaned = std::cell::Cell::new(false);
+        let aborted = isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "test-postpass",
+            "test_postpass_error",
+            Err(ComposeError::Aborted),
+            |_s| {
+                cleaned.set(true);
+                Ok(())
+            },
+        );
+        assert!(
+            matches!(aborted, Err(ComposeError::Aborted)),
+            "Aborted (transport/cancel) must propagate, not be isolated"
+        );
+        assert!(!cleaned.get(), "Aborted must not trigger fact cleanup");
+
+        // A successful postpass is a plain pass-through — its facts are KEPT, so
+        // cleanup does NOT run.
+        let cleaned = std::cell::Cell::new(false);
+        assert!(isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "test-postpass",
+            "test_postpass_error",
+            Ok(5),
+            |_s| {
+                cleaned.set(true);
+                Ok(())
+            },
+        )
+        .is_ok());
+        assert!(
+            !cleaned.get(),
+            "a successful postpass keeps its facts — no cleanup"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-2 item 2 (failure-path proof): when a multi-write
+    /// postpass fails AFTER committing some of its facts, `isolate_postpass`'s
+    /// compensating cleanup removes those partial facts so the snapshot completes
+    /// WITHOUT them — never a half-written subset. We plant a committed policy fact
+    /// (standing in for the partial write), fail the postpass, and prove the fact is
+    /// gone and the failure is honestly recorded.
+    #[test]
+    fn isolate_postpass_cleanup_removes_partial_facts() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        // Plant a committed policy fact — stands in for a partial write left by a
+        // policy-facts postpass that then failed on a later table.
+        storage
+            .execute_raw(&format!(
+                "INSERT INTO status_mappings
+                 (uid, snapshot_uid, symbol_key, function_name, file_path,
+                  line_start, line_end, source_type, target_type, mappings_json)
+                 VALUES ('u1', '{snap_uid}', 'k', 'f', 'a.c', 1, 2, 'in', 'out', '[]')"
+            ))
+            .unwrap();
+        let count = |s: &StorageConnection| -> i64 {
+            s.query_scalar(&format!(
+                "SELECT COUNT(*) FROM status_mappings WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap()
+        };
+        assert_eq!(count(&storage), 1, "partial fact present before isolation");
+
+        // The postpass fails; isolate_postpass runs the REAL policy-facts cleanup.
+        let outcome = isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "policy-facts",
+            "policy_facts_postpass_error",
+            Err(ComposeError::Index("boom".into())),
+            |s| {
+                s.delete_policy_facts(&snap_uid)
+                    .map(|_| ())
+                    .map_err(ComposeError::Storage)
+            },
+        );
+        assert!(outcome.is_ok(), "the index continues past the failure");
+
+        // The partial fact is GONE (no half-written subset), and the failure is
+        // recorded so the degradation is honest, not silent.
+        assert_eq!(
+            count(&storage),
+            0,
+            "cleanup removed the partial policy fact"
+        );
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .expect("diagnostics blob present");
+        let value: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            value
+                .get("policy_facts_postpass_error")
+                .and_then(|v| v.as_str()),
+            Some("index: boom"),
+            "the isolated failure is recorded as an extraction diagnostic"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-2 item 2 (boundary sibling-preservation): the C
+    /// (`c-ipc`) and TS (`ts-worker`) boundary postpasses write the SAME table under
+    /// one snapshot, tagged by `extractor`. When the TS postpass fails, its
+    /// compensating cleanup must remove ONLY the TS facts and LEAVE the already-
+    /// committed C facts — a snapshot-wide delete would collaterally erase correct C
+    /// facts and misreport them as measured-absent. Exercises the REAL TS boundary
+    /// cleanup closure and the extractor consts the production call sites wire in.
+    #[test]
+    fn isolate_postpass_boundary_cleanup_preserves_sibling_extractor_facts() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+        // The surfaces' repo_uid FK (NOT NULL → repos) needs the real repo uid.
+        let repo_uid: String = storage
+            .query_scalar(&format!(
+                "SELECT repo_uid FROM snapshots WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap();
+
+        // Plant one committed C boundary surface (the successful C postpass) and one
+        // TS boundary surface (a fact the TS postpass committed before it then failed).
+        let plant = |s: &StorageConnection, uid: &str, extractor: &str, file: &str| {
+            s.execute_raw(&format!(
+                "INSERT INTO boundary_interaction_surfaces
+                 (surface_uid, snapshot_uid, repo_uid, boundary_scope, channel_kind,
+                  direction, protocol, protocol_family, interaction_pattern,
+                  endpoint_locality, symbol_stable_key, source_file, line_start,
+                  line_end, col_start, col_end, extractor, basis, confidence, evidence_json)
+                 VALUES ('{uid}', '{snap_uid}', '{repo_uid}', 'inter_process', 'unix_socket',
+                  'provider', 'unix', 'socket', 'stream', 'same_host_named', 'k', '{file}',
+                  1, 2, 3, 4, '{extractor}', 'api_call', 1.0, '{{}}')"
+            ))
+            .unwrap();
+        };
+        plant(&storage, "c-surf", C_BOUNDARY_EXTRACTOR, "src/server.c");
+        plant(&storage, "ts-surf", TS_BOUNDARY_EXTRACTOR, "src/worker.ts");
+
+        let count_ext = |s: &StorageConnection, ext: &str| -> i64 {
+            s.query_scalar(&format!(
+                "SELECT COUNT(*) FROM boundary_interaction_surfaces
+                 WHERE snapshot_uid = '{snap_uid}' AND extractor = '{ext}'"
+            ))
+            .unwrap()
+        };
+        assert_eq!(count_ext(&storage, C_BOUNDARY_EXTRACTOR), 1);
+        assert_eq!(count_ext(&storage, TS_BOUNDARY_EXTRACTOR), 1);
+
+        // The TS boundary postpass fails; isolate_postpass runs the REAL TS cleanup.
+        let outcome = isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "ts-boundary-interaction",
+            "ts_boundary_facts_postpass_error",
+            Err(ComposeError::Index("boom".into())),
+            |s| {
+                s.delete_boundary_facts_by_extractor(&snap_uid, TS_BOUNDARY_EXTRACTOR)
+                    .map(|_| ())
+                    .map_err(ComposeError::Storage)
+            },
+        );
+        assert!(outcome.is_ok(), "the index continues past the failure");
+
+        // TS facts gone; the sibling C facts SURVIVE (not collaterally deleted).
+        assert_eq!(
+            count_ext(&storage, TS_BOUNDARY_EXTRACTOR),
+            0,
+            "the failed postpass's own facts are removed"
+        );
+        assert_eq!(
+            count_ext(&storage, C_BOUNDARY_EXTRACTOR),
+            1,
+            "the sibling C boundary facts are preserved"
+        );
+
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .expect("diagnostics blob present");
+        let value: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            value
+                .get("ts_boundary_facts_postpass_error")
+                .and_then(|v| v.as_str()),
+            Some("index: boom"),
+            "the isolated failure is recorded"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-2 item 1 (dedup proof): a single pathologically
+    /// deep React file is skipped by BOTH the component and hook passes, but the
+    /// recorded degradation count is the number of DISTINCT files skipped — ONE, not
+    /// two. Guards against reporting one skipped file as two.
+    #[test]
+    fn persist_react_inferences_dedups_deep_file_across_passes() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        // One deep .tsx that BOTH React passes parse (components gate: .tsx + react
+        // import; hooks gate: wide ext + react import) and then skip at the depth
+        // guard — so without dedup the recorded count would be 2.
+        let mut deep =
+            String::from("import React, { useState } from 'react';\nfunction Deep() {\n");
+        for _ in 0..(MAX_POSTPASS_TREE_DEPTH + 2_000) {
+            deep.push('{');
+        }
+        deep.push_str(" useState(0); ");
+        for _ in 0..(MAX_POSTPASS_TREE_DEPTH + 2_000) {
+            deep.push('}');
+        }
+        deep.push_str("\n  return <div/>;\n}\n");
+        let file_inputs = vec![FileInput {
+            rel_path: "deep.tsx".to_string(),
+            content: deep,
+            content_hash: String::new(),
+            size_bytes: 0,
+            line_count: 0,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }];
+
+        let persisted =
+            persist_react_inferences(&mut storage, "r1", &snap_uid, &file_inputs).unwrap();
+        assert_eq!(
+            persisted, 0,
+            "the deep file yields no inferences (all skipped)"
+        );
+
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .expect("diagnostics blob present");
+        let value: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            value
+                .get("react_inference_facts_files_skipped_deep_nesting")
+                .and_then(|v| v.as_u64()),
+            Some(1),
+            "one deep file skipped by both passes counts ONCE, not twice"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 item 2 (honest degradation write path): the per-file
+    /// skip counter accumulates into the extraction-diagnostics blob so a reader
+    /// can see that pathological files were skipped rather than silently lost.
+    #[test]
+    fn record_files_skipped_deep_nesting_accumulates_into_diagnostics() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        // Zero is a no-op — no key is written when nothing was skipped.
+        record_files_skipped_deep_nesting(&mut storage, &snap_uid, "boundary_deep_skips", 0)
+            .unwrap();
+        let diag0 = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .unwrap();
+        let v0: serde_json::Value = serde_json::from_str(&diag0).unwrap();
+        assert!(
+            v0.get("boundary_deep_skips").is_none(),
+            "0 must not write a key"
+        );
+
+        // Successive skips accumulate (multiple postpasses / refresh add up).
+        record_files_skipped_deep_nesting(&mut storage, &snap_uid, "boundary_deep_skips", 3)
+            .unwrap();
+        record_files_skipped_deep_nesting(&mut storage, &snap_uid, "boundary_deep_skips", 2)
+            .unwrap();
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            v.get("boundary_deep_skips").and_then(|x| x.as_u64()),
+            Some(5),
+            "skip counts accumulate honestly across calls"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-3 item 1 (failure-path): if the compensating
+    /// cleanup ITSELF fails, the snapshot would retain a partial subset of the failed
+    /// postpass's facts — a silently-dishonest READY snapshot. `isolate_postpass` must
+    /// NOT complete: it DEMOTES the snapshot out of READY (so `get_latest_snapshot`
+    /// stops serving it) and PROPAGATES the infrastructure error. The prior version
+    /// swallowed the cleanup error (`let _ = ...`) and returned `Ok`.
+    #[test]
+    fn isolate_postpass_demotes_and_propagates_when_cleanup_fails() {
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        let status = |s: &StorageConnection| -> String {
+            s.query_scalar(&format!(
+                "SELECT status FROM snapshots WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap()
+        };
+        assert_eq!(
+            status(&storage),
+            "ready",
+            "the snapshot is already READY before the postpass runs (orchestrator finalize)"
+        );
+
+        // The postpass failed AND its cleanup cannot remove the partial facts — a
+        // storage I/O failure, modeled as a cleanup closure that returns an error.
+        let ran = std::cell::Cell::new(false);
+        let outcome = isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "policy-facts",
+            "policy_facts_postpass_error",
+            Err(ComposeError::Index("postpass boom".into())),
+            |_s| {
+                ran.set(true);
+                Err(ComposeError::Index(
+                    "cleanup could not remove partial facts".into(),
+                ))
+            },
+        );
+        assert!(ran.get(), "cleanup was attempted");
+        assert!(
+            outcome.is_err(),
+            "a cleanup failure must PROPAGATE — the index must not silently complete"
+        );
+        assert_eq!(
+            status(&storage),
+            "failed",
+            "the dishonest snapshot is DEMOTED out of READY so it is not served"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-3 item 1 (failure-path): if RECORDING the
+    /// degradation diagnostic fails, the READY snapshot would hide that this
+    /// postpass's facts are absent (a false completeness claim). `isolate_postpass`
+    /// must DEMOTE and PROPAGATE. We inject the failure by corrupting the diagnostics
+    /// blob so the read-modify-write cannot parse it — a stand-in for a storage I/O
+    /// failure on the diagnostics write (which cannot be provoked on an in-memory DB).
+    #[test]
+    fn isolate_postpass_demotes_and_propagates_when_diagnostic_persist_fails() {
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        storage
+            .execute_raw(&format!(
+                "UPDATE snapshots SET extraction_diagnostics_json = 'not-valid-json{{' \
+                 WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap();
+
+        let outcome = isolate_postpass(
+            &mut storage,
+            &snap_uid,
+            "policy-facts",
+            "policy_facts_postpass_error",
+            Err(ComposeError::Index("postpass boom".into())),
+            // Cleanup succeeds; the failure is in RECORDING the degradation.
+            |_s| Ok(()),
+        );
+        assert!(
+            outcome.is_err(),
+            "a diagnostic-persist failure must PROPAGATE — the degradation must not be silently lost"
+        );
+        let status: String = storage
+            .query_scalar(&format!(
+                "SELECT status FROM snapshots WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap();
+        assert_eq!(
+            status, "failed",
+            "the snapshot whose degradation could not be recorded is demoted out of READY"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-3 item 1: a deep-file skip that cannot be persisted
+    /// must PROPAGATE, never be silently dropped — a dropped skip is a READY snapshot
+    /// claiming a completeness it does not have. Corrupting the blob makes the
+    /// read-modify-write fail.
+    #[test]
+    fn record_files_skipped_deep_nesting_propagates_persist_failure() {
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        storage
+            .execute_raw(&format!(
+                "UPDATE snapshots SET extraction_diagnostics_json = 'not-json' \
+                 WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap();
+
+        let outcome =
+            record_files_skipped_deep_nesting(&mut storage, &snap_uid, "boundary_deep_skips", 1);
+        assert!(
+            outcome.is_err(),
+            "a skip that cannot be persisted must propagate, not be silently lost"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 review-3 item 1: even if the diagnostics column is still
+    /// NULL, a deep-file skip is RECORDED (not silently dropped) —
+    /// `merge_extraction_diagnostics` starts from an empty object and writes it (the
+    /// snapshot row exists, so the UPDATE lands). Closes the `None`-branch honesty gap.
+    #[test]
+    fn record_files_skipped_deep_nesting_creates_blob_when_column_null() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap_uid = result.snapshot_uid.clone();
+
+        storage
+            .execute_raw(&format!(
+                "UPDATE snapshots SET extraction_diagnostics_json = NULL \
+                 WHERE snapshot_uid = '{snap_uid}'"
+            ))
+            .unwrap();
+
+        record_files_skipped_deep_nesting(&mut storage, &snap_uid, "boundary_deep_skips", 2)
+            .unwrap();
+
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap_uid)
+            .unwrap()
+            .expect("a skip must create the blob even when the column was NULL");
+        let v: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            v.get("boundary_deep_skips").and_then(|x| x.as_u64()),
+            Some(2),
+            "the skip is recorded honestly rather than dropped"
+        );
+    }
+
+    /// PERSIST-RECURSION-1 regression (the F13 killer BI-1A + its PF-1 sibling):
+    /// a pathologically deep C file fed to the C re-parse postpasses COMPLETES
+    /// (no stack overflow — reaching the asserts is the proof) and is honestly
+    /// SKIPPED, with the skip recorded in the snapshot's extraction-diagnostics
+    /// blob (the exact key the reader surface renders). Never a process death,
+    /// never silent loss.
+    ///
+    /// Driven straight into the postpasses (not through `index_into_storage`) on
+    /// purpose: the MAIN C extractor still descends the AST recursively (TECH-DEBT
+    /// F14, out of this slice's scope), so a deep file routed through "extracting"
+    /// would overflow THERE before reaching the guarded postpass. This isolates the
+    /// postpass contract this slice fixes.
+    #[test]
+    fn deeply_nested_c_file_is_skipped_by_postpasses_and_recorded() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let fixture = make_fixture_repo();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let snap = result.snapshot_uid.clone();
+
+        // A C file nested far past the guard (~2×15k braces).
+        let mut deep = String::from("void deep() {\n");
+        for _ in 0..(MAX_POSTPASS_TREE_DEPTH + 5_000) {
+            deep.push('{');
+        }
+        for _ in 0..(MAX_POSTPASS_TREE_DEPTH + 5_000) {
+            deep.push('}');
+        }
+        deep.push_str("\n}\n");
+        let deep_file = FileInput {
+            rel_path: "deep.c".to_string(),
+            content: deep,
+            content_hash: String::new(),
+            size_bytes: 0,
+            line_count: 0,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        };
+
+        // Both C re-parse postpasses complete WITHOUT overflow and skip the file
+        // rather than descend it.
+        persist_boundary_interactions(&mut storage, "r1", &snap, std::slice::from_ref(&deep_file))
+            .unwrap();
+        persist_policy_facts(&mut storage, "r1", &snap, std::slice::from_ref(&deep_file)).unwrap();
+
+        // The skips are recorded honestly — this is the blob the reader surface reads.
+        let diag = TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &snap)
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            v.get("boundary_facts_files_skipped_deep_nesting")
+                .and_then(|x| x.as_u64()),
+            Some(1),
+            "BI-1A (the F13 killer) skip recorded"
+        );
+        assert_eq!(
+            v.get("policy_facts_files_skipped_deep_nesting")
+                .and_then(|x| x.as_u64()),
+            Some(1),
+            "PF-1 sibling skip recorded"
+        );
+    }
 
     fn make_fixture_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();

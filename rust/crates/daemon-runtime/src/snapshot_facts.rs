@@ -246,6 +246,27 @@ pub fn collect_snapshot_facts(state: &DaemonState, db_path: &Path, repo_uid: &st
         .ok()
         .map(|s| s.prunable);
     facts["prunable_snapshots"] = json!(prunable);
+
+    // PERSIST-RECURSION-1: surface the CURRENT snapshot's honest extraction
+    // degradations (deeply-nested files skipped, isolated postpass failures) from
+    // its diagnostics blob. The latest snapshot is the most recent index attempt —
+    // the same one doctor's other storage lines describe. Read-only + best-effort:
+    // a missing blob or read failure simply shows no degradation line, never an error.
+    if let Some(latest) = storage
+        .get_latest_snapshot_any_state(repo_uid)
+        .ok()
+        .flatten()
+    {
+        let diag = repo_graph_trust::TrustStorageRead::get_snapshot_extraction_diagnostics(
+            &storage,
+            &latest.snapshot_uid,
+        )
+        .ok()
+        .flatten();
+        if let Some(degradations) = extraction_degradations(diag.as_deref()) {
+            facts["extraction_degradations"] = degradations;
+        }
+    }
     facts
 }
 
@@ -258,6 +279,92 @@ fn facts_read_error(db_size_bytes: u64, reason: &str) -> Value {
         "snapshots": Value::Null,
         "read_error": reason,
     })
+}
+
+/// PERSIST-RECURSION-1 (honest degradation surface): parse a snapshot's
+/// extraction-diagnostics blob into the reader-facing degradations that doctor
+/// and `rmap repo info` show — per-postpass counts of files skipped for
+/// pathological AST nesting, and any isolated postpass failures.
+///
+/// Returns `None` when there is nothing to report (the overwhelmingly common
+/// case), so callers only attach the field when a degradation actually happened.
+/// PURE and unit-testable: the blob is the free-form JSON the indexer writes; the
+/// typed `ExtractionDiagnostics` reader ignores these extra keys, so this is the
+/// ONLY place they surface. The reader-language subject mapping lives here, in one
+/// place, and the `lines` are printed verbatim by both consumers (matching this
+/// module's "compute reader strings here" contract).
+fn extraction_degradations(diagnostics_json: Option<&str>) -> Option<Value> {
+    let value: Value = serde_json::from_str(diagnostics_json?).ok()?;
+    let obj = value.as_object()?;
+
+    // (postpass family, count) / (postpass family, message). Family is the key
+    // with its role suffix stripped, e.g. `boundary_facts_files_skipped_deep_nesting`
+    // and `boundary_facts_postpass_error` both map to family `boundary_facts`.
+    let mut skips: Vec<(String, u64)> = Vec::new();
+    let mut errors: Vec<(String, String)> = Vec::new();
+    for (key, val) in obj {
+        if let Some(family) = key.strip_suffix("_files_skipped_deep_nesting") {
+            // `> 0` only: 0 is "measured and absent", never a written key, but be
+            // defensive so a stray 0 never produces a "skipped for 0 files" line.
+            if let Some(n) = val.as_u64() {
+                if n > 0 {
+                    skips.push((family.to_string(), n));
+                }
+            }
+        } else if let Some(family) = key.strip_suffix("_postpass_error") {
+            if let Some(msg) = val.as_str() {
+                errors.push((family.to_string(), msg.to_string()));
+            }
+        }
+    }
+    if skips.is_empty() && errors.is_empty() {
+        return None;
+    }
+    // Deterministic (alphabetical by family) — no reader-facing order jitter.
+    skips.sort();
+    errors.sort();
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut skips_obj = serde_json::Map::new();
+    for (family, n) in &skips {
+        let files = if *n == 1 { "file" } else { "files" };
+        lines.push(format!(
+            "{} skipped for {} {} (pathological nesting)",
+            postpass_subject(family),
+            n,
+            files
+        ));
+        skips_obj.insert(family.clone(), json!(n));
+    }
+    let mut errors_obj = serde_json::Map::new();
+    for (family, msg) in &errors {
+        lines.push(format!(
+            "{} not extracted for this snapshot — the postpass failed but the index completed ({})",
+            postpass_subject(family),
+            msg
+        ));
+        errors_obj.insert(family.clone(), json!(msg));
+    }
+
+    Some(json!({
+        "deep_nesting_skips": Value::Object(skips_obj),
+        "postpass_errors": Value::Object(errors_obj),
+        "lines": lines,
+    }))
+}
+
+/// Map a re-parse postpass family to the reader's own subject (VISION: labels
+/// speak the reader's language, not our pipeline's). An unknown family (a future
+/// postpass) degrades to a humanised form of the key rather than a raw identifier.
+fn postpass_subject(family: &str) -> String {
+    match family {
+        "policy_facts" => "policy facts".to_string(),
+        "boundary_facts" => "boundary facts".to_string(),
+        "ts_boundary_facts" => "boundary facts (TypeScript/JavaScript)".to_string(),
+        "express_surface_facts" => "HTTP route surfaces".to_string(),
+        "react_inference_facts" => "React inferences".to_string(),
+        other => other.replace('_', " "),
+    }
 }
 
 #[cfg(test)]
@@ -373,6 +480,102 @@ mod tests {
             facts["interrupted_snapshots"].as_array().unwrap().len(),
             1,
             "the building snapshot is surfaced as interrupted"
+        );
+    }
+
+    // PERSIST-RECURSION-1: a clean snapshot (no degradation keys) reports nothing —
+    // callers must not attach an empty `extraction_degradations` field.
+    #[test]
+    fn extraction_degradations_none_when_clean() {
+        assert!(extraction_degradations(None).is_none(), "no blob → None");
+        let clean = r#"{"diagnostics_version":1,"edges_total":100,"unresolved_total":2,"unresolved_breakdown":{"other":2}}"#;
+        assert!(
+            extraction_degradations(Some(clean)).is_none(),
+            "a blob with only typed diagnostics reports no degradation"
+        );
+        // A defensive zero must not produce a "skipped for 0 files" line.
+        let zero = r#"{"boundary_facts_files_skipped_deep_nesting":0}"#;
+        assert!(
+            extraction_degradations(Some(zero)).is_none(),
+            "0 is measured-and-absent, not a degradation"
+        );
+    }
+
+    // The reader-frame line matches the slice's example wording exactly, and speaks
+    // the reader's language (their file's nesting), not our pipeline's key.
+    #[test]
+    fn extraction_degradations_reports_skips_in_reader_frame() {
+        let blob = r#"{"boundary_facts_files_skipped_deep_nesting":1}"#;
+        let d = extraction_degradations(Some(blob)).expect("a skip is a degradation");
+        let lines: Vec<&str> = d["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            lines,
+            vec!["boundary facts skipped for 1 file (pathological nesting)"],
+            "reader-frame line matches the slice example"
+        );
+        // The structured count is preserved for machine consumers (`--json`).
+        assert_eq!(d["deep_nesting_skips"]["boundary_facts"].as_u64(), Some(1));
+
+        // Plural + the express/react/ts families render their reader subjects.
+        let blob = r#"{"react_inference_facts_files_skipped_deep_nesting":3,"ts_boundary_facts_files_skipped_deep_nesting":2}"#;
+        let d = extraction_degradations(Some(blob)).unwrap();
+        let joined = d["lines"].to_string();
+        assert!(
+            joined.contains("React inferences skipped for 3 files (pathological nesting)"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains(
+                "boundary facts (TypeScript/JavaScript) skipped for 2 files (pathological nesting)"
+            ),
+            "{joined}"
+        );
+    }
+
+    // An isolated postpass failure (item 3) is surfaced honestly too: the index
+    // completed, but those facts are missing — the reader is told, not left guessing.
+    #[test]
+    fn extraction_degradations_reports_isolated_postpass_errors() {
+        let blob = r#"{"policy_facts_postpass_error":"index: simulated failure"}"#;
+        let d = extraction_degradations(Some(blob)).unwrap();
+        let joined = d["lines"].to_string();
+        assert!(
+            joined.contains("policy facts not extracted for this snapshot"),
+            "{joined}"
+        );
+        assert!(joined.contains("the index completed"), "{joined}");
+        assert!(joined.contains("index: simulated failure"), "{joined}");
+        assert_eq!(
+            d["postpass_errors"]["policy_facts"].as_str(),
+            Some("index: simulated failure")
+        );
+    }
+
+    // Multiple degradations render in a deterministic (alphabetical-by-family) order —
+    // no reader-facing jitter across runs.
+    #[test]
+    fn extraction_degradations_deterministic_order() {
+        let blob = r#"{"react_inference_facts_files_skipped_deep_nesting":1,"boundary_facts_files_skipped_deep_nesting":1,"policy_facts_files_skipped_deep_nesting":1}"#;
+        let a = extraction_degradations(Some(blob)).unwrap();
+        let b = extraction_degradations(Some(blob)).unwrap();
+        assert_eq!(a, b, "same blob → identical output");
+        let lines: Vec<String> = a["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        // boundary_facts < policy_facts < react_inference_facts alphabetically.
+        assert!(lines[0].starts_with("boundary facts skipped"), "{lines:?}");
+        assert!(lines[1].starts_with("policy facts skipped"), "{lines:?}");
+        assert!(
+            lines[2].starts_with("React inferences skipped"),
+            "{lines:?}"
         );
     }
 }

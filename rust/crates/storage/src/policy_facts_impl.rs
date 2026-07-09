@@ -21,6 +21,41 @@ use rusqlite::params;
 use uuid::Uuid;
 
 use crate::connection::StorageConnection;
+use crate::error::StorageError;
+
+impl StorageConnection {
+    /// Delete all policy facts (STATUS_MAPPING + BEHAVIORAL_MARKER + RETURN_FATE)
+    /// for a snapshot, atomically.
+    ///
+    /// PERSIST-RECURSION-1 (failure isolation): `persist_policy_facts` writes three
+    /// tables through three separately-committing methods (`insert_status_mappings`,
+    /// `insert_behavioral_markers`, `insert_return_fates`). If a later write fails,
+    /// the earlier ones are ALREADY committed — a partial subset. This is the
+    /// compensating cleanup that `repo-index`'s `isolate_postpass` runs on such a
+    /// failure so the snapshot completes WITHOUT partial policy facts (the isolation
+    /// contract), not with a half-written mix. Mirrors [`Self::delete_boundary_facts`].
+    ///
+    /// All three deletes run in ONE transaction, so the cleanup itself is atomic.
+    /// Returns the total number of rows deleted across the three tables.
+    pub fn delete_policy_facts(&mut self, snapshot_uid: &str) -> Result<usize, StorageError> {
+        let tx = self.connection_mut().transaction()?;
+        let mut deleted = 0;
+        deleted += tx.execute(
+            "DELETE FROM status_mappings WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )?;
+        deleted += tx.execute(
+            "DELETE FROM behavioral_markers WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )?;
+        deleted += tx.execute(
+            "DELETE FROM return_fates WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )?;
+        tx.commit()?;
+        Ok(deleted)
+    }
+}
 
 impl PolicyFactsStorageWrite for StorageConnection {
     fn insert_status_mappings(
@@ -635,6 +670,76 @@ mod tests {
             results[0].default_output,
             Some("OUTPUT_DEFAULT".to_string())
         );
+    }
+
+    /// PERSIST-RECURSION-1 (failure isolation): `delete_policy_facts` clears ALL
+    /// three policy tables for one snapshot, atomically, and is snapshot-scoped —
+    /// the compensating cleanup `isolate_postpass` runs when a policy-facts postpass
+    /// fails partway, so the snapshot completes WITHOUT partial policy facts.
+    #[test]
+    fn delete_policy_facts_clears_snapshot_facts_scoped() {
+        let mut conn = create_test_db(); // snap-1
+                                         // A second snapshot proves the delete is snapshot-scoped.
+        conn.connection_mut()
+            .execute_batch(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at)
+                 VALUES ('snap-2', 'test-repo', 'full', 'ready', datetime('now'));",
+            )
+            .unwrap();
+
+        let mapping = StatusMapping {
+            symbol_key: "test-repo:file.c#f:SYMBOL:FUNCTION".to_string(),
+            function_name: "f".to_string(),
+            file_path: "file.c".to_string(),
+            line_start: 1,
+            line_end: 2,
+            source_type: "in_t".to_string(),
+            target_type: "out_t".to_string(),
+            mappings: vec![CaseMapping {
+                inputs: vec!["A".to_string()],
+                output: "X".to_string(),
+            }],
+            default_output: None,
+        };
+        let marker = BehavioralMarker {
+            symbol_key: "test-repo:file.c#f:SYMBOL:FUNCTION".to_string(),
+            function_name: "f".to_string(),
+            file_path: "file.c".to_string(),
+            line_start: 1,
+            line_end: 2,
+            kind: MarkerKind::RetryLoop,
+            evidence: MarkerEvidence::RetryLoop {
+                loop_kind: "for".to_string(),
+                sleep_call: Some("sleep".to_string()),
+                delay_ms: None,
+                max_attempts: None,
+                break_condition: None,
+            },
+        };
+
+        conn.insert_status_mappings("snap-1", std::slice::from_ref(&mapping))
+            .unwrap();
+        conn.insert_behavioral_markers("snap-1", std::slice::from_ref(&marker))
+            .unwrap();
+        // snap-2 gets a status mapping that must SURVIVE the snap-1 cleanup.
+        conn.insert_status_mappings("snap-2", std::slice::from_ref(&mapping))
+            .unwrap();
+
+        assert_eq!(conn.count_status_mappings("snap-1").unwrap(), 1);
+        assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 1);
+
+        // One status_mapping + one behavioral_marker deleted (return_fates DELETE
+        // also runs — validating its SQL — but has 0 rows here).
+        let deleted = conn.delete_policy_facts("snap-1").unwrap();
+        assert_eq!(deleted, 2);
+
+        // snap-1 cleared across all three policy tables.
+        assert_eq!(conn.count_status_mappings("snap-1").unwrap(), 0);
+        assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 0);
+        assert_eq!(conn.count_return_fates("snap-1").unwrap(), 0);
+
+        // snap-2 untouched.
+        assert_eq!(conn.count_status_mappings("snap-2").unwrap(), 1);
     }
 
     #[test]

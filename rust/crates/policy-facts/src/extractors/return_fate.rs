@@ -163,23 +163,19 @@ fn build_function_registry(
     repo_uid: &str,
     registry: &mut FunctionRegistry,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "function_definition" => {
-                if let Some(declarator) = child.child_by_field_name("declarator") {
-                    if let Some(name) = extract_function_name(&declarator, source) {
-                        let key = format!("{}:{}#{}:SYMBOL:FUNCTION", repo_uid, file_path, name);
-                        registry.insert(name, key);
-                    }
-                }
+    // PERSIST-RECURSION-1: iterative descent through preprocessor blocks (was
+    // recursive on preproc-nesting depth), reusing the shared helper that the
+    // sibling `walk_preproc_for_functions` also uses. Same function_definitions
+    // in the same document order → the registry (last-writer-wins per name) is
+    // byte-for-byte unchanged.
+    super::walk::for_each_preproc_function(*node, |func_node| {
+        if let Some(declarator) = func_node.child_by_field_name("declarator") {
+            if let Some(name) = extract_function_name(&declarator, source) {
+                let key = format!("{}:{}#{}:SYMBOL:FUNCTION", repo_uid, file_path, name);
+                registry.insert(name, key);
             }
-            "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-                build_function_registry(&child, source, file_path, repo_uid, registry);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 /// Recursively walk preprocessor blocks for function definitions.
@@ -191,32 +187,18 @@ fn walk_preproc_for_functions(
     function_registry: &FunctionRegistry,
     results: &mut Vec<ReturnFate>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "function_definition" => {
-                extract_fates_from_function(
-                    &child,
-                    source,
-                    file_path,
-                    repo_uid,
-                    function_registry,
-                    results,
-                );
-            }
-            "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-                walk_preproc_for_functions(
-                    &child,
-                    source,
-                    file_path,
-                    repo_uid,
-                    function_registry,
-                    results,
-                );
-            }
-            _ => {}
-        }
-    }
+    // PERSIST-RECURSION-1: iterative descent through preprocessor blocks (was
+    // recursive on preproc-nesting depth). Order and emitted fates unchanged.
+    super::walk::for_each_preproc_function(*node, |func_node| {
+        extract_fates_from_function(
+            &func_node,
+            source,
+            file_path,
+            repo_uid,
+            function_registry,
+            results,
+        );
+    });
 }
 
 /// Extract fates from a single function definition.
@@ -297,11 +279,14 @@ fn find_calls_recursive(
     function_registry: &FunctionRegistry,
     results: &mut Vec<ReturnFate>,
 ) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "call_expression" {
+    // PERSIST-RECURSION-1: iterative pre-order visit of the whole body subtree
+    // (was recursive on body-nesting depth). `node` is the function body, never
+    // a `call_expression`, so visiting the root is a no-op; every descendant is
+    // classified in the same order as before.
+    super::walk::visit_preorder(*node, |n| {
+        if n.kind() == "call_expression" {
             if let Some(fate) = classify_call(
-                &child,
+                &n,
                 source,
                 file_path,
                 caller_name,
@@ -311,17 +296,8 @@ fn find_calls_recursive(
                 results.push(fate);
             }
         }
-        // Recurse into all children
-        find_calls_recursive(
-            &child,
-            source,
-            file_path,
-            caller_name,
-            caller_key,
-            function_registry,
-            results,
-        );
-    }
+        std::ops::ControlFlow::Continue(())
+    });
 }
 
 /// Classify a call expression's return value fate.
@@ -839,17 +815,29 @@ fn find_comparison_in_subtree(
     call_node: &tree_sitter::Node,
     source: &[u8],
 ) -> Option<(String, String)> {
-    if node.kind() == "binary_expression"
-        && is_comparison_operator(node, source)
-        && is_ancestor_of(node, call_node)
-    {
-        return extract_comparison_from_binary(node, call_node, source);
-    }
+    // PERSIST-RECURSION-1: iterative pre-order search with prune-on-match. A
+    // matching node (a comparison `binary_expression` that is an ancestor of the
+    // call) yields its comparison directly and is NOT descended into — exactly as
+    // the recursive form returned without recursing. A match whose extraction is
+    // `None` does not stop the search: it prunes that node's subtree and
+    // continues, mirroring the recursive `None` propagating up to the sibling loop.
+    let mut stack: Vec<tree_sitter::Node> = vec![*node];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "binary_expression"
+            && is_comparison_operator(&n, source)
+            && is_ancestor_of(&n, call_node)
+        {
+            if let Some(result) = extract_comparison_from_binary(&n, call_node, source) {
+                return Some(result);
+            }
+            // Matched but nothing extracted → prune this subtree, keep searching.
+            continue;
+        }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if let Some(result) = find_comparison_in_subtree(&child, call_node, source) {
-            return Some(result);
+        let mut cursor = n.walk();
+        let children: Vec<tree_sitter::Node> = n.children(&mut cursor).collect();
+        for child in children.into_iter().rev() {
+            stack.push(child);
         }
     }
 
@@ -889,6 +877,30 @@ mod tests {
         let language: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
         parser.set_language(&language).unwrap();
         parser.parse(source, None).unwrap()
+    }
+
+    /// PERSIST-RECURSION-1 regression: a deeply nested function body must NOT
+    /// overflow the return-fate walk (`find_calls_recursive`, which descends
+    /// EVERY node in the body). Runs on the default test-thread stack, so a
+    /// still-recursive walk would abort the test process. The call at the bottom
+    /// proves the iterative walk still descends the full depth.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from("void deep() {\n");
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" foo(); ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n}\n");
+
+        let tree = parse_c(&source);
+        let fates = extract_return_fates(&tree, source.as_bytes(), "deep.c", "repo");
+        // Reaching here proves no stack overflow; the nested `foo()` is found.
+        assert_eq!(fates.len(), 1);
     }
 
     // =========================================================================

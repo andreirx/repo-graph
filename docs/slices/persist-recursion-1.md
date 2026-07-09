@@ -1,7 +1,30 @@
 # PERSIST-RECURSION-1 — Postpass AST walks must not scale stack with tree depth
 
-Status: SPECIFIED (2026-07-06) · Track: Daemon stability — P0, gates the next
-release (with DAEMON-CRASH-RECOVERY-1)
+Status: **DELIVERED (2026-07-09)** · Track: Daemon stability — P0
+
+## 0. Delivery record (2026-07-09)
+
+Shipped via target-owned relay (5 review cycles) + operator close-out on the
+frozen tree (later rounds had degenerated into an evidence treadmill — each
+code tweak invalidated "exact tree" evidence; operator froze and produced the
+final set once). What shipped: iterative work-stack walkers replacing
+recursion-on-input-depth in the C boundary detector (the proven killer), all
+policy-facts extractors, TS boundary detectors, and the express/react
+walkers; per-file depth guard with honest skip + recorded diagnostics;
+reader-facing degradation surface (doctor/repo-info render deep-nesting
+skips); postpass failure isolation, with the honesty machinery itself made
+FALLIBLE (ratified: a snapshot whose degradation records cannot persist is
+demoted out of READY — Fact-Certainty applied to our own bookkeeping).
+Review catches: missing degradation surface (r0), React skip double-count
+(r2), fallibility contract (r3). Evidence (operator, frozen tree): build/
+fmt/clippy clean, **4908/0 workspace**, dogfood green,
+`iterative_walk_is_byte_identical_to_recursive_reference` ok (named; zero
+pre-existing assertion lines modified across converted extractors), and the
+acceptance transcript: **`rmap index legacy-codebases/linux` → INDEX_EXIT=0,
+snapshot READY, daemon clean** — the identical run that produced `fatal
+runtime error: stack overflow, aborting` at persisting 5/8 on 2026-07-06.
+Residual filed: TECH-DEBT F14 (≤1MB pathologically-deep file could overflow
+a MAIN extractor — postpasses now guarded, extractors not; follow-up slice).
 Origin: TECH-DEBT F13 root cause — REPRODUCED with a profile transcript
 
 ## 1. Problem — a deterministic daemon-killer in persist step 5

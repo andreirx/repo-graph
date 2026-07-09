@@ -10,3 +10,6 @@
 pub mod behavioral_marker;
 pub mod return_fate;
 pub mod status_mapping;
+
+/// Iterative AST-walk helpers shared by the extractors (PERSIST-RECURSION-1).
+mod walk;

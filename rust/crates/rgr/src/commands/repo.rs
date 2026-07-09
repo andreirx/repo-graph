@@ -247,6 +247,19 @@ fn print_repo_storage(storage: &serde_json::Value) {
             .unwrap_or("?");
         println!("  - {state}: {outcome} (created {created})");
     }
+
+    // PERSIST-RECURSION-1: honest degradation from the latest index — files skipped for
+    // pathological AST nesting, or an isolated postpass failure. The reader-language lines are
+    // computed daemon-side (snapshot_facts) and printed verbatim (same facts `rmap doctor` shows).
+    if let Some(lines) = storage
+        .get("extraction_degradations")
+        .and_then(|d| d.get("lines"))
+        .and_then(|v| v.as_array())
+    {
+        for line in lines.iter().filter_map(|l| l.as_str()) {
+            println!("  ! {line}");
+        }
+    }
 }
 
 /// Humanise a byte count (GB/MB/KB) for `repo info` storage lines.

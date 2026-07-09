@@ -63,10 +63,13 @@ pub struct ExpressRouteDetection {
 /// Filters to TS/JS files, checks for Express import, parses AST,
 /// and extracts route registrations.
 ///
-/// Returns raw detections with file paths. Use `routes_to_surfaces` to
-/// convert to persistable surface inputs (requires module resolution).
-pub fn detect_express_routes(file_inputs: &[FileInput]) -> Vec<ExpressRouteDetection> {
+/// Returns raw detections with file paths, plus the count of files skipped for
+/// pathological AST nesting (PERSIST-RECURSION-1 item 2 — honest degradation).
+/// Use `routes_to_surfaces` to convert detections to persistable surface inputs
+/// (requires module resolution).
+pub fn detect_express_routes(file_inputs: &[FileInput]) -> DetectedRoutes {
     let mut routes = Vec::new();
+    let mut files_skipped_deep_nesting: u64 = 0;
 
     // Initialize tree-sitter parsers.
     let mut parser = Parser::new();
@@ -102,13 +105,34 @@ pub fn detect_express_routes(file_inputs: &[FileInput]) -> Vec<ExpressRouteDetec
             None => continue, // Parse failed, skip.
         };
 
+        // PERSIST-RECURSION-1: skip pathologically deep files entirely (honest
+        // degradation), the same guard the compose-level postpasses apply. The
+        // walk below is already iterative, so this is a resource bound, not the
+        // overflow fix — and it never emits partial facts for a skipped file.
+        if crate::walk::tree_exceeds_depth(&tree.root_node(), crate::walk::MAX_POSTPASS_TREE_DEPTH)
+        {
+            files_skipped_deep_nesting += 1;
+            continue;
+        }
+
         // Detect routes in this file.
         let file_routes =
             detect_routes_in_file(&tree.root_node(), file.content.as_bytes(), &file.rel_path);
         routes.extend(file_routes);
     }
 
-    routes
+    DetectedRoutes {
+        routes,
+        files_skipped_deep_nesting,
+    }
+}
+
+/// Output of [`detect_express_routes`]: the detected routes plus the honest
+/// degradation counter (files skipped for pathological AST nesting).
+#[derive(Debug, Default)]
+pub struct DetectedRoutes {
+    pub routes: Vec<ExpressRouteDetection>,
+    pub files_skipped_deep_nesting: u64,
 }
 
 /// Module resolution function type.
@@ -162,25 +186,24 @@ fn detect_routes_in_file(
     routes
 }
 
-/// Recursively collect route registrations from AST nodes.
+/// Collect route registrations from AST nodes (PERSIST-RECURSION-1: iterative
+/// pre-order, was recursive on AST depth → stack overflow at scale). Every node
+/// is checked for the Express call pattern in the same order as before.
 fn collect_routes(
     node: &Node,
     source: &[u8],
     file_path: &str,
     routes: &mut Vec<ExpressRouteDetection>,
 ) {
-    // Check if this node is a call expression matching Express pattern.
-    if node.kind() == "call_expression" {
-        if let Some(route) = try_extract_route(node, source, file_path) {
-            routes.push(route);
+    crate::walk::visit_preorder(*node, |node| {
+        // Check if this node is a call expression matching the Express pattern.
+        if node.kind() == "call_expression" {
+            if let Some(route) = try_extract_route(&node, source, file_path) {
+                routes.push(route);
+            }
         }
-    }
-
-    // Recurse into children.
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_routes(&child, source, file_path, routes);
-    }
+        std::ops::ControlFlow::Continue(())
+    });
 }
 
 /// Try to extract a route from a call expression node.
@@ -407,6 +430,69 @@ mod tests {
         parser.set_language(&ts_language).unwrap();
         let tree = parser.parse(source, None).unwrap();
         detect_routes_in_file(&tree.root_node(), source.as_bytes(), "test.ts")
+    }
+
+    fn file_input(rel_path: &str, content: &str) -> FileInput {
+        FileInput {
+            rel_path: rel_path.to_string(),
+            content: content.to_string(),
+            content_hash: String::new(),
+            size_bytes: content.len(),
+            line_count: content.lines().count(),
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }
+    }
+
+    /// PERSIST-RECURSION-1 item 2: the public detector applies the per-file depth
+    /// guard — a pathologically deep file is skipped (its facts are NOT extracted)
+    /// and counted, while a normal file is detected as before.
+    #[test]
+    fn detect_express_routes_skips_pathologically_deep_files() {
+        // A normal Express file: detected, nothing skipped.
+        let normal = file_input(
+            "app.ts",
+            "import express from 'express';\nconst app = express();\napp.get('/x', h);\n",
+        );
+        let out = detect_express_routes(std::slice::from_ref(&normal));
+        assert_eq!(out.routes.len(), 1, "normal file is detected");
+        assert_eq!(out.files_skipped_deep_nesting, 0, "nothing skipped");
+
+        // A file nested well past the guard: skipped + counted, no partial facts.
+        let mut deep = String::from(
+            "import express from 'express';\nconst app = express();\nfunction d() {\n",
+        );
+        for _ in 0..(crate::walk::MAX_POSTPASS_TREE_DEPTH + 2_000) {
+            deep.push('{');
+        }
+        deep.push_str(" app.get('/x', h); ");
+        for _ in 0..(crate::walk::MAX_POSTPASS_TREE_DEPTH + 2_000) {
+            deep.push('}');
+        }
+        deep.push_str("\n}\n");
+        let out = detect_express_routes(&[file_input("deep.ts", &deep)]);
+        assert_eq!(out.routes.len(), 0, "a skipped file emits no partial facts");
+        assert_eq!(out.files_skipped_deep_nesting, 1, "the skip is counted");
+    }
+
+    /// PERSIST-RECURSION-1 regression: a deeply nested file must NOT overflow the
+    /// Express route walk (`collect_routes`, which visits every node). Runs on the
+    /// default test-thread stack, so a still-recursive walk would abort here.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from("const app = express();\nfunction deep() {\n");
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" app.get('/x', handler); ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n}\n");
+
+        let routes = parse_and_detect(&source);
+        assert_eq!(routes.len(), 1);
     }
 
     #[test]

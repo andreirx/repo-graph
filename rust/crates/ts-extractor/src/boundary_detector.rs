@@ -70,67 +70,26 @@ pub fn extract_ts_boundary_calls(
     src: &[u8],
     _file_path: &str,
 ) -> Vec<RawTsBoundaryCall> {
+    // PERSIST-RECURSION-1: iterative pre-order walk with enclosing-function
+    // tracking (was recursive on AST depth → stack overflow at scale). Order and
+    // emitted facts are byte-for-byte identical to the prior recursive form.
     let mut results = Vec::new();
-    let mut enclosing_function = String::new();
-
-    extract_from_node(root, src, &mut enclosing_function, &mut results);
-
-    results
-}
-
-fn extract_from_node(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    enclosing_function: &mut String,
-    results: &mut Vec<RawTsBoundaryCall>,
-) {
-    match node.kind() {
-        // Track enclosing function for stable key construction
-        "function_declaration" | "method_definition" | "arrow_function" => {
-            let prev_enclosing = enclosing_function.clone();
-
-            // Try to extract function name
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(src) {
-                    *enclosing_function = name.to_string();
-                }
-            }
-
-            // Recurse into body
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    extract_from_node(&child, src, enclosing_function, results);
-                }
-            }
-
-            // Restore enclosing function
-            *enclosing_function = prev_enclosing;
-            return; // Already recursed
-        }
-
+    crate::walk::visit_with_enclosing(*root, src, |node, enclosing| match node.kind() {
         // Detect `new SharedArrayBuffer(...)` and `new Worker(...)`
         "new_expression" => {
-            if let Some(call) = try_extract_new_expression(node, src, enclosing_function) {
+            if let Some(call) = try_extract_new_expression(&node, src, enclosing) {
                 results.push(call);
             }
         }
-
         // Detect `worker.postMessage(...)` and `Atomics.*(...)`
         "call_expression" => {
-            if let Some(call) = try_extract_call_expression(node, src, enclosing_function) {
+            if let Some(call) = try_extract_call_expression(&node, src, enclosing) {
                 results.push(call);
             }
         }
-
         _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_from_node(&child, src, enclosing_function, results);
-        }
-    }
+    });
+    results
 }
 
 /// Try to extract a boundary call from a `new_expression` node.
@@ -236,6 +195,28 @@ mod tests {
             .expect("Error loading TypeScript grammar");
         let tree = parser.parse(source, None).expect("Failed to parse");
         extract_ts_boundary_calls(&tree.root_node(), source.as_bytes(), "test.ts")
+    }
+
+    /// PERSIST-RECURSION-1 regression: a pathologically deep TS file must NOT
+    /// overflow the stack. Exercises the shared `visit_with_enclosing` walk (used
+    /// by every detector's `extract_from_node`) on 50_000 nesting levels. Runs on
+    /// the default test-thread stack, so a still-recursive walk would abort here.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from("function deep() {\n");
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" const sab = new SharedArrayBuffer(1024); ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n}\n");
+
+        let calls = parse_and_extract(&source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "SharedArrayBuffer");
     }
 
     #[test]

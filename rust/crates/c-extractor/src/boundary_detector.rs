@@ -191,57 +191,83 @@ pub fn extract_boundary_calls(
     results
 }
 
+/// Work item for the iterative traversal (PERSIST-RECURSION-1).
+///
+/// The former recursive form set `enclosing_function` on the way *down* into a
+/// `function_definition` body and cleared it on the way *up*. An explicit stack
+/// has no implicit "way up", so the clear is scheduled as a deferred work item
+/// (`ClearEnclosing`) pushed *beneath* the body: it pops only after the entire
+/// body subtree has been processed, reproducing the post-order clear exactly.
+enum CWork<'a> {
+    Visit(tree_sitter::Node<'a>),
+    ClearEnclosing,
+}
+
+/// Push a node's children onto the work stack in reverse document order so the
+/// left-most child is popped (visited) first — preserving pre-order traversal.
+fn push_children_reversed<'a>(node: &tree_sitter::Node<'a>, stack: &mut Vec<CWork<'a>>) {
+    let mut cursor = node.walk();
+    let children: Vec<tree_sitter::Node<'a>> = node.children(&mut cursor).collect();
+    for child in children.into_iter().rev() {
+        stack.push(CWork::Visit(child));
+    }
+}
+
+/// PERSIST-RECURSION-1: iterative pre-order traversal with an explicit work
+/// stack. Depth is heap-bounded — the former recursive descent grew the call
+/// stack with AST depth and aborted the process (`stack overflow`) on deeply
+/// nested / generated C at scale. Traversal order and every `enclosing_function`
+/// state transition are byte-for-byte identical to the prior recursive form.
 fn extract_from_node(
-    node: &tree_sitter::Node,
+    root: &tree_sitter::Node,
     src: &[u8],
     enclosing_function: &mut String,
     results: &mut Vec<RawBoundaryCall>,
 ) {
-    match node.kind() {
-        "function_definition" => {
-            // Update enclosing function name
-            if let Some(declarator) = node.child_by_field_name("declarator") {
-                *enclosing_function = extract_function_name_from_declarator(&declarator, src);
+    let mut stack: Vec<CWork> = vec![CWork::Visit(*root)];
+    while let Some(work) = stack.pop() {
+        let node = match work {
+            CWork::ClearEnclosing => {
+                // Post-order: clear enclosing function when exiting a definition.
+                enclosing_function.clear();
+                continue;
+            }
+            CWork::Visit(n) => n,
+        };
+
+        match node.kind() {
+            "function_definition" => {
+                // Update enclosing function name
+                if let Some(declarator) = node.child_by_field_name("declarator") {
+                    *enclosing_function = extract_function_name_from_declarator(&declarator, src);
+                }
+
+                // Schedule the exit-clear BEFORE the body so it pops AFTER the
+                // whole body subtree — matching the recursive post-order clear.
+                stack.push(CWork::ClearEnclosing);
+
+                // Recurse into body only (not the declarator etc.).
+                if let Some(body) = node.child_by_field_name("body") {
+                    stack.push(CWork::Visit(body));
+                }
             }
 
-            // Recurse into body
-            if let Some(body) = node.child_by_field_name("body") {
-                extract_from_node(&body, src, enclosing_function, results);
+            "call_expression" => {
+                if let Some(call) = try_extract_boundary_call(&node, src, enclosing_function) {
+                    results.push(call);
+                }
+
+                // Still recurse for nested calls.
+                push_children_reversed(&node, &mut stack);
             }
 
-            // Clear enclosing function when exiting
-            enclosing_function.clear();
-        }
-
-        "call_expression" => {
-            if let Some(call) = try_extract_boundary_call(node, src, enclosing_function) {
-                results.push(call);
+            // Recurse into preprocessor blocks
+            "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
+                push_children_reversed(&node, &mut stack);
             }
 
-            // Still recurse for nested calls
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                extract_from_node(&child, src, enclosing_function, results);
-            }
-        }
-
-        // Recurse into preprocessor blocks
-        "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                extract_from_node(&child, src, enclosing_function, results);
-            }
-        }
-
-        _ => {
-            // Don't recurse into nested function definitions
-            if node.kind() == "function_definition" {
-                return;
-            }
-
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                extract_from_node(&child, src, enclosing_function, results);
+            _ => {
+                push_children_reversed(&node, &mut stack);
             }
         }
     }
@@ -595,14 +621,18 @@ fn extract_assignment_lhs(call_node: &tree_sitter::Node, src: &[u8]) -> Option<S
 /// - Simple identifier: `fd`
 /// - Pointer declarator: `*fd` → extracts `fd`
 fn extract_identifier_from_declarator(node: &tree_sitter::Node, src: &[u8]) -> Option<String> {
-    match node.kind() {
-        "identifier" => node.utf8_text(src).ok().map(|s| s.to_string()),
-        "pointer_declarator" => {
+    // PERSIST-RECURSION-1: iterative unwrap of nested `pointer_declarator`s (was
+    // tail-recursive on pointer nesting → could overflow the stack on a
+    // pathologically deep declarator like `**********…fd`). Result is identical:
+    // follow the single `declarator` child chain to the inner identifier.
+    let mut current = *node;
+    loop {
+        match current.kind() {
+            "identifier" => return current.utf8_text(src).ok().map(|s| s.to_string()),
             // pointer_declarator has a declarator child
-            let inner = node.child_by_field_name("declarator")?;
-            extract_identifier_from_declarator(&inner, src)
+            "pointer_declarator" => current = current.child_by_field_name("declarator")?,
+            _ => return None,
         }
-        _ => None,
     }
 }
 
@@ -845,6 +875,32 @@ mod tests {
 
         let tree = parser.parse(source, None).unwrap();
         extract_boundary_calls(&tree.root_node(), source.as_bytes(), "test.c")
+    }
+
+    /// PERSIST-RECURSION-1 regression: a pathologically deep C file must NOT
+    /// overflow the stack. The former recursive `extract_from_node` aborted the
+    /// process on inputs like this (one call-stack frame per nesting level); the
+    /// iterative walk is heap-bounded. This runs on the default test-thread stack
+    /// — the same class of stack the daemon worker uses — so a still-recursive
+    /// walk would abort the test process here. 50_000 levels is far beyond any
+    /// real code and well past the few-thousand-frame overflow threshold.
+    #[test]
+    fn deeply_nested_input_does_not_overflow() {
+        let depth = 50_000;
+        let mut source = String::from("void deep() {\n");
+        for _ in 0..depth {
+            source.push('{');
+        }
+        source.push_str(" int fd = socket(AF_UNIX, SOCK_STREAM, 0); ");
+        for _ in 0..depth {
+            source.push('}');
+        }
+        source.push_str("\n}\n");
+
+        // Completes without overflow AND still descends to the deepest call.
+        let calls = parse_and_extract(&source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "socket");
     }
 
     #[test]
@@ -1767,5 +1823,156 @@ mod tests {
         // connect: fd argument for lineage tracking
         assert_eq!(calls[1].function_name, "connect");
         assert_eq!(calls[1].fd_argument, Some("client_fd".to_string()));
+    }
+
+    // ── PERSIST-RECURSION-1: byte-equality proof (review-1 required change #2) ──
+    //
+    // The slice converted `extract_from_node` from stack-recursive descent to an
+    // explicit iterative work stack to stop the daemon-killing stack overflow. The
+    // stop condition is that this MUST NOT change the facts emitted on
+    // non-pathological input. This test proves that directly and durably: it runs
+    // the production (iterative) `extract_boundary_calls` and an in-test RECURSIVE
+    // REFERENCE that is a VERBATIM transcription of the pre-slice recursive
+    // `extract_from_node` (`git show <pre-slice HEAD>:…/boundary_detector.rs`) — the
+    // real prior code, not a paraphrase — over a fixture exercising every path the
+    // conversion touched: enclosing-function transitions AND the post-order clear
+    // across functions (including a file-scope call after a function, where a missed
+    // clear would leak the prior name), nested blocks, a boundary call nested inside
+    // another call's arguments, a preprocessor block, and document-ordered
+    // multi-calls. The two full `Vec<RawBoundaryCall>` are compared via `{:#?}` — a
+    // byte-level string equality over every field (family/type enums, source
+    // locations, assigned/fd identifiers). Equal output ⇒ the iterative walk
+    // preserves order, enclosing-scope state, and content exactly. The reference
+    // recurses, so it is only ever run on this shallow fixture (never the 50k-deep
+    // overflow fixture above).
+
+    /// Verbatim transcription of the pre-slice recursive `extract_from_node` — the
+    /// byte-equality oracle. Kept faithful ON PURPOSE: the dead `function_definition`
+    /// re-check in the `_` arm is copied as-is. Do not "clean it up" — its entire
+    /// value is being exactly the code the production iterative walk replaced.
+    fn extract_boundary_calls_recursive_reference(
+        root: &tree_sitter::Node,
+        src: &[u8],
+    ) -> Vec<RawBoundaryCall> {
+        fn recurse(
+            node: &tree_sitter::Node,
+            src: &[u8],
+            enclosing_function: &mut String,
+            results: &mut Vec<RawBoundaryCall>,
+        ) {
+            match node.kind() {
+                "function_definition" => {
+                    if let Some(declarator) = node.child_by_field_name("declarator") {
+                        *enclosing_function =
+                            extract_function_name_from_declarator(&declarator, src);
+                    }
+                    if let Some(body) = node.child_by_field_name("body") {
+                        recurse(&body, src, enclosing_function, results);
+                    }
+                    enclosing_function.clear();
+                }
+                "call_expression" => {
+                    if let Some(call) = try_extract_boundary_call(node, src, enclosing_function) {
+                        results.push(call);
+                    }
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        recurse(&child, src, enclosing_function, results);
+                    }
+                }
+                "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        recurse(&child, src, enclosing_function, results);
+                    }
+                }
+                _ => {
+                    // Dead in practice (function_definition is matched above); copied
+                    // verbatim from the pre-slice source so this oracle IS the old code.
+                    if node.kind() == "function_definition" {
+                        return;
+                    }
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        recurse(&child, src, enclosing_function, results);
+                    }
+                }
+            }
+        }
+
+        let mut results = Vec::new();
+        let mut enclosing = String::new();
+        recurse(root, src, &mut enclosing, &mut results);
+        results
+    }
+
+    #[test]
+    fn iterative_walk_is_byte_identical_to_recursive_reference() {
+        // Exercises: three functions (enclosing transitions + the post-order clear),
+        // nested blocks, a boundary call nested inside another call's arguments
+        // (accept inside printf), a preprocessor block containing a boundary call,
+        // document-ordered multi-calls, and a FILE-SCOPE call after the last function
+        // (its enclosing must be cleared to "" — a leaked name would diverge here).
+        let source = r#"
+            static int helper(int x) { return x + 1; }
+
+            void net_server(void) {
+                int fd = socket(AF_INET, SOCK_STREAM, 0);
+                {
+                    { bind(fd, addr, len); }
+                }
+                printf("%d\n", accept(fd, 0, 0));
+            #ifdef USE_UNIX
+                unix_setup();
+                int ufd = socket(AF_UNIX, SOCK_DGRAM, 0);
+            #endif
+                listen(fd, 5);
+            }
+
+            void other(void) {
+                kill(pid, SIGTERM);
+            }
+
+            int g_fd = socket(AF_CAN, SOCK_RAW, 0);
+        "#;
+
+        let mut parser = tree_sitter::Parser::new();
+        let c_lang: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
+        parser.set_language(&c_lang).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let bytes = source.as_bytes();
+
+        let iterative = extract_boundary_calls(&root, bytes, "test.c");
+        let recursive = extract_boundary_calls_recursive_reference(&root, bytes);
+
+        // Non-vacuous: the fixture yields several boundary calls across three funcs
+        // plus a file-scope call (equality on an empty Vec would prove nothing).
+        assert!(
+            iterative.len() >= 6,
+            "fixture must produce a non-trivial result, got {}",
+            iterative.len()
+        );
+        // The conversion preserves enclosing-scope state across function boundaries:
+        // `kill` belongs to `other`, and the file-scope `g_fd` socket sees a cleared
+        // enclosing — not the leaked `other`/`net_server`.
+        let kill = iterative
+            .iter()
+            .find(|c| c.function_name == "kill")
+            .expect("kill detected");
+        assert_eq!(kill.enclosing_function, "other");
+        let file_scope = iterative
+            .iter()
+            .find(|c| c.assigned_identifier.as_deref() == Some("g_fd"))
+            .expect("file-scope socket detected");
+        assert_eq!(file_scope.enclosing_function, "");
+
+        // Byte-equality of the FULL fact list (order + every field) between the
+        // production iterative walk and the verbatim recursive reference.
+        assert_eq!(
+            format!("{:#?}", iterative),
+            format!("{:#?}", recursive),
+            "iterative walk must emit byte-identical boundary facts to the recursive form"
+        );
     }
 }

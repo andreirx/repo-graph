@@ -122,40 +122,36 @@ struct KafkaFactoryVars {
 /// - Object property assignments
 /// - Destructured assignments
 fn extract_kafka_factory_vars(root: &tree_sitter::Node, src: &[u8]) -> KafkaFactoryVars {
+    // PERSIST-RECURSION-1: iterative pre-order collect (was recursive on AST
+    // depth). The output is a set of variable names — order-insensitive — so the
+    // traversal order does not affect the result.
     let mut vars = KafkaFactoryVars::default();
-    extract_factory_vars_recursive(root, src, &mut vars);
-    vars
-}
-
-fn extract_factory_vars_recursive(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    vars: &mut KafkaFactoryVars,
-) {
-    // Look for variable_declarator: const x = something.producer() or something.consumer()
-    if node.kind() == "variable_declarator" {
-        if let (Some(name_node), Some(value_node)) = (
-            node.child_by_field_name("name"),
-            node.child_by_field_name("value"),
-        ) {
-            // Only track simple identifier names (not destructuring patterns)
-            if name_node.kind() == "identifier" {
-                // Check if value is a call expression
-                if value_node.kind() == "call_expression" {
-                    if let Some(function) = value_node.child_by_field_name("function") {
-                        // Check if it's a member expression: x.producer() or x.consumer()
-                        if function.kind() == "member_expression" {
-                            if let Some(property) = function.child_by_field_name("property") {
-                                if let Ok(method_name) = property.utf8_text(src) {
-                                    if let Ok(var_name) = name_node.utf8_text(src) {
-                                        match method_name {
-                                            "producer" => {
-                                                vars.producer_vars.insert(var_name.to_string());
+    crate::walk::visit_preorder(*root, |node| {
+        // Look for variable_declarator: const x = something.producer() or something.consumer()
+        if node.kind() == "variable_declarator" {
+            if let (Some(name_node), Some(value_node)) = (
+                node.child_by_field_name("name"),
+                node.child_by_field_name("value"),
+            ) {
+                // Only track simple identifier names (not destructuring patterns)
+                if name_node.kind() == "identifier" {
+                    // Check if value is a call expression
+                    if value_node.kind() == "call_expression" {
+                        if let Some(function) = value_node.child_by_field_name("function") {
+                            // Check if it's a member expression: x.producer() or x.consumer()
+                            if function.kind() == "member_expression" {
+                                if let Some(property) = function.child_by_field_name("property") {
+                                    if let Ok(method_name) = property.utf8_text(src) {
+                                        if let Ok(var_name) = name_node.utf8_text(src) {
+                                            match method_name {
+                                                "producer" => {
+                                                    vars.producer_vars.insert(var_name.to_string());
+                                                }
+                                                "consumer" => {
+                                                    vars.consumer_vars.insert(var_name.to_string());
+                                                }
+                                                _ => {}
                                             }
-                                            "consumer" => {
-                                                vars.consumer_vars.insert(var_name.to_string());
-                                            }
-                                            _ => {}
                                         }
                                     }
                                 }
@@ -165,14 +161,9 @@ fn extract_factory_vars_recursive(
                 }
             }
         }
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_factory_vars_recursive(&child, src, vars);
-        }
-    }
+        std::ops::ControlFlow::Continue(())
+    });
+    vars
 }
 
 /// Check if the file has a direct kafkajs import/require.
@@ -187,38 +178,42 @@ fn extract_factory_vars_recursive(
 ///
 /// Returns `true` if any kafkajs import is found.
 pub fn has_kafkajs_import(root: &tree_sitter::Node, src: &[u8]) -> bool {
-    has_kafkajs_import_recursive(root, src)
-}
-
-fn has_kafkajs_import_recursive(node: &tree_sitter::Node, src: &[u8]) -> bool {
-    match node.kind() {
-        // ESM import: import ... from 'kafkajs'
-        "import_statement" => {
-            if let Some(source) = node.child_by_field_name("source") {
-                if let Ok(text) = source.utf8_text(src) {
-                    let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
-                    if trimmed == "kafkajs" {
-                        return true;
+    // PERSIST-RECURSION-1: iterative pre-order search (was recursive on AST
+    // depth). Order-insensitive boolean OR; the first `kafkajs` import/require
+    // short-circuits, and non-matching import/call nodes still descend.
+    let mut found = false;
+    crate::walk::visit_preorder(*root, |node| {
+        match node.kind() {
+            // ESM import: import ... from 'kafkajs'
+            "import_statement" => {
+                if let Some(source) = node.child_by_field_name("source") {
+                    if let Ok(text) = source.utf8_text(src) {
+                        let trimmed = text.trim_matches(|c| c == '"' || c == '\'');
+                        if trimmed == "kafkajs" {
+                            found = true;
+                            return std::ops::ControlFlow::Break(());
+                        }
                     }
                 }
             }
-        }
 
-        // CommonJS require: require('kafkajs')
-        "call_expression" => {
-            if let Some(function) = node.child_by_field_name("function") {
-                if function.kind() == "identifier" {
-                    if let Ok(name) = function.utf8_text(src) {
-                        if name == "require" {
-                            if let Some(args) = node.child_by_field_name("arguments") {
-                                for i in 0..args.child_count() {
-                                    if let Some(arg) = args.child(i) {
-                                        if arg.kind() == "string" {
-                                            if let Ok(text) = arg.utf8_text(src) {
-                                                let trimmed =
-                                                    text.trim_matches(|c| c == '"' || c == '\'');
-                                                if trimmed == "kafkajs" {
-                                                    return true;
+            // CommonJS require: require('kafkajs')
+            "call_expression" => {
+                if let Some(function) = node.child_by_field_name("function") {
+                    if function.kind() == "identifier" {
+                        if let Ok(name) = function.utf8_text(src) {
+                            if name == "require" {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    for i in 0..args.child_count() {
+                                        if let Some(arg) = args.child(i) {
+                                            if arg.kind() == "string" {
+                                                if let Ok(text) = arg.utf8_text(src) {
+                                                    let trimmed = text
+                                                        .trim_matches(|c| c == '"' || c == '\'');
+                                                    if trimmed == "kafkajs" {
+                                                        found = true;
+                                                        return std::ops::ControlFlow::Break(());
+                                                    }
                                                 }
                                             }
                                         }
@@ -229,21 +224,12 @@ fn has_kafkajs_import_recursive(node: &tree_sitter::Node, src: &[u8]) -> bool {
                     }
                 }
             }
+
+            _ => {}
         }
-
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if has_kafkajs_import_recursive(&child, src) {
-                return true;
-            }
-        }
-    }
-
-    false
+        std::ops::ControlFlow::Continue(())
+    });
+    found
 }
 
 /// Extract Kafka boundary calls from a parsed TS/JS file.
@@ -271,68 +257,19 @@ pub fn extract_kafka_boundary_calls(
     // Guard 2 prep: extract tracked factory variables
     let factory_vars = extract_kafka_factory_vars(root, src);
 
+    // PERSIST-RECURSION-1: iterative pre-order walk with enclosing-function
+    // tracking (was recursive on AST depth). Byte-for-byte identical output.
     let mut results = Vec::new();
-    let mut enclosing_function = String::new();
-
-    extract_from_node(
-        root,
-        src,
-        &mut enclosing_function,
-        &factory_vars,
-        &mut results,
-    );
-
-    results
-}
-
-fn extract_from_node(
-    node: &tree_sitter::Node,
-    src: &[u8],
-    enclosing_function: &mut String,
-    factory_vars: &KafkaFactoryVars,
-    results: &mut Vec<RawKafkaBoundaryCall>,
-) {
-    match node.kind() {
-        // Track enclosing function for stable key construction
-        "function_declaration" | "method_definition" | "arrow_function" => {
-            let prev_enclosing = enclosing_function.clone();
-
-            // Try to extract function name
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(src) {
-                    *enclosing_function = name.to_string();
-                }
-            }
-
-            // Recurse into body
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    extract_from_node(&child, src, enclosing_function, factory_vars, results);
-                }
-            }
-
-            // Restore enclosing function
-            *enclosing_function = prev_enclosing;
-            return; // Already recursed
-        }
-
+    crate::walk::visit_with_enclosing(*root, src, |node, enclosing| {
         // Detect `producer.send(...)`, `consumer.subscribe(...)`, etc.
-        "call_expression" => {
-            if let Some(call) = try_extract_kafka_call(node, src, enclosing_function, factory_vars)
-            {
+        if node.kind() == "call_expression" {
+            if let Some(call) = try_extract_kafka_call(&node, src, enclosing, &factory_vars) {
                 results.push(call);
             }
         }
+    });
 
-        _ => {}
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            extract_from_node(&child, src, enclosing_function, factory_vars, results);
-        }
-    }
+    results
 }
 
 /// Try to extract a Kafka boundary call from a `call_expression` node.

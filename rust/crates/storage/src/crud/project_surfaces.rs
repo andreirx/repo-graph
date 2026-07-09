@@ -497,6 +497,39 @@ impl StorageConnection {
         tx.commit()?;
         Ok(uids)
     }
+
+    /// Delete all project-surface facts (surfaces + their evidence) for a snapshot,
+    /// atomically.
+    ///
+    /// PERSIST-RECURSION-1 (failure isolation): `persist_express_surfaces` inserts
+    /// surfaces, then evidence keyed by the returned surface UIDs — two separately-
+    /// committing batches. If the evidence batch fails, the surfaces are ALREADY
+    /// committed (surfaces with no evidence = partial facts). This is the
+    /// compensating cleanup that `repo-index`'s `isolate_postpass` runs on such a
+    /// failure so the snapshot completes WITHOUT partial surface facts (the isolation
+    /// contract). Mirrors [`Self::delete_boundary_facts`].
+    ///
+    /// Evidence is deleted EXPLICITLY (not left to the `ON DELETE CASCADE` from
+    /// `project_surfaces`) so the cleanup is correct regardless of the connection's
+    /// `PRAGMA foreign_keys` state; both deletes run in one transaction. Returns the
+    /// total rows deleted across both tables.
+    pub fn delete_project_surface_facts(
+        &mut self,
+        snapshot_uid: &str,
+    ) -> Result<usize, StorageError> {
+        let tx = self.connection_mut().transaction()?;
+        let mut deleted = 0;
+        deleted += tx.execute(
+            "DELETE FROM project_surface_evidence WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )?;
+        deleted += tx.execute(
+            "DELETE FROM project_surfaces WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )?;
+        tx.commit()?;
+        Ok(deleted)
+    }
 }
 
 #[cfg(test)]
@@ -614,6 +647,100 @@ mod tests {
             .expect("create snapshot");
 
         (repo.repo_uid, snapshot.snapshot_uid)
+    }
+
+    /// PERSIST-RECURSION-1 (failure isolation): `delete_project_surface_facts`
+    /// clears BOTH the surfaces and their evidence for one snapshot, atomically, and
+    /// is snapshot-scoped — the compensating cleanup `isolate_postpass` runs when the
+    /// Express postpass fails between the surface batch and the evidence batch, so the
+    /// snapshot completes WITHOUT partial surface facts.
+    #[test]
+    fn delete_project_surface_facts_clears_surfaces_and_evidence_scoped() {
+        let mut conn = fresh_storage();
+        let (repo_uid, snap_a) = setup_test_snapshot(&conn);
+        let snap_b = conn
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: repo_uid.clone(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .expect("create snap_b")
+            .snapshot_uid;
+
+        insert_module_candidate(&conn, "mod-a", &snap_a, &repo_uid, ".");
+        insert_module_candidate(&conn, "mod-b", &snap_b, &repo_uid, ".");
+        insert_surface(
+            &conn,
+            "ps-a",
+            &snap_a,
+            &repo_uid,
+            "mod-a",
+            "http_service",
+            "app",
+            None,
+            "node",
+            Some("code_detection"),
+            Some("key-a"),
+        );
+        insert_evidence(
+            &conn,
+            "pse-a",
+            "ps-a",
+            &snap_a,
+            &repo_uid,
+            "code_detection",
+            "app/x.ts",
+            "route_registration",
+        );
+        insert_surface(
+            &conn,
+            "ps-b",
+            &snap_b,
+            &repo_uid,
+            "mod-b",
+            "http_service",
+            "app",
+            None,
+            "node",
+            Some("code_detection"),
+            Some("key-b"),
+        );
+        insert_evidence(
+            &conn,
+            "pse-b",
+            "ps-b",
+            &snap_b,
+            &repo_uid,
+            "code_detection",
+            "app/y.ts",
+            "route_registration",
+        );
+
+        let count = |c: &StorageConnection, table: &str, snap: &str| -> i64 {
+            c.connection()
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE snapshot_uid = ?"),
+                    [snap],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(count(&conn, "project_surfaces", &snap_a), 1);
+        assert_eq!(count(&conn, "project_surface_evidence", &snap_a), 1);
+
+        let deleted = conn.delete_project_surface_facts(&snap_a).unwrap();
+        assert_eq!(deleted, 2, "one surface + one evidence");
+
+        // snap_a cleared across both tables.
+        assert_eq!(count(&conn, "project_surfaces", &snap_a), 0);
+        assert_eq!(count(&conn, "project_surface_evidence", &snap_a), 0);
+        // snap_b untouched (snapshot-scoped).
+        assert_eq!(count(&conn, "project_surfaces", &snap_b), 1);
+        assert_eq!(count(&conn, "project_surface_evidence", &snap_b), 1);
     }
 
     #[test]
