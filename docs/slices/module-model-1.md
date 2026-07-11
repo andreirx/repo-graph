@@ -492,3 +492,63 @@ binding outcome the IMPL executes (it does NOT re-open these).
   the release script sit between slice-done and a release). The reason is **minimize
   leftover tech debt + keep the surface coherent at each slice boundary**: relabelling
   stats without fixing orient would leave the tree half-migrated.
+
+---
+
+## 13. Amendment — pre-IMPL review pass (operator + standalone reviewer, 2026-07-11)
+
+Before bootstrapping the IMPL, the ratified package was put to a standalone adversarial
+review (gpt-5.6-sol, self-contained prompt per `prompts/standalone-review.md`; the operator
+independently flagged the same scale gap). §12 STANDS — nothing below re-opens D1–D6. This
+section binds the IMPL additionally.
+
+### D7 — bounded presentation at scale (RATIFIED 2026-07-11: bounded human, complete JSON)
+
+The near-term deployment target is a 160k-file polyglot monorepo; the §4 desired output
+would print thousands of package groups. Ratified:
+
+- **Human output is bounded:** orient (and stats' human table) shows the top-N groups by
+  file count, deterministic tie-break (lexicographic path), followed by an explicit
+  omission line naming the count and the drill-down ("… and N more groups — see
+  `stats --json` / `modules`"). N integrates with orient's existing progressive budget
+  ladder (C5 / HONEST-DEGRADATION-1) rather than adding a new knob.
+- **Headline counts count ALL groups**, never only the displayed ones.
+- **JSON output carries the complete group set** (machine consumers get the full topology).
+- Display names must be collision-safe after prefix collapse (if two groups collapse to the
+  same display name, disambiguate with the shortest distinguishing path suffix).
+- Validation adds a scale acceptance: on a synthetic or real deep tree with >100 groups,
+  human output stays within the budget ladder and the omission line is present and true.
+
+### D2 clarification — authoritative input population (binding)
+
+The package-group computation reads ONE authoritative population: the indexed-file set
+behind the per-directory MODULE nodes / OWNS edges (what stats reads today). orient's
+group counts and stats' group counts MUST derive from that same read; the §1 discrepancy
+(49 repo / 47 stats / 30 module-owned files) is resolved by naming this source, and the
+IMPL's acceptance counts are computed against it. Exclusions (untracked, ignored,
+non-indexed) are whatever that population already excludes — no new filtering logic.
+
+### D4 clarification — "logical package" per toolchain (binding)
+
+"Merge by logical package" is defined per detected toolchain, not by basename:
+
+- **Rust:** the crate (nearest `Cargo.toml`); groups below crate level only via D3 descent.
+- **TS/JS:** the workspace package (nearest `package.json`); source-root collapse applies
+  to `src/` inside it.
+- **JVM:** logical package with `src/main|test/<lang>` source-root collapse merged, test
+  counts shown (the §4 spring-petclinic shape — unchanged).
+- **C/C++ and manifest-less trees:** directory groups (leaf-dir grouping as today),
+  eligible for D3 umbrella descent.
+- Basename merging across UNRELATED roots is forbidden — merge only within one
+  source-root family; collision-safe display names per D7.
+- Vendored/generated trees group like any other directory tree (no special casing in this
+  slice; hotspot-pollution handling stays TECH-DEBT).
+
+### D3 note — determinism + fixtures (validation-plan addition)
+
+The umbrella descent (second commit, ratified scope — the §12 D6 word "optional" is
+corrected: it is IN scope, merely sequenced second) must be deterministic (single-pass,
+depth-bounded, documented stopping rule: descend single-child chains to the first
+≥2-sibling fan-out, thresholds unchanged) and validated with fixtures for: a deep
+single-child chain, multiple fan-outs at different depths, and a vendored-style
+manifest-less layout.
