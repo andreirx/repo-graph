@@ -35,8 +35,12 @@ If it doesn't, it belongs in `docs/FUTURE-ITERATIONS.md` or nowhere.
 
 **Discovery is the primary product goal. Enforcement is secondary.**
 
-Discovery means: what exists now, what changed since baseline, what got worse,
-what got better, what is risky, where to look first.
+Discovery means: what exists now, how it is structured, where the current risk
+concentrations are, where to look first. Quality *trends* — "what got worse
+since baseline", snapshot-to-snapshot quality diffs, risk ranking over time —
+are **not** a discovery priority (ratified 2026-07-11): the operator derives
+those by other means and will not rely on repo-graph for them. Parked in
+`docs/FUTURE-ITERATIONS.md`.
 
 Enforcement means: policy declarations, gate verdicts, waiver semantics, audit
 trails, CI blocking. The enforcement machinery exists and works. It is not the
@@ -46,9 +50,9 @@ governance surface ships without a ratified promotion from
 
 **Product priority order:**
 1. Structural discovery (modules, boundaries, seams, dependencies)
-2. Quality discovery (measurements, comparisons, risk ranking)
-3. Change discovery (what's new, what's worsened, what's improved)
-4. Enforcement (gate pass/fail, policy compliance) — useful, not primary
+2. Current-state quality signals (complexity, size, hotspots) — orientation
+   aids, not a trend system
+3. Enforcement (gate pass/fail, policy compliance) — useful, not primary
 
 **Implication for CLI output:** a discovery-first CLI answers "what should the
 agent notice?", not "should CI block?". If output collapses meaning into
@@ -83,7 +87,6 @@ working on a repo needs to immediately understand:
 - where the boundaries and seams are
 - how modules relate to each other
 - what runtime/build environment each module runs under
-- what changed since the last known state
 
 This is high-value, slow-changing architectural truth that agents cannot
 efficiently reconstruct from raw file reads. The product makes it queryable in
@@ -98,8 +101,7 @@ milliseconds, not minutes.
    what exists and what drifted; the agent writes the docs).
 3. Agent changes code using repo-graph facts plus compact docs for
    orientation.
-4. Agent asks `check` to see what changed structurally and qualitatively;
-   repo-graph reports deltas — new risks, worsened, improved.
+4. Agent asks `check` to validate the structural state it is leaving behind.
 5. Agent decides whether to proceed based on visible facts.
 
 The gate/policy layer is available for teams that want hard enforcement. It is
@@ -238,13 +240,12 @@ understanding layer**:
 4. **Documentation as first-class evidence** — the docs themselves are the
    data; repo-graph finds what exists, what is missing, and what likely
    drifted. Repo-graph is not a documentation authoring system.
-5. **Quality discovery** — deterministic measurements (complexity, size,
-   coverage, churn, hotspots, risk, cycles, unresolved-edge pressure) with
-   snapshot deltas, so agents see what got worse and where the risks are.
-   Four kinds of truth, stored separately: evidence (raw artifacts),
-   measurements (deterministic facts), policies (declared thresholds),
-   assessments (derived judgments). Not one composite score — a health
-   vector with trend.
+5. **Current-state quality signals** — deterministic measurements (complexity,
+   size, hotspots, cycles, unresolved-edge pressure) that tell the agent where
+   the risk concentrations are *now*, honestly labelled with per-language
+   coverage. Snapshot-delta quality diffs / health-vector-with-trend are
+   parked (`docs/FUTURE-ITERATIONS.md`, ratified 2026-07-11) — the operator
+   does not rely on repo-graph for trends.
 
 The extraction layer is the necessary foundation; the value is the
 architectural interpretation on top of it.
@@ -298,8 +299,7 @@ Repo-graph does not race platform vendors on generic local indexing. It owns
 the layer vendors are structurally less likely to prioritize:
 
 - portability across tools, agents, and model vendors
-- deterministic structural and quality discovery
-- cross-snapshot comparison and change visibility
+- deterministic structural discovery with current-state quality signals
 - architectural understanding that persists across sessions
 
 Token reduction is the measurable proof: a `callers` query replaces a

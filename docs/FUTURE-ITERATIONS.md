@@ -170,3 +170,22 @@ refresh, stop-time summary — shipped direction). Phase 2 would add selective
 enforcement: block raw SQL before CLI, block completion without a validation
 transcript, block stale-DB use in critical flows. Parked until field
 experience with Phase 1 accumulates.
+
+## Quality Trend Discovery (Snapshot-To-Snapshot Diffs, Risk Ranking Over Time)
+
+Parked 2026-07-11 (operator ratification). Previously the VISION's Value
+Frontier item 5 and the ROADMAP's "Quality discovery surface" section:
+snapshot-to-snapshot quality diff, "what got worse" delta surfacing in
+`orient`/`check`, risk prioritization combining complexity with
+churn/coverage/boundary signals, the health-vector-with-trend model, and the
+comparability rules (toolchain provenance → `NOT_COMPARABLE`) that gate it.
+
+**Why parked:** the operator derives quality trends by other means and will
+not rely on repo-graph for them. Current-state quality signals (complexity,
+hotspots, cycles — honestly coverage-labelled) REMAIN in scope as orientation
+aids; what is parked is the *trend/delta* system. This also aligns with the
+retention ratification ("git has history — I want DISCOVERY"): internal
+snapshots exist for refresh mechanics, not as a queryable quality timeline.
+
+Promotion path (as for everything here): operator ratification → VISION
+amended → ROADMAP entry.

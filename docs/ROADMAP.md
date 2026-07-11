@@ -246,15 +246,14 @@ reviews → a follow-on IMPL slice; operator triggers each):
 Unblocked = the enrichment pipeline, classifier, and Cargo/package manifest readers all exist;
 none requires DAEMON-CONCURRENCY-1.
 
-## Quality discovery surface (VISION's named primary frontier)
+## Quality trend discovery — PARKED (2026-07-11)
 
-The discovery layer the VISION calls #1 and that is still missing:
-**snapshot-to-snapshot quality diff**, delta surfacing in `orient`/`check`
-("what got worse"), and risk prioritization combining complexity with
-churn/coverage/boundary signals. Governance substrate (policies, `assess`, `gate`)
-is shipped; this is the _discovery_ half. Comparability rules (toolchain provenance
-→ `NOT_COMPARABLE`) are the gating design point. Natural follow-on to the
-orient/stats honesty work above.
+Snapshot-to-snapshot quality diff, "what got worse" delta surfacing, and
+risk-ranking-over-time are **not** a discovery priority: the operator derives
+trends by other means and will not rely on repo-graph for them. Moved with
+full rationale to `docs/FUTURE-ITERATIONS.md` (§ Quality Trend Discovery);
+VISION amended same date. Current-state quality signals (complexity, hotspots,
+cycles — coverage-labelled) remain in scope as orientation aids.
 
 ## Parallel strategic bet — non-TS LiveGraph coverage
 
