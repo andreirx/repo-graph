@@ -51,8 +51,9 @@ pub fn print_usage() {
     eprintln!("usage:");
     eprintln!();
     eprintln!("Indexing (daemon required):");
-    eprintln!("  rmap index [repo_path] [--alias <name>] [--include-root <path>]...");
-    eprintln!("  rmap refresh [--include-root <path>]...");
+    eprintln!("  rmap index [repo_path] [--alias <name>] [--include-root <path>]... [--progress]");
+    eprintln!("  rmap refresh [--include-root <path>]... [--progress]");
+    eprintln!("    --progress   stream inline progress; default is quiet — follow live progress with `rmap doctor`");
     eprintln!();
     eprintln!("Repo management:");
     eprintln!("  rmap repo list                         List all registered repos");

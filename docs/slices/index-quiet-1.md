@@ -1,6 +1,14 @@
 # INDEX-QUIET-1 — Progress belongs to doctor, not the index invocation
 
-Status: SPECIFIED (2026-07-10) · Track: Product-surface UX (operator-directed)
+Status: **DELIVERED (2026-07-11)** · Track: Product-surface UX (operator-directed)
+
+## 0. Delivery record (2026-07-11)
+
+Relay approved cycle 2 + operator live check: default index output is now
+exactly one start line ("indexing <repo> — follow progress with `rmap
+doctor`") + the completion report; `--progress` restores inline rendering;
+frames consumed silently (stall-deadline semantics untouched, existing
+tests passing). Gates: rgr 982/0, fmt/clippy clean.
 Ratified (operator, 2026-07-10): "I don't want progress shown inline — I want
 rmap doctor to report current progress each time you call it."
 

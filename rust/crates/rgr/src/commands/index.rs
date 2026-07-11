@@ -37,16 +37,48 @@ fn long_op_read_timeout_secs() -> u64 {
     }
 }
 
-/// DAEMON-VISIBILITY-1 (contract C2): a throttled stderr renderer for the daemon's progress frames.
+/// The throttled progress-frame sink for a long `index`/`refresh` (DAEMON-VISIBILITY-1 C2 +
+/// INDEX-QUIET-1).
 ///
-/// Renders on every phase change and at most once every 2s within a phase, so a long index surfaces
-/// coarse progress ("extracting: 42000/160000") instead of blocking silently — without flooding the
-/// terminal when the pipeline emits per-file events.
-fn make_progress_renderer() -> impl FnMut(&serde_json::Value) {
-    let mut last_render = Instant::now();
-    let mut last_phase = String::new();
-    let mut first = true;
-    move |p: &serde_json::Value| {
+/// It is fed EVERY progress frame the daemon emits (the transport's read loop consumes each frame,
+/// which resets the per-read stall deadline — see `socket_transport::send_request`). What it *does*
+/// with a frame depends on `render`:
+///
+/// - `render == false` (INDEX-QUIET-1 default): consume silently, emit nothing. Progress is a PULL
+///   concern — `rmap doctor` renders it per call. The frames still flow through, so the stall deadline
+///   still resets and the still-running honesty (contract C1) is unaffected. This is the whole slice:
+///   a display-only suppression, transport untouched.
+/// - `render == true` (`--progress` opt-in): render coarse progress exactly as before this slice — on
+///   every phase change and at most once every 2s within a phase, so a long index surfaces
+///   "extracting: 42000/160000" instead of flooding the terminal on per-file events.
+///
+/// [`on_frame`](Self::on_frame) is the pure decision seam (returns the line to print, or `None`),
+/// extracted so the quiet/opt-in proofs assert behavior without capturing stderr;
+/// [`make_progress_sink`] wraps it in the `eprintln!` closure the transport calls.
+struct ProgressSink {
+    render: bool,
+    last_render: Instant,
+    last_phase: String,
+    first: bool,
+}
+
+impl ProgressSink {
+    fn new(render: bool) -> Self {
+        Self {
+            render,
+            last_render: Instant::now(),
+            last_phase: String::new(),
+            first: true,
+        }
+    }
+
+    /// Decide what (if anything) to render for one progress frame. `None` = render nothing (quiet
+    /// mode, or the intra-phase throttle window). The throttle state advances only when `render` is
+    /// on, so the quiet path is a pure early return that never touches timing.
+    fn on_frame(&mut self, p: &serde_json::Value) -> Option<String> {
+        if !self.render {
+            return None;
+        }
         let phase = p
             .get("phase")
             .and_then(|v| v.as_str())
@@ -54,19 +86,63 @@ fn make_progress_renderer() -> impl FnMut(&serde_json::Value) {
             .to_string();
         let current = p.get("current").and_then(|v| v.as_u64()).unwrap_or(0);
         let total = p.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-        let phase_changed = phase != last_phase;
-        if first || phase_changed || last_render.elapsed() >= Duration::from_secs(2) {
-            if total > 0 {
-                eprintln!("  {}: {}/{}", phase, current, total);
+        let phase_changed = phase != self.last_phase;
+        if self.first || phase_changed || self.last_render.elapsed() >= Duration::from_secs(2) {
+            let line = if total > 0 {
+                Some(format!("  {}: {}/{}", phase, current, total))
             } else if current > 0 {
-                eprintln!("  {}: {}", phase, current);
+                Some(format!("  {}: {}", phase, current))
             } else if !phase.is_empty() {
-                eprintln!("  {}…", phase);
-            }
-            last_render = Instant::now();
-            last_phase = phase;
-            first = false;
+                Some(format!("  {}…", phase))
+            } else {
+                None
+            };
+            self.last_render = Instant::now();
+            self.last_phase = phase;
+            self.first = false;
+            line
+        } else {
+            None
         }
+    }
+}
+
+/// Build the progress-frame closure the transport invokes for each frame (DAEMON-VISIBILITY-1 C2).
+///
+/// `render == false` is the INDEX-QUIET-1 default: the closure still runs on every frame (so frames
+/// are consumed and the stall deadline resets), but prints nothing. `render == true` restores today's
+/// inline rendering for `--progress`.
+fn make_progress_sink(render: bool) -> impl FnMut(&serde_json::Value) {
+    let mut sink = ProgressSink::new(render);
+    move |p: &serde_json::Value| {
+        if let Some(line) = sink.on_frame(p) {
+            eprintln!("{line}");
+        }
+    }
+}
+
+/// INDEX-QUIET-1 (contract §2.1 + §2.3): the DEFAULT-QUIET preamble decision for one long
+/// `index`/`refresh`, lifted OUT of the two daemon-gated command bodies so a named test proves the
+/// command-level surface WITHOUT a daemon (the review-0 gap: build-0 proved the sink helpers, not the
+/// `run_*` wiring that decides start-line-vs-not).
+///
+/// - Default (quiet, `progress == false`): `Some(<start line>)` — the one honest line a quiet run
+///   prints before it goes silent. It names the op + repo and points at `rmap doctor`, the live
+///   progress surface (progress is a PULL concern now).
+/// - Opt-in (`--progress`, `progress == true`): `None` — that path prints no start line and keeps
+///   today's inline rendering unchanged (§2.3).
+///
+/// This reads the SAME `progress` bool that drives [`make_progress_sink`]'s render mode, so the two
+/// halves of the surface — "print the start line?" and "render frames inline?" — cannot disagree: a
+/// quiet run is (start line, silent sink); an opt-in run is (no start line, rendering sink). Both
+/// callers (`run_index`, `run_refresh`) pass their verb ("indexing" / "refreshing").
+fn long_op_preamble(progress: bool, verb: &str, repo: &str) -> Option<String> {
+    if progress {
+        None
+    } else {
+        Some(format!(
+            "{verb} {repo} — follow progress with `rmap doctor`"
+        ))
     }
 }
 
@@ -96,6 +172,9 @@ pub fn run_index(args: &[String]) -> ExitCode {
     let mut include_roots: Vec<String> = Vec::new();
     let mut alias: Option<String> = None;
     let mut repo_path_arg: Option<String> = None;
+    // INDEX-QUIET-1 (§2.3): opt into today's inline progress rendering. Default is quiet (progress
+    // is a PULL concern — `rmap doctor`).
+    let mut progress = false;
     let mut i = 0;
 
     while i < args.len() {
@@ -113,6 +192,9 @@ pub fn run_index(args: &[String]) -> ExitCode {
             }
             alias = Some(args[i + 1].clone());
             i += 2;
+        } else if args[i] == "--progress" {
+            progress = true;
+            i += 1;
         } else if args[i].starts_with("--") {
             eprintln!("error: unknown option: {}", args[i]);
             return ExitCode::from(1);
@@ -121,7 +203,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
             i += 1;
         } else {
             eprintln!("error: unexpected argument: {}", args[i]);
-            eprintln!("usage: rmap index [repo_path] [--alias <name>] [--include-root <path>]...");
+            eprintln!("usage: rmap index [repo_path] [--alias <name>] [--include-root <path>]... [--progress]");
             return ExitCode::from(1);
         }
     }
@@ -169,9 +251,18 @@ pub fn run_index(args: &[String]) -> ExitCode {
         }
     };
 
+    // INDEX-QUIET-1 (§2.1/§2.3): a DEFAULT-QUIET run prints one honest start line pointing at `rmap
+    // doctor` (the live progress surface), then stays silent; `--progress` prints nothing here and
+    // keeps today's inline rendering. `long_op_preamble` is the tested decision seam (default →
+    // Some(line), opt-in → None).
+    if let Some(line) = long_op_preamble(progress, "indexing", &repo_path_canon.to_string_lossy()) {
+        eprintln!("{line}");
+    }
+
     // Transport selection (socket vs stdio) happens in request() via ensure_connected().
-    // DAEMON-VISIBILITY-1 (C2): render the daemon's progress frames while attached.
-    let mut on_progress = make_progress_renderer();
+    // DAEMON-VISIBILITY-1 (C2): frames are consumed for the whole op (resetting the stall deadline);
+    // INDEX-QUIET-1: they render only under `--progress` (default is a silent sink).
+    let mut on_progress = make_progress_sink(progress);
     match client.request_with_progress(
         "index",
         Some(params),
@@ -801,6 +892,103 @@ mod tests {
         ArtifactCopyForward, ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult,
     };
 
+    // INDEX-QUIET-1 (contract §2.1) — QUIET PROOF. A DEFAULT (quiet) index/refresh renders NO inline
+    // progress. The sink is still fed every frame — the transport's read loop consumes each frame,
+    // which is what resets the stall deadline (C2) and drives the still-running honesty — but a quiet
+    // sink emits nothing. Proven deterministically: `on_frame` returns `None` for every frame,
+    // INCLUDING the first-frame and phase-change cases that WOULD render when opted in.
+    #[test]
+    fn progress_sink_quiet_emits_nothing_even_as_frames_flow() {
+        let mut sink = ProgressSink::new(false);
+        // First frame — `first` would bypass the throttle and render if opted in.
+        assert_eq!(
+            sink.on_frame(
+                &serde_json::json!({ "phase": "extracting", "current": 42, "total": 160 })
+            ),
+            None
+        );
+        // Phase change — would also render if opted in.
+        assert_eq!(
+            sink.on_frame(&serde_json::json!({ "phase": "resolving", "current": 5, "total": 10 })),
+            None
+        );
+        // A bare phase, and an empty frame — still nothing.
+        assert_eq!(
+            sink.on_frame(&serde_json::json!({ "phase": "writing" })),
+            None
+        );
+        assert_eq!(sink.on_frame(&serde_json::json!({})), None);
+    }
+
+    // INDEX-QUIET-1 (contract §2.3) — OPT-IN PROOF. `--progress` restores today's inline rendering,
+    // byte-for-byte. The first frame always renders (bypasses the 2s throttle); a phase change bypasses
+    // it too, so these three frames render deterministically in each of the format's three branches.
+    #[test]
+    fn progress_sink_opt_in_renders_frames_as_before() {
+        let mut sink = ProgressSink::new(true);
+        // total > 0 → "  <phase>: <cur>/<total>".
+        assert_eq!(
+            sink.on_frame(
+                &serde_json::json!({ "phase": "extracting", "current": 42, "total": 160 })
+            ),
+            Some("  extracting: 42/160".to_string())
+        );
+        // total == 0, current > 0 → "  <phase>: <cur>" (phase change bypasses the throttle).
+        assert_eq!(
+            sink.on_frame(&serde_json::json!({ "phase": "resolving", "current": 5, "total": 0 })),
+            Some("  resolving: 5".to_string())
+        );
+        // total == 0 && current == 0, phase present → "  <phase>…".
+        assert_eq!(
+            sink.on_frame(&serde_json::json!({ "phase": "writing", "current": 0, "total": 0 })),
+            Some("  writing…".to_string())
+        );
+    }
+
+    // INDEX-QUIET-1 (contract §2.1 + §2.3) — COMMAND-SURFACE PROOF (review-0 required change #2). Not
+    // just the sink helper: this proves what a DEFAULT `rmap index`/`refresh` invocation DOES with its
+    // `progress` flag, at the exact seam both `run_index` and `run_refresh` call. The daemon-only
+    // completion report is covered by the isolated dogfood; here we lock the decision that lives in
+    // the command bodies:
+    //   - default (no --progress): print the ONE honest start line (naming the repo + `rmap doctor`)
+    //     AND run a SILENT sink (no inline progress);
+    //   - --progress: print NO start line AND run a RENDERING sink (today's inline behavior).
+    // Both halves derive from the SAME `progress` bool, so they cannot disagree — asserted for both
+    // verbs (index → "indexing", refresh → "refreshing").
+    #[test]
+    fn default_command_surface_prints_start_line_and_stays_quiet_opt_in_renders() {
+        let a_frame = serde_json::json!({ "phase": "extracting", "current": 42, "total": 160 });
+        for (verb, repo) in [("indexing", "/repos/big"), ("refreshing", "/work/svc")] {
+            // DEFAULT (quiet): the command prints the exact honest start line...
+            assert_eq!(
+                long_op_preamble(false, verb, repo),
+                Some(format!(
+                    "{verb} {repo} — follow progress with `rmap doctor`"
+                )),
+                "default {verb} run must print the start line"
+            );
+            // ...and the sink built from the same `false` emits nothing, even on a would-render frame.
+            assert_eq!(
+                ProgressSink::new(false).on_frame(&a_frame),
+                None,
+                "default {verb} run must be quiet"
+            );
+
+            // OPT-IN (--progress): NO start line...
+            assert_eq!(
+                long_op_preamble(true, verb, repo),
+                None,
+                "--progress {verb} run must not print a start line"
+            );
+            // ...and the sink built from the same `true` renders that frame inline (unchanged).
+            assert_eq!(
+                ProgressSink::new(true).on_frame(&a_frame),
+                Some("  extracting: 42/160".to_string()),
+                "--progress {verb} run must render inline"
+            );
+        }
+    }
+
     // DAEMON-VISIBILITY-1 (contract C) — the still-running proof. A client read-timeout on a long op
     // is classified from a fresh `daemon_info` probe: a live op → "still running" with a DISTINCT
     // exit status (NOT the failure code); an unreachable daemon → the failure code. This is the fix
@@ -1164,6 +1352,8 @@ mod tests {
 pub fn run_refresh(args: &[String]) -> ExitCode {
     // Parse options (REG-1: no positional args, repo from cwd)
     let mut include_roots: Vec<String> = Vec::new();
+    // INDEX-QUIET-1 (§2.3): opt into today's inline progress rendering; default is quiet.
+    let mut progress = false;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--include-root" {
@@ -1173,12 +1363,15 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             }
             include_roots.push(args[i + 1].clone());
             i += 2;
+        } else if args[i] == "--progress" {
+            progress = true;
+            i += 1;
         } else if args[i].starts_with("--") {
             eprintln!("error: unknown option: {}", args[i]);
             return ExitCode::from(1);
         } else {
             eprintln!("error: unexpected argument: {}", args[i]);
-            eprintln!("usage: rmap refresh [--include-root <path>]...");
+            eprintln!("usage: rmap refresh [--include-root <path>]... [--progress]");
             return ExitCode::from(1);
         }
     }
@@ -1218,9 +1411,16 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         }
     };
 
+    // INDEX-QUIET-1 (§2.1/§2.3): quiet-by-default — one start line pointing at `rmap doctor`, then
+    // silence; `--progress` prints nothing here. `long_op_preamble` is the tested decision seam.
+    if let Some(line) = long_op_preamble(progress, "refreshing", &repo_path) {
+        eprintln!("{line}");
+    }
+
     // Transport selection (socket vs stdio) happens in request() via ensure_connected().
-    // DAEMON-VISIBILITY-1 (C2): render the daemon's progress frames while attached.
-    let mut on_progress = make_progress_renderer();
+    // DAEMON-VISIBILITY-1 (C2): frames are consumed for the whole op (resetting the stall deadline);
+    // INDEX-QUIET-1: they render only under `--progress` (default is a silent sink).
+    let mut on_progress = make_progress_sink(progress);
     match client.request_with_progress(
         "refresh",
         Some(params),
