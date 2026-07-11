@@ -2558,8 +2558,16 @@ impl ServiceDispatcher {
         // failure; the orchestrator's `Break`→abort seam is untouched, so an explicit cancel remains
         // the one deliberate way to stop a write op (contract item 4).
         let mut client_gone = false;
+        let mut last_phase: Option<String> = None;
         let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
             _activity.update(&event.phase, event.current, event.total);
+            // DAEMON-CRASH-RECOVERY-1 (F8): log COARSE phase transitions (deduped — a handful of
+            // phases, never per-file spam), so a crash's daemon log shows which phase was in flight
+            // (the field crash was mid-postpass).
+            if last_phase.as_deref() != Some(event.phase.as_str()) {
+                crate::oplog::log_op_phase("index", &repo_uid, &event.phase);
+                last_phase = Some(event.phase.clone());
+            }
             if client_gone {
                 // Client already disconnected: skip the emit cheaply, keep indexing.
                 return ControlFlow::Continue(());
@@ -2581,6 +2589,13 @@ impl ServiceDispatcher {
             ControlFlow::Continue(())
         };
 
+        // DAEMON-CRASH-RECOVERY-1 (F8): the op-START line lands in the daemon LOG the moment the index
+        // actually begins (after the pre-op validation/registration returns above, so those rejections
+        // never log a spurious start). The snapshot_uid is created INSIDE the extractor, so it is not
+        // known here — the outcome line below carries it. If the daemon dies between here and an
+        // outcome line, the next boot's reconciliation line supplies the missing "interrupted" outcome.
+        crate::oplog::log_op_start("index", &repo_uid, None);
+
         // Execute index under DB write lock (with progress)
         match index_path_with_progress(
             &canonical_path,
@@ -2590,6 +2605,13 @@ impl ServiceDispatcher {
             Some(&mut progress_callback),
         ) {
             Ok(result) => {
+                // DAEMON-CRASH-RECOVERY-1 (F8): the op-OUTCOME line, now that the snapshot exists.
+                crate::oplog::log_op_outcome(
+                    "index",
+                    &repo_uid,
+                    Some(&result.snapshot_uid),
+                    "completed",
+                );
                 // Update registry with index timestamp
                 let now = crate::util::utc_now_iso8601();
                 {
@@ -2705,17 +2727,25 @@ impl ServiceDispatcher {
             // longer produces `Aborted` — this arm is now only reachable if the orchestrator's
             // `Break`→abort seam is driven by a deliberate explicit cancel. Retained (not removed) so
             // that mapping stays correct; on the daemon path it is unreachable.
-            Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(
-                    ErrorCode::ProgressDeliveryFailed,
-                    "operation aborted: progress delivery failed",
-                ),
-            ),
-            Err(e) => DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-            ),
+            Err(repo_graph_repo_index::compose::ComposeError::Aborted) => {
+                // DAEMON-CRASH-RECOVERY-1 (F8): a deliberate cancel is a terminal outcome too.
+                crate::oplog::log_op_outcome("index", &repo_uid, None, "interrupted (aborted)");
+                DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::ProgressDeliveryFailed,
+                        "operation aborted: progress delivery failed",
+                    ),
+                )
+            }
+            Err(e) => {
+                // DAEMON-CRASH-RECOVERY-1 (F8): a genuine index failure, named in the LOG.
+                crate::oplog::log_op_outcome("index", &repo_uid, None, &format!("failed: {e}"));
+                DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                )
+            }
         }
         // _db_write_guard drops here, releasing the lock
     }
@@ -2861,8 +2891,14 @@ impl ServiceDispatcher {
         // subsequent emits and run to completion detached. NEVER returns `Break` on transport failure
         // (the previous `Err(_) => Break` aborted the refresh mid-flight, same F5 class as index).
         let mut client_gone = false;
+        let mut last_phase: Option<String> = None;
         let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
             _activity.update(&event.phase, event.current, event.total);
+            // DAEMON-CRASH-RECOVERY-1 (F8): coarse phase transitions, deduped (see handle_index).
+            if last_phase.as_deref() != Some(event.phase.as_str()) {
+                crate::oplog::log_op_phase("refresh", &repo_uid, &event.phase);
+                last_phase = Some(event.phase.clone());
+            }
             if client_gone {
                 return ControlFlow::Continue(());
             }
@@ -2882,6 +2918,9 @@ impl ServiceDispatcher {
             ControlFlow::Continue(())
         };
 
+        // DAEMON-CRASH-RECOVERY-1 (F8): op-START line (see handle_index for the snapshot_uid note).
+        crate::oplog::log_op_start("refresh", &repo_uid, None);
+
         // Execute refresh under both locks (with progress)
         match refresh_path_with_progress(
             &repo_path,
@@ -2891,6 +2930,13 @@ impl ServiceDispatcher {
             Some(&mut progress_callback),
         ) {
             Ok(result) => {
+                // DAEMON-CRASH-RECOVERY-1 (F8): op-OUTCOME line, now that the snapshot exists.
+                crate::oplog::log_op_outcome(
+                    "refresh",
+                    &repo_uid,
+                    Some(&result.snapshot_uid),
+                    "completed",
+                );
                 // Build response with all summary data for CLI parity
                 let mut response = serde_json::json!({
                     "snapshot_uid": result.snapshot_uid,
@@ -2973,17 +3019,23 @@ impl ServiceDispatcher {
             // (best-effort callback above); this arm is now only reachable via a deliberate explicit
             // cancel driving the orchestrator's abort seam. Unreachable on the daemon path, retained
             // so the mapping stays correct.
-            Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(
-                    ErrorCode::ProgressDeliveryFailed,
-                    "operation aborted: progress delivery failed",
-                ),
-            ),
-            Err(e) => DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-            ),
+            Err(repo_graph_repo_index::compose::ComposeError::Aborted) => {
+                crate::oplog::log_op_outcome("refresh", &repo_uid, None, "interrupted (aborted)");
+                DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::ProgressDeliveryFailed,
+                        "operation aborted: progress delivery failed",
+                    ),
+                )
+            }
+            Err(e) => {
+                crate::oplog::log_op_outcome("refresh", &repo_uid, None, &format!("failed: {e}"));
+                DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                )
+            }
         }
         // Guards drop here: _refresh_guard then _db_write_guard
     }
@@ -3332,11 +3384,23 @@ impl ServiceDispatcher {
             }
         };
 
-        // Run enrichment pipeline
+        // Run enrichment pipeline.
+        // DAEMON-CRASH-RECOVERY-1 (F8, review-2 item 2): the manual `rmap enrich` command is a write
+        // op, so — exactly like index/refresh — log an op-START the moment real work begins (AFTER the
+        // pre-op validation/registration returns above, so a rejected request never logs a spurious
+        // start) and a terminal OUTCOME on every arm of the write. Unlike index, the snapshot is
+        // already resolved here, so the start line NAMES it. Observability only — enrich is unchanged.
+        crate::oplog::log_op_start("enrich", repo_uid, Some(&snapshot_uid));
         let mut pipeline = EnrichmentPipeline::with_registry(storage, registry);
         let report = match pipeline.run(repo_uid, &snapshot_uid, &config) {
             Ok(r) => r,
             Err(e) => {
+                crate::oplog::log_op_outcome(
+                    "enrich",
+                    repo_uid,
+                    Some(&snapshot_uid),
+                    &format!("failed: {e}"),
+                );
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(
@@ -3346,6 +3410,22 @@ impl ServiceDispatcher {
                 );
             }
         };
+        // F8: the terminal OUTCOME line for the completed manual enrich (reader-frame summary mirrors
+        // the auto pass's wording: "nothing to enrich" | "enriched N/M edges").
+        let summary = if report.eligible_count == 0 {
+            "nothing to enrich".to_string()
+        } else {
+            format!(
+                "enriched {}/{} edges",
+                report.enriched_count, report.eligible_count
+            )
+        };
+        crate::oplog::log_op_outcome(
+            "enrich",
+            repo_uid,
+            Some(&snapshot_uid),
+            &format!("completed ({summary})"),
+        );
 
         // Emit completion progress (best-effort; skip if the client already departed).
         if !client_gone {

@@ -81,6 +81,10 @@ struct RetentionStats {
     parent: i64,
     baseline_auto: i64,
     baseline_user: i64,
+    /// DAEMON-CRASH-RECOVERY-1 (F12): READY snapshots classed prunable. Previously omitted from the
+    /// client render — part of why the table could read as an (almost) empty store.
+    #[serde(default)]
+    prunable: i64,
     total: i64,
 }
 
@@ -227,6 +231,10 @@ fn execute_prune(client: &mut DaemonClient) -> Result<PruneOutput, String> {
             .get("baseline_user")
             .and_then(|v| v.as_i64())
             .unwrap_or(0),
+        prunable: retention
+            .get("prunable")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         total: retention.get("total").and_then(|v| v.as_i64()).unwrap_or(0),
     };
 
@@ -276,27 +284,84 @@ fn execute_prune(client: &mut DaemonClient) -> Result<PruneOutput, String> {
 }
 
 fn print_prune_human(output: &PruneOutput) {
-    if output.pruned_count == 0 {
-        println!("no prunable snapshots found");
-    } else {
-        println!(
-            "pruned {} snapshot(s) in {}ms",
-            output.pruned_count, output.duration_ms
-        );
+    let interrupted_n = output.interrupted_snapshots.len();
+    if let Some(headline) = prune_headline(output.pruned_count, output.duration_ms, interrupted_n) {
+        println!("{headline}");
     }
     println!();
     println!("retention stats:");
-    println!("  current:      {}", output.retention.current);
-    println!("  parent:       {}", output.retention.parent);
-    println!("  baseline_auto:{}", output.retention.baseline_auto);
-    println!("  baseline_user:{}", output.retention.baseline_user);
-    println!("  total:        {}", output.retention.total);
+    println!("  current:       {}", output.retention.current);
+    println!("  parent:        {}", output.retention.parent);
+    println!("  baseline_auto: {}", output.retention.baseline_auto);
+    println!("  baseline_user: {}", output.retention.baseline_user);
+    println!("  prunable:      {}", output.retention.prunable);
+    println!("  total:         {}", output.retention.total);
+    // F12: name genuinely-UNCLASSIFIED rows so the table NEVER implies an empty store when the class
+    // counts above do not sum to `total`. After DAEMON-CRASH-RECOVERY-1 a reconciled crash orphan is
+    // counted in `prunable` above (NOT unclassified), so this fires only for rows no class covers yet
+    // (e.g. a `building` orphan the boot sweep has not reached) — never contradicting the `prunable`
+    // line for a reconciled orphan. The orphaned partials are still named by the reclaim section below.
+    if unclassified_count(&output.retention) > 0 {
+        println!(
+            "  unclassified:  {} (orphaned — daemon restart?)",
+            orphan_state_summary(&output.interrupted_snapshots)
+        );
+    }
 
     // DAEMON-VISIBILITY-1 (F3 visibility): surface interrupted (non-READY) snapshots so they no
     // longer silently hold disk.
     for line in interrupted_report_lines(output) {
         println!("{line}");
     }
+}
+
+/// DAEMON-CRASH-RECOVERY-1 (F12): the prune headline, or `None`.
+///
+/// The field bug: `maintenance prune` printed "no prunable snapshots found" over 11 GB of orphaned
+/// non-READY partials (they are not READY-`prunable`, so `pruned_count` was 0). Here we print that
+/// line ONLY when there is genuinely nothing — no READY prune AND no orphaned non-READY snapshot.
+/// When orphans are present the reclaim/orphan lines below carry the truth, so the headline is
+/// suppressed rather than lying.
+fn prune_headline(pruned_count: i64, duration_ms: u64, interrupted_n: usize) -> Option<String> {
+    if pruned_count > 0 {
+        Some(format!(
+            "pruned {pruned_count} snapshot(s) in {duration_ms}ms"
+        ))
+    } else if interrupted_n == 0 {
+        Some("no prunable snapshots found".to_string())
+    } else {
+        None
+    }
+}
+
+/// DAEMON-CRASH-RECOVERY-1 (F12): a compact "N <state>" breakdown of the orphaned non-READY
+/// snapshots, grouped by reader-frame state (deterministic order). Crash-orphans all render
+/// "interrupted"; a mixed set lists each state. Pure/testable.
+fn orphan_state_summary(interrupted: &[InterruptedSnapshot]) -> String {
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for s in interrupted {
+        let state = if s.state.is_empty() {
+            "non-READY"
+        } else {
+            s.state.as_str()
+        };
+        *counts.entry(state).or_default() += 1;
+    }
+    counts
+        .iter()
+        .map(|(state, n)| format!("{n} {state}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// DAEMON-CRASH-RECOVERY-1 (F12): snapshots no retention class covers — `total` minus every classified
+/// row. `> 0` is the honest "the class counts do not sum to `total`" signal (the field bug was
+/// `total 3, all classes 0`). After reconciliation a crash orphan is counted in `prunable`, so this is
+/// 0 for it (no phantom line contradicting the `prunable` count); it stays positive only for rows no
+/// class covers yet (e.g. a not-yet-reconciled `building` orphan). Pure/testable; clamped at 0 so a
+/// transient over-count never prints a negative.
+fn unclassified_count(r: &RetentionStats) -> i64 {
+    (r.total - r.current - r.parent - r.baseline_auto - r.baseline_user - r.prunable).max(0)
 }
 
 /// DAEMON-VISIBILITY-1 (F3, operator Option A): the interrupted-snapshots section of the prune report
@@ -423,6 +488,7 @@ mod tests {
                 parent: 0,
                 baseline_auto: 0,
                 baseline_user: 0,
+                prunable: 0,
                 total: 2,
             },
             interrupted_snapshots: interrupted,
@@ -500,5 +566,75 @@ mod tests {
     fn prune_report_empty_when_no_interrupted() {
         let lines = interrupted_report_lines(&base_output(vec![], NonReadyReclaim::default()));
         assert!(lines.is_empty());
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (F12): the exact field bug — 3 orphaned partials, 0 READY-prunable.
+    // The headline must NOT be the misleading "no prunable snapshots found"; it is suppressed so the
+    // reclaim lines carry the truth. When there is genuinely nothing, the honest line still prints.
+    #[test]
+    fn headline_never_implies_empty_over_orphans() {
+        // 3 orphaned non-READY snapshots, nothing READY-prunable → NO misleading headline.
+        assert_eq!(prune_headline(0, 5, 3), None);
+        // Genuinely nothing → the honest "no prunable" line.
+        assert_eq!(
+            prune_headline(0, 5, 0).as_deref(),
+            Some("no prunable snapshots found")
+        );
+        // Something pruned → the count line.
+        assert_eq!(
+            prune_headline(2, 12, 0).as_deref(),
+            Some("pruned 2 snapshot(s) in 12ms")
+        );
+    }
+
+    // F12: the stats-table orphan line NAMES the excluded rows by reader-frame state so the READY-only
+    // class counts (which can all be 0) never read as an empty store.
+    #[test]
+    fn orphan_state_summary_names_the_excluded_by_state() {
+        let three_interrupted = vec![
+            InterruptedSnapshot {
+                state: "interrupted".to_string(),
+                created_at: "t1".to_string(),
+            },
+            InterruptedSnapshot {
+                state: "interrupted".to_string(),
+                created_at: "t2".to_string(),
+            },
+            InterruptedSnapshot {
+                state: "interrupted".to_string(),
+                created_at: "t3".to_string(),
+            },
+        ];
+        assert_eq!(orphan_state_summary(&three_interrupted), "3 interrupted");
+        // A missing state degrades to a labelled "non-READY", never a blank.
+        let blank = vec![InterruptedSnapshot {
+            state: String::new(),
+            created_at: "t".to_string(),
+        }];
+        assert_eq!(orphan_state_summary(&blank), "1 non-READY");
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (F12, review-1): the "unclassified" stats line fires on the TRUE
+    // `total > Σ(classes)` condition — NOT merely "interrupted present". After reconciliation a crash
+    // orphan is counted in `prunable`, so `unclassified_count` is 0 for it and the line does NOT print
+    // (it would otherwise contradict the `prunable: N` line just above — a name-vs-behavior defect).
+    #[test]
+    fn unclassified_count_is_total_minus_classified() {
+        let stats = |current, prunable, total| RetentionStats {
+            current,
+            parent: 0,
+            baseline_auto: 0,
+            baseline_user: 0,
+            prunable,
+            total,
+        };
+        // The pre-reconciliation field bug: 3 orphans, no class → 3 unclassified (the line SHOULD fire).
+        assert_eq!(unclassified_count(&stats(0, 0, 3)), 3);
+        // Post-reconciliation: the 3 orphans are counted `prunable` → 0 unclassified (no phantom line).
+        assert_eq!(unclassified_count(&stats(0, 3, 3)), 0);
+        // A healthy repo (current + a prunable READY) → 0.
+        assert_eq!(unclassified_count(&stats(1, 1, 2)), 0);
+        // Clamped: a transient over-count never yields a negative.
+        assert_eq!(unclassified_count(&stats(2, 2, 3)), 0);
     }
 }

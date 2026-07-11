@@ -67,6 +67,9 @@ pub mod handlers;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
+// DAEMON-CRASH-RECOVERY-1 (F8): op-lifecycle lines in the daemon LOG (index/refresh/enrich/retention/
+// reconcile), so a crashed op's forensics survive in the ONE surface a dead daemon leaves behind.
+pub mod oplog;
 pub mod orient_coherence;
 pub mod orient_lg_decisions;
 pub mod orient_serve;
@@ -75,6 +78,10 @@ pub mod partition_discovery;
 // from the oversized `dispatch.rs`. Crate-internal (all public items are `pub(crate)`); `dispatch`
 // re-exports them so existing call sites resolve unchanged.
 pub(crate) mod reader_context;
+// DAEMON-CRASH-RECOVERY-1 (F7/F11): boot + repo-load reconciliation of crash-orphaned `building`
+// snapshots (flip to terminal `failed` + log; the non-READY prune reclaims them and F12 stats name
+// them). Two callers: `load_repo` + the boot sweep.
+pub mod reconcile;
 pub mod registry;
 pub mod resource_metrics;
 pub mod retention_pass;
@@ -261,6 +268,19 @@ pub fn run_daemon() -> Result<(), String> {
 
     let state = Arc::new(DaemonState::new());
     let state_init = startup_start.elapsed();
+
+    // DAEMON-CRASH-RECOVERY-1 (F7/F11): sweep every registered repo for crash-orphaned `building`
+    // snapshots left by a previous (dead) daemon — flip each to the terminal `failed` state, classify
+    // it `prunable` (retention stats then count it), and log it (the non-READY prune + VACUUM then
+    // reclaims it). Runs on a BACKGROUND thread so it
+    // NEVER delays the socket bind below (the contract's
+    // "must not materially delay socket readiness"); each repo is two-gate guarded, so a repo a fresh
+    // client is already indexing is skipped (its live op finalizes its own snapshot). The lazy
+    // `load_repo` hook (state.rs) covers any repo the sweep has not reached yet.
+    {
+        let boot_state = Arc::clone(&state);
+        std::thread::spawn(move || crate::reconcile::reconcile_all_repos(&boot_state));
+    }
 
     // DAEMON-CONCURRENCY-IMPL-1 (D-C = C-B): the dispatcher is shared across
     // concurrent connection-handler threads as `Arc<ServiceDispatcher>`.

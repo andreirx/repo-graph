@@ -344,7 +344,16 @@ fn newer_trigger_supersedes_the_older_queued_pass() {
 #[test]
 fn absent_toolchain_yields_an_honest_skip_not_an_error() {
     let _serial = serial_guard();
-    set_overrides(true);
+    // Auto-enrich OFF: this proof drives `run_enrich_pass` DIRECTLY with an injected absent-toolchain
+    // predicate (`&|_| false`, below), so it needs NO background auto pass. Leaving auto-enrich ON let
+    // the setup index spawn a real background pass which — on a HOST WHERE tsserver IS PRESENT — starts a
+    // real LSP and writes the DB concurrently with this test's own raw `StorageConnection::open` (a
+    // `database is locked` flake), AND contradicts this test's own "no LSP" claim. OFF makes the proof
+    // hermetic + host-independent — the same discipline every synchronous-pass proof here already uses
+    // (e.g. `newer_trigger_supersedes_the_older_queued_pass`, `enrich_yields_under_contention...`). The
+    // honest-skip assertion is unchanged: it is proven by the direct `run_enrich_pass` call below, not by
+    // any background pass.
+    set_overrides(false);
 
     let (dispatcher, _state, _root) = isolated();
     let repo_root = tempdir().unwrap();
@@ -776,5 +785,58 @@ fn cwd_resolved_manual_enrich_runs_without_identifiers() {
     assert_eq!(
         result["eligible_count"], 0,
         "zero-eligible fixture → nothing to resolve (no LSP): {result}"
+    );
+}
+
+// ── DAEMON-CRASH-RECOVERY-1 (F8, review-2 item 2) — the MANUAL enrich command logs its lifecycle ──
+
+// The manual `rmap enrich` daemon command (`handle_enrich`) is a write op and — like index/refresh —
+// must log an op-START + terminal OUTCOME pair, which it previously did NOT (review-2 finding #2).
+// Driven through the REAL dispatch surface on a zero-eligible fixture (hermetic — `pipeline.run`
+// early-returns before any resolver init), asserting the `completed` outcome closes the start. The
+// enrich op's FAILURE disposition is covered deterministically by the `enrich_pass` lib proof
+// `a_failed_enrich_closes_its_start_with_a_failed_outcome` (identical `op enrich failed: …` line
+// shape); forcing `pipeline.run` itself to Err in-process would require a resolver test-seam that
+// `handle_enrich` deliberately does not have (an unearned production abstraction).
+#[test]
+fn manual_enrich_command_logs_start_and_completed_outcome() {
+    let _serial = serial_guard();
+    set_overrides(false); // index's own auto-enrich OFF → the only enrich lines are the manual one's
+    repo_graph_daemon_runtime::oplog::enable_oplog_capture_for_test();
+
+    let (dispatcher, _state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_no_eligible(&repo_dir);
+    let indexed = index(&dispatcher, "idx", &repo_dir);
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+    let repo_ref = repo_dir
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    let result = expect_success(run(
+        &dispatcher,
+        "enr",
+        "enrich",
+        json!({ "repo": repo_ref }),
+    ));
+    assert_eq!(
+        result["command"], "enrich",
+        "the manual enrich reaches handle_enrich: {result}"
+    );
+
+    let lines: Vec<String> = repo_graph_daemon_runtime::oplog::oplog_lines_for_test()
+        .into_iter()
+        .filter(|l| l.contains(&repo_uid))
+        .collect();
+    assert!(
+        lines.iter().any(|l| l.contains("op enrich started")),
+        "the manual enrich command logs an op-START: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("op enrich completed")),
+        "the manual enrich command logs a terminal completed OUTCOME closing the start: {lines:?}"
     );
 }

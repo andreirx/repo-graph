@@ -282,3 +282,75 @@ fn prune_prunable_snapshots_deletes_marked() {
     assert_eq!(stats_after.prunable, 0);
     assert_eq!(stats_after.total, 1);
 }
+
+// DAEMON-CRASH-RECOVERY-1 (review-1, Change 2): a reconciled crash orphan is `status='failed'` +
+// `retention_class='prunable'`. The READY-retention prune is guarded to `status='ready'`, so it must
+// NOT delete the orphan — that is the non-READY (`prune_non_ready_snapshots` + `VACUUM`) path's job,
+// and deleting it here would skip that VACUUM (the "disk never came back" field bug). `get_retention_stats`
+// still COUNTS it as prunable BEFORE any reclaim (the visibility the slice requires).
+#[test]
+fn prune_prunable_leaves_non_ready_orphan_for_the_vacuum_path() {
+    use crate::types::{CreateSnapshotInput, UpdateSnapshotStatusInput};
+
+    let storage = setup_storage();
+    insert_repo(&storage, "r1");
+
+    let mk = |kind: &str| {
+        storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                kind: kind.to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid
+    };
+
+    // A READY current snapshot + a crash orphan reconciled to failed+prunable.
+    let ready = mk("full");
+    storage
+        .update_snapshot_status(&UpdateSnapshotStatusInput {
+            snapshot_uid: ready.clone(),
+            status: "ready".to_string(),
+            completed_at: None,
+        })
+        .unwrap();
+    let orphan = mk("full");
+    assert!(storage
+        .mark_snapshot_interrupted(&orphan, "daemon restart")
+        .unwrap());
+
+    // Classify touches only the READY row (→ `current`); the orphan keeps its reconciliation-set class.
+    storage.classify_repo_retention("r1").unwrap();
+    // The orphan IS counted as prunable (visibility) BEFORE any reclaim — the reviewer's assertion.
+    assert_eq!(
+        storage.get_retention_stats("r1").unwrap().prunable,
+        1,
+        "the non-READY orphan is classified + counted prunable"
+    );
+    // …yet the READY-retention prune leaves it (guarded to status='ready'), so the VACUUM path keeps it.
+    assert_eq!(
+        storage.prune_prunable_snapshots("r1").unwrap(),
+        0,
+        "prune_prunable does not delete the failed orphan"
+    );
+    assert!(
+        storage.get_snapshot(&orphan).unwrap().is_some(),
+        "orphan still present for the non-READY VACUUM path"
+    );
+
+    // The non-READY path is what actually reclaims it (the daemon VACUUMs after); READY survives.
+    assert_eq!(
+        storage.prune_non_ready_snapshots("r1").unwrap(),
+        vec![orphan],
+        "the orphan is reclaimed through the non-READY path"
+    );
+    assert!(
+        storage.get_snapshot(&ready).unwrap().is_some(),
+        "the READY snapshot survives"
+    );
+}

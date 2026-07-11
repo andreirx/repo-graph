@@ -243,11 +243,13 @@ pub fn handle_classify_retention(state: &DaemonState, request: &Request) -> Disp
         }
     };
 
-    // DAEMON-VISIBILITY-1 (F3): non-READY (interrupted) snapshots are OUTSIDE the READY retention
-    // model — `classify_repo_retention` only classifies `status='ready'` and `prune_prunable_snapshots`
-    // only deletes `retention_class='prunable'`, so an interrupted 4 GB `building` snapshot is invisible
-    // to it and silently holds disk (the day-2 field bug). Enumerate them here (pre-reclaim, so the
-    // report can NAME state + when even after they are deleted), then RECLAIM the orphaned ones.
+    // DAEMON-VISIBILITY-1 (F3): non-READY (interrupted) snapshots are reclaimed OUTSIDE the READY
+    // retention model. `classify_repo_retention` only classifies `status='ready'`, and
+    // `prune_prunable_snapshots` is guarded to `status='ready'` (DAEMON-CRASH-RECOVERY-1) — so even a
+    // crash orphan that reconciliation classified `prunable` (for stats visibility) is NOT deleted by
+    // the READY prune above; it silently held disk in the day-2 field bug. Enumerate the non-READY
+    // rows here (pre-reclaim, so the report can NAME state + when even after they are deleted), then
+    // RECLAIM the orphaned ones (with the VACUUM that returns their disk to the OS).
     let interrupted: Vec<serde_json::Value> = storage
         .list_snapshots(repo_uid)
         .unwrap_or_default()

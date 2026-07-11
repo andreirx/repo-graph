@@ -34,11 +34,28 @@ use crate::connection::StorageConnection;
 use crate::error::StorageError;
 
 impl StorageConnection {
-    /// Prune snapshots marked as prunable for a repo.
+    /// Prune the READY snapshots marked as prunable for a repo.
     ///
     /// This deletes the snapshot rows and all dependent data. The operation
-    /// is **atomic**: either all prunable snapshots are deleted (along with
-    /// their dependent rows), or the database is unchanged.
+    /// is **atomic**: either all prunable READY snapshots are deleted (along
+    /// with their dependent rows), or the database is unchanged.
+    ///
+    /// # Why the `status = 'ready'` guard (DAEMON-CRASH-RECOVERY-1, review-1)
+    ///
+    /// The READY-retention model only ever CLASSIFIES `status='ready'` rows
+    /// (`classify_repo_retention`), so historically every `retention_class =
+    /// 'prunable'` row was already READY and this guard was implicit. It is now
+    /// EXPLICIT because reconciliation classifies crash-orphaned NON-READY
+    /// snapshots `prunable` too (so `get_retention_stats` counts them — the
+    /// slice's "retention classifies them prunable"). Those orphans must be
+    /// reclaimed through [`prune_non_ready_snapshots`], which is followed by a
+    /// `VACUUM` that returns their disk to the OS. If this READY-retention
+    /// prune (which does NOT VACUUM in the `maintenance prune` handler) deleted
+    /// them first, the non-READY reclaim would find nothing and SKIP the VACUUM
+    /// — re-introducing the "disk never came back" field bug. The guard keeps
+    /// the two paths from colliding: classification for visibility, the
+    /// non-READY path for reclaim. Behaviour-preserving for every pre-existing
+    /// caller (all prior prunable rows are READY).
     ///
     /// # Transactional Guarantee
     ///
@@ -70,7 +87,7 @@ impl StorageConnection {
         let snapshot_uids: Vec<String> = {
             let mut stmt = conn.prepare(
                 "SELECT snapshot_uid FROM snapshots \
-                 WHERE repo_uid = ?1 AND retention_class = 'prunable'",
+                 WHERE repo_uid = ?1 AND retention_class = 'prunable' AND status = 'ready'",
             )?;
             let rows = stmt.query_map(rusqlite::params![repo_uid], |row| row.get(0))?;
             rows.collect::<Result<Vec<_>, _>>()?

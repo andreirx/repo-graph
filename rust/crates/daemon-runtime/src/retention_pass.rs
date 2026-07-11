@@ -403,6 +403,9 @@ pub fn try_retention_attempt(
         Ok(s) => s,
         Err(e) => return RetentionAttempt::Failed(format!("could not open storage: {e}")),
     };
+    // DAEMON-CRASH-RECOVERY-1 (F8): the op-START line for retention (the outcome is logged by
+    // `run_auto_retention`'s summary line). Emitted only once both gates passed and the pass truly runs.
+    crate::oplog::log_op_start("retention", repo_uid, None);
     match run_retention_pass(&storage, db_path, repo_uid, &repo_state.coordinator) {
         Ok(outcome) => RetentionAttempt::Ran(outcome),
         Err(e) => RetentionAttempt::Failed(e.to_string()),
@@ -436,9 +439,16 @@ fn run_auto_retention(state: &DaemonState, db_path: &Path, repo_uid: &str, repo_
     for _ in 0..REQUEUE_MAX_ATTEMPTS {
         match try_retention_attempt(state, db_path, repo_uid, repo_display) {
             RetentionAttempt::Ran(outcome) => {
-                eprintln!(
-                    "retention: {} (repo {repo_uid})",
-                    summarize_outcome(&outcome)
+                // DAEMON-CRASH-RECOVERY-1 (F8, review-0 item a): the op-lifecycle OUTCOME line —
+                // same shape as index/refresh (op, repo, outcome), paired with the op-START line
+                // `try_retention_attempt` logged. Replaces the ad-hoc "retention: …" summary so the
+                // daemon log reads as ONE uniform op lifecycle; `summarize_outcome` is the reader-frame
+                // detail (pruned N, reclaimed X / below-threshold / deferred).
+                crate::oplog::log_op_outcome(
+                    "retention",
+                    repo_uid,
+                    None,
+                    &format!("completed ({})", summarize_outcome(&outcome)),
                 );
                 state.record_retention_report(RetentionReport::new(
                     repo_display.to_string(),
@@ -447,18 +457,26 @@ fn run_auto_retention(state: &DaemonState, db_path: &Path, repo_uid: &str, repo_
                 return;
             }
             RetentionAttempt::Failed(e) => {
-                eprintln!("retention: pass failed for repo {repo_uid}: {e}");
+                crate::oplog::log_op_outcome("retention", repo_uid, None, &format!("failed: {e}"));
                 return;
             }
             RetentionAttempt::Yielded(_reason) => {
-                // Explicit user op in progress — yield and requeue (the ratified rule).
+                // Explicit user op in progress — yield and requeue (the ratified rule). Not a terminal
+                // outcome (no op ran this attempt), so no outcome line — the pass never logged a start.
                 std::thread::sleep(REQUEUE_BACKOFF);
             }
         }
     }
-    eprintln!(
-        "retention: deferred for repo {repo_uid} — the repo stayed busy for {}s; the next successful index/refresh will retry",
-        (REQUEUE_MAX_ATTEMPTS as u64) * REQUEUE_BACKOFF.as_secs()
+    // Deferred: the pass never got past the gates (never logged a start), so this is the terminal
+    // disposition of a spawned pass that never ran — an honest op-lifecycle line, not a lone outcome.
+    crate::oplog::log_op_outcome(
+        "retention",
+        repo_uid,
+        None,
+        &format!(
+            "deferred (repo stayed busy for {}s; the next index/refresh retries)",
+            (REQUEUE_MAX_ATTEMPTS as u64) * REQUEUE_BACKOFF.as_secs()
+        ),
     );
 }
 
@@ -824,6 +842,51 @@ mod tests {
             RetentionAttempt::Yielded(r) => format!("Yielded({r})"),
             RetentionAttempt::Failed(e) => format!("Failed({e})"),
         }
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (F8, review-0 item a): a real background retention pass writes an
+    // explicit op-lifecycle START + OUTCOME pair to the log sink — the same `op <op> <outcome> (repo
+    // <repo>)` shape as index/refresh — NOT the old ad-hoc "retention: …" summary. Drives the real
+    // `run_auto_retention` requeue loop (idle → runs → records) end to end.
+    #[test]
+    fn run_auto_retention_logs_the_op_lifecycle_outcome_line() {
+        crate::oplog::enable_oplog_capture_for_test();
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("retention_outcome.db");
+        // Unique repo → the process-global (non-draining) capture buffer is filtered to THIS test.
+        let repo = "retention-outcome-repo";
+        {
+            let mut storage = StorageConnection::open(&db_path).unwrap();
+            add_repo(&storage, repo);
+            let s1 = ready_snapshot(&mut storage, repo, None, 2_000); // prunable (older)
+            let s2 = ready_snapshot(&mut storage, repo, Some(&s1), 0);
+            let _s3 = ready_snapshot(&mut storage, repo, Some(&s2), 0);
+        }
+        let db_path = db_path.canonicalize().unwrap();
+        let state = isolated_state();
+
+        // Idle DB → the pass RUNS on its first attempt and records its outcome.
+        run_auto_retention(&state, &db_path, repo, repo);
+
+        let lines: Vec<String> = crate::oplog::oplog_lines_for_test()
+            .into_iter()
+            .filter(|l| l.contains(repo))
+            .collect();
+        assert!(
+            lines.iter().any(|l| l.contains("op retention started")),
+            "the pass logs an op-START line: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("op retention completed") && l.contains("pruned")),
+            "the pass logs an op-lifecycle OUTCOME line (not the old ad-hoc 'retention: …' summary): {lines:?}"
+        );
+        // The recorded doctor report still reflects the run (unchanged behavior).
+        assert!(
+            state.last_retention_json().is_some(),
+            "the retention report is still recorded for doctor"
+        );
     }
 
     // SNAPSHOT-RETENTION-1 THRESHOLD PROOF (named test): below-threshold reclaim SKIPS the VACUUM

@@ -28,6 +28,7 @@
 //!   writing this DB (its own activity registry), so lock contention is normal operation, not a
 //!   health failure (contract E).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use repo_graph_storage::connection::StorageConnection;
@@ -70,27 +71,73 @@ pub fn no_ready_snapshot_message(
         .ok()
         .flatten();
     let db_size = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
-    partial_snapshot_message(latest.as_ref(), db_size)
+    // DAEMON-CRASH-RECOVERY-1 (Option B): if the partial was reconciled (a crash orphan → daemon
+    // restart), its DURABLE reason renders in the message — "interrupted — daemon restart, reconciled
+    // <time>" — so the truth survives log rotation on the very surface the user hits.
+    let reason = latest
+        .as_ref()
+        .and_then(|s| snapshot_interruption_reason(storage, &s.snapshot_uid));
+    partial_snapshot_message(latest.as_ref(), db_size, reason.as_deref())
 }
 
 /// Pure formatter for the "no READY snapshot" message (unit-testable without a DB).
 ///
-/// `latest` is the newest snapshot of ANY state (or `None` if the repo was never indexed).
-pub fn partial_snapshot_message(latest: Option<&Snapshot>, db_size_bytes: u64) -> String {
+/// `latest` is the newest snapshot of ANY state (or `None` if the repo was never indexed). `reason`
+/// is the durable interruption reason (Option B) when the partial was reconciled, else `None`.
+pub fn partial_snapshot_message(
+    latest: Option<&Snapshot>,
+    db_size_bytes: u64,
+    reason: Option<&str>,
+) -> String {
     match latest {
         Some(snap) if snap.status != "ready" => {
             let state = snapshot_state_label(&snap.status, false);
+            // A reconciled orphan names WHY: "interrupted — daemon restart, reconciled <time>".
+            let state_frame = match reason {
+                Some(r) => format!("{state} — {r}"),
+                None => state.to_string(),
+            };
             let size = format_bytes(db_size_bytes);
             format!(
                 "no READY snapshot for this repo, but a snapshot from {created} exists that was not \
-                 completed (state: {state}; this repo holds {size} on disk). The last index did not \
-                 finalize. Re-run `rmap index` to build a fresh snapshot; the interrupted snapshot is \
-                 listed by `rmap maintenance prune`.",
+                 completed (state: {state_frame}; this repo holds {size} on disk). The last index did \
+                 not finalize. Re-run `rmap index` to build a fresh snapshot; the interrupted snapshot \
+                 is listed by `rmap maintenance prune`.",
                 created = snap.created_at,
             )
         }
         // Genuinely never indexed (no snapshot at all), or a race left only a READY row.
         _ => "no snapshot for this repo yet. Index it first with `rmap index`.".to_string(),
+    }
+}
+
+/// Read a snapshot's DURABLE interruption reason (DAEMON-CRASH-RECOVERY-1, Option B) from its
+/// extraction-diagnostics blob, if any. Best-effort: a missing blob / read failure / a clean
+/// snapshot all yield `None` (the common case). Daemon-coupled (needs the open connection); the
+/// parse is the pure [`interruption_reason`].
+fn snapshot_interruption_reason(storage: &StorageConnection, snapshot_uid: &str) -> Option<String> {
+    let diag = repo_graph_trust::TrustStorageRead::get_snapshot_extraction_diagnostics(
+        storage,
+        snapshot_uid,
+    )
+    .ok()
+    .flatten();
+    interruption_reason(diag.as_deref())
+}
+
+/// Parse the durable interruption annotation (DAEMON-CRASH-RECOVERY-1, Option B) that reconciliation
+/// merges into a snapshot's extraction-diagnostics blob (`{"interrupted": {"reason": …,
+/// "reconciled_at": …}}`). Returns a reader-frame suffix — e.g. `"daemon restart, reconciled
+/// 2026-07-02T…Z"` — or `None` when the snapshot was not reconciled (the overwhelmingly common
+/// case). PURE and unit-testable; like [`extraction_degradations`] it reads extra keys the typed
+/// `ExtractionDiagnostics` reader ignores, so it is the only place this key surfaces.
+fn interruption_reason(diagnostics_json: Option<&str>) -> Option<String> {
+    let value: Value = serde_json::from_str(diagnostics_json?).ok()?;
+    let interrupted = value.get("interrupted")?.as_object()?;
+    let reason = interrupted.get("reason")?.as_str()?;
+    match interrupted.get("reconciled_at").and_then(|v| v.as_str()) {
+        Some(at) => Some(format!("{reason}, reconciled {at}")),
+        None => Some(reason.to_string()),
     }
 }
 
@@ -119,7 +166,12 @@ fn other_leaked(_status: &str) -> &'static str {
 }
 
 /// Reader-frame outcome sentence for a snapshot (the "last index outcome" fact).
-pub fn snapshot_outcome(snap: &Snapshot, is_active: bool) -> String {
+///
+/// `reason` is the DURABLE interruption reason (DAEMON-CRASH-RECOVERY-1, Option B) when the snapshot
+/// was reconciled (a crash orphan the boot sweep marked `failed`), else `None`. When present it names
+/// WHY — "interrupted — daemon restart, reconciled <time>" — instead of the generic abort text, so the
+/// truth survives log rotation on doctor / repo-info.
+pub fn snapshot_outcome(snap: &Snapshot, is_active: bool, reason: Option<&str>) -> String {
     match snap.status.as_str() {
         "ready" => match &snap.completed_at {
             Some(ts) => format!("completed {ts}"),
@@ -127,9 +179,13 @@ pub fn snapshot_outcome(snap: &Snapshot, is_active: bool) -> String {
         },
         "building" if is_active => "in progress (indexing now)".to_string(),
         "building" => "interrupted before completion (index did not finalize)".to_string(),
-        "failed" => match &snap.completed_at {
-            Some(ts) => format!("interrupted (index failed or was aborted at {ts})"),
-            None => "interrupted (index failed or was aborted)".to_string(),
+        // A reconciled crash orphan carries its durable reason; a genuine index abort does not.
+        "failed" => match reason {
+            Some(r) => format!("interrupted — {r}"),
+            None => match &snap.completed_at {
+                Some(ts) => format!("interrupted (index failed or was aborted at {ts})"),
+                None => "interrupted (index failed or was aborted)".to_string(),
+            },
         },
         "stale" => "superseded by a newer snapshot".to_string(),
         other => format!("unknown state: {other}"),
@@ -141,13 +197,14 @@ pub fn is_non_ready(snap: &Snapshot) -> bool {
     snap.status != "ready"
 }
 
-/// Per-snapshot fact object (short uid + state + outcome + magnitude counts).
-fn snapshot_to_json(snap: &Snapshot, is_active: bool) -> Value {
+/// Per-snapshot fact object (short uid + state + outcome + magnitude counts). `reason` is the
+/// snapshot's durable interruption reason (Option B) when reconciled, threaded into the outcome.
+fn snapshot_to_json(snap: &Snapshot, is_active: bool, reason: Option<&str>) -> Value {
     json!({
         "snapshot_uid": snap.snapshot_uid,
         "status": snap.status,
         "state": snapshot_state_label(&snap.status, is_active),
-        "outcome": snapshot_outcome(snap, is_active),
+        "outcome": snapshot_outcome(snap, is_active, reason),
         "created_at": snap.created_at,
         "completed_at": snap.completed_at,
         // Magnitude of the snapshot (per-snapshot BYTES are not tracked; these counts are the honest
@@ -161,18 +218,25 @@ fn snapshot_to_json(snap: &Snapshot, is_active: bool) -> Value {
 /// Map a snapshot list to the aggregate facts block (PURE — no I/O, unit-testable).
 ///
 /// Called only when the repo is NOT being actively written (the caller short-circuits the active
-/// case), so no row here is "in progress"; any `building`/`failed` row is interrupted.
-pub fn map_snapshots(snapshots: &[Snapshot], db_size_bytes: u64) -> Value {
+/// case), so no row here is "in progress"; any `building`/`failed` row is interrupted. `reasons` maps
+/// a snapshot_uid to its durable interruption reason (Option B) — the caller reads the blobs (I/O),
+/// keeping this mapping pure; a snapshot absent from the map renders its generic outcome.
+pub fn map_snapshots(
+    snapshots: &[Snapshot],
+    db_size_bytes: u64,
+    reasons: &BTreeMap<String, String>,
+) -> Value {
+    let reason_for = |s: &Snapshot| reasons.get(&s.snapshot_uid).map(|r| r.as_str());
     let per_snapshot: Vec<Value> = snapshots
         .iter()
-        .map(|s| snapshot_to_json(s, false))
+        .map(|s| snapshot_to_json(s, false, reason_for(s)))
         .collect();
 
     let ready_count = snapshots.iter().filter(|s| s.status == "ready").count();
     let interrupted: Vec<Value> = snapshots
         .iter()
         .filter(|s| is_non_ready(s))
-        .map(|s| snapshot_to_json(s, false))
+        .map(|s| snapshot_to_json(s, false, reason_for(s)))
         .collect();
 
     json!({
@@ -237,7 +301,17 @@ pub fn collect_snapshot_facts(state: &DaemonState, db_path: &Path, repo_uid: &st
         Ok(s) => s,
         Err(e) => return facts_read_error(db_size_bytes, &format!("{e}")),
     };
-    let mut facts = map_snapshots(&snaps, db_size_bytes);
+    // DAEMON-CRASH-RECOVERY-1 (Option B): read the durable interruption reason for each NON-READY
+    // snapshot (READY rows never carry it), so doctor / repo-info render "interrupted — daemon restart,
+    // reconciled <time>" per snapshot. Bounded — retention keeps ≤2 snapshots plus any orphans — and on
+    // the already-open connection; a clean/missing blob simply yields no reason.
+    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    for s in snaps.iter().filter(|s| is_non_ready(s)) {
+        if let Some(r) = snapshot_interruption_reason(&storage, &s.snapshot_uid) {
+            reasons.insert(s.snapshot_uid.clone(), r);
+        }
+    }
+    let mut facts = map_snapshots(&snaps, db_size_bytes, &reasons);
     // Preserve `prunable_snapshots` (doctor's storage line reads it). Retention class is not
     // derivable from `status`, so read it here on the already-open connection; a read failure
     // degrades to `null` (UNKNOWN), never a false 0.
@@ -270,15 +344,40 @@ pub fn collect_snapshot_facts(state: &DaemonState, db_path: &Path, repo_uid: &st
     facts
 }
 
-/// A genuine (non-contention) read failure: DB absent/corrupt. `snapshots: null` (UNKNOWN) and an
-/// explicit reason — distinct from the in-use case (`in_use_by_daemon: true`).
+/// A read failure with `snapshots: null` (UNKNOWN) and an explicit reason — distinct from the in-use
+/// case (`in_use_by_daemon: true`).
+///
+/// DAEMON-CRASH-RECOVERY-1 (F9): a `database is locked` failure here is NOT the daemon's own write
+/// (the `in_use_by_daemon` short-circuit already ran and found no live op for this DB), so it is a
+/// lock the daemon cannot attribute to itself — most likely another process holding the DB, or a
+/// just-restarted daemon still opening it. That is a transient, reader-frame condition, NOT a
+/// corrupt/absent DB, so it is tagged `locked_by_other` and rendered as a reader-frame note rather
+/// than a raw FAIL (`storage_probe.rs`). Genuine failures (absent/corrupt) keep the plain reason.
 fn facts_read_error(db_size_bytes: u64, reason: &str) -> Value {
+    if is_lock_contention(reason) {
+        return json!({
+            "db_size_bytes": db_size_bytes,
+            "in_use_by_daemon": false,
+            "snapshots": Value::Null,
+            "locked_by_other": true,
+            "read_error": reason,
+        });
+    }
     json!({
         "db_size_bytes": db_size_bytes,
         "in_use_by_daemon": false,
         "snapshots": Value::Null,
         "read_error": reason,
     })
+}
+
+/// True if a storage-open/read error string is SQLite lock contention (`SQLITE_BUSY` →
+/// "database is locked", `SQLITE_LOCKED` → "database table is locked"). Substring match on the
+/// canonical SQLite text — the daemon does not have a typed error at this boundary (the reason is a
+/// formatted string from several sources), and over-matching here only ever downgrades a genuine
+/// failure to a softer reader-frame, never the reverse (a corrupt DB does not say "is locked").
+pub fn is_lock_contention(reason: &str) -> bool {
+    reason.contains("is locked")
 }
 
 /// PERSIST-RECURSION-1 (honest degradation surface): parse a snapshot's
@@ -396,7 +495,7 @@ mod tests {
         assert_eq!(snapshot_state_label("ready", false), "ready");
         let s = snap("ready", Some("2026-07-02T10:05:00Z"));
         assert_eq!(
-            snapshot_outcome(&s, false),
+            snapshot_outcome(&s, false, None),
             "completed 2026-07-02T10:05:00Z"
         );
         assert!(!is_non_ready(&s));
@@ -408,7 +507,7 @@ mod tests {
         assert_eq!(snapshot_state_label("building", false), "interrupted");
         let s = snap("building", None);
         assert_eq!(
-            snapshot_outcome(&s, false),
+            snapshot_outcome(&s, false, None),
             "interrupted before completion (index did not finalize)"
         );
         assert!(is_non_ready(&s));
@@ -418,14 +517,57 @@ mod tests {
     fn building_with_active_op_is_in_progress() {
         assert_eq!(snapshot_state_label("building", true), "in progress");
         let s = snap("building", None);
-        assert_eq!(snapshot_outcome(&s, true), "in progress (indexing now)");
+        assert_eq!(
+            snapshot_outcome(&s, true, None),
+            "in progress (indexing now)"
+        );
     }
 
     #[test]
     fn failed_is_interrupted() {
         assert_eq!(snapshot_state_label("failed", false), "interrupted");
         let s = snap("failed", Some("2026-07-02T10:03:00Z"));
-        assert!(snapshot_outcome(&s, false).contains("interrupted"));
+        assert!(snapshot_outcome(&s, false, None).contains("interrupted"));
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (Option B): a reconciled crash orphan (terminal `failed`) renders its
+    // DURABLE reason in the outcome — "interrupted — daemon restart, reconciled <time>" — instead of
+    // the generic abort text. This is the doctor / repo-info per-snapshot render seam.
+    #[test]
+    fn failed_with_reason_names_the_daemon_restart() {
+        let s = snap("failed", None);
+        let reason = "daemon restart, reconciled 2026-07-02T11:00:00Z";
+        assert_eq!(
+            snapshot_outcome(&s, false, Some(reason)),
+            "interrupted — daemon restart, reconciled 2026-07-02T11:00:00Z"
+        );
+    }
+
+    // The pure parser reads back exactly what reconciliation merges into the diagnostics blob, and
+    // returns None for a clean/absent/typed-only blob (the common case — no false "interrupted" note).
+    #[test]
+    fn interruption_reason_parses_the_durable_annotation() {
+        assert!(interruption_reason(None).is_none(), "no blob → None");
+        assert!(
+            interruption_reason(Some(
+                r#"{"diagnostics_version":1,"edges_total":100,"unresolved_total":2}"#
+            ))
+            .is_none(),
+            "a typed-only diagnostics blob is not an interruption"
+        );
+        let blob = r#"{"edges_total":9,"interrupted":{"reason":"daemon restart","reconciled_at":"2026-07-02T11:00:00Z"}}"#;
+        assert_eq!(
+            interruption_reason(Some(blob)).as_deref(),
+            Some("daemon restart, reconciled 2026-07-02T11:00:00Z"),
+            "reason + reconciled time, coexisting with other diagnostics keys"
+        );
+        // A reason without a timestamp degrades to just the reason (defensive; reconciliation always
+        // writes both).
+        let no_ts = r#"{"interrupted":{"reason":"daemon restart"}}"#;
+        assert_eq!(
+            interruption_reason(Some(no_ts)).as_deref(),
+            Some("daemon restart")
+        );
     }
 
     // DAEMON-VISIBILITY-1 (F2): the orient/explain "no READY snapshot" message NAMES the partial
@@ -433,7 +575,7 @@ mod tests {
     #[test]
     fn partial_message_names_the_interrupted_snapshot_and_both_actions() {
         let s = snap("building", None);
-        let msg = partial_snapshot_message(Some(&s), 4_000_000_000);
+        let msg = partial_snapshot_message(Some(&s), 4_000_000_000, None);
         assert!(msg.contains("interrupted"), "names the state: {msg}");
         assert!(
             msg.contains("2026-07-02"),
@@ -457,9 +599,24 @@ mod tests {
     #[test]
     fn partial_message_falls_back_when_never_indexed() {
         // No snapshot at all → the plain "index it first" is correct (not gaslighting).
-        let msg = partial_snapshot_message(None, 0);
+        let msg = partial_snapshot_message(None, 0, None);
         assert!(msg.contains("rmap index"));
         assert!(msg.contains("no snapshot"));
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (Option B): the F2 orient/explain message — the surface the user hits —
+    // names the DURABLE reason of a reconciled orphan, so the truth survives log rotation right where
+    // the user reads it: "state: interrupted — daemon restart, reconciled <time>".
+    #[test]
+    fn partial_message_names_the_durable_reconciliation_reason() {
+        let s = snap("failed", None); // a reconciled crash orphan (boot sweep flipped it)
+        let reason = "daemon restart, reconciled 2026-07-02T11:00:00Z";
+        let msg = partial_snapshot_message(Some(&s), 4_000_000_000, Some(reason));
+        assert!(
+            msg.contains("interrupted — daemon restart, reconciled 2026-07-02T11:00:00Z"),
+            "the F2 message names the durable reason: {msg}"
+        );
+        assert!(msg.contains("rmap index") && msg.contains("rmap maintenance prune"));
     }
 
     #[test]
@@ -468,10 +625,32 @@ mod tests {
         assert_eq!(format_bytes(0), "0 B");
     }
 
+    // DAEMON-CRASH-RECOVERY-1 (F9): a lock the daemon cannot attribute to itself is tagged
+    // `locked_by_other` (transient reader-frame), while a genuine corrupt/absent DB is a plain read
+    // error (a real FAIL downstream).
+    #[test]
+    fn lock_contention_is_tagged_but_corruption_is_not() {
+        assert!(is_lock_contention("database is locked"));
+        assert!(is_lock_contention(
+            "Sqlite(SqliteFailure(.. database table is locked ..))"
+        ));
+        assert!(!is_lock_contention("database disk image is malformed"));
+
+        let locked = facts_read_error(4_000_000_000, "database is locked");
+        assert_eq!(locked["locked_by_other"], true, "lock is flagged: {locked}");
+
+        let corrupt = facts_read_error(100, "database disk image is malformed");
+        assert!(
+            corrupt.get("locked_by_other").is_none(),
+            "a genuine corruption is NOT a lock race: {corrupt}"
+        );
+        assert_eq!(corrupt["read_error"], "database disk image is malformed");
+    }
+
     #[test]
     fn map_snapshots_separates_interrupted_and_ready() {
         let snaps = vec![snap("building", None), snap("ready", Some("t"))];
-        let facts = map_snapshots(&snaps, 4_000_000_000);
+        let facts = map_snapshots(&snaps, 4_000_000_000, &BTreeMap::new());
         assert_eq!(facts["db_size_bytes"], 4_000_000_000u64);
         assert_eq!(facts["total_snapshots"], 2);
         assert_eq!(facts["ready_snapshots"], 1);
@@ -480,6 +659,26 @@ mod tests {
             facts["interrupted_snapshots"].as_array().unwrap().len(),
             1,
             "the building snapshot is surfaced as interrupted"
+        );
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (Option B): when a reconciled orphan's durable reason is supplied, the
+    // per-snapshot `outcome` (rendered verbatim by doctor + repo-info) carries it.
+    #[test]
+    fn map_snapshots_renders_the_durable_reason_in_the_outcome() {
+        let orphan = snap("failed", None);
+        let mut reasons = BTreeMap::new();
+        reasons.insert(
+            orphan.snapshot_uid.clone(),
+            "daemon restart, reconciled 2026-07-02T11:00:00Z".to_string(),
+        );
+        let facts = map_snapshots(&[orphan], 4_000_000_000, &reasons);
+        let outcome = facts["interrupted_snapshots"][0]["outcome"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            outcome, "interrupted — daemon restart, reconciled 2026-07-02T11:00:00Z",
+            "the reconciled orphan's outcome names the durable reason"
         );
     }
 

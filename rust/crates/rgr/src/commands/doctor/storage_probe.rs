@@ -50,6 +50,28 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
         };
     }
 
+    // DAEMON-CRASH-RECOVERY-1 (F9): a lock the daemon cannot attribute to its own activity (the
+    // in_use_by_daemon short-circuit already ran) is transient — another process holds the DB, or a
+    // just-restarted daemon is still opening it. Reader-frame, NOT a raw FAIL: the DB is fine, the
+    // read simply cannot proceed this instant. `passed` stays true (a retryable state never flips the
+    // health verdict).
+    if response
+        .get("locked_by_other")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return ProbeResult {
+            name: "storage".to_string(),
+            passed: true,
+            message: format!("db: {size_human}, held by another process — daemon restarting?"),
+            details: Some(
+                "the repo database is locked by another process; if the daemon just restarted this \
+                 clears in a moment — re-run `rmap doctor`"
+                    .to_string(),
+            ),
+        };
+    }
+
     // Read error (DB absent/corrupt): a genuine health failure (contract E's "error" case).
     if let Some(reason) = response.get("read_error").and_then(|v| v.as_str()) {
         return ProbeResult {
@@ -300,6 +322,36 @@ mod tests {
         assert!(
             details.contains("boundary facts skipped for 1 file (pathological nesting)"),
             "the reader-frame line is rendered in doctor's storage details: {details}"
+        );
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (F9): a lock the daemon cannot attribute to itself is a transient,
+    // reader-frame condition ("held by another process — daemon restarting?"), NOT a raw FAIL — the
+    // DB is fine, the read simply cannot proceed this instant.
+    #[test]
+    fn lock_race_is_reader_frame_not_a_failure() {
+        let response = json!({
+            "db_size_bytes": 4_000_000_000_u64,
+            "in_use_by_daemon": false,
+            "locked_by_other": true,
+            "read_error": "database is locked",
+            "snapshots": serde_json::Value::Null,
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(
+            probe.passed,
+            "a lock race is transient, not a health failure: {probe:?}"
+        );
+        assert!(
+            probe.message.contains("held by another process")
+                && probe.message.contains("daemon restarting?"),
+            "reader-frame message: {}",
+            probe.message
+        );
+        assert!(
+            !probe.message.to_lowercase().contains("cannot read"),
+            "must not read as a corrupt-DB failure: {}",
+            probe.message
         );
     }
 

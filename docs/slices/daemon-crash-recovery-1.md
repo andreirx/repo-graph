@@ -1,7 +1,23 @@
 # DAEMON-CRASH-RECOVERY-1 — A crash leaves nothing the next boot can't explain
 
-Status: SPECIFIED (2026-07-06) · Track: Daemon correctness — queued behind
-ENRICH-LIFECYCLE-1; gates the release after v0.5.0
+Status: **DELIVERED (2026-07-11)** · Track: Daemon correctness
+
+## 0. Delivery record (2026-07-11)
+
+Shipped via target-owned relay (approved cycle 4; one escalation ratified:
+crash reason persisted in the extraction-diagnostics blob — durable, zero
+migration) + operator validation. Kill-9 e2e transcript (gstreamer, kill -9
+at t+10s mid-extraction): the next boot logs the orphaned op's posthumous
+OUTCOME line ("op index interrupted (daemon restart) …"), reconciliation
+logs its work ("marked 1 interrupted snapshot(s)"), and `repo info` renders
+the durable reader-frame reason ("interrupted — daemon restart, reconciled
+<time>") — surviving log rotation. Crash orphans are classified/countable as
+prunable (review-1 catch) and reclaimed by the retention machinery. F8 op
+lifecycle lines cover index/refresh/enrich/retention including the
+yield-after-start path (review-2 catch). Storage-probe lock-race renders
+reader-frame. Gates: 4934/0 workspace, fmt/clippy clean, dogfood green,
+named proofs 2/2. Cosmetic follow-up noted: "interrupted: interrupted —"
+label/reason wording dupe on the repo-info line.
 Origin: TECH-DEBT F7–F12 (second-machine v0.5.0 field incident, 87k-file repo)
 
 ## 1. Problem — a daemon that dies mid-write leaves invisible wreckage

@@ -628,6 +628,15 @@ impl DaemonState {
             repos.insert(key, Arc::clone(&state));
         }
 
+        // DAEMON-CRASH-RECOVERY-1 (F7/F11): the first time this daemon loads a repo, reconcile any
+        // crash-orphaned `building` snapshots left by a previous (dead) daemon — flip each to the
+        // terminal `failed` state, classify it `prunable`, and log it (retention stats then count it;
+        // the non-READY prune + VACUUM reclaims it).
+        // Runs ONCE per repo per daemon lifetime (cache-miss branch), is
+        // two-gate guarded (a live op or a contended lock → skips, never blocks/deadlocks — the
+        // `try_acquire_write` is non-blocking), and is a no-op query in the common no-orphan case.
+        crate::reconcile::reconcile_repo(self, db_path, repo_uid, repo_uid);
+
         Ok(state)
     }
 

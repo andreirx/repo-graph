@@ -214,6 +214,138 @@ impl StorageConnection {
         )?;
         Ok(())
     }
+
+    /// DAEMON-CRASH-RECOVERY-1 (F7/F11): mark a crash-orphaned `building` snapshot as interrupted.
+    ///
+    /// A `building` snapshot with no live writer never finalized — the daemon died mid-index, or the
+    /// machine slept. This flips it to the existing terminal `failed` state AND classifies it
+    /// `retention_class = 'prunable'`, so the orphan stops reading as "in progress" and becomes a
+    /// first-class prunable NON-READY snapshot: `snapshot_facts` renders it "interrupted",
+    /// `get_retention_stats` counts it in `prunable` (doctor / `maintenance prune` name it), and BOTH
+    /// the F3 `prune_non_ready_snapshots` reclaim (which also VACUUMs) and the auto-retention pass
+    /// reclaim it. Reuses INDEX-DISCONNECT-1's terminal `failed` state AND the existing `prunable`
+    /// class — no new status vocabulary, no schema migration.
+    ///
+    /// # Why it sets `retention_class = 'prunable'` — and why that is still VACUUM-safe (review-1)
+    ///
+    /// The slice's acceptance criterion is "retention classifies them prunable, prune reclaims" and the
+    /// reconciliation proof asserts the prunable STAT before any reclaim. Setting the class HERE is the
+    /// only way a non-READY snapshot is ever classified, because `classify_repo_retention` only ever
+    /// touches `status='ready'` rows — so without this write the orphan would stay `retention_class IS
+    /// NULL` (invisible to every retention class, the field bug: `total 3, all classes 0`).
+    ///
+    /// This does NOT re-introduce the "disk never came back" bug, because
+    /// [`StorageConnection::prune_prunable_snapshots`] is guarded to `status='ready'`: the READY-
+    /// retention prune (which does NOT VACUUM in the `maintenance prune` handler) therefore never
+    /// deletes this `failed` orphan out from under the non-READY reclaim. The orphan is reclaimed
+    /// EXCLUSIVELY through the non-READY path (`prune_non_ready_snapshots` + `vacuum`) in BOTH the
+    /// `maintenance prune` handler and the auto-retention pass, so the disk is always returned to the
+    /// OS. Classification is for VISIBILITY; the non-READY path is for RECLAIM; the `status='ready'`
+    /// guard is what keeps the two from colliding.
+    ///
+    /// # Why `completed_at` is left NULL
+    ///
+    /// A crash has no honest completion time; stamping "now" would render as a completion that never
+    /// happened. `snapshot_outcome` handles a `failed` row with a NULL `completed_at` ("interrupted
+    /// … "). The `reason` (e.g. "daemon restart") is NOT a fabricated `completed_at`; it is recorded
+    /// durably in the extraction-diagnostics blob (see below), so the reader-frame render can say
+    /// "interrupted — daemon restart, reconciled <time>" without inventing a completion timestamp.
+    ///
+    /// # Why the reason is recorded (operator resolution: Option B, no migration)
+    ///
+    /// The `snapshots` table has no reason column and this slice forbids a schema migration, so the
+    /// interruption reason is merged into the EXISTING `extraction_diagnostics_json` blob (an
+    /// additive `interrupted` key — see [`merge_interruption_annotation`]). That makes the reason a
+    /// durable current-state fact that survives daemon-log rotation and renders on doctor / repo-info
+    /// / orient; the F8 daemon-log line remains a parallel forensic trail. The status flip and the
+    /// reason write are ONE atomic, guarded UPDATE (below), so the reason is GUARANTEED whenever the
+    /// flip happens — NOT a best-effort second write whose failure could leave a `failed` orphan with
+    /// no recorded reason (review-1 change #4: the prior split write swallowed its error with `let _`).
+    ///
+    /// # Safety — the `status = 'building'` guard
+    ///
+    /// The WHERE clause requires `status = 'building'`, so if the index finalized (to `ready` or
+    /// `failed`) between the caller's enumeration and this UPDATE, the statement is a NO-OP: a
+    /// completed snapshot is never clobbered (neither its status NOR its diagnostics blob — the WHERE
+    /// excludes the row, so the computed merge is simply discarded). The daemon additionally calls this
+    /// only under the two-gate rule (no live op on the DB + the DB write lock held). Returns `true` iff
+    /// a row was flipped — and a `true` return therefore GUARANTEES the durable reason landed with it
+    /// (so the daemon logs only snapshots it actually reconciled + annotated).
+    pub fn mark_snapshot_interrupted(
+        &self,
+        snapshot_uid: &str,
+        reason: &str,
+    ) -> Result<bool, StorageError> {
+        // An honest reconciliation timestamp (when this daemon repaired the orphan) — NOT a completion
+        // time. Same ISO format as `created_at`/`completed_at`.
+        let reconciled_at = current_iso_timestamp(self.connection())?;
+        // Read the existing blob so the reason MERGES rather than clobbers: PERSIST-RECURSION-1 writes
+        // extraction diagnostics at finalize (right before the READY flip), and a crash in that narrow
+        // window can leave a populated blob on a `building` orphan; erasing it would violate "do not
+        // erase computed facts". A NULL column (the common case — the crash preceded finalize) and a
+        // QueryReturnedNoRows both degrade to "no prior diagnostics". A genuine read error propagates
+        // (non-silent) rather than risking a lossy overwrite.
+        let existing: Option<String> = match self.connection().query_row(
+            "SELECT extraction_diagnostics_json FROM snapshots WHERE snapshot_uid = ?",
+            rusqlite::params![snapshot_uid],
+            |row| row.get::<_, Option<String>>(0),
+        ) {
+            Ok(v) => v,
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(e) => return Err(StorageError::Sqlite(e)),
+        };
+        let merged = merge_interruption_annotation(existing.as_deref(), reason, &reconciled_at);
+        // Flip status, classify `prunable`, AND record the reason in ONE guarded, atomic UPDATE.
+        // Because all three are the SAME write, a returned `Ok(true)` GUARANTEES the durable reason AND
+        // the prunable classification landed together — no best-effort second write (the prior split
+        // write's `let _` swallow was the review-1 defect). The `status = 'building'` guard makes the
+        // whole statement a no-op (0 rows) if the snapshot finalized concurrently, so a completed
+        // snapshot is never flipped, reclassified, NOR annotated.
+        let affected = self.connection().execute(
+            "UPDATE snapshots SET status = 'failed', retention_class = 'prunable', \
+             extraction_diagnostics_json = ?1 \
+             WHERE snapshot_uid = ?2 AND status = 'building'",
+            rusqlite::params![merged, snapshot_uid],
+        )?;
+        Ok(affected > 0)
+    }
+}
+
+/// Merge a DAEMON-CRASH-RECOVERY-1 interruption annotation into a snapshot's existing
+/// `extraction_diagnostics_json` blob WITHOUT clobbering any Layer-0 extraction diagnostics already
+/// there, returning the merged JSON string to persist.
+///
+/// PERSIST-RECURSION-1 writes that blob at finalize (right before the READY flip); a crash in the
+/// narrow window after that write but before the flip would leave a populated blob on a `building`
+/// orphan, so [`StorageConnection::mark_snapshot_interrupted`] reads-merges-writes rather than
+/// overwriting (`update_snapshot_extraction_diagnostics` is a raw column overwrite). The blob is
+/// free-form JSON and the typed `ExtractionDiagnostics` reader ignores unknown keys (no
+/// `deny_unknown_fields`), so the added `interrupted` key is purely additive for every existing
+/// reader — the same property `snapshot_facts::extraction_degradations` already relies on.
+///
+/// Shape: `{"interrupted": {"reason": <reason>, "reconciled_at": <iso>}}` merged over any existing
+/// object; `snapshot_facts::interruption_reason` parses it back for the reader-frame render.
+///
+/// PURE (no I/O) — the caller does the single atomic SELECT-merge-UPDATE — so the merge is
+/// unit-testable in isolation. A non-object or unparseable existing blob starts fresh (never an error:
+/// this is forensic metadata and a corrupt prior blob is not worth failing reconciliation over).
+fn merge_interruption_annotation(
+    existing: Option<&str>,
+    reason: &str,
+    reconciled_at: &str,
+) -> String {
+    let mut obj = existing
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| match v {
+            serde_json::Value::Object(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+    obj.insert(
+        "interrupted".to_string(),
+        serde_json::json!({ "reason": reason, "reconciled_at": reconciled_at }),
+    );
+    serde_json::Value::Object(obj).to_string()
 }
 
 /// Generate an ISO 8601 / RFC 3339 timestamp for the current
@@ -549,6 +681,206 @@ mod tests {
             "created_at must end with Z (UTC), got: {:?}",
             snap.created_at
         );
+    }
+
+    /// Read a snapshot's raw `extraction_diagnostics_json` blob (test-only, via the crate-internal
+    /// connection accessor). `None` when the column is NULL.
+    fn diagnostics_blob(storage: &StorageConnection, uid: &str) -> Option<String> {
+        storage
+            .connection()
+            .query_row(
+                "SELECT extraction_diagnostics_json FROM snapshots WHERE snapshot_uid = ?",
+                rusqlite::params![uid],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (F7/F11 + review-1): a crash-orphaned `building` snapshot is flipped to
+    // the terminal `failed` state AND classified `prunable` (`get_retention_stats` counts it — the
+    // slice's "retention classifies them prunable", asserted BEFORE reclaim). It is reclaimed through
+    // the non-READY (VACUUM) path; the READY-retention prune is guarded off it so the disk still comes
+    // back.
+    #[test]
+    fn mark_snapshot_interrupted_flips_building_to_failed_prunable_and_reclaims() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let building = create_test_snapshot(&storage); // status = building
+
+        let flipped = storage
+            .mark_snapshot_interrupted(&building.snapshot_uid, "daemon restart")
+            .unwrap();
+        assert!(flipped, "a building snapshot is flipped");
+
+        let after = storage
+            .get_snapshot(&building.snapshot_uid)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.status, "failed",
+            "status is the terminal failed state"
+        );
+        assert!(
+            after.completed_at.is_none(),
+            "a crash has no honest completion time — completed_at stays NULL"
+        );
+
+        // review-1 (the blocking mismatch): the orphan is CLASSIFIED prunable and the stat counts it
+        // BEFORE any reclaim — so doctor / `maintenance prune` name it, never an "empty store".
+        let stats = storage.get_retention_stats("r1").unwrap();
+        assert_eq!(
+            stats.prunable, 1,
+            "the reconciled orphan is counted as prunable: {stats:?}"
+        );
+        assert_eq!(
+            stats.unclassified, 0,
+            "it is no longer `retention_class IS NULL` (the field bug was total 3 / all classes 0)"
+        );
+        assert_eq!(stats.total, 1);
+
+        // VACUUM-safety (Change 2): the READY-retention prune is guarded to `status='ready'`, so it
+        // does NOT delete this `failed` orphan out from under the non-READY reclaim (which VACUUMs).
+        assert_eq!(
+            storage.prune_prunable_snapshots("r1").unwrap(),
+            0,
+            "prune_prunable leaves the non-READY orphan for the VACUUM path"
+        );
+
+        // DAEMON-CRASH-RECOVERY-1 (operator resolution: Option B): the reason is DURABLE in the
+        // extraction-diagnostics blob (survives log rotation), with an honest `reconciled_at` that is
+        // NOT a fabricated completion time.
+        let blob =
+            diagnostics_blob(&storage, &building.snapshot_uid).expect("interrupted blob written");
+        let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
+        assert_eq!(
+            v["interrupted"]["reason"], "daemon restart",
+            "durable reason: {blob}"
+        );
+        assert!(
+            v["interrupted"]["reconciled_at"]
+                .as_str()
+                .is_some_and(|s| s.ends_with('Z')),
+            "durable reconciled-at timestamp (ISO Z), not a completion time: {blob}"
+        );
+
+        // The orphan is NON-READY, so the F3 reclaim (the VACUUM path) deletes it; a fresh READY
+        // snapshot would survive.
+        let reclaimed = storage.prune_non_ready_snapshots("r1").unwrap();
+        assert_eq!(
+            reclaimed,
+            vec![building.snapshot_uid],
+            "the interrupted orphan is reclaimed through the non-READY (VACUUM) path"
+        );
+    }
+
+    // DAEMON-CRASH-RECOVERY-1: the `status='building'` guard — a snapshot that finalized (to READY)
+    // between the daemon's enumeration and the flip is NEVER clobbered.
+    #[test]
+    fn mark_snapshot_interrupted_never_clobbers_a_finalized_snapshot() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap = create_test_snapshot(&storage);
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: snap.snapshot_uid.clone(),
+                status: SNAPSHOT_STATUS_READY.to_string(),
+                completed_at: None,
+            })
+            .unwrap();
+
+        let flipped = storage
+            .mark_snapshot_interrupted(&snap.snapshot_uid, "daemon restart")
+            .unwrap();
+        assert!(!flipped, "a finalized snapshot is never flipped");
+        let after = storage.get_snapshot(&snap.snapshot_uid).unwrap().unwrap();
+        assert_eq!(after.status, SNAPSHOT_STATUS_READY, "ready is preserved");
+        // The guard also protects the blob: a READY snapshot is never annotated "interrupted".
+        assert!(
+            diagnostics_blob(&storage, &snap.snapshot_uid).is_none(),
+            "no interrupted reason is written onto a finalized snapshot"
+        );
+        // …and it protects the CLASS: a finalized (READY) snapshot is never reclassified `prunable`
+        // by a racing reconcile (the single guarded UPDATE writes status + class + reason together).
+        assert_eq!(
+            storage.get_retention_stats("r1").unwrap().prunable,
+            0,
+            "a READY snapshot is not reclassified prunable"
+        );
+    }
+
+    // DAEMON-CRASH-RECOVERY-1: recording the interruption reason MERGES into the existing
+    // extraction-diagnostics blob — it never clobbers Layer-0 diagnostics that PERSIST-RECURSION-1
+    // wrote in the narrow crash-after-finalize-write window.
+    #[test]
+    fn mark_snapshot_interrupted_preserves_existing_extraction_diagnostics() {
+        use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
+
+        let mut storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let building = create_test_snapshot(&storage); // status = building
+                                                       // Simulate the narrow window: a finalize-time diagnostics blob already landed on the orphan.
+        let prior = r#"{"diagnostics_version":1,"edges_total":100,"unresolved_total":2,"boundary_facts_files_skipped_deep_nesting":3}"#;
+        SnapshotLifecyclePort::update_snapshot_extraction_diagnostics(
+            &mut storage,
+            &building.snapshot_uid,
+            prior,
+        )
+        .unwrap();
+
+        assert!(storage
+            .mark_snapshot_interrupted(&building.snapshot_uid, "daemon restart")
+            .unwrap());
+
+        let blob = diagnostics_blob(&storage, &building.snapshot_uid).expect("blob present");
+        let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
+        // The interruption reason is present…
+        assert_eq!(v["interrupted"]["reason"], "daemon restart", "{blob}");
+        // …AND the pre-existing extraction diagnostics survive (not clobbered).
+        assert_eq!(
+            v["diagnostics_version"], 1,
+            "existing key preserved: {blob}"
+        );
+        assert_eq!(v["edges_total"], 100, "existing key preserved: {blob}");
+        assert_eq!(
+            v["boundary_facts_files_skipped_deep_nesting"], 3,
+            "the PERSIST-RECURSION-1 degradation key survives the merge: {blob}"
+        );
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (review-1 change #4): the PURE merge helper now composes the exact string
+    // the single atomic UPDATE writes — merge over an existing object, start fresh on NULL/corrupt,
+    // never lose a prior key. Unit-testable without a DB precisely because the reason write is no longer
+    // a separate best-effort call.
+    #[test]
+    fn merge_interruption_annotation_merges_not_clobbers() {
+        // NULL / absent prior blob → a fresh object carrying only the interruption.
+        let fresh = merge_interruption_annotation(None, "daemon restart", "2026-07-02T11:00:00Z");
+        let v: serde_json::Value = serde_json::from_str(&fresh).unwrap();
+        assert_eq!(v["interrupted"]["reason"], "daemon restart");
+        assert_eq!(v["interrupted"]["reconciled_at"], "2026-07-02T11:00:00Z");
+
+        // Existing Layer-0 diagnostics are preserved beside the new `interrupted` key.
+        let prior = r#"{"diagnostics_version":1,"edges_total":100}"#;
+        let merged = merge_interruption_annotation(Some(prior), "daemon restart", "t");
+        let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(v["diagnostics_version"], 1, "prior key preserved: {merged}");
+        assert_eq!(v["edges_total"], 100, "prior key preserved: {merged}");
+        assert_eq!(v["interrupted"]["reason"], "daemon restart");
+
+        // A non-object / corrupt prior blob starts fresh rather than failing (forensic metadata is not
+        // worth losing the flip over) — the annotation is still recorded.
+        for junk in ["not json at all", "[1,2,3]", "42"] {
+            let v: serde_json::Value = serde_json::from_str(&merge_interruption_annotation(
+                Some(junk),
+                "daemon restart",
+                "t",
+            ))
+            .unwrap();
+            assert_eq!(
+                v["interrupted"]["reason"], "daemon restart",
+                "corrupt prior blob ({junk}) still yields the interruption annotation"
+            );
+        }
     }
 
     #[test]

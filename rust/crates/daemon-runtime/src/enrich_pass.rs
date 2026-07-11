@@ -853,6 +853,14 @@ pub fn try_enrich_attempt(
             jdtls_path_from_env().as_deref(),
         )
     };
+    // DAEMON-CRASH-RECOVERY-1 (F8): op-START line for enrichment. Its terminal OUTCOME is logged by
+    // `run_auto_enrich` for the Ran (completed) and Failed dispositions; the THIRD terminal of a
+    // STARTED run — a cancel at a batch boundary (`Yielded` AFTER this start) — is closed just below,
+    // because `run_auto_enrich` cannot tell that case from a gate-yield (both are
+    // `EnrichAttempt::Yielded`, but a gate-yield returns ABOVE, before this start line, so it logged no
+    // start). Observability only — enrich semantics (the classify → requeue mapping, the return value)
+    // are unchanged.
+    crate::oplog::log_op_start("enrich", repo_uid, None);
     let run_result = run_enrich_pass(
         db_path,
         repo_uid,
@@ -860,7 +868,16 @@ pub fn try_enrich_attempt(
         &available,
         &cancel,
     );
-    classify_completed_attempt(run_result, cancel_flag.is_cancelled())
+    let attempt = classify_completed_attempt(run_result, cancel_flag.is_cancelled());
+    // review-2 (F8, item 1): every logged `op enrich started` must get a terminal outcome. A `Yielded`
+    // reached HERE (after the start line) can ONLY be a cancel-at-batch-boundary — a started, then
+    // interrupted, run (every contention gate-yield returned above, before the start). Close it with an
+    // `interrupted` outcome so the start/outcome pairing is a local invariant of this function.
+    // `run_auto_enrich` still requeues on `Yielded`; this only ADDS the previously-missing log line.
+    if let EnrichAttempt::Yielded(reason) = &attempt {
+        crate::oplog::log_op_outcome("enrich", repo_uid, None, &format!("interrupted ({reason})"));
+    }
+    attempt
     // _running_guard + _activity + _slot + _db_guard drop here.
 }
 
@@ -939,9 +956,16 @@ pub fn run_auto_enrich(
     for _ in 0..REQUEUE_MAX_ATTEMPTS {
         match try_enrich_attempt(state, db_path, repo_uid, repo_display, my_generation) {
             EnrichAttempt::Ran(outcome) => {
-                eprintln!(
-                    "enrichment: {} (repo {repo_uid})",
-                    summarize_outcome(&outcome)
+                // DAEMON-CRASH-RECOVERY-1 (F8, review-0 item a): the op-lifecycle OUTCOME line —
+                // same shape as index/refresh (op, repo, outcome), paired with the op-START line
+                // `try_enrich_attempt` logged. Replaces the ad-hoc "enrichment: …" summary so the
+                // daemon log reads as ONE uniform op lifecycle; `summarize_outcome` is the reader-frame
+                // detail (enriched N/M, promoted P / skipped langs / nothing to enrich).
+                crate::oplog::log_op_outcome(
+                    "enrich",
+                    repo_uid,
+                    None,
+                    &format!("completed ({})", summarize_outcome(&outcome)),
                 );
                 state.record_enrichment_report(EnrichmentReport::new(
                     repo_display.to_string(),
@@ -951,23 +975,32 @@ pub fn run_auto_enrich(
                 return;
             }
             EnrichAttempt::Failed(e) => {
-                eprintln!("enrichment: pass failed for repo {repo_uid}: {e}");
+                crate::oplog::log_op_outcome("enrich", repo_uid, None, &format!("failed: {e}"));
                 // Still chain retention — the index succeeded; cleanup should not hinge on enrich.
                 chain_retention(state, db_path, repo_uid, repo_display);
                 return;
             }
             EnrichAttempt::Superseded => {
-                // A newer index's pass owns this repo now; it will chain retention. Drop silently.
+                // A newer index's pass owns this repo now; it will chain retention. Drop silently
+                // (Superseded returns BEFORE the op-START line, so there is no dangling start to close).
                 return;
             }
             EnrichAttempt::Yielded(_reason) => {
+                // Yielded to an explicit index/refresh (or a closed gate) — a requeue, not a terminal
+                // outcome; sleep and retry.
                 std::thread::sleep(REQUEUE_BACKOFF);
             }
         }
     }
-    eprintln!(
-        "enrichment: deferred for repo {repo_uid} — the repo stayed busy for {}s; the next successful index/refresh will retry",
-        (REQUEUE_MAX_ATTEMPTS as u64) * REQUEUE_BACKOFF.as_secs()
+    // Deferred (never completed a run) — the terminal disposition of a spawned pass that kept yielding.
+    crate::oplog::log_op_outcome(
+        "enrich",
+        repo_uid,
+        None,
+        &format!(
+            "deferred (repo stayed busy for {}s; the next index/refresh retries)",
+            (REQUEUE_MAX_ATTEMPTS as u64) * REQUEUE_BACKOFF.as_secs()
+        ),
     );
     // Deferred (never ran) — still hand off to retention so cleanup runs this cycle.
     chain_retention(state, db_path, repo_uid, repo_display);
@@ -1353,6 +1386,199 @@ mod tests {
                 EnrichAttempt::Failed(_)
             ),
             "a pass error stays Failed regardless of the yield flag"
+        );
+    }
+
+    // DAEMON-CRASH-RECOVERY-1 (F8, review-0 item a): a real background enrichment pass writes an
+    // explicit op-lifecycle START + OUTCOME pair to the log sink — the same `op <op> <outcome> (repo
+    // <repo>)` shape as index/refresh — NOT the old ad-hoc "enrichment: …" summary. Drives the real
+    // `run_auto_enrich` on a repo with a READY snapshot but no eligible edges ("nothing to enrich"),
+    // so no live LSP toolchain is needed.
+    #[test]
+    fn run_auto_enrich_logs_the_op_lifecycle_outcome_line() {
+        use crate::registry::RepoRegistry;
+        use repo_graph_storage::types::{CreateSnapshotInput, Repo, UpdateSnapshotStatusInput};
+
+        crate::oplog::enable_oplog_capture_for_test();
+        // The chained retention pass would spawn its own thread + line; disable it so this test stays
+        // focused on the enrich outcome line and leaves no detached thread touching the tempdir.
+        crate::retention_pass::set_auto_retention_for_test(false);
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("enrich_outcome.db");
+        // Unique repo → the process-global (non-draining) capture buffer is filtered to THIS test.
+        let repo = "enrich-outcome-repo";
+        {
+            let storage = StorageConnection::open(&db_path).unwrap();
+            storage
+                .add_repo(&Repo {
+                    repo_uid: repo.to_string(),
+                    name: repo.to_string(),
+                    root_path: ".".to_string(),
+                    default_branch: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    metadata_json: None,
+                })
+                .unwrap();
+            // A READY snapshot with no nodes/edges → no eligible unresolved edges → "nothing to enrich".
+            let snap = storage
+                .create_snapshot(&CreateSnapshotInput {
+                    repo_uid: repo.to_string(),
+                    kind: "full".to_string(),
+                    basis_ref: None,
+                    basis_commit: None,
+                    parent_snapshot_uid: None,
+                    label: None,
+                    toolchain_json: None,
+                })
+                .unwrap();
+            storage
+                .update_snapshot_status(&UpdateSnapshotStatusInput {
+                    snapshot_uid: snap.snapshot_uid,
+                    status: "ready".to_string(),
+                    completed_at: None,
+                })
+                .unwrap();
+        }
+        let db_path = db_path.canonicalize().unwrap();
+        let state = Arc::new(DaemonState::with_registry(
+            RepoRegistry::empty_non_persistent(),
+        ));
+        let my_generation = state.enrich_coord().bump_generation(repo);
+        run_auto_enrich(&state, &db_path, repo, repo, my_generation);
+
+        let lines: Vec<String> = crate::oplog::oplog_lines_for_test()
+            .into_iter()
+            .filter(|l| l.contains(repo))
+            .collect();
+        assert!(
+            lines.iter().any(|l| l.contains("op enrich started")),
+            "the pass logs an op-START line: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("op enrich completed")),
+            "the pass logs an op-lifecycle OUTCOME line (not the old ad-hoc 'enrichment: …' summary): {lines:?}"
+        );
+    }
+
+    // ── DAEMON-CRASH-RECOVERY-1 (F8, review-2 item 1): every STARTED enrich op is CLOSED ───────────
+
+    /// Seed a repo with one snapshot in `status` ("ready" or "building"), returning the canonical db
+    /// path. Two callers (the interrupted + failed F8 proofs below) with the same ~20-line seed —
+    /// earned over duplication; the pre-existing "completed" proof predates it and stays inlined
+    /// (minimal-change discipline).
+    fn seed_repo_with_snapshot(dir: &Path, repo: &str, status: &str) -> PathBuf {
+        use repo_graph_storage::types::{CreateSnapshotInput, Repo, UpdateSnapshotStatusInput};
+        let db_path = dir.join(format!("{repo}.db"));
+        let storage = StorageConnection::open(&db_path).unwrap();
+        storage
+            .add_repo(&Repo {
+                repo_uid: repo.to_string(),
+                name: repo.to_string(),
+                root_path: ".".to_string(),
+                default_branch: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                metadata_json: None,
+            })
+            .unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: repo.to_string(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap();
+        if status == "ready" {
+            storage
+                .update_snapshot_status(&UpdateSnapshotStatusInput {
+                    snapshot_uid: snap.snapshot_uid,
+                    status: "ready".to_string(),
+                    completed_at: None,
+                })
+                .unwrap();
+        }
+        db_path.canonicalize().unwrap()
+    }
+
+    // THE review-2 finding: an enrich pass that logged an op-START and is then CANCELLED at a batch
+    // boundary (an explicit index/refresh latched its yield flag) must close that start with a terminal
+    // `interrupted` outcome. Before the fix it requeued SILENTLY, leaving a started op with no
+    // completed/interrupted/failed line. Deterministic + hermetic (no LSP): a pending yield adopted in
+    // the acquire→register window makes the real `try_enrich_attempt` run already-cancelled and map to
+    // Yielded-after-start; the zero-eligible snapshot means the pipeline body is never even reached.
+    #[test]
+    fn a_cancelled_started_enrich_closes_its_start_with_an_interrupted_outcome() {
+        use crate::registry::RepoRegistry;
+        crate::oplog::enable_oplog_capture_for_test();
+        let repo = "enrich-f8-interrupted-repo"; // unique → parallel-safe capture filter
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = seed_repo_with_snapshot(dir.path(), repo, "ready");
+
+        let state = Arc::new(DaemonState::with_registry(
+            RepoRegistry::empty_non_persistent(),
+        ));
+        let gen = state.enrich_coord().bump_generation(repo);
+        // Latch a yield in the acquire→register window → `register_running` adopts it, so the pass
+        // starts already-cancelled and yields at its first batch boundary (a started, interrupted run).
+        state.enrich_coord().request_yield_for_db(&db_path);
+
+        let attempt = try_enrich_attempt(&state, &db_path, repo, repo, gen);
+        assert!(
+            matches!(attempt, EnrichAttempt::Yielded(_)),
+            "a cancel-after-start maps to Yielded"
+        );
+
+        let lines: Vec<String> = crate::oplog::oplog_lines_for_test()
+            .into_iter()
+            .filter(|l| l.contains(repo))
+            .collect();
+        assert!(
+            lines.iter().any(|l| l.contains("op enrich started")),
+            "the started run logged an op-START: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("op enrich interrupted")),
+            "the cancelled run's start is CLOSED by an interrupted outcome (review-2 fix): {lines:?}"
+        );
+    }
+
+    // The failure disposition of the same invariant: an enrich pass that FAILS (its snapshot is not
+    // enrichable) closes its op-START with a terminal `failed` outcome. Deterministic + hermetic: a
+    // repo whose latest snapshot is `building` (never ready) → `run_enrich_pass` errors →
+    // `EnrichAttempt::Failed` → `run_auto_enrich` logs the failed outcome. Retention forced OFF so the
+    // chained pass is a cheap no-op that spawns no thread racing tempdir teardown.
+    #[test]
+    fn a_failed_enrich_closes_its_start_with_a_failed_outcome() {
+        use crate::registry::RepoRegistry;
+        crate::oplog::enable_oplog_capture_for_test();
+        crate::retention_pass::set_auto_retention_for_test(false);
+        let repo = "enrich-f8-failed-repo";
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = seed_repo_with_snapshot(dir.path(), repo, "building");
+
+        let state = Arc::new(DaemonState::with_registry(
+            RepoRegistry::empty_non_persistent(),
+        ));
+        let gen = state.enrich_coord().bump_generation(repo);
+        run_auto_enrich(&state, &db_path, repo, repo, gen);
+
+        let lines: Vec<String> = crate::oplog::oplog_lines_for_test()
+            .into_iter()
+            .filter(|l| l.contains(repo))
+            .collect();
+        assert!(
+            lines.iter().any(|l| l.contains("op enrich started")),
+            "the attempt logged an op-START: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("op enrich failed")),
+            "a failed run's start is CLOSED by a failed outcome: {lines:?}"
         );
     }
 }
