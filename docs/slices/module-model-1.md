@@ -1,7 +1,16 @@
 # MODULE-MODEL-1: a true, coherent module model on the orientation surface — SPEC
 
 Slice: MODULE-MODEL-1
-Status: **SPEC** (design; the IMPL is the relay slice that follows)
+Status: **DELIVERED** — IMPL shipped 2026-06-23 as MODULE-MODEL-IMPL-1 (`17dbe93`,
+relay-approved iteration 1): D1/D2/D4 core (shared `package_groups` fold behind
+orient + stats, two self-labelled notions, JVM main/test merge + prefix collapse)
+and the D3 umbrella descent. Delivery record added retroactively 2026-07-11 — the
+record was missed at close-out. **§13 (added 2026-07-11) is a FOLLOW-UP contract
+(MODULE-MODEL-2), not part of the delivered slice:** D7 bounded-at-scale and D4
+per-toolchain grouping are NOT yet implemented (verified 2026-07-11: the
+package-groups renderer iterates unbounded; grouping has no crate/workspace
+awareness); the §13 D2 population clarification IS already satisfied by the
+delivered shared fold.
 Track: Product-surface honesty (`docs/ROADMAP.md` → Current priority, P1 "orient module
 under-segmentation" ↔ P2 "module model unification" — "decide the notion once").
 Pairs: this slice designs the fix for **TECH-DEBT #3** (orient under-segments nested layouts)
@@ -495,12 +504,15 @@ binding outcome the IMPL executes (it does NOT re-open these).
 
 ---
 
-## 13. Amendment — pre-IMPL review pass (operator + standalone reviewer, 2026-07-11)
+## 13. Amendment — follow-up contract for MODULE-MODEL-2 (operator + standalone reviewer, 2026-07-11)
 
-Before bootstrapping the IMPL, the ratified package was put to a standalone adversarial
-review (gpt-5.6-sol, self-contained prompt per `prompts/standalone-review.md`; the operator
-independently flagged the same scale gap). §12 STANDS — nothing below re-opens D1–D6. This
-section binds the IMPL additionally.
+The ratified package was put to a standalone adversarial review (gpt-5.6-sol, self-contained
+prompt per `prompts/standalone-review.md`; the operator independently flagged the same scale
+gap) ahead of deploying against a 160k-file polyglot monorepo. §12 STANDS — nothing below
+re-opens D1–D6, and the 2026-06-23 delivery (`17dbe93`) already satisfies the D2
+clarification below (one shared `package_groups` fold behind orient + stats). What is NOT
+yet implemented — D7 and the D4 per-toolchain definitions — binds the follow-up slice
+**MODULE-MODEL-2**.
 
 ### D7 — bounded presentation at scale (RATIFIED 2026-07-11: bounded human, complete JSON)
 
