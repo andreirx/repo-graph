@@ -3953,3 +3953,29 @@ metrics.rs:80 walk` self-call `:123`; full list in build-1.md).
   Deliberately deferred here — PERSIST-RECURSION-1 is scoped to the re-parse postpasses
   (`FILES_OUT_OF_SCOPE: extraction pipeline proper`), and the REPRODUCED daemon-killer (F13) IS closed
   by the postpass fix. Surfaced, not silently carried.
+
+## Scanner applies root .gitignore patterns unanchored — LIVE (2026-07-12, was latent)
+
+**Casualty (OBSERVED, isolated self-index):** the entire tracked crate
+`rust/crates/coverage/` is invisible to the file inventory — zero FILE nodes — because
+the repo root `.gitignore` contains the ROOT-ANCHORED pattern `/coverage/` (line 59;
+git check-ignore correctly does NOT match `rust/crates/coverage/`, and the line's own
+comment warns "root-level only, not rust/crates/coverage/"). The scanner
+(walkdir + load_root_gitignore) treats root patterns as unanchored substring/dir matches,
+so ANY directory named `coverage` anywhere in the tree is dropped — silently. Found
+during CARGO-WORKSPACE-INHERITANCE-1 (its "sixth missing crate").
+
+**Why this is P1 now:** a tool whose core claim is "this is what exists" silently omits
+tracked source files whose directory name collides with any root-anchored ignore pattern —
+an honesty-core violation invisible to the user (no caveat, no diagnostic). Any target
+repo ignoring `/build/`, `/dist/`, `/coverage/`, `/target/` at root while having
+same-named nested SOURCE dirs is affected — common in monorepos.
+
+**Proper fix:** replace the hand-rolled root-only loader with `ignore::WalkBuilder`
+(full gitignore semantics: anchoring, negation, nested .gitignore files) — the
+long-prescribed fix; spec as SCANNER-GITIGNORE-1. Validation must include: anchored
+root pattern + same-named nested source dir (the coverage case), negation, and a nested
+.gitignore.
+
+**Status:** OPEN — slice to be specced/queued (post ENRICH-YIELD-1 unless a field case
+escalates it).

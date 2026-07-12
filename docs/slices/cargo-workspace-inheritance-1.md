@@ -56,3 +56,35 @@ of crate groups (MODULE-MODEL-2 degrades honestly, by ratified design), and
 
 repo-graph's own orient/stats/modules name all 50 crates; the six formerly-degraded crates
 render as crate groups; no consumer needed changes; gates + transcript inlined.
+
+---
+
+## 6. Ratified contract amendment + delivery record (operator, 2026-07-12)
+
+**DELIVERED** (relay build + operator close-out; reviewer escalate resolved by THIS
+ratification — the §2 letter was authored before the real root cause was known).
+
+**Real root cause (narrower than §1 assumed):** `version.workspace = true` deserializes as
+a TOML table, crashed the strict `Option<String>` field, failed the WHOLE manifest parse,
+and suppressed the candidate. Five crates were victims (rgr, daemon-runtime,
+graph-algorithms, platform-paths, rmapd) — not six; see the coverage carve-out below.
+
+**§2.1 SUPERSEDED (ratified):** the reader stays a pure single-manifest parser. It
+tolerates the inherited-table form (and any non-string version) and emits the candidate —
+crate identity (name + location) is a deterministic fact of the member manifest alone
+(`name` cannot be inherited) — with version **honestly unresolved** (`None` = not
+measured, never fabricated). NO cross-file resolution against `[workspace.package]` at
+parser level. **Recorded residual:** caller-level (`compose.rs`) version-literal
+resolution + a diagnostic distinguishing valid inheritance from a malformed version value
+(both need the root table / diagnostics sink that live at the caller) — pick up only if
+version display or manifest-lint fidelity ever matters.
+
+**§5 DoD AMENDED (ratified):** 5/5 reachable crates fold (live isolated proof: orient
+headline `rgr, storage, daemon-runtime, agent, repo-index, indexer, … · 257 package
+groups`; cargo evidence rows 50 → 55; the six crates' directory fragments gone, 281 → 257
+groups). `coverage` is EXCLUDED from this slice's DoD: it was never a victim of the
+inheritance crash (explicit `version = "0.1.0"`) — the entire `rust/crates/coverage/`
+tree is invisible to the index because the scanner applies the root `.gitignore`'s
+root-anchored `/coverage/` pattern UNANCHORED (git itself tracks the crate). That
+pre-existing scanner defect is now TECH-DEBT (live, named casualty) with its own
+follow-up slice; fixing it here would violate the frozen-walks stop condition.
