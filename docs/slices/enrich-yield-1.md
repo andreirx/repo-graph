@@ -61,3 +61,31 @@ slice makes the funnel a measured fact FIRST.
 The 3.5% is decomposed into named, cited, per-gate facts visible on the product surface;
 the ratification packet proposes concrete yield options with honesty rationale; nothing
 about promotion behavior changed.
+
+---
+
+## 6. Delivery record (2026-07-12)
+
+**DELIVERED** (`3319c91`, relay-approved iteration 3 — 4 cycles — + decision-review pass,
+all four decisions converged after challenge). The funnel is a measured product-surface
+fact: `promotion funnel: 7,582 resolved candidates → 251 promoted (3.3%)` with a full
+8-stage waterfall (conservation-checked, first-rejection attribution, reader-frame labels,
+honest denominator on doctor/report/oplog). External fixture corroborates the shape.
+
+Measured shares (self-index): external receiver types ~36% (gate 4 — Vec/String/Option/…);
+type-not-in-graph ~26% (gate 5 — dominated by primitives like `str` and dependency types
+like `serde_json::Value` that pass gate 4); ambiguity/overload/not-found ≈430 ≈5.7%
+(gates 5/6, four distinct classes); `self.field.method` shape 140 (gate 8).
+
+**The EY1-A..D dispositions were adversarially corrected in decision-review**
+(`.agent-manager/slices/ENRICH-YIELD-1/ratification-packet.md`; challenge → verified
+concessions): EY1-A Layer-2 lands as a READ PROJECTION over already-persisted
+metadata_json (no new persisted shape) with heuristic-honest basis labels (the external
+flag is a 33-name static set, NOT compiler-verified); EY1-B splits into a SAFE primitive
+reattribution vs a BLOCKED dependency-name half (needs qualified-path provenance — the
+resolver discards it); EY1-C `self.field.method` stays REJECTED until a Rust
+receiver-expression locator exists (admitting it today would hover `self`, not
+`self.field` — false CALLS edges); EY1-D decomposes into four ratifiable items incl. a
+missed Layer-0 lever: Rust ENUMS land in type_not_a_class only because gate 5's predicate
+is Class-only and the Enum subtype is dropped at the crate boundary. ENRICH-YIELD-2
+implements whatever the operator ratifies.
