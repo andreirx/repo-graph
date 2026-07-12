@@ -1620,6 +1620,37 @@ impl ServiceDispatcher {
             )
         });
 
+        // MODULE-MODEL-2 §13 D4/D7: per-toolchain manifest roots (already-stored
+        // module_candidates ⋈ evidence.source_type), read ONCE here — BEFORE
+        // `storage` may move into the SQLite worker below — and folded into the
+        // COMPLETE package-group set inside `inject_stats_summary_fields`. The SAME
+        // shared `rollup_package_groups` + manifest facts `orient` uses, so the two
+        // surfaces cannot report divergent topology.
+        //
+        // MODULE-MODEL-2 review-0 #2 — "couldn't read" is NOT "doesn't exist": a
+        // READ FAILURE must PROPAGATE as a request error, exactly like the sibling
+        // `storage`/`snapshot` reads above (and exactly like `orient`, whose
+        // `module_summary` aggregator reaches the same `list_manifest_roots` via `?`
+        // and whose handler maps that `Err` to `DispatchResult::error`). Silently
+        // swallowing it to an empty set would render directory grouping as though
+        // manifests were genuinely absent — a false honest-degradation claim that
+        // could also diverge from `orient` (which errors on the same failure). A
+        // GENUINELY-EMPTY `Ok(vec![])` (no manifest facts indexed — a C/manifest-less
+        // tree, or the raw-indexer path) still degrades HONESTLY to directory/JVM
+        // grouping inside the fold; only the read-failure path errors.
+        let manifest_roots = match repo_graph_agent::AgentStorageRead::list_manifest_roots(
+            &storage,
+            &snapshot.snapshot_uid,
+        ) {
+            Ok(roots) => roots,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
         // STATS-LIVEGRAPH-IMPL-1: engine routing. DEFAULT (no flags == `auto`) = the cert-gated LiveGraph
         // module-stats FASTPATH (`stats_auto_response`): serves the LiveGraph stats WITHOUT
         // `compute_module_stats` on a GREEN repo cert at the current fingerprint, else a labelled SQLite
@@ -1672,6 +1703,7 @@ impl ServiceDispatcher {
                             total_symbols_field,
                             import_graph_reliability_field.as_ref(),
                             relationship_next_action.as_deref(),
+                            &manifest_roots,
                         );
                         DispatchResult::success(&request.id, v)
                     }
@@ -1700,6 +1732,7 @@ impl ServiceDispatcher {
                     total_symbols_field,
                     import_graph_reliability_field.as_ref(),
                     relationship_next_action.as_deref(),
+                    &manifest_roots,
                 );
                 return DispatchResult::success(&request.id, v);
             }
@@ -1721,6 +1754,7 @@ impl ServiceDispatcher {
                             total_symbols_field,
                             import_graph_reliability_field.as_ref(),
                             relationship_next_action.as_deref(),
+                            &manifest_roots,
                         );
                         DispatchResult::success(&request.id, v)
                     }
@@ -1819,6 +1853,7 @@ impl ServiceDispatcher {
             total_symbols_field,
             import_graph_reliability_field.as_ref(),
             relationship_next_action.as_deref(),
+            &manifest_roots,
         );
         DispatchResult::success(&request.id, body)
     }
@@ -1834,11 +1869,18 @@ impl ServiceDispatcher {
     /// `relationship_next_action` (D5, IMPL-2) is the toolchain-aware honest next-action line; OMITTED
     /// when absent (no LOW relationship axis, or no honest statement applies). The human renderer renders
     /// it beneath the dependency caveat.
+    ///
+    /// `package_groups` (MODULE-MODEL-2 §13 D4/D7) is the COMPLETE folded topology: the per-directory
+    /// `stats` rows this body already carries, folded through the SAME shared `rollup_package_groups` +
+    /// `manifest_roots` `orient` uses — so the two surfaces cannot diverge. Folded here (one point, all
+    /// four engine paths) reading `body["stats"]`. The JSON carries the WHOLE set; the human renderer
+    /// bounds it (top-N + omission). Empty `manifest_roots` → directory/JVM grouping (honest degradation).
     fn inject_stats_summary_fields(
         body: &mut serde_json::Value,
         total_symbols: Option<u64>,
         import_graph_reliability: Option<&serde_json::Value>,
         relationship_next_action: Option<&str>,
+        manifest_roots: &[repo_graph_agent::ManifestRoot],
     ) {
         let Some(obj) = body.as_object_mut() else {
             return;
@@ -1852,6 +1894,52 @@ impl ServiceDispatcher {
         if let Some(line) = relationship_next_action {
             obj.insert(
                 "relationship_next_action".to_string(),
+                serde_json::json!(line),
+            );
+        }
+        // Fold the per-directory topology into the COMPLETE package-group set. The
+        // `stats` array (present on every engine path) is the authoritative
+        // population (§13 D2); mapping it to `DirGroup` here keeps the fold
+        // daemon-side + shared with orient. `file_count` is clamped non-negative.
+        let dirs: Vec<repo_graph_agent::DirGroup> = obj
+            .get("stats")
+            .and_then(|s| s.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|r| {
+                        let path = r.get("module")?.as_str()?.to_string();
+                        let file_count = r
+                            .get("file_count")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0)
+                            .max(0) as u64;
+                        Some(repo_graph_agent::DirGroup { path, file_count })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let groups = repo_graph_agent::rollup_package_groups(&dirs, manifest_roots);
+        let groups_json: Vec<serde_json::Value> = groups
+            .iter()
+            .map(|g| {
+                serde_json::json!({
+                    "name": g.name,
+                    "file_count": g.file_count,
+                    "test_file_count": g.test_file_count,
+                })
+            })
+            .collect();
+        obj.insert("package_groups".to_string(), serde_json::json!(groups_json));
+        // MODULE-MODEL-2 (ROOT-MANIFEST-POLYGLOT, ratified 2026-07-12): surface the
+        // one-line limitation marker when a repo-root manifest was suppressed by the
+        // conservative rule (nested roots coexist) — the SAME shared
+        // `root_manifest_limitation` orient's aggregator uses, so the two surfaces
+        // carry the identical line. Inserted only when Some (a genuine single-package
+        // or manifest-less repo carries no marker); the human renderer + JSON both
+        // read it.
+        if let Some(line) = repo_graph_agent::root_manifest_limitation(manifest_roots) {
+            obj.insert(
+                "root_manifest_limitation".to_string(),
                 serde_json::json!(line),
             );
         }

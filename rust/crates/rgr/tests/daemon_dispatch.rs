@@ -4618,3 +4618,94 @@ fn callers_ambiguous_symbol_returns_structured_error() {
         output
     );
 }
+
+#[test]
+fn orient_and_stats_agree_on_package_groups() {
+    // MODULE-MODEL-2 §13: orient (daemon-side agent fold) and stats (daemon-side
+    // fold in `handle_stats`) share ONE `rollup_package_groups` over the SAME
+    // directory population + manifest facts — so they cannot report divergent
+    // package groups. Prove it end-to-end through the real daemon.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("agree-repo");
+    std::fs::create_dir_all(repo_dir.join("src/alpha")).unwrap();
+    std::fs::create_dir_all(repo_dir.join("src/beta")).unwrap();
+    std::fs::write(repo_dir.join("src/alpha/a.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(repo_dir.join("src/beta/b.ts"), "export const b = 2;\n").unwrap();
+
+    let index_request = format!(
+        r#"{{"id":"ag-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_dir.to_string_lossy()
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let index_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let canonical_path = index_parsed["result"]["canonical_path"]
+        .as_str()
+        .expect("index returns canonical_path")
+        .to_string();
+
+    // orient's package groups (from the MODULE_SUMMARY signal evidence).
+    let orient_request = format!(
+        r#"{{"id":"ag-2","method":"orient","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let orient_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let orient_groups = orient_parsed["result"]["value"]["signals"]
+        .as_array()
+        .expect("orient value.signals is an array")
+        .iter()
+        .find(|leaf| leaf["value"]["code"] == "MODULE_SUMMARY")
+        .and_then(|leaf| leaf["value"]["evidence"]["package_groups"].as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // stats' package groups (folded + attached by handle_stats via the SAME fold).
+    let stats_request = format!(
+        r#"{{"id":"ag-3","method":"stats","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&stats_request], state);
+    let stats_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let stats_groups = stats_parsed["result"]["package_groups"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    // Normalize each to a sorted (name, file_count, test_file_count) set.
+    let norm = |arr: &[serde_json::Value]| -> Vec<(String, u64, u64)> {
+        let mut v: Vec<(String, u64, u64)> = arr
+            .iter()
+            .map(|g| {
+                (
+                    g["name"].as_str().unwrap_or("").to_string(),
+                    g["file_count"].as_u64().unwrap_or(0),
+                    g["test_file_count"].as_u64().unwrap_or(0),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let o = norm(&orient_groups);
+    let s = norm(&stats_groups);
+    assert!(
+        !o.is_empty(),
+        "orient must report package groups: {orient_parsed}"
+    );
+    assert_eq!(
+        o, s,
+        "orient and stats must report the SAME package groups (one shared fold)"
+    );
+    // Sanity: the two source dirs fold to two groups named alpha / beta.
+    let names: Vec<&str> = o.iter().map(|(n, _, _)| n.as_str()).collect();
+    assert!(
+        names.contains(&"alpha") && names.contains(&"beta"),
+        "expected alpha/beta package groups, got {names:?}"
+    );
+}

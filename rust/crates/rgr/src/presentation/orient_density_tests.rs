@@ -189,3 +189,161 @@ fn honesty_posture_present_at_every_tier() {
         );
     }
 }
+
+/// MODULE-MODEL-2 §13 D7: on a >100-group tree the PRIMARY orientation surface
+/// stays BOUNDED at every budget tier, the omission count is TRUE (it counts ALL
+/// groups, not the displayed ones), and the headline count reflects the COMPLETE
+/// set. Human bounding is presentation-only — the evidence (JSON) is untouched.
+#[test]
+fn d7_scale_bounded_human_true_omission_at_every_tier() {
+    use serde_json::json;
+    let mut r = nginx_like();
+    // 130 package groups, size-DESC (g000 largest) — the fold's output shape.
+    let groups: Vec<_> = (0..130)
+        .map(|i| json!({"name": format!("g{i:03}"), "file_count": 1000 - i, "test_file_count": 0}))
+        .collect();
+    for leaf in &mut r.signals {
+        if leaf.value.code == "MODULE_SUMMARY" {
+            if let Some(ev) = leaf.value.evidence.as_mut() {
+                ev["package_groups"] = json!(groups);
+            }
+        }
+    }
+
+    // The headline count is the COMPLETE total at EVERY tier — never the displayed count.
+    for depth in [
+        OrientDepth::Small,
+        OrientDepth::Medium,
+        OrientDepth::Large,
+        OrientDepth::Full,
+    ] {
+        let out = r.render_human(depth);
+        assert!(
+            out.contains("130 package groups"),
+            "headline count must be the complete total at {depth:?}:\n{out}"
+        );
+    }
+
+    // SMALL: headline names a bounded set + "+N more" (the only pointer — no section).
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains("+122 more"),
+        "small points to the rest (130-8):\n{small}"
+    );
+    assert!(
+        !small.contains("Package groups (directory/package topology"),
+        "small renders no dedicated section:\n{small}"
+    );
+
+    // MEDIUM: section capped at 20 + TRUE omission (130 - 20 = 110).
+    let medium = r.render_human(OrientDepth::Medium);
+    assert!(medium.contains("Package groups (directory/package topology"));
+    assert!(
+        medium.contains("… and 110 more groups — see `stats --json` / `modules`"),
+        "medium omission must be true:\n{medium}"
+    );
+    assert!(
+        medium.contains("g000 — 1000 files"),
+        "top group shown:\n{medium}"
+    );
+    assert!(
+        medium.contains("g019 — 981 files"),
+        "20th group shown:\n{medium}"
+    );
+    assert!(
+        !medium.contains("g020 — "),
+        "medium caps the section at 20:\n{medium}"
+    );
+
+    // LARGE: section capped at 50 + TRUE omission (130 - 50 = 80).
+    let large = r.render_human(OrientDepth::Large);
+    assert!(
+        large.contains("… and 80 more groups — see `stats --json` / `modules`"),
+        "large omission must be true:\n{large}"
+    );
+    assert!(
+        large.contains("g049 — "),
+        "50th group shown at large:\n{large}"
+    );
+    assert!(
+        !large.contains("g050 — "),
+        "large caps the section at 50:\n{large}"
+    );
+
+    // FULL: package groups stay BOUNDED (§13 D7) — the SAME top-50 as `large`,
+    // NOT uncapped. `--full` uncaps only the complexity table (see
+    // `medium_caps_complexity_large_expands_full_uncapped`), never the package
+    // topology, which on a monorepo scales with directories into the thousands —
+    // the exact overrun D7 exists to bound on the primary surface. Same TRUE
+    // omission as `large` (130 - 50 = 80); the COMPLETE 130-group set rides JSON.
+    let full = r.render_human(OrientDepth::Full);
+    assert!(
+        full.contains("… and 80 more groups — see `stats --json` / `modules`"),
+        "full omission must be true — bounded at EVERY tier, incl. --full:\n{full}"
+    );
+    assert!(
+        full.contains("g049 — "),
+        "50th group shown at full:\n{full}"
+    );
+    assert!(
+        !full.contains("g050 — "),
+        "full caps the package-group section at 50 (§13 D7 — NOT uncapped):\n{full}"
+    );
+    // The headline still names the COMPLETE total (asserted in the tier loop above),
+    // and the JSON evidence is untouched — human bounding is presentation-only.
+}
+
+/// MODULE-MODEL-2 ROOT-MANIFEST-POLYGLOT: when the daemon attaches the reader-frame
+/// limitation marker (`root_manifest_limitation` in MODULE_SUMMARY evidence), the
+/// orient package-groups SECTION renders it as a visible note — not hidden in a
+/// comment. Present-half + absent-half in one test (the operator's named case,
+/// render side). The section renders at medium+ (small omits it, riding JSON).
+#[test]
+fn root_manifest_limitation_marker_renders_in_package_groups_section() {
+    use serde_json::json;
+    let groups = json!([
+        {"name": "alpha", "file_count": 9, "test_file_count": 0},
+        {"name": "beta", "file_count": 4, "test_file_count": 0},
+    ]);
+    let marker = "root package.json not folded — nested toolchains present; \
+                  root-owned directories shown as directory groups";
+
+    // Present: evidence carries the marker → it renders in the section (medium+).
+    let mut with = nginx_like();
+    for leaf in &mut with.signals {
+        if leaf.value.code == "MODULE_SUMMARY" {
+            if let Some(ev) = leaf.value.evidence.as_mut() {
+                ev["package_groups"] = groups.clone();
+                ev["root_manifest_limitation"] = json!(marker);
+            }
+        }
+    }
+    let out = with.render_human(OrientDepth::Medium);
+    let section = out
+        .split("Package groups (directory/package topology")
+        .nth(1)
+        .expect("package-groups section present");
+    let marker_pos = section
+        .find("root package.json not folded")
+        .expect("marker renders inside the section");
+    let first_group = section.find("alpha — ").expect("group row present");
+    assert!(
+        marker_pos < first_group,
+        "marker must precede the group rows:\n{section}"
+    );
+
+    // Absent: no marker field → no note (nothing suppressed, no noise).
+    let mut without = nginx_like();
+    for leaf in &mut without.signals {
+        if leaf.value.code == "MODULE_SUMMARY" {
+            if let Some(ev) = leaf.value.evidence.as_mut() {
+                ev["package_groups"] = groups.clone();
+            }
+        }
+    }
+    let out = without.render_human(OrientDepth::Medium);
+    assert!(
+        !out.contains("not folded"),
+        "no marker when evidence carries none:\n{out}"
+    );
+}

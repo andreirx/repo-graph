@@ -62,7 +62,13 @@ By distance from main sequence
 
 ## Design Rationale
 
-1. **Full sorted sections** — no arbitrary top-N clipping
+1. **Bounded human tables, complete JSON** — MODULE-MODEL-2 §13 D7 (ratified
+   2026-07-11) superseded the original "full sorted sections, no arbitrary top-N
+   clipping": on a large monorepo these per-group tables run to thousands of rows,
+   so each human table is now bounded to the top-N by its metric (file count for
+   "By size"; fan-in / fan-out / distance for the others; lexicographic module-path
+   tie-break) followed by an honest "… and N more …" omission line. The COMPLETE
+   set always rides `stats --json`. Bounded human output, complete machine output.
 2. **Ordering points the reader** — highest values first
 3. **Compact rows** — caller can pipe to `head` or redirect to file
 4. **No threshold-based labeling** — no "at risk" verdicts

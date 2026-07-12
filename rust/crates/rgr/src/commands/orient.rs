@@ -249,7 +249,7 @@ fn print_orient_usage() {
     eprintln!(
         "usage: rmap orient [--focus <path>] [--budget small|medium|large] [--full] [--json]"
     );
-    eprintln!("  --full   uncap all output (no budget truncation); for grep/complete listings");
+    eprintln!("  --full   deepest tier: uncaps the complexity table; other sections stay bounded with honest omission lines — complete listings ride --json / `stats --json`");
 }
 
 // ── check command (REG-1) ────────────────────────────────────────────

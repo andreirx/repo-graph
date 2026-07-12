@@ -36,6 +36,7 @@
 //!      untouched by agent concerns.
 
 use crate::errors::AgentStorageError;
+use crate::package_groups::ManifestRoot;
 
 // ── Repo identity ────────────────────────────────────────────────
 
@@ -904,6 +905,32 @@ pub trait AgentStorageRead {
         &self,
         _snapshot_uid: &str,
     ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
+        Ok(Vec::new())
+    }
+
+    /// List the manifest-declared package boundaries (crate / workspace-package
+    /// roots) for a snapshot — the per-toolchain grouping facts the package-group
+    /// fold uses to name Rust crates and TS packages instead of raw directory
+    /// fragments (MODULE-MODEL-2 §13 D4).
+    ///
+    /// A Layer-0/1 EXTRACTED fact: reads the ALREADY-STORED `module_candidates`
+    /// ⋈ `module_candidate_evidence` surface — `canonical_root_path` +
+    /// `source_type` (the toolchain marker: `cargo_toml` → Rust, `package_json` /
+    /// `pnpm_workspace_yaml` → TS). NOT `module_kind`, which is provenance
+    /// (`declared`/`inferred`), not toolchain. No new scan; no new subsystem.
+    ///
+    /// Empty when no manifest facts are indexed (e.g. a C/C++ or manifest-less
+    /// tree, or the raw-indexer path where `module_candidates` is unpopulated) —
+    /// the fold then degrades HONESTLY to directory/JVM grouping (the delivered
+    /// shape). Only Rust + TS manifests are surfaced; JVM/Python manifests keep
+    /// the directory/JVM heuristic per the ratified D4.
+    ///
+    /// Default impl returns empty so the many `AgentStorageRead` test fakes need
+    /// no stub; the real adapter overrides it.
+    fn list_manifest_roots(
+        &self,
+        _snapshot_uid: &str,
+    ) -> Result<Vec<ManifestRoot>, AgentStorageError> {
         Ok(Vec::new())
     }
 

@@ -11,7 +11,7 @@
 //! helpers stay private. Pure relocation — no behavior changed.
 
 use super::orient::{OrientDepth, OrientResponse, ReliabilityAxis, Signal};
-use super::{bullet, heading, DisplaySeverity};
+use super::{bullet, heading, sub_heading, DisplaySeverity};
 
 /// Headline signal codes — the load-bearing facts the dense headline
 /// synthesizes (the presentation mirror of the agent's
@@ -121,20 +121,26 @@ impl OrientResponse {
             }
         }
 
-        // STRUCTURE (Layer 0/1 topology): NAME the package groups.
+        // STRUCTURE (Layer 0/1 topology): NAME the package groups. The headline is
+        // a one-liner — BOUNDED at every tier (§13 D7). `total` counts ALL groups
+        // (never only the displayed ones), so the count stays TRUE at scale. The
+        // "+N more" pointer shows only at `small` (the sole topology surface
+        // there); at `medium`+ the dedicated package-group section carries the
+        // honest omission line, so the headline stays clean — no double pointer
+        // (mirrors `complexity_line`).
         if let Some(groups) = ev.get("package_groups").and_then(|v| v.as_array()) {
             let total = groups.len() as u64;
             if total > 0 {
                 let names: Vec<&str> = groups
                     .iter()
-                    .take(depth.module_name_cap())
+                    .take(depth.package_group_name_cap())
                     .filter_map(|g| g.get("name").and_then(|n| n.as_str()))
                     .collect();
                 line.push_str(&format!(" · {} package group{}", total, plural(total)));
                 if !names.is_empty() {
                     line.push_str(&format!(": {}", names.join(", ")));
                     let shown = names.len() as u64;
-                    if total > shown {
+                    if total > shown && !depth.shows_detail() {
                         line.push_str(&format!(", +{} more", total - shown));
                     }
                 }
@@ -397,7 +403,7 @@ impl OrientResponse {
     /// MODULE-MODEL-1 D4): the directory/package TOPOLOGY (Layer 0/1). DISTINCT
     /// from `module_breakdown_section` below (the declared/inferred notion).
     /// Empty when no directory owns files.
-    pub(super) fn package_groups_section(&self) -> String {
+    pub(super) fn package_groups_section(&self, cap: Option<usize>) -> String {
         let Some(ev) = self.module_summary_evidence() else {
             return String::new();
         };
@@ -408,8 +414,30 @@ impl OrientResponse {
             return String::new();
         }
 
+        // §13 D7: top-N by file count (the fold returns them size-DESC), then an
+        // honest omission line. `cap` is `OrientDepth::package_group_section_cap`:
+        // `None` is the generic "uncapped" sentinel this renderer still honors
+        // (`unwrap_or(total)` renders every group), but NO rendered detail tier
+        // passes it — `medium` caps at 20, `large`/`--full` at 50 (`--full` renders
+        // the SAME capped section as `large`; the complexity table is the only
+        // section `--full` uncaps, NOT this one). The lone `None` producer is
+        // `small`, which never reaches this renderer (`shows_detail()` gates the
+        // section off). `total` is the COMPLETE set — the fold never caps and the
+        // JSON carries it whole — so the omission count is always TRUE at scale.
+        let total = groups.len();
+        let limit = cap.unwrap_or(total);
         let mut out = heading("Package groups (directory/package topology — Layer 0/1)");
-        for g in groups {
+        // ROOT-MANIFEST-POLYGLOT (ratified 2026-07-12): when a repo-root manifest was
+        // suppressed by the conservative rule, the deliberate degradation RENDERS here
+        // as one reader-frame line (before the groups, so the reader knows what to
+        // expect) — not hidden in a comment. The daemon aggregator ships the exact
+        // string via `root_manifest_limitation` (shared with the `stats` surface, so
+        // the two agree). A plain indented note (not a bullet) so it never reads as a
+        // group row.
+        if let Some(note) = ev.get("root_manifest_limitation").and_then(|v| v.as_str()) {
+            out.push_str(&sub_heading(note));
+        }
+        for g in groups.iter().take(limit) {
             let name = g
                 .get("name")
                 .and_then(|p| p.as_str())
@@ -430,6 +458,14 @@ impl OrientResponse {
                 files,
                 plural(files),
                 test_suffix
+            )));
+        }
+        let shown = limit.min(total);
+        if total > shown {
+            out.push_str(&bullet(&format!(
+                "… and {} more group{} — see `stats --json` / `modules`",
+                total - shown,
+                plural((total - shown) as u64)
             )));
         }
         out

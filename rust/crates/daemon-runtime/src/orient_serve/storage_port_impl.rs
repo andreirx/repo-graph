@@ -13,7 +13,7 @@ use repo_graph_agent::{
     AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry,
     AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary,
     AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-    AgentSymbolEntry, AgentTrustSummary,
+    AgentSymbolEntry, AgentTrustSummary, ManifestRoot,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -423,6 +423,18 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
     ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
         self.inner.list_directory_groups(snapshot_uid)
+    }
+
+    // MODULE-MODEL-2 §13 D4: the per-toolchain manifest roots backing orient's
+    // crate/package grouping. Like list_directory_groups above it is a (c)-class
+    // SQLite read (module_candidates ⋈ evidence, no LiveGraph home) — DELEGATE to
+    // the inner port. Without this the decorator would fall back to the trait's
+    // empty default and the LiveGraph-served path would lose per-toolchain grouping.
+    fn list_manifest_roots(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<ManifestRoot>, AgentStorageError> {
+        self.inner.list_manifest_roots(snapshot_uid)
     }
 
     fn get_boundary_links_freshness(

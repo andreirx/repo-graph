@@ -3,8 +3,10 @@
 //! # CLI-OUT-2C
 //!
 //! Transforms daemon module stats into human-readable plain text.
-//! Renders full sorted sections to point the reader in the right direction.
-//! No arbitrary top-N clipping or threshold-based "at risk" labeling.
+//! Renders sorted sections to point the reader in the right direction. No
+//! threshold-based "at risk" labeling. MODULE-MODEL-2 §13 D7: every per-group
+//! table is bounded to the top [`STATS_SECTION_CAP`] rows + an honest omission
+//! line; the COMPLETE set always rides `stats --json`.
 //!
 //! ## Human Output Structure
 //!
@@ -48,10 +50,49 @@
 //!   ...
 //! ```
 
-use repo_graph_agent::{rollup_package_groups, DirGroup};
 use serde::Deserialize;
 
 use crate::presentation::heading;
+
+/// MODULE-MODEL-2 §13 D7: the top-N cap for EVERY per-group table on the human
+/// `stats` surface — the folded "Package groups" table AND the four per-directory
+/// "By size / fan-in / fan-out / distance" views. `stats` has no orient-style
+/// budget ladder, so it bounds at a single generous tier (aligned with orient's
+/// `large`) followed by an honest omission line. `stats --json` carries the
+/// COMPLETE set (the daemon folds + ships every group via the shared
+/// `rollup_package_groups`), so bounding the human tables loses nothing.
+///
+/// ONE cap for ALL sections is the "same budget notion" the surface uses
+/// (MODULE-MODEL-2 review-0 #1): the four `By …` tables enumerate the SAME
+/// `self.stats` population, so bounding only one would leave its omission line
+/// FALSE-in-context — the "omitted" groups would reappear in full three sections
+/// down. Bounding every table keeps each omission line TRUE (the tail rows live
+/// ONLY in `stats --json`).
+const STATS_SECTION_CAP: usize = 50;
+
+/// MODULE-MODEL-2 §13 D7: the honest omission tail for a bounded `stats` section.
+///
+/// Returns `Some("  … and N more {noun}s — see {drill}\n")` ONLY when `total`
+/// exceeds [`STATS_SECTION_CAP`] (else `None` — nothing was hidden, so no line).
+/// `total` is the COMPLETE group count (never the displayed subset), so the
+/// omission count is always TRUE. `drill` names where the full set lives:
+/// `stats --json` for every table; the package-group table additionally points at
+/// `modules` (review-0 #3, parity with `orient`'s line). One helper backs all five
+/// bounded tables so the tail wording + count stay uniform — and so a future edit
+/// cannot bound one table while leaving a sibling unbounded (the review-0 #1 bug).
+fn section_omission_line(total: usize, noun: &str, drill: &str) -> Option<String> {
+    if total <= STATS_SECTION_CAP {
+        return None;
+    }
+    let more = total - STATS_SECTION_CAP;
+    Some(format!(
+        "  … and {} more {}{} — see {}\n",
+        more,
+        noun,
+        if more == 1 { "" } else { "s" },
+        drill,
+    ))
+}
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -86,6 +127,34 @@ pub struct StatsResponse {
     /// daemon helper).
     #[serde(default)]
     pub relationship_next_action: Option<String>,
+    /// MODULE-MODEL-2 §13 D4/D7: the COMPLETE folded package-group set, folded
+    /// daemon-side via the SAME shared `rollup_package_groups` + manifest facts
+    /// `orient` uses (so the two surfaces agree). The human table bounds it (top-N
+    /// then an omission line); this field is the full set (`stats --json` exposes
+    /// it whole). `#[serde(default)]` keeps it empty on an older daemon.
+    #[serde(default)]
+    pub package_groups: Vec<StatsPackageGroup>,
+    /// MODULE-MODEL-2 (ROOT-MANIFEST-POLYGLOT, ratified 2026-07-12): the one-line
+    /// reader-frame limitation marker the daemon attaches when a repo-root manifest
+    /// was suppressed by the conservative rule (nested manifest roots coexist, so
+    /// "." folds nothing and its directories degrade to directory groups). The SAME
+    /// string `orient` carries (both from the shared `root_manifest_limitation`), so
+    /// the two surfaces agree. `None` (absent on the wire) when nothing is
+    /// suppressed — a genuine single-package or manifest-less repo carries no marker.
+    #[serde(default)]
+    pub root_manifest_limitation: Option<String>,
+}
+
+/// MODULE-MODEL-2 §13 D4/D7: one folded package group in the stats response — the
+/// reader-side mirror of `repo_graph_agent::PackageGroup`, deserialized from the
+/// `package_groups` array the daemon attaches (the daemon owns the fold).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StatsPackageGroup {
+    pub name: String,
+    #[serde(default)]
+    pub file_count: u64,
+    #[serde(default)]
+    pub test_file_count: u64,
 }
 
 /// HONEST-DEGRADATION-IMPL-1 (D1): the import-graph reliability axis carried inline on the stats
@@ -120,8 +189,11 @@ pub struct ModuleStats {
 impl StatsResponse {
     /// Render the stats response as human-readable plain text.
     ///
-    /// Renders full sorted sections. No arbitrary top-N clipping.
-    /// The caller can pipe to `head` or redirect to file if needed.
+    /// MODULE-MODEL-2 §13 D7: every per-group table (the folded "Package groups"
+    /// view and the four per-directory "By …" views) is bounded to
+    /// [`STATS_SECTION_CAP`] rows followed by an honest omission line; the COMPLETE
+    /// set always rides `stats --json`. Headline counts (the Summary block) count
+    /// ALL groups, never the displayed subset, so the omission counts are TRUE.
     pub fn render_human(&self) -> String {
         let mut out = String::new();
 
@@ -132,30 +204,17 @@ impl StatsResponse {
             .unwrap_or_else(|| &self.repo_uid);
         out.push_str(&format!("Module Stats: {}\n\n", repo_display));
 
-        // ── Package groups (MODULE-MODEL-1 D2(i)/D4) ───────────────
-        // Fold the per-directory rows into logical package groups via the SAME
-        // shared roll-up `orient` uses — so the two commands cannot report
-        // divergent topology numbers. The rows below are the directory-level
-        // detail (Martin metrics are per-directory); the package groups are the
-        // merged main+test view the agent orients by.
-        let package_groups = rollup_package_groups(
-            &self
-                .stats
-                .iter()
-                .map(|m| DirGroup {
-                    path: m.module.clone(),
-                    file_count: m.file_count.max(0) as u64,
-                })
-                .collect::<Vec<_>>(),
-        );
-
-        // ── Summary ────────────────────────────────────────────────
-        // Self-labelled, never a bare "modules: N" (MODULE-MODEL-1 D1): the
-        // package-group count agrees with `orient`; the directory-group count is
-        // the number of leaf-directory rows enumerated below. The
+        // ── Summary (MODULE-MODEL-1 D1; MODULE-MODEL-2 §13 D4) ─────
+        // Self-labelled, never a bare "modules: N": the package-group count is the
+        // COMPLETE set the daemon folded via the SAME shared `rollup_package_groups`
+        // + manifest facts `orient` uses (so the two surfaces agree); the
+        // directory-group count is the leaf-directory rows enumerated below. The
         // declared/inferred `module_candidates` notion lives in `modules`/`trust`.
         out.push_str(&heading("Summary"));
-        out.push_str(&format!("  package groups: {}\n", package_groups.len()));
+        out.push_str(&format!(
+            "  package groups: {}\n",
+            self.package_groups.len()
+        ));
         out.push_str(&format!("  directory groups: {}\n", self.stats.len()));
 
         let total_files: i64 = self.stats.iter().map(|m| m.file_count).sum();
@@ -175,11 +234,21 @@ impl StatsResponse {
             return out;
         }
 
-        // ── Package groups (by size, main+test merged) ─────────────
+        // ── Package groups (by size — MODULE-MODEL-2 §13 D7 bounded) ─
+        // Top-N by file count (the daemon returns them size-DESC, name-ASC), then
+        // an honest omission line. The COMPLETE set rides `stats --json`.
         out.push_str(&heading(
             "Package groups (by size — directory/package topology, Layer 0/1)",
         ));
-        for g in &package_groups {
+        // ROOT-MANIFEST-POLYGLOT (ratified 2026-07-12): the reader-frame limitation
+        // marker renders here (before the rows) when a repo-root manifest was
+        // suppressed — the SAME line `orient` carries (shared daemon helper), so the
+        // two surfaces agree. Absent (None) = nothing suppressed → no note.
+        if let Some(note) = &self.root_manifest_limitation {
+            out.push_str(&format!("  {note}\n"));
+        }
+        let pkg_total = self.package_groups.len();
+        for g in self.package_groups.iter().take(STATS_SECTION_CAP) {
             let test_suffix = if g.test_file_count > 0 {
                 format!(" ({} test)", g.test_file_count)
             } else {
@@ -190,21 +259,47 @@ impl StatsResponse {
                 g.name, g.file_count, test_suffix
             ));
         }
+        // review-0 #3: parity with `orient`'s omission line — package groups ARE the
+        // physical topology of the `modules` notion, so the drill-down names BOTH
+        // `stats --json` (the complete folded set) and `modules` (the declared/
+        // inferred candidate view). Directory-group tables below point only at
+        // `stats --json` (they are the raw per-directory rows, not the module view).
+        if let Some(line) = section_omission_line(pkg_total, "group", "`stats --json` / `modules`")
+        {
+            out.push_str(&line);
+        }
         out.push('\n');
 
-        // ── By size (per directory group) ──────────────────────────
+        // ── By size (per directory group — MODULE-MODEL-2 §13 D7 bounded) ──
+        // Top-N by file count + a TRUE omission line (review-0 #1). The four
+        // per-directory `By …` views all bound the SAME `self.stats` population,
+        // so each omission line is honest: the omitted directory groups are NOT
+        // shown elsewhere on the human surface — they ride `stats --json`.
         out.push_str(&heading("By size"));
         let mut by_size = self.stats.clone();
         by_size.sort_by(|a, b| {
             b.file_count
                 .cmp(&a.file_count)
-                .then_with(|| b.symbol_count.cmp(&a.symbol_count))
+                // MODULE-MODEL-2 review-2 #2 + §13 D7: file count DESC then
+                // lexicographic module path — and NO symbol-count key. D7 defines the
+                // topology ranking as "top-N by file count, lexicographic-path
+                // tie-break"; a secondary symbol-count key would order two equal-file
+                // groups by an unrelated metric (and could change which tied rows
+                // cross the cap boundary). Module paths are unique, so path alone
+                // makes the order TOTAL → `.take(cap)` is deterministic regardless of
+                // input row order (the review-1 #2 property, preserved).
+                .then_with(|| a.module.cmp(&b.module))
         });
-        for m in &by_size {
+        for m in by_size.iter().take(STATS_SECTION_CAP) {
             out.push_str(&format!(
                 "  {}  files={}  symbols={}\n",
                 m.module, m.file_count, m.symbol_count
             ));
+        }
+        if let Some(line) =
+            section_omission_line(by_size.len(), "directory group", "`stats --json`")
+        {
+            out.push_str(&line);
         }
         out.push('\n');
 
@@ -224,39 +319,63 @@ impl StatsResponse {
             out.push('\n');
         }
 
-        // ── By fan-in ──────────────────────────────────────────────
+        // ── By fan-in (MODULE-MODEL-2 §13 D7 bounded — see "By size") ──
         out.push_str(&heading("By fan-in"));
         let mut by_fan_in = self.stats.clone();
-        by_fan_in.sort_by(|a, b| b.fan_in.cmp(&a.fan_in));
-        for m in &by_fan_in {
+        // review-1 #2: module-path tie-break → TOTAL order → deterministic `.take(cap)`.
+        by_fan_in.sort_by(|a, b| {
+            b.fan_in
+                .cmp(&a.fan_in)
+                .then_with(|| a.module.cmp(&b.module))
+        });
+        for m in by_fan_in.iter().take(STATS_SECTION_CAP) {
             out.push_str(&format!(
                 "  {}  fan_in={}  fan_out={}\n",
                 m.module, m.fan_in, m.fan_out
             ));
         }
+        if let Some(line) =
+            section_omission_line(by_fan_in.len(), "directory group", "`stats --json`")
+        {
+            out.push_str(&line);
+        }
         out.push('\n');
 
-        // ── By fan-out ─────────────────────────────────────────────
+        // ── By fan-out (MODULE-MODEL-2 §13 D7 bounded — see "By size") ──
         out.push_str(&heading("By fan-out"));
         let mut by_fan_out = self.stats.clone();
-        by_fan_out.sort_by(|a, b| b.fan_out.cmp(&a.fan_out));
-        for m in &by_fan_out {
+        // review-1 #2: module-path tie-break → TOTAL order → deterministic `.take(cap)`.
+        by_fan_out.sort_by(|a, b| {
+            b.fan_out
+                .cmp(&a.fan_out)
+                .then_with(|| a.module.cmp(&b.module))
+        });
+        for m in by_fan_out.iter().take(STATS_SECTION_CAP) {
             out.push_str(&format!(
                 "  {}  fan_out={}  fan_in={}\n",
                 m.module, m.fan_out, m.fan_in
             ));
         }
+        if let Some(line) =
+            section_omission_line(by_fan_out.len(), "directory group", "`stats --json`")
+        {
+            out.push_str(&line);
+        }
         out.push('\n');
 
-        // ── By distance from main sequence ─────────────────────────
+        // ── By distance from main sequence (MODULE-MODEL-2 §13 D7 bounded) ──
         out.push_str(&heading("By distance from main sequence"));
         let mut by_distance = self.stats.clone();
         by_distance.sort_by(|a, b| {
             b.distance_from_main_sequence
                 .partial_cmp(&a.distance_from_main_sequence)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                // review-1 #2: module-path tie-break → TOTAL order → deterministic
+                // `.take(cap)` (also pins the order of the many `None`/`Equal` rows,
+                // which `partial_cmp` alone leaves at input order).
+                .then_with(|| a.module.cmp(&b.module))
         });
-        for m in &by_distance {
+        for m in by_distance.iter().take(STATS_SECTION_CAP) {
             // HONEST-DEGRADATION-IMPL-1 (D1): a degenerate (zero-degree) module has unknown
             // instability/distance — render "unknown", never "0.00" read as "on the main sequence".
             // Abstractness is import-graph-independent, so it stays a concrete number.
@@ -267,6 +386,11 @@ impl StatsResponse {
                 fmt_metric(m.instability),
                 m.abstractness
             ));
+        }
+        if let Some(line) =
+            section_omission_line(by_distance.len(), "directory group", "`stats --json`")
+        {
+            out.push_str(&line);
         }
 
         out
@@ -338,6 +462,26 @@ mod tests {
             total_symbols: None,
             import_graph_reliability: None,
             relationship_next_action: None,
+            root_manifest_limitation: None,
+            // The daemon folds these 3 dirs (no manifest, shared `src` prefix) into
+            // 3 package groups — pre-computed here since the client no longer folds.
+            package_groups: vec![
+                StatsPackageGroup {
+                    name: "handlers".to_string(),
+                    file_count: 45,
+                    test_file_count: 0,
+                },
+                StatsPackageGroup {
+                    name: "models".to_string(),
+                    file_count: 38,
+                    test_file_count: 0,
+                },
+                StatsPackageGroup {
+                    name: "utils".to_string(),
+                    file_count: 10,
+                    test_file_count: 0,
+                },
+            ],
             stats: vec![
                 ModuleStats {
                     module: "src/handlers".to_string(),
@@ -494,6 +638,8 @@ mod tests {
             total_symbols: None,
             import_graph_reliability: None,
             relationship_next_action: None,
+            root_manifest_limitation: None,
+            package_groups: vec![],
             stats: vec![],
         };
         let output = resp.render_human();
@@ -512,6 +658,8 @@ mod tests {
             total_symbols: None,
             import_graph_reliability: None,
             relationship_next_action: None,
+            root_manifest_limitation: None,
+            package_groups: vec![],
             stats: vec![],
         };
         let output = resp.render_human();
@@ -581,6 +729,8 @@ mod tests {
             total_symbols: Some(3977),
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
             relationship_next_action: None,
+            root_manifest_limitation: None,
+            package_groups: vec![],
             stats: vec![degenerate_module()],
         };
         let output = resp.render_human();
@@ -610,6 +760,8 @@ mod tests {
             total_symbols: Some(3977),
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
             relationship_next_action: None,
+            root_manifest_limitation: None,
+            package_groups: vec![],
             stats: vec![degenerate_module()],
         };
         let output = resp.render_human();
@@ -688,5 +840,321 @@ mod tests {
         let output = resp.render_human();
         assert!(!output.contains("semantic-resolution"), "{output}");
         assert!(!output.contains("rmap enrich"), "{output}");
+    }
+
+    // ── MODULE-MODEL-2 §13 D7 — bounded package-group table + true omission ────────
+
+    #[test]
+    fn render_human_bounds_package_groups_with_true_omission() {
+        // A >cap-group repo renders the top-STATS_SECTION_CAP by size + an
+        // honest omission line; the Summary count is the COMPLETE total. The full
+        // set rides `stats --json` (the daemon ships it whole).
+        let mut resp = sample_stats(); // non-empty `stats` (skips the empty return)
+        let n = STATS_SECTION_CAP + 20;
+        resp.package_groups = (0..n)
+            .map(|i| StatsPackageGroup {
+                name: format!("g{i:03}"),
+                file_count: (1000 - i) as u64,
+                test_file_count: 0,
+            })
+            .collect();
+        let output = resp.render_human();
+
+        // Summary count is the COMPLETE total, never the displayed count.
+        assert!(
+            output.contains(&format!("package groups: {n}")),
+            "summary count must be the complete total:\n{output}"
+        );
+        // Top group shown; the group at the cap boundary omitted.
+        assert!(
+            output.contains("g000  files=1000"),
+            "top group shown:\n{output}"
+        );
+        assert!(
+            output.contains(&format!("g{:03}  files=", STATS_SECTION_CAP - 1)),
+            "last in-cap group shown:\n{output}"
+        );
+        assert!(
+            !output.contains(&format!("g{:03}  files=", STATS_SECTION_CAP)),
+            "first over-cap group omitted:\n{output}"
+        );
+        // True omission line (n - cap = 20) WITH the `/ modules` drill-down
+        // (review-0 #3, parity with orient's line).
+        assert!(
+            output.contains("… and 20 more groups — see `stats --json` / `modules`"),
+            "true omission line with modules drill-down:\n{output}"
+        );
+    }
+
+    #[test]
+    fn render_human_no_omission_when_within_cap() {
+        // At or below the cap, every group is shown and there is NO omission line.
+        let mut resp = sample_stats();
+        resp.package_groups = (0..STATS_SECTION_CAP)
+            .map(|i| StatsPackageGroup {
+                name: format!("g{i:03}"),
+                file_count: 1,
+                test_file_count: 0,
+            })
+            .collect();
+        let output = resp.render_human();
+        assert!(
+            !output.contains("more groups — see"),
+            "no omission at/under cap:\n{output}"
+        );
+    }
+
+    #[test]
+    fn render_human_bounds_directory_group_tables_with_true_omission() {
+        // review-0 #1: the four per-directory "By …" tables share ONE population
+        // (`self.stats`), so EACH must bound to STATS_SECTION_CAP + a TRUE omission
+        // line — otherwise a group omitted from "By size" reappears in full under
+        // "By fan-in", making the omission line false-in-context. Here N = cap + 15
+        // directory groups: every table shows the cap + "… 15 more directory
+        // groups", the Summary counts the COMPLETE N, and the full set rides JSON.
+        let mut resp = sample_stats();
+        let n = STATS_SECTION_CAP + 15;
+        resp.stats = (0..n)
+            .map(|i| ModuleStats {
+                module: format!("d{i:03}"),
+                fan_in: (n - i) as i64,
+                fan_out: i as i64,
+                instability: Some(0.5),
+                abstractness: 0.0,
+                distance_from_main_sequence: Some((n - i) as f64),
+                file_count: (n - i) as i64,
+                symbol_count: (n - i) as i64,
+            })
+            .collect();
+        // One package group keeps the package table OFF the omission path, so this
+        // test isolates the directory-group tables.
+        resp.package_groups = vec![StatsPackageGroup {
+            name: "only".to_string(),
+            file_count: 1,
+            test_file_count: 0,
+        }];
+        let output = resp.render_human();
+
+        // Summary counts ALL directory groups, never the displayed subset.
+        assert!(
+            output.contains(&format!("directory groups: {n}")),
+            "summary count must be the complete total:\n{output}"
+        );
+
+        // Each of the 4 per-directory tables carries the SAME true omission line
+        // (15 beyond each table's own top-cap). Exactly 4 occurrences.
+        let omission = "… and 15 more directory groups — see `stats --json`";
+        assert_eq!(
+            output.matches(omission).count(),
+            4,
+            "each of the 4 per-directory tables must carry the true omission line:\n{output}"
+        );
+
+        // Spot-check "By size": the largest row (d000) is shown; the row ranked at
+        // the cap boundary (d050 by size) is omitted; exactly the cap is shown.
+        let by_size = output
+            .split("By size\n")
+            .nth(1)
+            .unwrap()
+            .split("By fan-in")
+            .next()
+            .unwrap();
+        assert!(
+            by_size.contains("d000  files="),
+            "top row shown:\n{by_size}"
+        );
+        assert!(
+            !by_size.contains(&format!("d{:03}  files=", STATS_SECTION_CAP)),
+            "over-cap row omitted from By size:\n{by_size}"
+        );
+        // `symbols=` is unique to the By-size row format → exactly cap rows shown.
+        assert_eq!(
+            by_size.matches("symbols=").count(),
+            STATS_SECTION_CAP,
+            "By size must show exactly the cap:\n{by_size}"
+        );
+    }
+
+    #[test]
+    fn render_human_directory_tables_tie_break_is_deterministic() {
+        // review-1 #2: when MORE THAN the cap of directory groups are TIED on a
+        // table's sort metric, WHICH rows survive the `.take(cap)` must be a pure
+        // function of the SET, not the input row order. Here 60 groups (`m00`..`m59`)
+        // are identical on EVERY metric and fed in REVERSE (`m59` first). The
+        // lexicographic module-path tie-break makes each of the four `By …` sorts a
+        // TOTAL order, so every table shows the lexicographically-smallest cap
+        // (`m00`..`m49`) and omits `m50`..`m59` — regardless of input order. Without
+        // the tie-break the stable sort would keep input order and show `m59`..`m10`
+        // (the opposite selection), so this pins the fix, not merely the bound.
+        let mut resp = sample_stats();
+        let n = STATS_SECTION_CAP + 10; // 60
+        resp.stats = (0..n)
+            .rev() // input order m59, m58, …, m00 — deliberately NOT the display order
+            .map(|i| ModuleStats {
+                module: format!("m{i:02}"),
+                fan_in: 3,
+                fan_out: 3,
+                instability: Some(0.5),
+                abstractness: 0.0,
+                distance_from_main_sequence: Some(0.5),
+                file_count: 7,
+                symbol_count: 7,
+            })
+            .collect();
+        // One package group keeps the package table off the omission path.
+        resp.package_groups = vec![StatsPackageGroup {
+            name: "only".to_string(),
+            file_count: 1,
+            test_file_count: 0,
+        }];
+        let output = resp.render_human();
+
+        // Summary counts ALL 60 directory groups.
+        assert!(
+            output.contains(&format!("directory groups: {n}")),
+            "summary count must be the complete total:\n{output}"
+        );
+
+        // Each of the 4 per-directory tables carries the TRUE omission line (10 = 60-cap).
+        assert_eq!(
+            output
+                .matches("… and 10 more directory groups — see `stats --json`")
+                .count(),
+            4,
+            "each of the 4 tables carries the true omission count:\n{output}"
+        );
+
+        // Deterministic selection: the lexicographically-smallest cap survives in
+        // EVERY table; the 10 largest-by-name rows are omitted everywhere. `m00` is
+        // shown and `m50` omitted ONLY under the path tie-break (the old stable-sort
+        // input order would show `m59`..`m10`, i.e. the inverse).
+        let sections = [
+            ("By size\n", "By fan-in"),
+            ("By fan-in\n", "By fan-out"),
+            ("By fan-out\n", "By distance"),
+            ("By distance from main sequence\n", "\u{0}"), // to end
+        ];
+        for (start, end) in sections {
+            let after = output.split(start).nth(1).unwrap_or("");
+            let section = after.split(end).next().unwrap_or(after);
+            assert!(
+                section.contains("m00") && section.contains("m49"),
+                "smallest-by-path cap must be shown in section starting {start:?}:\n{section}"
+            );
+            assert!(
+                !section.contains("m50") && !section.contains("m59"),
+                "largest-by-path rows must be omitted in section starting {start:?}:\n{section}"
+            );
+        }
+    }
+
+    // ── MODULE-MODEL-2 review-2 #2 — "By size" tie-break is path, NOT symbol count ──
+
+    #[test]
+    fn render_human_by_size_ties_break_on_path_not_symbol_count() {
+        // review-2 #2 + §13 D7: three groups TIED on file_count but with DIFFERENT
+        // symbol counts, whose path order is the INVERSE of their symbol-count order.
+        // Under D7 (file DESC, then lexicographic path — no symbol key) the rows come
+        // out `src/aaa, src/bbb, src/ccc`. With the removed symbol-count key they
+        // would come out `src/bbb (999), src/ccc (500), src/aaa (1)` — so this
+        // fixture DETECTS the key, unlike the earlier all-tied fixture.
+        let mut resp = sample_stats();
+        resp.stats = vec![
+            ModuleStats {
+                module: "src/aaa".to_string(),
+                fan_in: 0,
+                fan_out: 0,
+                instability: Some(0.5),
+                abstractness: 0.0,
+                distance_from_main_sequence: Some(0.5),
+                file_count: 10,
+                symbol_count: 1, // smallest symbols, first by path
+            },
+            ModuleStats {
+                module: "src/bbb".to_string(),
+                fan_in: 0,
+                fan_out: 0,
+                instability: Some(0.5),
+                abstractness: 0.0,
+                distance_from_main_sequence: Some(0.5),
+                file_count: 10,
+                symbol_count: 999, // largest symbols — would rank FIRST under old key
+            },
+            ModuleStats {
+                module: "src/ccc".to_string(),
+                fan_in: 0,
+                fan_out: 0,
+                instability: Some(0.5),
+                abstractness: 0.0,
+                distance_from_main_sequence: Some(0.5),
+                file_count: 10,
+                symbol_count: 500,
+            },
+        ];
+        let output = resp.render_human();
+        let by_size = output
+            .split("By size\n")
+            .nth(1)
+            .unwrap()
+            .split("By fan-in")
+            .next()
+            .unwrap();
+        let a = by_size.find("src/aaa").expect("aaa present");
+        let b = by_size.find("src/bbb").expect("bbb present");
+        let c = by_size.find("src/ccc").expect("ccc present");
+        assert!(
+            a < b && b < c,
+            "By size must order tied-file rows by path (aaa<bbb<ccc), NOT by symbol \
+             count (which would give bbb<ccc<aaa):\n{by_size}"
+        );
+    }
+
+    // ── MODULE-MODEL-2 ROOT-MANIFEST-POLYGLOT — visible limitation marker ──────────
+
+    #[test]
+    fn render_human_renders_root_manifest_limitation_marker() {
+        // When the daemon attaches the marker (a root manifest was suppressed by the
+        // conservative rule), it renders as a visible reader-frame note inside the
+        // Package groups section, ABOVE the group rows (tells the reader what to
+        // expect). The daemon owns the exact wording (shared with orient); the
+        // renderer just surfaces it.
+        let mut resp = sample_stats();
+        resp.root_manifest_limitation = Some(
+            "root package.json not folded — nested toolchains present; \
+             root-owned directories shown as directory groups"
+                .to_string(),
+        );
+        let output = resp.render_human();
+        assert!(
+            output.contains("root package.json not folded"),
+            "marker must render:\n{output}"
+        );
+        // It sits inside the Package groups section, before the first group row.
+        let pkg_section = output
+            .split("Package groups (by size")
+            .nth(1)
+            .expect("package groups section present");
+        let marker_pos = pkg_section
+            .find("root package.json not folded")
+            .expect("marker inside package-groups section");
+        let first_row = pkg_section
+            .find("handlers")
+            .expect("first group row present");
+        assert!(
+            marker_pos < first_row,
+            "marker must precede the group rows:\n{pkg_section}"
+        );
+    }
+
+    #[test]
+    fn render_human_omits_marker_when_no_root_manifest_limitation() {
+        // None (single-package / manifest-less repo, nothing suppressed) → no note,
+        // no noise.
+        let resp = sample_stats(); // root_manifest_limitation: None
+        let output = resp.render_human();
+        assert!(
+            !output.contains("not folded"),
+            "no marker when nothing is suppressed:\n{output}"
+        );
     }
 }

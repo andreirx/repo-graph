@@ -139,7 +139,10 @@ pub use dto::{
 pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
 pub use explain::{explain_to_coherent, run_explain, run_explain_cancellable, ExplainLgDecisions};
 pub use orient::{orient, orient_cancellable};
-pub use package_groups::{rollup_package_groups, DirGroup, PackageGroup};
+pub use package_groups::{
+    rollup_package_groups, root_manifest_limitation, DirGroup, ManifestKind, ManifestRoot,
+    PackageGroup,
+};
 pub use storage_port::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,

@@ -102,13 +102,41 @@ impl OrientDepth {
         !matches!(self, Self::Small)
     }
 
-    /// How many NAMED modules the structure headline lists.
-    /// `pub(super)` so the `orient_sections` renderers can read it.
-    pub(super) fn module_name_cap(self) -> usize {
+    /// How many NAMED package groups the structure HEADLINE lists (§13 D7). A
+    /// headline is a one-liner, so this is BOUNDED at every tier (even `--full`) —
+    /// the overflow rides the "+N more" pointer at `small` and the dedicated
+    /// package-group section at `medium`+. (Renamed from `module_name_cap`: the
+    /// headline names package GROUPS, not the declared/inferred `module_candidates`
+    /// notion — the very distinction MODULE-MODEL-1 draws.) `pub(super)` so the
+    /// `orient_sections` renderers can read it.
+    pub(super) fn package_group_name_cap(self) -> usize {
         match self {
             Self::Small => 8,
             Self::Medium => 16,
-            Self::Large | Self::Full => usize::MAX,
+            Self::Large | Self::Full => 24,
+        }
+    }
+
+    /// The per-tier render cap for the package-group SECTION (§13 D7), distinct
+    /// from the headline cap above — the knob that keeps the primary orientation
+    /// surface bounded on a monorepo: `medium` a top-slice, `large`/`--full` a
+    /// larger table. Package groups stay BOUNDED at EVERY tier — the complexity
+    /// table is the ONLY section `--full` uncaps (the enum contract above: "large
+    /// with the complexity table uncapped"). Package groups are deliberately NOT
+    /// uncapped at `--full`: on a 160k-file monorepo the group count scales with
+    /// directories into the thousands — the exact overrun §13 D7 exists to bound —
+    /// so dumping them all would defeat the bounded-human contract on the primary
+    /// surface. `--full` therefore renders the SAME capped section as `large`; the
+    /// omitted groups ride the honest omission line (→ `stats --json` / `modules`)
+    /// and the COMPLETE size-DESC set always rides the JSON, so a cap never
+    /// overclaims. `None` at `small` is unused — `small` never renders the section
+    /// (`shows_detail()` gates it), the headline being the sole topology surface
+    /// there.
+    fn package_group_section_cap(self) -> Option<usize> {
+        match self {
+            Self::Small => None,
+            Self::Medium => Some(20),
+            Self::Large | Self::Full => Some(50),
         }
     }
 
@@ -427,7 +455,7 @@ impl OrientResponse {
             }
             // Package groups (Layer-0/1 directory TOPOLOGY) then the declared/
             // inferred module_candidates breakdown — two labelled notions (MODULE-MODEL-1).
-            let pkg_groups = self.package_groups_section();
+            let pkg_groups = self.package_groups_section(depth.package_group_section_cap());
             if !pkg_groups.is_empty() {
                 out.push('\n');
                 out.push_str(&pkg_groups);

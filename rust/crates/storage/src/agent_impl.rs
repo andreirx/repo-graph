@@ -1547,6 +1547,16 @@ impl AgentStorageRead for StorageConnection {
         crate::agent_orient_reads::directory_groups(self.connection(), snapshot_uid)
     }
 
+    fn list_manifest_roots(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_agent::ManifestRoot>, AgentStorageError> {
+        // MODULE-MODEL-2 §13 D4: per-toolchain crate/package roots (already-stored
+        // module_candidates ⋈ evidence.source_type). Body beside the other
+        // discovery reads in `agent_orient_reads`.
+        crate::agent_orient_reads::manifest_roots(self.connection(), snapshot_uid)
+    }
+
     fn get_boundary_links_freshness(
         &self,
         snapshot_uid: &str,

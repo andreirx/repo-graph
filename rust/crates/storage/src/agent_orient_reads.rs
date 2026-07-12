@@ -14,7 +14,10 @@
 
 use std::path::{Path, PathBuf};
 
-use repo_graph_agent::{AgentDirectoryGroup, AgentDocEntry, AgentModuleSize, AgentStorageError};
+use repo_graph_agent::{
+    AgentDirectoryGroup, AgentDocEntry, AgentModuleSize, AgentStorageError, ManifestKind,
+    ManifestRoot,
+};
 use rusqlite::Connection;
 
 use crate::agent_impl::map_err;
@@ -180,6 +183,62 @@ pub(crate) fn directory_groups(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(map_err("list_directory_groups"))
+}
+
+/// List the manifest-declared package boundaries (crate / workspace-package
+/// roots) for a snapshot — the per-toolchain grouping facts the package-group
+/// fold uses to name Rust crates and TS packages (MODULE-MODEL-2 §13 D4).
+///
+/// Reads the ALREADY-STORED `module_candidates` ⋈ `module_candidate_evidence`
+/// surface: `canonical_root_path` (the crate/package root dir) filtered to the
+/// manifest `source_type`s whose ecosystem D4 groups by boundary —
+/// `cargo_toml` → Rust, `package_json` / `pnpm_workspace_yaml` → TS. It reads
+/// `source_type` (the ecosystem marker), NOT `module_kind` (which is provenance:
+/// `declared`/`inferred`/`directory`, identical across cargo/npm on the Rust
+/// indexer path). No new scan, no new table.
+///
+/// `pyproject_toml` / `settings_gradle` are deliberately NOT surfaced: the
+/// ratified D4 keeps Python/JVM/C/C++/manifest-less trees on the directory/JVM
+/// heuristic. Rows ordered by `(canonical_root_path, source_type)` for a total,
+/// deterministic order (the fold is order-independent, but a hybrid
+/// same-root/two-manifest dir then resolves deterministically).
+pub(crate) fn manifest_roots(
+    conn: &Connection,
+    snapshot_uid: &str,
+) -> Result<Vec<ManifestRoot>, AgentStorageError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT mc.canonical_root_path, e.source_type \
+             FROM module_candidates mc \
+             JOIN module_candidate_evidence e \
+               ON e.module_candidate_uid = mc.module_candidate_uid \
+               AND e.snapshot_uid = mc.snapshot_uid \
+             WHERE mc.snapshot_uid = ?1 \
+               AND e.source_type IN ('cargo_toml', 'package_json', 'pnpm_workspace_yaml') \
+             ORDER BY mc.canonical_root_path ASC, e.source_type ASC",
+        )
+        .map_err(map_err("list_manifest_roots"))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![snapshot_uid], |row| {
+            let path: String = row.get(0)?;
+            let source_type: String = row.get(1)?;
+            Ok((path, source_type))
+        })
+        .map_err(map_err("list_manifest_roots"))?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (path, source_type) = row.map_err(map_err("list_manifest_roots"))?;
+        // The WHERE clause guarantees one of the three; map to the D4 ecosystem.
+        let kind = match source_type.as_str() {
+            "cargo_toml" => ManifestKind::RustCrate,
+            "package_json" | "pnpm_workspace_yaml" => ManifestKind::TsPackage,
+            _ => continue,
+        };
+        out.push(ManifestRoot { path, kind });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -386,5 +445,64 @@ mod tests {
             })
             .unwrap();
         assert_eq!(storage.get_doc_inventory("r1").unwrap(), vec![]);
+    }
+
+    // ── MODULE-MODEL-2 §13 D4: manifest-root read (source_type → toolchain) ────────
+
+    #[test]
+    fn manifest_roots_maps_source_type_to_kind_and_filters() {
+        use repo_graph_agent::ManifestKind;
+        let storage = setup();
+        let snap = snapshot(&storage);
+        // Four candidate roots; only the cargo + npm manifests are surfaced.
+        // pyproject (Python) and a directory-inferred candidate (no manifest
+        // evidence) are excluded — the ratified D4 keeps those on the directory
+        // heuristic. `module_kind` is 'declared' for all three manifests (proving
+        // the read keys on `source_type`, NOT the provenance `module_kind`).
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_candidates \
+                 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+                  module_kind, canonical_root_path, confidence) VALUES \
+                 ('mc_rust','{snap}','r1','crate:agent','declared','rust/crates/agent',1.0), \
+                 ('mc_ts','{snap}','r1','pkg:api','declared','packages/api',1.0), \
+                 ('mc_py','{snap}','r1','py:app','declared','app',1.0), \
+                 ('mc_dir','{snap}','r1','dir:src/x','directory','src/x',1.0)"
+            ))
+            .unwrap();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_candidate_evidence \
+                 (evidence_uid, module_candidate_uid, snapshot_uid, repo_uid, \
+                  source_type, source_path, evidence_kind, confidence) VALUES \
+                 ('e_rust','mc_rust','{snap}','r1','cargo_toml','rust/crates/agent/Cargo.toml','manifest_declaration',1.0), \
+                 ('e_ts','mc_ts','{snap}','r1','package_json','packages/api/package.json','manifest_declaration',1.0), \
+                 ('e_py','mc_py','{snap}','r1','pyproject_toml','app/pyproject.toml','manifest_declaration',1.0)"
+            ))
+            .unwrap();
+
+        let mut roots = storage.list_manifest_roots(&snap).unwrap();
+        roots.sort_by(|a, b| a.path.cmp(&b.path));
+        assert_eq!(
+            roots.len(),
+            2,
+            "only Rust + TS manifests surface: {roots:?}"
+        );
+        assert_eq!(roots[0].path, "packages/api");
+        assert_eq!(roots[0].kind, ManifestKind::TsPackage);
+        assert_eq!(roots[1].path, "rust/crates/agent");
+        assert_eq!(roots[1].kind, ManifestKind::RustCrate);
+    }
+
+    #[test]
+    fn manifest_roots_empty_without_manifest_evidence() {
+        // A directory-inferred snapshot (no manifest evidence) → no manifest roots
+        // → the fold degrades to directory grouping (honest, no crate/package split).
+        let storage = setup();
+        let snap = snapshot(&storage);
+        seed_three_modules(&storage, &snap); // all 'directory' kind, no evidence
+        assert!(storage.list_manifest_roots(&snap).unwrap().is_empty());
     }
 }

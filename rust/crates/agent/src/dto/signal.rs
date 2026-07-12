@@ -602,6 +602,17 @@ pub struct ModuleSummaryEvidence {
     /// evidence payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub package_groups: Vec<PackageGroupEvidence>,
+
+    /// One reader-frame line stating a package-groups limitation, when one applies
+    /// (ROOT-MANIFEST-POLYGLOT, ratified 2026-07-12): present only when a repo-root
+    /// manifest exists but was SUPPRESSED because nested manifest roots also exist
+    /// (so "." folds nothing and its directories degrade to directory groups). The
+    /// exact wording comes from `package_groups::root_manifest_limitation` — the
+    /// SAME string the `stats` surface carries, so the two agree. `None` (and
+    /// omitted from JSON) when nothing is suppressed. This makes the deliberate
+    /// honest-degradation VISIBLE on the primary surface, not buried in a comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_manifest_limitation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1755,6 +1766,7 @@ mod tests {
             module_kinds: None,
             top_modules: Vec::new(),
             package_groups: Vec::new(),
+            root_manifest_limitation: None,
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert_eq!(s.category, SignalCategory::Informational);
@@ -1786,6 +1798,7 @@ mod tests {
                 },
             ],
             package_groups: Vec::new(),
+            root_manifest_limitation: None,
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert!(s.summary.contains("50 files"));

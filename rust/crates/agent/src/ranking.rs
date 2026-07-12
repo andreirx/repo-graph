@@ -194,6 +194,7 @@ mod tests {
                 module_kinds: None,
                 top_modules: Vec::new(),
                 package_groups: Vec::new(),
+                root_manifest_limitation: None,
             }),
             Signal::trust_low_resolution(TrustLowResolutionEvidence {
                 resolution_rate: 0.5,
