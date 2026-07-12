@@ -506,6 +506,21 @@ binding outcome the IMPL executes (it does NOT re-open these).
 
 ## 13. Amendment — follow-up contract for MODULE-MODEL-2 (operator + standalone reviewer, 2026-07-11)
 
+**DELIVERED 2026-07-12 (`170be30`, relay-approved iteration 6 — 7 cycles, 2 ratified
+escalations, operator close-out).** D4 per-toolchain fold (Rust crate / TS workspace
+package; one shared rollup behind orient+stats) + D7 bounded tables with true omission
+lines everywhere (JSON complete on both surfaces). Two decisions ratified during the run:
+ROOT-MANIFEST-POLYGLOT — conservative rule (a root manifest owns descendants only when no
+nested manifest root exists; never fabricated ownership) with a VISIBLE reader-frame
+limitation marker on orient/stats; CARGO-WORKSPACE-INHERITANCE — option A, workspace-
+inheriting crates degrade honestly to directory groups pending the upstream
+`cargo-workspace-inheritance-1` slice. Self-dogfood: repo-graph's own orient names crates
+(`storage, agent, repo-index, indexer, … · 281 package groups`); omission arithmetic true
+at every tier (20+261, 50+231=281, 50+267=317). Review notes: the review-3 demand to cap
+`--full`'s package-group section was UPHELD against the operator's initial challenge — the
+ORIENT-DENSITY-1 enum contract ("Full = large with the complexity table uncapped, the only
+uncapped tier") pre-existed this slice; the stale orient usage line was corrected instead.
+
 The ratified package was put to a standalone adversarial review (gpt-5.6-sol, self-contained
 prompt per `prompts/standalone-review.md`; the operator independently flagged the same scale
 gap) ahead of deploying against a 160k-file polyglot monorepo. §12 STANDS — nothing below
