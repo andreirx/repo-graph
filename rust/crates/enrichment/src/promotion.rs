@@ -9,24 +9,29 @@
 //!
 //! # The 8 Gates
 //!
-//! An edge is promoted ONLY when ALL gates pass:
+//! An edge is promoted ONLY when ALL gates pass. The numbering is the authoritative one in
+//! `docs/TECH-DEBT.md § 8-Gate Promotion Filter` (gate 2 is the config opt-in placeholder; gate 3 is
+//! the compiler-resolved check that subsumes "enrichment exists"):
 //!
 //! 1. **Category**: Must be `calls_obj_method_needs_type_info` or
 //!    `calls_this_wildcard_method_needs_type_info`
-//! 2. **Enrichment exists**: Must have enrichment metadata
-//! 3. **Compiler origin**: Enrichment origin must be "compiler" (not "failed")
+//! 2. **Config opt-in**: a no-op placeholder — no config surface gates promotion today, so it never
+//!    rejects (counted as a waterfall stage only, for complete per-gate accounting)
+//! 3. **Compiler-resolved**: enrichment origin must be "compiler" (not "failed") — this subsumes
+//!    "enrichment exists" (a non-compiler origin is the resolution-failed case)
 //! 4. **Internal type**: `is_external_type` must be false
 //! 5. **Unique class**: Type maps to exactly ONE CLASS symbol in the graph
 //! 6. **Unique method**: Method maps to exactly ONE METHOD on that class
 //! 7. **No union/intersection**: Type display name has no "|" or "&"
 //! 8. **Simple shape**: Target key is simple "receiver.method" or "this.field.method"
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::contracts::{
     EdgeLocation, PromotedEdge, PromotionCandidate, ReceiverTypeOrigin, SymbolInfo, SymbolSubtype,
     UnresolvedCategory,
 };
+use crate::funnel::RejectionClass;
 use crate::status::PromotionReport;
 
 /// Version identifier for promoted edges.
@@ -48,8 +53,14 @@ pub struct PromotionResult {
     /// Edges that passed all gates and are ready for insertion.
     pub promoted: Vec<PromotedEdge>,
 
-    /// Count of edges skipped per reason.
+    /// Count of edges skipped per reason (first-rejecting gate).
     pub skipped_reasons: HashMap<String, usize>,
+
+    /// ENRICH-YIELD-1: candidates that REACHED each gate, keyed by gate number — ground truth
+    /// recorded live as each candidate flows through the filter. Feeds the per-gate waterfall
+    /// (`entered`) in [`crate::funnel::PromotionFunnel`]; see [`promote_edges`]. Pure accounting: no
+    /// gate predicate reads it, so it cannot change what promotes.
+    pub gate_entered: BTreeMap<u8, usize>,
 }
 
 impl PromotionResult {
@@ -66,6 +77,7 @@ impl PromotionResult {
             candidates: candidate_count,
             promoted: self.promoted.len(),
             skipped_reasons: self.skipped_reasons.clone(),
+            gate_entered: self.gate_entered.clone(),
             persisted_count,
         }
     }
@@ -159,30 +171,60 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
     let mut promoted = Vec::new();
     let mut skipped_reasons: HashMap<String, usize> = HashMap::new();
 
-    let mut skip = |reason: &str| {
-        *skipped_reasons.entry(reason.to_string()).or_insert(0) += 1;
+    // First-rejection accounting: each candidate is promoted xor skipped exactly once (every skip is
+    // followed by `continue`), so the recorded counts conserve — `candidates == promoted + Σ skipped`
+    // (ENRICH-YIELD-1). `RejectionClass` is the single source of the reason strings; `reason_code()`
+    // preserves the exact `skipped_reasons` keys, so this is byte-identical accounting, no behavior
+    // change — it only lets the taxonomy (gate + reader label) stay in lockstep with the filter.
+    let mut skip = |class: RejectionClass| {
+        *skipped_reasons
+            .entry(class.reason_code().to_string())
+            .or_insert(0) += 1;
+    };
+
+    // Per-gate entry accounting (ENRICH-YIELD-1 §2.1): `enter(N)` is called at the TOP of each gate,
+    // so `gate_entered[N]` is the GROUND-TRUTH count of candidates that reached gate N — recorded as
+    // it happens, not derived, so the per-gate `entered` waterfall can never silently disagree with
+    // the filter's real check order. The gates are visited in EVALUATION order (1, 2, 3, 4, 7, 8, 5,
+    // 6): the cheap syntactic gates 7/8 run before the graph-lookup gates 5/6. `enter` is likewise
+    // pure accounting — no predicate reads it.
+    let mut gate_entered: BTreeMap<u8, usize> = BTreeMap::new();
+    let mut enter = |gate: u8| {
+        *gate_entered.entry(gate).or_insert(0) += 1;
     };
 
     for candidate in candidates {
         // Gate 1: Category
+        enter(1);
         if !matches!(
             candidate.category,
             UnresolvedCategory::CallsObjMethodNeedsTypeInfo
                 | UnresolvedCategory::CallsThisWildcardMethodNeedsTypeInfo
         ) {
-            skip("wrong_category");
+            skip(RejectionClass::WrongCategory);
             continue;
         }
 
-        // Gate 2 + 3: Enrichment exists and is compiler-derived
+        // Gate 2: config opt-in (placeholder). Per `docs/TECH-DEBT.md § 8-Gate Promotion Filter` this
+        // gate is a no-op — no config surface gates promotion today, so it NEVER rejects. It is counted
+        // as its own waterfall stage purely for complete per-gate (1–8) accounting (ENRICH-YIELD-1
+        // §2.1): `enter(2)` records that every gate-1 survivor reached it, and because no
+        // `RejectionClass` maps to gate 2 its first-rejection count is always 0. No predicate, no
+        // `continue` — additive accounting only; the promotion decision is byte-identical.
+        enter(2);
+
+        // Gate 3: the receiver type was resolved by the compiler (origin == Compiler). This single
+        // check subsumes "enrichment exists" — a non-compiler origin IS the resolution-failed case.
+        enter(3);
         if candidate.enrichment.origin != ReceiverTypeOrigin::Compiler {
-            skip("no_compiler_enrichment");
+            skip(RejectionClass::NoCompilerEnrichment);
             continue;
         }
 
-        // Gate 4: Type is internal
+        // Gate 4: Type is internal (this check + the type-name precondition below are both gate 4).
+        enter(4);
         if candidate.enrichment.is_external_type {
-            skip("external_type");
+            skip(RejectionClass::ExternalType);
             continue;
         }
 
@@ -195,38 +237,42 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
         {
             Some(name) => name,
             None => {
-                skip("no_type_name");
+                skip(RejectionClass::NoTypeName);
                 continue;
             }
         };
 
-        // Gate 7: No union/intersection
+        // Gate 7: No union/intersection (evaluated BEFORE gates 5/6 — a cheap string check).
+        enter(7);
         if type_name.contains('|') || type_name.contains('&') {
-            skip("union_or_intersection");
+            skip(RejectionClass::UnionOrIntersection);
             continue;
         }
 
-        // Gate 8: Simple receiver.method or this.field.method shape
-        // Check the FULL target_key for optional chaining or element access,
-        // not just the method name. E.g., "obj?.method" has the ? on the receiver.
+        // Gate 8: Simple receiver.method or this.field.method shape (this check + the method-name
+        // parse below are both gate 8). Check the FULL target_key for optional chaining or element
+        // access, not just the method name. E.g., "obj?.method" has the ? on the receiver.
+        enter(8);
         if candidate.target_key.contains('?') || candidate.target_key.contains('[') {
-            skip("optional_or_element_access");
+            skip(RejectionClass::OptionalOrElementAccess);
             continue;
         }
 
         let method_name = match parse_method_name(&candidate.target_key) {
             Some(name) => name,
             None => {
-                skip("not_simple_receiver_method");
+                skip(RejectionClass::NotSimpleReceiverMethod);
                 continue;
             }
         };
 
-        // Gate 5: Type maps to exactly one CLASS symbol
+        // Gate 5: Type maps to exactly one CLASS symbol (the first graph-lookup gate; these three
+        // checks are all gate 5).
+        enter(5);
         let symbols = match ctx.get_symbols(type_name) {
             Some(s) => s,
             None => {
-                skip("type_not_in_graph");
+                skip(RejectionClass::TypeNotInGraph);
                 continue;
             }
         };
@@ -237,28 +283,29 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
             .collect();
 
         if classes.is_empty() {
-            skip("type_not_a_class");
+            skip(RejectionClass::TypeNotAClass);
             continue;
         }
 
         if classes.len() > 1 {
-            skip("ambiguous_class_multiple_definitions");
+            skip(RejectionClass::AmbiguousClassMultipleDefinitions);
             continue;
         }
 
         let class = classes[0];
 
-        // Gate 6: Method maps to exactly one METHOD on that class
+        // Gate 6: Method maps to exactly one METHOD on that class (both checks are gate 6).
+        enter(6);
         let methods = match ctx.get_methods(&class.stable_key, method_name) {
             Some(m) if !m.is_empty() => m,
             _ => {
-                skip("method_not_found_on_class");
+                skip(RejectionClass::MethodNotFoundOnClass);
                 continue;
             }
         };
 
         if methods.len() > 1 {
-            skip("ambiguous_method_overloaded");
+            skip(RejectionClass::AmbiguousMethodOverloaded);
             continue;
         }
 
@@ -289,6 +336,7 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
     PromotionResult {
         promoted,
         skipped_reasons,
+        gate_entered,
     }
 }
 
@@ -613,6 +661,235 @@ mod tests {
             result.skipped_reasons.get("method_not_found_on_class"),
             Some(&1)
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ENRICH-YIELD-1: funnel accounting over the real filter
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    // Conservation: `candidates == promoted + Σ rejected`, computed over a real promote_edges run
+    // spanning several gates. The invariant the whole funnel surface leans on.
+    #[test]
+    fn funnel_conserves_over_a_real_mixed_run() {
+        let ctx = make_context();
+        let candidates = vec![
+            // promotes (all gates pass)
+            make_candidate(
+                "e1",
+                "obj.doSomething",
+                Some("MyClass"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 4: external
+            make_candidate(
+                "e2",
+                "obj.doSomething",
+                Some("MyClass"),
+                true,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 3: resolution failed
+            make_candidate(
+                "e3",
+                "obj.doSomething",
+                Some("MyClass"),
+                false,
+                ReceiverTypeOrigin::Failed,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 6: method not found
+            make_candidate(
+                "e4",
+                "obj.nope",
+                Some("MyClass"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 7: union
+            make_candidate(
+                "e5",
+                "obj.doSomething",
+                Some("A | B"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+        ];
+        let n = candidates.len();
+        let funnel = promote_edges(&candidates, &ctx).to_report(n, None).funnel();
+
+        assert_eq!(funnel.candidates, 5);
+        assert_eq!(funnel.promoted, 1);
+        assert_eq!(funnel.rejected, 4);
+        assert!(
+            funnel.conserves(),
+            "1 promoted + 4 rejected == 5 candidates: {funnel:?}"
+        );
+        // Four distinct first-rejection classes, one candidate each.
+        assert_eq!(funnel.rejections.len(), 4);
+        for r in &funnel.rejections {
+            assert_eq!(
+                r.count, 1,
+                "each gate rejected exactly one candidate: {r:?}"
+            );
+        }
+    }
+
+    // First-rejection attribution: a candidate that fails MULTIPLE gates is attributed to the FIRST
+    // one only (the loop `continue`s), never double-counted. Here e2 is BOTH external (gate 4) AND
+    // its method does not exist (gate 6) — it must count once, under gate 4.
+    #[test]
+    fn funnel_attributes_to_the_first_failing_gate_only() {
+        let ctx = make_context();
+        let candidate = make_candidate(
+            "e-multi",
+            "obj.methodThatDoesNotExist", // would also fail gate 6
+            Some("MyClass"),
+            true, // fails gate 4 FIRST
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+        let funnel = promote_edges(&[candidate], &ctx)
+            .to_report(1, None)
+            .funnel();
+
+        assert!(funnel.conserves());
+        assert_eq!(
+            funnel.rejections.len(),
+            1,
+            "attributed to ONE gate, not two"
+        );
+        assert_eq!(
+            funnel.rejections[0].reason, "external_type",
+            "the FIRST failing gate (4)"
+        );
+        assert_eq!(funnel.rejections[0].gate, 4);
+        // The later-gate reason never appears.
+        assert!(
+            !funnel
+                .rejections
+                .iter()
+                .any(|r| r.reason == "method_not_found_on_class"),
+            "a later gate must not be counted once an earlier one fired: {funnel:?}"
+        );
+    }
+
+    // Ground-truth per-gate waterfall over the REAL filter (ENRICH-YIELD-1 §2.1): candidates entering
+    // AND first-rejected for each gate, plus promoted, all conserving. `entered` is what the pass
+    // actually counted, so if the eval-order table in `funnel.rs` ever drifts from THIS function's
+    // check order, `conserves()` fails here.
+    #[test]
+    fn funnel_gate_waterfall_counts_entered_and_rejected_per_gate() {
+        let ctx = make_context(); // MyClass + MyClass.doSomething
+        let candidates = vec![
+            // promotes
+            make_candidate(
+                "e1",
+                "obj.doSomething",
+                Some("MyClass"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 4: external
+            make_candidate(
+                "e2",
+                "obj.doSomething",
+                Some("MyClass"),
+                true,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 7: union
+            make_candidate(
+                "e3",
+                "obj.doSomething",
+                Some("A | B"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 5: type not in graph
+            make_candidate(
+                "e4",
+                "obj.doSomething",
+                Some("UnknownClass"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+            // gate 6: method not found on MyClass
+            make_candidate(
+                "e5",
+                "obj.nope",
+                Some("MyClass"),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            ),
+        ];
+        let funnel = promote_edges(&candidates, &ctx)
+            .to_report(candidates.len(), None)
+            .funnel();
+
+        assert!(
+            funnel.conserves(),
+            "the whole waterfall conserves: {funnel:?}"
+        );
+        let gate = |n: u8| funnel.gates.iter().find(|g| g.gate == n).unwrap();
+        // Evaluation-order waterfall: 5 → (−1 external) 4 → (−1 union) 3 → 3 → (−1 not-in-graph) 2 →
+        // (−1 method) 1 promoted.
+        assert_eq!((gate(1).entered, gate(1).rejected), (5, 0));
+        // Gate 2 (config opt-in placeholder) is a no-op stage: every gate-1 survivor reaches it and it
+        // rejects nothing, so its entrants mirror gate 3's. Present for complete per-gate accounting.
+        assert_eq!((gate(2).entered, gate(2).rejected), (5, 0));
+        assert_eq!(gate(2).entered, gate(3).entered, "gate 2 is a pass-through");
+        assert_eq!((gate(3).entered, gate(3).rejected), (5, 0));
+        assert_eq!((gate(4).entered, gate(4).rejected), (5, 1)); // e2 external
+        assert_eq!((gate(7).entered, gate(7).rejected), (4, 1)); // e3 union
+        assert_eq!((gate(8).entered, gate(8).rejected), (3, 0));
+        assert_eq!((gate(5).entered, gate(5).rejected), (3, 1)); // e4 not in graph
+        assert_eq!((gate(6).entered, gate(6).rejected), (2, 1)); // e5 method not found
+        assert_eq!(funnel.promoted, 1);
+    }
+
+    // Evaluation order is NOT gate-number order: a candidate that is BOTH a union type (gate 7) AND
+    // has a class not in the graph (gate 5) is attributed to gate 7 — because the filter evaluates the
+    // cheap syntactic gate 7 BEFORE the graph-lookup gate 5. So gate 5 never even sees it (its
+    // `entered` excludes it). If the funnel used numeric order this would be misattributed to gate 5.
+    #[test]
+    fn gate_entered_follows_evaluation_order_not_gate_number() {
+        let ctx = make_context();
+        // "Nope | Other": a union (gate 7) whose members are also not classes in the graph (gate 5).
+        let candidate = make_candidate(
+            "e-eval",
+            "obj.doSomething",
+            Some("Nope | Other"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+        let funnel = promote_edges(&[candidate], &ctx)
+            .to_report(1, None)
+            .funnel();
+
+        assert!(funnel.conserves());
+        let gate = |n: u8| funnel.gates.iter().find(|g| g.gate == n).unwrap();
+        assert_eq!(
+            gate(7).rejected,
+            1,
+            "attributed to gate 7 (union), evaluated first"
+        );
+        assert_eq!(gate(7).entered, 1);
+        assert_eq!(gate(5).entered, 0, "gate 5 never reached — 7 fired first");
+        assert_eq!(gate(5).rejected, 0);
+        // And the reader-frame reason is the union one, not the not-in-graph one.
+        assert_eq!(funnel.rejections.len(), 1);
+        assert_eq!(funnel.rejections[0].reason, "union_or_intersection");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

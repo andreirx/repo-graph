@@ -110,7 +110,7 @@ use std::time::{Duration, Instant};
 
 use enrichment::{
     EligibilityQuery, EnrichmentConfig, EnrichmentLanguage, EnrichmentPipeline,
-    EnrichmentStoragePort, ResolverRegistry,
+    EnrichmentStoragePort, PromotionFunnel, ResolverRegistry,
 };
 use jdtls_resolver::{JdtlsConfig, JdtlsResolver};
 use parking_lot::{Mutex, MutexGuard};
@@ -333,6 +333,12 @@ pub struct EnrichPassOutcome {
     pub enrichment_rate: f64,
     /// Languages present with eligible edges but no toolchain — the honest skips (slice §3.2).
     pub skipped: Vec<SkippedLanguage>,
+    /// ENRICH-YIELD-1: the promotion funnel — resolved candidates → promoted, with the reader-frame
+    /// per-gate first-rejection breakdown of the rest. `None` when the pass ran no promotion (nothing
+    /// eligible / all languages skipped), so a zero-work pass renders as "no data" rather than a
+    /// misleading measured-zero. Some(funnel with candidates=0) is a promotion that found no
+    /// candidates (honest, distinct from None).
+    pub funnel: Option<PromotionFunnel>,
 }
 
 impl EnrichPassOutcome {
@@ -370,8 +376,10 @@ impl EnrichmentReport {
 
     /// The JSON shape `daemon_info.last_enrichment` carries (read by the `rmap doctor` enrichment
     /// probe). `state` is the lifecycle token; `skipped` is the reader-frame per-language honest skip.
+    /// `promotion_funnel` (ENRICH-YIELD-1) is present only when the pass ran promotion — its absence
+    /// is honest "no funnel data", never a measured-zero.
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "repo": self.repo_display,
             "state": self.outcome.lifecycle_state(),
             "eligible_count": self.outcome.eligible_count,
@@ -383,7 +391,17 @@ impl EnrichmentReport {
                 "reason": s.reason,
             })).collect::<Vec<_>>(),
             "finished_secs_ago": self.at.elapsed().as_secs(),
-        })
+        });
+        // Additive: attach the funnel breakdown ({candidates, promoted, rejected, rejections:[{reason,
+        // gate, label, count}]}) only when it exists, keeping every pre-existing key byte-identical.
+        if let Some(funnel) = &self.outcome.funnel {
+            if let (Some(obj), Ok(funnel_json)) =
+                (value.as_object_mut(), serde_json::to_value(funnel))
+            {
+                obj.insert("promotion_funnel".to_string(), funnel_json);
+            }
+        }
+        value
     }
 }
 
@@ -714,6 +732,8 @@ pub fn run_enrich_pass(
             promoted_count: 0,
             enrichment_rate: 0.0,
             skipped,
+            // No language ran → no promotion → no funnel (honest "no data", not a measured-zero).
+            funnel: None,
         });
     }
 
@@ -769,6 +789,10 @@ pub fn run_enrich_pass(
         promoted_count: report.promotion.as_ref().map(|p| p.promoted).unwrap_or(0),
         enrichment_rate: report.enrichment_rate,
         skipped,
+        // ENRICH-YIELD-1: decompose the promotion funnel from the same report the promoted count
+        // comes from. `Some` iff promotion ran (auto-enrich always promotes), so the funnel is
+        // present here whenever a language ran; the reader-frame per-gate breakdown flows to doctor.
+        funnel: report.promotion.as_ref().map(|p| p.funnel()),
     })
 }
 
@@ -1020,8 +1044,12 @@ fn chain_retention(state: &Arc<DaemonState>, db_path: &Path, repo_uid: &str, rep
     );
 }
 
-/// Reader-frame one-liner for the daemon log: "enriched N/M edges, promoted P (skipped: rust)" |
-/// "nothing to enrich" | "skipped: rust-analyzer not found — …".
+/// Reader-frame one-liner for the daemon log: "enriched N/M edges, promoted P (top rejections: …)
+/// (skipped: rust)" | "nothing to enrich" | "skipped: rust-analyzer not found — …".
+///
+/// ENRICH-YIELD-1: when promotion ran and rejected candidates, the top rejecting classes (reader
+/// frame) are named in the headline so the oplog outcome line says WHY promotion banked so few — not
+/// just the bare "promoted P". Absent/empty funnel → no note (a zero-work pass stays honest).
 pub fn summarize_outcome(o: &EnrichPassOutcome) -> String {
     let skip_note = if o.skipped.is_empty() {
         String::new()
@@ -1037,10 +1065,51 @@ pub fn summarize_outcome(o: &EnrichPassOutcome) -> String {
         }
     } else {
         format!(
-            "enriched {}/{} edges, promoted {}{skip_note}",
-            o.enriched_count, o.eligible_count, o.promoted_count
+            "enriched {}/{} edges, {}{}{skip_note}",
+            o.enriched_count,
+            o.eligible_count,
+            promoted_clause(o),
+            funnel_headline_note(o.funnel.as_ref())
         )
     }
+}
+
+/// The promotion clause of the completion headline. ENRICH-YIELD-1 review-2 item 3: state the
+/// funnel's OWN denominator — the count of **resolved candidates** that reached the promotion filter
+/// (`funnel.candidates`) — so "promoted P" is read against that population, NOT against the larger
+/// `enriched`/`eligible` counts (a different, upstream population). Numerator and denominator both
+/// come from the funnel so the ratio is internally consistent. Falls back to the bare "promoted P"
+/// when no funnel carries a denominator (older report, or a zero-candidate pass) — honest "no
+/// denominator to show", not a fabricated one.
+fn promoted_clause(o: &EnrichPassOutcome) -> String {
+    match o.funnel.as_ref() {
+        Some(f) if f.candidates > 0 => {
+            format!(
+                "promoted {}/{} resolved candidates",
+                f.promoted, f.candidates
+            )
+        }
+        _ => format!("promoted {}", o.promoted_count),
+    }
+}
+
+/// The " (top rejections: <label> N, <label> N)" clause for the completion headline, or empty when
+/// there is no funnel or nothing was rejected. Names the top TWO reader-frame classes — enough to
+/// point the reader at the dominant cause without reproducing the whole breakdown (that lives on the
+/// doctor detail surface).
+fn funnel_headline_note(funnel: Option<&PromotionFunnel>) -> String {
+    let Some(funnel) = funnel else {
+        return String::new();
+    };
+    let top = funnel.top(2);
+    if top.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = top
+        .iter()
+        .map(|r| format!("{} {}", r.label, r.count))
+        .collect();
+    format!(" (top rejections: {})", parts.join(", "))
 }
 
 #[cfg(test)]
@@ -1211,6 +1280,8 @@ mod tests {
             promoted_count: 40,
             enrichment_rate: 81.0,
             skipped: vec![],
+            // No funnel → no rejection note; the headline stays exactly as before (backcompat).
+            funnel: None,
         };
         assert_eq!(
             summarize_outcome(&ran),
@@ -1227,6 +1298,7 @@ mod tests {
                 language: "rust".to_string(),
                 reason: "rust-analyzer not found — install rust-analyzer".to_string(),
             }],
+            funnel: None,
         };
         assert_eq!(all_skipped.lifecycle_state(), "skipped");
         assert!(summarize_outcome(&all_skipped).contains("skipped: rust"));
@@ -1237,9 +1309,150 @@ mod tests {
             promoted_count: 0,
             enrichment_rate: 0.0,
             skipped: vec![],
+            funnel: None,
         };
         assert_eq!(summarize_outcome(&empty), "nothing to enrich");
         assert_eq!(empty.lifecycle_state(), "completed");
+    }
+
+    // ── ENRICH-YIELD-1: the funnel on the completion report (oplog headline + doctor JSON) ──────────
+
+    fn outcome_with_funnel(funnel: Option<PromotionFunnel>) -> EnrichPassOutcome {
+        EnrichPassOutcome {
+            eligible_count: 100,
+            enriched_count: 81,
+            promoted_count: 40,
+            enrichment_rate: 81.0,
+            skipped: vec![],
+            funnel,
+        }
+    }
+
+    // The oplog headline names the top rejecting classes (reader frame) so the completion line says
+    // WHY only 40 of 78 promoted — not just the bare "promoted 40".
+    #[test]
+    fn summarize_headline_names_top_rejections_when_funnel_present() {
+        let funnel = PromotionFunnel::from_counts(
+            78,
+            40,
+            &[
+                ("external_type".to_string(), 20),
+                ("method_not_found_on_class".to_string(), 18),
+                ("ambiguous_class_multiple_definitions".to_string(), 0), // measured-absent → hidden
+            ]
+            .into_iter()
+            .collect(),
+            &BTreeMap::new(),
+        );
+        let line = summarize_outcome(&outcome_with_funnel(Some(funnel)));
+        // review-2 item 3: the headline states the funnel's OWN denominator (78 resolved candidates),
+        // then names the top rejecting classes. The fixture is the reviewer's 100/81/78/40 case.
+        assert!(
+            line.starts_with(
+                "enriched 81/100 edges, promoted 40/78 resolved candidates (top rejections:"
+            ),
+            "the candidates→promoted funnel headline is rendered and the rejection note appended: {line}"
+        );
+        // The promotion denominator is the funnel's candidates (78) — NOT the enriched (81) or eligible
+        // (100) counts. This is the no-conflation assertion review-2 item 3 requires (differing values).
+        assert!(
+            line.contains("promoted 40/78"),
+            "denominator is candidates: {line}"
+        );
+        assert!(
+            !line.contains("40/81") && !line.contains("40/100"),
+            "promotion must NOT be denominated against enriched/eligible: {line}"
+        );
+        assert!(
+            line.contains("receiver type is external to this repo (a library type) 20"),
+            "dominant class named in reader frame with its count: {line}"
+        );
+        assert!(
+            line.contains("method isn't defined on the resolved class 18"),
+            "second class named too: {line}"
+        );
+        assert!(
+            !line.contains("gate"),
+            "no pipeline-internal 'gate N' in the reader line: {line}"
+        );
+    }
+
+    // Honest zero-work: a completed pass whose promotion found no candidates (Some funnel, but
+    // candidates=0) appends NO rejection note — nothing was rejected, so nothing is claimed.
+    #[test]
+    fn summarize_headline_has_no_note_when_nothing_rejected() {
+        let funnel =
+            PromotionFunnel::from_counts(0, 0, &std::collections::HashMap::new(), &BTreeMap::new());
+        let line = summarize_outcome(&outcome_with_funnel(Some(funnel)));
+        assert_eq!(line, "enriched 81/100 edges, promoted 40");
+    }
+
+    // The doctor JSON (`last_enrichment`) carries the full breakdown under `promotion_funnel` when a
+    // funnel exists, and OMITS the key entirely when it does not (honest "no data", not measured-zero).
+    #[test]
+    fn to_json_carries_promotion_funnel_only_when_present() {
+        let funnel = PromotionFunnel::from_counts(
+            78,
+            40,
+            &[("external_type".to_string(), 38)].into_iter().collect(),
+            // Ground-truth entries: 78 reach gates 1–4 (gate 2 is the no-op config-opt-in placeholder);
+            // gate 4 rejects 38 external → 40 survive and pass through gates 7/8/5/6 to promotion.
+            &[
+                (1u8, 78usize),
+                (2, 78),
+                (3, 78),
+                (4, 78),
+                (7, 40),
+                (8, 40),
+                (5, 40),
+                (6, 40),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let with =
+            EnrichmentReport::new("r".to_string(), outcome_with_funnel(Some(funnel))).to_json();
+        let pf = &with["promotion_funnel"];
+        assert_eq!(pf["candidates"], 78);
+        assert_eq!(pf["promoted"], 40);
+        assert_eq!(pf["rejected"], 38);
+        assert_eq!(pf["rejections"][0]["reason"], "external_type");
+        assert_eq!(pf["rejections"][0]["gate"], 4);
+        assert_eq!(
+            pf["rejections"][0]["label"],
+            "receiver type is external to this repo (a library type)"
+        );
+        // The per-gate waterfall reaches the doctor JSON too (eval order; gate 4 entered 78, rejected
+        // 38 external). This is the §2.1 per-gate accounting on the product surface.
+        let gates = pf["gates"]
+            .as_array()
+            .expect("gates waterfall present in doctor JSON");
+        let gate4 = gates
+            .iter()
+            .find(|g| g["gate"] == 4)
+            .expect("gate 4 present");
+        assert_eq!(gate4["entered"], 78);
+        assert_eq!(gate4["rejected"], 38);
+        // Gate order in the JSON is evaluation order, not numeric — all eight documented gates.
+        let order: Vec<u64> = gates.iter().filter_map(|g| g["gate"].as_u64()).collect();
+        assert_eq!(order, vec![1, 2, 3, 4, 7, 8, 5, 6]);
+        // Gate 2 (config-opt-in placeholder) reaches the doctor JSON as a no-op stage: entered, 0
+        // rejected.
+        let gate2 = gates
+            .iter()
+            .find(|g| g["gate"] == 2)
+            .expect("gate 2 present");
+        assert_eq!(gate2["entered"], 78);
+        assert_eq!(gate2["rejected"], 0);
+
+        let without = EnrichmentReport::new("r".to_string(), outcome_with_funnel(None)).to_json();
+        assert!(
+            without.get("promotion_funnel").is_none(),
+            "no funnel → the key is absent, not null-or-zero: {without}"
+        );
+        // The pre-existing keys are unchanged whether or not a funnel is attached.
+        assert_eq!(without["promoted_count"], 40);
+        assert_eq!(without["state"], "completed");
     }
 
     // ── ENRICH-LIFECYCLE-1 running-yield: the yield signal + the requeue mapping ───────────────────
@@ -1360,6 +1573,7 @@ mod tests {
             promoted_count: 10,
             enrichment_rate: 60.0,
             skipped: vec![],
+            funnel: None,
         };
 
         match classify_completed_attempt(Ok(outcome.clone()), false) {

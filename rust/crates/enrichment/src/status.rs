@@ -10,7 +10,7 @@
 //! `enrichment_state` axis.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::contracts::EnrichmentLanguage;
 
@@ -184,11 +184,33 @@ pub struct PromotionReport {
     /// Number of edges promoted to resolved.
     pub promoted: usize,
 
-    /// Skipped edges by reason.
+    /// Skipped edges by reason (first-rejecting gate; `promote_edges` `continue`s after the first
+    /// failing gate, so each candidate contributes to exactly one reason).
     pub skipped_reasons: HashMap<String, usize>,
+
+    /// Candidates that REACHED each gate, keyed by gate number — ground truth counted live by
+    /// `promote_edges` (ENRICH-YIELD-1 §2.1). Feeds the per-gate waterfall in [`Self::funnel`].
+    /// `#[serde(default)]` so an older report without it deserializes to an empty (flat-only) funnel.
+    #[serde(default)]
+    pub gate_entered: BTreeMap<u8, usize>,
 
     /// Actual promoted edges persisted to storage (may differ if storage fails).
     pub persisted_count: Option<usize>,
+}
+
+impl PromotionReport {
+    /// Decompose the 3.5% (ENRICH-YIELD-1): candidates → promoted, with BOTH the reader-frame per-gate
+    /// waterfall (entering + first-rejected for each gate, from `gate_entered`) and the per-class
+    /// first-rejection breakdown of the rest. Pure derivation of the counts already here; see
+    /// [`crate::funnel::PromotionFunnel`].
+    pub fn funnel(&self) -> crate::funnel::PromotionFunnel {
+        crate::funnel::PromotionFunnel::from_counts(
+            self.candidates,
+            self.promoted,
+            &self.skipped_reasons,
+            &self.gate_entered,
+        )
+    }
 }
 
 /// A failure reason with count.

@@ -287,6 +287,144 @@ fn skip_detail_clauses(skipped: Option<&Vec<serde_json::Value>>) -> String {
     }
 }
 
+/// ENRICH-YIELD-1: the " (top rejections: <label> N, <label> N)" clause appended to the doctor
+/// enrichment headline, or empty when there is no funnel / nothing was rejected. Names the top TWO
+/// reader-frame classes (the daemon already sorted `rejections` dominant-first). Reader labels only —
+/// never the machine `reason`/`gate`, so the headline stays in the reader's language.
+fn enrichment_funnel_headline(funnel: Option<&serde_json::Value>) -> String {
+    let Some(rejections) = funnel
+        .and_then(|f| f.get("rejections"))
+        .and_then(|r| r.as_array())
+    else {
+        return String::new();
+    };
+    let parts: Vec<String> = rejections
+        .iter()
+        .take(2)
+        .filter_map(|r| {
+            let label = r.get("label").and_then(|v| v.as_str())?;
+            let count = r.get("count").and_then(|v| v.as_u64())?;
+            Some(format!("{label} {count}"))
+        })
+        .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" (top rejections: {})", parts.join(", "))
+    }
+}
+
+/// ENRICH-YIELD-1 (review-2 item 3): the promotion clause of the doctor completion headline. States
+/// the funnel's OWN denominator — the count of **resolved candidates** that reached the promotion
+/// filter (`promotion_funnel.candidates`) — so "promoted P" is read against THAT population, not the
+/// larger `enriched`/`eligible` counts (a different, upstream population: eligible unresolved edges →
+/// resolved receiver types → the compiler-origin candidates that actually enter the filter). Numerator
+/// and denominator both come from the funnel so the ratio is internally consistent. Mirrors
+/// `daemon_runtime::enrich_pass::promoted_clause` (the oplog headline) so the two product surfaces
+/// render the same relationship. Falls back to the bare "promoted P" (from `promoted_count`) when no
+/// funnel carries a denominator — an older daemon's JSON, or a zero-candidate pass — an honest "no
+/// denominator to show", never a fabricated one.
+fn enrichment_promoted_clause(funnel: Option<&serde_json::Value>, promoted_count: u64) -> String {
+    if let Some(f) = funnel {
+        let candidates = f.get("candidates").and_then(|v| v.as_u64()).unwrap_or(0);
+        if candidates > 0 {
+            let promoted = f
+                .get("promoted")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(promoted_count);
+            return format!("promoted {promoted}/{candidates} resolved candidates");
+        }
+    }
+    format!("promoted {promoted_count}")
+}
+
+/// ENRICH-YIELD-1: the full promotion-funnel breakdown for the doctor `details` surface — the
+/// "least-new-surface" queryable breakdown (reuses `ProbeResult.details`, already rendered; no new
+/// command/flag). Renders TWO reader-frame views of the daemon's `promotion_funnel` JSON:
+///
+/// 1. the **per-gate waterfall** (`gates`, §2.1 requirement) in the filter's evaluation order — for
+///    each gate a candidate reached, how many *reached* it and how many it *filtered out*; and
+/// 2. the **dominant rejection reasons** (`rejections`, per class) — the retained per-class detail.
+///
+/// All labels are reader-frame (the daemon already put the "gate N" numbers only in machine fields).
+/// `None` when there is no funnel / nothing to show, so a zero-work pass shows no phantom breakdown.
+/// Lines join with the doctor detail indent convention (`\n        `).
+fn enrichment_funnel_details(funnel: Option<&serde_json::Value>) -> Option<String> {
+    let funnel = funnel?;
+    let candidates = funnel
+        .get("candidates")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let promoted = funnel.get("promoted").and_then(|v| v.as_u64()).unwrap_or(0);
+    let rejected = funnel.get("rejected").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let gates = funnel.get("gates").and_then(|g| g.as_array());
+    let rejections = funnel.get("rejections").and_then(|r| r.as_array());
+
+    let has_gates = gates.is_some_and(|g| !g.is_empty());
+    let has_rejections = rejections.is_some_and(|r| !r.is_empty());
+    if !has_gates && !has_rejections {
+        return None; // nothing to show (zero-work / older daemon without a funnel)
+    }
+
+    let mut lines = vec![format!(
+        "promotion funnel: {candidates} resolved candidates → {promoted} promoted, {rejected} rejected"
+    )];
+
+    // Per-gate waterfall (evaluation order), showing only the gates candidates actually reached.
+    if let Some(gates) = gates {
+        let mut waterfall = Vec::new();
+        for g in gates {
+            let (Some(label), Some(entered)) = (
+                g.get("label").and_then(|v| v.as_str()),
+                g.get("entered").and_then(|v| v.as_u64()),
+            ) else {
+                continue;
+            };
+            if entered == 0 {
+                continue; // the funnel already collapsed before this gate
+            }
+            let rej = g.get("rejected").and_then(|v| v.as_u64()).unwrap_or(0);
+            if rej > 0 {
+                let pct = (rej as f64 / entered as f64) * 100.0;
+                waterfall.push(format!(
+                    "  {label}: {entered} reached → {rej} filtered out here ({pct:.0}%)"
+                ));
+            } else {
+                waterfall.push(format!(
+                    "  {label}: {entered} reached → 0 filtered out here"
+                ));
+            }
+        }
+        if !waterfall.is_empty() {
+            lines.push("gate-by-gate (in filter order):".to_string());
+            lines.extend(waterfall);
+        }
+    }
+
+    // Dominant rejection reasons (per class, dominant first) — the retained per-class detail, each as
+    // a share of the resolved candidates (the 3.5%'s denominator).
+    if let Some(rejections) = rejections.filter(|r| !r.is_empty()) {
+        lines.push("top rejection reasons:".to_string());
+        for r in rejections {
+            let (Some(label), Some(count)) = (
+                r.get("label").and_then(|v| v.as_str()),
+                r.get("count").and_then(|v| v.as_u64()),
+            ) else {
+                continue;
+            };
+            if candidates > 0 {
+                let pct = (count as f64 / candidates as f64) * 100.0;
+                lines.push(format!("  {label}: {count} ({pct:.0}% of resolved)"));
+            } else {
+                lines.push(format!("  {label}: {count}"));
+            }
+        }
+    }
+
+    Some(lines.join("\n        "))
+}
+
 /// ENRICH-LIFECYCLE-1 (D3): the enrichment lifecycle line for `rmap doctor`, from
 /// `daemon_info.{last_enrichment, enrichment_enabled, enrichment_activity}`. The full lifecycle
 /// across states (shown here as the DISPLAYED doctor line):
@@ -367,8 +505,16 @@ fn enrichment_probe(response: &serde_json::Value) -> ProbeResult {
                         if eligible == 0 {
                             format!("up to date (nothing to resolve), {ago}{skip}")
                         } else {
+                            // ENRICH-YIELD-1: the completion headline. review-2 item 3: render the
+                            // promotion's OWN denominator (resolved candidates → promoted) via
+                            // `enrichment_promoted_clause`, NOT the enriched/eligible population; then
+                            // name the top rejecting classes (reader frame) so the line says WHY
+                            // promotion banked so few.
+                            let funnel = le.get("promotion_funnel");
+                            let promoted_clause = enrichment_promoted_clause(funnel, promoted);
+                            let funnel_note = enrichment_funnel_headline(funnel);
                             format!(
-                                "resolved {enriched}/{eligible} receiver types, promoted {promoted}, {ago}{skip}"
+                                "resolved {enriched}/{eligible} receiver types, {promoted_clause}{funnel_note}, {ago}{skip}"
                             )
                         }
                     }
@@ -389,11 +535,23 @@ fn enrichment_probe(response: &serde_json::Value) -> ProbeResult {
             },
         }
     };
+    // ENRICH-YIELD-1: the full per-gate reader-frame breakdown on the doctor `details` surface — the
+    // chosen least-new-surface "queryable full breakdown" (§2.2). Only when enrichment is enabled and
+    // the last pass carried a funnel; absent otherwise (honest "no data").
+    let details = if enabled {
+        response
+            .get("last_enrichment")
+            .filter(|le| le.is_object())
+            .and_then(|le| enrichment_funnel_details(le.get("promotion_funnel")))
+    } else {
+        None
+    };
+
     ProbeResult {
         name: "enrichment".to_string(),
         passed: true,
         message,
-        details: None,
+        details,
     }
 }
 
@@ -778,6 +936,138 @@ mod tests {
             "{msg}"
         );
         assert!(msg.contains("12s ago"), "{msg}");
+    }
+
+    // ENRICH-YIELD-1: a completed pass with a promotion funnel names the top rejecting classes in the
+    // headline (reader frame) AND carries the full per-gate breakdown on the details surface.
+    #[test]
+    fn enrichment_probe_surfaces_promotion_funnel() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "r", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 7,
+                "promotion_funnel": {
+                    "candidates": 78, "promoted": 40, "rejected": 38,
+                    "rejections": [
+                        {"reason":"external_type","gate":4,"label":"receiver type is external to this repo (a library type)","count":30},
+                        {"reason":"method_not_found_on_class","gate":6,"label":"method isn't defined on the resolved class","count":8}
+                    ],
+                    "gates": [
+                        {"gate":1,"label":"call is a method call whose receiver type we resolve","entered":78,"rejected":0},
+                        {"gate":2,"label":"resolving this kind of call is enabled","entered":78,"rejected":0},
+                        {"gate":3,"label":"receiver type was resolved by the compiler","entered":78,"rejected":0},
+                        {"gate":4,"label":"receiver type is defined in this repo (not a library type)","entered":78,"rejected":30},
+                        {"gate":7,"label":"receiver type is a single type (not a union/intersection)","entered":48,"rejected":0},
+                        {"gate":8,"label":"call is a direct receiver.method (no chaining or indexing)","entered":48,"rejected":0},
+                        {"gate":5,"label":"receiver type maps to exactly one class we can see","entered":48,"rejected":0},
+                        {"gate":6,"label":"the called method is uniquely defined on that class","entered":48,"rejected":8}
+                    ]
+                }
+            }
+        });
+        let probe = enrichment_probe(&response);
+        // Headline: the enrichment metric (resolved 81/100 receiver types) is preserved AND the
+        // dominant reader-frame class is named.
+        assert!(
+            probe.message.contains("resolved 81/100 receiver types"),
+            "{}",
+            probe.message
+        );
+        // review-2 item 3: the promotion clause states the funnel's OWN denominator — the resolved
+        // candidates (78) that entered the filter, NOT the enriched (81) or eligible (100) counts. The
+        // 100/81/78/40 fixture has all four values differing, so any conflation is visible here.
+        assert!(
+            probe.message.contains("promoted 40/78 resolved candidates"),
+            "the candidates→promoted denominator is rendered in the completion headline: {}",
+            probe.message
+        );
+        assert!(
+            !probe.message.contains("40/81") && !probe.message.contains("40/100"),
+            "promotion must NOT be denominated against the enriched/eligible population: {}",
+            probe.message
+        );
+        assert!(
+            probe.message.contains(
+                "top rejections: receiver type is external to this repo (a library type) 30"
+            ),
+            "the dominant class is named in the headline: {}",
+            probe.message
+        );
+        assert!(
+            !probe.message.contains("gate"),
+            "no pipeline-internal 'gate N' in the reader line: {}",
+            probe.message
+        );
+        // Details: BOTH the per-gate waterfall (§2.1) and the per-class breakdown, reader frame.
+        let details = probe.details.expect("funnel breakdown present in details");
+        assert!(
+            details.contains("78 resolved candidates → 40 promoted"),
+            "{details}"
+        );
+        // Per-gate waterfall (evaluation order, entering → filtered-out), reader frame.
+        assert!(
+            details.contains("gate-by-gate (in filter order):"),
+            "{details}"
+        );
+        // Gate 2 (the config-opt-in placeholder) renders as a no-op stage: entrants reached, nothing
+        // filtered — the honest rendering of a gate that rejects nothing (review-1 item 1).
+        assert!(
+            details.contains(
+                "resolving this kind of call is enabled: 78 reached → 0 filtered out here"
+            ),
+            "gate 2 renders as a no-op stage: {details}"
+        );
+        assert!(
+            details.contains(
+                "receiver type is defined in this repo (not a library type): 78 reached → 30 filtered out here (38%)"
+            ),
+            "per-gate entering+rejected line present: {details}"
+        );
+        assert!(
+            details.contains(
+                "the called method is uniquely defined on that class: 48 reached → 8 filtered out here (17%)"
+            ),
+            "a later gate shows its own entrants (48, not 78) — the waterfall narrowed: {details}"
+        );
+        // Retained per-class dominant reasons, each as a share of resolved.
+        assert!(
+            details.contains(
+                "receiver type is external to this repo (a library type): 30 (38% of resolved)"
+            ),
+            "{details}"
+        );
+        assert!(
+            details.contains("method isn't defined on the resolved class: 8 (10% of resolved)"),
+            "{details}"
+        );
+        // Reader frame throughout the details too — no "gate N".
+        assert!(
+            !details.contains("gate 4") && !details.contains("gate 6"),
+            "{details}"
+        );
+    }
+
+    // No funnel (older daemon, or a toolchain-skipped pass) → the line and details are unchanged: no
+    // "top rejections" clause, no phantom breakdown (honest "no data").
+    #[test]
+    fn enrichment_probe_without_funnel_is_unchanged() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "r", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 7
+            }
+        });
+        let probe = enrichment_probe(&response);
+        assert!(
+            !probe.message.contains("top rejections"),
+            "{}",
+            probe.message
+        );
+        assert!(probe.details.is_none(), "no funnel → no details");
     }
 
     #[test]

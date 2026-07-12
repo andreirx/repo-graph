@@ -80,6 +80,7 @@
 
 pub mod contracts;
 pub mod eligibility;
+pub mod funnel;
 pub mod pipeline;
 pub mod promotion;
 pub mod resolver;
@@ -92,6 +93,8 @@ pub use contracts::{
 };
 
 pub use eligibility::{EligibilityQuery, EnrichmentStoragePort, StorageError};
+
+pub use funnel::{PromotionFunnel, RejectionClass, RejectionTally};
 
 pub use pipeline::{EnrichmentConfig, EnrichmentPipeline, PipelineError};
 

@@ -3569,6 +3569,11 @@ impl ServiceDispatcher {
                 "candidates": p.candidates,
                 "promoted": p.promoted,
                 "persisted_count": p.persisted_count,
+                // ENRICH-YIELD-1: the reader-frame, per-gate first-rejection breakdown of the
+                // candidates that did NOT promote — silently dropped before this slice. Additive to
+                // the existing object (no new command/flag); {candidates, promoted, rejected,
+                // rejections:[{reason, gate, label, count}]}.
+                "funnel": serde_json::to_value(p.funnel()).unwrap_or(serde_json::Value::Null),
             })
         });
 
