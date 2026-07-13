@@ -59,3 +59,24 @@ receiver-locator) is deliberately split out as ENRICH-YIELD-3 (new resolver seam
 The three ratified levers are live and visible: funnel attribution is accurate for
 primitives, Rust enum calls promote (cited), and the ~36% external class renders as honest
 Layer-2 orientation — with the measured funnel delta inlined.
+
+---
+
+## 5. Delivery record (2026-07-13)
+
+**DELIVERED** (`a5728f4`, relay-approved iteration 4 — 5 cycles, two mid-run operator
+ratifications). EY1-A: Layer-2 likely-external projection on the trust surface with
+separate heuristic-honest basis lines. EY1-B: primitives external at the resolver seam;
+neutrality proven by deterministic replay of the REAL captured self-index corpus
+(committed: `capture_ey1b_corpus.py` + `ey1b_selfindex_corpus.json`) — promoted sets
+exactly equal, movement = gate 5-or-8 → 4 only for primitives. EY1-D: Enum preserved
+across the boundary, gate 5 = Class|Enum via the shared predicate; 15 live enum-owned
+promotions. Ratifications during the run: **EY2-B-PROOF** (deterministic identical-corpus
+replay mandatory — a live-run comparison cannot isolate EY1-B), **EY2-D-CALLABLE**
+("enum method call" = enum-owned callable incl. associated functions), **EY2-B-GATE8**
+(the observed broader invariant: deep-chain primitives move 8 → 4, not only 5 → 4;
+promoted-set equality is the binding fact). Review history: seam correction (review-0:
+primitive list belonged in the Rust resolver, not language-agnostic promotion), synthetic
+corpus rejected (review-2: the replay must use the REAL corpus), wording-vs-reality
+escalation (review-3: resolved by ratifying what the proof measured).
+Next: ENRICH-YIELD-3 (Rust receiver-expression locator; spec committed).
