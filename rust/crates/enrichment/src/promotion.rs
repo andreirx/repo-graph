@@ -23,7 +23,10 @@
 //! 5. **Unique class**: Type maps to exactly ONE CLASS symbol in the graph
 //! 6. **Unique method**: Method maps to exactly ONE METHOD on that class
 //! 7. **No union/intersection**: Type display name has no "|" or "&"
-//! 8. **Simple shape**: Target key is simple "receiver.method" or "this.field.method"
+//! 8. **Simple shape**: Target key is simple "receiver.method", "this.field.method", or
+//!    "self.field.method" — the last admitted by ENRICH-YIELD-3 once the Rust resolver gained a
+//!    receiver locator that resolves the intermediate field's type (EY1-C). Deep chains ("a.b.c.d")
+//!    and non-field intermediates ("self.get().method") stay rejected.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -257,9 +260,11 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
             continue;
         }
 
-        // Gate 8: Simple receiver.method or this.field.method shape (this check + the method-name
-        // parse below are both gate 8). Check the FULL target_key for optional chaining or element
-        // access, not just the method name. E.g., "obj?.method" has the ? on the receiver.
+        // Gate 8: Simple receiver.method / this.field.method / self.field.method shape (this check +
+        // the method-name parse below are both gate 8). Check the FULL target_key for optional
+        // chaining or element access, not just the method name. E.g., "obj?.method" has the ? on the
+        // receiver. (A nested CALL in the chain — "self.get().method" — is caught by the field-segment
+        // check inside parse_method_name below, not here.)
         enter(8);
         if candidate.target_key.contains('?') || candidate.target_key.contains('[') {
             skip(RejectionClass::OptionalOrElementAccess);
@@ -357,23 +362,45 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
 /// Parse the method name from a target key.
 ///
 /// Valid shapes:
-/// - "receiver.method" -> Some("method")
-/// - "this.field.method" -> Some("method")
+/// - "receiver.method"    -> Some("method")
+/// - "this.field.method"  -> Some("method")   (TypeScript wildcard receiver)
+/// - "self.field.method"  -> Some("method")   (Rust wildcard receiver — ENRICH-YIELD-3)
 ///
-/// Invalid shapes:
-/// - "a.b.c.d" (too deep)
-/// - "method" (no dot)
+/// Invalid shapes (None):
+/// - "a.b.c.d"            (deeper than one intermediate field — ratified to stay rejected)
+/// - "method"            (no receiver)
+/// - "self.get().method" (the intermediate segment is a CALL, not a plain field)
+///
+/// The three-segment `this.`/`self.` forms are admitted ONLY when the intermediate segment is a plain
+/// field identifier ([`is_simple_field`]). This is what makes admitting the Rust `self.field.method`
+/// shape safe (ENRICH-YIELD-3 / EY1-C): the resolver's receiver locator resolves the *field's* type
+/// only for a genuine field access. A non-field intermediate (`self.get()`, `self.arr[0]`) means the
+/// stored call position does not sit on the true receiver, so promoting it would risk a false
+/// Layer-0 CALLS edge — those stay rejected here (`self.arr[0].method` is already rejected upstream
+/// by the `[` check; `self.get().method` is rejected here).
 fn parse_method_name(target_key: &str) -> Option<&str> {
     let parts: Vec<_> = target_key.split('.').collect();
 
     match parts.len() {
         // Simple: obj.method
         2 => Some(parts[1]),
-        // this.field.method
-        3 if parts[0] == "this" => Some(parts[2]),
-        // Invalid shape
+        // this.field.method / self.field.method — only when the intermediate is a plain field.
+        3 if (parts[0] == "this" || parts[0] == "self") && is_simple_field(parts[1]) => {
+            Some(parts[2])
+        }
+        // Invalid shape (incl. deep chains a.b.c.d and non-field intermediates)
         _ => None,
     }
+}
+
+/// Whether a dotted target-key segment is a plain field/identifier — ASCII letters, digits, or `_`,
+/// non-empty. Rejects a nested call (`get()`) or any punctuation-bearing segment, so only a genuine
+/// intermediate FIELD access admits the `self.field.method` / `this.field.method` shape.
+fn is_simple_field(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Build edge location from candidate.
@@ -626,13 +653,181 @@ mod tests {
         assert_eq!(result.promoted.len(), 1);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ENRICH-YIELD-3 / EY1-C: Rust self.field.method admission + the false-edge proof
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    // The Rust `self.field.method` shape now promotes, like `this.field.method`. Note the REAL
+    // category: Rust `self.field.method` is `CallsObjMethodNeedsTypeInfo` (the indexer categorizer
+    // only maps TS `this.` to the wildcard category — EY3-ROUTING); gate 1 accepts both. It reaches
+    // gate 8 (admitted by parse_method_name), then gates 5/6 resolve on the receiver type the resolver
+    // stored (the FIELD's type, via the receiver locator routed by shape).
+    #[test]
+    fn self_field_method_pattern_promotes() {
+        let ctx = make_context();
+        let candidate = make_candidate(
+            "edge-self",
+            "self.field.doSomething",
+            Some("MyClass"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+
+        let result = promote_edges(&[candidate], &ctx);
+
+        assert_eq!(
+            result.promoted.len(),
+            1,
+            "self.field.method promotes; skipped: {:?}",
+            result.skipped_reasons
+        );
+    }
+
+    // THE FALSE-EDGE PROOF (EY1-C). `self.field.method()` where `self`'s type (`Outer`) and
+    // `self.field`'s type (`Inner`) DIFFER and BOTH own a `run` method. The promoted edge's target
+    // MUST follow the RESOLVED RECEIVER type. The Rust receiver locator resolves `self.field`'s type
+    // (proven in `rust-analyzer-resolver::receiver_locator::tests::self_field_method_locates_the_field_not_self`,
+    // which shows the located query position is the `field` token, not `self`). Here we prove the
+    // promotion CONSEQUENCE: fed the field's type the edge targets `Inner::run`; fed self's type — the
+    // naive call-start hover the locator exists to prevent — it would target `Outer::run`, the FALSE
+    // edge. Same target_key, two resolved types, two different edges: the resolved type drives the
+    // promotion, so resolving the FIELD (not self) is load-bearing.
+    #[test]
+    fn self_field_method_promotes_on_the_field_type_not_the_self_type() {
+        let mut ctx = PromotionContext::new();
+        // Outer = self's type; Inner = self.field's type. Both real, both own `run`.
+        for (uid, name) in [("outer", "Outer"), ("inner", "Inner")] {
+            ctx.add_symbol(SymbolInfo {
+                node_uid: uid.to_string(),
+                stable_key: name.to_string(),
+                qualified_name: Some(name.to_string()),
+                subtype: SymbolSubtype::Class,
+            });
+            ctx.add_class_method(
+                name,
+                "run",
+                SymbolInfo {
+                    node_uid: format!("{uid}.run"),
+                    stable_key: format!("{name}.run"),
+                    qualified_name: Some(format!("{name}.run")),
+                    subtype: SymbolSubtype::Method,
+                },
+            );
+        }
+
+        let candidate = |receiver_type: &str| {
+            make_candidate(
+                "e-false-edge",
+                "self.field.run",
+                Some(receiver_type),
+                false,
+                ReceiverTypeOrigin::Compiler,
+                // The real Rust category for self.field.method (EY3-ROUTING).
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            )
+        };
+
+        // Correct: the locator resolved the FIELD's type (Inner) → edge targets Inner::run.
+        let correct = promote_edges(&[candidate("Inner")], &ctx);
+        assert_eq!(correct.promoted.len(), 1, "field-typed receiver promotes");
+        assert_eq!(
+            correct.promoted[0].target_node_uid, "inner.run",
+            "promotion targets the FIELD's method (Inner::run)"
+        );
+
+        // The false edge the naive self-hover would create: self's type (Outer) → Outer::run.
+        let naive = promote_edges(&[candidate("Outer")], &ctx);
+        assert_eq!(naive.promoted.len(), 1);
+        assert_eq!(
+            naive.promoted[0].target_node_uid, "outer.run",
+            "self-typed receiver would target Outer::run — the false edge the locator prevents"
+        );
+
+        // Same target_key, DIFFERENT edges: the divergence is exactly why the receiver locator
+        // (resolve the field, not self) is load-bearing for Layer-0 correctness.
+        assert_ne!(
+            correct.promoted[0].target_node_uid,
+            naive.promoted[0].target_node_uid
+        );
+    }
+
+    // Gate 8 rejects a nested-call intermediate (`self.get().run`) even under the self.field.method
+    // admission: `get()` is not a plain field, so the resolver's stored position does not sit on the
+    // true receiver — admitting it would risk a false edge. Stays at `not_simple_receiver_method`.
+    #[test]
+    fn gate_8_rejects_nested_call_in_self_chain() {
+        let ctx = make_context();
+        let candidate = make_candidate(
+            "e-nested",
+            "self.get().run",
+            Some("MyClass"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+
+        let result = promote_edges(&[candidate], &ctx);
+
+        assert!(
+            result.promoted.is_empty(),
+            "nested-call chain must not promote"
+        );
+        assert_eq!(
+            result.skipped_reasons.get("not_simple_receiver_method"),
+            Some(&1)
+        );
+    }
+
+    // Deep self-chains stay rejected (ratified), same as `a.b.c.d`.
+    #[test]
+    fn gate_8_rejects_deep_self_chain() {
+        let ctx = make_context();
+        let candidate = make_candidate(
+            "e-deep",
+            "self.a.b.run", // 4 segments — deeper than one intermediate field
+            Some("MyClass"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+
+        let result = promote_edges(&[candidate], &ctx);
+
+        assert!(
+            result.promoted.is_empty(),
+            "deep self-chain must not promote"
+        );
+        assert_eq!(
+            result.skipped_reasons.get("not_simple_receiver_method"),
+            Some(&1)
+        );
+    }
+
     #[test]
     fn test_parse_method_name() {
         assert_eq!(parse_method_name("obj.method"), Some("method"));
         assert_eq!(parse_method_name("this.field.method"), Some("method"));
+        // ENRICH-YIELD-3: the Rust wildcard shape is now admitted (mirrors this.field.method).
+        assert_eq!(parse_method_name("self.field.method"), Some("method"));
+        // Deep chains stay rejected (ratified).
         assert_eq!(parse_method_name("a.b.c.d"), None);
+        assert_eq!(parse_method_name("self.a.b.method"), None);
+        // A non-field intermediate stays rejected — the false-edge guard (EY1-C).
+        assert_eq!(parse_method_name("self.get().method"), None);
+        assert_eq!(parse_method_name("this.get().method"), None);
         assert_eq!(parse_method_name("method"), None);
         assert_eq!(parse_method_name(""), None);
+    }
+
+    #[test]
+    fn is_simple_field_accepts_identifiers_rejects_calls_and_indexes() {
+        assert!(is_simple_field("field"));
+        assert!(is_simple_field("inner_state"));
+        assert!(is_simple_field("0")); // tuple index — a genuine field access
+        assert!(!is_simple_field("get()")); // nested call
+        assert!(!is_simple_field("arr[0]")); // index
+        assert!(!is_simple_field("")); // empty
     }
 
     #[test]
@@ -1103,15 +1298,27 @@ mod tests {
             "EY1-B is promotion-neutral on the real self-index corpus: identical corpus, identical \
              promoted set pre vs post"
         );
-        // Non-vacuous AND fidelity-pinned: replaying the captured corpus reproduces the live
-        // `rmap enrich` funnel's promoted count (47 — see this fixture's `_provenance` capture run and
-        // the build report). This cross-checks that the captured symbol/method context is COMPLETE,
-        // not merely real: an under-captured context would promote fewer than the live run did. (If the
-        // fixture is regenerated from a different self-index run, update this count.)
+        // Non-vacuous AND fidelity-pinned: a corpus-completeness fingerprint (an under-captured
+        // symbol/method context would promote FEWER). At EY1-B capture this was 47 (the live funnel's
+        // count then). ENRICH-YIELD-3 added `self.field.method` at gate 8, and this corpus PREDATES the
+        // Rust receiver locator: its 11 `self.field.method` candidates still carry the STORED (self)
+        // receiver type (e.g. `self.entries.len` → `BindingTable`, resolved by the old call-start
+        // hover), so exactly ONE now promotes on that stale self-type — the +1 (47→48). That is a
+        // REPLAY ARTIFACT, NOT a live edge: in production the resolver routes `self.field.method` to
+        // the locator (by shape — EY3-ROUTING) and resolves the FIELD's type, so the live funnel's
+        // `self.field.method` promotions differ (this is precisely the false edge the locator prevents
+        // — see `rust-analyzer-resolver::receiver_locator` and
+        // `self_field_method_promotes_on_the_field_type_not_the_self_type`). The count is thus a corpus
+        // fingerprint, not a live-funnel match for the compound shape. EY1-B neutrality (pre == post,
+        // asserted above) is unaffected — gate 8 admits regardless of `is_external`, so the +1 lands in
+        // BOTH replays. (Regenerating the fixture from a fresh, post-locator self-index will change this
+        // count; update it then.)
         assert_eq!(
             post_set.len(),
-            47,
-            "post-EY1-B replay reproduces the live self-index funnel's 47 promotions"
+            48,
+            "corpus replay through the current filter promotes 48 (47 at EY1-B capture + 1 \
+             self.field.method admitted by ENRICH-YIELD-3, on this pre-locator corpus's stored \
+             self-type — a replay artifact, not a live edge)"
         );
 
         // Per-candidate disposition over the real filter: "PROMOTED" or "<reason>@gate<N>". Each

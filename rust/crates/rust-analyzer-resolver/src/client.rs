@@ -18,10 +18,11 @@ use tracing::{debug, warn};
 
 use enrichment::{
     EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver, ReceiverTypeResult,
-    ResolverError, ResolverProgress,
+    ResolverError, ResolverProgress, UnresolvedCategory,
 };
 
 use crate::cargo::group_by_cargo_root;
+use crate::receiver_locator::{ReceiverLocation, ReceiverLocator};
 use crate::transport::{
     write_notification, write_request, IdGenerator, ReaderHandle, TransportError,
 };
@@ -207,12 +208,27 @@ impl ReceiverTypeResolver for RustAnalyzerResolver {
                 }
 
                 let abs_path = repo_root.join(&edge.source_file_path);
-                let result = session.resolve_type(
-                    &abs_path,
-                    edge.line_start,
-                    edge.col_start,
-                    &edge.edge_uid,
-                );
+
+                // COMPOUND receiver (`self.field.method()`): the stored position is the
+                // call-expression start (the `self` token), so a direct hover would resolve `self`'s
+                // type, not `self.field`'s — a false Layer-0 edge (EY1-C). Use the tree-sitter locator
+                // to move the hover onto the intermediate receiver's type-bearing token. Simple
+                // receivers hover `col_start` directly, unchanged (their receiver already sits there).
+                //
+                // NOTE: routed on SHAPE, not the wildcard CATEGORY. The indexer's categorizer
+                // (`indexer::resolver::categorize_unresolved_call`, out of scope) only maps TS's
+                // `this.`-prefixed keys to `CallsThisWildcardMethodNeedsTypeInfo`; Rust's `self.field`
+                // keys fall through to `CallsObjMethodNeedsTypeInfo` (verified: every one of the ~140
+                // self-index `self.field.method` candidates carries the obj category). Routing on the
+                // wildcard category alone would therefore NEVER fire for Rust, and the gate-8 admission
+                // of `self.field.method` would then promote on `self`'s type — the exact EY1-C false
+                // edge. The shape predicate subsumes the wildcard category (a wildcard key is always a
+                // `this.`-compound), so both paths are covered. See DECISION_REQUIRED EY3-ROUTING.
+                let result = if needs_receiver_locator(edge) {
+                    resolve_compound_receiver(&mut session, &abs_path, edge)
+                } else {
+                    session.resolve_type(&abs_path, edge.line_start, edge.col_start, &edge.edge_uid)
+                };
                 all_results.push(result);
                 processed += 1;
             }
@@ -603,6 +619,98 @@ impl Drop for RustAnalyzerSession {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Compound Receiver Resolution (ENRICH-YIELD-3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether an edge's receiver is COMPOUND (`self.field` / `this.field`) and therefore needs the
+/// tree-sitter locator to move the hover off the stored call-expression start.
+///
+/// Routed on SHAPE, not the wildcard category, because the indexer categorizer only assigns the
+/// wildcard category to TS `this.`-keys — Rust `self.field.method` is `CallsObjMethodNeedsTypeInfo`
+/// (verified against the self-index corpus). The predicate is: the target key starts with `self.` or
+/// `this.` AND has ≥2 dots (the receiver itself contains a `.`), i.e. exactly the `self.field.method`
+/// / `this.field.method` shapes gate 8 admits. Simple `obj.method` / `self.method` (one dot) keep the
+/// direct `col_start` hover, unchanged. The explicit wildcard-category check is belt-and-suspenders
+/// (a wildcard key always satisfies the shape predicate too).
+fn needs_receiver_locator(edge: &EligibleEdge) -> bool {
+    edge.category == UnresolvedCategory::CallsThisWildcardMethodNeedsTypeInfo
+        || is_self_or_this_compound(&edge.target_key)
+}
+
+/// `self.field.method` / `this.field.method` — a `self.`/`this.` prefix with a compound (dotted)
+/// receiver (≥2 dots total). NOT `self.method` (1 dot) and NOT a bare `obj.field.method`.
+fn is_self_or_this_compound(target_key: &str) -> bool {
+    let head = target_key.split('.').next();
+    matches!(head, Some("self") | Some("this"))
+        && target_key.bytes().filter(|&b| b == b'.').count() >= 2
+}
+
+/// Resolve the receiver type for a COMPOUND-receiver edge (`self.field.method()`).
+///
+/// The edge's stored position is the call-expression start (`self`); hovering there resolves
+/// `self`'s type, not `self.field`'s — a false Layer-0 CALLS edge (EY1-C). This:
+/// 1. reads the source file,
+/// 2. uses the tree-sitter [`ReceiverLocator`] to find the intermediate receiver's type-bearing
+///    token (the `field` of `self.field`),
+/// 3. queries rust-analyzer for the type at THAT position.
+///
+/// Mirrors the `tsserver-resolver` seam (syntax localization + semantic typing). Failure reasons use
+/// the shared `receiver_locator_*` vocabulary so the enrichment report reads the same across
+/// languages. A located-but-unresolvable receiver simply yields a `failed` result (no promotion) —
+/// never a guessed type.
+fn resolve_compound_receiver(
+    session: &mut RustAnalyzerSession,
+    abs_path: &Path,
+    edge: &EligibleEdge,
+) -> ReceiverTypeResult {
+    let source = match std::fs::read_to_string(abs_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return ReceiverTypeResult::failed(
+                edge.edge_uid.clone(),
+                format!("receiver_locator_read_error:{}", e),
+            );
+        }
+    };
+
+    let mut locator = match ReceiverLocator::new() {
+        Ok(l) => l,
+        Err(e) => {
+            return ReceiverTypeResult::failed(
+                edge.edge_uid.clone(),
+                format!("receiver_locator_init_error:{}", e),
+            );
+        }
+    };
+
+    // Coordinates flow through unchanged: EligibleEdge is 1-based line / 0-based col, the locator
+    // takes and returns the same, and resolve_type expects the same — correct-by-construction.
+    match locator.locate_receiver(&source, edge.line_start, edge.col_start) {
+        ReceiverLocation::Found { line, column, text } => {
+            debug!(
+                edge_uid = %edge.edge_uid,
+                stored_pos = %format!("{}:{}", edge.line_start, edge.col_start),
+                receiver_pos = %format!("{}:{}", line, column),
+                receiver_text = %text,
+                "located Rust intermediate receiver; querying its type"
+            );
+            session.resolve_type(abs_path, line, column, &edge.edge_uid)
+        }
+        ReceiverLocation::NoReceiver => {
+            ReceiverTypeResult::failed(edge.edge_uid.clone(), "receiver_locator_no_receiver")
+        }
+        ReceiverLocation::UnsupportedPattern { reason } => ReceiverTypeResult::failed(
+            edge.edge_uid.clone(),
+            format!("receiver_locator_unsupported:{}", reason),
+        ),
+        ReceiverLocation::ParseError { reason } => ReceiverTypeResult::failed(
+            edge.edge_uid.clone(),
+            format!("receiver_locator_parse_error:{}", reason),
+        ),
+    }
+}
+
 /// Convert a filesystem path to an LSP URI.
 fn path_to_uri(path: &Path) -> Url {
     Url::from_file_path(path).unwrap_or_else(|_| {
@@ -657,5 +765,71 @@ mod tests {
         let text = extract_hover_text(&contents);
         assert!(text.is_some());
         assert!(text.unwrap().contains("fn foo"));
+    }
+
+    // ── ENRICH-YIELD-3 routing (EY3-ROUTING) ─────────────────────────────────────────────────────
+
+    fn edge(target_key: &str, category: UnresolvedCategory) -> EligibleEdge {
+        EligibleEdge {
+            edge_uid: "e".to_string(),
+            snapshot_uid: "s".to_string(),
+            repo_uid: "r".to_string(),
+            source_node_uid: "n".to_string(),
+            target_key: target_key.to_string(),
+            source_file_path: "src/lib.rs".to_string(),
+            line_start: 1,
+            col_start: 0,
+            category,
+            language: EnrichmentLanguage::Rust,
+        }
+    }
+
+    // THE critical routing fact: Rust `self.field.method` carries the OBJ category (the indexer
+    // categorizer only recognizes TS `this.`), yet it MUST go through the receiver locator — otherwise
+    // the gate-8 admission promotes on `self`'s type (the EY1-C false edge). Shape routing guarantees
+    // it does.
+    #[test]
+    fn self_field_method_obj_category_still_routes_to_locator() {
+        assert!(
+            needs_receiver_locator(&edge(
+                "self.field.method",
+                UnresolvedCategory::CallsObjMethodNeedsTypeInfo
+            )),
+            "Rust self.field.method (obj category) must route to the locator via its SHAPE"
+        );
+    }
+
+    #[test]
+    fn simple_receivers_keep_the_direct_hover() {
+        // One dot → the receiver IS at col_start; no locator, no behavior change.
+        assert!(!needs_receiver_locator(&edge(
+            "obj.method",
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo
+        )));
+        assert!(!needs_receiver_locator(&edge(
+            "self.method",
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo
+        )));
+    }
+
+    #[test]
+    fn wildcard_category_routes_to_locator_belt_and_suspenders() {
+        // A wildcard-category edge (TS parity path) routes to the locator even though its shape also
+        // satisfies the predicate.
+        assert!(needs_receiver_locator(&edge(
+            "this.field.method",
+            UnresolvedCategory::CallsThisWildcardMethodNeedsTypeInfo
+        )));
+    }
+
+    #[test]
+    fn is_self_or_this_compound_shape_matrix() {
+        assert!(is_self_or_this_compound("self.field.method"));
+        assert!(is_self_or_this_compound("this.field.method"));
+        assert!(is_self_or_this_compound("self.a.b.method")); // deep self chain (gate 8 rejects later)
+        assert!(!is_self_or_this_compound("self.method")); // simple self receiver
+        assert!(!is_self_or_this_compound("obj.method")); // simple obj receiver
+        assert!(!is_self_or_this_compound("a.b.c.method")); // compound but not self/this
+        assert!(!is_self_or_this_compound("method")); // no receiver
     }
 }
