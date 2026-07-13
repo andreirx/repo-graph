@@ -72,9 +72,9 @@ repo-graph-policy-facts = { path = "../policy-facts" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-boundary-interaction-extractor = { path = "../boundary-interaction-extractor" }
 
-# Filesystem walking.
-walkdir = "2"
-# Gitignore pattern matching (root .gitignore only, matching TS).
+# Filesystem walking + full git ignore semantics (anchoring, negation, nested
+# `.gitignore`, `.git/info/exclude`) via `ignore::WalkBuilder`. See scanner.rs.
+# (Replaced the prior `walkdir` + root-only `Gitignore` loader — SCANNER-GITIGNORE-1.)
 ignore = "0.4"
 
 # SHA-256 for content hashing (locked to match TS hashContent).
