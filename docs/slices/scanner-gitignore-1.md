@@ -55,3 +55,18 @@ silently false.
 git-tracked source can no longer be silently dropped by ignore-pattern collisions; the
 coverage crate is visible end-to-end (inventory → candidate → package group); parity holds
 where the old behavior was correct; gates + transcript inlined.
+
+---
+
+## 6. Delivery record (2026-07-13)
+
+**DELIVERED** (`c4d848c`, relay-approved iteration 1 — 2 cycles, one ratified escalation).
+The review widened the root cause: beyond unanchored `.gitignore` handling, the hardcoded
+prune list dropped nested tracked dirs named out/.cache/venv/.next/… at ANY depth.
+Ratified SCANNER-PRUNE-AUTHORITY = root-depth-only hardcoded pruning (WalkBuilder git
+semantics govern nested; `.git` excluded everywhere); the review also caught a symlink
+regression in the new walker before it shipped (restored + parity-tested). Operator
+end-to-end proof: self-index 1226 → 1234 files, `coverage` folds, ALL 50 crates fold
+(CARGO-WORKSPACE-INHERITANCE-1 carve-out closed). Workspace suite 5,029/0 UNEXCLUDED —
+the environmental daemon test passes since the operator machine's v0.2.1 → v0.6.0
+upgrade + daemon restart.

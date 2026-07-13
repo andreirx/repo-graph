@@ -3977,5 +3977,7 @@ long-prescribed fix; spec as SCANNER-GITIGNORE-1. Validation must include: ancho
 root pattern + same-named nested source dir (the coverage case), negation, and a nested
 .gitignore.
 
-**Status:** OPEN — slice to be specced/queued (post ENRICH-YIELD-1 unless a field case
-escalates it).
+**Status:** CLOSED (2026-07-13) — fixed by SCANNER-GITIGNORE-1 (`c4d848c`): ignore::WalkBuilder
+full gitignore semantics + ratified root-depth-only hardcoded pruning (the review widened the
+root cause to the depth-independent prune list). The coverage crate is visible end-to-end;
+all 50 self-crates fold. See docs/slices/scanner-gitignore-1.md §6.
