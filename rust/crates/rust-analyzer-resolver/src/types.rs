@@ -275,12 +275,28 @@ pub fn is_valid_rust_type_name(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Check if a Rust type is external (from std or well-known crates).
+/// Whether a resolved Rust receiver type is EXTERNAL to the repo — has no in-repo definition to
+/// anchor a promoted call to. Two disjoint static name-sets qualify:
 ///
-/// **Provisional:** Currently only checks std types.
-/// Future: could check against indexed crate dependencies.
+/// - [`STD_TYPES`]: well-known std / std-library types (`Vec`, `String`, `Arc`, `PathBuf`, …).
+/// - [`PRIMITIVES`]: the language primitives (`str`, `usize`, `bool`, …). A primitive is never a
+///   repo-defined type, so a call on a primitive receiver (`s.len()`, `n.count_ones()`) can never
+///   promote to a Layer-0 in-repo edge. Classifying it external here (ENRICH-YIELD-2 EY1-B) makes
+///   the promotion filter reject it at gate 4 (the external path) instead of falling through to
+///   gate 5's `type_not_in_graph` — where the reader would be told "we looked for this type in the
+///   repo and didn't find it", misleading for a built-in that was never a repo type. It also lets
+///   the likely-external read projection (EY1-A) surface primitive receivers as orientation.
+///
+/// DETERMINISTIC and promotion-neutral: a primitive is never a promotable in-repo class, so moving
+/// its rejection one gate earlier changes only the funnel ATTRIBUTION, never the promoted set. This
+/// classification lives in the RUST resolver (not the language-agnostic promotion filter) *because*
+/// the primitive set is a Rust-language fact — a TypeScript type named `i32` must NOT be caught by
+/// it. The dependency-name half (`serde_json::Value` → external) stays BLOCKED: the resolver
+/// discards qualified paths, so manifest-name membership cannot prove a bare `Value` is external.
+///
+/// **Provisional:** a static-name heuristic, NOT compiler-verified.
 pub fn is_external_type(type_name: &str) -> bool {
-    STD_TYPES.contains(type_name)
+    STD_TYPES.contains(type_name) || PRIMITIVES.contains(type_name)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -493,5 +509,25 @@ mod tests {
 
         assert!(!is_external_type("Engine"));
         assert!(!is_external_type("MyCustomType"));
+    }
+
+    // ENRICH-YIELD-2 EY1-B: language primitives classify as external HERE (in the Rust resolver), so
+    // a primitive receiver lands at promotion gate 4 (the external path) rather than gate 5's
+    // `type_not_in_graph`, and surfaces in the EY1-A likely-external projection. The set is the
+    // resolver's own `PRIMITIVES` — a Rust-language fact, deliberately NOT in the language-agnostic
+    // promotion filter, so a non-Rust type named `i32` is never caught by it.
+    #[test]
+    fn primitives_classify_as_external() {
+        for prim in ["str", "usize", "bool", "char", "i32", "u64", "f64", "i128"] {
+            assert!(
+                is_external_type(prim),
+                "primitive `{prim}` must classify as external (EY1-B)"
+            );
+        }
+        // A repo-defined type is still internal.
+        assert!(!is_external_type("Engine"));
+        // The two sets are disjoint: a primitive is external via PRIMITIVES, not STD_TYPES.
+        assert!(!STD_TYPES.contains("str"));
+        assert!(PRIMITIVES.contains("str"));
     }
 }

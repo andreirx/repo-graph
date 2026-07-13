@@ -315,8 +315,12 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
         for symbol in symbols {
             ctx.add_symbol(symbol.clone());
 
-            // If it's a class, load its methods
-            if symbol.subtype == crate::contracts::SymbolSubtype::Class {
+            // Load methods for any usable receiver type — a class OR an enum (EY1-D). This MUST use
+            // the same predicate as promotion gate 5 (`is_usable_receiver_type`): if the gate accepts
+            // a subtype whose methods we never load here, gate 6 finds zero methods and the edge
+            // silently fails to promote. `load_class_methods` associates methods by type name /
+            // qualified_name, so it already returns an enum's `impl` methods.
+            if symbol.subtype.is_usable_receiver_type() {
                 let methods = self
                     .storage
                     .load_class_methods(snapshot_uid, &symbol.stable_key)?;

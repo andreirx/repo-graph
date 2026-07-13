@@ -1364,11 +1364,13 @@ mod tests {
             "promotion must NOT be denominated against enriched/eligible: {line}"
         );
         assert!(
-            line.contains("receiver type is external to this repo (a library type) 20"),
+            line.contains(
+                "receiver type is external to this repo (a std/library type or language primitive) 20"
+            ),
             "dominant class named in reader frame with its count: {line}"
         );
         assert!(
-            line.contains("method isn't defined on the resolved class 18"),
+            line.contains("method isn't defined on the resolved class or enum 18"),
             "second class named too: {line}"
         );
         assert!(
@@ -1420,7 +1422,7 @@ mod tests {
         assert_eq!(pf["rejections"][0]["gate"], 4);
         assert_eq!(
             pf["rejections"][0]["label"],
-            "receiver type is external to this repo (a library type)"
+            "receiver type is external to this repo (a std/library type or language primitive)"
         );
         // The per-gate waterfall reaches the doctor JSON too (eval order; gate 4 entered 78, rejected
         // 38 external). This is the §2.1 per-gate accounting on the product surface.

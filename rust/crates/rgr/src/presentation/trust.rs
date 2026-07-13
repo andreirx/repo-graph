@@ -148,6 +148,13 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
         out.push('\n');
     }
 
+    // EY1-A: the likely-external receiver-call orientation projection (Layer-2, read-side).
+    let external_receivers = render_enrichment_external(v);
+    if !external_receivers.is_empty() {
+        out.push_str(&external_receivers);
+        out.push('\n');
+    }
+
     let suspicious = render_suspicious_modules(v);
     if !suspicious.is_empty() {
         out.push_str(&suspicious);
@@ -306,6 +313,69 @@ fn render_classification(v: &CoherentTrustReport) -> String {
     );
     for cls in non_zero {
         out.push_str(&bullet(&format!("{} {}", cls.count, cls.classification)));
+    }
+    out
+}
+
+/// EY1-A (ENRICH-YIELD-2): a Layer-2 read projection over the enrichment metadata already on the
+/// trust report — the largest reject class (~36% of enrichment-eligible unknown object-method calls)
+/// whose receiver resolved to a *likely-external* type. This is ORIENTATION, not a resolved edge:
+/// `<T>` tells the agent "this call goes into a library/std type `<T>` — follow it to that
+/// crate/package/docs", converting an unattributed unknown into a place to look (VISION: orientation
+/// over oracle). Read-only reprojection of `enrichment_status.top_types` (already computed by the
+/// trust service); NO new persisted shape, NO new query — the ratified corrected EY1-A cell.
+///
+/// Two SEPARATE, independently-labelled basis lines (the ratified corrected EY1-A cell) — the two
+/// facts have DISTINCT provenance and must not be conflated into one claim:
+///   - receiver-type basis: the type name is inferred from a language-server type hover,
+///     heuristically parsed;
+///   - external-classification basis: the name matched a static name-set of well-known std/library
+///     type names AND language primitives (EY1-B classifies primitives external), NOT
+///     compiler-verified.
+///
+/// Both the Rust (`STD_TYPES` + `PRIMITIVES`) and TS (`NODE_TYPES`/`LIBRARY_TYPES`) resolvers
+/// classify externality by static name-set, so the basis is accurate across languages; those
+/// constant names are internal and kept off the reader surface (VISION: labels speak the reader's
+/// language). Never claims Layer-0 certainty — the ratification rejected promoting these to edges.
+fn render_enrichment_external(v: &CoherentTrustReport) -> String {
+    // Enrichment never ran → honest absence (no section), never a measured-zero.
+    let Some(status) = v.enrichment_status.value.as_ref() else {
+        return String::new();
+    };
+    let external: Vec<_> = status
+        .top_types
+        .iter()
+        .filter(|t| t.is_external && t.count > 0)
+        .collect();
+    // Enrichment ran but surfaced no external receivers → measured-absent, show nothing.
+    if external.is_empty() {
+        return String::new();
+    }
+    let mut out = labelled_heading(
+        "Likely-External Receiver Calls",
+        &v.enrichment_status,
+        "snapshot-scoped extraction",
+    );
+    // Two SEPARATE, independently-labelled bases (the ratified corrected EY1-A cell): the receiver
+    // TYPE and the EXTERNAL classification are distinct heuristics with distinct provenance, so each
+    // gets its own basis line — never merged into a single "basis:" claim. Plus the Layer-2 framing:
+    // this is orientation, not a resolved edge.
+    out.push_str(&bullet(
+        "receiver-type basis: inferred from a language-server type hover, heuristically parsed",
+    ));
+    out.push_str(&bullet(
+        "external-classification basis: matched a static name-set of well-known std/library type \
+         names and language primitives — not compiler-verified",
+    ));
+    out.push_str(&bullet(
+        "orientation only, not resolved call-graph edges (never a Layer-0 CALLS edge)",
+    ));
+    for t in external {
+        let calls = if t.count == 1 { "call" } else { "calls" };
+        out.push_str(&bullet(&format!(
+            "call on likely-external receiver `{}` ({} {})",
+            t.type_name, t.count, calls
+        )));
     }
     out
 }

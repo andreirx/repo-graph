@@ -973,4 +973,128 @@ mod tests {
             "the promoted CALLS edge targets the resolved impl method"
         );
     }
+
+    // ── ENRICH-YIELD-2 EY1-D: Rust enum receiver promotes end-to-end ───────────────────────────
+    //
+    // The full boundary: the extractor writes a Rust enum as subtype `"ENUM"` and its `impl` method
+    // unparented (type carried in `qualified_name`). This proves, through the REAL SQLite adapter,
+    // that (1) `load_symbols_by_names` returns the enum with subtype parsed to `Enum` (not collapsed
+    // to `Other`), (2) `is_usable_receiver_type()` accepts it so its methods load, (3)
+    // `load_class_methods` finds the enum's method by qualified_name, and (4) the 8-gate filter
+    // promotes the call. Before EY1-D the subtype collapsed to `Other` and gate 5 rejected the enum
+    // as `type_not_a_class` — a real single-answer type lost to a Class-only predicate.
+    #[test]
+    fn rust_enum_impl_method_receiver_promotes_end_to_end() {
+        use enrichment::{promote_edges, PromotionContext};
+
+        let mut storage = setup_test_db();
+        storage
+            .add_repo(&Repo {
+                repo_uid: "r1".to_string(),
+                name: "repo".to_string(),
+                root_path: "/tmp/r1".to_string(),
+                default_branch: None,
+                created_at: "2026-07-12T00:00:00Z".to_string(),
+                metadata_json: None,
+            })
+            .unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                parent_snapshot_uid: None,
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid;
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: snap.clone(),
+                status: "ready".to_string(),
+                completed_at: Some("2026-07-12T00:01:00Z".to_string()),
+            })
+            .unwrap();
+
+        let status_key = "r1:src/status.rs#Status:SYMBOL:ENUM".to_string();
+        storage
+            .insert_nodes(&[
+                // Rust enum → NodeSubtype::Enum → the extractor writes "ENUM".
+                rust_node("n-status", &status_key, "ENUM", "Status", "Status", &snap),
+                // Its `impl Status { fn is_active(&self) }` method — unparented, type in
+                // qualified_name, exactly like a struct impl method.
+                rust_node(
+                    "n-status-active",
+                    "r1:src/status.rs#Status.is_active:SYMBOL:METHOD",
+                    "METHOD",
+                    "is_active",
+                    "Status.is_active",
+                    &snap,
+                ),
+            ])
+            .unwrap();
+
+        // The adapter returns the enum with its subtype preserved as `Enum` (EY1-D boundary).
+        let symbols =
+            EnrichmentStoragePort::load_symbols_by_names(&storage, &snap, &["Status".to_string()])
+                .unwrap();
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(
+            symbols[0].subtype,
+            SymbolSubtype::Enum,
+            "the enum subtype survives the storage read (not collapsed to Other)"
+        );
+
+        // Build the promotion context with the SAME predicate the pipeline uses (Class|Enum), so the
+        // enum's methods load into the context.
+        let mut ctx = PromotionContext::new();
+        for sym in symbols {
+            let usable = sym.subtype.is_usable_receiver_type();
+            let key = sym.stable_key.clone();
+            ctx.add_symbol(sym);
+            if usable {
+                for (mname, minfo) in
+                    EnrichmentStoragePort::load_class_methods(&storage, &snap, &key).unwrap()
+                {
+                    ctx.add_class_method(&key, &mname, minfo);
+                }
+            }
+        }
+
+        // A resolved `status.is_active()` receiver (rust-analyzer resolves the enum type "Status").
+        let candidate = PromotionCandidate {
+            edge_uid: "e-enum-1".to_string(),
+            snapshot_uid: snap.clone(),
+            repo_uid: "r1".to_string(),
+            source_node_uid: "n-caller".to_string(),
+            target_key: "status.is_active".to_string(),
+            line_start: Some(7),
+            col_start: Some(4),
+            line_end: Some(7),
+            col_end: Some(22),
+            category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            enrichment: EnrichmentMetadata {
+                receiver_type: Some("Status".to_string()),
+                type_display_name: Some("Status".to_string()),
+                is_external_type: false,
+                origin: ReceiverTypeOrigin::Compiler,
+                failure_reason: None,
+            },
+        };
+
+        let result = promote_edges(&[candidate], &ctx);
+
+        assert_eq!(
+            result.promoted.len(),
+            1,
+            "a resolved Rust ENUM method receiver promotes; skipped: {:?}",
+            result.skipped_reasons
+        );
+        assert_eq!(
+            result.promoted[0].target_node_uid, "n-status-active",
+            "the promoted CALLS edge targets the enum's impl method"
+        );
+    }
 }

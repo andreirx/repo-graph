@@ -337,6 +337,13 @@ pub struct SymbolInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolSubtype {
     Class,
+    /// A Rust `enum` — a concrete, single-answer type that owns methods via `impl` blocks, exactly
+    /// like a `Class`. Preserved as its own variant (ENRICH-YIELD-2 EY1-D) so promotion gate 5 can
+    /// treat it as a usable receiver type. Before this variant the extractor's `"ENUM"` subtype
+    /// collapsed to [`Self::Other`] here, so an unambiguous enum with a valid method was rejected at
+    /// gate 5 purely because the predicate was `Class`-only — a lossy crate boundary, not a real
+    /// ambiguity. See [`crate::promotion`] gate 5 and `docs/slices/enrich-yield-2.md` §1.3.
+    Enum,
     Method,
     Getter,
     Setter,
@@ -348,6 +355,10 @@ impl SymbolSubtype {
     pub fn parse(s: &str) -> Self {
         match s.to_uppercase().as_str() {
             "CLASS" => Self::Class,
+            // The rust-extractor emits Rust enums as `"ENUM"` (`NodeSubtype::Enum` via
+            // `format!("{:?}", subtype).to_uppercase()`); preserve it across the boundary instead of
+            // collapsing to `Other` (EY1-D).
+            "ENUM" => Self::Enum,
             "METHOD" => Self::Method,
             "GETTER" => Self::Getter,
             "SETTER" => Self::Setter,
@@ -358,6 +369,20 @@ impl SymbolSubtype {
 
     pub fn is_method_like(&self) -> bool {
         matches!(self, Self::Method | Self::Getter | Self::Setter)
+    }
+
+    /// Whether this subtype is a receiver type that can anchor a promoted method call — a concrete
+    /// type body that owns methods. Currently `Class | Enum` (EY1-D widened it from `Class`-only).
+    ///
+    /// ONE definition, TWO matched callers that MUST agree: promotion gate 5 (which receiver types
+    /// are usable — [`crate::promotion::promote_edges`]) and the pipeline's method loader (which
+    /// types get their methods loaded into the promotion context — [`crate::pipeline`]). If those
+    /// two drifted, a type could be accepted by the gate but have no methods loaded (gate 6 then
+    /// fails silently) or vice-versa; sharing this predicate makes "usable receiver type" a single
+    /// decision. That drift-safety across a module boundary is why this is a named method, not an
+    /// inline `matches!` at each site.
+    pub fn is_usable_receiver_type(&self) -> bool {
+        matches!(self, Self::Class | Self::Enum)
     }
 }
 
@@ -431,5 +456,23 @@ mod tests {
         assert_eq!(result.receiver_type, None);
         assert_eq!(result.origin, ReceiverTypeOrigin::Failed);
         assert_eq!(result.failure_reason, Some("type is any".to_string()));
+    }
+
+    // EY1-D: the Rust enum subtype survives the extractor→enrichment boundary. The rust-extractor
+    // writes `"ENUM"` (uppercased `NodeSubtype::Enum`); `parse` must map it to `Enum`, NOT collapse
+    // it to `Other` as it did before — the whole point of the lever is that an unambiguous enum with
+    // a valid method is a usable promotion type, not an unresolvable "non-class".
+    #[test]
+    fn symbol_subtype_parse_preserves_enum() {
+        assert_eq!(SymbolSubtype::parse("ENUM"), SymbolSubtype::Enum);
+        // Case-insensitive, matching the other variants (the extractor uppercases, but be robust).
+        assert_eq!(SymbolSubtype::parse("enum"), SymbolSubtype::Enum);
+        assert_eq!(SymbolSubtype::parse("Enum"), SymbolSubtype::Enum);
+        // Unchanged mappings, incl. the still-`Other` fallback for genuinely unknown subtypes.
+        assert_eq!(SymbolSubtype::parse("CLASS"), SymbolSubtype::Class);
+        assert_eq!(SymbolSubtype::parse("METHOD"), SymbolSubtype::Method);
+        assert_eq!(SymbolSubtype::parse("TYPEALIAS"), SymbolSubtype::Other);
+        // An enum is a type, not a method-like symbol.
+        assert!(!SymbolSubtype::Enum.is_method_like());
     }
 }

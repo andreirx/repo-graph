@@ -28,7 +28,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::contracts::{
-    EdgeLocation, PromotedEdge, PromotionCandidate, ReceiverTypeOrigin, SymbolInfo, SymbolSubtype,
+    EdgeLocation, PromotedEdge, PromotionCandidate, ReceiverTypeOrigin, SymbolInfo,
     UnresolvedCategory,
 };
 use crate::funnel::RejectionClass;
@@ -222,6 +222,14 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
         }
 
         // Gate 4: Type is internal (this check + the type-name precondition below are both gate 4).
+        // `is_external_type` is set by the language's resolver. For Rust it is true for std/library
+        // types AND (ENRICH-YIELD-2 EY1-B) language primitives (`str`, `usize`, …): a primitive is
+        // never a repo-defined type, so it can never anchor an in-repo edge. Catching primitives on
+        // THIS existing external path — rather than a separate predicate in this language-agnostic
+        // filter — keeps the primitive-name set a Rust-language fact owned by the Rust resolver (a
+        // TypeScript type named `i32` is not caught), and is promotion-neutral: a primitive would
+        // have failed gate 5's graph lookup anyway, so only the attribution moves (gate 5 →
+        // gate 4). See `rust-analyzer-resolver::types::is_external_type`.
         enter(4);
         if candidate.enrichment.is_external_type {
             skip(RejectionClass::ExternalType);
@@ -277,9 +285,15 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
             }
         };
 
+        // A usable receiver type is a CLASS *or* an ENUM (EY1-D). A Rust enum is a concrete,
+        // single-answer type that owns methods via `impl` blocks exactly like a struct/class, so an
+        // unambiguous enum with a valid method is a real Layer-0 promotion. Genuine ambiguity (2+
+        // matching types) and non-type symbols still reject below. The predicate is
+        // `SymbolSubtype::is_usable_receiver_type` — shared with the pipeline's method loader so the
+        // gate and the loader cannot disagree on what a usable type is.
         let classes: Vec<_> = symbols
             .iter()
-            .filter(|s| s.subtype == SymbolSubtype::Class)
+            .filter(|s| s.subtype.is_usable_receiver_type())
             .collect();
 
         if classes.is_empty() {
@@ -375,7 +389,8 @@ fn build_location(candidate: &PromotionCandidate) -> Option<EdgeLocation> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::EnrichmentMetadata;
+    use crate::contracts::{EnrichmentMetadata, SymbolSubtype};
+    use std::collections::BTreeSet;
 
     fn make_candidate(
         edge_uid: &str,
@@ -890,6 +905,387 @@ mod tests {
         // And the reader-frame reason is the union one, not the not-in-graph one.
         assert_eq!(funnel.rejections.len(), 1);
         assert_eq!(funnel.rejections[0].reason, "union_or_intersection");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ENRICH-YIELD-2 EY1-B: primitive receiver reattribution (gate 4, promotion-neutral)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    // A primitive receiver (`str`, `usize`, …) lands at gate 4 (external path), NOT gate 5's
+    // `type_not_in_graph`. The Rust resolver classifies primitives as external
+    // (`rust-analyzer-resolver::types::is_external_type` — proven by its own
+    // `primitives_classify_as_external`), so the candidate arrives with `is_external_type=true` and
+    // is rejected by the EXISTING gate-4 external check. This is the reattribution lever: a primitive
+    // is never a repo type, so "we looked for it in the repo and didn't find it" (gate 5) would
+    // mislead. It rides the external path (no separate disposition, no primitive predicate in this
+    // language-agnostic filter) — the ratified corrected EY1-B cell.
+    #[test]
+    fn primitive_receiver_classified_external_lands_at_gate_4() {
+        let ctx = make_context();
+        let candidate = make_candidate(
+            "e-prim",
+            "s.len",
+            Some("str"),
+            true, // the Rust resolver marks primitives external (is_external_type("str") == true)
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+        let funnel = promote_edges(&[candidate], &ctx)
+            .to_report(1, None)
+            .funnel();
+
+        assert!(funnel.conserves());
+        assert_eq!(funnel.promoted, 0);
+        assert_eq!(funnel.rejections.len(), 1);
+        assert_eq!(funnel.rejections[0].reason, "external_type");
+        assert_eq!(
+            funnel.rejections[0].gate, 4,
+            "primitive is attributed to gate 4 (external path), not gate 5"
+        );
+        // The label honestly names both cases — a primitive is not a library type.
+        assert_eq!(
+            funnel.rejections[0].label,
+            "receiver type is external to this repo (a std/library type or language primitive)"
+        );
+        // Gate 4 counts it; the graph-lookup gate 5 never even sees it.
+        let gate = |n: u8| funnel.gates.iter().find(|g| g.gate == n).unwrap();
+        assert_eq!(gate(4).rejected, 1);
+        assert_eq!(
+            gate(5).entered,
+            0,
+            "a primitive never reaches the graph-lookup gate"
+        );
+    }
+
+    // EY1-B promotion-neutrality — the RATIFIED proof (OPERATOR_NOTE 2026-07-12, EY2-B-PROOF), now
+    // over a REAL CAPTURED SELF-INDEX CORPUS (review-2). The stop condition "promoted set BEFORE ==
+    // AFTER" binds EY1-B *in isolation*; it CANNOT be shown by comparing two live enrichment runs
+    // (rust-analyzer is nondeterministic, and EY1-D adds enum promotions by design). So we CAPTURE ONE
+    // real candidate corpus + its symbol/method context from an isolated `rmap index` + live
+    // rust-analyzer enrichment of this workspace (`testdata/ey1b_selfindex_corpus.json` — see its
+    // `_provenance`; the read-only `testdata/capture_ey1b_corpus.py` reproduces
+    // `storage::enrichment_impl`'s `load_promotion_candidates` + `load_symbols_by_names` +
+    // `load_class_methods`), and replay THAT identical corpus through the two classifications EY1-B
+    // moves between:
+    //   - post-EY1-B: `is_external_type` = the REAL persisted value (STD_TYPES ∪ PRIMITIVES);
+    //   - pre-EY1-B:  `is_external_type` = post AND NOT `receiver_is_primitive` (STD-only), because
+    //     EY1-B's ONLY change to `is_external_type` was `|| PRIMITIVES.contains(name)`.
+    // The corpus (821 candidates, 54 primitive; 146 symbols; 922 methods) is byte-identical between the
+    // two passes; only `is_external_type` on the primitive receivers differs. We assert:
+    //   (a) the promoted edge set is EXACTLY equal pre vs post (THE stop condition, in isolation), and
+    //   (b) the ONLY candidates whose disposition changes are the primitives — each moving to gate 4
+    //       (`external_type`) post-EY1-B FROM a pre-EY1-B NON-promotion rejection; every non-primitive
+    //       is byte-identical.
+    // HONEST NUANCE the real corpus reveals (the old synthetic replay hid it): a primitive's pre-EY1-B
+    // rejection gate is `type_not_in_graph@gate5` for a simple `recv.method` (49/54 in this corpus),
+    // but a DEEPER-chain primitive (e.g. `file_path.rsplit('/').next().unwrap_or`) is rejected at gate 8
+    // (`not_simple_receiver_method`, 5/54) — because gate 4 is evaluated BEFORE gate 8, so post-EY1-B
+    // catches it at gate 4 first. EITHER WAY the primitive NEVER promotes in either pass, so the
+    // promoted set is unchanged (neutrality holds); EY1-B only moves the ATTRIBUTION of an
+    // already-failing primitive earlier, to the honest external gate. This REPLACES the prior
+    // hand-built `primitives_are_promotion_neutral_deterministic_replay`.
+    #[test]
+    fn primitives_are_promotion_neutral_over_real_self_index_corpus() {
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            candidates: Vec<FxCandidate>,
+            symbols: Vec<FxSymbol>,
+            class_methods: Vec<FxMethod>,
+        }
+        #[derive(serde::Deserialize)]
+        struct FxCandidate {
+            edge_uid: String,
+            target_key: String,
+            receiver_type: Option<String>,
+            type_display_name: Option<String>,
+            category: String,
+            /// The REAL persisted `$.enrichment.isExternalType` (post-EY1-B = STD_TYPES ∪ PRIMITIVES).
+            is_external_post: bool,
+            /// Membership in the resolver's PRIMITIVES set (the receivers EY1-B moves).
+            receiver_is_primitive: bool,
+        }
+        #[derive(serde::Deserialize)]
+        struct FxSymbol {
+            node_uid: String,
+            stable_key: String,
+            qualified_name: Option<String>,
+            subtype: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct FxMethod {
+            class_stable_key: String,
+            method_name: String,
+            method: FxSymbol,
+        }
+
+        let raw = include_str!("testdata/ey1b_selfindex_corpus.json");
+        let fx: Fixture = serde_json::from_str(raw).expect("fixture parses");
+
+        // Rebuild the promotion context exactly as `EnrichmentPipeline::run_promotion` does: add every
+        // captured symbol; add every captured (usable-type) method. The subtype defaults mirror the
+        // storage adapter (symbols default `Other`, methods default `Method`).
+        let mut ctx = PromotionContext::new();
+        for s in &fx.symbols {
+            ctx.add_symbol(SymbolInfo {
+                node_uid: s.node_uid.clone(),
+                stable_key: s.stable_key.clone(),
+                qualified_name: s.qualified_name.clone(),
+                subtype: s
+                    .subtype
+                    .as_deref()
+                    .map(SymbolSubtype::parse)
+                    .unwrap_or(SymbolSubtype::Other),
+            });
+        }
+        for m in &fx.class_methods {
+            ctx.add_class_method(
+                &m.class_stable_key,
+                &m.method_name,
+                SymbolInfo {
+                    node_uid: m.method.node_uid.clone(),
+                    stable_key: m.method.stable_key.clone(),
+                    qualified_name: m.method.qualified_name.clone(),
+                    subtype: m
+                        .method
+                        .subtype
+                        .as_deref()
+                        .map(SymbolSubtype::parse)
+                        .unwrap_or(SymbolSubtype::Method),
+                },
+            );
+        }
+
+        // Classify the identical corpus two ways. `is_external_pre = is_external_post && !primitive`
+        // is the pre-EY1-B (STD-only) classification; `is_external_post` is the real persisted one.
+        let build = |c: &FxCandidate, is_external: bool| PromotionCandidate {
+            edge_uid: c.edge_uid.clone(),
+            snapshot_uid: "fixture".to_string(),
+            repo_uid: "fixture".to_string(),
+            source_node_uid: "fixture".to_string(),
+            target_key: c.target_key.clone(),
+            line_start: None,
+            col_start: None,
+            line_end: None,
+            col_end: None,
+            category: UnresolvedCategory::parse(&c.category)
+                .expect("fixture holds only accepted categories"),
+            enrichment: EnrichmentMetadata {
+                receiver_type: c.receiver_type.clone(),
+                type_display_name: c.type_display_name.clone(),
+                is_external_type: is_external,
+                origin: ReceiverTypeOrigin::Compiler,
+                failure_reason: None,
+            },
+        };
+        let pre: Vec<_> = fx
+            .candidates
+            .iter()
+            .map(|c| build(c, c.is_external_post && !c.receiver_is_primitive))
+            .collect();
+        let post: Vec<_> = fx
+            .candidates
+            .iter()
+            .map(|c| build(c, c.is_external_post))
+            .collect();
+
+        // (a) The promoted set is EXACTLY equal pre vs post — THE stop condition, over the real corpus.
+        let promoted_set = |cands: &[PromotionCandidate]| -> BTreeSet<String> {
+            promote_edges(cands, &ctx)
+                .promoted
+                .into_iter()
+                .map(|e| e.edge_uid)
+                .collect()
+        };
+        let pre_set = promoted_set(&pre);
+        let post_set = promoted_set(&post);
+        assert_eq!(
+            pre_set, post_set,
+            "EY1-B is promotion-neutral on the real self-index corpus: identical corpus, identical \
+             promoted set pre vs post"
+        );
+        // Non-vacuous AND fidelity-pinned: replaying the captured corpus reproduces the live
+        // `rmap enrich` funnel's promoted count (47 — see this fixture's `_provenance` capture run and
+        // the build report). This cross-checks that the captured symbol/method context is COMPLETE,
+        // not merely real: an under-captured context would promote fewer than the live run did. (If the
+        // fixture is regenerated from a different self-index run, update this count.)
+        assert_eq!(
+            post_set.len(),
+            47,
+            "post-EY1-B replay reproduces the live self-index funnel's 47 promotions"
+        );
+
+        // Per-candidate disposition over the real filter: "PROMOTED" or "<reason>@gate<N>". Each
+        // candidate is evaluated independently by `promote_edges` (no cross-candidate state).
+        fn disposition(cand: &PromotionCandidate, ctx: &PromotionContext) -> String {
+            let f = promote_edges(std::slice::from_ref(cand), ctx)
+                .to_report(1, None)
+                .funnel();
+            if f.promoted == 1 {
+                "PROMOTED".to_string()
+            } else {
+                let r = &f.rejections[0];
+                format!("{}@gate{}", r.reason, r.gate)
+            }
+        }
+
+        // (b) The ONLY candidates that move are the primitives; each moves to gate 4 (external) FROM a
+        // pre-EY1-B non-promotion rejection. Every non-primitive is byte-identical.
+        let mut moved = 0usize;
+        for (c, (cand_pre, cand_post)) in fx.candidates.iter().zip(pre.iter().zip(post.iter())) {
+            let d_pre = disposition(cand_pre, &ctx);
+            let d_post = disposition(cand_post, &ctx);
+            if c.receiver_is_primitive {
+                moved += 1;
+                assert_ne!(
+                    d_pre, d_post,
+                    "a primitive's attribution moves under EY1-B: {} ({})",
+                    c.edge_uid, c.target_key
+                );
+                assert_eq!(
+                    d_post, "external_type@gate4",
+                    "post-EY1-B a primitive is caught at gate 4 (external): {} ({})",
+                    c.edge_uid, c.target_key
+                );
+                assert_ne!(
+                    d_pre, "PROMOTED",
+                    "a primitive NEVER promoted pre-EY1-B, so moving it is promotion-neutral: {} ({})",
+                    c.edge_uid, c.target_key
+                );
+                // Pre-EY1-B a primitive is an already-failing rejection at gate 5 (type_not_in_graph,
+                // simple call) OR gate 8 (deeper chain) — never gate 6, since no repo symbol is named
+                // after a primitive (verified by promoted-set equality above).
+                assert!(
+                    d_pre == "type_not_in_graph@gate5"
+                        || d_pre == "not_simple_receiver_method@gate8"
+                        || d_pre == "optional_or_element_access@gate8",
+                    "pre-EY1-B a primitive is an already-failing rejection at gate 5 or gate 8, not \
+                     {d_pre}: {} ({})",
+                    c.edge_uid,
+                    c.target_key
+                );
+            } else {
+                assert_eq!(
+                    d_pre, d_post,
+                    "a non-primitive candidate's disposition is untouched by EY1-B: {} ({})",
+                    c.edge_uid, c.target_key
+                );
+            }
+        }
+        // Non-vacuous: the corpus really contains the primitive receivers EY1-B reclassifies (54 —
+        // matches this fixture's `_provenance.counts.primitive_candidates`; the receivers observed were
+        // `bool`, `char`, `i32`, `str`, `u64`). Update if the fixture is regenerated.
+        assert_eq!(
+            moved, 54,
+            "the captured corpus contains the 54 primitive receivers EY1-B reclassifies"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ENRICH-YIELD-2 EY1-D: Rust enum receiver promotion (gate 5 widened to Class|Enum)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    // An unambiguous Rust enum with a valid method PROMOTES: gate 5 accepts Class|Enum. Before EY1-D
+    // the enum's `"ENUM"` subtype collapsed to `Other` and gate 5 rejected it as `type_not_a_class`
+    // despite an enum being a concrete, single-answer type that owns methods via `impl` blocks.
+    #[test]
+    fn enum_receiver_with_valid_method_promotes() {
+        let mut ctx = PromotionContext::new();
+        ctx.add_symbol(SymbolInfo {
+            node_uid: "enum-1".to_string(),
+            stable_key: "Status".to_string(),
+            qualified_name: Some("Status".to_string()),
+            subtype: SymbolSubtype::Enum,
+        });
+        ctx.add_class_method(
+            "Status",
+            "is_active",
+            SymbolInfo {
+                node_uid: "m-1".to_string(),
+                stable_key: "Status.is_active".to_string(),
+                qualified_name: Some("Status.is_active".to_string()),
+                subtype: SymbolSubtype::Method,
+            },
+        );
+
+        let candidate = make_candidate(
+            "e-enum",
+            "status.is_active",
+            Some("Status"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+        let result = promote_edges(&[candidate], &ctx);
+
+        assert_eq!(
+            result.promoted.len(),
+            1,
+            "an unambiguous enum method call promotes; skipped: {:?}",
+            result.skipped_reasons
+        );
+        assert_eq!(result.promoted[0].target_node_uid, "m-1");
+    }
+
+    // EY1-D does NOT relax genuine ambiguity or admit non-types: a name resolving to BOTH an enum and
+    // a class (2 usable types) is still `ambiguous_class_multiple_definitions`, and a symbol that is
+    // neither class nor enum (e.g. a type alias → `Other`) is still `type_not_a_class`. Only
+    // unambiguous concrete types promote — the honesty boundary the ratification kept.
+    #[test]
+    fn enum_widening_still_rejects_ambiguous_and_non_usable() {
+        // (a) ambiguous: an enum AND a class share the name "Dup" → 2 usable types.
+        let mut ctx = PromotionContext::new();
+        ctx.add_symbol(SymbolInfo {
+            node_uid: "d-enum".to_string(),
+            stable_key: "Dup".to_string(),
+            qualified_name: Some("Dup".to_string()),
+            subtype: SymbolSubtype::Enum,
+        });
+        ctx.add_symbol(SymbolInfo {
+            node_uid: "d-class".to_string(),
+            stable_key: "Dup".to_string(),
+            qualified_name: Some("Dup".to_string()),
+            subtype: SymbolSubtype::Class,
+        });
+        let amb = make_candidate(
+            "e-amb",
+            "d.go",
+            Some("Dup"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+        let r = promote_edges(&[amb], &ctx);
+        assert!(r.promoted.is_empty());
+        assert_eq!(
+            r.skipped_reasons
+                .get("ambiguous_class_multiple_definitions"),
+            Some(&1),
+            "enum+class homonym stays ambiguous"
+        );
+
+        // (b) non-usable: "Alias" resolves only to an `Other`-subtype symbol (e.g. a type alias).
+        let mut ctx2 = PromotionContext::new();
+        ctx2.add_symbol(SymbolInfo {
+            node_uid: "a-1".to_string(),
+            stable_key: "Alias".to_string(),
+            qualified_name: Some("Alias".to_string()),
+            subtype: SymbolSubtype::Other,
+        });
+        let non = make_candidate(
+            "e-non",
+            "a.go",
+            Some("Alias"),
+            false,
+            ReceiverTypeOrigin::Compiler,
+            UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+        );
+        let r2 = promote_edges(&[non], &ctx2);
+        assert!(r2.promoted.is_empty());
+        assert_eq!(
+            r2.skipped_reasons.get("type_not_a_class"),
+            Some(&1),
+            "a non-class, non-enum type is still rejected"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

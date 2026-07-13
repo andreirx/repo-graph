@@ -562,8 +562,12 @@ fn compute_blast_radius_and_enrichment_cancellable(
     let mut eligible_count: u64 = 0;
     let mut enrichment_was_run = false;
 
-    // BTreeMap for deterministic ordering of type counts.
-    let mut type_counts: std::collections::BTreeMap<String, (u64, bool)> =
+    // BTreeMap for deterministic ordering. The key includes `is_external` so the SAME simple name
+    // appearing as BOTH an internal and an external receiver (e.g. a std `Error` and an in-repo
+    // `Error`, which the resolver collapses to the same bare name) is counted SEPARATELY per
+    // classification. Keying by name alone would freeze the first row's flag for every same-name row,
+    // and the likely-external read projection (EY1-A) could then report a false external count.
+    let mut type_counts: std::collections::BTreeMap<(String, bool), u64> =
         std::collections::BTreeMap::new();
 
     for (i, sample) in samples.iter().enumerate() {
@@ -609,8 +613,7 @@ fn compute_blast_radius_and_enrichment_cancellable(
                                 .get("isExternalType")
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(false);
-                            let entry = type_counts.entry(type_name).or_insert((0, is_ext));
-                            entry.0 += 1;
+                            *type_counts.entry((type_name, is_ext)).or_insert(0) += 1;
                         }
                     }
                 }
@@ -636,7 +639,7 @@ fn compute_blast_radius_and_enrichment_cancellable(
     let enrichment = if enrichment_was_run {
         let mut top_types: Vec<EnrichmentTopType> = type_counts
             .into_iter()
-            .map(|(type_name, (count, is_external))| EnrichmentTopType {
+            .map(|((type_name, is_external), count)| EnrichmentTopType {
                 type_name,
                 count,
                 is_external,
@@ -1194,6 +1197,60 @@ mod tests {
         assert!(es.top_types[0].is_external);
         assert_eq!(es.top_types[1].type_name, "MyClass");
         assert!(!es.top_types[1].is_external);
+    }
+
+    // ENRICH-YIELD-2 EY1-A read-path regression: the SAME simple name resolving to BOTH an external
+    // and an internal receiver (e.g. std `Error` vs an in-repo `Error` — the resolver discards the
+    // qualified path, so both arrive as bare `Error`) must be counted SEPARATELY per classification.
+    // Keying the aggregation by name alone froze the first row's `isExternalType` for every same-name
+    // row, which would let the likely-external projection report an internal-inflated external count.
+    #[test]
+    fn enrichment_same_name_both_classes_counted_separately() {
+        let mut input = minimal_input();
+        input.all_classification_counts = vec![ClassificationCountRow {
+            classification: UnresolvedEdgeClassification::Unknown,
+            count: 5,
+        }];
+        let ext = || TrustUnresolvedEdgeSample {
+            category: UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+            source_node_visibility: None,
+            metadata_json: Some(
+                r#"{"enrichment":{"receiverType":"Error","isExternalType":true}}"#.into(),
+            ),
+        };
+        let internal = || TrustUnresolvedEdgeSample {
+            category: UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+            source_node_visibility: None,
+            metadata_json: Some(
+                r#"{"enrichment":{"receiverType":"Error","isExternalType":false}}"#.into(),
+            ),
+        };
+        // 3 external `Error`, 2 internal `Error`. If classification collapsed, we'd see one entry of
+        // count 5; the fix keeps them apart.
+        input.unknown_calls_samples = vec![ext(), ext(), ext(), internal(), internal()];
+
+        let report = compute_trust_report(&input);
+        let es = report.enrichment_status.unwrap();
+        assert_eq!(es.top_types.len(), 2, "two entries: one per classification");
+        let external = es
+            .top_types
+            .iter()
+            .find(|t| t.is_external)
+            .expect("an external `Error` entry");
+        let internal = es
+            .top_types
+            .iter()
+            .find(|t| !t.is_external)
+            .expect("an internal `Error` entry");
+        assert_eq!(external.type_name, "Error");
+        assert_eq!(internal.type_name, "Error");
+        assert_eq!(
+            external.count, 3,
+            "external count is not inflated by internal rows"
+        );
+        assert_eq!(internal.count, 2);
     }
 
     #[test]

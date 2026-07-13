@@ -4,9 +4,10 @@
 //!
 //! - **What:** the reader-facing taxonomy of the promotion filter's rejections — for each
 //!   first-rejection reason the 8-gate filter ([`crate::promotion`]) can emit, its gate number, its
-//!   stable machine code, and a *reader-frame* label ("type resolves to 2+ classes (ambiguous)", not
-//!   "gate 5") — PLUS the pure aggregator ([`PromotionFunnel`]) that turns a promotion run's
-//!   candidate/promoted/first-rejection counts into a conserved, deterministically-ordered breakdown.
+//!   stable machine code, and a *reader-frame* label ("type resolves to 2+ classes or enums
+//!   (ambiguous)", not "gate 5") — PLUS the pure aggregator ([`PromotionFunnel`]) that turns a
+//!   promotion run's candidate/promoted/first-rejection counts into a conserved,
+//!   deterministically-ordered breakdown.
 //! - **Concrete current users:** [`crate::promotion::promote_edges`] (its `skip` records a
 //!   [`RejectionClass`], the single source of truth for the reason strings), and
 //!   [`crate::status::PromotionReport::funnel`], which the daemon's enrichment pass + the manual
@@ -48,7 +49,11 @@ pub enum RejectionClass {
     /// Gate 3 — the receiver type was not resolved by the compiler (resolution failed). Gate 2 (the
     /// config-opt-in placeholder) never rejects, so the resolution-failed case is attributed here.
     NoCompilerEnrichment,
-    /// Gate 4 — the resolved receiver type is external to this repo (a library/crate type).
+    /// Gate 4 — the resolved receiver type is external to this repo: a std/library type (`Vec`,
+    /// `String`, …) OR a language primitive (`str`, `usize`, …). Both are grouped here because both
+    /// are rejected via the same gate-4 external path — the Rust resolver's `is_external_type` marks
+    /// primitives external too (ENRICH-YIELD-2 EY1-B), since a primitive is never a repo-defined type
+    /// that could anchor an in-repo edge. Neither can promote; the reader label names both cases.
     ExternalType,
     /// Gate 4 (usable-type precondition) — resolved, but no usable type name was produced.
     NoTypeName,
@@ -60,13 +65,16 @@ pub enum RejectionClass {
     NotSimpleReceiverMethod,
     /// Gate 5 — the receiver type is not a type defined in this repo.
     TypeNotInGraph,
-    /// Gate 5 — the receiver type resolves to a non-class symbol.
+    /// Gate 5 — the receiver type resolves to a symbol that is neither a class nor an enum (EY1-D
+    /// widened the usable-type predicate to `Class | Enum`), so there is no type body owning methods
+    /// to anchor a call to. The stable code stays `type_not_a_class` (machine contract); the reader
+    /// label names both class and enum.
     TypeNotAClass,
-    /// Gate 5 — the type resolves to 2+ classes (ambiguous).
+    /// Gate 5 — the type resolves to 2+ classes or enums (ambiguous).
     AmbiguousClassMultipleDefinitions,
-    /// Gate 6 — the method is not defined on the resolved class.
+    /// Gate 6 — the method is not defined on the resolved class or enum.
     MethodNotFoundOnClass,
-    /// Gate 6 — the method is overloaded on the class (2+ definitions).
+    /// Gate 6 — the method is overloaded on the class or enum (2+ definitions).
     AmbiguousMethodOverloaded,
 }
 
@@ -130,7 +138,9 @@ impl RejectionClass {
         match self {
             Self::WrongCategory => "call isn't an object-method call we resolve",
             Self::NoCompilerEnrichment => "receiver type was not resolved by the compiler",
-            Self::ExternalType => "receiver type is external to this repo (a library type)",
+            Self::ExternalType => {
+                "receiver type is external to this repo (a std/library type or language primitive)"
+            }
             Self::NoTypeName => "resolved receiver has no usable type name",
             Self::UnionOrIntersection => "receiver type is a union/intersection of 2+ types",
             Self::OptionalOrElementAccess => {
@@ -138,10 +148,18 @@ impl RejectionClass {
             }
             Self::NotSimpleReceiverMethod => "call chain is deeper than receiver.method",
             Self::TypeNotInGraph => "receiver type isn't a type defined in this repo",
-            Self::TypeNotAClass => "receiver type resolves to a non-class symbol",
-            Self::AmbiguousClassMultipleDefinitions => "type resolves to 2+ classes (ambiguous)",
-            Self::MethodNotFoundOnClass => "method isn't defined on the resolved class",
-            Self::AmbiguousMethodOverloaded => "method is overloaded on the class (2+ definitions)",
+            // EY1-D widened the usable-type predicate to class OR enum, so a rejection here means the
+            // resolved symbol is NEITHER — e.g. a trait/interface, type alias, or value symbol that
+            // owns no methods we can anchor a call to. The label must not imply "any non-class",
+            // which would now mislead: an enum IS usable and promotes.
+            Self::TypeNotAClass => "receiver type isn't a class or enum we can anchor a method on",
+            Self::AmbiguousClassMultipleDefinitions => {
+                "type resolves to 2+ classes or enums (ambiguous)"
+            }
+            Self::MethodNotFoundOnClass => "method isn't defined on the resolved class or enum",
+            Self::AmbiguousMethodOverloaded => {
+                "method is overloaded on the class or enum (2+ definitions)"
+            }
         }
     }
 
@@ -193,8 +211,14 @@ const GATE_STAGES_IN_EVAL_ORDER: [(u8, &str); 8] = [
         8,
         "call is a direct receiver.method (no chaining or indexing)",
     ),
-    (5, "receiver type maps to exactly one class we can see"),
-    (6, "the called method is uniquely defined on that class"),
+    (
+        5,
+        "receiver type maps to exactly one class or enum we can see",
+    ),
+    (
+        6,
+        "the called method is uniquely defined on that class or enum",
+    ),
 ];
 
 /// One gate's slice of the promotion waterfall (ENRICH-YIELD-1 §2.1) — how many candidates REACHED
@@ -444,7 +468,7 @@ mod tests {
         assert_eq!(f.rejections[0].gate, 4);
         assert_eq!(
             f.rejections[0].label,
-            "receiver type is external to this repo (a library type)"
+            "receiver type is external to this repo (a std/library type or language primitive)"
         );
         assert_eq!(
             f.rejections[2].reason,
