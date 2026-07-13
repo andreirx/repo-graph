@@ -27,3 +27,17 @@ enrichment pass's batch/cancellation semantics untouched. Do NOT commit.
 Cargo gates; the false-edge named test; isolated self-dogfood funnel BEFORE/AFTER — the
 ~140 self.field.method rejections convert to promotions ONLY where the located receiver
 type resolves uniquely (cite examples); no other gate's counts regress.
+
+---
+
+## 4. Delivery record (2026-07-13)
+
+**DELIVERED** (relay-approved iteration 1 — 2 cycles + 2 ratifications). EY3-ROUTING:
+shape-based routing ratified (the packet's "category-routed" premise was a TS-mirror
+assumption; Rust's categorizer assigns object-method to self.*). EY3-FUNNEL: live proof
+required and delivered — identical 16k corpus, promoted 623 → 630 (+7 cited internal-type
+conversions, zero lost), −266 gate-8 / +267 gate-4: the locator resolves the FIELD's type,
+which is usually external — the admission converts false-edge RISK into honest attribution,
+exactly the EY1-C corrected cell's intent. False-edge integration test (Inner-not-Outer)
+green against real rust-analyzer. The ENRICH-YIELD arc (1: measure → 2: safe levers →
+3: locator) is complete.
