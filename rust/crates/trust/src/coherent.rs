@@ -111,8 +111,16 @@ pub struct ResolutionCounts {
     pub unresolved_calls: u64,
     /// Unresolved CALLS classified `external_library_candidate` (Variant-A exclusion).
     pub unresolved_calls_external: u64,
-    /// Unresolved CALLS minus the external subset (the internal-like denominator).
+    /// Unresolved CALLS minus the known-external subset — the in-scope-rate
+    /// denominator. RELIABILITY-REFRAME-1 (review-3 §2): this is "in-scope OR
+    /// UNCLASSIFIED", NOT known-internal (it includes `unknown` classifications);
+    /// `unresolved_calls_unknown` below is its unclassified portion.
     pub unresolved_calls_internal_like: u64,
+    /// The UNCLASSIFIED (`unknown`) portion of `unresolved_calls_internal_like`
+    /// (review-3 §2). Additive; `#[serde(default)]` for pre-slice daemon JSON. The
+    /// human render uses it for the reader-frame conservative-rate caveat.
+    #[serde(default)]
+    pub unresolved_calls_unknown: u64,
     /// `resolved_calls / (resolved_calls + internal_like)` (1.0 when no calls).
     pub call_resolution_rate: f64,
 }
@@ -241,6 +249,10 @@ pub fn trust_to_coherent(
         diagnostics_available,
         // serde(skip) internal disambiguator — never on the wire (P3); not part of the hybrid.
         enrichment_eligible_count: _,
+        // serde(skip) in-process counter (RELIABILITY-REFRAME-1 review-3 §2): NOT on the
+        // parity wire, but projected onto the coherent resolution leaf below so the human
+        // render can fire the conservative-rate caveat.
+        unresolved_calls_unknown,
     } = report;
 
     let resolution_counts = ResolutionCounts {
@@ -251,6 +263,7 @@ pub fn trust_to_coherent(
         unresolved_calls: summary.unresolved_calls,
         unresolved_calls_external: summary.unresolved_calls_external,
         unresolved_calls_internal_like: summary.unresolved_calls_internal_like,
+        unresolved_calls_unknown,
         call_resolution_rate: summary.call_resolution_rate,
     };
 

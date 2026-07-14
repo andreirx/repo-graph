@@ -17,7 +17,7 @@
 //!
 //! Passing conditions
 //!   - SNAPSHOT_EXISTS: Snapshot exists.
-//!   - CALL_GRAPH_RELIABLE: Call graph reliability is high.
+//!   - CALL_GRAPH_RELIABLE: Your code's calls 95% resolved (HIGH).
 //! ```
 
 use repo_graph_coherence::CoherenceEnvelope;

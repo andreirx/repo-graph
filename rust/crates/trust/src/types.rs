@@ -208,7 +208,22 @@ pub struct EnrichmentTopType {
 pub struct EnrichmentStatus {
     pub eligible: u64,
     pub enriched: u64,
+    /// Top receiver types by count — MIXED internal + external, truncated to 15.
+    /// The established TS-parity shape; UNCHANGED (RELIABILITY-REFRAME-1 keeps every
+    /// existing consumer, incl. the `--json`/daemon reader, byte-identical).
     pub top_types: Vec<EnrichmentTopType>,
+    /// RELIABILITY-REFRAME-1 (review-3 §3): the top EXTERNAL receiver types, selected
+    /// by FILTERING all external types FIRST and truncating AFTER — so a genuine top
+    /// external target is never dropped by `top_types`' top-15-MIXED cut (that cut can
+    /// evict an external ranked below 15th overall even when it is a top external).
+    /// The reader-frame coverage map (`trust`'s Likely-External section, `orient`'s map,
+    /// `check`) draws from THIS, never from `top_types` re-filtered.
+    ///
+    /// Additive: `#[serde(default)]` so pre-slice JSON deserializes (empty), and
+    /// `skip_serializing_if` so the two `enrichment_status: null` parity fixtures — and
+    /// any snapshot with no external receivers — stay byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_external_types: Vec<EnrichmentTopType>,
 }
 
 // ── Module trust row ─────────────────────────────────────────────
@@ -297,6 +312,24 @@ pub struct TrustReport {
     /// with zero eligible samples.
     #[serde(skip, default)]
     pub enrichment_eligible_count: u64,
+
+    /// Unresolved CALLS the classifier could NOT attribute (classification
+    /// `unknown`), within the in-scope denominator. RELIABILITY-REFRAME-1
+    /// (review-3 §2): `unresolved_calls_internal_like` = external-excluded =
+    /// internal-candidate ∪ UNKNOWN, so it is "in-scope OR unclassified", NOT
+    /// known-internal. This counter is the unclassified portion; a reader surface
+    /// uses it to fire the conservative-rate caveat
+    /// (`repo_graph_agent::reliability::unclassified_caveat`) when the unclassified
+    /// share is material.
+    ///
+    /// `#[serde(skip, default)]` — like `enrichment_eligible_count`, it is NOT on
+    /// the TS-parity `TrustReport` wire (adding a serialized `TrustSummary` field
+    /// would change both `report__*` fixtures AND diverge from the live TS side).
+    /// It is consumed IN-PROCESS (daemon-side) by `trust_to_coherent`,
+    /// `TrustOverlaySummary::from_report`, and the agent storage adapter, which put
+    /// it on THEIR own (non-parity) wires.
+    #[serde(skip, default)]
+    pub unresolved_calls_unknown: u64,
 }
 
 #[cfg(test)]

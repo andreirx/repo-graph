@@ -25,8 +25,7 @@
 //!   ... (3 more)
 //!
 //! Trust
-//!   - Call resolution: 95%
-//!   - Call graph reliability: high
+//!   - your code's calls 95% resolved (HIGH)
 //! ```
 //!
 //! ## Human Output Structure (file target)
@@ -50,8 +49,7 @@
 //!   - src/types/auth.ts
 //!
 //! Trust
-//!   - Call resolution: 95%
-//!   - Call graph reliability: high
+//!   - your code's calls 95% resolved (HIGH)
 //! ```
 
 use repo_graph_coherence::CoherenceEnvelope;
@@ -393,8 +391,38 @@ mod tests {
         })];
         let out = r.render_human(false);
         assert!(out.contains("Trust"));
-        assert!(out.contains("Call resolution: 95%"));
-        assert!(out.contains("Call graph reliability: high"));
+        // RELIABILITY-REFRAME-1: reader frame from the ONE shared wording, no pipeline grade.
+        assert!(out.contains("your code's calls 95% resolved (HIGH)"));
+        assert!(!out.contains("Call graph reliability"));
+        assert!(!out.contains("Call resolution:"));
+    }
+
+    #[test]
+    fn render_trust_zero_in_scope_is_unknown_not_fabricated_100() {
+        // RELIABILITY-REFRAME-1 (review-1 §1): a 0-of-0 repo must render "no in-scope calls
+        // measured", NOT the `call_resolution_rate` 1.0 sentinel's fabricated 100%. The additive
+        // in-scope COUNTS on the evidence let the render tell unknown from a genuine 100%.
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_TRUST".to_string(),
+            summary: "Trust info.".to_string(),
+            evidence: Some(serde_json::json!({
+                "call_resolution_rate": 1.0,        // the 0-of-0 rate sentinel
+                "call_graph_reliability": "high",   // vacuous band
+                "enrichment_state": "ran",
+                "resolved_in_scope": 0,
+                "in_scope_or_unclassified_total": 0
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("no in-scope calls measured"),
+            "zero in-scope calls is unknown, not 100%:\n{out}"
+        );
+        assert!(
+            !out.contains("100% resolved") && !out.contains("(HIGH)"),
+            "no fabricated 100% / vacuous band for an empty call graph:\n{out}"
+        );
     }
 
     #[test]

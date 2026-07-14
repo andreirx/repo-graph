@@ -846,6 +846,14 @@ fn build_trust_signal(trust: &crate::storage_port::AgentTrustSummary) -> Signal 
             EnrichmentState::NotApplicable => "not_applicable".to_string(),
             EnrichmentState::NotRun => "not_run".to_string(),
         },
+        // RELIABILITY-REFRAME-1 (review-1 §1): carry the in-scope COUNTS so the reader surface can
+        // render the honest "no in-scope calls measured" for a 0-of-0 repo instead of the
+        // `call_resolution_rate` 1.0 sentinel's fabricated 100%. The denominator excludes
+        // known-external calls but KEEPS unclassified ones (`resolved_calls +
+        // unresolved_calls_internal_like`) — the same denominator the band is scored on — so the
+        // field is named "in-scope OR unclassified", not purely in-scope (review-5 §1).
+        resolved_in_scope: trust.resolved_calls,
+        in_scope_or_unclassified_total: trust.resolved_calls + trust.unresolved_calls_internal_like,
     })
 }
 

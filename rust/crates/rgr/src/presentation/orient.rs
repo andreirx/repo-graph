@@ -38,7 +38,7 @@
 //!     - 150 files, 1200 symbols indexed.
 //!
 //! Degradation
-//!   - Call resolution rate is 78% (120 of 154 calls resolved).
+//!   - your code's calls 78% resolved (below 85% target).
 //!
 //! Next steps
 //!   - rmap check
@@ -364,6 +364,13 @@ pub struct TrustOverlay {
     pub reliability: Option<ReliabilitySection>,
     #[serde(default)]
     pub caveats: Vec<String>,
+    // RELIABILITY-REFRAME-1 (RR1_BOUNDARY option A): the reader-frame call-coverage
+    // facts the daemon now carries on the trust overlay. Reused verbatim (not mirrored)
+    // from the producer so orient builds the SAME
+    // `repo_graph_agent::reliability::CallReliabilityView` as trust/check — one shape,
+    // no per-surface drift. Absent (`None`) on an overlay that predates the field.
+    #[serde(default)]
+    pub call_coverage: Option<repo_graph_trust::CallCoverage>,
     // Legacy fields for backward compatibility
     #[serde(default)]
     pub call_graph_reliability: Option<String>,
@@ -483,6 +490,14 @@ impl OrientResponse {
                 if !degradation.is_empty() {
                     out.push('\n');
                     out.push_str(&degradation);
+                }
+                // RELIABILITY-REFRAME-1 (review-2 §1): the external coverage map is reader CONTEXT,
+                // not a grade — it renders in its OWN band-independent section, so it stays visible
+                // even when the call-graph band is HIGH (unlike Degradation, which is band-gated).
+                let external = self.render_external_coverage();
+                if !external.is_empty() {
+                    out.push('\n');
+                    out.push_str(&external);
                 }
             }
             let others = self.other_signals_section();

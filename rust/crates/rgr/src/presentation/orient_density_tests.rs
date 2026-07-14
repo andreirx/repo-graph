@@ -176,7 +176,7 @@ fn honesty_posture_present_at_every_tier() {
     for depth in [OrientDepth::Small, OrientDepth::Medium, OrientDepth::Large] {
         let out = render_orient_envelope(&env, depth);
         assert!(
-            out.contains("Reliability: call-graph 42% resolved (LOW)"),
+            out.contains("Reliability: your code's calls 42% resolved (LOW)"),
             "reliability caveat (D1) dropped at {depth:?}:\n{out}"
         );
         assert!(

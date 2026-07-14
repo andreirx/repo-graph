@@ -257,6 +257,7 @@ mod tests {
             caveats: vec![],
             diagnostics_available: true,
             enrichment_eligible_count: 0,
+            unresolved_calls_unknown: 0,
         }
     }
 

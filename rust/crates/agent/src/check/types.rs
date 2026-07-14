@@ -83,6 +83,27 @@ pub struct CheckInput {
     pub stale_file_count: u64,
     /// Trust call-graph reliability level. None if no snapshot.
     pub call_graph_reliability: Option<AgentReliabilityLevel>,
+    /// RELIABILITY-REFRAME-1: resolved CALLS, for the reader-frame in-scope rate
+    /// in the CALL_GRAPH_RELIABILITY summary. 0 when no snapshot. Projected from
+    /// the trust summary already read at the construction site (no new read).
+    pub resolved_calls: u64,
+    /// RELIABILITY-REFRAME-1: unresolved CALLS with the known-external subset
+    /// EXCLUDED — the in-scope-rate denominator with `resolved_calls`. review-3 §2:
+    /// "in-scope OR unclassified", not known-internal. 0 when no snapshot.
+    pub unresolved_calls_internal_like: u64,
+    /// RELIABILITY-REFRAME-1 (review-3 §1): ALL unresolved CALLS (resolved-or-not),
+    /// the external-SHARE denominator with `resolved_calls` (`total_calls`). Lets
+    /// `check` render the external share, not an `external=0` placeholder. 0 when no
+    /// snapshot.
+    pub unresolved_calls: u64,
+    /// RELIABILITY-REFRAME-1 (review-3 §2): the UNCLASSIFIED (`unknown`) portion of
+    /// `unresolved_calls_internal_like`, for the conservative-rate caveat. 0 when no
+    /// snapshot.
+    pub unresolved_calls_unknown: u64,
+    /// RELIABILITY-REFRAME-1 (review-3 §1): the top named EXTERNAL receiver targets
+    /// for the reader-frame coverage map, so `check` carries the FULL projection
+    /// (external share + named targets + bases). Empty when no snapshot / none surfaced.
+    pub external_targets: Vec<crate::reliability::ExternalTarget>,
     /// Enrichment execution state. None if no snapshot.
     pub enrichment_state: Option<EnrichmentState>,
     /// Gate outcome projection. None if no snapshot or gate not

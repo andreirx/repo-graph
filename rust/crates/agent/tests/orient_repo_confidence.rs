@@ -41,6 +41,10 @@ fn make_trust(
         call_resolution_rate: rate,
         resolved_calls: (rate * 100.0) as u64,
         unresolved_calls: ((1.0 - rate) * 100.0) as u64,
+        // external=0 in this fixture, so all unresolved calls are in-scope.
+        unresolved_calls_internal_like: ((1.0 - rate) * 100.0) as u64,
+        unresolved_calls_unknown: 0,
+        external_targets: Vec::new(),
         call_graph_reliability: reliable_axis(),
         dead_code_reliability: reliable_axis(),
         enrichment_state,

@@ -202,8 +202,14 @@ fn build_caveats(
         );
     }
     if call_graph_level != ReliabilityLevel::HIGH {
+        // RELIABILITY-REFRAME-1: reader frame — the subject is the READER's calls, not a
+        // grade of repo-graph's call-graph pipeline. Band-only here (the caveat builder has
+        // levels, not the rate); the numeric "your code's calls M% resolved" rides the
+        // Reliability axis render. This caveat is in the `trust` crate (below `agent`), so it
+        // cannot consume `agent::reliability` without inverting the dependency rule — the
+        // shared vocabulary is the RATE derivation, which this band-only string does not touch.
         caveats.push(format!(
-            "Call-graph reliability is {:?} on this repo. \
+            "Your code's calls resolve at {:?} reliability on this repo. \
 			 Do not use callers/callees for safety-critical decisions without verification.",
             call_graph_level
         ));
@@ -319,6 +325,22 @@ pub fn compute_trust_report_cancellable(
         .map(|r| r.count)
         .unwrap_or(0);
     let unresolved_calls_internal_like = unresolved_calls.saturating_sub(unresolved_calls_external);
+
+    // RELIABILITY-REFRAME-1 (review-3 §2): the UNCLASSIFIED (`unknown`) portion of the
+    // in-scope denominator, READ from the SAME already-fetched classification counts (the
+    // classification axis is CONSUMED, not modified). `internal_like` = external-excluded =
+    // internal-candidate ∪ unknown, so labelling it "known internal" is a false certainty;
+    // this counter lets a reader surface fire the conservative-rate caveat. Clamped to the
+    // in-scope denominator: the classification table and the diagnostics `unresolved_calls`
+    // are separate reads, so `unknown` can nominally exceed `internal_like`; a share > 100%
+    // would be nonsense, so the honest ceiling is "all of the in-scope denominator".
+    let unresolved_calls_unknown = input
+        .calls_classification_counts
+        .iter()
+        .find(|r| r.classification == UnresolvedEdgeClassification::Unknown)
+        .map(|r| r.count)
+        .unwrap_or(0)
+        .min(unresolved_calls_internal_like);
 
     let import_graph_reliability = rules::compute_import_graph_reliability(
         alias_resolution.triggered,
@@ -517,6 +539,7 @@ pub fn compute_trust_report_cancellable(
         caveats,
         diagnostics_available,
         enrichment_eligible_count,
+        unresolved_calls_unknown,
     })
 }
 
@@ -637,7 +660,7 @@ fn compute_blast_radius_and_enrichment_cancellable(
     // counter the two states are indistinguishable through the
     // public DTO.
     let enrichment = if enrichment_was_run {
-        let mut top_types: Vec<EnrichmentTopType> = type_counts
+        let mut all_types: Vec<EnrichmentTopType> = type_counts
             .into_iter()
             .map(|((type_name, is_external), count)| EnrichmentTopType {
                 type_name,
@@ -645,17 +668,35 @@ fn compute_blast_radius_and_enrichment_cancellable(
                 is_external,
             })
             .collect();
-        // Sort: count desc, then type_name asc as tie-break.
-        top_types.sort_by(|a, b| {
+        // Sort: count desc, then type_name asc as tie-break. `all_types` is fully
+        // sorted, so BOTH derived lists below inherit a deterministic order.
+        all_types.sort_by(|a, b| {
             b.count
                 .cmp(&a.count)
                 .then_with(|| a.type_name.cmp(&b.type_name))
         });
+
+        // RELIABILITY-REFRAME-1 (review-3 §3): FILTER to external FIRST, truncate AFTER —
+        // so the reader's coverage map is the true top-N EXTERNAL targets. Deriving it from
+        // the top-15-MIXED `top_types` (as consumers did before) could drop an external
+        // ranked below 15th overall even when it is a top external. `all_types` is already
+        // count-desc/name-asc, so `filter` preserves that order; the tie-break is inherited.
+        let top_external_types: Vec<EnrichmentTopType> = all_types
+            .iter()
+            .filter(|t| t.is_external)
+            .take(15)
+            .cloned()
+            .collect();
+
+        // `top_types` stays the established MIXED top-15 (byte-identical for every existing
+        // consumer, incl. the daemon `--json` reader).
+        let mut top_types = all_types;
         top_types.truncate(15);
         Some(EnrichmentStatus {
             eligible: eligible_count,
             enriched: enriched_count,
             top_types,
+            top_external_types,
         })
     } else {
         None
@@ -1273,6 +1314,70 @@ mod tests {
         assert_eq!(es.eligible, 1);
         assert_eq!(es.enriched, 0);
         assert_eq!(es.top_types.len(), 0);
+        assert_eq!(es.top_external_types.len(), 0);
+    }
+
+    // RELIABILITY-REFRAME-1 (review-3 §3): `top_external_types` must FILTER to external FIRST
+    // and truncate AFTER, so a genuine top external is never dropped by `top_types`' top-15-MIXED
+    // cut. Here 15 INTERNAL receiver types each out-count the externals, pushing the externals
+    // past rank 15 in the mixed order — the pre-fix "top-15-mixed THEN filter" would return an
+    // EMPTY external list. Two equal-count externals also pin the deterministic name-asc tie-break.
+    #[test]
+    fn top_external_types_filter_then_truncate_keeps_external_below_15th_mixed() {
+        fn receiver_sample(type_name: &str, is_external: bool) -> TrustUnresolvedEdgeSample {
+            TrustUnresolvedEdgeSample {
+                category: UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+                basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+                source_node_visibility: None,
+                metadata_json: Some(format!(
+                    r#"{{"enrichment":{{"receiverType":"{type_name}","isExternalType":{is_external}}}}}"#
+                )),
+            }
+        }
+
+        let mut input = minimal_input();
+        input.all_classification_counts = vec![ClassificationCountRow {
+            classification: UnresolvedEdgeClassification::Unknown,
+            count: 200,
+        }];
+        let mut samples = Vec::new();
+        // 15 internal receiver types, count 10 each → they fill the entire mixed top-15.
+        for i in 0..15 {
+            for _ in 0..10 {
+                samples.push(receiver_sample(&format!("Internal{i:02}"), false));
+            }
+        }
+        // 2 external receiver types, count 5 each → they rank 16th/17th in the mixed order.
+        for _ in 0..5 {
+            samples.push(receiver_sample("TokioRuntime", true));
+            samples.push(receiver_sample("SerdeValue", true));
+        }
+        input.unknown_calls_samples = samples;
+
+        let es = compute_trust_report(&input)
+            .enrichment_status
+            .expect("enrichment ran");
+
+        // The MIXED top-15 is all internal — the externals are beyond it (the pre-fix hazard).
+        assert_eq!(es.top_types.len(), 15);
+        assert!(
+            !es.top_types.iter().any(|t| t.is_external),
+            "no external survived the mixed top-15 cut: {:?}",
+            es.top_types
+        );
+        // Filter-THEN-truncate recovers BOTH externals, count-desc then NAME-ASC on the tie.
+        assert_eq!(
+            es.top_external_types.len(),
+            2,
+            "both externals selected from ALL externals: {:?}",
+            es.top_external_types
+        );
+        assert_eq!(es.top_external_types[0].type_name, "SerdeValue"); // name-asc tie-break
+        assert_eq!(es.top_external_types[1].type_name, "TokioRuntime");
+        assert!(es
+            .top_external_types
+            .iter()
+            .all(|t| t.is_external && t.count == 5));
     }
 
     // ── Module suspicious flag ───────────────────────────────
@@ -1383,7 +1488,7 @@ mod tests {
         assert!(report
             .caveats
             .iter()
-            .any(|c| c.contains("Call-graph reliability is LOW")));
+            .any(|c| c.contains("Your code's calls resolve at LOW reliability")));
         // Dead-code caveat removed: `rmap dead` surface is disabled.
     }
 

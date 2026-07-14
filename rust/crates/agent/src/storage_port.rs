@@ -354,6 +354,24 @@ pub struct AgentTrustSummary {
     pub call_resolution_rate: f64,
     pub resolved_calls: u64,
     pub unresolved_calls: u64,
+    /// Unresolved CALLS with the known-external subset EXCLUDED (`unresolved_calls`
+    /// minus `unresolved_calls_external`). RELIABILITY-REFRAME-1: the reader's in-scope
+    /// resolution rate is `resolved_calls / (resolved_calls + this)`. review-3 §2: this
+    /// is "in-scope OR UNCLASSIFIED", NOT known-internal — it still includes `unknown`
+    /// classifications; `unresolved_calls_unknown` below is that unclassified portion.
+    /// The storage adapter projects both from the trust report (already computed by the
+    /// Variant-A reweighting); the agent layer must NOT recompute the split from the
+    /// classification axis.
+    pub unresolved_calls_internal_like: u64,
+    /// RELIABILITY-REFRAME-1 (review-3 §2): the UNCLASSIFIED (`unknown`) portion of
+    /// `unresolved_calls_internal_like`, so `check` can fire the conservative-rate
+    /// caveat from the SAME shared helper `trust`/`orient` use.
+    pub unresolved_calls_unknown: u64,
+    /// RELIABILITY-REFRAME-1 (review-3 §1): the top named EXTERNAL receiver targets
+    /// (the trust report's `top_external_types` — external-FILTERED then truncated),
+    /// so `check` renders the SAME named coverage map as `orient`/`trust`, not an
+    /// `external=0` placeholder. Empty when enrichment surfaced no external receivers.
+    pub external_targets: Vec<crate::reliability::ExternalTarget>,
     pub call_graph_reliability: AgentReliabilityAxis,
     pub dead_code_reliability: AgentReliabilityAxis,
     pub enrichment_state: EnrichmentState,

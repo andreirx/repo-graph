@@ -481,7 +481,14 @@ pub struct CycleEvidence {
 pub struct TrustLowResolutionEvidence {
     pub resolution_rate: f64,
     pub resolved_count: u64,
+    /// The in-scope-OR-unclassified denominator (known-external calls excluded, but
+    /// unclassified calls still IN) — the same denominator trust/orient/check use.
     pub total_count: u64,
+    /// RELIABILITY-REFRAME-1 (review-5 §1, additive RR1_BOUNDARY): the UNCLASSIFIED
+    /// (`unknown`) portion of `total_count`, so this denominator-bearing signal emits
+    /// the SAME material-unclassified caveat as the other rate surfaces when that share
+    /// is material. Zero on a fully-classified repo (caveat then silent).
+    pub unclassified_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -851,6 +858,17 @@ pub struct ExplainTrustEvidence {
     pub call_graph_reliability: String,
     // dead_code_reliability — removed. Surface withdrawn.
     pub enrichment_state: String,
+    /// RELIABILITY-REFRAME-1 (review-1 §1): the IN-SCOPE call counts, additive (RR1_BOUNDARY
+    /// option A — no existing field removed/renamed). `call_resolution_rate` alone cannot tell a
+    /// genuine "100% resolved" from the trust service's 0-of-0 rate sentinel (`1.0`), so a
+    /// zero-in-scope-call repo would render a fabricated "your code's calls 100% resolved".
+    /// Carrying the counts lets the reader surface build the SAME `CallReliabilityView` as
+    /// trust/check and render the honest "no in-scope calls measured" when the denominator is 0.
+    /// `resolved_in_scope` ⊆ `in_scope_or_unclassified_total` (known-external calls excluded, but
+    /// unclassified calls still IN — hence "or unclassified", review-5 §1: the field name must not
+    /// claim the denominator is purely in-scope).
+    pub resolved_in_scope: u64,
+    pub in_scope_or_unclassified_total: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1320,11 +1338,26 @@ impl Signal {
     }
 
     pub fn trust_low_resolution(evidence: TrustLowResolutionEvidence) -> Self {
-        let summary = format!(
-            "Call resolution rate is {:.0}% ({} of {} calls resolved).",
+        // RELIABILITY-REFRAME-1 (review-2 §2): route the "% resolved" WORDING through the ONE
+        // shared projection (`reliability::resolved_phrase_pct`) so this reader-visible summary
+        // can never re-derive an external-inclusive "% resolved" string that forks from the
+        // orient headline / trust / check. review-5 §1: the denominator is "in-scope OR
+        // unclassified" — known-external calls are excluded but unclassified ones stay IN, so the
+        // label says so and the material-unclassified caveat rides here too (the SAME helper the
+        // other rate surfaces use) when that share is material. Sentence-cased (stands alone).
+        let head = crate::reliability::sentence_case(&crate::reliability::resolved_phrase_pct(
             evidence.resolution_rate * 100.0,
-            evidence.resolved_count,
-            evidence.total_count
+        ));
+        let caveat = crate::reliability::unclassified_caveat(
+            evidence.unclassified_count,
+            evidence.total_count,
+        )
+        .map(|c| format!("{c}; "))
+        .unwrap_or_default();
+        let summary = format!(
+            "{head} ({} of {} in-scope or unclassified) — calls into external libraries are \
+             excluded; {caveat}verify call/dead claims against source.",
+            evidence.resolved_count, evidence.total_count,
         );
         Self::build(
             SignalCode::TrustLowResolution,
@@ -1622,11 +1655,23 @@ impl Signal {
     }
 
     pub fn explain_trust(evidence: ExplainTrustEvidence) -> Self {
-        let summary = format!(
-            "Trust: {:.0}% call resolution, {} call graph.",
-            evidence.call_resolution_rate * 100.0,
-            evidence.call_graph_reliability,
+        // RELIABILITY-REFRAME-1 (review-1 §1): build the reader-frame summary from the ONE shared
+        // projection off the IN-SCOPE COUNTS — so 0-of-0 reads "no in-scope calls measured"
+        // (unknown), never the `call_resolution_rate` 1.0 sentinel's fabricated 100%. This routes
+        // the explain SIGNAL summary through the same `CallReliabilityView` orient/trust/check use,
+        // folding rate+band into one reader-frame phrase. (DoD §4: NO reader surface grades
+        // repo-graph's own pipeline coverage.)
+        let view = crate::reliability::CallReliabilityView::derive(
+            evidence.resolved_in_scope,
+            evidence
+                .in_scope_or_unclassified_total
+                .saturating_sub(evidence.resolved_in_scope),
+            0,
+            evidence.in_scope_or_unclassified_total,
+            Vec::new(),
+            crate::reliability::band_from_wire(&evidence.call_graph_reliability),
         );
+        let summary = format!("Trust: {}.", view.resolved_with_band());
         Self::build(
             SignalCode::ExplainTrust,
             summary,
@@ -1837,10 +1882,65 @@ mod tests {
             resolution_rate: 0.10,
             resolved_count: 1,
             total_count: 10,
+            unclassified_count: 0,
         });
         assert_eq!(s.code, SignalCode::TrustLowResolution);
         assert_eq!(s.category, SignalCategory::Trust);
         assert_eq!(s.severity, Severity::Medium);
+    }
+
+    #[test]
+    fn trust_low_resolution_summary_is_shared_reader_frame() {
+        // RELIABILITY-REFRAME-1 (review-2 §2): the summary's "% resolved" wording comes from the
+        // ONE shared projection (`reliability::resolved_phrase_pct`), sentence-cased — never a
+        // bespoke "Call resolution rate is …" string that could fork external-inclusive from the
+        // orient headline / trust / check. review-5 §1: `total_count` is the "in-scope OR
+        // unclassified" denominator; the label says so, and with the unclassified share immaterial
+        // (0 here) NO caveat fires. The reader reads where THEIR code stands, not a grade of
+        // repo-graph's pipeline.
+        let s = Signal::trust_low_resolution(TrustLowResolutionEvidence {
+            resolution_rate: 0.12,
+            resolved_count: 3,
+            total_count: 25,
+            unclassified_count: 0,
+        });
+        assert_eq!(
+            s.summary,
+            "Your code's calls 12% resolved (3 of 25 in-scope or unclassified) — calls into \
+             external libraries are excluded; verify call/dead claims against source."
+        );
+        // Never the old pipeline-grade wording, and no false "purely in-scope" label.
+        assert!(!s.summary.contains("Call resolution rate is"));
+        assert!(!s.summary.contains("in-scope)"));
+    }
+
+    #[test]
+    fn trust_low_resolution_summary_emits_material_unclassified_caveat() {
+        // RELIABILITY-REFRAME-1 (review-5 §1): this denominator-bearing rate surface emits the
+        // SAME material-unclassified caveat the trust/orient/check surfaces do, so a "low" rate
+        // that is really "mostly unclassified" reads honestly (the true resolved share may be
+        // higher). 20 of 25 (80% ≥ 20% material) fires the caveat.
+        let s = Signal::trust_low_resolution(TrustLowResolutionEvidence {
+            resolution_rate: 0.12,
+            resolved_count: 3,
+            total_count: 25,
+            unclassified_count: 20,
+        });
+        assert!(
+            s.summary.contains("20 of these 25 calls are unclassified"),
+            "material-unclassified caveat present: {}",
+            s.summary
+        );
+        assert!(
+            s.summary.contains("true resolved share may be higher"),
+            "{}",
+            s.summary
+        );
+        // Label still honest, and the caveat sits before the verify tail.
+        assert!(s.summary.contains("(3 of 25 in-scope or unclassified)"));
+        assert!(s
+            .summary
+            .ends_with("verify call/dead claims against source."));
     }
 
     #[test]

@@ -94,6 +94,11 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 files_total: 0,
                 stale_file_count: 0,
                 call_graph_reliability: None,
+                resolved_calls: 0,
+                unresolved_calls_internal_like: 0,
+                unresolved_calls: 0,
+                unresolved_calls_unknown: 0,
+                external_targets: Vec::new(),
                 enrichment_state: None,
                 gate_outcome: None,
             };
@@ -121,6 +126,16 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 files_total: snapshot.files_total,
                 stale_file_count: stale_files.len() as u64,
                 call_graph_reliability: Some(trust.call_graph_reliability.level),
+                // RELIABILITY-REFRAME-1: the FULL reader-frame projection facts —
+                // straight projection of the summary already read above (no new
+                // storage read). review-3 §1: external share (via `unresolved_calls`
+                // total) + named targets reach check like orient/trust; review-3 §2:
+                // the unclassified count feeds the conservative-rate caveat.
+                resolved_calls: trust.resolved_calls,
+                unresolved_calls_internal_like: trust.unresolved_calls_internal_like,
+                unresolved_calls: trust.unresolved_calls,
+                unresolved_calls_unknown: trust.unresolved_calls_unknown,
+                external_targets: trust.external_targets.clone(),
                 enrichment_state: Some(trust.enrichment_state),
                 gate_outcome: Some(gate_outcome),
             };

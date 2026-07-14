@@ -343,6 +343,10 @@ impl AgentStorageRead for StorageConnection {
         // Project the relevant scalars into the agent DTO.
         let resolved_calls = report.summary.resolved_calls;
         let unresolved_calls = report.summary.unresolved_calls;
+        // RELIABILITY-REFRAME-1: project the in-scope (external-excluded) unresolved
+        // count the trust service already computed, so the agent layer can render the
+        // reader's in-scope rate without re-deriving the external split.
+        let unresolved_calls_internal_like = report.summary.unresolved_calls_internal_like;
         let call_resolution_rate = report.summary.call_resolution_rate;
 
         // Reliability axes (Rust-43 F1/F3 fix). The agent
@@ -403,10 +407,34 @@ impl AgentStorageRead for StorageConnection {
             Some(es) => (EnrichmentState::Ran, es.eligible, es.enriched),
         };
 
+        // RELIABILITY-REFRAME-1 (review-3 §1/§2): project the reader-frame coverage facts the
+        // shared `CallReliabilityView` needs — the UNCLASSIFIED portion of the in-scope
+        // denominator, and the top named EXTERNAL targets (the trust service's
+        // `top_external_types`, external-FILTERED then truncated, review-3 §3) mapped into the
+        // agent crate's neutral `ExternalTarget` (the `repo-graph-trust` type never crosses the
+        // port). Both are consumed daemon-side by `check`; no new storage read.
+        let unresolved_calls_unknown = report.unresolved_calls_unknown;
+        let external_targets: Vec<repo_graph_agent::reliability::ExternalTarget> = report
+            .enrichment_status
+            .as_ref()
+            .map(|s| {
+                s.top_external_types
+                    .iter()
+                    .map(|t| repo_graph_agent::reliability::ExternalTarget {
+                        type_name: t.type_name.clone(),
+                        count: t.count,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(AgentTrustSummary {
             call_resolution_rate,
             resolved_calls,
             unresolved_calls,
+            unresolved_calls_internal_like,
+            unresolved_calls_unknown,
+            external_targets,
             call_graph_reliability,
             dead_code_reliability,
             enrichment_state,

@@ -80,6 +80,8 @@ fn report(diagnostics_available: bool) -> TrustReport {
         caveats: vec!["a caveat".into()],
         diagnostics_available,
         enrichment_eligible_count: 3,
+        // RELIABILITY-REFRAME-1 (review-3 §2): 6 of the 6 internal-like calls are unclassified.
+        unresolved_calls_unknown: 6,
     }
 }
 
@@ -133,6 +135,9 @@ fn half_b_payloads_are_byte_identical_to_v1() {
     assert_eq!(env.value.resolution.value.edges_total, 100);
     assert_eq!(env.value.resolution.value.resolved_calls, 50);
     assert_eq!(env.value.resolution.value.unresolved_calls_internal_like, 6);
+    // RELIABILITY-REFRAME-1 (review-3 §2): the in-process unclassified counter projects
+    // onto the coherent resolution leaf (it is NOT on the v1 parity summary wire).
+    assert_eq!(env.value.resolution.value.unresolved_calls_unknown, 6);
     assert_eq!(env.value.resolution.value.call_resolution_rate, 0.833);
 }
 

@@ -128,6 +128,9 @@ pub(super) fn trust_signal() -> Signal {
         call_resolution_rate: 0.9,
         call_graph_reliability: "high".to_string(),
         enrichment_state: "ran".to_string(),
+        // In-scope-or-unclassified counts consistent with the 0.9 rate (90 / 100).
+        resolved_in_scope: 90,
+        in_scope_or_unclassified_total: 100,
     })
 }
 

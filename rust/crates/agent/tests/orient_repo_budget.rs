@@ -54,6 +54,9 @@ fn seed_many_signals() -> FakeAgentStorage {
             call_resolution_rate: 0.10,
             resolved_calls: 1,
             unresolved_calls: 9,
+            unresolved_calls_internal_like: 9,
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
             call_graph_reliability: AgentReliabilityAxis {
                 level: AgentReliabilityLevel::High,
                 reasons: Vec::new(),

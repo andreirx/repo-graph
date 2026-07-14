@@ -249,6 +249,9 @@ fn trust_low_resolution_emitted_below_threshold() {
             call_resolution_rate: 0.10,
             resolved_calls: 1,
             unresolved_calls: 9,
+            unresolved_calls_internal_like: 9,
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
             call_graph_reliability: AgentReliabilityAxis {
                 level: AgentReliabilityLevel::High,
                 reasons: Vec::new(),
@@ -273,6 +276,58 @@ fn trust_low_resolution_emitted_below_threshold() {
         }
         other => panic!("wrong evidence variant: {:?}", other),
     }
+}
+
+#[test]
+fn trust_low_resolution_total_excludes_external_via_shared_view() {
+    // RELIABILITY-REFRAME-1 (review-2 §2): the TRUST_LOW_RESOLUTION emitter derives its in-scope
+    // total from the ONE shared projection (external-library calls excluded), NEVER the
+    // external-inclusive `resolved + unresolved_calls`. Here 1 resolved, 9 in-scope unresolved,
+    // 81 external → in-scope total 10 (NOT 91), and the reader-frame summary reconciles with it.
+    let mut fake = seeded();
+    fake.trust_summaries.insert(
+        "snap-1".into(),
+        AgentTrustSummary {
+            call_resolution_rate: 0.10,
+            resolved_calls: 1,
+            unresolved_calls: 90,              // external-INCLUSIVE
+            unresolved_calls_internal_like: 9, // in-scope only (81 external excluded)
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
+            call_graph_reliability: AgentReliabilityAxis {
+                level: AgentReliabilityLevel::Low,
+                reasons: Vec::new(),
+            },
+            dead_code_reliability: AgentReliabilityAxis {
+                level: AgentReliabilityLevel::High,
+                reasons: Vec::new(),
+            },
+            enrichment_state: EnrichmentState::Ran,
+            enrichment_eligible: 90,
+            enrichment_enriched: 81,
+        },
+    );
+    let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+    let sig = find_signal(&result, SignalCode::TrustLowResolution)
+        .expect("TRUST_LOW_RESOLUTION must fire below 0.20");
+    match sig.evidence() {
+        SignalEvidence::TrustLowResolution(ev) => {
+            assert_eq!(ev.resolved_count, 1);
+            assert_eq!(
+                ev.total_count, 10,
+                "in-scope total excludes the 81 external calls (not 91)"
+            );
+        }
+        other => panic!("wrong evidence variant: {:?}", other),
+    }
+    // The reader-visible summary is the shared reader-frame wording reconciling with the counts.
+    assert!(
+        sig.summary()
+            .contains("Your code's calls 10% resolved (1 of 10 in-scope or unclassified)"),
+        "reader-frame summary from the shared wording: {}",
+        sig.summary()
+    );
+    assert!(!sig.summary().contains("Call resolution rate is"));
 }
 
 // ── TRUST_STALE_SNAPSHOT ────────────────────────────────────────
@@ -340,6 +395,9 @@ fn trust_no_enrichment_emitted_when_state_not_run() {
             call_resolution_rate: 0.70,
             resolved_calls: 70,
             unresolved_calls: 30,
+            unresolved_calls_internal_like: 30,
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
             call_graph_reliability: AgentReliabilityAxis {
                 level: AgentReliabilityLevel::High,
                 reasons: Vec::new(),
@@ -378,6 +436,9 @@ fn trust_no_enrichment_suppressed_when_state_not_applicable() {
             call_resolution_rate: 1.0,
             resolved_calls: 0,
             unresolved_calls: 0,
+            unresolved_calls_internal_like: 0,
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
             call_graph_reliability: AgentReliabilityAxis {
                 level: AgentReliabilityLevel::High,
                 reasons: Vec::new(),

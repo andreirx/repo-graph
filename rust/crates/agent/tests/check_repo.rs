@@ -154,6 +154,9 @@ fn call_graph_medium_everything_pass() {
             call_resolution_rate: 0.75,
             resolved_calls: 75,
             unresolved_calls: 25,
+            unresolved_calls_internal_like: 25,
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
             call_graph_reliability: AgentReliabilityAxis {
                 level: AgentReliabilityLevel::Medium,
                 reasons: Vec::new(),
@@ -198,6 +201,9 @@ fn enrichment_not_run_produces_fail() {
             call_resolution_rate: 0.90,
             resolved_calls: 90,
             unresolved_calls: 10,
+            unresolved_calls_internal_like: 10,
+            unresolved_calls_unknown: 0,
+            external_targets: Vec::new(),
             call_graph_reliability: AgentReliabilityAxis {
                 level: AgentReliabilityLevel::High,
                 reasons: Vec::new(),

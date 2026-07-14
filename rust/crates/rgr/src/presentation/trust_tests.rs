@@ -10,7 +10,8 @@ use repo_graph_coherence::{FreshnessState, QueryCompleteness, TrustPosture};
 use repo_graph_trust::trust_to_coherent;
 use repo_graph_trust::types::{
     DowngradeTrigger, EnrichmentStatus, EnrichmentTopType, ReliabilityAxisScore, ReliabilityLevel,
-    TrustCategoryRow, TrustDowngrades, TrustReliability, TrustReport, TrustSummary,
+    TrustCategoryRow, TrustClassificationRow, TrustDowngrades, TrustReliability, TrustReport,
+    TrustSummary,
 };
 use repo_graph_trust::{LiveGraphPartitionPosture, LiveGraphPosture};
 use std::collections::BTreeSet;
@@ -70,6 +71,7 @@ fn report() -> TrustReport {
         caveats: vec![],
         diagnostics_available: true,
         enrichment_eligible_count: 0,
+        unresolved_calls_unknown: 0,
     }
 }
 
@@ -109,11 +111,272 @@ fn render_shows_repo_display_name() {
 }
 
 #[test]
-fn render_shows_resolution_rates_byte_identical_bullets() {
+fn render_resolution_is_reader_frame_in_scope() {
+    // RELIABILITY-REFRAME-1 supersedes the v1 byte-identical "Calls: X% resolved
+    // (N of M)" bullet (its denominator was the external-INCLUSIVE `unresolved_calls`).
+    // Fixture: resolved=50, internal-like unresolved=5, external=5, all-unresolved=10.
+    //   in-scope rate = 50 / (50 + 5) = 91% (NOT 50 / (50 + 10) = 83%).
+    //   external share = 5 / (50 + 10) = 8% of all calls.
     let out = render_trust_envelope(&warm_envelope());
-    // The v1 bullet text is preserved verbatim (W2 / P1).
-    assert!(out.contains("Calls: 83% resolved (50 of 60)"));
+    assert!(
+        out.contains("your code's calls 91% resolved (50 of 55 in-scope or unclassified)"),
+        "reader-frame in-scope resolution line (review-3 §2: denominator is in-scope OR unclassified):\n{out}"
+    );
+    assert!(
+        out.contains("8% of calls go into external libraries — follow to their crates/docs"),
+        "named external share line:\n{out}"
+    );
+    // Never the grades-us external-inclusive number or vocabulary.
+    assert!(
+        !out.contains("Calls: 83% resolved"),
+        "old grades-us line survived:\n{out}"
+    );
+    // Edges are structural (not call-graph reliability) — unchanged.
     assert!(out.contains("Edges: 100% resolved (100 of 100)"));
+}
+
+#[test]
+fn render_resolution_in_scope_low_still_reads_low() {
+    // Slice §3: the reframe must NEVER hide genuine in-scope failure. With 80
+    // IN-SCOPE calls unresolved (external=10, resolved=10), the in-scope rate is
+    // 10 / (10 + 80) = 11% — it reads LOW plainly; the external exclusion does not
+    // mask it (the external subset is only 10 of 100 calls).
+    let mut r = report();
+    r.summary.resolved_calls = 10;
+    r.summary.unresolved_calls = 90;
+    r.summary.unresolved_calls_external = 10;
+    r.summary.unresolved_calls_internal_like = 80;
+    r.summary.call_resolution_rate = 10.0 / 90.0;
+    r.summary.reliability.call_graph = axis(
+        ReliabilityLevel::LOW,
+        vec!["call_resolution_rate=11.1%_below_50%"],
+    );
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("your code's calls 11% resolved (10 of 90 in-scope or unclassified)"),
+        "genuine in-scope failure must read low, not hidden:\n{out}"
+    );
+    // The band still reads LOW, with reframed reader-frame prose.
+    assert!(
+        out.contains("Call-graph: LOW"),
+        "band must still read LOW:\n{out}"
+    );
+    assert!(
+        out.contains("your code's calls 11% resolved (below 50% target)"),
+        "reframed band reason:\n{out}"
+    );
+}
+
+#[test]
+fn render_resolution_zero_external_renders_none_identified_heuristic() {
+    // review-3 §2 / operator iteration-4 §2: when the heuristic identifies ZERO external
+    // calls (but calls exist), render "no external-library calls identified (heuristic)" — a
+    // heuristic FINDING, NOT a measured absence and NOT a fabricated "0% external" or a silent
+    // omission. This is the KNOWN-ZERO case (distinct from the material-unclassified caveat).
+    let mut r = report();
+    r.summary.resolved_calls = 50;
+    r.summary.unresolved_calls = 5;
+    r.summary.unresolved_calls_external = 0;
+    r.summary.unresolved_calls_internal_like = 5;
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("your code's calls 91% resolved (50 of 55 in-scope or unclassified)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("no external-library calls identified (heuristic name-set match, not compiler-verified)"),
+        "zero external is a heuristic 'none identified', never a fabricated 0% or a silent omission:\n{out}"
+    );
+    // Still never a fabricated percentage.
+    assert!(
+        !out.contains("0% of calls go into external libraries"),
+        "{out}"
+    );
+}
+
+#[test]
+fn render_resolution_material_unclassified_fires_conservative_caveat() {
+    // review-3 §2 / slice §2 degraded path: the in-scope denominator is "in-scope OR
+    // unclassified". When a MATERIAL share is unclassified (unknown ≠ known-internal), the rate
+    // is a conservative lower bound and the surface says so — the UNKNOWN case, distinct from the
+    // known-zero-external "none identified" case above. Here 40 of the 90-call denominator are
+    // unclassified (44% ≥ the 20% material threshold).
+    let mut r = report();
+    r.summary.resolved_calls = 10;
+    r.summary.unresolved_calls = 90;
+    r.summary.unresolved_calls_external = 10;
+    r.summary.unresolved_calls_internal_like = 80;
+    r.unresolved_calls_unknown = 40; // 40 of (10 + 80) = 44% unclassified → material
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("40 of these 90 calls are unclassified"),
+        "conservative-rate caveat names the unclassified count and denominator:\n{out}"
+    );
+    assert!(
+        out.contains("the true resolved share may be higher"),
+        "the caveat states the rate is a lower bound:\n{out}"
+    );
+}
+
+#[test]
+fn render_resolution_immaterial_unclassified_no_caveat() {
+    // The caveat is gated on MATERIALITY — 1 of 90 unclassified (1.1% < 20%) does NOT fire it;
+    // the "in-scope or unclassified" label alone carries the honesty. Prevents caveat noise.
+    let mut r = report();
+    r.summary.resolved_calls = 10;
+    r.summary.unresolved_calls = 90;
+    r.summary.unresolved_calls_external = 10;
+    r.summary.unresolved_calls_internal_like = 80;
+    r.unresolved_calls_unknown = 1;
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        !out.contains("are unclassified"),
+        "an immaterial unclassified share must not fire the caveat (noise):\n{out}"
+    );
+}
+
+#[test]
+fn render_resolution_zero_in_scope_is_unknown_not_fabricated_full() {
+    // REVISE #3 / slice §3: 0 resolved + 0 in-scope unresolved is UNKNOWN — render
+    // "no in-scope calls measured", NEVER the prior fabricated "100% resolved (0 of 0)".
+    // This is the surface where the `.unwrap_or(100.0)` dishonesty lived.
+    let mut r = report();
+    r.summary.resolved_calls = 0;
+    r.summary.unresolved_calls = 0;
+    r.summary.unresolved_calls_external = 0;
+    r.summary.unresolved_calls_internal_like = 0;
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("no in-scope calls measured"),
+        "zero in-scope calls is unknown, not 100%:\n{out}"
+    );
+    assert!(
+        !out.contains("100% resolved (0 of 0"),
+        "no fabricated 100% for an empty call graph:\n{out}"
+    );
+}
+
+#[test]
+fn render_reliability_zero_in_scope_calls_is_unknown_not_a_band() {
+    // REVISE #1 / review-1 §1: with NO in-scope calls the RELIABILITY section's Call-graph axis
+    // must read "no in-scope calls measured", NEVER the upstream vacuous band. The stored band is
+    // forced HIGH to prove the render does not trust it when there is nothing to measure.
+    let mut r = report();
+    r.summary.resolved_calls = 0;
+    r.summary.unresolved_calls = 0;
+    r.summary.unresolved_calls_external = 0;
+    r.summary.unresolved_calls_internal_like = 0;
+    r.summary.reliability.call_graph = axis(ReliabilityLevel::HIGH, vec![]);
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("Call-graph: no in-scope calls measured"),
+        "call-graph axis reads unknown, not a vacuous band:\n{out}"
+    );
+    assert!(
+        !out.contains("Call-graph: HIGH"),
+        "no vacuous HIGH band for a repo with nothing to measure:\n{out}"
+    );
+    // Import-graph / change-impact are separate axes and still render their bands.
+    assert!(out.contains("Import-graph: HIGH"), "{out}");
+}
+
+#[test]
+fn render_omits_raw_pipeline_diagnostic_sections_from_human_surface() {
+    // review-1 §3 / slice §1.2 (VISION: labels speak the reader's language): the raw
+    // "Unresolved Breakdown" + "Classification" sections narrated OUR extractor in internal
+    // vocabulary. They are moved to the `--json` structured surface ONLY — the human render must
+    // carry NONE of the raw codes even when the report is full of them.
+    let mut r = report();
+    r.categories = vec![TrustCategoryRow {
+        category: "calls_obj_method_needs_type_info".into(),
+        label: "CALLS (object method needs type info)".into(),
+        unresolved: 42,
+    }];
+    r.classifications = vec![
+        TrustClassificationRow {
+            classification: "external_library_candidate".into(),
+            count: 30,
+        },
+        TrustClassificationRow {
+            classification: "internal_candidate".into(),
+            count: 12,
+        },
+    ];
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        !out.contains("Unresolved Breakdown"),
+        "raw breakdown heading must not render on the human surface:\n{out}"
+    );
+    assert!(
+        !out.contains("Classification"),
+        "raw classification heading must not render on the human surface:\n{out}"
+    );
+    assert!(
+        !out.contains("external_library_candidate") && !out.contains("internal_candidate"),
+        "raw classification codes must not leak to the reader:\n{out}"
+    );
+    assert!(
+        !out.contains("calls_obj_method_needs_type_info"),
+        "raw category code must not leak to the reader:\n{out}"
+    );
+}
+
+#[test]
+fn render_names_top_external_targets_in_order_with_heuristic_basis() {
+    // Slice §2: the external share renders as a NAMED coverage map — top targets
+    // (from receiver-type facts) in the given count-desc order, with honest
+    // heuristic-basis markers (EY1-A), never a Layer-0 claim. Internal receivers
+    // are excluded from the external map.
+    let mut r = report();
+    r.enrichment_status = Some(EnrichmentStatus {
+        eligible: 47,
+        enriched: 47,
+        top_types: vec![
+            EnrichmentTopType {
+                type_name: "Value".into(),
+                count: 30,
+                is_external: true,
+            },
+            EnrichmentTopType {
+                type_name: "Vec".into(),
+                count: 12,
+                is_external: true,
+            },
+            EnrichmentTopType {
+                type_name: "LocalThing".into(),
+                count: 5,
+                is_external: false,
+            },
+        ],
+        // review-3 §3: the render reads `top_external_types` (external-FILTERED then truncated) —
+        // the externals only, count-desc, as the service produces them.
+        top_external_types: vec![
+            EnrichmentTopType {
+                type_name: "Value".into(),
+                count: 30,
+                is_external: true,
+            },
+            EnrichmentTopType {
+                type_name: "Vec".into(),
+                count: 12,
+                is_external: true,
+            },
+        ],
+    });
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    let value_at = out.find("`Value`").expect("names external receiver Value");
+    let vec_at = out.find("`Vec`").expect("names external receiver Vec");
+    assert!(value_at < vec_at, "top targets in count-desc order:\n{out}");
+    assert!(
+        !out.contains("LocalThing"),
+        "internal receiver excluded from the external coverage map:\n{out}"
+    );
+    // Honest heuristic basis (EY1-A) — never a Layer-0 certainty claim.
+    assert!(out.contains("not compiler-verified"), "{out}");
+    assert!(
+        out.contains("orientation only, not resolved call-graph edges"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -209,6 +472,30 @@ fn report_with_external_receivers() -> TrustReport {
                 type_name: "Once".into(),
                 count: 1,
                 is_external: true, // exercises singular "call"
+            },
+        ],
+        // review-3 §3: externals only, count-desc (Engine internal excluded) — what the service's
+        // filter-then-truncate emits, and what the render now reads.
+        top_external_types: vec![
+            EnrichmentTopType {
+                type_name: "str".into(),
+                count: 512,
+                is_external: true,
+            },
+            EnrichmentTopType {
+                type_name: "Value".into(),
+                count: 425,
+                is_external: true,
+            },
+            EnrichmentTopType {
+                type_name: "TempDir".into(),
+                count: 203,
+                is_external: true,
+            },
+            EnrichmentTopType {
+                type_name: "Once".into(),
+                count: 1,
+                is_external: true,
             },
         ],
     });
@@ -316,6 +603,8 @@ fn render_omits_external_section_when_no_external_types() {
             count: 8,
             is_external: false,
         }],
+        // No external receivers → the filter-then-truncate list is empty.
+        top_external_types: vec![],
     });
     let env = trust_to_coherent(r, warm_posture(), false);
     let out = render_trust_envelope(&env);

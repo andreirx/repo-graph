@@ -200,6 +200,7 @@ mod tests {
                 resolution_rate: 0.5,
                 resolved_count: 50,
                 total_count: 100,
+                unclassified_count: 0,
             }),
             Signal::boundary_violations(BoundaryViolationsEvidence {
                 violation_count: 1,
@@ -257,6 +258,7 @@ mod tests {
             resolution_rate: 0.4,
             resolved_count: 40,
             total_count: 100,
+            unclassified_count: 0,
         }));
         sort_and_rank(&mut s);
         let outcome = truncate_signals(&mut s, Budget::Small);
@@ -321,6 +323,7 @@ mod tests {
                 resolution_rate: rate,
                 resolved_count: (rate * 100.0) as u64,
                 total_count: 100,
+                unclassified_count: 0,
             }));
         }
         sort_and_rank(&mut s);

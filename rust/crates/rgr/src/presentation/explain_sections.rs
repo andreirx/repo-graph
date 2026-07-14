@@ -21,6 +21,8 @@
 //! formatting varies (overflow-note vs not; cycles enumerates and skips empty rings), so the shared helper
 //! would carry more parameters than the one-line `shown` it would remove.
 
+use repo_graph_agent::reliability;
+
 use super::explain::{ExplainResponse, ExplainSignal};
 use super::{bullet, heading};
 
@@ -270,17 +272,50 @@ impl ExplainResponse {
     fn render_trust(&self, evidence: &serde_json::Value) -> String {
         let mut out = heading("Trust");
 
-        if let Some(rate) = evidence
-            .get("call_resolution_rate")
-            .and_then(|v| v.as_f64())
-        {
-            out.push_str(&bullet(&format!("Call resolution: {:.0}%", rate * 100.0)));
-        }
-        if let Some(reliability) = evidence
+        // RELIABILITY-REFRAME-1: the reader's frame, not repo-graph's pipeline — via the ONE shared
+        // projection, so this explain surface never forks from orient/trust/check. review-1 §1: prefer
+        // the in-scope COUNTS so a 0-of-0 repo renders the honest "no in-scope calls measured"; the
+        // `call_resolution_rate` field carries the trust service's 1.0 sentinel for 0-of-0 (a fabricated
+        // 100% if trusted). The band folds into the same line rather than a standalone
+        // "Call graph reliability: …" (grades-us) bullet. Falls back to the rate-only path only when the
+        // additive counts are absent (evidence from a daemon that predates them).
+        let band = evidence
             .get("call_graph_reliability")
-            .and_then(|v| v.as_str())
-        {
-            out.push_str(&bullet(&format!("Call graph reliability: {}", reliability)));
+            .and_then(|v| v.as_str());
+        let counts = evidence
+            .get("resolved_in_scope")
+            .and_then(|v| v.as_u64())
+            .zip(
+                evidence
+                    .get("in_scope_or_unclassified_total")
+                    .and_then(|v| v.as_u64()),
+            );
+        if let Some((resolved, total)) = counts {
+            let view = reliability::CallReliabilityView::derive(
+                resolved,
+                total.saturating_sub(resolved),
+                0,
+                total,
+                Vec::new(),
+                band.and_then(reliability::band_from_wire),
+            );
+            out.push_str(&bullet(&view.resolved_with_band()));
+        } else {
+            let rate = evidence
+                .get("call_resolution_rate")
+                .and_then(|v| v.as_f64());
+            match (rate, band) {
+                (Some(r), Some(b)) => out.push_str(&bullet(
+                    &reliability::resolved_phrase_with_band(r * 100.0, &b.to_uppercase()),
+                )),
+                (Some(r), None) => {
+                    out.push_str(&bullet(&reliability::resolved_phrase_pct(r * 100.0)))
+                }
+                (None, Some(b)) => {
+                    out.push_str(&bullet(&format!("your code's call resolution is {}", b)))
+                }
+                (None, None) => {}
+            }
         }
         if let Some(enrichment) = evidence.get("enrichment_state").and_then(|v| v.as_str()) {
             out.push_str(&bullet(&format!("Enrichment: {}", enrichment)));

@@ -46,6 +46,9 @@ fn make_trust(
         call_resolution_rate: 0.90,
         resolved_calls: 90,
         unresolved_calls: 10,
+        unresolved_calls_internal_like: 10,
+        unresolved_calls_unknown: 0,
+        external_targets: Vec::new(),
         call_graph_reliability: AgentReliabilityAxis {
             level: AgentReliabilityLevel::High,
             reasons: Vec::new(),

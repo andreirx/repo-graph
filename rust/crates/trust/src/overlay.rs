@@ -13,9 +13,51 @@
 //! - Caveats are included when reliability is degraded
 //! - Per-result markers are OPTIONAL and only present when degraded
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::types::{ReliabilityLevel, TrustReliability, TrustReport};
+use crate::types::{EnrichmentTopType, ReliabilityLevel, TrustReliability, TrustReport};
+
+// ── Reader-frame call-coverage facts (RELIABILITY-REFRAME-1) ─────
+
+/// The call-coverage facts the reader-frame projection needs, carried additively
+/// on the trust overlay so `orient` (and any query surface that embeds the
+/// overlay) can build the SAME `repo_graph_agent::reliability::CallReliabilityView`
+/// as `trust` and `check` — the ratified "one shared projection reaching every
+/// surface" (RR1_BOUNDARY option A). These are a faithful subset of the full
+/// `TrustSummary`/`ResolutionCounts` the `trust` command already exposes; carrying
+/// the COUNTS (not a pre-computed rate) is deliberate — every surface derives the
+/// in-scope rate + external share the same way, so no per-surface bespoke number
+/// can drift (the MODULE-MODEL lesson).
+///
+/// Round-trippable (Serialize + Deserialize) so the CLI reuses this exact type
+/// rather than mirroring it — the named-receiver shape is `EnrichmentTopType`, the
+/// same wire shape `trust`'s Likely-External Receiver Calls section uses, so there
+/// is ONE named-receiver shape across surfaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallCoverage {
+    /// Resolved CALLS edges.
+    pub resolved_calls: u64,
+    /// Unresolved CALLS-family edges (all, resolved or not → the external-share denominator with `resolved_calls`).
+    pub unresolved_calls: u64,
+    /// Unresolved CALLS classified into external libraries (the Variant-A exclusion).
+    pub unresolved_calls_external: u64,
+    /// The in-scope-rate denominator with `resolved_calls`. RELIABILITY-REFRAME-1
+    /// (review-3 §2): "in-scope OR UNCLASSIFIED" — external-EXCLUDED, so it includes
+    /// `unknown` classifications (NOT known-internal); `unresolved_calls_unknown`
+    /// below is its unclassified portion.
+    pub unresolved_calls_internal_like: u64,
+    /// The UNCLASSIFIED (`unknown`) portion of `unresolved_calls_internal_like`
+    /// (review-3 §2) — lets `orient` fire the conservative-rate caveat from the SAME
+    /// shared helper `trust`/`check` use. Additive; `#[serde(default)]` for older wire.
+    #[serde(default)]
+    pub unresolved_calls_unknown: u64,
+    /// Top named external receiver targets — the trust service's `top_external_types`
+    /// (external-FILTERED then truncated, review-3 §3), NOT `top_types` re-filtered, so a
+    /// genuine top external is never dropped by the mixed top-15 cut. Absent when
+    /// enrichment surfaced no external receivers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_targets: Vec<EnrichmentTopType>,
+}
 
 // ── Top-level trust overlay for query surfaces ───────────────────
 
@@ -43,6 +85,14 @@ pub struct TrustOverlaySummary {
     /// Empty if all axes are HIGH.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub caveats: Vec<String>,
+
+    /// RELIABILITY-REFRAME-1: the reader-frame call-coverage facts, so `orient`
+    /// builds the SAME shared projection as `trust`/`check` (in-scope rate +
+    /// external share + named coverage map) rather than a bespoke per-surface
+    /// number. Additive; absent from the wire when the overlay predates this
+    /// field (`#[serde(default)]` on the reader).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_coverage: Option<CallCoverage>,
 }
 
 impl TrustOverlaySummary {
@@ -92,12 +142,33 @@ impl TrustOverlaySummary {
             .cloned()
             .collect();
 
+        // RELIABILITY-REFRAME-1: project the reader-frame call-coverage facts from the
+        // SAME `report` (no new read). The named external targets are the trust service's
+        // `top_external_types` (external-FILTERED then truncated, review-3 §3) — identical to
+        // the trust command's Likely-External section source — so orient's named coverage map
+        // cannot drift from trust's, AND a genuine top external is never dropped by the mixed
+        // top-15 cut.
+        let external_targets: Vec<EnrichmentTopType> = report
+            .enrichment_status
+            .as_ref()
+            .map(|s| s.top_external_types.clone())
+            .unwrap_or_default();
+        let call_coverage = Some(CallCoverage {
+            resolved_calls: report.summary.resolved_calls,
+            unresolved_calls: report.summary.unresolved_calls,
+            unresolved_calls_external: report.summary.unresolved_calls_external,
+            unresolved_calls_internal_like: report.summary.unresolved_calls_internal_like,
+            unresolved_calls_unknown: report.unresolved_calls_unknown,
+            external_targets,
+        });
+
         Self {
             summary_scope: "repo_snapshot",
             graph_basis: graph_basis.to_string(),
             reliability: report.summary.reliability.clone(),
             degradation_flags,
             caveats,
+            call_coverage,
         }
     }
 
@@ -345,6 +416,7 @@ mod tests {
             caveats: vec![],
             diagnostics_available: true,
             enrichment_eligible_count: 0,
+            unresolved_calls_unknown: 0,
         }
     }
 
@@ -486,14 +558,14 @@ mod tests {
         let mut report = minimal_report();
         report.caveats = vec![
             "Cycle payloads currently emit leaf module names only".to_string(),
-            "Call-graph reliability is LOW".to_string(),
+            "Your code's calls resolve at LOW reliability on this repo.".to_string(),
         ];
 
         let overlay = TrustOverlaySummary::from_report(&report, "CALLS");
 
         // Permanent cycle caveat should be filtered out
         assert_eq!(overlay.caveats.len(), 1);
-        assert!(overlay.caveats[0].contains("Call-graph"));
+        assert!(overlay.caveats[0].contains("Your code's calls"));
     }
 
     #[test]

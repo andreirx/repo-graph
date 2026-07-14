@@ -148,6 +148,7 @@ pub(super) fn nginx_like() -> OrientResponse {
                 reasons: vec!["alias_resolution_suspicion".to_string()],
             }),
         }),
+        call_coverage: None,
         call_graph_reliability: None,
         call_resolution_rate: None,
         caveats: vec![],
@@ -247,7 +248,7 @@ fn small_reliability_is_one_compressed_line() {
     let out = nginx_like().render_human(OrientDepth::Small);
     assert!(
         out.contains(
-            "Reliability: call-graph 42% resolved (LOW) — verify call/dead claims against source."
+            "Reliability: your code's calls 42% resolved (LOW) — verify call/dead claims against source."
         ),
         "one compressed reliability caveat with the real %:\n{out}"
     );
@@ -260,6 +261,356 @@ fn small_reliability_is_one_compressed_line() {
 }
 
 #[test]
+fn orient_renders_external_coverage_map_from_shared_view() {
+    // RELIABILITY-REFRAME-1 (review-0 defect / REVISE): orient CONSUMES the ONE shared
+    // projection built from the overlay's call-coverage COUNTS — the in-scope rate + band
+    // (compressed line) AND the external share + NAMED coverage map (--full) — the same
+    // `CallReliabilityView` trust/check render, not a bespoke per-surface number.
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "LOW".to_string(),
+                reasons: vec!["call_resolution_rate=42.0%_below_50%".to_string()],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        // 42 resolved / (42 + 58) in-scope = 42%; 100 external of 200 total calls = 50%.
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 42,
+            unresolved_calls: 158,
+            unresolved_calls_external: 100,
+            unresolved_calls_internal_like: 58,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![
+                repo_graph_trust::types::EnrichmentTopType {
+                    type_name: "Value".to_string(),
+                    count: 30,
+                    is_external: true,
+                },
+                repo_graph_trust::types::EnrichmentTopType {
+                    type_name: "Vec".to_string(),
+                    count: 12,
+                    is_external: true,
+                },
+            ],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+
+    // Compressed headline (Small): in-scope rate + band from the view's COUNTS.
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains("Reliability: your code's calls 42% resolved (LOW)"),
+        "compressed in-scope rate from the shared view:\n{small}"
+    );
+
+    // Full Degradation: the external SHARE + the NAMED coverage map, reader-frame.
+    let full = r.render_human(OrientDepth::Full);
+    assert!(
+        full.contains("50% of calls go into external libraries — follow to their crates/docs"),
+        "external share named as reader context:\n{full}"
+    );
+    assert!(
+        full.contains(
+            "External coverage (heuristic): `Value` (30), `Vec` (12) — follow to their crates/docs"
+        ),
+        "top external receiver targets named, count-desc:\n{full}"
+    );
+    // review-1 §2: the map carries BOTH distinct EY1-A heuristic bases — the receiver TYPE
+    // (language-server hover) and the EXTERNAL classification (static name-set, NOT
+    // compiler-verified) — compactly, as honest as trust's detailed section.
+    assert!(
+        full.contains("receiver types inferred from a language-server type hover"),
+        "receiver-type basis on the orient coverage map:\n{full}"
+    );
+    assert!(
+        full.contains("static std/library name-set, not compiler-verified"),
+        "external-classification basis (not compiler-verified) on the orient coverage map:\n{full}"
+    );
+    // Never the grades-us pipeline frame on any orient reader line.
+    assert!(!full.contains("Call graph reliability is"));
+    assert!(!full.to_lowercase().contains("call resolution rate"));
+    // review-2 §1: the map is reader CONTEXT — it renders under its own `External calls`
+    // heading, decoupled from the band-gated `Degradation` block.
+    assert!(
+        full.contains("External calls"),
+        "coverage map lives in its own context section:\n{full}"
+    );
+}
+
+#[test]
+fn orient_external_coverage_visible_when_call_graph_band_is_high() {
+    // RELIABILITY-REFRAME-1 (review-2 §1): the external coverage map is CONTEXT, not a grade, so
+    // it must stay visible even when the in-scope band is HIGH. It used to be nested inside the
+    // `cg.level != "HIGH"` degradation branch, which hid reader context behind a good grade. Here
+    // the in-scope rate is a GENUINE HIGH (90%), and the external context still renders.
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "HIGH".to_string(), // 90 / (90 + 10) in-scope = 90% → genuine HIGH
+                reasons: vec![],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        // 90 resolved, 10 in-scope unresolved; 40 external of 140 total calls = 28.6% → 29%.
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 90,
+            unresolved_calls: 50,
+            unresolved_calls_external: 40,
+            unresolved_calls_internal_like: 10,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![repo_graph_trust::types::EnrichmentTopType {
+                type_name: "Arc".to_string(),
+                count: 25,
+                is_external: true,
+            }],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+
+    let full = r.render_human(OrientDepth::Full);
+    // The External calls context section renders DESPITE the HIGH band.
+    assert!(
+        full.contains("External calls"),
+        "external coverage section present at HIGH band:\n{full}"
+    );
+    assert!(
+        full.contains("29% of calls go into external libraries — follow to their crates/docs"),
+        "external share visible regardless of grade:\n{full}"
+    );
+    assert!(
+        full.contains("External coverage (heuristic): `Arc` (25)"),
+        "named external target visible at HIGH band:\n{full}"
+    );
+    // A HIGH band is not restated as a degradation line — the context above is enough.
+    assert!(
+        !full.contains("your code's calls 90% resolved"),
+        "a HIGH in-scope band is not surfaced as a degradation line:\n{full}"
+    );
+}
+
+#[test]
+fn orient_zero_in_scope_calls_is_honest_no_fabricated_rate() {
+    // RELIABILITY-REFRAME-1 (iteration-5 §2): a repo whose calls are ALL external has zero
+    // in-scope calls (nothing to grade). `compute_call_graph_reliability(0,0)` is a vacuous HIGH;
+    // orient must NOT fabricate an in-scope "100% resolved" rate. The prior contract let it stay
+    // SILENT on the in-scope rate ("honest by omission") — the ratified rule now REQUIRES the
+    // explicit "no in-scope calls measured" (unknown, not silence, not a fabricated 100%) at
+    // every budget, while still naming WHERE the external calls go — context, not a grade.
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "HIGH".to_string(), // the vacuous 0-of-0 band
+                reasons: vec![],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        // 0 resolved, 0 in-scope unresolved — every call is external (50 of 50 = 100%).
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 0,
+            unresolved_calls: 50,
+            unresolved_calls_external: 50,
+            unresolved_calls_internal_like: 0,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![repo_graph_trust::types::EnrichmentTopType {
+                type_name: "Buffer".to_string(),
+                count: 40,
+                is_external: true,
+            }],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+
+    let full = r.render_human(OrientDepth::Full);
+    // The explicit honest unknown renders — NOT silence (fixes the prior "blesses silence" test).
+    assert!(
+        full.contains("Reliability: no in-scope calls measured"),
+        "zero in-scope renders the explicit honest unknown, not silence:\n{full}"
+    );
+    // Context still named: 100% external + the named target.
+    assert!(
+        full.contains("100% of calls go into external libraries"),
+        "all-external repo names the external share as context:\n{full}"
+    );
+    assert!(
+        full.contains("External coverage (heuristic): `Buffer` (40)"),
+        "named external target for an all-external repo:\n{full}"
+    );
+    // No fabricated in-scope rate: never "your code's calls N% resolved" / "100% resolved".
+    assert!(
+        !full.contains("your code's calls"),
+        "zero in-scope calls must not fabricate a resolved rate:\n{full}"
+    );
+    assert!(
+        !full.contains("100% resolved"),
+        "vacuous HIGH must not read as a fabricated 100% resolved:\n{full}"
+    );
+}
+
+#[test]
+fn orient_small_headline_carries_material_unclassified_caveat() {
+    // iteration-5 §2: the material-unclassified qualification (review-3 §2) rides the DEFAULT
+    // (small) headline, not only `--full` — the ratified unknown rules apply at EVERY budget.
+    // The caveat comes from the SAME shared helper the `--full` External calls section uses.
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "LOW".to_string(),
+                reasons: vec!["call_resolution_rate=42.0%_below_50%".to_string()],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        // in-scope = 42 / (42 + 58) = 42%; unclassified 30 of 100 in-scope = 30% ≥ 20% material.
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 42,
+            unresolved_calls: 158,
+            unresolved_calls_external: 100,
+            unresolved_calls_internal_like: 58,
+            unresolved_calls_unknown: 30,
+            external_targets: vec![],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains("Reliability: your code's calls 42% resolved (LOW)"),
+        "in-scope rate on the small headline:\n{small}"
+    );
+    assert!(
+        small.contains("30 of these 100 calls are unclassified"),
+        "material-unclassified caveat rides the DEFAULT surface, not only --full:\n{small}"
+    );
+    assert!(
+        small.contains("true resolved share may be higher"),
+        "the caveat states the rate is a lower bound:\n{small}"
+    );
+    // An IMMATERIAL unclassified share (< 20%) stays silent — the caveat is not noise.
+    r.trust_briefing.as_mut().unwrap().call_coverage = Some(repo_graph_trust::CallCoverage {
+        resolved_calls: 42,
+        unresolved_calls: 158,
+        unresolved_calls_external: 100,
+        unresolved_calls_internal_like: 58,
+        unresolved_calls_unknown: 10, // 10 of 100 = 10% < 20%
+        external_targets: vec![],
+    });
+    let immaterial = r.render_human(OrientDepth::Small);
+    assert!(
+        !immaterial.contains("unclassified"),
+        "immaterial unclassified share is silent at small:\n{immaterial}"
+    );
+}
+
+#[test]
+fn orient_small_headline_empty_call_graph_still_reads_no_in_scope_calls_measured() {
+    // review-6 §1: an EMPTY call graph (all coverage counts zero, the vacuous HIGH band)
+    // is still a zero-in-scope measurement — the default surface must render the honest
+    // "no in-scope calls measured", NOT fall silent behind a `total_calls > 0` gate. With
+    // zero total calls the external share is genuinely UNKNOWN (ExternalShare = None), so
+    // no share line renders either — unknown stays unknown, never a fabricated 0%.
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "HIGH".to_string(), // vacuous band over an empty graph
+                reasons: vec![],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 0,
+            unresolved_calls: 0,
+            unresolved_calls_external: 0,
+            unresolved_calls_internal_like: 0,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains("Reliability: no in-scope calls measured"),
+        "an empty call graph renders the honest unknown at the DEFAULT budget, not silence:\n{small}"
+    );
+    assert!(
+        !small.contains("of calls go into external libraries"),
+        "zero total calls = UNKNOWN external share — no fabricated share line:\n{small}"
+    );
+    assert!(
+        !small.contains("your code's calls"),
+        "no fabricated rate on an empty call graph:\n{small}"
+    );
+}
+
+#[test]
+fn orient_small_headline_zero_in_scope_reads_no_in_scope_calls_measured() {
+    // iteration-5 §2: a repo whose calls are ALL external (the vacuous 0-of-0 HIGH band) must
+    // NOT fall silent on the DEFAULT surface — it renders the honest "no in-scope calls
+    // measured" (unknown, never a fabricated 100%) plus the external share as compact context.
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "HIGH".to_string(), // the vacuous 0-of-0 band
+                reasons: vec![],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 0,
+            unresolved_calls: 50,
+            unresolved_calls_external: 50,
+            unresolved_calls_internal_like: 0,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![repo_graph_trust::types::EnrichmentTopType {
+                type_name: "Buffer".to_string(),
+                count: 40,
+                is_external: true,
+            }],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains("Reliability: no in-scope calls measured"),
+        "zero in-scope renders the honest unknown at the DEFAULT budget, not silence:\n{small}"
+    );
+    assert!(
+        small.contains("100% of calls go into external libraries"),
+        "the external share is compact context at small:\n{small}"
+    );
+    assert!(
+        !small.contains("your code's calls"),
+        "no fabricated in-scope rate:\n{small}"
+    );
+    assert!(
+        !small.contains("100% resolved"),
+        "no fabricated 100% resolved:\n{small}"
+    );
+}
+
+#[test]
 fn small_is_dense_not_thin_meta() {
     // The headline finding: small must be dense load-bearing orientation,
     // not the old severity-grouped meta list.
@@ -267,7 +618,7 @@ fn small_is_dense_not_thin_meta() {
     // Dense, NAMED facts present.
     assert!(out.contains("package groups: http, core"));
     assert!(out.contains("Complexity centers: src/http"));
-    assert!(out.contains("Reliability: call-graph"));
+    assert!(out.contains("Reliability: your code's calls"));
     // The old thin-meta surface is gone: no "Signals / High / Medium / Low" grouping.
     assert!(
         !out.contains("\n  High\n"),
@@ -488,11 +839,11 @@ fn wrapper_full_renders_dense_body_serving_block_and_degradation() {
     // Dense body: repo named in the structure line, cycle anchor rendered.
     assert!(out.contains("my-app"));
     assert!(out.contains("1 import cycle (http -> core -> http)"));
-    // Compressed reliability caveat (legacy fields → 78%).
-    assert!(out.contains("Reliability: call-graph 78% resolved"));
+    // Compressed reliability caveat (legacy fields → 78%), reader-frame.
+    assert!(out.contains("Reliability: your code's calls 78% resolved"));
     // Full per-axis Degradation present at --full.
     assert!(out.contains("Degradation"));
-    assert!(out.contains("Call resolution rate: 78%"));
+    assert!(out.contains("your code's calls 78% resolved"));
     // HONEST-DEGRADATION-IMPL-2 (D3): the footer is SERVING/provenance, NOT "Certainty"; the answer-class
     // is scoped ("answer basis partial"), never a bare global word; freshness + sources are preserved.
     assert!(out.contains("Serving"), "{out}");
@@ -733,4 +1084,183 @@ fn measurement_coverage_unavailable_is_stated_not_silent() {
         out.contains("could not be read"),
         "unavailable coverage must be stated on the orient headline:\n{out}"
     );
+}
+
+// ── RELIABILITY-REFRAME-1 review-3 §4 / slice §1.4: the ONE shared projection ─────────────────
+//
+// The binding proof that orient, trust, AND check consume the SAME complete projection — the same
+// in-scope rate (EXCLUDING external), the same external share, and the same named target from ONE
+// `CallReliabilityView` derivation — NOT merely equivalent wording from partial inputs (review-0's
+// objection to the earlier `one_shared_computation` test). Each surface is driven by the SAME
+// counts through its REAL render entry point; the assertion is that the identical projection-derived
+// strings appear in all three, and that the external-INCLUSIVE rate (21%) appears in NONE of them.
+
+/// A trust report carrying the shared binding counts (resolved 42 / in-scope-unresolved 58 /
+/// external 100 / total 200) plus the two external receiver targets.
+fn binding_report() -> repo_graph_trust::types::TrustReport {
+    use repo_graph_trust::types::*;
+    let axis = |level, reasons: Vec<&str>| ReliabilityAxisScore {
+        level,
+        reasons: reasons.into_iter().map(String::from).collect(),
+    };
+    let no_dg = || DowngradeTrigger {
+        triggered: false,
+        reasons: vec![],
+    };
+    let ext = |name: &str, count| EnrichmentTopType {
+        type_name: name.into(),
+        count,
+        is_external: true,
+    };
+    TrustReport {
+        snapshot_uid: "snap_binding".into(),
+        display_name: Some("binding".into()),
+        basis_commit: None,
+        toolchain: None,
+        diagnostics_version: Some(1),
+        summary: TrustSummary {
+            edges_total: 200,
+            edges_resolved: 200,
+            unresolved_total: 158,
+            resolved_calls: 42,
+            unresolved_calls: 158,
+            unresolved_calls_external: 100,
+            unresolved_calls_internal_like: 58,
+            call_resolution_rate: 0.42,
+            reliability: TrustReliability {
+                import_graph: axis(ReliabilityLevel::HIGH, vec![]),
+                call_graph: axis(
+                    ReliabilityLevel::LOW,
+                    vec!["call_resolution_rate=42.0%_below_50%"],
+                ),
+                dead_code: axis(ReliabilityLevel::HIGH, vec![]),
+                change_impact: axis(ReliabilityLevel::HIGH, vec![]),
+            },
+            triggered_downgrades: TrustDowngrades {
+                framework_heavy_suspicion: no_dg(),
+                registry_pattern_suspicion: no_dg(),
+                missing_entrypoint_declarations: no_dg(),
+                alias_resolution_suspicion: no_dg(),
+            },
+        },
+        categories: vec![],
+        classifications: vec![],
+        unknown_calls_blast_radius: None,
+        enrichment_status: Some(EnrichmentStatus {
+            eligible: 42,
+            enriched: 42,
+            top_types: vec![],
+            top_external_types: vec![ext("Value", 30), ext("Vec", 12)],
+        }),
+        modules: vec![],
+        caveats: vec![],
+        diagnostics_available: true,
+        enrichment_eligible_count: 42,
+        unresolved_calls_unknown: 0,
+    }
+}
+
+#[test]
+fn one_shared_projection_reaches_orient_trust_and_check() {
+    use repo_graph_agent::check::{evaluate_conditions, CheckInput, ConditionCode};
+    use repo_graph_agent::reliability::ExternalTarget;
+    use repo_graph_agent::storage_port::{AgentReliabilityLevel, EnrichmentState};
+
+    // ── trust surface ──
+    let trust_out =
+        crate::presentation::trust::render_trust_envelope(&repo_graph_trust::trust_to_coherent(
+            binding_report(),
+            repo_graph_trust::LiveGraphPosture::unavailable_leaf(),
+            false,
+        ));
+
+    // ── orient surface (same counts on the overlay `call_coverage`) ──
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "LOW".to_string(),
+                reasons: vec!["call_resolution_rate=42.0%_below_50%".to_string()],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            resolved_calls: 42,
+            unresolved_calls: 158,
+            unresolved_calls_external: 100,
+            unresolved_calls_internal_like: 58,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![
+                repo_graph_trust::types::EnrichmentTopType {
+                    type_name: "Value".into(),
+                    count: 30,
+                    is_external: true,
+                },
+                repo_graph_trust::types::EnrichmentTopType {
+                    type_name: "Vec".into(),
+                    count: 12,
+                    is_external: true,
+                },
+            ],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+    let orient_out = r.render_human(OrientDepth::Full);
+
+    // ── check surface (same counts on CheckInput) ──
+    let check_out = evaluate_conditions(&CheckInput {
+        snapshot_exists: true,
+        files_total: 1,
+        stale_file_count: 0,
+        call_graph_reliability: Some(AgentReliabilityLevel::Low),
+        resolved_calls: 42,
+        unresolved_calls_internal_like: 58,
+        unresolved_calls: 158,
+        unresolved_calls_unknown: 0,
+        external_targets: vec![
+            ExternalTarget {
+                type_name: "Value".into(),
+                count: 30,
+            },
+            ExternalTarget {
+                type_name: "Vec".into(),
+                count: 12,
+            },
+        ],
+        enrichment_state: Some(EnrichmentState::Ran),
+        gate_outcome: None,
+    })
+    .into_iter()
+    .find(|c| c.code == ConditionCode::CallGraphReliability)
+    .expect("CALL_GRAPH_RELIABILITY present")
+    .summary;
+
+    // Each surface renders the SAME three projection facts, from the SAME derivation.
+    for (name, out) in [
+        ("trust", &trust_out),
+        ("orient", &orient_out),
+        ("check", &check_out),
+    ] {
+        assert!(
+            out.contains("42% resolved"),
+            "{name} must render the shared IN-SCOPE rate (42%, external-excluded):\n{out}"
+        );
+        assert!(
+            out.contains("50% of calls go into external libraries"),
+            "{name} must render the shared external share (50%):\n{out}"
+        );
+        assert!(
+            out.contains("`Value`"),
+            "{name} must render the shared named external target:\n{out}"
+        );
+        // The external-INCLUSIVE rate (42 / 200 = 21%) must appear in NONE of them — proof they
+        // consume the shared EXTERNAL-EXCLUDING projection, not a per-surface partial number.
+        assert!(
+            !out.contains("21% resolved"),
+            "{name} must NOT use the external-inclusive rate (21%):\n{out}"
+        );
+    }
 }

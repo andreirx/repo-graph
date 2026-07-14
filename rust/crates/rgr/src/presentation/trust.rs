@@ -30,14 +30,23 @@
 //!   - Migrated-answer capability: yes
 //!
 //! Resolution  (sqlite, snapshot-scoped extraction, Fresh)
-//!   - Calls: 78% resolved (1234 of 1582)
+//!   - your code's calls 78% resolved (1234 of 1582 in-scope or unclassified)
+//!   - 12% of calls go into external libraries — follow to their crates/docs
 //!   - Edges: 95% resolved (2100 of 2210)
 //!
 //! Reliability  (sqlite, snapshot-scoped extraction, Fresh)
-//!   - Call-graph: LOW (unresolved calls exceed threshold)
+//!   - Call-graph: LOW (your code's calls 22% resolved (below 50% target))
 //!   ...
 //! ```
+//!
+//! RELIABILITY-REFRAME-1: the Resolution "your code's calls" line is the IN-SCOPE
+//! rate (external-library calls excluded from the denominator) — the prior "Calls:
+//! X% resolved" bullet recomputed it external-INCLUSIVE, grading repo-graph's own
+//! pipeline. The reader-frame vocabulary + derivation is the ONE shared projection
+//! [`repo_graph_agent::reliability::CallReliabilityView`] (also consumed by `orient`
+//! and `check`), so no surface can re-derive a divergent number.
 
+use repo_graph_agent::reliability::{self, CallReliabilityView, ExternalTarget};
 use repo_graph_coherence::{AnswerClass, CoherenceEnvelope, FreshnessState, Provenance, Source};
 use repo_graph_trust::types::ReliabilityAxisScore;
 use repo_graph_trust::{CoherentTrustReport, LiveGraphPosture};
@@ -136,17 +145,15 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
     out.push_str(&render_reliability(v));
     out.push('\n');
 
-    let breakdown = render_unresolved_breakdown(v);
-    if !breakdown.is_empty() {
-        out.push_str(&breakdown);
-        out.push('\n');
-    }
-
-    let classification = render_classification(v);
-    if !classification.is_empty() {
-        out.push_str(&classification);
-        out.push('\n');
-    }
+    // RELIABILITY-REFRAME-1 (review-1 §3 / slice §1.2, VISION "labels speak the reader's
+    // language"): the "Unresolved Breakdown" (`calls_obj_method_needs_type_info`, …) and
+    // "Classification" (`external_library_candidate`, `internal_candidate`, …) sections narrated
+    // OUR extraction pipeline in raw internal vocabulary — noise to the reader. They are moved to
+    // the STRUCTURED `--json` surface ONLY: the wire `CoherentTrustReport` still carries the
+    // `categories` + `classifications` leaves verbatim (the debug/structured diagnostic surface),
+    // so no fact is lost — the raw codes just no longer pollute the human product. The reader-
+    // relevant external/internal split is already carried in the reader's frame by the Resolution
+    // section (in-scope rate + named external SHARE) and the Likely-External Receiver Calls map.
 
     // EY1-A: the likely-external receiver-call orientation projection (Layer-2, read-side).
     let external_receivers = render_enrichment_external(v);
@@ -240,16 +247,50 @@ fn render_resolution(v: &CoherentTrustReport) -> String {
     let mut out = labelled_heading("Resolution", &v.resolution, "snapshot-scoped extraction");
     let r = &v.resolution.value;
 
+    // RELIABILITY-REFRAME-1: the ONE shared projection. In-scope rate = resolved over in-scope
+    // references only; external-library calls are out of source scope (unresolvable by design) and
+    // are EXCLUDED from the denominator (`unresolved_calls_internal_like`). The prior code recomputed
+    // `resolved / (resolved + unresolved_calls)` external-INCLUSIVE — grading repo-graph's own
+    // pipeline coverage instead of the reader's code. The excluded external share is named on its own
+    // line below (context, not a grade). The band (Reliability section) is scored on this same in-scope
+    // denominator too — genuine in-scope failure still reads low.
     let total_calls = r.resolved_calls + r.unresolved_calls;
-    let call_pct = if total_calls > 0 {
-        (r.resolved_calls as f64 / total_calls as f64 * 100.0).round() as u64
-    } else {
-        100
-    };
-    out.push_str(&bullet(&format!(
-        "Calls: {}% resolved ({} of {})",
-        call_pct, r.resolved_calls, total_calls
-    )));
+    let view = CallReliabilityView::derive(
+        r.resolved_calls,
+        r.unresolved_calls_internal_like,
+        r.unresolved_calls_external,
+        total_calls,
+        Vec::new(), // the named targets render in their own section below
+        None,       // the band renders in the Reliability section, not here
+    );
+    // Honest 0-of-0 (slice §3 / REVISE #3): no in-scope calls is UNKNOWN, never a fabricated 100%.
+    // review-3 §2: the denominator is "in-scope OR unclassified" (external-EXCLUDED, but it still
+    // includes `unknown` classifications) — NOT known-internal. The label says so.
+    match &view.resolution {
+        Some(res) => out.push_str(&bullet(&format!(
+            "{} ({} of {} in-scope or unclassified)",
+            reliability::resolved_phrase_pct(res.pct),
+            res.resolved,
+            res.in_scope_or_unclassified_total
+        ))),
+        None => out.push_str(&bullet(reliability::NO_IN_SCOPE_CALLS)),
+    }
+    // The external SHARE, named as reader context. When the heuristic identified ZERO external
+    // calls (but calls exist) this reads "no external-library calls identified (heuristic)" —
+    // a heuristic finding, never a fabricated "0% external" or a silent omission (review-3 §2).
+    if let Some(line) = view.external_line() {
+        out.push_str(&bullet(&line));
+    }
+    // review-3 §2 (slice §2 degraded path): when a MATERIAL share of the denominator is
+    // unclassified, the rate is a conservative lower bound — say so, in the reader's frame.
+    if let Some(res) = view.resolution {
+        if let Some(caveat) = reliability::unclassified_caveat(
+            r.unresolved_calls_unknown,
+            res.in_scope_or_unclassified_total,
+        ) {
+            out.push_str(&bullet(&caveat));
+        }
+    }
 
     let edge_pct = if r.edges_total > 0 {
         (r.edges_resolved as f64 / r.edges_total as f64 * 100.0).round() as u64
@@ -268,54 +309,42 @@ fn render_reliability(v: &CoherentTrustReport) -> String {
     let mut out = labelled_heading("Reliability", &v.reliability, "snapshot-scoped extraction");
     let r = &v.reliability.value;
 
-    out.push_str(&bullet(&format_axis("Call-graph", &r.call_graph)));
+    // RELIABILITY-REFRAME-1 (review-1 §1 / review-2 §2): the zero-denominator decision comes from
+    // the ONE shared projection — `resolution.is_none()`, the SAME decision `ResolvedRate::
+    // derive` makes for the Resolution line above — never a bespoke `== 0` here. The Call-graph band
+    // is scored on the in-scope denominator, and `compute_call_graph_reliability(0,0)` is a vacuous
+    // HIGH. Rendering "Call-graph: HIGH" for a repo with NO in-scope calls would grade "nothing to
+    // measure" as reliable. Honest: no in-scope calls → "no in-scope calls measured" (unknown),
+    // never a band. The counts are the resolution leaf's own denominator (the one the band uses).
+    let res = &v.resolution.value;
+    let view = CallReliabilityView::derive(
+        res.resolved_calls,
+        res.unresolved_calls_internal_like,
+        0,
+        res.resolved_calls + res.unresolved_calls_internal_like,
+        Vec::new(),
+        None,
+    );
+    if view.resolution.is_none() {
+        out.push_str(&bullet(&format!(
+            "Call-graph: {}",
+            reliability::NO_IN_SCOPE_CALLS
+        )));
+    } else {
+        out.push_str(&bullet(&format_axis("Call-graph", &r.call_graph)));
+    }
     out.push_str(&bullet(&format_axis("Import-graph", &r.import_graph)));
     out.push_str(&bullet(&format_axis("Change-impact", &r.change_impact)));
 
     out
 }
 
-fn render_unresolved_breakdown(v: &CoherentTrustReport) -> String {
-    let non_zero: Vec<_> = v
-        .categories
-        .value
-        .iter()
-        .filter(|c| c.unresolved > 0)
-        .collect();
-    if non_zero.is_empty() {
-        return String::new();
-    }
-    let mut out = labelled_heading(
-        "Unresolved Breakdown",
-        &v.categories,
-        "snapshot-scoped extraction",
-    );
-    for cat in non_zero {
-        out.push_str(&bullet(&format!("{} {}", cat.unresolved, cat.label)));
-    }
-    out
-}
-
-fn render_classification(v: &CoherentTrustReport) -> String {
-    let non_zero: Vec<_> = v
-        .classifications
-        .value
-        .iter()
-        .filter(|c| c.count > 0)
-        .collect();
-    if non_zero.is_empty() {
-        return String::new();
-    }
-    let mut out = labelled_heading(
-        "Classification",
-        &v.classifications,
-        "snapshot-scoped extraction",
-    );
-    for cls in non_zero {
-        out.push_str(&bullet(&format!("{} {}", cls.count, cls.classification)));
-    }
-    out
-}
+// RELIABILITY-REFRAME-1 (review-1 §3): `render_unresolved_breakdown` + `render_classification`
+// were removed from the HUMAN render — they emitted raw pipeline vocabulary ("Unresolved
+// Breakdown", `external_library_candidate`, `internal_candidate`, `calls_obj_method_needs_type_info`)
+// that grades OUR extractor, not the reader's code. The facts survive on the `--json` surface
+// (`CoherentTrustReport.categories` / `.classifications` are serialized verbatim). See the note at
+// their former call site in `render_trust_envelope`.
 
 /// EY1-A (ENRICH-YIELD-2): a Layer-2 read projection over the enrichment metadata already on the
 /// trust report — the largest reject class (~36% of enrichment-eligible unknown object-method calls)
@@ -342,12 +371,12 @@ fn render_enrichment_external(v: &CoherentTrustReport) -> String {
     let Some(status) = v.enrichment_status.value.as_ref() else {
         return String::new();
     };
-    let external: Vec<_> = status
-        .top_types
-        .iter()
-        .filter(|t| t.is_external && t.count > 0)
-        .collect();
-    // Enrichment ran but surfaced no external receivers → measured-absent, show nothing.
+    // review-3 §3: the top EXTERNAL targets are the service's `top_external_types` —
+    // external-FILTERED then truncated — so a genuine top external is never dropped by the
+    // mixed top-15 `top_types` cut. The zero-external "none identified" honesty rides the
+    // Resolution external-share line (this section is the NAMED list; it only renders when
+    // there are names to render).
+    let external = &status.top_external_types;
     if external.is_empty() {
         return String::new();
     }
@@ -359,23 +388,18 @@ fn render_enrichment_external(v: &CoherentTrustReport) -> String {
     // Two SEPARATE, independently-labelled bases (the ratified corrected EY1-A cell): the receiver
     // TYPE and the EXTERNAL classification are distinct heuristics with distinct provenance, so each
     // gets its own basis line — never merged into a single "basis:" claim. Plus the Layer-2 framing:
-    // this is orientation, not a resolved edge.
-    out.push_str(&bullet(
-        "receiver-type basis: inferred from a language-server type hover, heuristically parsed",
-    ));
-    out.push_str(&bullet(
-        "external-classification basis: matched a static name-set of well-known std/library type \
-         names and language primitives — not compiler-verified",
-    ));
-    out.push_str(&bullet(
-        "orientation only, not resolved call-graph edges (never a Layer-0 CALLS edge)",
-    ));
+    // this is orientation, not a resolved edge. The basis strings + per-target line are the ONE shared
+    // reader-frame vocabulary (`repo_graph_agent::reliability`) — the same `orient`'s compact coverage
+    // map draws from, so the named map cannot fork across surfaces.
+    out.push_str(&bullet(reliability::RECEIVER_TYPE_BASIS));
+    out.push_str(&bullet(reliability::EXTERNAL_CLASSIFICATION_BASIS));
+    out.push_str(&bullet(reliability::ORIENTATION_ONLY_BASIS));
     for t in external {
-        let calls = if t.count == 1 { "call" } else { "calls" };
-        out.push_str(&bullet(&format!(
-            "call on likely-external receiver `{}` ({} {})",
-            t.type_name, t.count, calls
-        )));
+        let target = ExternalTarget {
+            type_name: t.type_name.clone(),
+            count: t.count,
+        };
+        out.push_str(&bullet(&CallReliabilityView::named_target_line(&target)));
     }
     out
 }
@@ -467,48 +491,15 @@ fn format_axis(name: &str, axis: &ReliabilityAxisScore) -> String {
     if axis.reasons.is_empty() {
         format!("{}: {}", name, level)
     } else {
-        let humanized: Vec<String> = axis.reasons.iter().map(|r| humanize_reason(r)).collect();
+        // RELIABILITY-REFRAME-1: reader-frame reason prose from the ONE shared humanizer
+        // (was a byte-for-byte copy that has now converged with orient's).
+        let humanized: Vec<String> = axis
+            .reasons
+            .iter()
+            .map(|r| reliability::humanize_reason(r))
+            .collect();
         format!("{}: {} ({})", name, level, humanized.join("; "))
     }
-}
-
-/// Convert machine-format reasons to human-readable prose.
-fn humanize_reason(reason: &str) -> String {
-    // Pattern: "call_resolution_rate=33.5%_below_50%"
-    if reason.starts_with("call_resolution_rate=") {
-        if let Some(rest) = reason.strip_prefix("call_resolution_rate=") {
-            let parts: Vec<&str> = rest.split("_below_").collect();
-            if parts.len() == 2 {
-                let rate = parts[0].trim_end_matches('%');
-                let threshold = parts[1].trim_end_matches('%');
-                if let (Ok(r), Ok(t)) = (rate.parse::<f64>(), threshold.parse::<f64>()) {
-                    return format!("{:.0}% call resolution, below {}% threshold", r, t);
-                }
-            }
-        }
-    }
-
-    // Pattern: "unresolved_imports=944"
-    if reason.starts_with("unresolved_imports=") {
-        if let Some(count) = reason.strip_prefix("unresolved_imports=") {
-            if let Ok(n) = count.parse::<u64>() {
-                return format!("{} unresolved imports", n);
-            }
-        }
-    }
-
-    if reason == "alias_resolution_suspicion" {
-        return "alias resolution suspected".to_string();
-    }
-    if reason == "missing_entrypoint_declarations" {
-        return "no entrypoints declared".to_string();
-    }
-    if reason == "registry_pattern_suspicion" {
-        return "registry/factory patterns detected".to_string();
-    }
-
-    // Unknown pattern - clean up underscores
-    reason.replace('_', " ")
 }
 
 fn truncate_uid(uid: &str) -> String {

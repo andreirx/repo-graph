@@ -20,6 +20,7 @@ use crate::dto::signal::{
     Signal, TrustLowResolutionEvidence, TrustNoEnrichmentEvidence, TrustStaleSnapshotEvidence,
 };
 use crate::errors::AgentStorageError;
+use crate::reliability::CallReliabilityView;
 use crate::storage_port::{AgentStorageRead, AgentTrustSummary, EnrichmentState};
 
 /// Threshold below which call resolution rate is flagged as low.
@@ -42,14 +43,34 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 
     let mut signals: Vec<Signal> = Vec::new();
 
-    // TRUST_LOW_RESOLUTION
-    let total_calls = summary.resolved_calls + summary.unresolved_calls;
-    if total_calls > 0 && summary.call_resolution_rate < LOW_RESOLUTION_THRESHOLD {
-        signals.push(Signal::trust_low_resolution(TrustLowResolutionEvidence {
-            resolution_rate: summary.call_resolution_rate,
-            resolved_count: summary.resolved_calls,
-            total_count: total_calls,
-        }));
+    // TRUST_LOW_RESOLUTION. RELIABILITY-REFRAME-1 (review-2 §2): derive the in-scope facts
+    // from the ONE shared projection — never a bespoke `resolved + internal_like` here — so
+    // the "{resolved} of {total}" the signal renders is the SAME in-scope denominator
+    // trust / check / orient use. `resolution` is `Some` exactly when there is at least one
+    // in-scope call to grade; the all-external / no-calls case has `call_resolution_rate`
+    // pinned to the 1.0 sentinel (never below the threshold), so gating on the shared
+    // projection is behaviourally identical to the prior `total_calls > 0` guard, and more
+    // honest (the alert is about in-scope resolution, so it needs in-scope calls to exist).
+    let view = CallReliabilityView::derive(
+        summary.resolved_calls,
+        summary.unresolved_calls_internal_like,
+        0,
+        0,
+        Vec::new(),
+        None,
+    );
+    if let Some(res) = view.resolution {
+        if summary.call_resolution_rate < LOW_RESOLUTION_THRESHOLD {
+            signals.push(Signal::trust_low_resolution(TrustLowResolutionEvidence {
+                resolution_rate: summary.call_resolution_rate,
+                resolved_count: res.resolved,
+                total_count: res.in_scope_or_unclassified_total,
+                // review-5 §1: the denominator-bearing signal emits the material-unclassified
+                // caveat too, from the SAME `unresolved_calls_unknown` count trust/orient/check
+                // use — so a "low" that is really "mostly unclassified" reads honestly.
+                unclassified_count: summary.unresolved_calls_unknown,
+            }));
+        }
     }
 
     // TRUST_STALE_SNAPSHOT

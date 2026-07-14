@@ -185,4 +185,6 @@ pub use coherent::{
 // 2. DeadResultTrust — per-candidate dead-code confidence
 //
 // EdgeResultTrust remains pub(crate) until callers/callees contracts emit it.
-pub use overlay::{assess_dead_confidence, DeadResultTrust, ResultConfidence, TrustOverlaySummary};
+pub use overlay::{
+    assess_dead_confidence, CallCoverage, DeadResultTrust, ResultConfidence, TrustOverlaySummary,
+};
