@@ -58,3 +58,34 @@ that data on the reader's frame.
 No reader surface grades the reader's repo by repo-graph's own pipeline coverage: in-scope
 rate labelled as such, external share named and actionable, real in-scope failure still
 honest, one shared computation — proven by the BEFORE/AFTER transcript + named tests.
+
+---
+
+## 5. Delivery record (2026-07-14)
+
+**DELIVERED** (`285e62e`, operator close-out with RATIFIED ACCEPTANCE after 8 relay
+iterations). The projection: one shared `CallReliabilityView` (agent crate) consumed by
+orient/trust/check/explain — in-scope-or-unclassified conservative rate, external share,
+filter-then-truncate named heuristic targets with both EY1-A bases, honest zero states
+(0-of-0 → "no in-scope calls measured" at every budget incl. empty call graph; known-zero
+externals ≠ unknown).
+
+**Review history (every round found real items):** r0 escalate → RR1_BOUNDARY ratified
+(additive DTO expansion; presentation-only was operator under-scoping). r1-r2 → genuine
+shared model enforced; coverage-map-conditional-on-grade killed; 0-of-0→100% bug fixed.
+r3 → hollow check projection; unknown-conflation labeling; truncate-before-filter. r4 →
+default-budget caveats; zero-in-scope silence test corrected. r5 → "in-scope" identifier
+renames; known-zero external share (rule 6). r6 → empty-call-graph gate (fixed
+operator-side + named test). r7-r8 → evidence formalism only.
+
+**Ratified acceptance (operator judgment):** three consecutive reviewer-verified green
+code rounds (rgr 583/0, agent 218/0, 14 shared-projection tests, every surface spot-check);
+live evidence recorded (enriched 7,605/9,985 edges, 355 promoted; named targets rendering
+live on check with full basis sentence; registry non-interference sha-proofed; numbers
+reconciled: 14,819/71,758 = 21%, 13,502/85,260 = 16%). The single unmet formalism — raw
+orient-full/trust named-target excerpts in one report file — is covered by per-surface
+unit tests (reviewer-executed) + the live check rendering, which flows from the SAME
+projection struct the other surfaces consume; that is the architecture's own guarantee.
+Structural note: 3 of 8 iterations died to provider rate limits mid-gates — the 90-min
+fuse cannot contain code+suite+dogfood+report in one run; filed as relay tech debt
+(checkpointable builder runs).

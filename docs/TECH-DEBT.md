@@ -288,7 +288,11 @@ repo-graph's own resolution pipeline, not the reader's code, and conflates expec
 dependency usage with extraction failure. Context store for the ROADMAP "Resolution &
 attribution" track. Verified against code (cites).
 
-### R1. Reliability rate counts out-of-scope calls as failures (P1)
+### R1. Reliability rate counts out-of-scope calls as failures (P1) — CLOSED 2026-07-14
+
+**CLOSED by RELIABILITY-REFRAME-1 (`285e62e`):** every reader surface now renders the
+in-scope-or-unclassified conservative rate + a named external coverage map from one shared
+projection. See docs/slices/reliability-reframe-1.md §5.
 
 - **OBSERVED:** `call_resolution_rate = resolved_calls / (resolved_calls + unresolved_calls)`
   (`trust/src/rules.rs:215`; `agent/src/aggregators/trust.rs:46`); the external/internal
