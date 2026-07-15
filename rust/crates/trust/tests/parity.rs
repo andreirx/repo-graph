@@ -25,8 +25,9 @@ use std::path::{Path, PathBuf};
 
 use repo_graph_trust::service::{assemble_trust_report, TrustAssemblyError};
 use repo_graph_trust::storage_port::{
-    ClassificationCountRow, CountByClassificationInput, PathPrefixModuleCycle,
-    QueryUnresolvedEdgesInput, TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample,
+    BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
+    ExternalDependencyAttribution, PathPrefixModuleCycle, QueryUnresolvedEdgesInput,
+    TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample,
 };
 use repo_graph_trust::types::ReliabilityLevel;
 use repo_graph_trust::{
@@ -227,6 +228,8 @@ struct FixtureMockStorage {
     resolved_calls: u64,
     calls_classification_counts: Vec<ClassificationCountRow>,
     all_classification_counts: Vec<ClassificationCountRow>,
+    all_basis_code_counts: Vec<BasisCodeCountRow>,
+    external_dependencies: ExternalDependencyAttribution,
     unknown_calls_samples: Vec<TrustUnresolvedEdgeSample>,
 }
 
@@ -257,6 +260,21 @@ impl TrustStorageRead for FixtureMockStorage {
         } else {
             Ok(self.calls_classification_counts.clone())
         }
+    }
+
+    fn count_unresolved_edges_by_basis_code(
+        &self,
+        _snapshot_uid: &str,
+    ) -> Result<Vec<BasisCodeCountRow>, String> {
+        Ok(self.all_basis_code_counts.clone())
+    }
+
+    fn attribute_external_dependencies(
+        &self,
+        _snapshot_uid: &str,
+        _limit: u32,
+    ) -> Result<ExternalDependencyAttribution, String> {
+        Ok(self.external_dependencies.clone())
     }
 
     fn query_unresolved_edges(
@@ -322,6 +340,13 @@ fn dispatch_assemble_trust_report(input: &Value) -> Result<Value, String> {
             "allClassificationCounts",
             "compute_trust_report",
         )?,
+        // ATTRIBUTION-1: the basis-code breakdown is Rust-only (not a TS-parity fixture
+        // field). The v1 `TrustReport.basis_classifications` is `#[serde(skip)]`, so it
+        // is never compared against the TS fixture — default empty here.
+        all_basis_code_counts: vec![],
+        // ATTRIBUTION-1 iteration 3: the external-dependency attribution is Rust-only
+        // (serde-skip on the v1 wire); empty for the TS-parity path.
+        external_dependencies: ExternalDependencyAttribution::default(),
         unknown_calls_samples: get_field(input, "unknownCallsSamples", "compute_trust_report")?,
     };
 

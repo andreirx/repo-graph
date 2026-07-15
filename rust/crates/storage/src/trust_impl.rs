@@ -25,13 +25,80 @@
 //! strings are checked against the Rust classification vocabulary
 //! at the adapter boundary.
 
+use repo_graph_classification::resolve_external_dependency_name;
+use repo_graph_classification::types::{
+    ClassifierEdgeInput, ImportBinding, PackageDependencySet, UnresolvedEdgeCategory,
+};
 use repo_graph_trust::storage_port::{
-    ClassificationCountRow, CountByClassificationInput, PathPrefixModuleCycle,
+    BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
+    ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
     QueryUnresolvedEdgesInput, TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample,
+    UnresolvedEdgeBasisCode,
 };
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
+
+/// A source file's classifier signals, deserialized from the persisted `file_signals`
+/// columns for the ATTRIBUTION-1 provenance join. The stored JSON IS the camelCase
+/// serialization of the classifier's own `ImportBinding` / `PackageDependencySet`
+/// (`indexer/orchestrator.rs` writes `serde_json::to_string(&import_bindings)`), so it
+/// deserializes straight into those types — no local mirror struct, no field-name drift.
+struct FileSignalsFacts {
+    /// Every import binding in the file (identifier → specifier), used to name
+    /// receiver/callee-via-external-import calls.
+    bindings: Vec<ImportBinding>,
+    /// The file's declared package dependencies (its nearest manifest).
+    declared: PackageDependencySet,
+}
+
+impl FileSignalsFacts {
+    /// Empty signals — a file with no persisted `file_signals` row, or an absent/malformed
+    /// JSON column. Its external references degrade honestly to "dependency not identified"
+    /// (the join returns `None` for them), never a fabricated name.
+    fn empty() -> Self {
+        Self {
+            bindings: Vec::new(),
+            declared: PackageDependencySet { names: Vec::new() },
+        }
+    }
+}
+
+/// Load every file's classifier signals for a snapshot, keyed by `file_uid`
+/// (ATTRIBUTION-1). Absent/malformed content columns degrade to empty for that file (the
+/// honest-degradation contract — its external refs become "dependency not identified"); a
+/// real SQL failure still propagates via `?`, never a silent skip.
+fn load_file_signals(
+    conn: &rusqlite::Connection,
+    snapshot_uid: &str,
+) -> Result<std::collections::HashMap<String, FileSignalsFacts>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT file_uid, import_bindings_json, package_dependencies_json \
+         FROM file_signals \
+         WHERE snapshot_uid = ?",
+    )?;
+    let rows = stmt.query_map([snapshot_uid], |row| {
+        let file_uid: String = row.get(0)?;
+        let bindings_json: Option<String> = row.get(1)?;
+        let deps_json: Option<String> = row.get(2)?;
+        Ok((file_uid, bindings_json, deps_json))
+    })?;
+
+    let mut map = std::collections::HashMap::new();
+    for row in rows {
+        let (file_uid, bindings_json, deps_json) = row?;
+        let bindings = bindings_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<Vec<ImportBinding>>(j).ok())
+            .unwrap_or_default();
+        let declared = deps_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<PackageDependencySet>(j).ok())
+            .unwrap_or_else(|| PackageDependencySet { names: Vec::new() });
+        map.insert(file_uid, FileSignalsFacts { bindings, declared });
+    }
+    Ok(map)
+}
 
 // ── Enum serialization helpers ────────────────────────────────
 //
@@ -191,6 +258,149 @@ impl TrustStorageRead for StorageConnection {
             });
         }
         Ok(result)
+    }
+
+    fn count_unresolved_edges_by_basis_code(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<BasisCodeCountRow>, StorageError> {
+        // ATTRIBUTION-1: the finer companion to
+        // `count_unresolved_edges_by_classification`. A read-only GROUP BY over the
+        // EXISTING `basis_code` column (idx_unresolved_edges_snapshot_class covers the
+        // snapshot predicate; the group is a scan over the snapshot's rows). Unfiltered
+        // — the full unresolved set — so the reader-frame breakdown names every
+        // reference. Deterministic ORDER BY for stable output. `basis_code` is
+        // revalidated against the typed enum on read (policy-boundary validation): an
+        // unknown persisted value surfaces as Err, never a silent skip.
+        let mut stmt = self.connection().prepare(
+            "SELECT basis_code, COUNT(*) AS count \
+			 FROM unresolved_edges \
+			 WHERE snapshot_uid = ? \
+			 GROUP BY basis_code \
+			 ORDER BY basis_code ASC",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            let basis_code_str: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((basis_code_str, count))
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let (basis_code_str, count) = row?;
+            let basis_code = deserialize_enum(&basis_code_str, "basis_code")?;
+            result.push(BasisCodeCountRow {
+                basis_code,
+                count: count as u64,
+            });
+        }
+        Ok(result)
+    }
+
+    fn attribute_external_dependencies(
+        &self,
+        snapshot_uid: &str,
+        limit: u32,
+    ) -> Result<ExternalDependencyAttribution, StorageError> {
+        // ATTRIBUTION-1 iteration 3 (OPERATOR_NOTE 2026-07-15): the provenance JOIN that
+        // replaces the review-1 GROUP BY. It names EVERY external-import unresolved
+        // reference — across all three bases the classifier resolves through imports — by
+        // its DECLARED dependency, reusing the classifier's own reduction so a scoped
+        // specifier (`repo_graph_indexer::types`) renders as the manifest name
+        // (`repo-graph-indexer`), and receiver/callee calls are named via their import
+        // binding rather than degraded.
+        //
+        // Step 1 — the external-import unresolved edges + their source file. The basis
+        // filter values come from serializing the typed enums (not literals), so they
+        // cannot drift from the classifier vocabulary. LEFT JOIN so an edge whose source
+        // node has no file_uid is still counted (-> unidentified), keeping the class total
+        // reconciled (`total_named + unidentified` == the ExternalDependency class total).
+        let specifier_basis =
+            serialize_enum(&UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency)?;
+        let receiver_basis =
+            serialize_enum(&UnresolvedEdgeBasisCode::ReceiverMatchesExternalImport)?;
+        let callee_basis = serialize_enum(&UnresolvedEdgeBasisCode::CalleeMatchesExternalImport)?;
+
+        let mut edge_stmt = self.connection().prepare(
+            "SELECT ue.target_key, ue.metadata_json, ue.category, ue.basis_code, n.file_uid \
+             FROM unresolved_edges ue \
+             LEFT JOIN nodes n ON n.node_uid = ue.source_node_uid \
+             WHERE ue.snapshot_uid = ? \
+               AND ue.basis_code IN (?, ?, ?)",
+        )?;
+        let edge_rows = edge_stmt.query_map(
+            rusqlite::params![snapshot_uid, specifier_basis, receiver_basis, callee_basis],
+            |row| {
+                let target_key: String = row.get(0)?;
+                let metadata_json: Option<String> = row.get(1)?;
+                let category_str: String = row.get(2)?;
+                let basis_code_str: String = row.get(3)?;
+                let file_uid: Option<String> = row.get(4)?;
+                Ok((
+                    target_key,
+                    metadata_json,
+                    category_str,
+                    basis_code_str,
+                    file_uid,
+                ))
+            },
+        )?;
+        // Materialize before opening the file-signals statement on the same connection.
+        let mut edges = Vec::new();
+        for row in edge_rows {
+            edges.push(row?);
+        }
+
+        // Step 2 — per-file signals (import bindings + declared deps), deserialized into the
+        // classifier's own types (the persisted JSON is their serialization).
+        let file_signals = load_file_signals(self.connection(), snapshot_uid)?;
+        let empty_signals = FileSignalsFacts::empty();
+
+        // Step 3 — resolve each reference to its declared dependency (the classifier's own
+        // reduction), aggregating named counts (deterministic BTreeMap) and the honest
+        // unidentified bucket. `category`/`basis_code` are revalidated against the typed
+        // enum on read (policy-boundary validation, like the sibling reads).
+        let mut named: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+        let mut unidentified: u64 = 0;
+        for (target_key, metadata_json, category_str, basis_code_str, file_uid) in edges {
+            let category: UnresolvedEdgeCategory = deserialize_enum(&category_str, "category")?;
+            let basis_code: UnresolvedEdgeBasisCode =
+                deserialize_enum(&basis_code_str, "basis_code")?;
+            let facts = file_uid
+                .as_deref()
+                .and_then(|f| file_signals.get(f))
+                .unwrap_or(&empty_signals);
+            let edge_input = ClassifierEdgeInput {
+                target_key,
+                metadata_json,
+            };
+            match resolve_external_dependency_name(
+                &edge_input,
+                category,
+                basis_code,
+                &facts.bindings,
+                &facts.declared,
+            ) {
+                Some(name) => *named.entry(name).or_insert(0) += 1,
+                None => unidentified += 1,
+            }
+        }
+
+        // Step 4 — the bounded top (count-desc, name-asc) + the reconciling totals.
+        let total_named: u64 = named.values().sum();
+        let mut top: Vec<NamedDependencyCount> = named
+            .into_iter()
+            .map(|(name, count)| NamedDependencyCount { name, count })
+            .collect();
+        top.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        top.truncate(limit as usize);
+
+        Ok(ExternalDependencyAttribution {
+            top,
+            total_named,
+            unidentified,
+        })
     }
 
     fn query_unresolved_edges(
@@ -596,6 +806,43 @@ mod tests {
                     edge_uid,
                     snap_uid,
                     source_node_uid,
+                    category,
+                    classification,
+                    basis_code
+                ],
+            )
+            .unwrap();
+    }
+
+    /// Insert a single unresolved_edges row with an EXPLICIT `target_key` — for the
+    /// ATTRIBUTION-1 named-dependency read, whose GROUP BY is over `target_key`.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_unresolved_edge_with_target(
+        storage: &StorageConnection,
+        snap_uid: &str,
+        edge_uid: &str,
+        source_node_uid: &str,
+        target_key: &str,
+        classification: &str,
+        category: &str,
+        basis_code: &str,
+    ) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO unresolved_edges \
+                 (edge_uid, snapshot_uid, repo_uid, source_node_uid, \
+                  target_key, type, resolution, extractor, \
+                  category, classification, classifier_version, \
+                  basis_code, observed_at) \
+                 VALUES (?, ?, 'r1', ?, \
+                  ?, 'CALLS', 'unresolved', 'ts-base:1', \
+                  ?, ?, 1, ?, '2025-01-01T00:00:00.000Z')",
+                rusqlite::params![
+                    edge_uid,
+                    snap_uid,
+                    source_node_uid,
+                    target_key,
                     category,
                     classification,
                     basis_code
@@ -1134,6 +1381,368 @@ mod tests {
             matches!(result, Err(StorageError::Sqlite(_))),
             "malformed classification must propagate as Err(StorageError::Sqlite), got {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn count_unresolved_by_basis_code_groups_counts_and_orders() {
+        // ATTRIBUTION-1: the aggregate GROUP BY over the existing `basis_code` column.
+        // Two edges share a basis code (→ count 2); a third differs (→ count 1). Rows
+        // come back basis_code-ASC (deterministic): `no_supporting_signal` before
+        // `specifier_matches_package_dependency`.
+        use repo_graph_trust::storage_port::UnresolvedEdgeBasisCode;
+
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_dummy_node(&mut storage, &snap_uid, "n1");
+
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue1",
+            "n1",
+            "external_library_candidate",
+            "imports_file_not_found",
+            "specifier_matches_package_dependency",
+        );
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue2",
+            "n1",
+            "external_library_candidate",
+            "imports_file_not_found",
+            "specifier_matches_package_dependency",
+        );
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue3",
+            "n1",
+            "unknown",
+            "calls_function_ambiguous_or_missing",
+            "no_supporting_signal",
+        );
+
+        let rows =
+            TrustStorageRead::count_unresolved_edges_by_basis_code(&storage, &snap_uid).unwrap();
+        assert_eq!(rows.len(), 2);
+        // basis_code ASC.
+        assert_eq!(
+            rows[0].basis_code,
+            UnresolvedEdgeBasisCode::NoSupportingSignal
+        );
+        assert_eq!(rows[0].count, 1);
+        assert_eq!(
+            rows[1].basis_code,
+            UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency
+        );
+        assert_eq!(rows[1].count, 2);
+    }
+
+    #[test]
+    fn count_unresolved_by_basis_code_errors_on_bad_basis_value() {
+        // Policy-boundary validation (parity with the classification/category error
+        // tests): an unknown persisted basis_code surfaces as Err, never a silent skip.
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_dummy_node(&mut storage, &snap_uid, "n1");
+
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_bad_basis",
+            "n1",
+            "unknown",
+            "calls_function_ambiguous_or_missing",
+            "totally_bogus_basis_code",
+        );
+
+        let result = TrustStorageRead::count_unresolved_edges_by_basis_code(&storage, &snap_uid);
+        assert!(
+            matches!(result, Err(StorageError::Sqlite(_))),
+            "malformed basis_code must propagate as Err(StorageError::Sqlite), got {:?}",
+            result
+        );
+    }
+
+    /// Upsert a `files` row (satisfies the `nodes.file_uid` FK) and a node in that file.
+    fn insert_node_in_file(
+        storage: &mut StorageConnection,
+        snap_uid: &str,
+        node_uid: &str,
+        file_uid: &str,
+        path: &str,
+    ) {
+        storage
+            .upsert_files(&[crate::types::TrackedFile {
+                file_uid: file_uid.into(),
+                repo_uid: "r1".into(),
+                path: path.into(),
+                language: Some("rust".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            }])
+            .unwrap();
+        storage
+            .insert_nodes(&[crate::types::GraphNode {
+                node_uid: node_uid.into(),
+                snapshot_uid: snap_uid.into(),
+                repo_uid: "r1".into(),
+                stable_key: format!("r1:{path}:{node_uid}:SYMBOL"),
+                kind: "SYMBOL".into(),
+                subtype: None,
+                name: node_uid.into(),
+                qualified_name: None,
+                file_uid: Some(file_uid.into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            }])
+            .unwrap();
+    }
+
+    /// Insert a `file_signals` row (the persisted import-binding + declared-dependency facts
+    /// the ATTRIBUTION-1 join reads). `import_bindings_json` is the camelCase serialization
+    /// the indexer writes.
+    fn insert_file_signals(
+        storage: &StorageConnection,
+        snap_uid: &str,
+        file_uid: &str,
+        import_bindings_json: &str,
+        package_dependencies_json: &str,
+    ) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO file_signals \
+                 (snapshot_uid, file_uid, import_bindings_json, package_dependencies_json) \
+                 VALUES (?, ?, ?, ?)",
+                rusqlite::params![
+                    snap_uid,
+                    file_uid,
+                    import_bindings_json,
+                    package_dependencies_json
+                ],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn attribute_external_dependencies_joins_signals_to_declared_names_end_to_end() {
+        // ATTRIBUTION-1 iteration 3 (OPERATOR_NOTE 2026-07-15): the REAL provenance join —
+        // from persisted file_signals (import_bindings_json + package_dependencies_json)
+        // THROUGH storage to the resolved DECLARED name. No injected attribution.
+        use repo_graph_trust::storage_port::NamedDependencyCount;
+
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_node_in_file(&mut storage, &snap_uid, "n1", "r1:src/a.rs", "src/a.rs");
+
+        // The file's persisted signals: declared deps + the two import bindings that name the
+        // receiver/callee calls. `isRelative`/`location`/`isTypeOnly` match the indexer's
+        // serialized shape so this deserializes into the classifier's `ImportBinding`.
+        insert_file_signals(
+            &storage,
+            &snap_uid,
+            "r1:src/a.rs",
+            r#"[{"identifier":"app","specifier":"express","isRelative":false,"location":null,"isTypeOnly":false},{"identifier":"useState","specifier":"react","isRelative":false,"location":null,"isTypeOnly":false}]"#,
+            r#"{"names":["repo-graph-indexer","serde","express","react"]}"#,
+        );
+
+        // The external-import unresolved references (target_key + basis + category):
+        //   serde ×3            specifier basis          → serde (bare)
+        //   repo_graph_indexer::types  specifier basis   → repo-graph-indexer (scoped → declared)
+        //   app.listen ×1       receiver-external        → express (via binding app→express)
+        //   useState ×2         callee-external          → react   (via binding useState→react)
+        //   mystery.call ×1     receiver-external        → UNIDENTIFIED (no binding for `mystery`)
+        let edges: &[(&str, &str, &str)] = &[
+            (
+                "serde",
+                "imports_file_not_found",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "serde",
+                "imports_file_not_found",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "serde",
+                "imports_file_not_found",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "repo_graph_indexer::types",
+                "imports_file_not_found",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "app.listen",
+                "calls_obj_method_needs_type_info",
+                "receiver_matches_external_import",
+            ),
+            (
+                "useState",
+                "calls_function_ambiguous_or_missing",
+                "callee_matches_external_import",
+            ),
+            (
+                "useState",
+                "calls_function_ambiguous_or_missing",
+                "callee_matches_external_import",
+            ),
+            (
+                "mystery.call",
+                "calls_obj_method_needs_type_info",
+                "receiver_matches_external_import",
+            ),
+        ];
+        for (i, (target_key, category, basis)) in edges.iter().enumerate() {
+            insert_unresolved_edge_with_target(
+                &storage,
+                &snap_uid,
+                &format!("ue_{i}"),
+                "n1",
+                target_key,
+                "external_library_candidate",
+                category,
+                basis,
+            );
+        }
+
+        // Bounded top-2, count-desc then name-asc: serde(3), react(2).
+        let top2 =
+            TrustStorageRead::attribute_external_dependencies(&storage, &snap_uid, 2).unwrap();
+        assert_eq!(
+            top2.top,
+            vec![
+                NamedDependencyCount {
+                    name: "serde".into(),
+                    count: 3
+                },
+                NamedDependencyCount {
+                    name: "react".into(),
+                    count: 2
+                },
+            ],
+            "top-2 declared deps, count-desc then name-asc"
+        );
+
+        // Full: serde(3), react(2), then the equal-count-1 pair name-asc: express, repo-graph-indexer.
+        let all =
+            TrustStorageRead::attribute_external_dependencies(&storage, &snap_uid, 100).unwrap();
+        assert_eq!(
+            all.top,
+            vec![
+                NamedDependencyCount {
+                    name: "serde".into(),
+                    count: 3
+                },
+                NamedDependencyCount {
+                    name: "react".into(),
+                    count: 2
+                },
+                NamedDependencyCount {
+                    name: "express".into(),
+                    count: 1
+                },
+                NamedDependencyCount {
+                    name: "repo-graph-indexer".into(),
+                    count: 1
+                },
+            ],
+            "all four declared deps: receiver/callee named via binding; scoped specifier reduced"
+        );
+        assert_eq!(
+            all.total_named, 7,
+            "3 serde + 2 react + 1 express + 1 repo-graph-indexer"
+        );
+        assert_eq!(
+            all.unidentified, 1,
+            "mystery.call has no binding → dependency not identified"
+        );
+
+        // The scoped specifier renders as the DECLARED name, NEVER the import path (review-2 defect).
+        assert!(
+            all.top.iter().any(|d| d.name == "repo-graph-indexer"),
+            "scoped `repo_graph_indexer::types` must resolve to the declared `repo-graph-indexer`"
+        );
+        assert!(
+            !all.top.iter().any(|d| d.name.contains("::") || d.name.contains('.')),
+            "no name may be an import path or call expression (repo_graph_indexer::types / app.listen)"
+        );
+
+        // Reconciliation: named + unidentified == the ExternalDependency class total (every
+        // external-import edge counted once). The class total is the sum of the three
+        // external bases in the basis-code aggregate.
+        let basis_counts =
+            TrustStorageRead::count_unresolved_edges_by_basis_code(&storage, &snap_uid).unwrap();
+        let external_total: u64 = basis_counts
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.basis_code,
+                    UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency
+                        | UnresolvedEdgeBasisCode::ReceiverMatchesExternalImport
+                        | UnresolvedEdgeBasisCode::CalleeMatchesExternalImport
+                )
+            })
+            .map(|r| r.count)
+            .sum();
+        assert_eq!(
+            external_total, 8,
+            "3 serde + 1 scoped + 1 app + 2 useState + 1 mystery"
+        );
+        assert_eq!(
+            all.total_named + all.unidentified,
+            external_total,
+            "named + unidentified must reconcile with the ExternalDependency class total"
+        );
+    }
+
+    #[test]
+    fn attribute_external_dependencies_degrades_when_no_manifest_signal() {
+        // Missing-name degradation (operator point 3): external-import references whose file
+        // has NO persisted signals cannot be named → all `unidentified`, none `top`. No
+        // fabricated name.
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_node_in_file(&mut storage, &snap_uid, "n1", "r1:src/b.rs", "src/b.rs");
+        // No file_signals row inserted for src/b.rs.
+
+        insert_unresolved_edge_with_target(
+            &storage,
+            &snap_uid,
+            "ue_0",
+            "n1",
+            "serde",
+            "external_library_candidate",
+            "imports_file_not_found",
+            "specifier_matches_package_dependency",
+        );
+        insert_unresolved_edge_with_target(
+            &storage,
+            &snap_uid,
+            "ue_1",
+            "n1",
+            "app.listen",
+            "external_library_candidate",
+            "calls_obj_method_needs_type_info",
+            "receiver_matches_external_import",
+        );
+
+        let attr =
+            TrustStorageRead::attribute_external_dependencies(&storage, &snap_uid, 100).unwrap();
+        assert!(attr.top.is_empty(), "no declared-dep facts → nothing named");
+        assert_eq!(attr.total_named, 0);
+        assert_eq!(
+            attr.unidentified, 2,
+            "both external refs degrade to 'not identified'"
         );
     }
 

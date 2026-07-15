@@ -13,8 +13,9 @@ use repo_graph_coherence::{
 
 use super::{trust_to_coherent, LiveGraphPartitionPosture, LiveGraphPosture};
 use crate::types::{
-    DowngradeTrigger, ReliabilityAxisScore, ReliabilityLevel, TrustCategoryRow,
-    TrustClassificationRow, TrustDowngrades, TrustReliability, TrustReport, TrustSummary,
+    DowngradeTrigger, ReliabilityAxisScore, ReliabilityLevel, TrustBasisClassificationRow,
+    TrustCategoryRow, TrustClassificationRow, TrustDowngrades, TrustReliability, TrustReport,
+    TrustSummary,
 };
 
 // ── Builders ───────────────────────────────────────────────────────────────────────────────────
@@ -74,6 +75,11 @@ fn report(diagnostics_available: bool) -> TrustReport {
             classification: "unknown".into(),
             count: 7,
         }],
+        basis_classifications: vec![TrustBasisClassificationRow {
+            basis_code: "no_supporting_signal".into(),
+            count: 7,
+        }],
+        external_dependencies: Default::default(),
         unknown_calls_blast_radius: None,
         enrichment_status: None,
         modules: vec![],

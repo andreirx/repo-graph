@@ -46,6 +46,7 @@
 //! [`repo_graph_agent::reliability::CallReliabilityView`] (also consumed by `orient`
 //! and `check`), so no surface can re-derive a divergent number.
 
+use repo_graph_agent::attribution;
 use repo_graph_agent::reliability::{self, CallReliabilityView, ExternalTarget};
 use repo_graph_coherence::{AnswerClass, CoherenceEnvelope, FreshnessState, Provenance, Source};
 use repo_graph_trust::types::ReliabilityAxisScore;
@@ -145,15 +146,21 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
     out.push_str(&render_reliability(v));
     out.push('\n');
 
-    // RELIABILITY-REFRAME-1 (review-1 §3 / slice §1.2, VISION "labels speak the reader's
-    // language"): the "Unresolved Breakdown" (`calls_obj_method_needs_type_info`, …) and
-    // "Classification" (`external_library_candidate`, `internal_candidate`, …) sections narrated
-    // OUR extraction pipeline in raw internal vocabulary — noise to the reader. They are moved to
-    // the STRUCTURED `--json` surface ONLY: the wire `CoherentTrustReport` still carries the
-    // `categories` + `classifications` leaves verbatim (the debug/structured diagnostic surface),
-    // so no fact is lost — the raw codes just no longer pollute the human product. The reader-
-    // relevant external/internal split is already carried in the reader's frame by the Resolution
-    // section (in-scope rate + named external SHARE) and the Likely-External Receiver Calls map.
+    // RELIABILITY-REFRAME-1 (review-1 §3) removed the raw "Unresolved Breakdown"
+    // (`calls_obj_method_needs_type_info`, …) and "Classification" (`external_library_candidate`,
+    // `internal_candidate`, …) sections: they narrated OUR extraction pipeline in raw internal
+    // vocabulary — noise to the reader. ATTRIBUTION-1 (slice §1.3) now REFRAMES the classification
+    // breakdown into the reader's frame ("external library / dependency: 30 references — follow to
+    // their crate/package docs") via the ONE shared mapping (`repo_graph_agent::attribution`) — the
+    // reader learns WHERE their unresolved references go without ever seeing a classifier code. The
+    // raw `categories` breakdown (extraction failure modes, not attribution) stays OFF the human
+    // surface; both `categories` + `classifications` leaves remain on the STRUCTURED `--json`
+    // surface verbatim (the debug diagnostic surface), so no fact is lost.
+    let attribution_breakdown = render_unresolved_attribution(v);
+    if !attribution_breakdown.is_empty() {
+        out.push_str(&attribution_breakdown);
+        out.push('\n');
+    }
 
     // EY1-A: the likely-external receiver-call orientation projection (Layer-2, read-side).
     let external_receivers = render_enrichment_external(v);
@@ -345,6 +352,116 @@ fn render_reliability(v: &CoherentTrustReport) -> String {
 // that grades OUR extractor, not the reader's code. The facts survive on the `--json` surface
 // (`CoherentTrustReport.categories` / `.classifications` are serialized verbatim). See the note at
 // their former call site in `render_trust_envelope`.
+
+/// ATTRIBUTION-1 (slice §1.1/§1.3; review-1 REVISE #1/#2): the reader-frame reframe of
+/// the unresolved-reference breakdown — the successor to the removed raw
+/// `render_classification`.
+///
+/// Where the old section listed `external_library_candidate  30` (grading OUR classifier),
+/// this NAMES where the reader's unresolved references go, through the ONE shared module
+/// [`attribution`] (vocabulary AND the typed `basis_code → class` match, both in `agent`
+/// per ATTR1-MAPPING-BOUNDARY option A), so the wording cannot fork across renderers.
+/// Library calls are named per DECLARED dependency — "library call → serde: 12 references" —
+/// from the `external_dependencies` provenance-join leaf; every other class renders its total.
+///
+/// It reads the FINER `basis_classifications` leaf (not the coarse `classifications`): the
+/// 4-value classification folds third-party dependencies, the standard library, and runtime
+/// globals into one `external_library_candidate` bucket, which cannot produce the reader's
+/// distinct classes (review-0 #1/#2). BOTH the `classifications` and `basis_classifications`
+/// leaves stay on the `--json` debug surface verbatim; the raw codes never reach the human.
+/// Zero-count classes are skipped; an empty / absent aggregate renders nothing.
+///
+/// An unrecognized wire basis code (an older/newer daemon carrying a code this build predates)
+/// folds into the honest [`attribution::OTHER_UNRESOLVED_LABEL`] bucket — the count is
+/// preserved and the raw code never surfaced (the runtime analogue of the compile-time
+/// exhaustiveness the typed mapping guarantees for known codes). The heuristic + provenance
+/// honesty (declared-dependency identity across the three external-import bases; versions not
+/// recorded; Java/Gradle limited — review-0 #3) rides the basis markers.
+fn render_unresolved_attribution(v: &CoherentTrustReport) -> String {
+    // Neutral `(wire basis code, count)` pairs — the agent breakdown never sees a trust
+    // type (preserving `agent`'s no-dependency-on-`repo-graph-trust` boundary).
+    let breakdown = attribution::attribution_breakdown(
+        v.basis_classifications
+            .value
+            .iter()
+            .map(|r| (r.basis_code.as_str(), r.count)),
+    );
+    if breakdown.is_empty() {
+        return String::new();
+    }
+
+    // Heading carries the same (source, scope, freshness) honesty label as its Half-B siblings,
+    // and NO internal vocabulary ("Unresolved Breakdown" / "Classification" are gone).
+    let mut out = labelled_heading(
+        "Unresolved references — where they go",
+        &v.basis_classifications,
+        "snapshot-scoped extraction",
+    );
+    for (class, count) in &breakdown.classes {
+        if *class == attribution::AttributionClass::ExternalDependency {
+            // The "library call" class is NAMED per DECLARED dependency (the provenance
+            // join), NOT rendered as a bare class total.
+            render_library_calls(&mut out, v);
+        } else {
+            out.push_str(&bullet(&attribution::attribution_line(*class, *count)));
+        }
+    }
+    if breakdown.other > 0 {
+        out.push_str(&bullet(&format!(
+            "{}: {}",
+            attribution::OTHER_UNRESOLVED_LABEL,
+            attribution::count_references(breakdown.other)
+        )));
+    }
+    // EY1-A honest basis (heuristic, not a Layer-0 edge claim) + the honest provenance
+    // degradation (a named dependency is the declared dependency a reference resolved to — via
+    // its specifier or its receiver/callee import; versions not recorded; Java/Gradle
+    // heuristic — review-0 #3). The exact wording lives in `attribution::PROVENANCE_BASIS`.
+    out.push_str(&bullet(attribution::ATTRIBUTION_BASIS));
+    out.push_str(&bullet(attribution::PROVENANCE_BASIS));
+    out
+}
+
+/// Render the "library call" ([`attribution::AttributionClass::ExternalDependency`]) class
+/// as NAMED dependency lines (ATTRIBUTION-1 iteration 3): the top DECLARED dependencies by
+/// name (from the `external_dependencies` provenance-join leaf), an honest aggregate tail for
+/// identified-but-unlisted dependencies, and the honest "dependency not identified" bucket
+/// for references that could not be resolved to a declared dependency. All three values come
+/// from the ONE storage join, so `total_named + unidentified` reconciles the class total.
+fn render_library_calls(out: &mut String, v: &CoherentTrustReport) {
+    let attr = &v.external_dependencies.value;
+    // The top declared dependencies (across all three external-import bases), already bounded
+    // + count-desc/name-asc from the storage join. Each is the DECLARED manifest name.
+    let mut shown = 0u64;
+    for dep in &attr.top {
+        out.push_str(&bullet(&attribution::named_dependency_line(
+            &dep.name, dep.count,
+        )));
+        shown += dep.count;
+    }
+    // Identified dependencies beyond the bounded top-N list (honest aggregate tail — these
+    // ARE named declared deps, just not individually listed; distinct from "not identified").
+    let remainder = attr.total_named.saturating_sub(shown);
+    if remainder > 0 {
+        out.push_str(&bullet(&attribution::more_named_dependencies_line(
+            remainder,
+        )));
+    }
+    // External-import references with no nameable declared dependency — the honest
+    // missing-name degradation (never a fabricated name).
+    if attr.unidentified > 0 {
+        out.push_str(&bullet(&attribution::dependency_not_identified_line(
+            attr.unidentified,
+        )));
+    }
+    // The orientation action (VISION), rendered once — only when there IS a named dependency
+    // to follow.
+    if attr.total_named > 0 {
+        if let Some(hint) = attribution::AttributionClass::ExternalDependency.follow_hint() {
+            out.push_str(&bullet(hint));
+        }
+    }
+}
 
 /// EY1-A (ENRICH-YIELD-2): a Layer-2 read projection over the enrichment metadata already on the
 /// trust report — the largest reject class (~36% of enrichment-eligible unknown object-method calls)

@@ -33,14 +33,23 @@ use crate::rules::{
     sum_unresolved_calls, sum_unresolved_imports, ModuleForSuspicionCheck, PathPrefixCycleInput,
 };
 use crate::storage_port::{
-    ClassificationCountRow, PathPrefixModuleCycle, TrustModuleStats, TrustStorageRead,
-    TrustUnresolvedEdgeSample, UnresolvedEdgeClassification,
+    BasisCodeCountRow, ClassificationCountRow, ExternalDependencyAttribution,
+    PathPrefixModuleCycle, TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample,
+    UnresolvedEdgeClassification,
 };
 use crate::types::{
     EnrichmentStatus, EnrichmentTopType, ExtractionDiagnostics, ModuleTrustRow, ReliabilityLevel,
-    TrustCategoryRow, TrustClassificationRow, TrustDowngrades, TrustReliability, TrustReport,
+    TrustBasisClassificationRow, TrustCategoryRow, TrustClassificationRow, TrustDowngrades,
+    TrustExternalDependencyAttribution, TrustNamedDependencyRow, TrustReliability, TrustReport,
     TrustSummary, UnknownCallsBlastRadiusBreakdown,
 };
+
+/// The bound on how many named library dependencies the reader-frame breakdown lists
+/// individually (ATTRIBUTION-1). Applied at the storage read (count-desc, name-asc);
+/// dependencies beyond it are surfaced honestly as an aggregate "other declared
+/// dependencies" tail, never dropped. Ten keeps the section compact while covering the
+/// dependency set of a typical module/crate.
+pub const TOP_NAMED_DEPENDENCIES_LIMIT: u32 = 10;
 
 // ── Error type for assembly layer ────────────────────────────────
 
@@ -146,6 +155,15 @@ pub struct TrustComputationInput {
     /// Classification counts unfiltered (all categories).
     /// Used for the classifications section of the report.
     pub all_classification_counts: Vec<ClassificationCountRow>,
+    /// ATTRIBUTION-1: basis-code counts unfiltered (all categories). The finer axis
+    /// used to build the reader-frame attribution breakdown. Empty when the snapshot
+    /// has no unresolved edges (mirrors `all_classification_counts`).
+    pub all_basis_code_counts: Vec<BasisCodeCountRow>,
+    /// ATTRIBUTION-1 iteration 3: the reader-frame attribution of the external-import
+    /// unresolved references — each named by its DECLARED dependency across all three call
+    /// bases (the provenance join), plus the named/unidentified totals reconciling the
+    /// class. Empty/zero when the snapshot has no external-import references.
+    pub external_dependencies: ExternalDependencyAttribution,
     /// Unresolved edge samples with classification = "unknown".
     /// Used for blast-radius breakdown and enrichment status.
     /// Empty if `all_classification_counts` was empty (assembly
@@ -412,6 +430,52 @@ pub fn compute_trust_report_cancellable(
             .then_with(|| a.classification.cmp(&b.classification))
     });
 
+    // ── Phase 4b: Basis-code rows (ATTRIBUTION-1) ────────────
+    // The finer axis. Same serialize-typed-enum-to-string discipline as the
+    // classification rows above, and the same count-desc / code-asc ordering — the
+    // rgr presentation layer maps each basis code to a reader-frame attribution class.
+    let mut basis_classifications: Vec<TrustBasisClassificationRow> = input
+        .all_basis_code_counts
+        .iter()
+        .map(|r| {
+            let basis_code_str = serde_json::to_value(r.basis_code)
+                .ok()
+                .and_then(|v| match v {
+                    serde_json::Value::String(s) => Some(s),
+                    _ => None,
+                })
+                .unwrap_or_else(|| format!("{:?}", r.basis_code));
+            TrustBasisClassificationRow {
+                basis_code: basis_code_str,
+                count: r.count,
+            }
+        })
+        .collect();
+    basis_classifications.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| a.basis_code.cmp(&b.basis_code))
+    });
+
+    // ── Phase 4c: External-dependency attribution (ATTRIBUTION-1 iteration 3) ─────────
+    // The provenance join's result: the top declared dependencies (already bounded +
+    // ordered count-desc, name-asc by the storage read) plus the named/unidentified totals
+    // that reconcile the class. The report/wire mirror is a field-identical map (port →
+    // report), exactly like the basis rows above but with no enum to serialize.
+    let external_dependencies = TrustExternalDependencyAttribution {
+        top: input
+            .external_dependencies
+            .top
+            .iter()
+            .map(|d| TrustNamedDependencyRow {
+                name: d.name.clone(),
+                count: d.count,
+            })
+            .collect(),
+        total_named: input.external_dependencies.total_named,
+        unidentified: input.external_dependencies.unidentified,
+    };
+
     // ── Phase 5: Blast radius + enrichment ───────────────────
     //
     // `enrichment_eligible_count` is returned alongside the
@@ -533,6 +597,8 @@ pub fn compute_trust_report_cancellable(
         },
         categories,
         classifications,
+        basis_classifications,
+        external_dependencies,
         unknown_calls_blast_radius,
         enrichment_status,
         modules,
@@ -836,6 +902,20 @@ pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
         )
         .map_err(TrustAssemblyError::Storage)?;
 
+    // ATTRIBUTION-1: basis-code counts (no filter — the full unresolved set). The
+    // finer companion to the classification counts above, used for the reader-frame
+    // attribution breakdown.
+    let all_basis_code_counts = storage
+        .count_unresolved_edges_by_basis_code(snapshot_uid)
+        .map_err(TrustAssemblyError::Storage)?;
+
+    // ATTRIBUTION-1 iteration 3: the external-dependency attribution (the provenance join) —
+    // the top declared dependencies (bounded, count-desc) across all three external-import
+    // bases + the named/unidentified totals that reconcile the class.
+    let external_dependencies = storage
+        .attribute_external_dependencies(snapshot_uid, TOP_NAMED_DEPENDENCIES_LIMIT)
+        .map_err(TrustAssemblyError::Storage)?;
+
     // Unknown CALLS samples (conditional: only if there are
     // classification counts).
     let unknown_calls_samples = if !all_classification_counts.is_empty() {
@@ -863,6 +943,8 @@ pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
         resolved_calls,
         calls_classification_counts,
         all_classification_counts,
+        all_basis_code_counts,
+        external_dependencies,
         unknown_calls_samples,
     };
 
@@ -879,7 +961,8 @@ pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
 mod tests {
     use super::*;
     use crate::storage_port::{
-        ClassificationCountRow, CountByClassificationInput, PathPrefixModuleCycle,
+        BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
+        ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
         QueryUnresolvedEdgesInput, TrustModuleStats, TrustUnresolvedEdgeSample,
         UnresolvedEdgeBasisCode, UnresolvedEdgeClassification,
     };
@@ -901,6 +984,8 @@ mod tests {
             resolved_calls: 0,
             calls_classification_counts: vec![],
             all_classification_counts: vec![],
+            all_basis_code_counts: vec![],
+            external_dependencies: ExternalDependencyAttribution::default(),
             unknown_calls_samples: vec![],
         }
     }
@@ -932,6 +1017,45 @@ mod tests {
         assert_eq!(report.classifications.len(), 0);
         assert!(report.unknown_calls_blast_radius.is_none());
         assert!(report.enrichment_status.is_none());
+    }
+
+    #[test]
+    fn compute_carries_external_dependency_attribution_from_input_to_report() {
+        // ATTRIBUTION-1 iteration 3: the provenance-join result (top + totals) flows
+        // input → report unchanged (order-preserving); the render surface later names them.
+        let mut input = minimal_input();
+        input.external_dependencies = ExternalDependencyAttribution {
+            top: vec![
+                NamedDependencyCount {
+                    name: "serde".into(),
+                    count: 5,
+                },
+                NamedDependencyCount {
+                    name: "tokio".into(),
+                    count: 2,
+                },
+            ],
+            total_named: 9,
+            unidentified: 4,
+        };
+        let report = compute_trust_report(&input);
+        assert_eq!(
+            report.external_dependencies,
+            TrustExternalDependencyAttribution {
+                top: vec![
+                    TrustNamedDependencyRow {
+                        name: "serde".into(),
+                        count: 5
+                    },
+                    TrustNamedDependencyRow {
+                        name: "tokio".into(),
+                        count: 2
+                    },
+                ],
+                total_named: 9,
+                unidentified: 4,
+            }
+        );
     }
 
     #[test]
@@ -1536,6 +1660,8 @@ mod tests {
         resolved_calls: u64,
         calls_classification_counts: Vec<ClassificationCountRow>,
         all_classification_counts: Vec<ClassificationCountRow>,
+        all_basis_code_counts: Vec<BasisCodeCountRow>,
+        external_dependencies: ExternalDependencyAttribution,
         unknown_calls_samples: Vec<TrustUnresolvedEdgeSample>,
         /// If set, all methods return this error.
         force_error: Option<String>,
@@ -1552,6 +1678,8 @@ mod tests {
                 resolved_calls: 0,
                 calls_classification_counts: vec![],
                 all_classification_counts: vec![],
+                all_basis_code_counts: vec![],
+                external_dependencies: ExternalDependencyAttribution::default(),
                 unknown_calls_samples: vec![],
                 force_error: None,
             }
@@ -1605,6 +1733,27 @@ mod tests {
             } else {
                 Ok(self.calls_classification_counts.clone())
             }
+        }
+
+        fn count_unresolved_edges_by_basis_code(
+            &self,
+            _snapshot_uid: &str,
+        ) -> Result<Vec<BasisCodeCountRow>, String> {
+            if self.force_error.is_some() {
+                return self.err_result();
+            }
+            Ok(self.all_basis_code_counts.clone())
+        }
+
+        fn attribute_external_dependencies(
+            &self,
+            _snapshot_uid: &str,
+            _limit: u32,
+        ) -> Result<ExternalDependencyAttribution, String> {
+            if self.force_error.is_some() {
+                return self.err_result();
+            }
+            Ok(self.external_dependencies.clone())
         }
 
         fn query_unresolved_edges(

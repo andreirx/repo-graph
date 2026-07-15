@@ -45,8 +45,8 @@ use crate::signals::{
     matches_any_alias,
 };
 use crate::types::{
-    ClassifierEdgeInput, ClassifierVerdict, FileSignals, SnapshotSignals, UnresolvedEdgeBasisCode,
-    UnresolvedEdgeCategory, UnresolvedEdgeClassification,
+    ClassifierEdgeInput, ClassifierVerdict, FileSignals, ImportBinding, PackageDependencySet,
+    SnapshotSignals, UnresolvedEdgeBasisCode, UnresolvedEdgeCategory, UnresolvedEdgeClassification,
 };
 
 /// Classify a single unresolved edge.
@@ -139,74 +139,31 @@ fn classify_unresolved_import(
     snapshot_signals: &SnapshotSignals,
     file_signals: &FileSignals,
 ) -> ClassifierVerdict {
-    let mut specifier = edge.target_key.clone();
-    let mut is_relative = false;
-
-    // Parse metadata for the import specifier.
-    if let Some(ref meta_str) = edge.metadata_json {
-        if let Ok(meta) = serde_json::from_str::<serde_json::Value>(meta_str) {
-            // TS extractor: rawPath is the original specifier.
-            if let Some(raw_path) = meta.get("rawPath").and_then(|v| v.as_str()) {
-                specifier = raw_path.to_string();
-                is_relative = specifier.starts_with('.');
-            }
-            // Rust extractor: specifier is the crate/module path.
-            if let Some(spec) = meta.get("specifier").and_then(|v| v.as_str()) {
-                specifier = spec.to_string();
-                is_relative = specifier.starts_with("crate::")
-                    || specifier.starts_with("super::")
-                    || specifier.starts_with("self::");
-            }
-        }
-    }
-
-    // Python relative imports: targetKey starts with ".".
-    if !is_relative && specifier.starts_with('.') {
-        is_relative = true;
-    }
+    // Read the specifier + relativity exactly as before (metadata rawPath/specifier,
+    // target_key fallback) — extracted to `parse_import_specifier` so
+    // `resolve_external_dependency_name` (ATTRIBUTION-1) reads the specifier the same way.
+    let (specifier, is_relative) = parse_import_specifier(edge);
 
     // Relative → internal.
     if is_relative {
         return internal(UnresolvedEdgeBasisCode::RelativeImportTargetUnresolved);
     }
 
-    // Check package dependency (with Rust hyphen normalization + Java prefix).
-    let base_specifier = if specifier.contains("::") {
-        specifier
-            .split("::")
-            .next()
-            .unwrap_or(&specifier)
-            .to_string()
-    } else {
-        specifier.clone()
-    };
-
-    if has_package_dependency(&file_signals.package_dependencies, &base_specifier) {
+    // Check package dependency (with Rust hyphen normalization + Java prefix) — the shared
+    // reduction (ATTRIBUTION-1: `resolve_declared_dependency` reuses this exact matching so a
+    // named dependency renders as the DECLARED manifest name, not the raw specifier). The
+    // verdict is unchanged: external iff a declared dependency matches.
+    if resolve_declared_dependency(&specifier, &file_signals.package_dependencies).is_some() {
         return external(UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency);
     }
 
-    // Rust hyphen normalization: my_crate → my-crate.
-    let hyphenated = base_specifier.replace('_', "-");
-    if hyphenated != base_specifier
-        && has_package_dependency(&file_signals.package_dependencies, &hyphenated)
-    {
-        return external(UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency);
-    }
-
-    // Java prefix matching: import specifier "org.springframework.web.bind"
-    // matches Maven group "org.springframework.boot" if specifier starts
-    // with the dep name.
-    if specifier.contains('.') && !specifier.contains("::") && !specifier.contains('/') {
-        for dep in &file_signals.package_dependencies.names {
-            if dep.contains('.') && specifier.starts_with(dep.as_str()) {
-                return external(UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency);
-            }
-        }
-    }
-
-    // Check runtime modules.
+    // Check runtime modules (the specifier itself, and its scoped base — `std::collections`
+    // → base `std`). `base_specifier` is the shared split reused by `resolve_declared_dependency`.
     if has_runtime_builtin_module(&snapshot_signals.runtime_builtins, &specifier)
-        || has_runtime_builtin_module(&snapshot_signals.runtime_builtins, &base_specifier)
+        || has_runtime_builtin_module(
+            &snapshot_signals.runtime_builtins,
+            base_specifier(&specifier),
+        )
     {
         return external(UnresolvedEdgeBasisCode::SpecifierMatchesRuntimeModule);
     }
@@ -432,6 +389,129 @@ fn find_binding_for_identifier<'a>(
     bindings.iter().find(|b| b.identifier == identifier)
 }
 
+// ── Named-dependency resolution (ATTRIBUTION-1) ──────────────────
+//
+// The name-returning form of the classifier's own external-import matching. Extracted
+// from `classify_unresolved_edge` / `classify_unresolved_import` so the ATTRIBUTION-1
+// attribution join REUSES the exact reduction (operator-directed, 2026-07-15) instead of
+// duplicating it. `classify_*` call these helpers, so the classifier verdicts are
+// byte-identical — only the returned *name* is new surface.
+
+/// Read an unresolved IMPORTS edge's specifier + relativity exactly as
+/// `classify_unresolved_import` did inline (metadata `rawPath` for TS / `specifier` for
+/// Rust, `target_key` fallback; relative iff `.`/`crate::`/`super::`/`self::`). Extracted
+/// verbatim so both the classifier and [`resolve_external_dependency_name`] read the
+/// specifier identically.
+fn parse_import_specifier(edge: &ClassifierEdgeInput) -> (String, bool) {
+    let mut specifier = edge.target_key.clone();
+    let mut is_relative = false;
+    if let Some(ref meta_str) = edge.metadata_json {
+        if let Ok(meta) = serde_json::from_str::<serde_json::Value>(meta_str) {
+            // TS extractor: rawPath is the original specifier.
+            if let Some(raw_path) = meta.get("rawPath").and_then(|v| v.as_str()) {
+                specifier = raw_path.to_string();
+                is_relative = specifier.starts_with('.');
+            }
+            // Rust extractor: specifier is the crate/module path.
+            if let Some(spec) = meta.get("specifier").and_then(|v| v.as_str()) {
+                specifier = spec.to_string();
+                is_relative = specifier.starts_with("crate::")
+                    || specifier.starts_with("super::")
+                    || specifier.starts_with("self::");
+            }
+        }
+    }
+    // Python relative imports: targetKey starts with ".".
+    if !is_relative && specifier.starts_with('.') {
+        is_relative = true;
+    }
+    (specifier, is_relative)
+}
+
+/// The base dependency/module segment of a scoped specifier — the part before the first
+/// `"::"` (`serde::de` → `serde`), or the whole specifier when unscoped. Shared by the
+/// runtime-module check and [`resolve_declared_dependency`] so the split is defined once.
+fn base_specifier(specifier: &str) -> &str {
+    match specifier.split_once("::") {
+        Some((base, _)) => base,
+        None => specifier,
+    }
+}
+
+/// Reduce an import specifier to the DECLARED dependency name it matches, if any — the
+/// package-dependency matching `classify_unresolved_import` performs, returning the matched
+/// *declared* name instead of a bare verdict. Reduces a scoped path to its base
+/// (`serde::de` → `serde`; `repo_graph_indexer::types` → `repo_graph_indexer`), applies Rust
+/// hyphen normalization (`repo_graph_indexer` → `repo-graph-indexer`) and Java group-prefix
+/// matching, and returns the manifest entry that matched (`repo-graph-indexer`), or `None`.
+///
+/// The returned name is the DECLARED dependency (`repo-graph-indexer`), never the raw
+/// specifier (`repo_graph_indexer::types`) — the review-2 defect this fixes. `is_some()` is
+/// true in exactly the cases the classifier's three package-dependency checks returned
+/// external, so the classifier verdict is preserved.
+pub(crate) fn resolve_declared_dependency(
+    specifier: &str,
+    declared: &PackageDependencySet,
+) -> Option<String> {
+    let base = base_specifier(specifier);
+    if has_package_dependency(declared, base) {
+        return Some(base.to_string());
+    }
+    // Rust hyphen normalization: my_crate → my-crate.
+    let hyphenated = base.replace('_', "-");
+    if hyphenated != base && has_package_dependency(declared, &hyphenated) {
+        return Some(hyphenated);
+    }
+    // Java prefix: "org.springframework.web.bind" matches Maven group
+    // "org.springframework.boot" when the specifier starts with the dep name.
+    if specifier.contains('.') && !specifier.contains("::") && !specifier.contains('/') {
+        for dep in &declared.names {
+            if dep.contains('.') && specifier.starts_with(dep.as_str()) {
+                return Some(dep.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the DECLARED dependency an external-import unresolved reference maps to, in the
+/// reader's terms — the name-returning form of the classifier's external-import matching
+/// (ATTRIBUTION-1). Reuses the SAME identifier extraction + specifier reduction the
+/// classifier used to assign the basis, so the name is the manifest dependency
+/// (`repo-graph-indexer`, `serde`), never the raw import path (`repo_graph_indexer::types`)
+/// or the call expression (`app.listen`). Returns `None` when no declared dependency can be
+/// named (→ the honest "dependency not identified"), and for any non-external-import basis.
+///
+/// - [`UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency`]: read the specifier as
+///   the classifier does and reduce it against `declared`.
+/// - [`UnresolvedEdgeBasisCode::ReceiverMatchesExternalImport`] /
+///   [`UnresolvedEdgeBasisCode::CalleeMatchesExternalImport`]: extract the receiver/callee
+///   identifier, find the import binding that introduced it, and reduce that binding's
+///   specifier against `declared`. (The classifier matched `binding.specifier` directly; the
+///   reduction here is a superset — it returns the same name for a bare specifier and also
+///   handles a scoped one.)
+pub fn resolve_external_dependency_name(
+    edge: &ClassifierEdgeInput,
+    category: UnresolvedEdgeCategory,
+    basis_code: UnresolvedEdgeBasisCode,
+    import_bindings: &[ImportBinding],
+    declared: &PackageDependencySet,
+) -> Option<String> {
+    use UnresolvedEdgeBasisCode as B;
+    match basis_code {
+        B::SpecifierMatchesPackageDependency => {
+            let (specifier, _is_relative) = parse_import_specifier(edge);
+            resolve_declared_dependency(&specifier, declared)
+        }
+        B::ReceiverMatchesExternalImport | B::CalleeMatchesExternalImport => {
+            let identifier = extract_target_identifier(edge, category)?;
+            let binding = find_binding_for_identifier(&identifier, import_bindings)?;
+            resolve_declared_dependency(&binding.specifier, declared)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +539,24 @@ mod tests {
         ClassifierEdgeInput {
             target_key: target_key.to_string(),
             metadata_json: Some(meta.to_string()),
+        }
+    }
+
+    fn binding(identifier: &str, specifier: &str) -> ImportBinding {
+        ImportBinding {
+            identifier: identifier.into(),
+            specifier: specifier.into(),
+            is_relative: false,
+            location: None,
+            is_type_only: false,
+            imported_name: None,
+            kind: ImportKind::Named,
+        }
+    }
+
+    fn deps(names: &[&str]) -> PackageDependencySet {
+        PackageDependencySet {
+            names: names.iter().map(|s| s.to_string()).collect(),
         }
     }
 
@@ -856,5 +954,127 @@ mod tests {
         assert!(!is_rust_module_name("MyModule")); // uppercase
         assert!(!is_rust_module_name("1mod")); // starts with digit
         assert!(!is_rust_module_name("my-module")); // hyphen
+    }
+
+    // ── Named-dependency resolution (ATTRIBUTION-1) ───────────
+
+    #[test]
+    fn resolve_names_scoped_rust_specifier_as_declared_hyphenated_dependency() {
+        // review-2 defect: `repo_graph_indexer::types` is an import PATH; the DECLARED dep is
+        // `repo-graph-indexer`. The reduction bases + hyphen-normalizes to the manifest name.
+        let d = deps(&["repo-graph-indexer", "serde"]);
+        let e = edge_with_meta(
+            "repo_graph_indexer::types",
+            r#"{"specifier":"repo_graph_indexer::types"}"#,
+        );
+        assert_eq!(
+            resolve_external_dependency_name(
+                &e,
+                UnresolvedEdgeCategory::ImportsFileNotFound,
+                UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency,
+                &[],
+                &d,
+            ),
+            Some("repo-graph-indexer".to_string()),
+            "scoped specifier must name the DECLARED (hyphenated) dependency, not the import path"
+        );
+        // Bare specifier: serde → serde.
+        let e2 = edge_with_meta("serde", r#"{"specifier":"serde"}"#);
+        assert_eq!(
+            resolve_external_dependency_name(
+                &e2,
+                UnresolvedEdgeCategory::ImportsFileNotFound,
+                UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency,
+                &[],
+                &d,
+            ),
+            Some("serde".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_names_receiver_and_callee_external_calls_via_import_binding() {
+        // The two CALL bases the classifier resolves through import bindings — named via the
+        // binding's specifier, NOT the call expression `app.listen` / bare callee `useState`.
+        let d = deps(&["express", "react"]);
+        let bindings = vec![binding("app", "express"), binding("useState", "react")];
+        assert_eq!(
+            resolve_external_dependency_name(
+                &edge("app.listen"),
+                UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+                UnresolvedEdgeBasisCode::ReceiverMatchesExternalImport,
+                &bindings,
+                &d,
+            ),
+            Some("express".to_string())
+        );
+        assert_eq!(
+            resolve_external_dependency_name(
+                &edge("useState"),
+                UnresolvedEdgeCategory::CallsFunctionAmbiguousOrMissing,
+                UnresolvedEdgeBasisCode::CalleeMatchesExternalImport,
+                &bindings,
+                &d,
+            ),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_returns_none_when_unnameable_or_non_external_basis() {
+        let d = deps(&["serde"]);
+        // Receiver whose binding specifier is not a declared dep → unnameable (→ "not identified").
+        assert_eq!(
+            resolve_external_dependency_name(
+                &edge("app.listen"),
+                UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+                UnresolvedEdgeBasisCode::ReceiverMatchesExternalImport,
+                &[binding("app", "koa")],
+                &d,
+            ),
+            None
+        );
+        // Callee with no import binding at all → None.
+        assert_eq!(
+            resolve_external_dependency_name(
+                &edge("mystery"),
+                UnresolvedEdgeCategory::CallsFunctionAmbiguousOrMissing,
+                UnresolvedEdgeBasisCode::CalleeMatchesExternalImport,
+                &[],
+                &d,
+            ),
+            None
+        );
+        // A non-external-import basis is never named (own-code / stdlib / dynamic dispatch).
+        assert_eq!(
+            resolve_external_dependency_name(
+                &edge("serde"),
+                UnresolvedEdgeCategory::ImportsFileNotFound,
+                UnresolvedEdgeBasisCode::RelativeImportTargetUnresolved,
+                &[],
+                &d,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_declared_dependency_matches_classifier_reduction() {
+        // The reduction reused by classify_unresolved_import: base + hyphen + Java prefix.
+        let d = deps(&["repo-graph-indexer", "serde", "org.springframework.boot"]);
+        assert_eq!(
+            resolve_declared_dependency("serde::de", &d),
+            Some("serde".to_string())
+        );
+        assert_eq!(
+            resolve_declared_dependency("repo_graph_indexer", &d),
+            Some("repo-graph-indexer".to_string())
+        );
+        assert_eq!(
+            resolve_declared_dependency("org.springframework.boot.autoconfigure", &d),
+            Some("org.springframework.boot".to_string()),
+            "Java group-prefix match returns the declared group"
+        );
+        assert_eq!(resolve_declared_dependency("tokio", &d), None);
     }
 }

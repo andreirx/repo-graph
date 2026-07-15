@@ -37,8 +37,9 @@ use repo_graph_coherence::{
 };
 
 use crate::types::{
-    EnrichmentStatus, ModuleTrustRow, TrustCategoryRow, TrustClassificationRow, TrustDowngrades,
-    TrustReliability, TrustReport, UnknownCallsBlastRadiusBreakdown,
+    EnrichmentStatus, ModuleTrustRow, TrustBasisClassificationRow, TrustCategoryRow,
+    TrustClassificationRow, TrustDowngrades, TrustExternalDependencyAttribution, TrustReliability,
+    TrustReport, UnknownCallsBlastRadiusBreakdown,
 };
 
 // ── Half-A posture DTOs (the current-state LiveGraph reliability posture) ──────────────────────────
@@ -158,6 +159,19 @@ pub struct CoherentTrustReport {
     pub categories: CoherenceEnvelope<Vec<TrustCategoryRow>>,
     /// The classifier-bucket counts.
     pub classifications: CoherenceEnvelope<Vec<TrustClassificationRow>>,
+    /// ATTRIBUTION-1: the basis-code counts — the finer axis behind `classifications`,
+    /// which the rgr presentation layer maps to reader-frame attribution classes
+    /// (library call / standard library / runtime built-in / your own code / dynamic
+    /// dispatch / unattributed). Same snapshot posture + `sqlite` provenance as the
+    /// classifications leaf it refines.
+    pub basis_classifications: CoherenceEnvelope<Vec<TrustBasisClassificationRow>>,
+    /// ATTRIBUTION-1 iteration 3: the reader-frame attribution of the external-import
+    /// unresolved references — each named by its DECLARED dependency (the provenance join),
+    /// plus the named/unidentified totals. The rgr presentation layer renders
+    /// "library call → serde: N references", "other declared dependencies", and the honest
+    /// "dependency not identified" from this bundle. Same snapshot posture + `sqlite`
+    /// provenance as the basis-code leaf it refines.
+    pub external_dependencies: CoherenceEnvelope<TrustExternalDependencyAttribution>,
     /// The unknown-CALLS blast-radius breakdown.
     pub unknown_calls_blast_radius: CoherenceEnvelope<Option<UnknownCallsBlastRadiusBreakdown>>,
     /// The enrichment status for unknown CALLS.
@@ -242,6 +256,8 @@ pub fn trust_to_coherent(
         summary,
         categories,
         classifications,
+        basis_classifications,
+        external_dependencies,
         unknown_calls_blast_radius,
         enrichment_status,
         modules,
@@ -312,6 +328,22 @@ pub fn trust_to_coherent(
         snap_trust.clone(),
         snap_fresh,
     );
+    // ATTRIBUTION-1: the finer basis-code leaf, same posture/provenance as the
+    // classifications leaf it refines (`sqlite`, snapshot-scoped).
+    let basis_classifications_leaf = CoherenceEnvelope::new(
+        basis_classifications,
+        Provenance::sqlite(),
+        snap_trust.clone(),
+        snap_fresh,
+    );
+    // ATTRIBUTION-1 iteration 3: the external-dependency attribution leaf, same
+    // posture/provenance as the basis-code leaf it refines (`sqlite`, snapshot-scoped).
+    let external_dependencies_leaf = CoherenceEnvelope::new(
+        external_dependencies,
+        Provenance::sqlite(),
+        snap_trust.clone(),
+        snap_fresh,
+    );
     let blast_leaf = CoherenceEnvelope::new(
         unknown_calls_blast_radius,
         Provenance::sqlite(),
@@ -341,6 +373,8 @@ pub fn trust_to_coherent(
         meta_of(&downgrades_leaf),
         meta_of(&categories_leaf),
         meta_of(&classifications_leaf),
+        meta_of(&basis_classifications_leaf),
+        meta_of(&external_dependencies_leaf),
         meta_of(&blast_leaf),
         meta_of(&enrichment_leaf),
         meta_of(&modules_leaf),
@@ -360,6 +394,8 @@ pub fn trust_to_coherent(
         triggered_downgrades: downgrades_leaf,
         categories: categories_leaf,
         classifications: classifications_leaf,
+        basis_classifications: basis_classifications_leaf,
+        external_dependencies: external_dependencies_leaf,
         unknown_calls_blast_radius: blast_leaf,
         enrichment_status: enrichment_leaf,
         modules: modules_leaf,

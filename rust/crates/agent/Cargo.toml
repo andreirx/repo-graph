@@ -76,6 +76,18 @@ serde_json = "1"
 # no-dependency-on-`repo-graph-trust` boundary below.
 repo-graph-coherence = { path = "../repo-graph-coherence" }
 
+# Classification substrate — added in ATTRIBUTION-1 (operator-RATIFIED
+# 2026-07-15, ATTR1-MAPPING-BOUNDARY option A). `attribution.rs` owns the ONE
+# typed, compile-fail-exhaustive `UnresolvedEdgeBasisCode → AttributionClass`
+# match (slice §1.4 "one shared mapping module"), so it must NAME the classifier
+# enum. `repo-graph-classification` is an inner leaf crate (deps: serde +
+# serde_json + repo-graph-coverage) consumed by indexer / daemon-runtime /
+# extractors; `agent → classification` is outer → inner per the dependency rule,
+# and cycle-free (classification has no edge back to agent — verified). This does
+# NOT relax the documented no-dependency-on-`repo-graph-trust` boundary below:
+# the wire basis code arrives as a `String` and is parsed to the typed enum here.
+repo-graph-classification = { path = "../classification" }
+
 # Gate crate — added in Rust-43A. The agent orient pipeline
 # emits GATE_PASS / GATE_FAIL / GATE_INCOMPLETE signals by
 # calling `repo_graph_gate::assemble_from_requirements`. This

@@ -251,6 +251,8 @@ mod tests {
             },
             categories: vec![],
             classifications: vec![],
+            basis_classifications: vec![],
+            external_dependencies: Default::default(),
             unknown_calls_blast_radius: None,
             enrichment_status: None,
             modules: vec![],

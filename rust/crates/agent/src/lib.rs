@@ -53,9 +53,12 @@
 //!   - `rusqlite` or any SQL crate
 //!   - any indexer or extractor crate
 //!
-//! The only external dependencies are `serde` and `serde_json`.
+//! External dependencies: `serde`, `serde_json`, and `repo-graph-classification` (the
+//! typed `UnresolvedEdgeBasisCode` vocabulary for the exhaustive attribution mapping —
+//! an inward, cycle-free edge ratified in ATTRIBUTION-1).
 
 pub mod aggregators;
+pub mod attribution;
 pub mod check;
 pub mod confidence;
 pub mod doc_relevance;

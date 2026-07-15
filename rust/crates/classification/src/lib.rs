@@ -297,4 +297,4 @@ pub use boundary_matcher::{compute_matcher_key, match_boundary_facts};
 pub use framework_boundary::detect_framework_boundary;
 pub use framework_entrypoints::detect_lambda_entrypoints;
 pub use spring_liveness::{classify_spring_liveness, SpringLivenessInference, SpringNodeInput};
-pub use unresolved_classifier::classify_unresolved_edge;
+pub use unresolved_classifier::{classify_unresolved_edge, resolve_external_dependency_name};

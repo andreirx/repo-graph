@@ -179,6 +179,60 @@ pub struct TrustClassificationRow {
     pub count: u64,
 }
 
+/// One row in the basis-code breakdown (ATTRIBUTION-1) — the FINER axis behind
+/// [`TrustClassificationRow`].
+///
+/// The coarse 4-value classification folds third-party dependencies, the standard
+/// library, and runtime globals into one `external_library_candidate` bucket; the 17
+/// `UnresolvedEdgeBasisCode` values keep them apart, which is what a reader-frame
+/// attribution breakdown needs. The `basis_code` is the enum's snake_case
+/// serialization as a `String` (consistent with the sibling classification row, and
+/// forward-compatible: a newer daemon's unknown code deserializes fine and the rgr
+/// renderer folds it into the honest "other" bucket rather than failing to parse).
+///
+/// Rust-only: this rides the COHERENT wire's `basis_classifications` leaf, NOT the
+/// TS-parity v1 `TrustReport` wire (that field is `#[serde(skip)]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustBasisClassificationRow {
+    pub basis_code: String,
+    pub count: u64,
+}
+
+/// One named-dependency row in the external-dependency attribution (ATTRIBUTION-1) — the
+/// report/wire mirror of [`crate::storage_port::NamedDependencyCount`] (same fields; the
+/// service maps port → report, exactly as it maps `BasisCodeCountRow` →
+/// [`TrustBasisClassificationRow`]).
+///
+/// `name` is the DECLARED dependency the reference resolved to (`repo-graph-indexer`,
+/// `serde`) — the honest dependency identity, never a fabricated version. Rust-only: rides
+/// the COHERENT wire's `external_dependencies` leaf inside
+/// [`TrustExternalDependencyAttribution`], NOT the TS-parity v1 `TrustReport` wire (that
+/// field is `#[serde(skip)]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustNamedDependencyRow {
+    pub name: String,
+    pub count: u64,
+}
+
+/// The reader-frame attribution of the EXTERNAL-import unresolved references (ATTRIBUTION-1
+/// iteration 3) — the report/wire mirror of
+/// [`crate::storage_port::ExternalDependencyAttribution`].
+///
+/// The provenance join names each external-import reference by its DECLARED dependency across
+/// all three call bases (`repo-graph-indexer`, `serde`, `express`, `react`), reducing scoped
+/// specifiers to the manifest name. `top` is the bounded leaders; `total_named` /
+/// `unidentified` reconcile the "library call" class (`total_named + unidentified` == the
+/// ExternalDependency class total), letting the renderer show "other declared dependencies"
+/// for the identified-but-unlisted remainder and the honest "dependency not identified"
+/// bucket. Rust-only: rides the COHERENT wire's `external_dependencies` leaf, NOT the
+/// TS-parity v1 `TrustReport` wire (that field is `#[serde(skip)]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustExternalDependencyAttribution {
+    pub top: Vec<TrustNamedDependencyRow>,
+    pub total_named: u64,
+    pub unidentified: u64,
+}
+
 // ── Blast-radius breakdown ───────────────────────────────────────
 
 /// Blast-radius counts for unknown-classified CALLS edges. Mirror
@@ -330,6 +384,33 @@ pub struct TrustReport {
     /// it on THEIR own (non-parity) wires.
     #[serde(skip, default)]
     pub unresolved_calls_unknown: u64,
+
+    /// ATTRIBUTION-1: the basis-code breakdown — the finer axis behind
+    /// `classifications`, which the rgr presentation layer maps to reader-frame
+    /// attribution classes (library call / standard library / runtime built-in / your
+    /// own code / dynamic dispatch / unattributed).
+    ///
+    /// `#[serde(skip, default)]` — NOT on the TS-parity v1 wire (exactly like
+    /// `unresolved_calls_unknown`: adding a serialized field would break both
+    /// `report__*` fixtures AND diverge from the live TS side, which does not compute
+    /// it). It is populated in-process by `assemble_trust_report` and projected onto
+    /// the coherent `basis_classifications` leaf by `trust_to_coherent`.
+    #[serde(skip, default)]
+    pub basis_classifications: Vec<TrustBasisClassificationRow>,
+
+    /// ATTRIBUTION-1 iteration 3: the reader-frame attribution of the external-import
+    /// unresolved references — each named by its DECLARED dependency across all three call
+    /// bases (the provenance join), plus the named/unidentified totals that reconcile the
+    /// "library call" class. Replaces the review-1 `top_named_dependencies` (which named
+    /// only the specifier basis, by raw specifier); the renderer draws
+    /// "library call → serde: N references", "other declared dependencies", and the honest
+    /// "dependency not identified" from this one bundle.
+    ///
+    /// `#[serde(skip, default)]` — NOT on the TS-parity v1 wire (same rationale as
+    /// `basis_classifications`). Populated in-process by `assemble_trust_report` and
+    /// projected onto the coherent `external_dependencies` leaf by `trust_to_coherent`.
+    #[serde(skip, default)]
+    pub external_dependencies: TrustExternalDependencyAttribution,
 }
 
 #[cfg(test)]

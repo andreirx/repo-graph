@@ -76,6 +76,63 @@ pub struct ClassificationCountRow {
     pub count: u64,
 }
 
+/// One row from a basis-code-grouped unresolved-edge count.
+///
+/// ATTRIBUTION-1: the FINER axis behind [`ClassificationCountRow`]. The coarse
+/// 4-value `UnresolvedEdgeClassification` folds third-party dependencies, the
+/// standard library, and runtime globals all into one `ExternalLibraryCandidate`
+/// bucket; the 17 `UnresolvedEdgeBasisCode` values keep them apart, which is exactly
+/// what a reader-frame attribution breakdown needs. Typed key (the trust crate
+/// already depends on `repo-graph-classification`), read from a GROUP BY over the
+/// EXISTING `unresolved_edges.basis_code` column — a read, not a schema change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BasisCodeCountRow {
+    pub basis_code: UnresolvedEdgeBasisCode,
+    pub count: u64,
+}
+
+/// One named-dependency row in [`ExternalDependencyAttribution::top`] (ATTRIBUTION-1).
+///
+/// `name` is the DECLARED manifest dependency a reference resolved to (`serde`,
+/// `repo-graph-indexer`, `express`, `react`), reduced from whichever external-import basis
+/// named it — the import specifier, or the import binding that introduced a receiver/callee
+/// call. The provenance join reduces a scoped specifier (`repo_graph_indexer::types`) to the
+/// manifest name and never emits a raw import path or call expression, so `name` never
+/// misnames a dependency. The version is never included (the extractor does not record it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedDependencyCount {
+    pub name: String,
+    pub count: u64,
+}
+
+/// The reader-frame attribution of the EXTERNAL-import unresolved references (ATTRIBUTION-1
+/// iteration 3 — the provenance join).
+///
+/// The storage join resolves each external-import unresolved reference to the DECLARED
+/// dependency it maps to, across ALL three bases the classifier resolves through imports
+/// (`SpecifierMatchesPackageDependency`, `ReceiverMatchesExternalImport`,
+/// `CalleeMatchesExternalImport`), reusing the classifier's own reduction so a scoped
+/// specifier (`repo_graph_indexer::types`) becomes the manifest name (`repo-graph-indexer`),
+/// never the raw import path (the review-2 defect).
+///
+/// The three fields RECONCILE the "library call" class: `total_named + unidentified` equals
+/// the ExternalDependency class total (every external-import reference is counted exactly
+/// once — named if it resolves to a declared dependency, unidentified otherwise).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ExternalDependencyAttribution {
+    /// The top declared dependencies among the external-import references, count-descending
+    /// then name-ascending, bounded by the read's `limit`.
+    pub top: Vec<NamedDependencyCount>,
+    /// ALL external-import references that resolved to a declared dependency name (the full
+    /// count, not just the bounded `top`) — lets the renderer show "other declared
+    /// dependencies: N" for the identified-but-unlisted remainder honestly.
+    pub total_named: u64,
+    /// External-import references with NO nameable declared dependency (no source file, no
+    /// manifest signal, or no matching declared dependency) — the honest "dependency not
+    /// identified" bucket. Never a fabricated name.
+    pub unidentified: u64,
+}
+
 /// One row from a `query_unresolved_edges` sample query.
 ///
 /// Narrowed to the fields the trust service reads. Uses the
@@ -166,6 +223,36 @@ pub trait TrustStorageRead {
         &self,
         input: &CountByClassificationInput,
     ) -> Result<Vec<ClassificationCountRow>, Self::Error>;
+
+    /// Count unresolved edges grouped by the basis-code axis (ATTRIBUTION-1).
+    ///
+    /// The finer companion to [`Self::count_unresolved_edges_by_classification`]: a
+    /// read-only GROUP BY over the existing `basis_code` column, unfiltered (the full
+    /// unresolved set), so the reader surface can NAME where unresolved references go
+    /// (declared dependency / standard library / runtime global / own code / dynamic
+    /// dispatch / unattributed) instead of the coarse 4-value classification.
+    fn count_unresolved_edges_by_basis_code(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<BasisCodeCountRow>, Self::Error>;
+
+    /// Attribute the EXTERNAL-import unresolved references to their DECLARED dependencies
+    /// (ATTRIBUTION-1 iteration 3 — the provenance join replacing the review-1 GROUP BY).
+    ///
+    /// A read-only join of the external-import unresolved edges (three bases:
+    /// `SpecifierMatchesPackageDependency`, `Receiver`/`CalleeMatchesExternalImport`) with
+    /// each source file's persisted signals (`file_signals.import_bindings_json` +
+    /// `package_dependencies_json`), resolving each reference to its DECLARED dependency via
+    /// the classifier's own reduction (`repo_graph_classification::
+    /// resolve_external_dependency_name`) — so a scoped specifier renders as the manifest
+    /// name (`repo-graph-indexer`), and receiver/callee calls are named via their import
+    /// binding, not degraded. Returns the bounded `top` (count-desc, name-asc) plus the
+    /// `total_named` / `unidentified` totals that reconcile the class. No schema change.
+    fn attribute_external_dependencies(
+        &self,
+        snapshot_uid: &str,
+        limit: u32,
+    ) -> Result<ExternalDependencyAttribution, Self::Error>;
 
     /// Query unresolved edge samples filtered by classification.
     fn query_unresolved_edges(
