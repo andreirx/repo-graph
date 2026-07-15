@@ -57,3 +57,22 @@ gates section per gate, transcripts as captured; a killed run must leave a resum
 No reader surface shows an internal category code; unresolved calls are named in the
 reader's world with honest provenance where facts exist and honest degradation where not;
 one shared mapping; incremental report complete with raw evidence.
+
+---
+
+## 5. Delivery record (2026-07-15)
+
+**DELIVERED** (`adfd0cf`, operator close-out with ratified acceptance after 4 build
+iterations + 5 reviews). Live on repo-graph: "Unresolved references — where they go" with
+named base dependencies (serde 187, workspace crates, vitest 681 post-join, …), honest
+unidentified/unattributed tails, and the basis + provenance disclosure lines; internal
+codes grep-proofed off every reader surface. Ratifications: ATTR1-MAPPING-BOUNDARY
+(agent → classification inward edge; one compile-fail-exhaustive mapping),
+ATTR1-ORIENT-CHECK (trust-only; RR1's coverage map is the compact surface),
+ATTR1-PARITY-BASELINE (fixture repaired). Review value per round: coarse-classification
+mapping rejected → basis codes; import-path names rejected → declared-dependency reduction
+reusing the classifier's logic; false provenance sentence caught after the join improved.
+Final residuals (3 stale doc comments + the report stub after another fuse kill) closed
+operator-side; the reviewer had already EXECUTED the substantive proofs (e2e
+storage-to-render test, smoke artifacts with complete captures). TECH-DEBT R2 closed.
+Next: MAP-FROM-INDEX-1, then v0.7.0.

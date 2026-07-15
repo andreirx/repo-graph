@@ -307,7 +307,10 @@ projection. See docs/slices/reliability-reframe-1.md §5.
   external share as a reader-context coverage map (named libraries). ROADMAP "reframe
   reliability."
 
-### R2. The unresolved set is categorized but not attributed (P1)
+### R2. The unresolved set is categorized but not attributed (P1) — CLOSED 2026-07-15
+
+**CLOSED by ATTRIBUTION-1 (`adfd0cf`):** reader-frame attribution with named declared
+dependencies via the three-path storage join. See docs/slices/attribution-1.md §5.
 
 - **OBSERVED:** `UnresolvedEdgeClassification` = `ExternalLibraryCandidate / InternalCandidate /
   FrameworkBoundaryCandidate / Unknown` (`classification/src/types.rs:320`) — four coarse
