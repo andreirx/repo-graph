@@ -59,3 +59,18 @@ call edges, complexity, and module/package membership a MAP.md needs.
 `rmap map` produces deterministic, provenance-marked, coverage-honest MAP.md from the
 index for Rust and TS directories; live proof includes the rgistr comparison; rgistr
 README carries the deprecation note; no model call anywhere in the map path.
+
+---
+
+## 5. Delivery record (2026-07-16)
+
+**DELIVERED** (see the `rmap map` commit, operator close-out with ratified acceptance).
+Reviewer-verified substance: 33/33 renderer + 6/6 storage tests, byte-identical cmp on
+both dogfood render pairs, complete artifacts (markers, inventories, symbols, complexity,
+dependency sketches), scope clean, no model call in the path. Review value: the silent
+inner-join drop of unresolved imports (the exact honesty violation §1.4 exists to prevent),
+unmapped-reason fidelity, known-zero DTO defaults (rule 6), the imports/calls field name.
+The rgistr staleness delta is the usefulness proof: 2-month-old 16-file LLM map vs the
+true 18 files, deterministic. Sole review-2 blocker = the pre-existing parity fixture,
+repaired durably on HEAD (78b5dd4); full suite 0 FAILED on the complete tree. The v0.7.0
+release gate (ATTRIBUTION-1 + MAP-FROM-INDEX-1) is met.
