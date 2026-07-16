@@ -276,6 +276,90 @@ pub struct FileComplexityRow {
     pub sum_complexity: u64,
 }
 
+// ── MAP-FROM-INDEX-1: read-only bulk projections for `rmap map` ──────────
+//
+// These four DTOs + their reader methods (`map_files_in_path`,
+// `map_symbols_in_path`, `map_resolved_dep_edges_in_path`,
+// `map_unresolved_imports_in_path`) are an ADDITIVE read
+// surface (RR1_BOUNDARY precedent, recorded): read-only, no schema change, no
+// write path, no extractor change. They project already-extracted Layer-0 facts
+// (`files`/`file_versions`/`nodes`/`edges`) for the deterministic MAP.md
+// renderer, which lives in `rgr` (presentation). They are storage-direct methods
+// (like `find_imports`/`query_complexity_by_file`) rather than `AgentStorageRead`
+// port methods on purpose: `rmap map` is the single caller, so widening the
+// dependency-inverted port trait (rippling every impl + the explain DTOs) is not
+// earned — the direct-read pattern already used by `handle_stats`/`handle_imports`
+// is the smaller, in-pattern seam.
+
+/// One file's map-inventory row: identity + parse disposition + skip cause +
+/// symbol count, scoped to one snapshot. Feeds `rmap map`'s per-directory
+/// inventory AND its honest "unmapped files" list — a file the index did NOT
+/// parse for symbols carries `parse_status != 'parsed'` (`ParseStatus::Parsed`
+/// is the success value, serialized lowercase; see `indexer::types::ParseStatus`
+/// — NOT `"indexed"`). `parse_status` and `extractor` are the raw `file_versions`
+/// values, passed through verbatim (Layer-0 facts); the reader-frame reason
+/// string is derived downstream, never here (labels speak the reader's language
+/// at the render boundary, not in SQL).
+///
+/// `extractor` disambiguates the skip cause the renderer reports honestly, set by
+/// `indexer::orchestrator`: on a `skipped` file, `Some("skipped:oversized")` =
+/// size cap, `None` = no routed extractor for the language; on a `failed` file,
+/// `Some(<extractor name>)` = the extractor that errored.
+#[derive(Debug, Clone)]
+pub struct MapFileRow {
+    pub path: String,
+    pub language: Option<String>,
+    pub parse_status: String,
+    /// Raw `file_versions.extractor`; the skip-cause discriminator (see above).
+    pub extractor: Option<String>,
+    pub is_test: bool,
+    pub is_generated: bool,
+    pub symbol_count: u64,
+}
+
+/// One symbol for the map surface: identity + declaration signature, scoped to a
+/// file. Distinct from the explain surface's `AgentSymbolEntry`, which
+/// deliberately drops `signature`; `rmap map` renders signatures where the
+/// substrate has them (`nodes.signature`), so it needs its own projection.
+#[derive(Debug, Clone)]
+pub struct MapSymbolRow {
+    pub file_path: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub subtype: Option<String>,
+    pub line_start: Option<u64>,
+    pub signature: Option<String>,
+}
+
+/// One resolved intra-repo dependency edge (source file → target file), both
+/// endpoints resolving to indexed files, scoped to a snapshot + path prefix.
+/// `edge_type` is the raw edge type (`IMPORTS` or `CALLS`) so the renderer can
+/// use imports alone for a file's import list and imports+calls together for the
+/// directory dependency sketch (slice §1.3 "import/call edges"). Only edges
+/// resolving to an indexed file target appear — external/library references have
+/// no file target (unresolved imports come from `map_unresolved_imports_in_path`).
+/// Self-file edges (source == target, common for same-file calls) are excluded:
+/// they are not an inter-file dependency and would flood the sketch with noise.
+#[derive(Debug, Clone)]
+pub struct MapDepEdge {
+    pub source_file: String,
+    pub target_file: String,
+    pub edge_type: String,
+}
+
+/// One UNRESOLVED IMPORTS edge: source file → the import specifier the source
+/// wrote (`unresolved_edges.target_key`, e.g. `std::collections`, `react`,
+/// `./missing`) that did not resolve to an indexed file. Scoped to a snapshot +
+/// path prefix. Feeds the per-file "external / unresolved imports" list so the
+/// map never silently drops a file's external imports ("resolved target where
+/// known", slice §1.3). The specifier is a reader-frame fact — the reader's own
+/// code's import string — not an internal diagnostic.
+#[derive(Debug, Clone)]
+pub struct MapUnresolvedImport {
+    pub source_file: String,
+    pub specifier: String,
+}
+
 /// An inference row read from the `inferences` table.
 ///
 /// Mirrors TS `InferenceRow` from `core/ports/storage.ts`, but
@@ -2416,6 +2500,189 @@ impl StorageConnection {
             .map_err(StorageError::from)
     }
 
+    /// Compute the `(LIKE-pattern, exact-path)` pair scoping a `rmap map` read to
+    /// a directory subtree. An empty prefix or "." selects the whole repo
+    /// (`LIKE '%'` matches every relative path; the exact arm binds an
+    /// unmatchable NUL sentinel). Otherwise a file is in scope when it equals the
+    /// prefix or sits beneath it (`prefix/%`).
+    ///
+    /// DB paths are repo-root-relative (no leading slash), so a naive
+    /// `format!("{prefix}/%")` on an empty prefix would yield `/%` and match
+    /// nothing — hence the explicit whole-repo branch. LIKE metacharacters
+    /// (`%`, `_`, `\`) inside the prefix are escaped (with `ESCAPE '\'` in the
+    /// query) so a literal `_` in a path segment is a literal, not a single-char
+    /// wildcard that would over-match a sibling directory — a correctness hole
+    /// the deterministic map surface must not have.
+    fn map_path_scope(path_prefix: &str) -> (String, String) {
+        let trimmed = path_prefix.trim_matches('/');
+        if trimmed.is_empty() || trimmed == "." {
+            ("%".to_string(), "\u{0}".to_string())
+        } else {
+            let escaped = trimmed
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            (format!("{}/%", escaped), trimmed.to_string())
+        }
+    }
+
+    /// MAP-FROM-INDEX-1: files under a directory prefix for one snapshot, with
+    /// language + parse disposition + symbol count. `path_prefix` is
+    /// repo-root-relative; empty or "." selects the whole repo. Ordered by
+    /// `path ASC` for determinism. Every file in the snapshot manifest appears —
+    /// including one the index skipped (`parse_status != 'parsed'`) — so the
+    /// renderer can list it as unmapped rather than silently omit it. See
+    /// [`MapFileRow`].
+    pub fn map_files_in_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<MapFileRow>, StorageError> {
+        let (like_pattern, exact) = Self::map_path_scope(path_prefix);
+        let mut stmt = self.connection().prepare(
+            "SELECT f.path, f.language, fv.parse_status, fv.extractor, f.is_test, f.is_generated, \
+                    (SELECT COUNT(*) FROM nodes n \
+                       WHERE n.file_uid = f.file_uid AND n.kind = 'SYMBOL' \
+                         AND n.snapshot_uid = ?1) AS symbol_count \
+             FROM files f \
+             JOIN file_versions fv ON fv.file_uid = f.file_uid AND fv.snapshot_uid = ?1 \
+             WHERE (f.path LIKE ?2 ESCAPE '\\' OR f.path = ?3) \
+             ORDER BY f.path ASC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![snapshot_uid, like_pattern, exact],
+            |row| {
+                let sym: i64 = row.get(6)?;
+                Ok(MapFileRow {
+                    path: row.get(0)?,
+                    language: row.get(1)?,
+                    parse_status: row.get(2)?,
+                    extractor: row.get(3)?,
+                    is_test: row.get::<_, i64>(4)? == 1,
+                    is_generated: row.get::<_, i64>(5)? == 1,
+                    symbol_count: sym.max(0) as u64,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
+    /// MAP-FROM-INDEX-1: SYMBOL nodes under a directory prefix for one snapshot,
+    /// carrying the declaration `signature` (`nodes.signature`) that the explain
+    /// surface drops. Ordered `path ASC, line_start ASC, name ASC` for
+    /// determinism. See [`MapSymbolRow`].
+    pub fn map_symbols_in_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<MapSymbolRow>, StorageError> {
+        let (like_pattern, exact) = Self::map_path_scope(path_prefix);
+        let mut stmt = self.connection().prepare(
+            "SELECT f.path, n.name, n.qualified_name, n.subtype, n.line_start, n.signature \
+             FROM nodes n \
+             JOIN files f ON n.file_uid = f.file_uid \
+             WHERE n.snapshot_uid = ?1 AND n.kind = 'SYMBOL' \
+               AND (f.path LIKE ?2 ESCAPE '\\' OR f.path = ?3) \
+             ORDER BY f.path ASC, n.line_start ASC, n.name ASC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![snapshot_uid, like_pattern, exact],
+            |row| {
+                let line: Option<i64> = row.get(4)?;
+                Ok(MapSymbolRow {
+                    file_path: row.get(0)?,
+                    name: row.get(1)?,
+                    qualified_name: row.get(2)?,
+                    subtype: row.get(3)?,
+                    line_start: line.and_then(|n| u64::try_from(n).ok()),
+                    signature: row.get(5)?,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
+    /// MAP-FROM-INDEX-1: resolved intra-repo dependency edges (source file →
+    /// target file) of both `IMPORTS` and `CALLS` type, whose source sits under a
+    /// directory prefix, for one snapshot. Only edges whose target resolves to an
+    /// indexed file appear — external/library references have no file target and
+    /// are absent (unresolved imports come from `map_unresolved_imports_in_path`).
+    /// Self-file edges (`src == tgt`, i.e. same-file calls) are excluded: they are
+    /// not an inter-file dependency. `DISTINCT` collapses multiple symbol-level
+    /// edges between the same file pair of the same type. Ordered
+    /// `source ASC, target ASC, type ASC`. Feeds the per-file import list (the
+    /// `IMPORTS` subset) and the per-directory dependency sketch (both types).
+    /// See [`MapDepEdge`].
+    pub fn map_resolved_dep_edges_in_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<MapDepEdge>, StorageError> {
+        let (like_pattern, exact) = Self::map_path_scope(path_prefix);
+        let mut stmt = self.connection().prepare(
+            "SELECT DISTINCT src_f.path, tgt_f.path, e.type \
+             FROM edges e \
+             JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
+             JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+             JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
+             JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
+             WHERE e.snapshot_uid = ?1 AND e.type IN ('IMPORTS', 'CALLS') \
+               AND src_f.path <> tgt_f.path \
+               AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
+             ORDER BY src_f.path ASC, tgt_f.path ASC, e.type ASC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![snapshot_uid, like_pattern, exact],
+            |row| {
+                Ok(MapDepEdge {
+                    source_file: row.get(0)?,
+                    target_file: row.get(1)?,
+                    edge_type: row.get(2)?,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
+    /// MAP-FROM-INDEX-1: UNRESOLVED IMPORTS edges (source file → the import
+    /// specifier the source wrote) whose source sits under a directory prefix, for
+    /// one snapshot. These are the imports that did not resolve to an indexed file
+    /// (external packages, missing relative paths) — read from `unresolved_edges`,
+    /// where `target_key` is the specifier as extracted. `DISTINCT` collapses
+    /// repeats of the same (source, specifier). Ordered `source ASC, specifier
+    /// ASC`. Feeds the per-file "external / unresolved imports" list so a file's
+    /// external imports are never silently dropped. See [`MapUnresolvedImport`].
+    pub fn map_unresolved_imports_in_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<MapUnresolvedImport>, StorageError> {
+        let (like_pattern, exact) = Self::map_path_scope(path_prefix);
+        let mut stmt = self.connection().prepare(
+            "SELECT DISTINCT src_f.path, ue.target_key \
+             FROM unresolved_edges ue \
+             JOIN nodes src_n ON ue.source_node_uid = src_n.node_uid \
+             JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+             WHERE ue.snapshot_uid = ?1 AND ue.type = 'IMPORTS' \
+               AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
+             ORDER BY src_f.path ASC, ue.target_key ASC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![snapshot_uid, like_pattern, exact],
+            |row| {
+                Ok(MapUnresolvedImport {
+                    source_file: row.get(0)?,
+                    specifier: row.get(1)?,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
     /// Per-language function/method counts and how many carry a
     /// `cyclomatic_complexity` measurement — the raw input for the language
     /// measurement-coverage caveat (METRIC-LANG-COVERAGE-1 part A).
@@ -2812,6 +3079,201 @@ mod tests {
             .expect("python unmeasured + significant -> caveat");
         assert!(caveat.contains("Python (40% of functions)"), "{caveat}");
         assert!(caveat.contains("measured for Rust only"), "{caveat}");
+    }
+
+    // ── MAP-FROM-INDEX-1: the four additive map reads ───────────────────────
+
+    #[test]
+    fn map_files_in_path_carries_parse_status_and_skip_cause() {
+        let (storage, snap) = setup_db_with_snapshot();
+        // Success status is `parsed` (ParseStatus::Parsed, lowercase) — NOT
+        // `indexed`. The two skipped files differ only in their `extractor`
+        // skip-cause: 'skipped:oversized' (size cap) vs NULL (no routed
+        // extractor). The renderer distinguishes them from these raw facts.
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path, language, is_test) VALUES \
+                   ('r1:src/a.rs', 'r1', 'src/a.rs', 'rust', 0), \
+                   ('r1:src/big.rs', 'r1', 'src/big.rs', 'rust', 0), \
+                   ('r1:src/data.bin', 'r1', 'src/data.bin', NULL, 0), \
+                   ('r1:other/z.rs', 'r1', 'other/z.rs', 'rust', 0); \
+                 INSERT INTO file_versions (snapshot_uid, file_uid, content_hash, extractor, parse_status, indexed_at) VALUES \
+                   ('{snap}', 'r1:src/a.rs', 'h1', 'rust-extractor', 'parsed', '2024-01-01T00:00:00Z'), \
+                   ('{snap}', 'r1:src/big.rs', 'h2', 'skipped:oversized', 'skipped', '2024-01-01T00:00:00Z'), \
+                   ('{snap}', 'r1:src/data.bin', 'h3', NULL, 'skipped', '2024-01-01T00:00:00Z'), \
+                   ('{snap}', 'r1:other/z.rs', 'h4', 'rust-extractor', 'parsed', '2024-01-01T00:00:00Z'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) VALUES \
+                   ('n1', '{snap}', 'r1', 'r1:src/a.rs#f', 'f', 'SYMBOL', 'r1:src/a.rs');"
+            ))
+            .unwrap();
+
+        // Scoped to src/: a.rs + big.rs + data.bin, path-ordered; other/z.rs excluded.
+        let rows = storage.map_files_in_path(&snap, "src").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].path, "src/a.rs");
+        assert_eq!(rows[0].language.as_deref(), Some("rust"));
+        assert_eq!(rows[0].parse_status, "parsed");
+        assert_eq!(rows[0].extractor.as_deref(), Some("rust-extractor"));
+        assert_eq!(rows[0].symbol_count, 1);
+        // Oversized: skipped + the 'skipped:oversized' cause carried through.
+        assert_eq!(rows[1].path, "src/big.rs");
+        assert_eq!(rows[1].parse_status, "skipped");
+        assert_eq!(rows[1].extractor.as_deref(), Some("skipped:oversized"));
+        // No routed extractor: skipped + NULL extractor (a distinct cause).
+        assert_eq!(rows[2].path, "src/data.bin");
+        assert_eq!(rows[2].parse_status, "skipped");
+        assert_eq!(rows[2].extractor, None);
+        assert_eq!(rows[2].symbol_count, 0);
+
+        // Whole-repo scope returns all four (LIKE '%').
+        assert_eq!(storage.map_files_in_path(&snap, "").unwrap().len(), 4);
+    }
+
+    #[test]
+    fn map_symbols_in_path_carries_signature_ordered_by_line_then_name() {
+        let (storage, snap) = setup_db_with_snapshot();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path, language) VALUES \
+                   ('r1:src/a.rs', 'r1', 'src/a.rs', 'rust'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, qualified_name, kind, subtype, file_uid, line_start, signature) VALUES \
+                   ('n_b', '{snap}', 'r1', 'r1:src/a.rs#beta',  'beta',  'a::beta',  'SYMBOL', 'FUNCTION', 'r1:src/a.rs', 20, 'fn beta(x: u8) -> u8'), \
+                   ('n_a', '{snap}', 'r1', 'r1:src/a.rs#alpha', 'alpha', 'a::alpha', 'SYMBOL', 'FUNCTION', 'r1:src/a.rs', 10, 'fn alpha()'), \
+                   ('n_g', '{snap}', 'r1', 'r1:src/a.rs#Gamma', 'Gamma', 'a::Gamma', 'SYMBOL', 'STRUCT',   'r1:src/a.rs', 10, NULL);"
+            ))
+            .unwrap();
+
+        let rows = storage.map_symbols_in_path(&snap, "src").unwrap();
+        assert_eq!(rows.len(), 3);
+        // line 10 tie -> name ASC under BINARY collation: 'Gamma' (0x47) before 'alpha' (0x61).
+        assert_eq!(rows[0].name, "Gamma");
+        assert_eq!(
+            rows[0].signature, None,
+            "a symbol with no signature stays null, not empty"
+        );
+        assert_eq!(rows[1].name, "alpha");
+        assert_eq!(rows[1].signature.as_deref(), Some("fn alpha()"));
+        assert_eq!(rows[2].name, "beta");
+        assert_eq!(rows[2].signature.as_deref(), Some("fn beta(x: u8) -> u8"));
+        assert_eq!(rows[2].subtype.as_deref(), Some("FUNCTION"));
+    }
+
+    #[test]
+    fn map_resolved_dep_edges_typed_self_excluded_and_source_scoped() {
+        let (storage, snap) = setup_db_with_snapshot();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path, language) VALUES \
+                   ('r1:src/a.rs', 'r1', 'src/a.rs', 'rust'), \
+                   ('r1:src/b.rs', 'r1', 'src/b.rs', 'rust'), \
+                   ('r1:other/c.rs', 'r1', 'other/c.rs', 'rust'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) VALUES \
+                   ('a1', '{snap}', 'r1', 'r1:src/a.rs#x', 'x', 'SYMBOL', 'r1:src/a.rs'), \
+                   ('a2', '{snap}', 'r1', 'r1:src/a.rs#y', 'y', 'SYMBOL', 'r1:src/a.rs'), \
+                   ('b1', '{snap}', 'r1', 'r1:src/b.rs#z', 'z', 'SYMBOL', 'r1:src/b.rs'), \
+                   ('c1', '{snap}', 'r1', 'r1:other/c.rs#w', 'w', 'SYMBOL', 'r1:other/c.rs');"
+            ))
+            .unwrap();
+        // Two symbol-level IMPORTS a->b collapse to one file pair; one IMPORTS b->a;
+        // one CALLS a->b (distinct TYPE, kept beside the a->b import); one CALLS
+        // a->a (same file, EXCLUDED — not an inter-file dependency); one IMPORTS
+        // c->a whose source is outside src/ (excluded from a src scope).
+        insert_raw_edge(&storage, &snap, "e1", "a1", "b1", "IMPORTS");
+        insert_raw_edge(&storage, &snap, "e2", "a2", "b1", "IMPORTS");
+        insert_raw_edge(&storage, &snap, "e3", "b1", "a1", "IMPORTS");
+        insert_raw_edge(&storage, &snap, "e4", "a1", "b1", "CALLS");
+        insert_raw_edge(&storage, &snap, "e5", "a1", "a2", "CALLS");
+        insert_raw_edge(&storage, &snap, "e6", "c1", "a1", "IMPORTS");
+
+        let edges = storage
+            .map_resolved_dep_edges_in_path(&snap, "src")
+            .unwrap();
+        // Ordered source, target, type: (a,b,CALLS) (a,b,IMPORTS) (b,a,IMPORTS).
+        assert_eq!(
+            edges.len(),
+            3,
+            "self-file CALLS a->a excluded; c->a out of scope"
+        );
+        let tuples: Vec<(&str, &str, &str)> = edges
+            .iter()
+            .map(|e| {
+                (
+                    e.source_file.as_str(),
+                    e.target_file.as_str(),
+                    e.edge_type.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            tuples,
+            vec![
+                ("src/a.rs", "src/b.rs", "CALLS"),
+                ("src/a.rs", "src/b.rs", "IMPORTS"),
+                ("src/b.rs", "src/a.rs", "IMPORTS"),
+            ]
+        );
+    }
+
+    #[test]
+    fn map_unresolved_imports_lists_specifiers_source_scoped() {
+        let (storage, snap) = setup_db_with_snapshot();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path, language) VALUES \
+                   ('r1:src/a.rs', 'r1', 'src/a.rs', 'rust'), \
+                   ('r1:other/c.rs', 'r1', 'other/c.rs', 'rust'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) VALUES \
+                   ('a1', '{snap}', 'r1', 'r1:src/a.rs#x', 'x', 'SYMBOL', 'r1:src/a.rs'), \
+                   ('c1', '{snap}', 'r1', 'r1:other/c.rs#w', 'w', 'SYMBOL', 'r1:other/c.rs'); \
+                 INSERT INTO unresolved_edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, resolution, extractor, category, classification, classifier_version, basis_code, observed_at) VALUES \
+                   ('u1', '{snap}', 'r1', 'a1', 'std::collections', 'IMPORTS', 'unresolved', 'rust-extractor', 'imports_external', 'external', 1, 'specifier', '2024-01-01T00:00:00Z'), \
+                   ('u2', '{snap}', 'r1', 'a1', 'react', 'IMPORTS', 'unresolved', 'rust-extractor', 'imports_external', 'external', 1, 'specifier', '2024-01-01T00:00:00Z'), \
+                   ('u3', '{snap}', 'r1', 'a1', 'react', 'IMPORTS', 'unresolved', 'rust-extractor', 'imports_external', 'external', 1, 'specifier', '2024-01-01T00:00:00Z'), \
+                   ('u4', '{snap}', 'r1', 'a1', 'some_fn', 'CALLS', 'unresolved', 'rust-extractor', 'calls_unresolved', 'external', 1, 'name', '2024-01-01T00:00:00Z'), \
+                   ('u5', '{snap}', 'r1', 'c1', 'serde', 'IMPORTS', 'unresolved', 'rust-extractor', 'imports_external', 'external', 1, 'specifier', '2024-01-01T00:00:00Z');"
+            ))
+            .unwrap();
+
+        let imports = storage
+            .map_unresolved_imports_in_path(&snap, "src")
+            .unwrap();
+        // Only src/a.rs IMPORTS: DISTINCT collapses the duplicate 'react'; the
+        // CALLS row is excluded; c.rs 'serde' is out of the src scope. Ordered by
+        // specifier ASC: 'react' < 'std::collections'.
+        let specs: Vec<(&str, &str)> = imports
+            .iter()
+            .map(|i| (i.source_file.as_str(), i.specifier.as_str()))
+            .collect();
+        assert_eq!(
+            specs,
+            vec![("src/a.rs", "react"), ("src/a.rs", "std::collections")]
+        );
+    }
+
+    #[test]
+    fn map_path_scope_whole_repo_and_escapes_like_metachars() {
+        assert_eq!(
+            StorageConnection::map_path_scope(""),
+            ("%".to_string(), "\u{0}".to_string())
+        );
+        assert_eq!(
+            StorageConnection::map_path_scope("."),
+            ("%".to_string(), "\u{0}".to_string())
+        );
+        assert_eq!(
+            StorageConnection::map_path_scope("/rust/crates/"),
+            ("rust/crates/%".to_string(), "rust/crates".to_string())
+        );
+        // A literal underscore is escaped so it is not treated as a single-char
+        // LIKE wildcard (which would over-match a sibling directory).
+        assert_eq!(
+            StorageConnection::map_path_scope("a_b"),
+            ("a\\_b/%".to_string(), "a_b".to_string())
+        );
     }
 
     // W-B-EPOCH-IMPL-2D: `distinct_file_languages_for_snapshot` PINS the language inventory to one snapshot

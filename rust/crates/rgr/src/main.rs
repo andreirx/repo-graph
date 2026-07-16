@@ -53,9 +53,9 @@ use repo_graph_rgr::commands::{
     run_assess, run_boundaries, run_callees, run_callers, run_check_cmd, run_churn, run_contracts,
     run_coverage, run_cycles, run_dead, run_declare, run_deps, run_dev, run_docs, run_doctor,
     run_enrich, run_explain_cmd, run_gate, run_hook, run_hotspots, run_imports, run_index,
-    run_inferences, run_integrate, run_maintenance, run_metrics, run_modules, run_orient, run_path,
-    run_perf, run_policy, run_refresh, run_repo, run_resource, run_risk, run_stats, run_surfaces,
-    run_trust, run_uninstall, run_violations,
+    run_inferences, run_integrate, run_maintenance, run_map, run_metrics, run_modules, run_orient,
+    run_path, run_perf, run_policy, run_refresh, run_repo, run_resource, run_risk, run_stats,
+    run_surfaces, run_trust, run_uninstall, run_violations,
 };
 use std::process::ExitCode;
 
@@ -105,6 +105,7 @@ fn main() -> ExitCode {
         "deps" => run_deps(&args[2..]),
         "cycles" => run_cycles(&args[2..]),
         "stats" => run_stats(&args[2..]),
+        "map" => run_map(&args[2..]),
         "declare" => run_declare(&args[2..]),
         "docs" => run_docs(&args[2..]),
         "enrich" => run_enrich(&args[2..]),

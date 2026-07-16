@@ -318,6 +318,10 @@ impl Dispatcher for ServiceDispatcher {
             "check" => self.handle_check(request, emitter),
             "explain" => self.handle_explain(request, emitter),
 
+            // ── Deterministic MAP.md facts (MAP-FROM-INDEX-1) ────────
+            // Flat extracted facts for the `rmap map` renderer; no model call.
+            "map" => crate::handlers::map::handle_map(&self.state, request),
+
             // ── Trust and governance ────────────────────────────────
             // RMAPD-PERF-1: trust emits heartbeat for long queries
             "trust" => self.handle_trust(request, emitter),

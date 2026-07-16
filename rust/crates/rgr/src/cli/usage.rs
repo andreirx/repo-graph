@@ -66,6 +66,8 @@ pub fn print_usage() {
     eprintln!("  rmap check [--full]");
     eprintln!("  rmap explain <target> [--budget medium|large] [--full]");
     eprintln!("    --full   uncap output for grep (no budget truncation; no-op on check)");
+    eprintln!("  rmap map [path] [--dry-run] [--json]    Deterministic MAP.md docs from the index (no LLM)");
+    eprintln!("    --dry-run  print rendered maps to stdout, write nothing");
     eprintln!();
     eprintln!("Graph queries (resolve repo from cwd):");
     eprintln!("  rmap callers <symbol> [--edge-types <types>]");

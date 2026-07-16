@@ -40,6 +40,7 @@ pub mod explain;
 pub mod explain_sections;
 pub mod graph_edges;
 pub mod imports;
+pub mod map;
 pub mod module_inventory;
 pub mod module_shared;
 pub mod modules_deps;

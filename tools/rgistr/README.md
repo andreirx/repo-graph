@@ -2,6 +2,29 @@
 
 Hierarchical documentation synthesis via LLM. Generates `MAP.md` files throughout a codebase using depth-first recursive summarization.
 
+> **Deprecated for structural `MAP.md` generation (MAP-FROM-INDEX-1, 2026-07-15).**
+> repo-graph now generates `MAP.md` **deterministically from its index** via
+> **`rmap map`** — extracted facts only (symbols with signatures, resolved
+> intra-repo imports, coverage-honest complexity, and an honest listing of files
+> the index could not map), **no model call**, byte-identical re-renders. Per
+> VISION commitment #1 — *facts are computed from source, reproducible, never
+> model output* — the LLM structure path in this tool is **superseded**. Prefer
+> `rmap map` for orientation maps. rgistr's model-synthesized *prose* (Purpose /
+> Reading Hint / Legacy Analysis narrative) has no deterministic equivalent and
+> remains available where a human wants narrative, but it is no longer the way to
+> produce structural maps. Full retirement of this prototype tracks under
+> `TS-PROTOTYPE-RETIREMENT-1`.
+>
+> **This supersedes the statement under _Architecture_ below that repo-graph
+> "never generates" MAP.md files.** As of `rmap map`, repo-graph DOES generate
+> structural `MAP.md` — deterministically, from its index. The old wording
+> described the pre-`rmap map` split (rgistr generates, repo-graph only ingests)
+> and is now historical.
+>
+> *Note: the `## MAP.md Frontmatter` section below is historical — the frontmatter
+> block was stripped 2026-07-10 in favor of a single `<!-- generated … -->`
+> marker comment.*
+
 ## Purpose
 
 Many codebases lack adequate documentation. `rgistr` fills this gap by:
@@ -20,7 +43,7 @@ The generated MAPs can be consumed by repo-graph as documentation evidence.
 - repo-graph: deterministic engineering intelligence (extraction, queries, graph truth)
 - rgistr: AI-generated documentation synthesis (volatile, model-dependent)
 
-repo-graph later **ingests** generated MAP.md files as documentation evidence, but never generates them.
+repo-graph **ingests** generated MAP.md files as documentation evidence. *(Historical: this section once said repo-graph "never generates them." That is no longer true — `rmap map` generates structural `MAP.md` deterministically from the index. See the deprecation note at the top of this README.)*
 
 ## Installation
 
