@@ -90,3 +90,23 @@ de-noise proof + dogfood green.
 - The deletion is large in lines but low in load-bearing assumptions (the
   VISION change-cost doctrine): nothing in the live Rust system should
   depend on it — Phase 1 exists to prove that before anything is removed.
+
+---
+
+## Delivery record (2026-07-16)
+
+**DELIVERED** (`800d78e`: 680 files, −95,352 lines; operator close-out with ratified
+acceptance after 7 relay iterations). Verify-then-delete worked as designed — the halt
+condition fired TWICE on living data stranded in the dead trees, each resolved by ratified
+byte-preserving relocation (git blob-id proven): the two compile-time `include_str!` data
+files, then the 47-file living integration corpus (→ repo-index tests/fixtures, 12 tests +
+smoke script updated). A third inventory (grammars/*.wasm + build-grammars.mjs) proved NO
+living consumer — deleted. De-noise proof: self-index 1,226 → 804 files, 281 → 67
+crate-named package groups, 184 → 0 dead-tree references, all-Rust complexity centers;
+operator registry untouched (sha-proven). Suite: chunked full-workspace 0 FAILED (rgr
+1,038/0; corroborating full runs 5,118/0, 2,199/0); smoke wrapper fixed to the v4 artifact
+contract, 6/6 exit 0. Process notes: one operator-caused relay race (per-slice lockfile
+debt filed in agent-manager); final iteration was the FIRST claude-fable-5 build under the
+model-by-complexity policy — it disproved the operator's rgistr-consumer hypothesis with
+dependency evidence rather than deferring to it. tools/rgistr and trust-parity-fixtures
+retained (inventoried: alive / Rust-owned).
