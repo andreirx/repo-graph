@@ -49,6 +49,10 @@ use repo_graph_trust_model::{AnswerClass, Granularity};
 use crate::livegraph_feed::import_cert_fingerprint;
 use crate::state::RepoState;
 
+/// RECON-SPIKE-1: additive, env-gated per-symbol divergence emission (off by default; the GREEN/RED
+/// verdict below is UNCHANGED). See [`diff`] for the gating + artifact contract.
+mod diff;
+
 #[cfg(test)]
 pub(crate) mod test_fixture;
 #[cfg(test)]
@@ -276,6 +280,11 @@ pub(crate) fn build_and_store_callgraph_cert(
 ) -> Option<bool> {
     let fingerprint = fingerprint?;
     let is_green = callgraph_compare_is_exact(repo_state, snapshot_uid)?;
+    // RECON-SPIKE-1: additive, env-gated (`RMAP_CALLGRAPH_DIFF`) diff emission — off by default (a single
+    // `var_os` lookup then return), best-effort, and independent of the verdict computed above/stored
+    // below. When the comparison ran (fingerprint present), this captures the per-symbol divergence detail
+    // the one-bit verdict discards. It reads only; it never changes `is_green`.
+    diff::maybe_emit(repo_state, snapshot_uid, &fingerprint, is_green);
     let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
     *repo_state.callgraph_cert.write() = Some(CallgraphNoLossCert {
         verdict,
