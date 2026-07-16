@@ -108,7 +108,7 @@
     }
   ],
   "caveats": [
-    "Call-graph reliability is MEDIUM on this repo. Do not use callers/callees for safety-critical decisions without verification.",
+    "Your code's calls resolve at MEDIUM reliability on this repo. Do not use callers/callees for safety-critical decisions without verification.",
     "Import-graph reliability is LOW. Module fan-in/fan-out and change-impact propagation may undercount relationships.",
     "Change-impact reliability is LOW. Impacted-module sets may be incomplete on this repo.",
     "Cycle payloads currently emit leaf module names only; full stable keys are not in the user-facing `graph cycles` output."
