@@ -1,1 +1,0 @@
-fs.unlinkSync("tmp.json");

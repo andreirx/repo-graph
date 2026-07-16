@@ -1,1 +1,0 @@
-unlink("tmp.dat");

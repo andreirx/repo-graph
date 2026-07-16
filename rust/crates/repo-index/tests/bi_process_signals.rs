@@ -4,7 +4,7 @@
 //! emission, and storage to verify that signal-related calls produce
 //! the expected boundary interaction surfaces.
 //!
-//! Fixture: `test/fixtures/process-signals/`
+//! Fixture: `rust/crates/repo-index/tests/fixtures/process-signals/`
 //!
 //! ## What this test proves
 //!
@@ -27,10 +27,7 @@ use repo_graph_storage::StorageConnection;
 fn signal_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("process-signals")
 }

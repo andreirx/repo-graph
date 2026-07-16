@@ -1,26 +1,28 @@
 # ── repo-graph-detectors ──────────────────────────────────────────
 #
-# Rust port of the operational dependency seam detector substrate.
-# Mirror of the TypeScript implementation under
-# `src/core/seams/detectors/` and `src/core/seams/comment-masker.ts`.
+# Operational dependency seam detector substrate.
 #
-# Slice scope (Rust-1):
-#   - parse the same `detectors.toml` as the TS runtime
-#   - implement the strict-validating loader
-#   - implement the comment masker (positional, language-aware)
-#   - implement the generic walker
-#   - implement the 11 named hooks
-#   - expose the same public wrapper API:
+# Originally a Rust port of the TypeScript implementation that
+# lived under `src/core/seams/detectors/` and
+# `src/core/seams/comment-masker.ts`. That TypeScript prototype was
+# retired (TS-PROTOTYPE-RETIREMENT-1; see `docs/ts-prototype.md`);
+# its `detectors.toml` data file was relocated into this crate
+# (crate root, embedded via `include_str!`), which is now the
+# standalone, sole owner of the detector substrate.
+#
+# Capabilities:
+#   - parse the crate-local `detectors.toml`
+#   - the strict-validating loader
+#   - the comment masker (positional, language-aware)
+#   - the generic walker
+#   - the 11 named hooks
+#   - the public wrapper API:
 #       detect_env_accesses(content, file_path) -> Vec<DetectedEnvDependency>
 #       detect_fs_mutations(content, file_path) -> Vec<DetectedFsMutation>
 #
 # NOT in scope: SQLite, indexer, daemon, tree-sitter, or any
 # integration with the rest of the codebase. The crate is a
 # standalone substrate library.
-#
-# Parity acceptance: structurally identical JSON output against the
-# curated `parity-fixtures/` corpus, compared byte-for-byte after
-# serialization with `serde(rename_all = "camelCase")`.
 
 [package]
 name         = "repo-graph-detectors"
@@ -33,12 +35,13 @@ publish      = false
 
 [dependencies]
 # TOML 1.0 parser, the canonical Rust crate maintained by toml-lang.
-# Matches the TS-side @iarna/toml choice in spec strictness.
+# Matches the @iarna/toml spec strictness the retired TS prototype used.
 toml = "0.8"
 
 # Serde for typed deserialization of detector records and JSON
 # serialization of fact outputs. The wrapper output uses
-# `rename_all = "camelCase"` to match the TS public API shape.
+# `rename_all = "camelCase"`, preserving the JSON shape the retired
+# TS public API produced.
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -52,7 +55,3 @@ regex = "1"
 # context (record index, pattern_id, field name) for the error
 # message to identify the offending declaration unambiguously.
 thiserror = "2"
-
-[dev-dependencies]
-# Used by parity tests to walk the fixture directory.
-walkdir = "2"

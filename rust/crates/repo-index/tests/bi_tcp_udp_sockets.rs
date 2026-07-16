@@ -4,7 +4,7 @@
 //! emission, and storage to verify that TCP and UDP socket() calls
 //! produce the expected boundary interaction surfaces.
 //!
-//! Fixture: `test/fixtures/tcp-udp-sockets/`
+//! Fixture: `rust/crates/repo-index/tests/fixtures/tcp-udp-sockets/`
 //!
 //! ## What this test proves
 //!
@@ -34,10 +34,7 @@ use repo_graph_storage::StorageConnection;
 fn tcp_udp_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("tcp-udp-sockets")
 }

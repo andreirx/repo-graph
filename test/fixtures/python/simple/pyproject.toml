@@ -1,7 +1,0 @@
-[project]
-name = "simple-python"
-version = "1.0.0"
-dependencies = [
-    "requests>=2.0",
-    "click>=8.0",
-]

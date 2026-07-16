@@ -13,13 +13,7 @@ use repo_graph_storage::StorageConnection;
 
 fn inter_core_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
-        .join("fixtures")
-        .join("inter_core")
+    manifest.join("tests").join("fixtures").join("inter_core")
 }
 
 #[test]

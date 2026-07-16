@@ -1,18 +1,16 @@
 # ── repo-graph Rust workspace ─────────────────────────────────────
 #
-# This workspace is the Rust track of the repo-graph daemon
-# prototype-then-port path. The first member crate is the detector
-# substrate port (Rust-1 slice). Future member crates will be added
-# as they are needed for storage, walker, indexer, daemon, etc.
+# This workspace is the Rust product: the daemon (`rmapd`), the
+# `rmap` CLI, and the extraction / indexing / storage substrate
+# plus the SCIP-first LiveGraph runtime.
 #
-# Operating model: O-C zipper. The TS implementation defines or
-# refines a contract; the matching Rust slice ports it; parity is
-# verified before the next contract-changing TS slice. The Rust
-# workspace exists alongside the TS source tree, NOT inside it.
-#
-# Parity surface: `parity-fixtures/` at the repo root contains the
-# curated cross-runtime contract test corpus. Both this workspace
-# and the TS test harness consume the same fixtures.
+# History: the workspace began as the Rust track of a
+# prototype-then-port effort — a TypeScript prototype defined
+# contracts that matching Rust slices ported, verified against a
+# shared cross-runtime `parity-fixtures/` corpus at the repo root.
+# That TypeScript prototype and its parity corpus were retired
+# (TS-PROTOTYPE-RETIREMENT-1; see `docs/ts-prototype.md`); the Rust
+# workspace is now the sole implementation.
 #
 # Workspace resolver "2" is required for >= Rust 2021 edition.
 

@@ -5,9 +5,11 @@
 //! function, and compares the actual output against the fixture's
 //! `expected.json`.
 //!
-//! This is the Rust side of the R4-H cross-runtime parity check.
-//! The TypeScript half runs the same fixtures through the TS trust
-//! functions and compares against the same `expected.json`.
+//! Built as the Rust side of the R4-H cross-runtime parity check;
+//! the TypeScript half (deleted by TS-PROTOTYPE-RETIREMENT-1;
+//! archived in git) ran the same fixtures through the TS trust
+//! functions. Now a Rust-only regression suite over the same
+//! corpus.
 //!
 //! **No normalization needed.** Trust computation is pure policy
 //! with no generated UIDs, no timestamps, no randomness.
@@ -18,7 +20,7 @@
 //!     `assemble_trust_report` with a mock `TrustStorageRead`,
 //!     exercising the storage-backed assembly layer (JSON parsing,
 //!     fetch composition) on the Rust side — the same boundary
-//!     the TS side exercises via a mock `StoragePort`.
+//!     the retired TS prototype exercised via a mock `StoragePort`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -215,7 +217,7 @@ fn dispatch_compute_change_impact(input: &Value) -> Result<Value, String> {
 //
 // Uses `assemble_trust_report` with a mock `TrustStorageRead` so
 // the Rust parity test exercises the same storage-backed assembly
-// boundary the TS side exercises via mock `StoragePort`. This
+// boundary the retired TS prototype exercised via mock `StoragePort`. This
 // means JSON parsing of diagnostics/toolchain, fetch composition,
 // and the full computation pipeline are all covered.
 

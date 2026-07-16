@@ -1,8 +1,10 @@
 # ── repo-graph-storage ────────────────────────────────────────────
 #
-# Rust port of the SQLite storage substrate. Mirror of the
-# TypeScript adapter at `src/adapters/storage/sqlite/` and the
-# storage port at `src/core/ports/storage.ts`.
+# Rust port of the SQLite storage substrate. Originally ported from
+# the TS prototype's adapter at `src/adapters/storage/sqlite/` and
+# storage port at `src/core/ports/storage.ts` (prototype retired by
+# TS-PROTOTYPE-RETIREMENT-1; archived in git). This crate owns the
+# storage contract now.
 #
 # Slice scope (Rust-2 storage substrate, locked):
 #   - port all 16 schema migrations (001 through 016) as the
@@ -33,15 +35,18 @@
 #   - replacing better-sqlite3 in TS
 #   - indexer / daemon / classification / trust / extractors port
 #
-# Operating model: O-C zipper. The TS implementation defines or
-# refines the storage contract; this Rust crate ports it; parity
-# is verified before the next contract-changing TS slice. Same
-# discipline as the Rust-1 detector parity slice.
+# Operating model at port time (historical): O-C zipper — the TS
+# implementation defined or refined the storage contract while it
+# existed; this Rust crate ported it; parity was verified before
+# each contract-changing TS slice. Same discipline as the Rust-1
+# detector parity slice. The prototype is retired
+# (TS-PROTOTYPE-RETIREMENT-1) — this crate is the sole
+# implementation now.
 #
-# Parity surface: `storage-parity-fixtures/` at the repo root will
-# contain the curated cross-runtime contract test corpus (added
-# in R2-F). Both this crate and the TS test harness consume the
-# same fixtures.
+# Parity surface: `storage-parity-fixtures/` at the repo root
+# contains the contract test corpus (added in R2-F as the
+# cross-runtime check; now a Rust-only regression corpus consumed
+# by `tests/parity.rs`).
 
 [package]
 name         = "repo-graph-storage"
@@ -53,15 +58,16 @@ description  = "Rust port of the repo-graph SQLite storage substrate"
 publish      = false
 
 [dependencies]
-# rusqlite — the canonical Rust binding to libsqlite3. Sync API,
-# matches the TypeScript better-sqlite3 shape on the TS side.
+# rusqlite — the canonical Rust binding to libsqlite3. Sync API;
+# chosen at port time to match the retired TS prototype's
+# better-sqlite3 shape.
 #
 # `bundled` feature: compiles libsqlite3 from source as part of the
 # build (via the libsqlite3-sys crate). The Rust binary statically
 # links a known libsqlite3 version, eliminating the entire
 # "different machines have different libsqlite3 versions" axis from
-# parity drift. This matches the TS side's bundling philosophy
-# (better-sqlite3 also bundles its libsqlite3). Locked at R2 D1a.
+# parity drift. (The retired TS side's better-sqlite3 bundled its
+# libsqlite3 the same way.) Locked at R2 D1a.
 #
 # Cost: ~30s first-build to compile libsqlite3, then cached. ~1MB
 # extra static link. Requires a C compiler on the build machine.

@@ -4,7 +4,7 @@
 //! emission, and storage to verify that SysV shared memory patterns produce
 //! the expected boundary interaction surfaces.
 //!
-//! Fixture: `test/fixtures/sysv-shared-memory/`
+//! Fixture: `rust/crates/repo-index/tests/fixtures/sysv-shared-memory/`
 //!
 //! ## What this test proves
 //!
@@ -34,10 +34,7 @@ use repo_graph_storage::StorageConnection;
 fn sysv_shm_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("sysv-shared-memory")
 }

@@ -5,11 +5,12 @@
 //! `StorageConnection` API, and compares the captured results plus
 //! post-state dump against the fixture's `expected.json`.
 //!
-//! This is the Rust side of the R2-F cross-runtime parity check.
-//! The TypeScript half (`test/storage-parity/storage-parity.test.ts`)
-//! runs the same fixtures through the TS `SqliteStorage` adapter
-//! and compares against the same `expected.json`. If one side
-//! passes and the other fails, the storage contract has drifted.
+//! Built as the Rust side of the R2-F cross-runtime parity check;
+//! the TypeScript half (`test/storage-parity/storage-parity.test.ts`,
+//! deleted by TS-PROTOTYPE-RETIREMENT-1; archived in git) ran the
+//! same fixtures through the TS `SqliteStorage` adapter. Now a
+//! Rust-only regression suite pinning the storage contract against
+//! the same corpus.
 //!
 //! Contract notes: see `storage-parity-fixtures/README.md` for
 //! the fixture format, supported operations, symbolic binding

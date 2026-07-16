@@ -1,8 +1,0 @@
-{
-	// Base config with shared aliases. Packages extend this.
-	"compilerOptions": {
-		"paths": {
-			"@shared/*": ["./shared/*"]
-		}
-	}
-}

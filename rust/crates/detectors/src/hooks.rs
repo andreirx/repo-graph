@@ -1,16 +1,19 @@
 //! Detector hook registry implementations.
 //!
-//! Rust mirror of `src/core/seams/detectors/hooks.ts`. Each hook is
-//! the procedural counterpart of one or more declared detector
+//! Ported from the now-retired TS `src/core/seams/detectors/hooks.ts`
+//! (deleted by TS-PROTOTYPE-RETIREMENT-1; archived in git). Each hook
+//! is the procedural counterpart of one or more declared detector
 //! records in `detectors.toml`. Hooks own the parts of detector
 //! behavior that are NOT cleanly representable as data:
 //! line-context inspection, multi-record emission, mode-based
 //! dispatch, and state-machine string-literal extraction.
 //!
-//! Every hook is lifted byte-identical from the TS implementation
+//! Every hook was lifted byte-identical from the TS implementation
 //! to preserve detector output exactly across the externalization
-//! boundary. The parity tests (R1-J) verify byte-identical output
-//! against the TS pipeline on a curated fixture corpus.
+//! boundary. The cross-runtime parity tests (R1-J) that guarded this
+//! — and the TS pipeline they compared against — were retired with
+//! the prototype (TS-PROTOTYPE-RETIREMENT-1); this crate is now the
+//! sole owner of the hook behavior.
 //!
 //! Hook contract (per types.rs):
 //!  - DTO-shaped I/O — no storage, no fs, no side-effect surface
@@ -20,7 +23,7 @@
 //!    defaults and the static record's base fields
 //!
 //! Hook merge semantics use the tri-state `Emitted<T>` wrapper for
-//! fields where the TS walker uses `!== undefined`. See `types.rs`
+//! fields where the TS walker used `!== undefined`. See `types.rs`
 //! `Emitted` documentation for the rationale.
 //!
 //! Pure functions only. No I/O. No external state.
@@ -87,9 +90,9 @@ static JAVA_FILE_OUTPUT_STREAM_LITERAL: LazyLock<Regex> =
 ///  - `process.env.X)` (inside a function call) → unknown
 ///  - bare `process.env.X` → required, no default
 ///
-/// Uses `line.find(varName)` (which mirrors TS `line.indexOf`)
-/// rather than the regex match position, to preserve any
-/// pre-existing edge case behavior of the original.
+/// Uses `line.find(varName)` (which mirrors the retired TS walker's
+/// `line.indexOf`) rather than the regex match position, to preserve
+/// any pre-existing edge case behavior of the original.
 fn infer_js_env_access_with_default(ctx: EnvHookContext<'_>) -> EnvHookResult {
     let var_name = match ctx.captures.get(1) {
         Some(m) => m.as_str().to_string(),

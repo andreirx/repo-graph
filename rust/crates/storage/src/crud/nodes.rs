@@ -1,8 +1,10 @@
 //! CRUD methods for the `nodes` table.
 //!
-//! Mirrors `insertNodes` (with preflight stable-key collision
-//! detection), `queryAllNodes`, `deleteNodesByFile` from
-//! `src/adapters/storage/sqlite/sqlite-storage.ts:425-622`.
+//! Ported from `insertNodes` (with preflight stable-key collision
+//! detection), `queryAllNodes`, `deleteNodesByFile` in the retired
+//! TS prototype's `src/adapters/storage/sqlite/sqlite-storage.ts:425-622`
+//! (deleted by TS-PROTOTYPE-RETIREMENT-1; archived in git). This
+//! crate owns the behavior now.
 //!
 //! - `insert_nodes`: transaction-wrapped batch INSERT, with a
 //!   preflight collision check that runs BEFORE any SQL.
@@ -12,12 +14,12 @@
 //!
 //! ── Parity-critical: insert_nodes preflight ───────────────────
 //!
-//! Pinned by the R2-E user lock. The TS adapter at
-//! `sqlite-storage.ts:439-457` walks the input batch, builds a
-//! `Map<stable_key, GraphNode>`, detects duplicates, and groups
-//! them into a structured collision report. On any collision,
-//! it throws `NodeStableKeyCollisionError` BEFORE issuing any
-//! SQL. The Rust port mirrors this exactly:
+//! Pinned by the R2-E user lock. The retired TS adapter
+//! (`sqlite-storage.ts:439-457`) walked the input batch, built a
+//! `Map<stable_key, GraphNode>`, detected duplicates, and grouped
+//! them into a structured collision report; on any collision it
+//! threw `NodeStableKeyCollisionError` BEFORE issuing any SQL.
+//! The behavior locked from it, now owned here:
 //!
 //!   1. Build a HashMap<stable_key, &GraphNode> walking the
 //!      input batch.

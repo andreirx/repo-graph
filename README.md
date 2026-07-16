@@ -266,9 +266,11 @@ For semantic enrichment, ensure language tooling is available where applicable:
 
 ## Architecture summary
 
-Two CLI binaries share SQLite storage today:
+The Rust workspace is the sole implementation:
 - `rmap` (Rust) — primary, agent-facing product surface
-- `rgr` (TypeScript) — legacy / parity / not-yet-ported surfaces
+- `rmapd` (Rust) — the long-lived daemon that owns current-state repo structure
+
+(The original TypeScript `rgr` prototype was retired — see `docs/ts-prototype.md`.)
 
 Core rules:
 - discovery surfaces are primary
@@ -287,7 +289,7 @@ The architecture now includes a shipped, long-lived daemon providing an in-memor
 | Roadmap | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/ROADMAP.md` |
 | Known limitations / debt | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/TECH-DEBT.md` |
 | Rust CLI contract | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/rmap-contracts.md` |
-| TS CLI reference | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/v1-cli.txt` |
+| Archived TS CLI reference (retired prototype) | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/v1-cli.txt` |
 | Database schema | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/architecture/schema.txt` |
 | Test protocol | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/testing/rmap-test-protocol.md` |
 
@@ -306,18 +308,11 @@ cargo test
 cargo clippy
 ```
 
-## Legacy TypeScript CLI (Deprecated)
+## Legacy TypeScript CLI (Retired)
 
-The TypeScript codebase (`rgr` CLI) is deprecated and being phased out as features achieve parity in Rust. 
-
-If you still need to run the TS codebase for legacy features:
-Requirements: Node.js 20+, `pnpm`
-```bash
-pnpm install
-pnpm rebuild better-sqlite3
-pnpm build
-pnpm test
-```
+The TypeScript `rgr` prototype was **retired and removed** from the tree
+(TS-PROTOTYPE-RETIREMENT-1). It is archived in git history — last release
+containing it: `v0.7.0`. See `docs/ts-prototype.md`.
 
 ## License
 

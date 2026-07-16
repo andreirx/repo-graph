@@ -353,9 +353,9 @@ impl Snapshot {
 /// Rust `bool` per D-B2. The TS adapter does the same conversion
 /// via `=== 1` (sqlite-storage.ts:3284-3286).
 ///
-/// The Rust type is named `TrackedFile` to match the TS interface
-/// name exactly. The SQL table is `files`, not `tracked_files`;
-/// the type-name disambiguation comes from the TS side, where
+/// The Rust type is named `TrackedFile`, inherited from the retired TS
+/// prototype's interface name. The SQL table is `files`, not `tracked_files`;
+/// the type-name disambiguation came from the TS era, where
 /// `File` would conflict with the DOM File API and several Node
 /// type names. Matching `TrackedFile` preserves cross-runtime
 /// mental-model alignment.
@@ -773,10 +773,13 @@ pub struct UpdateSnapshotStatusInput {
 /// );
 /// ```
 ///
-/// This is a read-only DTO for Rust. The TS indexer is the producer;
-/// Rust `rmap` commands are consumers. The `canonical_root_path` field
-/// is the stable identity anchor for boundary evaluation and module
-/// edge derivation.
+/// The retired TS prototype's indexer was the original producer of
+/// these rows, with Rust read-only (prototype removed by
+/// TS-PROTOTYPE-RETIREMENT-1; archived in git). The Rust indexing
+/// pipeline (`repo-graph-repo-index`, `compose.rs`) now owns the
+/// write path; `rmap` commands are consumers. The
+/// `canonical_root_path` field is the stable identity anchor for
+/// boundary evaluation and module edge derivation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleCandidate {
@@ -893,12 +896,15 @@ pub struct InferenceInput {
 /// );
 /// ```
 ///
-/// Read-only DTO for querying project surfaces.
+/// DTO for querying project surfaces.
 ///
-/// The TS indexer is currently the primary producer; Rust `rmap` commands
-/// are consumers. FD-SUPPORT-1 adds Rust write path for framework-detected
-/// surfaces. The `stable_surface_key` is the snapshot-independent identity
-/// (nullable for legacy rows).
+/// The retired TS prototype's indexer was the original primary
+/// producer (removed by TS-PROTOTYPE-RETIREMENT-1; archived in git);
+/// FD-SUPPORT-1 added the first Rust write path (framework-detected
+/// surfaces), and the Rust indexing pipeline (`repo-graph-repo-index`,
+/// `insert_project_surfaces_batch`) now owns production. `rmap`
+/// commands are consumers. The `stable_surface_key` is the
+/// snapshot-independent identity (nullable for legacy rows).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSurface {

@@ -1,8 +1,14 @@
 //! Detector substrate type definitions.
 //!
-//! This module is the Rust mirror of `src/core/seams/detectors/types.ts`
-//! and the public detector output shapes from
-//! `src/core/seams/env-dependency.ts` and `src/core/seams/fs-mutation.ts`.
+//! Provenance: ported from the now-retired TypeScript detector
+//! substrate — `src/core/seams/detectors/types.ts` and the public
+//! output shapes from `src/core/seams/env-dependency.ts` and
+//! `src/core/seams/fs-mutation.ts`. That prototype was deleted by
+//! TS-PROTOTYPE-RETIREMENT-1 (archived in git; last release
+//! containing it: v0.7.0). The `types.ts` / `env-dependency.ts` /
+//! `fs-mutation.ts` references throughout this file are historical
+//! provenance, not a live dependency: this crate is now the sole
+//! owner of these shapes.
 //!
 //! Pure types only. No behavior. No I/O. No regex compilation. No
 //! smart constructors. The loader (R1-C) consumes the raw record
@@ -10,21 +16,23 @@
 //! validation. The walker (R1-F) consumes the runtime types and
 //! the hook registry to produce detected fact outputs.
 //!
-//! Parity contract:
+//! Serialization contract (was locked to the retired TS prototype;
+//! now a self-contained contract owned by this crate):
 //!
 //!   - Output fact structs (`DetectedEnvDependency`,
 //!     `DetectedFsMutation`) are serialized via serde with
 //!     `rename_all = "camelCase"`. Field order in the struct
-//!     declaration matches the TS interface order exactly. JSON
-//!     output is byte-identical to the TS serialization.
+//!     declaration was locked to the TS interface order; JSON
+//!     output was byte-identical to the TS serialization.
 //!
 //!   - `Option<T>` serializes as `null` when `None`, matching the
-//!     TS nullable convention. Fields that the locked expected.json
-//!     shape requires to be always-present (e.g. `destinationPath`
-//!     on fs facts) are typed as `Option<T>` not `#[serde(skip)]`.
+//!     nullable convention the TS prototype used. Fields that the
+//!     locked expected.json shape requires to be always-present
+//!     (e.g. `destinationPath` on fs facts) are typed as `Option<T>`
+//!     not `#[serde(skip)]`.
 //!
 //!   - String enum variants are serialized via `rename_all`
-//!     attributes that match the TS string literal values exactly.
+//!     attributes locked to the TS string literal values.
 //!     `DetectorLanguage::Ts` ↔ `"ts"`, `MutationKind::WriteFile`
 //!     ↔ `"write_file"`, etc.
 
@@ -38,8 +46,9 @@ use serde::{Deserialize, Serialize};
 /// Distinguishes "the hook did not supply this field" from "the
 /// hook explicitly supplied a value (which may be null)".
 ///
-/// Walker merge semantics for hook emissions match the TypeScript
-/// walker exactly. The TS walker uses two different operators:
+/// Walker merge semantics for hook emissions were locked to the
+/// retired TypeScript walker. That TS walker used two different
+/// operators:
 ///
 ///   - `??` (nullish coalescing): collapses both `null` and
 ///     `undefined` into "fall back". Rust uses plain `Option<T>`
@@ -93,7 +102,7 @@ impl<T> Emitted<T> {
 
 /// Source language a detector record applies to.
 ///
-/// Mirrors `DetectorLanguage` in `types.ts`. The legacy file
+/// Ported from `DetectorLanguage` in `types.ts`. The legacy file
 /// extension dispatch maps multiple JS-family extensions
 /// (`.ts`, `.tsx`, `.js`, `.jsx`) all to the `Ts` variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -108,7 +117,7 @@ pub enum DetectorLanguage {
 
 /// Detector family — what kind of seam this detector reports.
 ///
-/// Mirrors `DetectorFamily` in `types.ts`.
+/// Ported from `DetectorFamily` in `types.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DetectorFamily {
@@ -120,7 +129,7 @@ pub enum DetectorFamily {
 
 /// How an env var is accessed at the call site.
 ///
-/// Mirrors `EnvAccessKind` in `env-dependency.ts`. Used as both a
+/// Ported from `EnvAccessKind` in `env-dependency.ts`. Used as both a
 /// static field on detector records and as part of the detected
 /// output fact serialization shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -133,7 +142,7 @@ pub enum EnvAccessKind {
 
 /// Which language pattern matched an env access.
 ///
-/// Mirrors `EnvAccessPattern` in `env-dependency.ts`. The string
+/// Ported from `EnvAccessPattern` in `env-dependency.ts`. The string
 /// literal values are stable identifiers used both inside the
 /// detector graph and in serialized fact output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -154,7 +163,7 @@ pub enum EnvAccessPattern {
 
 /// Coarse fs mutation taxonomy.
 ///
-/// Mirrors `MutationKind` in `fs-mutation.ts`. Stable string forms
+/// Ported from `MutationKind` in `fs-mutation.ts`. Stable string forms
 /// like `write_file`, `delete_path`, `create_dir`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -171,7 +180,7 @@ pub enum MutationKind {
 
 /// Per-language fs mutation pattern identifier.
 ///
-/// Mirrors `MutationPattern` in `fs-mutation.ts`. Stable string
+/// Ported from `MutationPattern` in `fs-mutation.ts`. Stable string
 /// forms with language prefixes like `fs_write_file`, `py_open_write`,
 /// `rust_fs_rename`, `java_files_write`, `c_fopen_write`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -221,19 +230,21 @@ pub enum MutationPattern {
 
 // ── Public output facts (parity boundary) ──────────────────────────
 //
-// These two structs are the parity boundary. Their JSON
-// serialization MUST be byte-identical to the TS
-// `DetectedEnvDependency` and `DetectedFsMutation` shapes when
-// produced from the same input. Field order, field names (after
-// camelCase rename), and null handling all participate in the
-// contract.
+// These two structs were the parity boundary against the now-retired
+// TS prototype. Their JSON serialization was locked byte-identical to
+// the TS `DetectedEnvDependency` and `DetectedFsMutation` shapes for
+// the same input; field order, field names (after camelCase rename),
+// and null handling all participate in the contract, which this crate
+// now owns on its own (no cross-runtime harness).
 
-/// Detected env var access. Mirrors `DetectedEnvDependency` in
-/// `env-dependency.ts`.
+/// Detected env var access. Ported from `DetectedEnvDependency` in
+/// the retired TS `env-dependency.ts`.
 ///
-/// Field order matches the TS interface declaration order exactly.
-/// Serde derives serialization in struct field order; do not
-/// reorder these fields without coordinating with the TS side.
+/// Field order was locked to the TS interface declaration order and
+/// is now a standalone serialization contract: serde derives
+/// serialization in struct field order, so reordering these fields
+/// changes the emitted JSON shape. Treat any reorder as a breaking
+/// change to detector output, not a cosmetic edit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedEnvDependency {
@@ -246,21 +257,21 @@ pub struct DetectedEnvDependency {
     pub confidence: f64,
 }
 
-/// Detected fs mutation. Mirrors `DetectedFsMutation` in
-/// `fs-mutation.ts`.
+/// Detected fs mutation. Ported from `DetectedFsMutation` in the
+/// retired TS `fs-mutation.ts`.
 ///
-/// Field order matches the TS interface declaration order exactly.
+/// Field order was locked to the TS interface declaration order (see
+/// `DetectedEnvDependency` for why that order is now a standalone
+/// serialization contract).
 ///
-/// Note on `destination_path`: in the TS interface this field is
-/// declared as optional (`destinationPath?: string | null`), so it
-/// may be absent from the TS JSON when the detector did not set
-/// it. The locked parity expected.json shape requires the field to
-/// be ALWAYS PRESENT (with value `null` when absent). The Rust
-/// struct uses `Option<String>` which serde serializes as `null`
-/// when `None` — always present. The TS parity harness must
-/// normalize the TS output to match this convention; that
-/// normalization is a parity-harness concern (R1-I), not a Rust
-/// type concern.
+/// Note on `destination_path`: in the TS interface this field was
+/// declared optional (`destinationPath?: string | null`), so it could
+/// be absent from the TS JSON when the detector did not set it. The
+/// locked expected.json shape required the field to be ALWAYS PRESENT
+/// (value `null` when absent). The Rust struct uses `Option<String>`,
+/// which serde serializes as `null` when `None` — always present. The
+/// retired TS parity harness normalized the TS output to this
+/// convention (an R1-I harness concern); the Rust type is unaffected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedFsMutation {
@@ -283,7 +294,7 @@ pub struct DetectedFsMutation {
 
 /// Env-family detector record after loading.
 ///
-/// Mirrors `EnvDetectorRecord` in `types.ts`. The `compiled_regex`
+/// Ported from `EnvDetectorRecord` in `types.ts`. The `compiled_regex`
 /// field is set by the loader and used by the walker hot path.
 /// `access_kind` and `access_pattern` are nullable because they are
 /// optional when a hook is declared and supplies them via the
@@ -305,7 +316,7 @@ pub struct EnvDetectorRecord {
 
 /// Fs-family detector record after loading.
 ///
-/// Mirrors `FsDetectorRecord` in `types.ts`. `base_kind` and
+/// Ported from `FsDetectorRecord` in `types.ts`. `base_kind` and
 /// `base_pattern` are nullable for the same hook-supplies reason as
 /// the env equivalents. `position_dedup_group` declares this record
 /// as a participant in a named overlap group; records sharing a
@@ -330,7 +341,7 @@ pub struct FsDetectorRecord {
 
 /// Discriminated union of env and fs detector records.
 ///
-/// Mirrors the TS `DetectorRecord` union type. The walker matches
+/// Ported from the TS `DetectorRecord` union type. The walker matches
 /// on the variant to dispatch to the appropriate emission path.
 #[derive(Debug, Clone)]
 pub enum DetectorRecord {
@@ -350,7 +361,7 @@ impl DetectorRecord {
 
 /// The full loaded detector graph.
 ///
-/// Mirrors `LoadedDetectorGraph` in `types.ts`. Records are stored
+/// Ported from `LoadedDetectorGraph` in `types.ts`. Records are stored
 /// once in `all_records` and indexed by `(family, language)` in
 /// `by_family_language` for O(1) walker dispatch. Both views
 /// preserve declaration order from the TOML source — required for
@@ -450,10 +461,10 @@ pub struct EnvHookContext<'a> {
 ///
 /// All fields are optional. The walker fills omitted fields from
 /// either walker defaults (varName from regex group 1) or static
-/// record fields (accessKind / accessPattern). This matches the TS
-/// `EnvHookEmission` shape exactly.
+/// record fields (accessKind / accessPattern). This was locked to the
+/// TS `EnvHookEmission` shape.
 ///
-/// Field merge semantics (must match the TS walker):
+/// Field merge semantics (were locked to the retired TS walker):
 ///
 ///   - `var_name`: `Option<String>`. `??` semantics — `None` falls
 ///     back to walker default (regex capture group 1).
@@ -461,7 +472,7 @@ pub struct EnvHookContext<'a> {
 ///     `None` falls back to record's static access_kind.
 ///   - `access_pattern`: `Option<EnvAccessPattern>`. `??` semantics.
 ///   - `default_value`: `Emitted<Option<String>>`. **Tri-state** —
-///     TS uses `e.defaultValue !== undefined` so the walker
+///     the TS walker used `e.defaultValue !== undefined`, so the walker
 ///     distinguishes "hook didn't say" (Unset → fallback null) from
 ///     "hook explicitly said null" (Value(None) → null) from
 ///     "hook explicitly said string" (Value(Some(x)) → x).
@@ -500,10 +511,10 @@ pub struct FsHookContext<'a> {
 
 /// One fs record an fs hook wants to emit before walker merge.
 ///
-/// Field merge semantics (must match the TS walker):
+/// Field merge semantics (were locked to the retired TS walker):
 ///
-///   - `target_path`: `Emitted<Option<String>>`. **Tri-state** — TS
-///     uses `e.targetPath !== undefined`. The walker distinguishes
+///   - `target_path`: `Emitted<Option<String>>`. **Tri-state** — the
+///     TS walker used `e.targetPath !== undefined`. The walker distinguishes
 ///     "hook didn't say" (Unset → walker default = regex group 1)
 ///     from "hook explicitly said null" (Value(None) → null) from
 ///     "hook explicitly said string" (Value(Some(x)) → x). The
@@ -511,13 +522,13 @@ pub struct FsHookContext<'a> {
 ///     correctness.
 ///
 ///   - `destination_path`: `Emitted<Option<String>>`. **Tri-state** —
-///     same as target_path. TS uses `e.destinationPath !== undefined`.
+///     same as target_path. The TS walker used `e.destinationPath !== undefined`.
 ///     The walker default for destinationPath is regex group 2 when
 ///     `two_ended` is set, otherwise null.
 ///
 ///   - `dynamic_path`: `Emitted<bool>`. **Tri-state in semantics, but
 ///     the inner type is `bool` (no nested Option)** because
-///     dynamicPath cannot be null. TS uses
+///     dynamicPath cannot be null. The TS walker used
 ///     `e.dynamicPath !== undefined ? e.dynamicPath : (targetPath === null)`.
 ///     Walker default is derived from the merged targetPath. The
 ///     three states are Unset (derive), Value(true), Value(false).
@@ -641,7 +652,7 @@ pub struct FsHookEntry {
 
 /// Named registry of env and fs hook entries.
 ///
-/// Mirrors `HookRegistry` in `types.ts`. The loader validates that
+/// Ported from `HookRegistry` in `types.ts`. The loader validates that
 /// any `hook = "..."` reference in the TOML resolves to a
 /// registered entry for the matching family.
 ///

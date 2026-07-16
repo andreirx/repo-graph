@@ -1,8 +1,10 @@
 # ── repo-graph-classification ─────────────────────────────────────
 #
-# Rust port of the core classification substrate. Mirror of the
-# TypeScript implementation under `src/core/classification/` plus
-# the necessary type deps from `src/core/diagnostics/`.
+# Rust port of the core classification substrate. Originally ported
+# from the TS prototype's `src/core/classification/` plus the
+# necessary type deps from `src/core/diagnostics/` (prototype
+# retired by TS-PROTOTYPE-RETIREMENT-1; archived in git). This crate
+# owns the behavior now.
 #
 # Slice scope (Rust-3):
 #   - port all 7 files in src/core/classification/ as pure Rust
@@ -55,15 +57,17 @@
 #           Output: hotspot entries with score = lines_changed * sum_complexity.
 #           Only files with BOTH inputs included. Sorted by score desc.
 #
-# Operating model: O-C zipper. Mirrors the discipline used in the
-# Rust-1 detector substrate port and the Rust-2 storage substrate
-# port. The TS implementation is the source of truth for behavior;
-# this crate ports it; parity is verified before any contract-
-# changing TS slice.
+# Operating model at port time (historical): O-C zipper, same
+# discipline as the Rust-1 detector and Rust-2 storage ports. The
+# TS implementation was the source of truth for behavior while it
+# existed; parity was verified before any contract-changing TS
+# slice. The prototype is retired (TS-PROTOTYPE-RETIREMENT-1) —
+# this crate is the sole implementation now.
 #
 # Parity surface: `classification-parity-fixtures/` at the repo
-# root will contain the curated cross-runtime contract test
-# corpus (added in R3-G). Per-fixture directory layout, one
+# root contains the contract test corpus (added in R3-G as the
+# cross-runtime check; now a Rust-only regression corpus consumed
+# by `tests/parity.rs`). Per-fixture directory layout, one
 # function call per fixture, `input.json` + `expected.json` pair.
 # No normalization is needed because classification outputs have
 # no generated UIDs or timestamps.

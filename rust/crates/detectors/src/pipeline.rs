@@ -1,12 +1,7 @@
 //! Public detector pipeline — eager-loaded production graph plus
-//! the drop-in replacement for the TS `detectEnvAccesses` /
-//! `detectFsMutations` public API.
+//! the `detect_env_accesses` / `detect_fs_mutations` public API.
 //!
-//! This module is the parity boundary. Callers get the same
-//! output shape and the same byte-level facts as the TS pipeline
-//! for every fixture in `parity-fixtures/`.
-//!
-//! Pipeline composition (mirror of the TS wrappers):
+//! Pipeline composition:
 //!
 //!   1. Map file path extension → `DetectorLanguage` (or return
 //!      empty if the extension is not recognized)
@@ -15,20 +10,21 @@
 //!
 //! Production graph loading:
 //!
-//! The detector graph source is the shared `detectors.toml` file
-//! at the TS repository root
-//! (`src/core/seams/detectors/detectors.toml`). The Rust crate
-//! embeds the file bytes at compile time via `include_str!`, then
-//! parses and validates them lazily on first use via `LazyLock`.
-//! This mirrors the TS "eager at module import" semantics closely
-//! enough: the first call to either detector function triggers
+//! The detector graph source is `detectors.toml`, co-located at
+//! the crate root (`rust/crates/detectors/detectors.toml`). The
+//! crate embeds the file bytes at compile time via `include_str!`,
+//! then parses and validates them lazily on first use via
+//! `LazyLock`: the first call to either detector function triggers
 //! the load and panics if the TOML is malformed.
 //!
-//! The `include_str!` path crosses from the Rust crate into the
-//! TS source tree. This is the intentional cross-runtime contract
-//! surface — both runtimes consume the SAME bytes from the SAME
-//! file. Any change to `detectors.toml` immediately affects both
-//! runtimes without risk of stale copies.
+//! History: `detectors.toml` was originally shared with the
+//! now-retired TypeScript prototype at the repo root
+//! (`src/core/seams/detectors/detectors.toml`). When the prototype
+//! was retired (TS-PROTOTYPE-RETIREMENT-1; see
+//! `docs/ts-prototype.md`) the file was relocated here byte-for-
+//! byte and this crate became its sole owner. Any change to it
+//! affects the build immediately (compile-time embed; no stale
+//! copies).
 
 use std::sync::LazyLock;
 
@@ -43,13 +39,13 @@ use crate::walker::{walk_env_detectors, walk_fs_detectors};
 // ── Production graph source ───────────────────────────────────────
 
 /// The raw TOML bytes of the production detector graph, embedded
-/// at compile time from the shared file at the repo root.
+/// at compile time from the crate-local `detectors.toml`.
 ///
 /// The path is resolved at compile time relative to this source
-/// file. If the TS side moves or renames `detectors.toml`, the
-/// Rust crate fails to build — which is the intended fail-fast
-/// signal for cross-runtime contract drift.
-const DETECTORS_TOML: &str = include_str!("../../../../src/core/seams/detectors/detectors.toml");
+/// file (`src/pipeline.rs` → `../detectors.toml`). If the file is
+/// moved or renamed, the crate fails to build — the intended
+/// fail-fast signal against a stale or missing detector graph.
+const DETECTORS_TOML: &str = include_str!("../detectors.toml");
 
 // ── Eager-loaded singleton ────────────────────────────────────────
 
@@ -96,7 +92,7 @@ pub fn production_pipeline() -> &'static ProductionPipeline {
 
 /// Detect environment variable accesses in a source file.
 ///
-/// Rust mirror of the TS `detectEnvAccesses(content, filePath)`
+/// Ported from the retired TS `detectEnvAccesses(content, filePath)`
 /// public function. Behavior:
 ///
 ///   1. Determine `DetectorLanguage` from `file_path` extension.
@@ -106,8 +102,9 @@ pub fn production_pipeline() -> &'static ProductionPipeline {
 ///   3. Dispatch to `walk_env_detectors` with the production graph
 ///      and registry.
 ///
-/// Byte-identical to the TS public function against every fixture
-/// in `parity-fixtures/`.
+/// Historically verified byte-identical to the retired TS public
+/// function via the `parity-fixtures/` corpus (both retired by
+/// TS-PROTOTYPE-RETIREMENT-1).
 pub fn detect_env_accesses(content: &str, file_path: &str) -> Vec<DetectedEnvDependency> {
     let language = match language_from_extension(file_path) {
         Some(l) => l,
@@ -126,7 +123,7 @@ pub fn detect_env_accesses(content: &str, file_path: &str) -> Vec<DetectedEnvDep
 
 /// Detect filesystem mutation occurrences in a source file.
 ///
-/// Rust mirror of the TS `detectFsMutations(content, filePath)`
+/// Ported from the retired TS `detectFsMutations(content, filePath)`
 /// public function. Composition is identical to
 /// `detect_env_accesses`: extension → language, comment mask,
 /// walker dispatch.
@@ -150,7 +147,7 @@ pub fn detect_fs_mutations(content: &str, file_path: &str) -> Vec<DetectedFsMuta
 
 /// Map a file extension to its `DetectorLanguage` bucket.
 ///
-/// Mirror of the TS `languageFromExtension` helper in
+/// Ported from the retired TS `languageFromExtension` helper in
 /// `env-detectors.ts` / `fs-mutation-detectors.ts`:
 ///
 ///   - `.ts` / `.tsx` / `.js` / `.jsx` → `Ts` (the JS/TS family)

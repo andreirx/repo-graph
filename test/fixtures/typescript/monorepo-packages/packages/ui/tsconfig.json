@@ -1,8 +1,0 @@
-{
-	// UI package: NO paths defined. Falls through to base via extends.
-	// Effective paths: @shared/* from tsconfig.base.json.
-	"extends": "../../tsconfig.base.json",
-	"compilerOptions": {
-		"strict": true
-	}
-}

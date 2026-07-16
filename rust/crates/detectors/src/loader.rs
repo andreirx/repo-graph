@@ -5,7 +5,7 @@
 //! malformed declaration: any error is a hard return at load time,
 //! NOT silent coercion at runtime.
 //!
-//! Hard validation rules (mirror of `loader.ts`):
+//! Hard validation rules (ported from the retired TS `loader.ts`):
 //!  - unknown family / language values reject
 //!  - missing required fields reject (no defaults for required)
 //!  - invalid regex (parse error) rejects
@@ -46,7 +46,7 @@ use crate::types::{
 
 /// Thrown by `load_detector_graph` on any validation failure.
 ///
-/// Mirror of TS `DetectorLoadError`. The message identifies the
+/// Ported from the retired TS `DetectorLoadError`. The message identifies the
 /// failing record by index and pattern_id (when available) so
 /// callers and authors can locate the offending declaration in the
 /// source TOML quickly.
@@ -156,8 +156,8 @@ fn validate_record(
     let flags = raw.flags.clone().unwrap_or_else(|| "g".to_string());
     if flags.is_empty() {
         // Empty string is treated as "no flags" — equivalent to "".
-        // The TS loader does not allow empty flags via optional_string,
-        // so an explicit empty string in the TOML rejects.
+        // The retired TS loader did not allow empty flags via
+        // optional_string, so an explicit empty string in the TOML rejects.
         if raw.flags.is_some() {
             return Err(DetectorLoadError::Validation(format!(
                 "{pattern_ctx}: field \"flags\" must not be empty"
@@ -503,16 +503,16 @@ fn require_string(
 // ── Regex compilation ────────────────────────────────────────────
 
 /// Compile a regex source string with TS-style flag characters into
-/// a Rust `regex::Regex`. Translates the cross-runtime flag set
-/// into Rust regex builder calls or hard-rejects flags that the
-/// Rust runtime cannot honor.
+/// a Rust `regex::Regex`. Translates the TS-style flag set into Rust
+/// regex builder calls or hard-rejects flags that the Rust runtime
+/// cannot honor.
 ///
 /// Flag handling:
 ///
 ///  - `g` (global): implicitly enabled by Rust's match-iteration
 ///    model — all matches are returned by `find_iter` /
-///    `captures_iter`. Accepted as a no-op so the same TOML works
-///    for both runtimes without modification.
+///    `captures_iter`. Accepted as a no-op so the TOML authored for
+///    the retired TS prototype still loads without modification.
 ///
 ///  - `i` (case-insensitive): translated to
 ///    `RegexBuilder::case_insensitive(true)`.
@@ -530,7 +530,7 @@ fn require_string(
 ///    that index onward. Rust's `regex` crate has no equivalent
 ///    primitive. Silently treating `y` as a no-op (the previous
 ///    behavior) would degrade sticky semantics to global, which is
-///    a material divergence from the TS contract. Detector authors
+///    a material semantic divergence (sticky → global). Detector authors
 ///    who declare `y` get an explicit error naming the cause.
 ///
 /// If a future detector genuinely needs sticky semantics, the
@@ -577,15 +577,15 @@ fn compile_regex(source: &str, flags: &str, ctx: &str) -> Result<Regex, Detector
 
     // Reject empty-match-capable regexes explicitly.
     //
-    // The TS walker guards zero-width matches by manually
+    // The retired TS walker guarded zero-width matches by manually
     // incrementing `regex.lastIndex` after an empty match. The
     // Rust walker uses `regex::Regex::captures_iter` which handles
     // empty-match advancement internally — but the advancement
     // rule differs from JS RegExp.exec on non-ASCII input (Rust
     // advances by one char boundary; JS advances by one UTF-16
     // code unit). On non-BMP input, a future empty-match-capable
-    // detector regex could produce different output between the
-    // two runtimes.
+    // detector regex could produce different output under the two
+    // engines' iteration semantics.
     //
     // Preventing the problem at load time is cleaner than trying
     // to re-implement JS iteration semantics in Rust: Rust's `str`
@@ -607,13 +607,14 @@ fn compile_regex(source: &str, flags: &str, ctx: &str) -> Result<Regex, Detector
     Ok(compiled)
 }
 
-/// Recognized TS regex flag characters. The Rust runtime accepts
-/// these at the validation layer (so a TOML declaring `flags = "y"`
-/// passes the field-shape check) and then either translates them,
-/// no-ops them, or hard-rejects them in `compile_regex`. The
-/// per-flag dispatch in `compile_regex` is the source of truth for
-/// runtime behavior; this set only enumerates which characters are
-/// part of the cross-runtime flag vocabulary.
+/// Recognized TS-style regex flag characters (the JS/TS regex flag
+/// letters the detector TOML was authored against). The Rust runtime
+/// accepts these at the validation layer (so a TOML declaring
+/// `flags = "y"` passes the field-shape check) and then either
+/// translates them, no-ops them, or hard-rejects them in
+/// `compile_regex`. The per-flag dispatch in `compile_regex` is the
+/// source of truth for runtime behavior; this set only enumerates
+/// which characters are part of that flag vocabulary.
 fn is_allowed_flag(ch: char) -> bool {
     matches!(ch, 'g' | 'i' | 'm' | 's' | 'u' | 'y')
 }

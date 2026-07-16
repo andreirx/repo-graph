@@ -1,11 +1,11 @@
 //! End-to-end integration test: index a checked-in fixture repo
 //! from disk into SQLite and verify deterministic outcomes.
 //!
-//! Test 1 uses `test/fixtures/typescript/classifier-repo/` for
-//! exact graph counts + config signal verification.
+//! Test 1 uses `rust/crates/repo-index/tests/fixtures/typescript/classifier-repo/`
+//! for exact graph counts + config signal verification.
 //!
-//! Test 2 uses `test/fixtures/typescript/rust-7a-fixture/` for
-//! scanner exclusion proof (gitignore, node_modules, dist).
+//! Test 2 uses `rust/crates/repo-index/tests/fixtures/typescript/rust-7a-fixture/`
+//! for scanner exclusion proof (gitignore, node_modules, dist).
 //!
 //! Classifier-repo has:
 //!   - package.json (dependencies: lodash, devDeps: typescript)
@@ -20,10 +20,7 @@ use repo_graph_storage::StorageConnection;
 fn fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("typescript")
         .join("classifier-repo")
@@ -178,10 +175,7 @@ fn index_classifier_repo_from_disk() {
 fn exclusion_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("typescript")
         .join("rust-7a-fixture")
@@ -249,13 +243,7 @@ fn snap_status(storage: &StorageConnection, uid: &str) -> String {
 
 fn mixed_lang_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
-        .join("fixtures")
-        .join("mixed-lang")
+    manifest.join("tests").join("fixtures").join("mixed-lang")
 }
 
 #[test]
@@ -416,10 +404,7 @@ fn mixed_lang_language_isolation() {
 fn rust_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("rust")
         .join("simple-crate")
@@ -708,10 +693,7 @@ fn index_rust_crate_receives_cargo_deps() {
 fn python_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("python")
         .join("simple-app")

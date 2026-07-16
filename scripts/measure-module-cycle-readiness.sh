@@ -72,10 +72,12 @@ echo "=== MODULE-CYCLES-DEFAULT-READINESS-1 measurement ==="
 rmap repo alias "$FIXTURE" xpart-monorepo >/dev/null 2>&1 || true
 measure_repo "A xpart-monorepo (HARD control)" "$FIXTURE" 1 "$FIXTURE/packages/a" "$FIXTURE/packages/b"
 
-# B — repo-graph is MIXED Rust+TS (it has a TS codebase under src/; NOT a clean non-TS control). Refresh
-# its DISCOVERED TS roots (excluding the in-repo xpart-monorepo fixture) -> the TS module cycles match,
-# the Rust/non-TS cycles show as MissingDueToUnloadedOrNonTsPartition (the language gap). Boundary
-# observation, does NOT invalidate the run.
+# B — HISTORICAL: when this readiness measurement was taken, repo-graph was a MIXED Rust+TS repo (it still
+# carried the TypeScript prototype under src/, since retired by TS-PROTOTYPE-RETIREMENT-1). At that time B
+# refreshed its DISCOVERED in-repo TS roots (excluding the xpart-monorepo fixture) -> the TS module cycles
+# matched, the Rust/non-TS cycles showed as MissingDueToUnloadedOrNonTsPartition (the language gap); a
+# boundary observation that did NOT invalidate the run. Post-retirement the src/ TS tree is gone, so a
+# re-run discovers no in-repo TS roots here.
 broots=()
 while IFS= read -r d; do [ -n "$d" ] && broots+=("$d"); done < <(find "$REPO_ROOT" -maxdepth 4 -name tsconfig.json -not -path '*/node_modules/*' -not -path '*xpart-monorepo*' -exec dirname {} \; 2>/dev/null | sort -u)
 measure_repo "B repo-graph (MIXED Rust+TS; TS portion)" "$REPO_ROOT" 0 "${broots[@]}"

@@ -160,20 +160,18 @@ pub struct ImportBinding {
     /// actual symbol is determined at the call site by the
     /// member expression, not by the import statement.
     ///
-    /// TS-side note: under the Fork-1 state-boundary posture,
-    /// TS-codebase extractors (`src/adapters/extractors/*`)
-    /// populate this as `null` on every binding. Full TS-side
-    /// population is a deferred follow-on. The field is present
-    /// in the contract for symmetry; Rust-side consumers
-    /// (`state-extractor`) are the only ones populating it
-    /// today.
+    /// Provenance note: under the Fork-1 state-boundary posture the
+    /// retired TS prototype's extractors emitted `null` here on
+    /// every binding, with full population deferred — mooted by
+    /// TS-PROTOTYPE-RETIREMENT-1 (the prototype is gone). The field
+    /// stayed in the contract; Rust-side consumers
+    /// (`state-extractor`) are the ones populating it today.
     ///
     /// Serde: `#[serde(default, skip_serializing_if =
     /// "Option::is_none")]` keeps this additive-transparent for
-    /// the existing cross-runtime parity harness
-    /// (`test/ts-extractor-parity/ts-extractor-parity.test.ts`),
-    /// which projects `ImportBinding` to a fixed field set
-    /// excluding this field.
+    /// the parity harness (`ts-extractor/tests/parity.rs` over
+    /// `ts-extractor-parity-fixtures/`), which projects
+    /// `ImportBinding` to a fixed field set excluding this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_name: Option<String>,
     /// The kind of import statement (Named, Default, or Namespace).
@@ -186,9 +184,11 @@ pub struct ImportBinding {
     /// Defaults to `Named` for backward compatibility with existing
     /// bindings that don't populate this field.
     ///
-    /// TS-side note: under Fork-1 posture, TS extractors will emit
-    /// `null` (or omit the field), which deserializes to `Named`.
-    /// Full TS-side population is deferred.
+    /// Provenance note: the retired TS prototype's extractors
+    /// (Fork-1 posture) emitted `null` or omitted the field, which
+    /// deserializes to `Named`; full TS-side population was deferred
+    /// and is mooted by TS-PROTOTYPE-RETIREMENT-1. Legacy rows
+    /// without the field still deserialize to `Named`.
     #[serde(default)]
     pub kind: ImportKind,
 }

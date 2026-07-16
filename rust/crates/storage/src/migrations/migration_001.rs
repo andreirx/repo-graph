@@ -1,11 +1,18 @@
 //! Migration 001 — initial schema.
 //!
-//! Embeds the canonical SQL source from
-//! `src/adapters/storage/sqlite/migrations/001-initial.sql` via
-//! `include_str!` per R2 decision D12. The compile-time embed
-//! means any change to the shared `.sql` file forces a Rust
-//! rebuild — drift between the file on disk and what Rust
-//! executes is impossible.
+//! Embeds the canonical SQL source from the crate-local
+//! `001-initial.sql` (co-located in this `migrations/` directory)
+//! via `include_str!` per R2 decision D12. The compile-time embed
+//! means any change to the `.sql` file forces a Rust rebuild —
+//! drift between the file on disk and what Rust executes is
+//! impossible.
+//!
+//! History: this SQL was originally shared with the now-retired
+//! TypeScript prototype at
+//! `src/adapters/storage/sqlite/migrations/001-initial.sql`. When
+//! the prototype was retired (TS-PROTOTYPE-RETIREMENT-1; see
+//! `docs/ts-prototype.md`) the file was relocated here byte-for-
+//! byte and this crate became its sole owner.
 //!
 //! ── PRAGMA stripping ──────────────────────────────────────────
 //!
@@ -59,7 +66,7 @@
 //! `commit()` rolls back.
 //!
 //! **Why the wrap matters even though current 001-initial.sql is
-//! all `IF NOT EXISTS`:** the shared `.sql` file is contract
+//! all `IF NOT EXISTS`:** the `.sql` file is contract
 //! input and can evolve. A future change that introduces a
 //! non-idempotent statement could fail partway through, leaving
 //! partial schema state committed in Rust while TS would roll
@@ -81,8 +88,9 @@
 //!
 //! ── Outdated-vs-final-schema fact ─────────────────────────────
 //!
-//! The shared `.sql` file is OUTDATED relative to the TypeScript
-//! constant `INITIAL_MIGRATION` in `001-initial.ts`. Specifically,
+//! The `.sql` file is OUTDATED relative to the (now-retired)
+//! TypeScript constant `INITIAL_MIGRATION` in `001-initial.ts`.
+//! Specifically,
 //! the `.sql` file does NOT include:
 //!
 //! - `snapshots.toolchain_json`
@@ -104,18 +112,13 @@ use crate::error::StorageError;
 
 /// Embedded SQL source for migration 001.
 ///
-/// Compile-time loaded from
-/// `src/adapters/storage/sqlite/migrations/001-initial.sql`. The
-/// path is relative to this source file: from
-/// `rust/crates/storage/src/migrations/migration_001.rs`, five
-/// `..` hops reach the repo root, then descend into the TS
-/// migration directory.
+/// Compile-time loaded from the crate-local `001-initial.sql`,
+/// which sits beside this source file in
+/// `rust/crates/storage/src/migrations/`.
 ///
-/// If the shared `.sql` file is moved or renamed, this
-/// `include_str!` fails at compile time, surfacing the contract
-/// drift immediately.
-const MIGRATION_001_SQL: &str =
-    include_str!("../../../../../src/adapters/storage/sqlite/migrations/001-initial.sql");
+/// If the `.sql` file is moved or renamed, this `include_str!`
+/// fails at compile time, surfacing the drift immediately.
+const MIGRATION_001_SQL: &str = include_str!("001-initial.sql");
 
 /// Run migration 001 against the given connection.
 ///

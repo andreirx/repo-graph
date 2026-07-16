@@ -4,7 +4,7 @@
 //! emission, and storage to verify that kafkajs patterns produce
 //! the expected boundary interaction surfaces.
 //!
-//! Fixture: `test/fixtures/kafka-basic/`
+//! Fixture: `rust/crates/repo-index/tests/fixtures/kafka-basic/`
 //!
 //! ## What this test proves
 //!
@@ -31,13 +31,7 @@ use repo_graph_storage::StorageConnection;
 
 fn kafka_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
-        .join("fixtures")
-        .join("kafka-basic")
+    manifest.join("tests").join("fixtures").join("kafka-basic")
 }
 
 #[test]

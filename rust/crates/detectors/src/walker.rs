@@ -1,6 +1,7 @@
 //! Generic detector graph walker.
 //!
-//! Rust mirror of `src/core/seams/detectors/walker.ts`. Consumes a
+//! Ported from the now-retired TS `src/core/seams/detectors/walker.ts`
+//! (deleted by TS-PROTOTYPE-RETIREMENT-1; archived in git). Consumes a
 //! `LoadedDetectorGraph` plus a hook registry and produces
 //! `DetectedEnvDependency` / `DetectedFsMutation` for one source
 //! file.
@@ -10,8 +11,8 @@
 //! regex, dispatches to hooks when present, and merges hook output
 //! with the static record's base fields.
 //!
-//! Walker default behavior (must match types.rs documentation and
-//! the TS walker exactly):
+//! Walker default behavior (matches the types.rs documentation; was
+//! locked to the retired TS walker):
 //!  - env varName ← regex capture group 1 (when hook does not supply)
 //!  - fs targetPath ← regex capture group 1 (when hook does not supply)
 //!  - fs destinationPath ← regex capture group 2 (when two_ended)
@@ -34,8 +35,9 @@
 //!
 //! Line iteration uses `content.split('\n')` rather than `lines()`
 //! because Rust's `str::lines()` strips trailing `\r` characters
-//! while TS `split("\n")` does not. For byte-identical behavior
-//! under CRLF inputs, `split` is the correct choice.
+//! while the TS `split("\n")` it was locked to did not. For
+//! byte-identical behavior under CRLF inputs, `split` is the correct
+//! choice.
 //!
 //! Zero-width match policy: the walker uses `regex::Regex::captures_iter`
 //! which handles empty-match advancement internally. This is safe
@@ -43,9 +45,9 @@
 //! time (see `loader::compile_regex`) — the walker is guaranteed
 //! to only see regexes that require at least one mandatory
 //! character, so `captures_iter`'s empty-match advancement rule
-//! cannot produce cross-runtime divergence with the TS walker. If
-//! a future detector is authored with an empty-match-capable
-//! regex, the loader catches it before the walker ever runs.
+//! could not have diverged from the retired TS walker. If a future
+//! detector is authored with an empty-match-capable regex, the
+//! loader catches it before the walker ever runs.
 //!
 //! Pure function. No I/O. No external dependencies beyond the loaded
 //! graph and registry passed in.
@@ -255,9 +257,9 @@ fn emit_env_from_match(
     let mut out: Vec<DetectedEnvDependency> = Vec::with_capacity(emissions.len());
     for e in emissions {
         // Merge: hook fields (if set) override walker defaults /
-        // static fields. The merge operators mirror the TS walker:
-        // `??` semantics for most fields, `Emitted` tri-state for
-        // default_value.
+        // static fields. The merge operators mirror the retired TS
+        // walker's: `??` semantics for most fields, `Emitted`
+        // tri-state for default_value.
         let var_name = match e.var_name.or_else(|| walker_var_name.clone()) {
             Some(n) => n,
             None => continue,
@@ -376,8 +378,8 @@ fn emit_fs_from_match(
         // from merged target_path. Value(b) → use b.
         //
         // IMPORTANT: the derivation uses the MERGED target_path,
-        // not the walker default. This matches the TS walker's line
-        // order: `const dynamicPath = e.dynamicPath !== undefined ? e.dynamicPath : targetPath === null`.
+        // not the walker default. This preserves the ordering the
+        // retired TS walker used: `const dynamicPath = e.dynamicPath !== undefined ? e.dynamicPath : targetPath === null`.
         let dynamic_path = match e.dynamic_path {
             Emitted::Unset => target_path.is_none(),
             Emitted::Value(b) => b,

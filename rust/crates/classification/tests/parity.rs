@@ -5,10 +5,11 @@
 //! classification function, and compares the actual output against
 //! the fixture's `expected.json`.
 //!
-//! This is the Rust side of the R3-G cross-runtime parity check.
-//! The TypeScript half runs the same fixtures through the TS
-//! classification functions and compares against the same
-//! `expected.json`.
+//! Built as the Rust side of the R3-G cross-runtime parity check;
+//! the TypeScript half (deleted by TS-PROTOTYPE-RETIREMENT-1;
+//! archived in git) ran the same fixtures through the TS
+//! classification functions. Now a Rust-only regression suite over
+//! the same corpus.
 //!
 //! **No normalization needed.** Classification is pure policy with
 //! no generated UIDs, no timestamps, no randomness. For the same

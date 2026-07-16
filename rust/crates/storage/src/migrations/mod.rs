@@ -10,11 +10,12 @@
 //! ── Migration source-of-truth strategy (D-C6 lock) ───────────
 //!
 //! - **Migration 001:** SQL embedded via `include_str!` from the
-//!   shared file `src/adapters/storage/sqlite/migrations/001-initial.sql`
-//!   per D12. The PRAGMA statements at the top of that file are
-//!   stripped before execution because the runner applies pragmas
-//!   separately at the connection level (matching the TS
-//!   `connection-provider.ts` behavior).
+//!   crate-local `001-initial.sql` beside `migration_001.rs`
+//!   per D12 (relocated byte-for-byte from the retired TS
+//!   prototype — TS-PROTOTYPE-RETIREMENT-1). The PRAGMA statements
+//!   at the top of that file are stripped before execution because
+//!   the runner applies pragmas separately at the connection level
+//!   (matching the original `connection-provider.ts` behavior).
 //!
 //! - **Migrations 002–016:** Hand-ported as Rust functions, each
 //!   in its own `migration_NNN.rs` file. Their SQL is inlined as
@@ -37,7 +38,7 @@
 //! - `declarations.authored_basis_json` (added by migration 002
 //!   on the upgrade path)
 //!
-//! On the TS side, fresh installs use the constant directly so
+//! In the retired TS prototype, fresh installs used the constant directly so
 //! these columns exist after migration 001. Migration 002 then
 //! sees them already present and is a no-op (its column-existence
 //! check returns true).

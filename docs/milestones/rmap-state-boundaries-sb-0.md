@@ -93,14 +93,16 @@ Capabilities:
 - Cross-language seam detection across `Ts`, `Py`, `Rs`, `Java`,
   `C` (includes C++). See
   `rust/crates/detectors/src/types.rs:99-107`.
-- TOML-driven detector graph loaded from
-  `src/core/seams/detectors/detectors.toml` (shared file,
-  embedded via `include_str!` —
-  `rust/crates/detectors/src/pipeline.rs:53-55`).
+- TOML-driven detector graph loaded from the crate-local
+  `rust/crates/detectors/detectors.toml`, embedded via
+  `include_str!` (`rust/crates/detectors/src/pipeline.rs`).
+  (Relocated byte-for-byte from the retired TS prototype —
+  TS-PROTOTYPE-RETIREMENT-1.)
 - Comment-masked preprocessing (`comment_masker.rs`).
 - Pattern-based walker with hooks (`walker.rs`, `hooks.rs`).
-- TS-parity harness: byte-identical output vs the TS
-  implementation (`tests/parity.rs`).
+- TS-parity harness (retired): historically verified byte-identical
+  output vs the TS implementation; the harness (`tests/parity.rs`) was
+  removed with the prototype by TS-PROTOTYPE-RETIREMENT-1.
 
 Output types (`rust/crates/detectors/src/types.rs`):
 
@@ -110,7 +112,8 @@ Output types (`rust/crates/detectors/src/types.rs`):
   mutation.
 
 **Output is NOT graph nodes and edges.** It is a stream of
-typed fact structs. In the TS runtime these are consumed by
+typed fact structs. In the now-retired TS runtime (deleted by
+TS-PROTOTYPE-RETIREMENT-1; archived in git) these were consumed by
 `src/adapters/indexer/repo-indexer.ts:1131-1132` and persisted
 into dedicated surface-scoped tables:
 
@@ -118,17 +121,18 @@ into dedicated surface-scoped tables:
   `src/adapters/storage/sqlite/migrations/015-env-dependencies.ts`).
 - `surface_fs_mutations` (migration 016).
 
-These tables are scoped to `project_surface_uid`, not to
+Those tables were scoped to `project_surface_uid`, not to
 symbol-level graph nodes. There are NO `READS` or `WRITES`
-graph edges produced from detector output in either runtime
-today.
+graph edges produced from detector output in the Rust workspace
+(the only runtime today).
 
 **In the Rust workspace, the detectors crate is not invoked
 at all** — no imports of `repo_graph_detectors::detect_env_accesses`
 or `detect_fs_mutations` exist outside the detectors crate
 itself. The Rust indexer does not call detectors. Detector
 output is currently reached only through the crate's own
-tests and the parity harness.
+tests (the cross-runtime parity harness was retired with the TS
+prototype, TS-PROTOTYPE-RETIREMENT-1).
 
 **Can `detectors` legally serve as a temporary non-AST seam
 pass without violating the state-boundary contract?**

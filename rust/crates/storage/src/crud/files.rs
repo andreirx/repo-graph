@@ -1,7 +1,10 @@
 //! CRUD methods for the `files` table.
 //!
-//! Mirrors `upsertFiles`, `getFilesByRepo`, `getStaleFiles` from
-//! `src/adapters/storage/sqlite/sqlite-storage.ts:345-421`.
+//! Ported from `upsertFiles`, `getFilesByRepo`, `getStaleFiles` in
+//! the retired TS prototype's
+//! `src/adapters/storage/sqlite/sqlite-storage.ts:345-421` (deleted
+//! by TS-PROTOTYPE-RETIREMENT-1; archived in git). This crate owns
+//! the behavior now.
 //!
 //! `upsert_files` is transaction-wrapped (batch upsert with
 //! ON CONFLICT). The two read methods are single-statement and
@@ -16,8 +19,9 @@
 //! - `get_files_by_repo` includes `WHERE is_excluded = 0` in the
 //!   SQL. The R2-E user lock pinned this: rows with
 //!   `is_excluded = 1` MUST NOT appear in the result. The
-//!   ordering `ORDER BY path` matches TS exactly so result row
-//!   order is observable and parity-checkable.
+//!   ordering `ORDER BY path` was locked byte-equal to the retired
+//!   TS adapter's ordering so result row order stays observable and
+//!   parity-checkable against the fixture corpus.
 //!
 //! - `get_stale_files` joins `files` with `file_versions` and
 //!   filters by `parse_status = 'stale'`. Returns `TrackedFile`

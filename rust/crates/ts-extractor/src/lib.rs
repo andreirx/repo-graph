@@ -34,10 +34,12 @@
 //!
 //! ── Locked contract divergence: sync extraction ──────────────
 //!
-//! The TS `TypeScriptExtractor` uses web-tree-sitter (WASM, async
-//! grammar loading). The Rust adapter uses native tree-sitter
-//! (compiled C grammars, sync). `initialize()` and `extract()` are
-//! synchronous per the R5-A ExtractorPort lock.
+//! The retired TS prototype's `TypeScriptExtractor` used
+//! web-tree-sitter (WASM, async grammar loading); this adapter was
+//! locked to native tree-sitter (compiled C grammars, sync) at
+//! R5-A. The prototype is gone (TS-PROTOTYPE-RETIREMENT-1; archived
+//! in git), but the contract stands: `initialize()` and `extract()`
+//! are synchronous per the R5-A ExtractorPort lock.
 //!
 //! ── Error behavior (locked at R6-A) ──────────────────────────
 //!
@@ -47,8 +49,9 @@
 //!   adapter/setup failures (null parser, unset grammar). Syntax
 //!   errors in source produce partial trees with ERROR nodes —
 //!   extraction proceeds and emits whatever the visitor finds.
-//!   This mirrors the TS extractor, which does not reject
-//!   syntactically invalid files.
+//!   This behavior was locked from the retired TS prototype's
+//!   extractor, which did not reject syntactically invalid files;
+//!   the crate now owns the contract on its own.
 
 pub mod amqp_detector;
 pub mod boundary_detector;

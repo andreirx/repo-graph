@@ -16,13 +16,7 @@ use repo_graph_storage::StorageConnection;
 
 fn memfd_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
-        .join("fixtures")
-        .join("memfd")
+    manifest.join("tests").join("fixtures").join("memfd")
 }
 
 /// Filter surfaces to only those with memfd in provenance.

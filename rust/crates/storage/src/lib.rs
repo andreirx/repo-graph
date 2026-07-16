@@ -25,9 +25,11 @@
 //! truth is hand-ported per substep R2 lock decision D3c; drift
 //! between TS and Rust migration logic is detected by the parity
 //! harness (R2-F), not by shared source-of-truth gymnastics.
-//! Migration 001 is the lone exception: its SQL is shared via
-//! `include_str!` of `src/adapters/storage/sqlite/migrations/001-initial.sql`
-//! per D12, providing a small structural anchor.
+//! Migration 001 is the lone exception: its SQL is embedded via
+//! `include_str!` of the crate-local `src/migrations/001-initial.sql`
+//! per D12, providing a small structural anchor. (It was relocated
+//! here byte-for-byte from the retired TS prototype —
+//! TS-PROTOTYPE-RETIREMENT-1.)
 //!
 //! Entity scope (R2-E behavioral boundary, D4-Core, 6 entities):
 //!   - repos
@@ -81,8 +83,9 @@
 //!   - Fixture format: JSON operation scripts in a new top-level
 //!     `storage-parity-fixtures/` directory at the repo root, with
 //!     its own README documenting the fixture shape. Separate from
-//!     the existing `parity-fixtures/` (which is detector-specific)
-//!     to maintain the directory-as-surface convention (D9)
+//!     the detector `parity-fixtures/` corpus (retired with the TS
+//!     prototype, TS-PROTOTYPE-RETIREMENT-1) to maintain the
+//!     directory-as-surface convention (D9)
 //!   - Dynamic value normalization: `schema_migrations.applied_at`
 //!     is blanket-normalized to `"<TIMESTAMP>"`, and
 //!     `createSnapshot`-generated `snapshotUid` / `createdAt`

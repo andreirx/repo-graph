@@ -1,4 +1,5 @@
-//! Comment masker tests — Rust mirror of TS `comment-masker.test.ts`.
+//! Comment masker tests (ported from the retired TS prototype's `comment-masker.test.ts`;
+//! removed in TS-PROTOTYPE-RETIREMENT-1 — git history is the archive).
 //!
 //! Each test proves a positional / lexical invariant the production
 //! detector pipeline depends on. Tests are organized by behavior

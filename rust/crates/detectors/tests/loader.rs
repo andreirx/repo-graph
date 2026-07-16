@@ -1,13 +1,14 @@
-//! Loader integration tests — Rust mirror of TS `loader.test.ts`.
+//! Loader integration tests (ported from the retired TS prototype's `loader.test.ts`;
+//! removed in TS-PROTOTYPE-RETIREMENT-1 — git history is the archive).
 //!
-//! Each TS describe block / it case has a corresponding Rust test
+//! Each original describe block / it case has a corresponding Rust test
 //! function. Test names are camelCase-mapped to snake_case but
 //! preserve the same input + expected outcome shape.
 //!
 //! Assertion mechanism: instead of regex matching against the JS
 //! Error message string, Rust tests use `matches!` against the
 //! error variant plus a `contains` check on the message text. The
-//! message format is preserved closely to the TS format so the
+//! message format is preserved closely to the retired TS prototype's format so the
 //! contains-checks are robust to minor wording changes.
 
 use std::collections::{HashMap, HashSet};

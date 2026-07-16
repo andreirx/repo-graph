@@ -1,4 +1,5 @@
-//! Hook implementation tests — Rust mirror of TS hook semantics.
+//! Hook implementation tests (semantics ported from the retired TS prototype;
+//! removed in TS-PROTOTYPE-RETIREMENT-1 — git history is the archive).
 //!
 //! Each hook is unit-tested in isolation against synthetic inputs
 //! that exercise its specific contract dimension. The tests are
@@ -11,12 +12,12 @@
 //!
 //! These tests do NOT use the loader or walker. They construct
 //! synthetic `EnvHookContext` / `FsHookContext` values directly
-//! and call the hook function via the registry. The walker-level
-//! integration is verified by R1-J parity tests later.
+//! and call the hook function via the registry. Walker-level
+//! integration is covered by the `walker` and `pipeline` suites.
 //!
 //! Helper: each hook is invoked through the production registry
 //! lookup so the test exercises the same dispatch path the walker
-//! will use.
+//! uses.
 
 use std::collections::HashSet;
 

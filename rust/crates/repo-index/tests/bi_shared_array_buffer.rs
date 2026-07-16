@@ -4,7 +4,7 @@
 //! emission, and storage to verify that SAB/Atomics patterns produce
 //! the expected boundary interaction surfaces.
 //!
-//! Fixture: `test/fixtures/shared-array-buffer/`
+//! Fixture: `rust/crates/repo-index/tests/fixtures/shared-array-buffer/`
 //!
 //! ## What this test proves
 //!
@@ -32,10 +32,7 @@ use repo_graph_storage::StorageConnection;
 fn sab_fixture_path() -> PathBuf {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("test")
+        .join("tests")
         .join("fixtures")
         .join("shared-array-buffer")
 }

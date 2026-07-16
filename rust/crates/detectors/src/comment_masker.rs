@@ -1,6 +1,7 @@
 //! Positional comment masker for detector inputs.
 //!
-//! Rust mirror of `src/core/seams/comment-masker.ts`. Replaces
+//! Ported from the now-retired TS `src/core/seams/comment-masker.ts`
+//! (deleted by TS-PROTOTYPE-RETIREMENT-1; archived in git). Replaces
 //! comment characters with spaces while preserving:
 //!
 //!   1. Byte length exactly — every detector reports line numbers,
@@ -22,10 +23,10 @@
 //! Implementation note: byte-level walking, not char-level.
 //!
 //! - JS strings are indexed in UTF-16 code units. Non-BMP characters
-//!   take TWO code units. The TS masker walks one code unit at a
+//!   take TWO code units. The TS masker walked one code unit at a
 //!   time. A naive Rust port walking `Vec<char>` (Unicode scalar
-//!   values) would diverge from the TS implementation on any source
-//!   containing non-BMP characters.
+//!   values) would have diverged from that TS implementation on any
+//!   source containing non-BMP characters.
 //!
 //! - More importantly, the Rust `regex` engine reports BYTE offsets.
 //!   If the masker shrinks the byte representation (replacing a

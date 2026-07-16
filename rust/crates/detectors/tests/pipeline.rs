@@ -1,8 +1,10 @@
-//! Public detector pipeline integration tests.
+//! Public detector pipeline integration tests (ported from the retired
+//! TS prototype; removed in TS-PROTOTYPE-RETIREMENT-1 — git history is
+//! the archive).
 //!
 //! These tests exercise the top-level `detect_env_accesses` and
-//! `detect_fs_mutations` functions as drop-in replacements for
-//! the TS public API. They verify:
+//! `detect_fs_mutations` functions — the crate's public API. They
+//! verify:
 //!
 //!   1. Language dispatch — the right walker bucket is selected
 //!      from the file path extension, unknown extensions return
@@ -17,11 +19,11 @@
 //!      `production_pipeline()` triggers the lazy init and should
 //!      never panic on a valid `detectors.toml`)
 //!
-//! The curated contract parity corpus comes later in R1-H/R1-I/R1-J.
-//! These tests are smoke-level and do not assert byte-for-byte
-//! equivalence against the TS pipeline — they assert that the
-//! wrapper composes the three layers (masker + walker + registry)
-//! correctly and produces the shapes R1-B / R1-F defined.
+//! These tests are smoke-level: they assert that the wrapper composes
+//! the three layers (masker + walker + registry) correctly and
+//! produces the shapes R1-B / R1-F defined. (The cross-runtime parity
+//! corpus that once checked byte-for-byte equivalence against the TS
+//! pipeline was retired with the prototype.)
 
 use repo_graph_detectors::types::{EnvAccessKind, EnvAccessPattern, MutationKind, MutationPattern};
 use repo_graph_detectors::{detect_env_accesses, detect_fs_mutations, production_pipeline};
@@ -307,23 +309,22 @@ fn python_env_inside_triple_quoted_docstring_is_preserved_in_string_literal() {
     // the bytes `os.environ["X"]` regardless of whether they are
     // inside a code expression or inside a docstring.
     //
-    // The TS side has the same behavior: detectors regex-match
-    // against the masked content, and masking preserves string
-    // literal contents (including triple-quoted). Patterns inside
-    // string literals are matched as if they were code.
+    // The detector regex-matches against the masked content, and
+    // masking preserves string literal contents (including
+    // triple-quoted). Patterns inside string literals are matched as
+    // if they were code.
     //
-    // This is an acknowledged limitation of the regex-based
-    // detectors and is recorded as TECH-DEBT in the TS slice
-    // ("string-literal-embedded env access false positives"). It
-    // is NOT a bug in this slice — the Rust pipeline must produce
-    // the same behavior as the TS pipeline.
+    // This is an acknowledged limitation of the regex-based detectors
+    // (recorded as TECH-DEBT: "string-literal-embedded env access
+    // false positives"). The retired TS prototype had the same
+    // behavior; this test pins the crate's current behavior.
     let out = detect_env_accesses(
         "doc = \"\"\"Example: os.environ[\"EXAMPLE\"]\"\"\"",
         "src/app.py",
     );
-    // Both runtimes detect this as a real access (known limitation
-    // shared between TS and Rust). The test pins the current
-    // behavior; fixing this is out of scope for R1-G.
+    // Detected as a real access (a known, enduring limitation of the
+    // regex-based approach). The test pins the current behavior;
+    // fixing this is out of scope for R1-G.
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].var_name, "EXAMPLE");
 }

@@ -1,4 +1,5 @@
-//! Walker integration tests — Rust mirror of TS `walker.test.ts`.
+//! Walker integration tests (ported 2026 from the retired TS prototype's `walker.test.ts`;
+//! the TS tree was removed in TS-PROTOTYPE-RETIREMENT-1 — git history is the archive).
 //!
 //! Tests are organized by behavior category (not by verbatim TS
 //! translation). Each test proves one invariant the walker must
@@ -14,8 +15,8 @@
 //!
 //! The tests use synthetic in-memory detector graphs built via the
 //! loader (not the production detectors.toml). This keeps walker
-//! tests independent of the data file; the data file gets its own
-//! parity tests in R1-H..R1-J.
+//! tests independent of the data file (the production graph is
+//! smoke-covered by the `pipeline` suite's singleton test).
 
 use std::collections::HashSet;
 

@@ -34,8 +34,10 @@ modules, declarations, or non-TS languages. Therefore ZERO SQLite tables are saf
 
 ## 1. SQLite responsibility inventory (33 tables, OBSERVED)
 
-Schema: `rust/crates/storage/src/adapters/storage/sqlite/migrations/001-initial.sql` + migrations
-`migration_003..025` under `rust/crates/storage/src/migrations/`.
+Schema: `rust/crates/storage/src/migrations/001-initial.sql` (path updated by
+TS-PROTOTYPE-RETIREMENT-1 — the SQL was relocated byte-identical from the retired TS tree
+into its consuming crate) + migrations `migration_003..025` under
+`rust/crates/storage/src/migrations/`.
 
 ### 1a. AUTHORITATIVE (source of truth — NOT reproducible by re-indexing)
 | Table | file:line | Note |
@@ -179,7 +181,7 @@ No code. No table deletion. No migrations. Audit doc only.
 ```
 
 ## References
-- `rust/crates/storage/src/adapters/storage/sqlite/migrations/001-initial.sql` + `src/migrations/migration_0NN.rs`
+- `rust/crates/storage/src/migrations/001-initial.sql` (path updated by TS-PROTOTYPE-RETIREMENT-1) + `src/migrations/migration_0NN.rs`
 - `rust/crates/rgr/src/commands/{graph,orient,dead,modules,surfaces}.rs`
 - `rust/crates/daemon-runtime/src/dispatch.rs` (route table ~219; handlers 767–5719)
 - `rust/crates/daemon-runtime/src/livegraph_feed.rs` (Engine::Sqlite default :82; fallback :268)

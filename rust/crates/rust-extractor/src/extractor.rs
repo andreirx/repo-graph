@@ -15,8 +15,8 @@ use tree_sitter::{Node, Parser};
 use crate::builtins::rust_runtime_builtins;
 use crate::metrics::compute_function_metrics;
 
-/// Extractor name and version. Mirrors `EXTRACTOR_VERSIONS.rust`
-/// from the TS side.
+/// Extractor name and version. Inherited from the retired TS prototype's
+/// `EXTRACTOR_VERSIONS.rust` (kept stable for snapshot comparability).
 const EXTRACTOR_NAME: &str = "rust-core:0.2.0";
 
 /// The language identifier this extractor handles.

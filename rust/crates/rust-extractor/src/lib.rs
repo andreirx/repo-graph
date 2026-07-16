@@ -29,15 +29,19 @@
 //!
 //! -- Locked contract divergence: sync extraction ------------------
 //!
-//! The TS `RustExtractor` uses web-tree-sitter (WASM, async grammar
-//! loading). The Rust adapter uses native tree-sitter (compiled C
-//! grammar, sync). `initialize()` and `extract()` are synchronous
-//! per the ExtractorPort contract.
+//! The retired TS prototype's `RustExtractor` used web-tree-sitter
+//! (WASM, async grammar loading); this adapter was locked to native
+//! tree-sitter (compiled C grammar, sync). The prototype is gone
+//! (TS-PROTOTYPE-RETIREMENT-1; archived in git), but the contract
+//! stands: `initialize()` and `extract()` are synchronous per the
+//! ExtractorPort contract.
 //!
 //! -- Behavioral contract ------------------------------------------
 //!
-//! Mirrors the TS RustExtractor at:
-//!   src/adapters/extractors/rust/rust-extractor.ts
+//! Behavior ported from the retired TS prototype's RustExtractor
+//! (`src/adapters/extractors/rust/rust-extractor.ts`, removed by
+//! TS-PROTOTYPE-RETIREMENT-1; archived in git history, last release
+//! containing it: v0.4.0). This crate now owns the contract.
 //!
 //! Extracts:
 //!   - FILE nodes (one per file)
