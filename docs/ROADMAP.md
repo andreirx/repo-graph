@@ -36,7 +36,43 @@ substrate; it is not a set of unrelated per-language extractors. See `docs/VISIO
 
 ---
 
-## Current priority — Product-surface honesty
+## NOW — post-v0.7.0 (reconciled 2026-07-16)
+
+Three releases shipped since this file's last major update, all field-report- or
+vision-driven (delivery records live in each `docs/slices/*.md`):
+
+- **v0.5.0** — installer truth (INSTALL-ROBUSTNESS-2), detached index completion
+  (INDEX-DISCONNECT-1), daemon visibility (DAEMON-VISIBILITY-1), auto snapshot retention
+  (SNAPSHOT-RETENTION-1), Rust metrics + coverage honesty (METRIC-LANG-COVERAGE-1).
+- **v0.6.0** — postpass recursion fix at kernel scale (PERSIST-RECURSION-1), crash
+  reconciliation (DAEMON-CRASH-RECOVERY-1), auto-enrichment (ENRICH-LIFECYCLE-1), quiet
+  CLI (INDEX-QUIET-1), rgistr header strip.
+- **v0.7.0** — module model at monorepo scale (MODULE-MODEL-2 + CARGO-WORKSPACE-
+  INHERITANCE-1), scanner honesty — no silently dropped source (SCANNER-GITIGNORE-1),
+  the ENRICH-YIELD arc (funnel instrumentation → ratified levers → Rust receiver
+  locator), the reader's coverage map (RELIABILITY-REFRAME-1), named attribution
+  (ATTRIBUTION-1), deterministic maps — LLM out of the map path (MAP-FROM-INDEX-1).
+
+**The current gate is FIELD VALIDATION:** v0.7.0 on the second machine against the
+160k-file polyglot monorepo (the deployment target), scored with the two-agent
+usefulness protocol against the operator's independent indexer. Priorities below are
+hypotheses until that run speaks.
+
+**The active work queue (operator-ratified 2026-07-16):**
+
+1. **TS-PROTOTYPE-RETIREMENT-1** — bury the 90k-LOC TS prototype (spec ready;
+   strengthened: `rmap map` superseded rgistr's LLM structure path).
+2. **ENGINE-CONSOLIDATION-1** (SPEC relay) — name the two-read-engines end-state;
+   primary candidate: SQLite keeps the slow-moving structure skeleton, LiveGraph owns
+   function internals (operator direction §2b, incl. the RED-floor collision).
+3. **DAEMON-CONCURRENCY-1** — serial → concurrent (the multi-agent gap; TECH-DEBT #1).
+4. **Scale chain** — POSTPASS-PROFILE-1 → delta-indexing completion → sharding
+   (monorepo reindex cost).
+5. Housekeeping: PROTOCOL-HELP-TRUTH-1 (#7+#9), F6 (`rmap check` F2 residual),
+   F14 (extractor deep-file guard), GRADLE-DEP-READER-1 (Java attribution prereq),
+   ENRICH-YIELD residuals (dependency-version capture; caller-level version resolution).
+
+## Product-surface honesty — track ledger (largely DELIVERED)
 
 The branch proved the gaps are on the agent-facing surface and that they pass CI.
 This track closes them. Context for every item: `docs/TECH-DEBT.md`
@@ -196,15 +232,16 @@ distribution surface, sliced as:
 **Dedicated slices — queued for agents to write** (relay: builder writes the spec → Codex
 reviews → IMPL slice; operator triggers each). Paired findings bunched into one slice:
 
-- `MODULE-MODEL-1` (#3 + #4) — **spec written + ratified** (D1–D6, §12); ready for its IMPL.
-- `DAEMON-CONCURRENCY-1` (#1 + #2) — serial → concurrent connection handling + query-path
-  cancellation.
-- `STATS-HONESTY-1` (#5 + #6) — `total_symbols` false-zero + fan-in/out reliability marker
-  (reader-context; coordinates with `RELIABILITY-REFRAME-1` below — same honesty theme).
-- `PROTOCOL-HELP-TRUTH-1` (#7 + #9) — REG-1 `--help` truth + peripheral output-words audit
-  (apply the "labels speak the reader's language" lens across the command tail).
-- `POSTPASS-PROFILE-1` (#8) — profiling **spike**: measure which postpasses dominate → scope /
-  batch (output is findings + a follow-on slice, not necessarily an IMPL).
+- `MODULE-MODEL-1` (#3 + #4) — **DELIVERED** (IMPL `17dbe93` 2026-06-23; scale +
+  polyglot follow-up MODULE-MODEL-2 `170be30` 2026-07-12; workspace-inheritance
+  `958a6bb`; #3/#4 closed).
+- `DAEMON-CONCURRENCY-1` (#1) — **OPEN** (P1; #2 query-path cancellation already
+  resolved 2026-06-26 — the remaining work is concurrent connection handling).
+- `STATS-HONESTY-1` (#5 + #6) — **SHIPPED via HONEST-DEGRADATION-1** (2026-07-01:
+  unknowns render as unknown, one canonical symbol count) + RELIABILITY-REFRAME-1
+  (axis-framed caveats). No separate slice needed.
+- `PROTOCOL-HELP-TRUTH-1` (#7 + #9) — **OPEN** (housekeeping tier).
+- `POSTPASS-PROFILE-1` (#8) — **OPEN**; entry point of the scale chain.
 
 ## Resolution & attribution — resolve what we can, label what we can't (reader-context)
 
@@ -236,15 +273,23 @@ the reader's language" principle. Runs **parallel to** the product-surface hones
 **Dedicated slices — queued for agents to write** (relay: builder writes the spec → Codex
 reviews → a follow-on IMPL slice; operator triggers each):
 
-- `ENRICH-LIFECYCLE-1` (R4) — run enrichment automatically. **Unblocked.**
-- `RELIABILITY-REFRAME-1` (R1) — reliability → reader-context coverage map. **Unblocked.**
-- `ATTRIBUTION-1` (R2) — reader-context named attribution (library / stdlib / system / dynamic).
-  **Unblocked for Rust/TS/Python.**
-- `GRADLE-DEP-READER-1` (R3) — Rust-path Gradle dependency reader; **prerequisite for Java
-  attribution.**
+- `ENRICH-LIFECYCLE-1` (R4) — **DELIVERED** (`1fe33b7`, v0.6.0): auto-enrichment after
+  every index/refresh, batch-boundary cancellation, toolchain-honest skips. Follow-ups
+  delivered: ENRICH-YIELD-1/2/3 (funnel accounting on the product surface; Layer-2
+  likely-external projection; promotion-neutral primitive reattribution; enum widening;
+  Rust receiver locator + safe self.field.method).
+- `RELIABILITY-REFRAME-1` (R1) — **DELIVERED** (`285e62e`, 2026-07-14): one shared
+  CallReliabilityView across orient/trust/check/explain; in-scope-or-unclassified
+  conservative rate; named external coverage map; honest zero states. R1 CLOSED.
+- `ATTRIBUTION-1` (R2) — **DELIVERED** (`adfd0cf`, 2026-07-15): "Unresolved references —
+  where they go" with declared base-dependency names via the three-path storage join;
+  internal vocabulary off all reader surfaces. R2 CLOSED.
+- `GRADLE-DEP-READER-1` (R3) — **OPEN**; prerequisite for Java attribution (Java renders
+  the honest degraded path meanwhile).
 
-Unblocked = the enrichment pipeline, classifier, and Cargo/package manifest readers all exist;
-none requires DAEMON-CONCURRENCY-1.
+Residuals recorded in the slice docs: dependency VERSIONS are not captured anywhere
+(disclosed honestly on the surface; capture is future work), caller-level workspace
+version resolution (CARGO-WORKSPACE-INHERITANCE-1 §6).
 
 ## Quality trend discovery — PARKED (2026-07-11)
 
