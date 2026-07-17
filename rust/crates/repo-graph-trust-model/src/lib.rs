@@ -132,6 +132,14 @@ pub enum DegradationReason {
     /// only — the producer side of the key was NOT re-verified live (WARM-CACHE-PRODUCER-ABSENT-1 D4).
     /// Pairs with `FreshnessState::Stale` / `AnswerClass::Stale`; never `Fresh`/`Exact`.
     ProducerUnavailable,
+    /// The queried symbol is a **structural node** — a file / module-scope node the producer materializes
+    /// (e.g. the FILE node SCIP emits for a top-level `import`; `IdentityBasis::AstFileScope`), not a
+    /// callable. It carries **no call-graph content of its own**, so a call-graph query over it is
+    /// honestly answerable only as `Partial`, never `Exact`. Reader-frame: "this symbol is a structural
+    /// node (file) — it has no call-graph content of its own"; the answer is partial because the symbol is
+    /// a container, NOT because anything failed or was left unresolved (contrast `UnresolvedAlias`).
+    /// (LIVEGRAPH-PARTIAL-FIX-1 — additive; closes the `finalize_envelope` `PartialRequiresReasons` panic.)
+    StructuralNodeNoCallGraphContent,
 }
 
 // ── Axis 5: language support maturity ─────────────────────────────
@@ -854,6 +862,39 @@ mod tests {
         assert_eq!(env.class(), AnswerClass::Partial);
         assert!(!env.degradation_reasons().is_empty());
         assert!(!env.missing_partitions().is_empty());
+    }
+
+    #[test]
+    fn partial_with_structural_node_reason_is_valid() {
+        // LIVEGRAPH-PARTIAL-FIX-1 (trust-model half). A structural (file-scope) node has no call-graph
+        // content, so a `Fresh` call-graph `Partial` over it is justified by
+        // `StructuralNodeNoCallGraphContent` — it is a valid, non-empty reason, NOT the empty-reason state
+        // that returns `PartialRequiresReasons` and panicked the LiveGraph runtime. This is the additive
+        // variant carrying that justification.
+        let env = AnswerEnvelope::partial(
+            Some(1u32),
+            vec![DegradationReason::StructuralNodeNoCallGraphContent],
+            vec![],
+            FreshnessState::Fresh,
+            vec![],
+            langs(),
+        )
+        .unwrap();
+        assert_eq!(env.class(), AnswerClass::Partial);
+        assert!(env
+            .degradation_reasons()
+            .contains(&DegradationReason::StructuralNodeNoCallGraphContent));
+        // And the reason forces `Degraded` completeness in the pure policy (variant-agnostic mechanism,
+        // pinned here for the new variant).
+        let mut i = input(
+            QueryGranularity::CallGraph,
+            vec![IdentityBasis::AstAdopted],
+            FreshnessState::Fresh,
+        );
+        assert_eq!(classify_answer(&i).0, AnswerClass::Exact);
+        i.degradation_reasons
+            .push(DegradationReason::StructuralNodeNoCallGraphContent);
+        assert_eq!(classify_answer(&i).0, AnswerClass::Partial);
     }
 
     #[test]

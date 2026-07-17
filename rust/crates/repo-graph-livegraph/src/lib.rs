@@ -300,10 +300,16 @@ fn classify_cross_partition(
 /// `PrecisionPending` → `Partial`; a non-resident contributing partition (`missing`) also forces
 /// `Partial`. Never an exact-empty for a missing/stale state.
 ///
-/// PRECONDITION: a `Partial` classification must be accompanied by a degradation reason, a missing
-/// partition, or a non-`Fresh` freshness. A call-graph-incomplete defining basis (e.g.
-/// `AstFileScope`) with none of those is not yet mapped to a `DegradationReason` and would panic the
-/// `partial` constructor; unreachable with current call-graph fixtures (recorded follow-up).
+/// INVARIANT (LIVEGRAPH-PARTIAL-FIX-1): every `Partial` reaching here is justified — by a degradation
+/// reason, a missing partition, or a non-`Fresh` freshness — so the `partial` constructor never fails.
+/// The argument is total: [`basis_of`] maps the three (and only three) [`IdentitySource`] variants to
+/// `{AstAdopted, ScipSynthesized, AstFileScope}`, and of those the only two that are call-graph-incomplete
+/// (`basis_complete_for(_, CallGraph) == false`) are `ScipSynthesized` and `AstFileScope`. `callers` /
+/// `callees` map BOTH to a `DegradationReason` before calling here (`ScipSynthesized` →
+/// `ScipFallbackIdentity`; `AstFileScope` → `StructuralNodeNoCallGraphContent`), so a `Fresh` `Partial`
+/// with empty reasons AND no missing partition cannot arise. (This WAS a documented latent daemon panic
+/// — RECON-SPIKE-1 finding #0, `PartialRequiresReasons` at the `partial` call below — before the
+/// `AstFileScope` mapping closed the gap.)
 fn finalize_envelope<T>(
     data: T,
     class_c: AnswerClass,
@@ -544,6 +550,14 @@ impl LiveGraph {
         if bases.contains(&IdentityBasis::ScipSynthesized) {
             reasons.push(DegradationReason::ScipFallbackIdentity);
         }
+        // LIVEGRAPH-PARTIAL-FIX-1: a call-graph-incomplete `AstFileScope` endpoint (a file/module-scope
+        // structural node — the FILE node SCIP materializes for a top-level `import`) carries no call-graph
+        // content of its own, so it justifies the `Partial` it forces with an honest reader-frame reason
+        // (see the totality invariant on `finalize_envelope`). Single push, mirroring `ScipFallbackIdentity`
+        // above; `contains` makes it idempotent regardless of how many bases are `AstFileScope`.
+        if bases.contains(&IdentityBasis::AstFileScope) {
+            reasons.push(DegradationReason::StructuralNodeNoCallGraphContent);
+        }
         // PRODUCER-ABSENT-1: surface each contributing partition's partition-level degradation reasons
         // (e.g. `ProducerUnavailable` when that partition was warm-loaded producer-absent).
         merge_partition_reasons(
@@ -669,6 +683,14 @@ impl LiveGraph {
         }
         if bases.contains(&IdentityBasis::ScipSynthesized) {
             reasons.push(DegradationReason::ScipFallbackIdentity);
+        }
+        // LIVEGRAPH-PARTIAL-FIX-1: symmetric honest mapping for the OUTGOING direction — a structural
+        // `AstFileScope` endpoint carries no call-graph content of its own (see the totality invariant on
+        // `finalize_envelope`). This is DISTINCT from the `UnresolvedAlias` pushed above (an unresolved
+        // CALLEE — genuinely "alias reconciliation found zero candidates"): the two are orthogonal and may
+        // legitimately co-occur, so no dedup guard against `UnresolvedAlias`.
+        if bases.contains(&IdentityBasis::AstFileScope) {
+            reasons.push(DegradationReason::StructuralNodeNoCallGraphContent);
         }
         // PRODUCER-ABSENT-1: include contributing partitions' partition-level degradation reasons.
         merge_partition_reasons(
@@ -2360,6 +2382,79 @@ mod tests {
         assert!(lg2
             .node_display(&CanonicalKey::from_existing("does.not.exist"))
             .is_none());
+    }
+
+    // ── LIVEGRAPH-PARTIAL-FIX-1: `AstFileScope` basis → reason-justified `Partial`, never a panic ──
+    //
+    // The basis→reason unit test (RECON-SPIKE-1 finding #0). A `Partial` from a call-graph-incomplete
+    // `AstFileScope` basis used to reach `finalize_envelope` with no degradation reason and panic the
+    // `partial` constructor (`PartialRequiresReasons`). The mapping now attaches a reason in BOTH
+    // directions. The no-panic WALK over the real-producer fixture lives in `repo-graph-livegraph-feed`
+    // (`feed_real_index.rs`), which can load the committed `synthetic/index.scip` this crate cannot.
+
+    #[test]
+    fn file_scope_basis_degrades_to_partial_with_reason_both_directions() {
+        // A FILE-scope node (materialized for a top-level import; basis `AstFileScope`) that references a
+        // resident AST-adopted symbol — the exact shape RECON-SPIKE-1 hit on `main.ts:FILE`.
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir(
+                "p",
+                vec![
+                    file_node("src/f.ts:FILE"),
+                    node("p.g", IdentitySource::AstAdopted),
+                ],
+                vec![edge("src/f.ts:FILE", "p.g")],
+            ),
+            LanguageSupport::TypeScriptPrimary,
+        );
+
+        // callers(FILE): the FILE node is the target, referenced by nobody → bases = [AstFileScope].
+        // Pre-fix this PANICKED (`partial invariant holds: PartialRequiresReasons`); now a clean Partial.
+        let callers = lg.callers("src/f.ts:FILE", Granularity::CallerDetail);
+        assert_eq!(callers.class(), AnswerClass::Partial);
+        assert!(
+            callers
+                .degradation_reasons()
+                .contains(&DegradationReason::StructuralNodeNoCallGraphContent),
+            "the AstFileScope basis must carry the honest structural-node reason, else the partial \
+             constructor panics"
+        );
+        assert!(
+            callers.data().is_some(),
+            "Partial serves its payload (never a bare panic)"
+        );
+        assert!(!callers.contributing_languages().is_empty());
+
+        // callees(FILE): the FILE node is the source; its edge resolves to an AST-adopted callee →
+        // bases = [AstFileScope, AstAdopted]. The OTHER direction — same clean Partial (was the 2nd panic).
+        let callees = lg.callees("src/f.ts:FILE", Granularity::CallerDetail);
+        assert_eq!(callees.class(), AnswerClass::Partial);
+        assert!(callees
+            .degradation_reasons()
+            .contains(&DegradationReason::StructuralNodeNoCallGraphContent));
+
+        // callers(g): a FILE node is now a CALLER (an edge src), so its `AstFileScope` basis enters the
+        // caller bases → the incoming direction degrades identically (the symmetry the fix guarantees).
+        let callers_g = lg.callers("p.g", Granularity::CallerDetail);
+        assert_eq!(callers_g.class(), AnswerClass::Partial);
+        assert!(callers_g
+            .degradation_reasons()
+            .contains(&DegradationReason::StructuralNodeNoCallGraphContent));
+    }
+
+    #[test]
+    fn ast_adopted_only_answer_stays_exact_without_spurious_reason() {
+        // Guard the mapping against over-firing: an all-AST-adopted call graph is complete for `CallGraph`,
+        // so it stays `Exact` with NO degradation reason (the `AstFileScope` branch must not trigger).
+        let lg = both();
+        let a = lg.callers("engine.foo", Granularity::CallerDetail);
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert!(
+            a.degradation_reasons().is_empty(),
+            "no AstFileScope basis → no spurious StructuralNodeNoCallGraphContent reason"
+        );
     }
 
     #[test]

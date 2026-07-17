@@ -4,11 +4,13 @@
 //! `ingest_partition` — NO hand-built `PartitionIr`. Single partition (callers/callees are
 //! intra-partition); cross-partition real data is the named residual (LIVEGRAPH-INTEGRATION-XPART-1).
 
-use repo_graph_ir::EdgeType;
+use repo_graph_ir::{EdgeType, IdentitySource};
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_livegraph_feed::feed_partition;
 use repo_graph_scip_ingest::{decode_index, ingest_partition, IngestOutcome};
-use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
+use repo_graph_trust_model::{
+    AnswerClass, DegradationReason, FreshnessState, Granularity, LanguageSupport,
+};
 use std::fs;
 
 fn fixture_root() -> String {
@@ -121,6 +123,67 @@ fn real_callers_and_callees_over_ingested_edges() {
             .is_empty(),
         "real callees must be non-empty"
     );
+}
+
+#[test]
+fn real_file_scope_symbols_walk_both_directions_without_panic() {
+    // LIVEGRAPH-PARTIAL-FIX-1 regression on REAL producer output (RECON-SPIKE-1 finding #0). The SCIP
+    // producer materializes an `AstFileScope` FILE node for each top-level `import` (`main.ts:FILE`,
+    // `shapes.ts:FILE`). Walking those symbols BOTH directions must NOT panic — there is deliberately NO
+    // catch_unwind here, so a `finalize_envelope` panic (`partial invariant holds: PartialRequiresReasons`)
+    // would abort the test — and must degrade to a reason-justified `Partial`, symmetric in both directions.
+    let outcome = ingest_synthetic();
+
+    // The `AstFileScope` FILE keys in the committed index — collected BEFORE `feed_partition` consumes it.
+    let file_keys: Vec<String> = outcome
+        .ir
+        .nodes
+        .iter()
+        .filter(|n| n.identity_source == IdentitySource::AstFileScope)
+        .map(|n| n.key.as_str().to_string())
+        .collect();
+    assert!(
+        !file_keys.is_empty(),
+        "the real fixture must contain AstFileScope FILE symbols (else this regression is vacuous)"
+    );
+
+    let mut lg = LiveGraph::new();
+    feed_partition(
+        &mut lg,
+        "synthetic",
+        outcome,
+        LanguageSupport::TypeScriptPrimary,
+    );
+
+    for key in &file_keys {
+        // Reaching these assertions at all proves the walk did not panic (no catch_unwind).
+        let callers = lg.callers(key, Granularity::CallerDetail);
+        assert_eq!(
+            callers.class(),
+            AnswerClass::Partial,
+            "callers({key}): a call-graph-incomplete FILE basis degrades to Partial, never panics"
+        );
+        assert!(
+            callers
+                .degradation_reasons()
+                .contains(&DegradationReason::StructuralNodeNoCallGraphContent),
+            "callers({key}): the Partial must carry the honest structural-node reason \
+             (the panic WAS the empty-reason case)"
+        );
+
+        let callees = lg.callees(key, Granularity::CallerDetail);
+        assert_eq!(
+            callees.class(),
+            AnswerClass::Partial,
+            "callees({key}): symmetric clean degradation, not a panic"
+        );
+        assert!(
+            callees
+                .degradation_reasons()
+                .contains(&DegradationReason::StructuralNodeNoCallGraphContent),
+            "callees({key}): the Partial must carry the honest structural-node reason"
+        );
+    }
 }
 
 #[test]
