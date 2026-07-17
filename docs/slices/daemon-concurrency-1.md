@@ -61,3 +61,16 @@ the product's target user.
 A long index no longer blocks anyone: concurrent reads are proven live during a real
 index; single-writer + frozen invariants intact; overload is bounded and honest; full
 gates green.
+
+---
+
+## 5. Delivery record (2026-07-17)
+
+**DELIVERED** (2 relay cycles, fable-5). The premise was stale: concurrency shipped
+2026-06-24 (`10493e8`) — TECH-DEBT #1 was never updated (now closed with the staleness
+lesson recorded). This slice delivered the missing VALIDATION surface: prompt-shutdown and
+no-interleaving tests added; head-of-line / honest-busy-serialization / cap-overload
+re-verified; the live proof ran a real gstreamer index (~122s) with concurrent reads
+served during it. The VISION's "concurrent queries, many readers" promise is now both
+implemented AND proven. Note from the live run: first orient on a cold 100k-node snapshot
+took 9.8s (cold-read cost, not concurrency) — a scale-chain datum.

@@ -83,7 +83,15 @@ Severity matches the rest of this file: **P1** = high blast radius on core value
 core architecture; **P2** = real defect on a secondary surface, or a compounding
 robustness gap; **P3** = lead or coverage gap, no specific defect yet proven.
 
-### 1. Daemon is strictly serial — head-of-line blocking (P1)
+### 1. Daemon is strictly serial — head-of-line blocking (P1) — CLOSED 2026-07-17 (was STALE)
+
+**CLOSED — and the entry itself was stale:** the serial loop was removed 2026-06-24 by
+`10493e8` (DAEMON-CONCURRENCY-IMPL-1/B1: thread-per-connection, 64-conn cap, typed Busy),
+but this entry was never updated and misled the post-v0.7.0 roadmap into a phantom P1.
+DAEMON-CONCURRENCY-1 (2026-07-17) delivered the missing validation surface + the first
+live head-of-line proof (gstreamer index with concurrent reads). Lesson: closing a debt
+without updating its entry costs a future planning cycle. Original stale text below for
+the record:
 
 - **OBSERVED (`rust/crates/daemon-transport/src/socket.rs:257-288`):** `run_socket`
   is a single accept loop that calls `handle_connection` **inline** (line 274) — no
