@@ -1393,6 +1393,7 @@ dependencies = [
  "repo-graph-storage",
  "repo-graph-trust",
  "repo-graph-ts-extractor",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

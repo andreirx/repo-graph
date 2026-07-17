@@ -76,6 +76,37 @@ pub struct Snapshot {
     pub toolchain_json: Option<String>,
 }
 
+/// One per-symbol resolved-CALLS degree (EC-1 M-3a, g2). Boundary DTO,
+/// owned by the indexer policy layer.
+///
+/// Tallied by the pipeline from the resolver's OUTPUT stream (all
+/// languages, before storage materialization): `call_fan_in` counts
+/// resolved CALLS results targeting the symbol (the dead-liveness
+/// input), `call_fan_out` those originating at it (§2b's other
+/// per-function skeleton column — same producer, per the ratified M-3a
+/// row). Symbols with both degrees zero are simply not supplied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolCallDegree {
+    pub node_uid: String,
+    pub call_fan_in: u64,
+    pub call_fan_out: u64,
+}
+
+/// One resolved-CALLS file pair (EC-1 M-3a, g3, D-EC-7-A-i). Boundary
+/// DTO, owned by the indexer policy layer.
+///
+/// A DISTINCT (source_file, target_file) pair — repo-relative paths —
+/// connected by `call_edge_count` resolved CALLS results whose endpoint
+/// symbols live in different indexed files (the shape map's dep sketch
+/// consumes; call multiplicity kept so later promotion deltas stay
+/// lawful arithmetic).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedCallFilePair {
+    pub source_file: String,
+    pub target_file: String,
+    pub call_edge_count: u64,
+}
+
 // ── File catalog DTOs ────────────────────────────────────────────
 
 /// Tracked file record. Mirror of `TrackedFile` from
@@ -151,6 +182,30 @@ pub trait SnapshotLifecyclePort {
         &mut self,
         snapshot_uid: &str,
         resolved_call_count: u64,
+    ) -> Result<(), Self::Error>;
+
+    /// Persist the per-symbol CALLS-degree family (EC-1 M-3a, g2).
+    ///
+    /// Same supplied-stream contract as
+    /// [`Self::persist_resolved_call_aggregate`]: values are tallied on
+    /// the resolver's output stream, BEFORE materialization — the
+    /// implementation stores them verbatim (plus the family's presence
+    /// marker) and must NOT recompute from persisted `edges` rows.
+    /// Called in Phase-5 finalization on both fresh index and delta
+    /// refresh, before the snapshot turns READY. An empty slice is a
+    /// measured zero (marker still stamped), not an omission.
+    fn persist_symbol_call_degrees(
+        &mut self,
+        snapshot_uid: &str,
+        degrees: &[SymbolCallDegree],
+    ) -> Result<(), Self::Error>;
+
+    /// Persist the resolved-CALLS file-pair family (EC-1 M-3a, g3).
+    /// Same contract as [`Self::persist_symbol_call_degrees`].
+    fn persist_resolved_call_file_pairs(
+        &mut self,
+        snapshot_uid: &str,
+        pairs: &[ResolvedCallFilePair],
     ) -> Result<(), Self::Error>;
 
     /// Persist extraction diagnostics JSON on a snapshot.

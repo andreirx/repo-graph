@@ -41,7 +41,8 @@ use crate::resolver::{
 use crate::routing::{self, detect_language, is_test_file, MAX_FILE_SIZE_BYTES};
 use crate::storage_port::{
     CreateSnapshotInput, ExtractionEdgeRow, FileSignalRow, FileVersion, IndexerStoragePort,
-    PersistedUnresolvedEdge, TrackedFile, UpdateSnapshotStatusInput,
+    PersistedUnresolvedEdge, ResolvedCallFilePair, SymbolCallDegree, TrackedFile,
+    UpdateSnapshotStatusInput,
 };
 use crate::types::{
     ContractIndexResult, ContractParseFailure, EdgeType, ExtractedNode, IndexOptions, IndexResult,
@@ -872,6 +873,27 @@ fn run_pipeline<S: IndexerStoragePort>(
     // CALLS-row drop (M-6) the `edges` table is a filtered subset, and
     // this stream-side count is the only honest full-stream accounting.
     let mut resolved_calls_total: u64 = 0;
+    // EC-1 M-3a (g2/g3): the two sub-snapshot FC2a-agg families, tallied
+    // from the SAME stream at the same point (before materialization,
+    // same M-6 independence):
+    //   g2 — per-symbol CALLS degrees (fan-in feeds dead-liveness;
+    //        fan-out is §2b's other skeleton column, same producer);
+    //   g3 — cross-file CALLS pairs (map's dep-sketch CALLS share),
+    //        keyed by the endpoint symbols' file paths, self-pairs and
+    //        file-less endpoints excluded (mirrors the live query's
+    //        nodes⋈files INNER JOINs + `src <> tgt` filter it replaces).
+    // BTreeMaps so the persisted row order is deterministic (VISION
+    // commitment 1: same snapshot content → same writes).
+    let mut call_fan_in: BTreeMap<String, u64> = BTreeMap::new();
+    let mut call_fan_out: BTreeMap<String, u64> = BTreeMap::new();
+    let mut call_file_pairs: BTreeMap<(String, String), u64> = BTreeMap::new();
+    // file_uid → repo-relative path over the FULL snapshot file set
+    // (copied-forward + fresh — `all_file_paths`), the same
+    // `{repo_uid}:{rel_path}` uid formation used at extraction above.
+    let file_uid_to_path: HashMap<String, &String> = all_file_paths
+        .iter()
+        .map(|p| (format!("{}:{}", repo_uid, p), p))
+        .collect();
     let mut unresolved_count: u64 = 0;
     let mut unresolved_breakdown: BTreeMap<String, u64> = BTreeMap::new();
     let mut all_resolved_import_pairs: Vec<(String, String)> = Vec::new();
@@ -920,6 +942,34 @@ fn run_pipeline<S: IndexerStoragePort>(
             .iter()
             .filter(|e| e.edge_type == EdgeType::Calls)
             .count() as u64;
+
+        // M-3a g2/g3 tallies on the same stream (Phase-4 module edges are
+        // OWNS / MODULE→MODULE IMPORTS only — never CALLS — so this loop
+        // covers the complete CALLS stream).
+        for e in result
+            .resolved
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls)
+        {
+            *call_fan_in.entry(e.target_node_uid.clone()).or_insert(0) += 1;
+            *call_fan_out.entry(e.source_node_uid.clone()).or_insert(0) += 1;
+
+            let src_path = index
+                .node_uid_to_file_uid
+                .get(&e.source_node_uid)
+                .and_then(|fu| file_uid_to_path.get(fu));
+            let tgt_path = index
+                .node_uid_to_file_uid
+                .get(&e.target_node_uid)
+                .and_then(|fu| file_uid_to_path.get(fu));
+            if let (Some(sp), Some(tp)) = (src_path, tgt_path) {
+                if sp != tp {
+                    *call_file_pairs
+                        .entry(((*sp).clone(), (*tp).clone()))
+                        .or_insert(0) += 1;
+                }
+            }
+        }
 
         // Persist resolved edges. (Real storage writes → store_ms.)
         if !result.resolved.is_empty() {
@@ -1013,6 +1063,42 @@ fn run_pipeline<S: IndexerStoragePort>(
     // the READY transition below. Enrichment promotion later adjusts it
     // atomically when it mutates the CALLS row set.
     storage.persist_resolved_call_aggregate(snap_uid, resolved_calls_total)?;
+
+    // EC-1 M-3a (g2/g3): persist the per-symbol degree family and the
+    // cross-file pair family from the same stream-side tallies — same
+    // full-stream / pre-materialization / both-paths / pre-READY contract
+    // as the g1 aggregate above. An empty family is a measured zero: the
+    // persist stamps the presence marker either way (unknown is never
+    // zero — only PRE-migration snapshots, which never reach this code,
+    // lack the marker and serve the labeled live fallback).
+    let degree_rows: Vec<SymbolCallDegree> = {
+        let mut merged: BTreeMap<&String, (u64, u64)> = BTreeMap::new();
+        for (uid, n) in &call_fan_in {
+            merged.entry(uid).or_insert((0, 0)).0 = *n;
+        }
+        for (uid, n) in &call_fan_out {
+            merged.entry(uid).or_insert((0, 0)).1 = *n;
+        }
+        merged
+            .into_iter()
+            .map(|(uid, (fan_in, fan_out))| SymbolCallDegree {
+                node_uid: uid.clone(),
+                call_fan_in: fan_in,
+                call_fan_out: fan_out,
+            })
+            .collect()
+    };
+    storage.persist_symbol_call_degrees(snap_uid, &degree_rows)?;
+
+    let pair_rows: Vec<ResolvedCallFilePair> = call_file_pairs
+        .iter()
+        .map(|((source, target), count)| ResolvedCallFilePair {
+            source_file: source.clone(),
+            target_file: target.clone(),
+            call_edge_count: *count,
+        })
+        .collect();
+    storage.persist_resolved_call_file_pairs(snap_uid, &pair_rows)?;
 
     let diagnostics = build_extraction_diagnostics(
         resolved_total + module_edges_count,
@@ -1882,6 +1968,14 @@ mod tests {
         /// compare it against what actually materialized in
         /// `resolved_edges`.
         persisted_resolved_call_aggregate: Option<u64>,
+        /// The g2 degree rows the pipeline SUPPLIED at Phase-5 (EC-1
+        /// M-3a) — recorded verbatim, same purpose as the g1 recorder.
+        /// `Some(vec![])` = supplied-empty (measured zero); `None` =
+        /// never supplied.
+        persisted_symbol_call_degrees: Option<Vec<SymbolCallDegree>>,
+        /// The g3 file-pair rows the pipeline SUPPLIED at Phase-5 (EC-1
+        /// M-3a) — recorded verbatim.
+        persisted_call_file_pairs: Option<Vec<ResolvedCallFilePair>>,
         /// M-6 simulation: when set, `insert_resolved_edges` silently
         /// drops the resolved CALLS edge with this uid (storage-layer
         /// filtering — the resolver output is untouched).
@@ -1943,6 +2037,22 @@ mod tests {
             // tallied the full resolver-output stream (not the possibly
             // filtered stored rows).
             self.persisted_resolved_call_aggregate = Some(count);
+            Ok(())
+        }
+        fn persist_symbol_call_degrees(
+            &mut self,
+            _: &str,
+            degrees: &[SymbolCallDegree],
+        ) -> Result<(), String> {
+            self.persisted_symbol_call_degrees = Some(degrees.to_vec());
+            Ok(())
+        }
+        fn persist_resolved_call_file_pairs(
+            &mut self,
+            _: &str,
+            pairs: &[ResolvedCallFilePair],
+        ) -> Result<(), String> {
+            self.persisted_call_file_pairs = Some(pairs.to_vec());
             Ok(())
         }
         fn update_snapshot_extraction_diagnostics(
@@ -2529,6 +2639,250 @@ mod tests {
         );
     }
 
+    /// EC-1 M-3a (g2): the persisted per-symbol degrees must count the FULL
+    /// resolver output, surviving a resolved CALLS result that is
+    /// deliberately NOT materialized as a stored row. A row-derived
+    /// recompute would flip the dropped edge's target falsely dead — the
+    /// exact M-6 failure the re-home prevents.
+    #[test]
+    fn degrees_count_full_resolver_output_when_a_calls_row_is_not_materialized() {
+        let mut storage = MockStorage {
+            drop_calls_with_uid: Some("edge-call-a2b".to_string()),
+            ..MockStorage::default()
+        };
+        let mut ext = CallsPairExtractor {
+            langs: vec!["typescript".into()],
+            builtins: RuntimeBuiltinsSet {
+                identifiers: vec![],
+                module_specifiers: vec![],
+            },
+        };
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+        let files = vec![FileInput {
+            rel_path: "src/lib.ts".into(),
+            content: "// bodies irrelevant — CallsPairExtractor fabricates the graph".into(),
+            content_hash: "hash1".into(),
+            size_bytes: 10,
+            line_count: 1,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }];
+
+        index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &files,
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+
+        // Stored rows carry only fnB→fnA (a2b dropped); the SUPPLIED
+        // degrees carry BOTH: fnB's fan-in comes exclusively from the
+        // dropped edge, so a row-derived recompute would zero it.
+        let stored_calls = storage
+            .resolved_edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls)
+            .count();
+        assert_eq!(stored_calls, 1, "precondition: one CALLS row dropped");
+
+        let degrees = storage
+            .persisted_symbol_call_degrees
+            .as_ref()
+            .expect("pipeline must supply the g2 family");
+        let by_uid = |uid: &str| {
+            degrees
+                .iter()
+                .find(|d| d.node_uid == uid)
+                .unwrap_or_else(|| panic!("degree row for {uid} must be supplied"))
+        };
+        assert_eq!(
+            (by_uid("n-fnb").call_fan_in, by_uid("n-fnb").call_fan_out),
+            (1, 1),
+            "fnB's fan-in must count the NON-materialized a2b edge (stream truth)"
+        );
+        assert_eq!(
+            (by_uid("n-fna").call_fan_in, by_uid("n-fna").call_fan_out),
+            (1, 1),
+            "fnA keeps its stream-derived degrees"
+        );
+        // Both calls are intra-file → the g3 pair family is a measured
+        // EMPTY (supplied, zero rows), never an omission.
+        assert_eq!(
+            storage.persisted_call_file_pairs.as_deref(),
+            Some(&[][..]),
+            "same-file calls must produce no file pair, but the family must be supplied"
+        );
+    }
+
+    /// Extractor emitting one function per file plus, from `src/a.ts`
+    /// only, TWO CALLS edges to `src/b.ts`'s function (bare unambiguous
+    /// name — resolves through the real resolver). Gives the g3 family a
+    /// cross-file pair with call multiplicity 2.
+    struct CrossFileCallsExtractor {
+        langs: Vec<String>,
+        builtins: RuntimeBuiltinsSet,
+    }
+
+    impl ExtractorPort for CrossFileCallsExtractor {
+        fn name(&self) -> &str {
+            "crossfile:1.0.0"
+        }
+        fn languages(&self) -> &[String] {
+            &self.langs
+        }
+        fn runtime_builtins(&self) -> &RuntimeBuiltinsSet {
+            &self.builtins
+        }
+        fn initialize(&mut self) -> Result<(), ExtractorError> {
+            Ok(())
+        }
+        fn extract(
+            &self,
+            _source: &str,
+            file_path: &str,
+            file_uid: &str,
+            repo_uid: &str,
+            snapshot_uid: &str,
+        ) -> Result<ExtractionResult, ExtractorError> {
+            let is_a = file_path.ends_with("a.ts");
+            let (sym_uid, sym_name) = if is_a { ("n-a", "fnA") } else { ("n-b", "fnB") };
+            let nodes = vec![
+                ExtractedNode {
+                    node_uid: format!("{}_node", file_uid),
+                    snapshot_uid: snapshot_uid.into(),
+                    repo_uid: repo_uid.into(),
+                    stable_key: format!("{}:FILE", file_uid),
+                    kind: NodeKind::File,
+                    subtype: None,
+                    name: file_path.rsplit('/').next().unwrap_or(file_path).into(),
+                    qualified_name: Some(file_path.into()),
+                    file_uid: Some(file_uid.into()),
+                    parent_node_uid: None,
+                    location: None,
+                    signature: None,
+                    visibility: None,
+                    doc_comment: None,
+                    metadata_json: None,
+                },
+                ExtractedNode {
+                    node_uid: sym_uid.into(),
+                    snapshot_uid: snapshot_uid.into(),
+                    repo_uid: repo_uid.into(),
+                    stable_key: format!("KEY_{}", sym_name),
+                    kind: NodeKind::Symbol,
+                    subtype: Some(NodeSubtype::Function),
+                    name: sym_name.into(),
+                    qualified_name: Some(sym_name.into()),
+                    file_uid: Some(file_uid.into()),
+                    parent_node_uid: None,
+                    location: None,
+                    signature: None,
+                    visibility: None,
+                    doc_comment: None,
+                    metadata_json: None,
+                },
+            ];
+            let edges = if is_a {
+                // TWO call sites a→b: multiplicity behind ONE file pair.
+                ["edge-x1", "edge-x2"]
+                    .iter()
+                    .map(|uid| ExtractedEdge {
+                        edge_uid: (*uid).into(),
+                        snapshot_uid: snapshot_uid.into(),
+                        repo_uid: repo_uid.into(),
+                        source_node_uid: "n-a".into(),
+                        target_key: "fnB".into(),
+                        edge_type: EdgeType::Calls,
+                        resolution: Resolution::Static,
+                        extractor: "crossfile:1.0.0".into(),
+                        location: None,
+                        metadata_json: None,
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
+            Ok(ExtractionResult {
+                nodes,
+                edges,
+                metrics: BTreeMap::new(),
+                import_bindings: vec![],
+                resolved_callsites: vec![],
+                import_observations: vec![],
+            })
+        }
+    }
+
+    /// EC-1 M-3a (g3): the persisted file-pair family must count the FULL
+    /// resolver output — the pair's `call_edge_count` keeps the dropped
+    /// edge's multiplicity, so the pair (and map's sketch) survives a
+    /// storage-layer CALLS drop that would otherwise thin it.
+    #[test]
+    fn file_pairs_count_full_resolver_output_when_a_calls_row_is_not_materialized() {
+        let mut storage = MockStorage {
+            drop_calls_with_uid: Some("edge-x1".to_string()),
+            ..MockStorage::default()
+        };
+        let mut ext = CrossFileCallsExtractor {
+            langs: vec!["typescript".into()],
+            builtins: RuntimeBuiltinsSet {
+                identifiers: vec![],
+                module_specifiers: vec![],
+            },
+        };
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+        let file = |rel_path: &str| FileInput {
+            rel_path: rel_path.into(),
+            content: "// fabricated by CrossFileCallsExtractor".into(),
+            content_hash: format!("h-{rel_path}"),
+            size_bytes: 10,
+            line_count: 1,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        };
+        let files = vec![file("src/a.ts"), file("src/b.ts")];
+
+        let result = index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &files,
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.edges_unresolved, 0, "both call sites must resolve");
+        let stored_calls = storage
+            .resolved_edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls)
+            .count();
+        assert_eq!(stored_calls, 1, "precondition: one CALLS row dropped");
+
+        let pairs = storage
+            .persisted_call_file_pairs
+            .as_ref()
+            .expect("pipeline must supply the g3 family");
+        assert_eq!(
+            pairs.as_slice(),
+            &[ResolvedCallFilePair {
+                source_file: "src/a.ts".into(),
+                target_file: "src/b.ts".into(),
+                call_edge_count: 2,
+            }],
+            "the pair must carry the FULL stream multiplicity (2), not the \
+             materialized row count (1) — the sketch must not thin under M-6"
+        );
+    }
+
     #[test]
     fn index_repo_populates_real_phase_timings() {
         // PERF-INSTRUMENTATION-1: the orchestrator measures the REAL phase
@@ -2795,6 +3149,20 @@ mod tests {
             }
             fn persist_resolved_call_aggregate(&mut self, s: &str, c: u64) -> Result<(), String> {
                 self.inner.persist_resolved_call_aggregate(s, c)
+            }
+            fn persist_symbol_call_degrees(
+                &mut self,
+                s: &str,
+                d: &[SymbolCallDegree],
+            ) -> Result<(), String> {
+                self.inner.persist_symbol_call_degrees(s, d)
+            }
+            fn persist_resolved_call_file_pairs(
+                &mut self,
+                s: &str,
+                p: &[ResolvedCallFilePair],
+            ) -> Result<(), String> {
+                self.inner.persist_resolved_call_file_pairs(s, p)
             }
             fn update_snapshot_extraction_diagnostics(
                 &mut self,

@@ -542,23 +542,47 @@ impl EnrichmentStoragePort for StorageConnection {
         }
 
         let conn = self.connection();
-        // ONE transaction for delete + insert + aggregate adjustment
-        // (review-0 item 2): the trust core PREFERS the persisted
-        // aggregate, so it must move with the rows or not at all. Any hard
-        // error below propagates with `?`; dropping the uncommitted
-        // transaction rolls EVERYTHING back — rows and aggregate revert
-        // together, and the aggregate still exactly describes the stored
-        // state. `unchecked_transaction` because this port takes `&self`
-        // (same pattern as retention/prune.rs).
+        // ONE transaction for delete + insert + aggregate adjustments
+        // (review-0 item 2; extended by EC-1 M-3a): the trust core and the
+        // dead-liveness/map readers PREFER the persisted aggregates, so
+        // they must move with the rows or not at all. Any hard error below
+        // propagates with `?`; dropping the uncommitted transaction rolls
+        // EVERYTHING back — rows, the g1 count, the g2 degrees and the g3
+        // pairs revert together, and each aggregate still exactly
+        // describes the stored state. `unchecked_transaction` because this
+        // port takes `&self` (same pattern as retention/prune.rs).
         let tx = conn.unchecked_transaction().map_err(StorageError::from)?;
 
-        // 1. Idempotency delete of the promoted uids, counting the CALLS
-        //    rows actually removed (exact accounting for the aggregate
-        //    delta; consistent because the SELECT and DELETE share the
+        // M-3a never-seed gates, read INSIDE the transaction: a
+        // pre-migration snapshot (NULL/malformed marker) gets NO family
+        // deltas — seeding would require a row-derived base, the banned
+        // accounting; its labeled live-derived fallback keeps serving.
+        // (The g1 equivalent is NULL-propagating SQL arithmetic.)
+        use crate::crud::call_aggregates::CallAggregateFamily;
+        let g2_present = crate::crud::call_aggregates::family_marker(
+            &tx,
+            snapshot_uid,
+            CallAggregateFamily::SymbolCallDegrees,
+        )
+        .map_err(EnrichmentStorageError::from)?
+        .is_some();
+        let g3_present = crate::crud::call_aggregates::family_marker(
+            &tx,
+            snapshot_uid,
+            CallAggregateFamily::ResolvedCallFilePairs,
+        )
+        .map_err(EnrichmentStorageError::from)?
+        .is_some();
+
+        // 1. Idempotency delete of the promoted uids, capturing the
+        //    ENDPOINTS of the CALLS rows actually removed (exact
+        //    accounting for the g1/g2/g3 deltas — the list's length is
+        //    the M-3b deleted count, its endpoints feed the M-3a deltas;
+        //    consistent because the SELECT and DELETE share the
         //    transaction). Chunked to avoid SQL length limits (same bound
         //    as the pre-M-3b implementation).
         let uids: Vec<&str> = promoted.iter().map(|e| e.edge_uid.as_str()).collect();
-        let mut deleted_calls: i64 = 0;
+        let mut deleted_call_endpoints: Vec<(String, String)> = Vec::new();
         for chunk in uids.chunks(100) {
             let placeholders: Vec<String> = chunk
                 .iter()
@@ -566,20 +590,25 @@ impl EnrichmentStoragePort for StorageConnection {
                 .collect();
             let list = placeholders.join(", ");
 
-            let chunk_calls: i64 = tx
-                .query_row(
-                    &format!(
-                        "SELECT COUNT(*) FROM edges WHERE edge_uid IN ({list}) AND type = 'CALLS'"
-                    ),
-                    [],
-                    |row| row.get(0),
-                )
+            let mut stmt = tx
+                .prepare(&format!(
+                    "SELECT source_node_uid, target_node_uid FROM edges \
+                     WHERE edge_uid IN ({list}) AND type = 'CALLS'"
+                ))
                 .map_err(StorageError::from)?;
-            deleted_calls += chunk_calls;
+            let chunk_endpoints = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(StorageError::from)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(StorageError::from)?;
+            deleted_call_endpoints.extend(chunk_endpoints);
 
             tx.execute(&format!("DELETE FROM edges WHERE edge_uid IN ({list})"), [])
                 .map_err(StorageError::from)?;
         }
+        let deleted_calls = deleted_call_endpoints.len() as i64;
 
         // 2. Insert the newly promoted edges. Per-edge failures tolerated
         //    and logged (pre-existing promotion semantics — partial success
@@ -605,7 +634,7 @@ impl EnrichmentStoragePort for StorageConnection {
         "#;
 
         let mut inserted: usize = 0;
-        let mut inserted_calls: i64 = 0;
+        let mut inserted_call_endpoints: Vec<(String, String)> = Vec::new();
         {
             let mut stmt = tx.prepare(sql).map_err(StorageError::from)?;
 
@@ -643,7 +672,10 @@ impl EnrichmentStoragePort for StorageConnection {
                     Ok(_) => {
                         inserted += 1;
                         if edge.edge_type == "CALLS" {
-                            inserted_calls += 1;
+                            // Deltas count ONLY rows that actually landed,
+                            // so they stay exact under partial success.
+                            inserted_call_endpoints
+                                .push((edge.source_node_uid.clone(), edge.target_node_uid.clone()));
                         }
                     }
                     Err(e) => {
@@ -656,16 +688,110 @@ impl EnrichmentStoragePort for StorageConnection {
                 }
             }
         } // stmt dropped before commit (it borrows the transaction)
+        let inserted_calls = inserted_call_endpoints.len() as i64;
 
-        // 3. Adjust the persisted aggregate by the net CALLS delta INSIDE
-        //    the same transaction (crud/snapshots.rs holds the write
-        //    census). NULL-propagating: a pre-migration snapshot keeps NULL
-        //    (never seeded — the labeled live-COUNT fallback applies).
+        // 3. Adjust the persisted g1 aggregate by the net CALLS delta
+        //    INSIDE the same transaction (crud/snapshots.rs holds its
+        //    write census). NULL-propagating: a pre-migration snapshot
+        //    keeps NULL (never seeded — the labeled live-COUNT fallback
+        //    applies).
         crate::crud::snapshots::adjust_resolved_call_aggregate(
             &tx,
             snapshot_uid,
             inserted_calls - deleted_calls,
         )?;
+
+        // 4. EC-1 M-3a: adjust the g2 degree family by the same per-edge
+        //    accounting (fan-in on targets, fan-out on sources; +1 per
+        //    landed insert, −1 per deleted row — an idempotent
+        //    re-promotion nets 0), marker-gated per the never-seed rule.
+        //    crud/call_aggregates.rs holds the M-3a write census.
+        if g2_present {
+            let mut degree_deltas: std::collections::BTreeMap<String, (i64, i64)> =
+                std::collections::BTreeMap::new();
+            for (source, target) in &inserted_call_endpoints {
+                degree_deltas.entry(target.clone()).or_default().0 += 1;
+                degree_deltas.entry(source.clone()).or_default().1 += 1;
+            }
+            for (source, target) in &deleted_call_endpoints {
+                degree_deltas.entry(target.clone()).or_default().0 -= 1;
+                degree_deltas.entry(source.clone()).or_default().1 -= 1;
+            }
+            let deltas: Vec<(String, i64, i64)> = degree_deltas
+                .into_iter()
+                .map(|(uid, (d_in, d_out))| (uid, d_in, d_out))
+                .collect();
+            crate::crud::call_aggregates::adjust_symbol_call_degrees(&tx, snapshot_uid, &deltas)
+                .map_err(EnrichmentStorageError::from)?;
+        }
+
+        // 5. EC-1 M-3a: adjust the g3 file-pair family. Endpoint symbols
+        //    are mapped to their file paths INSIDE the transaction (via
+        //    nodes⋈files — the FC1 skeleton, not the M-6-filtered edge
+        //    rows); self-file pairs and file-less endpoints are excluded,
+        //    mirroring the pipeline producer and the live join it
+        //    replaces.
+        if g3_present {
+            let mut endpoint_uids: std::collections::BTreeSet<&str> =
+                std::collections::BTreeSet::new();
+            for (source, target) in inserted_call_endpoints
+                .iter()
+                .chain(deleted_call_endpoints.iter())
+            {
+                endpoint_uids.insert(source.as_str());
+                endpoint_uids.insert(target.as_str());
+            }
+            let mut path_by_uid: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            let uid_list: Vec<&str> = endpoint_uids.into_iter().collect();
+            for chunk in uid_list.chunks(100) {
+                let placeholders: Vec<String> = chunk
+                    .iter()
+                    .map(|uid| format!("'{}'", uid.replace('\'', "''")))
+                    .collect();
+                let list = placeholders.join(", ");
+                let mut stmt = tx
+                    .prepare(&format!(
+                        "SELECT n.node_uid, f.path FROM nodes n \
+                         JOIN files f ON n.file_uid = f.file_uid \
+                         WHERE n.node_uid IN ({list})"
+                    ))
+                    .map_err(StorageError::from)?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(StorageError::from)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(StorageError::from)?;
+                path_by_uid.extend(rows);
+            }
+
+            let mut pair_deltas: std::collections::BTreeMap<(String, String), i64> =
+                std::collections::BTreeMap::new();
+            let mut apply = |endpoints: &[(String, String)], sign: i64| {
+                for (source, target) in endpoints {
+                    if let (Some(sp), Some(tp)) = (path_by_uid.get(source), path_by_uid.get(target))
+                    {
+                        if sp != tp {
+                            *pair_deltas.entry((sp.clone(), tp.clone())).or_default() += sign;
+                        }
+                    }
+                }
+            };
+            apply(&inserted_call_endpoints, 1);
+            apply(&deleted_call_endpoints, -1);
+            let deltas: Vec<(String, String, i64)> = pair_deltas
+                .into_iter()
+                .map(|((source, target), d)| (source, target, d))
+                .collect();
+            crate::crud::call_aggregates::adjust_resolved_call_file_pairs(
+                &tx,
+                snapshot_uid,
+                &deltas,
+            )
+            .map_err(EnrichmentStorageError::from)?;
+        }
 
         tx.commit().map_err(StorageError::from)?;
         Ok(inserted)
@@ -1153,6 +1279,399 @@ mod tests {
         let inserted = EnrichmentStoragePort::apply_promotion(&storage, &snap, &prior).unwrap();
         assert_eq!(inserted, 101);
         assert_promotion_parity(&storage, &snap, 102, "after recovery");
+    }
+
+    // ── EC-1 M-3a: apply_promotion keeps the g2/g3 families coherent ──
+    //
+    // Value-level pins for the family delta arithmetic (the integration
+    // suite `tests/call_aggregate_families.rs` covers what the SERVED
+    // read paths observe; these tests inspect the raw rows).
+
+    use crate::crud::call_aggregates::{ResolvedCallFilePairRow, SymbolCallDegreeRow};
+    use crate::types::TrackedFile;
+
+    /// Repo + READY snapshot + three FILE-MAPPED symbols (a/b/c.ts) +
+    /// one pipeline CALLS row a→b + parity-true families + g1 aggregate.
+    fn seed_m3a_promotion_fixture() -> (StorageConnection, String) {
+        let mut storage = setup_test_db();
+        storage
+            .add_repo(&Repo {
+                repo_uid: "r1".to_string(),
+                name: "repo".to_string(),
+                root_path: "/tmp/r1".to_string(),
+                default_branch: None,
+                created_at: "2026-07-17T00:00:00Z".to_string(),
+                metadata_json: None,
+            })
+            .unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                parent_snapshot_uid: None,
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap()
+            .snapshot_uid;
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: snap.clone(),
+                status: "ready".to_string(),
+                completed_at: Some("2026-07-17T00:01:00Z".to_string()),
+            })
+            .unwrap();
+
+        let file = |uid: &str, path: &str| TrackedFile {
+            file_uid: uid.to_string(),
+            repo_uid: "r1".to_string(),
+            path: path.to_string(),
+            language: Some("typescript".to_string()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        };
+        storage
+            .upsert_files(&[
+                file("r1:src/a.ts", "src/a.ts"),
+                file("r1:src/b.ts", "src/b.ts"),
+                file("r1:src/c.ts", "src/c.ts"),
+            ])
+            .unwrap();
+
+        let node = |uid: &str, name: &str, file_uid: &str| GraphNode {
+            node_uid: uid.to_string(),
+            snapshot_uid: snap.clone(),
+            repo_uid: "r1".to_string(),
+            stable_key: format!("r1:{name}:SYMBOL:FUNCTION"),
+            kind: "SYMBOL".to_string(),
+            subtype: Some("FUNCTION".to_string()),
+            name: name.to_string(),
+            qualified_name: Some(name.to_string()),
+            file_uid: Some(file_uid.to_string()),
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: Some("export".to_string()),
+            doc_comment: None,
+            metadata_json: None,
+        };
+        storage
+            .insert_nodes(&[
+                node("n-a", "fnA", "r1:src/a.ts"),
+                node("n-b", "fnB", "r1:src/b.ts"),
+                node("n-c", "fnC", "r1:src/c.ts"),
+            ])
+            .unwrap();
+        storage
+            .insert_edges(&[crate::types::GraphEdge {
+                edge_uid: "e-pipe".to_string(),
+                snapshot_uid: snap.clone(),
+                repo_uid: "r1".to_string(),
+                source_node_uid: "n-a".to_string(),
+                target_node_uid: "n-b".to_string(),
+                edge_type: "CALLS".to_string(),
+                resolution: "static".to_string(),
+                extractor: "test:0.0.1".to_string(),
+                location: None,
+                metadata_json: None,
+            }])
+            .unwrap();
+
+        // Parity-true families + g1 (what Phase-5 finalization supplies).
+        storage
+            .persist_symbol_call_degrees(
+                &snap,
+                &[
+                    SymbolCallDegreeRow {
+                        node_uid: "n-a".into(),
+                        call_fan_in: 0,
+                        call_fan_out: 1,
+                    },
+                    SymbolCallDegreeRow {
+                        node_uid: "n-b".into(),
+                        call_fan_in: 1,
+                        call_fan_out: 0,
+                    },
+                ],
+            )
+            .unwrap();
+        storage
+            .persist_resolved_call_file_pairs(
+                &snap,
+                &[ResolvedCallFilePairRow {
+                    source_file: "src/a.ts".into(),
+                    target_file: "src/b.ts".into(),
+                    call_edge_count: 1,
+                }],
+            )
+            .unwrap();
+        storage.persist_resolved_call_aggregate(&snap, 1).unwrap();
+
+        (storage, snap)
+    }
+
+    fn m3a_promoted_edge(uid: &str, snap: &str) -> enrichment::PromotedEdge {
+        // b→c: a NEW cross-file call (fan-out for n-b, fan-in for n-c,
+        // pair src/b.ts → src/c.ts).
+        enrichment::PromotedEdge {
+            edge_uid: uid.to_string(),
+            snapshot_uid: snap.to_string(),
+            repo_uid: "r1".to_string(),
+            source_node_uid: "n-b".to_string(),
+            target_node_uid: "n-c".to_string(),
+            edge_type: "CALLS",
+            resolution: "enriched",
+            extractor: "enrichment:0.1.0".to_string(),
+            location: None,
+            metadata_json: "{}".to_string(),
+        }
+    }
+
+    fn degree(storage: &StorageConnection, snap: &str, node: &str) -> Option<(i64, i64)> {
+        storage
+            .connection()
+            .query_row(
+                "SELECT call_fan_in, call_fan_out FROM symbol_call_degrees \
+                 WHERE snapshot_uid = ?1 AND node_uid = ?2",
+                rusqlite::params![snap, node],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok()
+    }
+
+    fn pair_count(storage: &StorageConnection, snap: &str, src: &str, tgt: &str) -> Option<i64> {
+        storage
+            .connection()
+            .query_row(
+                "SELECT call_edge_count FROM resolved_call_file_pairs \
+                 WHERE snapshot_uid = ?1 AND source_file = ?2 AND target_file = ?3",
+                rusqlite::params![snap, src, tgt],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
+    /// Parity window at the row level: persisted degrees/pairs == what a
+    /// live derivation over the current CALLS rows would say.
+    fn assert_m3a_row_parity(storage: &StorageConnection, snap: &str, ctx: &str) {
+        // Degrees: every node's persisted fan-in/out vs live counts.
+        for node in ["n-a", "n-b", "n-c"] {
+            let live_in: i64 = storage
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM edges WHERE snapshot_uid = ?1 \
+                     AND type = 'CALLS' AND target_node_uid = ?2",
+                    rusqlite::params![snap, node],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let live_out: i64 = storage
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM edges WHERE snapshot_uid = ?1 \
+                     AND type = 'CALLS' AND source_node_uid = ?2",
+                    rusqlite::params![snap, node],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let (fan_in, fan_out) = degree(storage, snap, node).unwrap_or((0, 0));
+            assert_eq!(
+                (fan_in, fan_out),
+                (live_in, live_out),
+                "{ctx}: node {node} persisted degrees == live row-derived degrees"
+            );
+        }
+        // Pairs: persisted visible pair set == live DISTINCT pair set.
+        let live_pairs: Vec<(String, String, i64)> = {
+            let conn = storage.connection();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT src_f.path, tgt_f.path, COUNT(*) FROM edges e \
+                     JOIN nodes sn ON e.source_node_uid = sn.node_uid \
+                     JOIN files src_f ON sn.file_uid = src_f.file_uid \
+                     JOIN nodes tn ON e.target_node_uid = tn.node_uid \
+                     JOIN files tgt_f ON tn.file_uid = tgt_f.file_uid \
+                     WHERE e.snapshot_uid = ?1 AND e.type = 'CALLS' \
+                       AND src_f.path <> tgt_f.path \
+                     GROUP BY src_f.path, tgt_f.path \
+                     ORDER BY src_f.path, tgt_f.path",
+                )
+                .unwrap();
+            let rows = stmt
+                .query_map(rusqlite::params![snap], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        };
+        let persisted_pairs: Vec<(String, String, i64)> = {
+            let conn = storage.connection();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT source_file, target_file, call_edge_count \
+                     FROM resolved_call_file_pairs \
+                     WHERE snapshot_uid = ?1 AND call_edge_count > 0 \
+                     ORDER BY source_file, target_file",
+                )
+                .unwrap();
+            let rows = stmt
+                .query_map(rusqlite::params![snap], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        };
+        assert_eq!(
+            persisted_pairs, live_pairs,
+            "{ctx}: persisted visible pairs == live row-derived pairs"
+        );
+    }
+
+    #[test]
+    fn apply_promotion_adjusts_family_values_exactly_and_idempotently() {
+        let (storage, snap) = seed_m3a_promotion_fixture();
+        assert_m3a_row_parity(&storage, &snap, "baseline");
+
+        // Promotion lands b→c: fan-out upsert on existing n-b row,
+        // fan-in insert for previously-absent n-c, new pair row.
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            &[m3a_promoted_edge("promoted:e1", &snap)],
+        )
+        .unwrap();
+        assert_eq!(inserted, 1);
+        assert_eq!(degree(&storage, &snap, "n-b"), Some((1, 1)));
+        assert_eq!(degree(&storage, &snap, "n-c"), Some((1, 0)));
+        assert_eq!(pair_count(&storage, &snap, "src/b.ts", "src/c.ts"), Some(1));
+        assert_m3a_row_parity(&storage, &snap, "after promotion");
+
+        // Idempotent re-promotion: delete+insert of the same uid nets 0
+        // in every family.
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            &[m3a_promoted_edge("promoted:e1", &snap)],
+        )
+        .unwrap();
+        assert_eq!(inserted, 1);
+        assert_eq!(degree(&storage, &snap, "n-b"), Some((1, 1)));
+        assert_eq!(degree(&storage, &snap, "n-c"), Some((1, 0)));
+        assert_eq!(pair_count(&storage, &snap, "src/b.ts", "src/c.ts"), Some(1));
+        assert_m3a_row_parity(&storage, &snap, "after re-promotion");
+    }
+
+    /// A hard failure mid-transaction must roll back the family deltas
+    /// WITH the row mutations (same guarantee the M-3b test pins for the
+    /// g1 aggregate — here for g2/g3).
+    #[test]
+    fn apply_promotion_hard_failure_rolls_back_family_deltas() {
+        let (storage, snap) = seed_m3a_promotion_fixture();
+        let promoted = m3a_promoted_edge("promoted:e1", &snap);
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            std::slice::from_ref(&promoted),
+        )
+        .unwrap();
+        assert_eq!(inserted, 1);
+        assert_m3a_row_parity(&storage, &snap, "after first promotion");
+
+        // Abort the re-promotion INSIDE the transaction, after its delete
+        // has already mutated rows (BEFORE INSERT trigger).
+        storage
+            .connection()
+            .execute_batch(
+                "CREATE TRIGGER fail_reinsert BEFORE INSERT ON edges \
+                 WHEN NEW.edge_uid = 'promoted:e1' \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-promotion failure'); END",
+            )
+            .unwrap();
+        // The insert failure is TOLERATED per-edge (partial success), so
+        // the transaction commits with delete-without-reinsert: families
+        // must follow the rows DOWN (net −1) — coherent, not stale.
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            std::slice::from_ref(&promoted),
+        )
+        .unwrap();
+        assert_eq!(inserted, 0, "insert was blocked by the trigger");
+        assert_eq!(degree(&storage, &snap, "n-b"), Some((1, 0)));
+        assert_eq!(degree(&storage, &snap, "n-c"), Some((0, 0)));
+        assert_eq!(pair_count(&storage, &snap, "src/b.ts", "src/c.ts"), Some(0));
+        assert_m3a_row_parity(&storage, &snap, "after blocked re-insert");
+
+        // Now abort the DELETE instead: a hard error → whole-transaction
+        // rollback, families and rows revert together.
+        storage
+            .connection()
+            .execute_batch("DROP TRIGGER fail_reinsert")
+            .unwrap();
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            std::slice::from_ref(&promoted),
+        )
+        .unwrap();
+        assert_eq!(inserted, 1, "recovery promotion lands");
+        assert_m3a_row_parity(&storage, &snap, "after recovery");
+        storage
+            .connection()
+            .execute_batch(
+                "CREATE TRIGGER fail_delete BEFORE DELETE ON edges \
+                 WHEN OLD.edge_uid = 'promoted:e1' \
+                 BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END",
+            )
+            .unwrap();
+        let result = EnrichmentStoragePort::apply_promotion(&storage, &snap, &[promoted]);
+        assert!(result.is_err(), "delete abort must surface as a hard error");
+        assert_eq!(
+            degree(&storage, &snap, "n-b"),
+            Some((1, 1)),
+            "rollback: degrees revert with the rows"
+        );
+        assert_eq!(
+            pair_count(&storage, &snap, "src/b.ts", "src/c.ts"),
+            Some(1),
+            "rollback: pair counts revert with the rows"
+        );
+        assert_m3a_row_parity(&storage, &snap, "after rolled-back promotion");
+    }
+
+    /// A snapshot with NO persisted families (pre-migration shape) gains
+    /// NO family rows through a real promotion — never seeded; the
+    /// labeled live-derived fallback stays in force.
+    #[test]
+    fn apply_promotion_never_seeds_missing_families() {
+        let (storage, snap, _engine_key) = seed_rust_type_with_impl_method();
+
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            &[promoted_calls_edge("promoted:e1", &snap)],
+        )
+        .unwrap();
+        assert_eq!(inserted, 1, "the promotion itself lands");
+
+        for table in ["symbol_call_degrees", "resolved_call_file_pairs"] {
+            let rows: i64 = storage
+                .connection()
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE snapshot_uid = ?1"),
+                    rusqlite::params![snap],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(rows, 0, "{table} must never be seeded by promotion");
+        }
     }
 
     /// A snapshot with NO persisted aggregate (pre-migration shape) keeps

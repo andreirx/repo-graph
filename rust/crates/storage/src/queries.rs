@@ -1012,9 +1012,19 @@ impl StorageConnection {
     ///
     /// Steps:
     ///   1. Select all nodes in the snapshot.
-    ///   2. Exclude nodes that are targets of reference edges
-    ///      (IMPORTS, CALLS, IMPLEMENTS, INSTANTIATES, ROUTES_TO,
-    ///      REGISTERED_BY, TESTED_BY, COVERS).
+    ///   2. Exclude live nodes — a node is live when it has a persisted
+    ///      incoming-CALLS degree > 0 (EC-1 M-3a, g2: the
+    ///      `symbol_call_degrees` family, computed from the FULL
+    ///      resolution stream, so liveness stays correct after a
+    ///      per-language CALLS-row drop, M-6) OR it is the target of a
+    ///      row of the 7 retained FC2b relation types (IMPORTS,
+    ///      IMPLEMENTS, INSTANTIATES, ROUTES_TO, REGISTERED_BY,
+    ///      TESTED_BY, COVERS — that 7-type NOT-IN remains a legitimate
+    ///      owner-read). PRE-MIGRATION snapshots (no persisted family —
+    ///      marker NULL) serve the pre-M-3a CALLS∪7-type membership over
+    ///      live `edges` rows: the labeled live-derived fallback, its
+    ///      source distinguishable at the artifact layer (marker absent
+    ///      = live-derived) — never fabricated zeros.
     ///   3. Exclude declared entrypoints (declarations table).
     ///   4. Exclude framework-liveness inferences.
     ///   5. **SB-5 divergence**: Exclude resource kinds (FS_PATH,
@@ -1040,6 +1050,37 @@ impl StorageConnection {
             ""
         };
 
+        // EC-1 M-3a (g2) read swap: while the parity window holds
+        // (persisted degrees == live row-derived membership) the two
+        // branches return byte-identical results; after M-6 only the
+        // persisted branch stays correct.
+        let g2_present = crate::crud::call_aggregates::family_marker(
+            self.connection(),
+            snapshot_uid,
+            crate::crud::call_aggregates::CallAggregateFamily::SymbolCallDegrees,
+        )?
+        .is_some();
+        let liveness_exclusion = if g2_present {
+            "AND n.node_uid NOT IN (
+			     SELECT e.target_node_uid FROM edges e
+			     WHERE e.snapshot_uid = ?1
+			       AND e.type IN ('IMPORTS', 'IMPLEMENTS', 'INSTANTIATES',
+			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			   )
+			   AND n.node_uid NOT IN (
+			     SELECT g.node_uid FROM symbol_call_degrees g
+			     WHERE g.snapshot_uid = ?1 AND g.call_fan_in > 0
+			   )"
+        } else {
+            // Labeled live-derived fallback (pre-migration snapshot).
+            "AND n.node_uid NOT IN (
+			     SELECT e.target_node_uid FROM edges e
+			     WHERE e.snapshot_uid = ?1
+			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
+			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			   )"
+        };
+
         let sql = format!(
             "SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
@@ -1052,12 +1093,7 @@ impl StorageConnection {
 			 FROM nodes n
 			 LEFT JOIN files f ON n.file_uid = f.file_uid
 			 WHERE n.snapshot_uid = ?1
-			   AND n.node_uid NOT IN (
-			     SELECT e.target_node_uid FROM edges e
-			     WHERE e.snapshot_uid = ?1
-			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
-			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
-			   )
+			   {liveness_exclusion}
 			   {kind_clause}
 			   AND n.stable_key NOT IN (
 			     SELECT d.target_stable_key FROM declarations d
@@ -2606,22 +2642,66 @@ impl StorageConnection {
 
     /// MAP-FROM-INDEX-1: resolved intra-repo dependency edges (source file →
     /// target file) of both `IMPORTS` and `CALLS` type, whose source sits under a
-    /// directory prefix, for one snapshot. Only edges whose target resolves to an
-    /// indexed file appear — external/library references have no file target and
+    /// directory prefix, for one snapshot. Only pairs whose two endpoints are
+    /// indexed files appear — external/library references have no file target and
     /// are absent (unresolved imports come from `map_unresolved_imports_in_path`).
     /// Self-file edges (`src == tgt`, i.e. same-file calls) are excluded: they are
-    /// not an inter-file dependency. `DISTINCT` collapses multiple symbol-level
-    /// edges between the same file pair of the same type. Ordered
+    /// not an inter-file dependency. Multiplicity between the same file pair of
+    /// the same type collapses to one row. Ordered
     /// `source ASC, target ASC, type ASC`. Feeds the per-file import list (the
     /// `IMPORTS` subset) and the per-directory dependency sketch (both types).
     /// See [`MapDepEdge`].
+    ///
+    /// Two sources (EC-1 M-3a, g3 read swap):
+    /// - the `IMPORTS` share stays a live owner-read over `edges` rows
+    ///   (FC2b — its rows stay owner-resident, D-EC-5-A);
+    /// - the `CALLS` share serves from the persisted
+    ///   `resolved_call_file_pairs` family (computed from the FULL
+    ///   resolution stream at index/refresh, promotion-adjusted), so the
+    ///   sketch stays language-complete after a per-language CALLS-row
+    ///   drop (M-6). PRE-MIGRATION snapshots (no family — marker NULL)
+    ///   serve the pre-M-3a combined live query: the labeled live-derived
+    ///   fallback, distinguishable at the artifact layer (marker absent =
+    ///   live-derived). While the parity window holds the two branches
+    ///   are byte-identical.
     pub fn map_resolved_dep_edges_in_path(
         &self,
         snapshot_uid: &str,
         path_prefix: &str,
     ) -> Result<Vec<MapDepEdge>, StorageError> {
         let (like_pattern, exact) = Self::map_path_scope(path_prefix);
-        let mut stmt = self.connection().prepare(
+        let g3_present = crate::crud::call_aggregates::family_marker(
+            self.connection(),
+            snapshot_uid,
+            crate::crud::call_aggregates::CallAggregateFamily::ResolvedCallFilePairs,
+        )?
+        .is_some();
+        let sql = if g3_present {
+            // IMPORTS owner-read UNION persisted CALLS pairs. UNION ALL is
+            // exact: the two shares cannot collide (distinct type
+            // strings); each share is already DISTINCT on its side. The
+            // outer ORDER BY reproduces the fallback's total order.
+            "SELECT source_file, target_file, edge_type FROM ( \
+               SELECT DISTINCT src_f.path AS source_file, tgt_f.path AS target_file, \
+                               e.type AS edge_type \
+               FROM edges e \
+               JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
+               JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+               JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
+               JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
+               WHERE e.snapshot_uid = ?1 AND e.type = 'IMPORTS' \
+                 AND src_f.path <> tgt_f.path \
+                 AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
+               UNION ALL \
+               SELECT p.source_file, p.target_file, 'CALLS' AS edge_type \
+               FROM resolved_call_file_pairs p \
+               WHERE p.snapshot_uid = ?1 AND p.call_edge_count > 0 \
+                 AND (p.source_file LIKE ?2 ESCAPE '\\' OR p.source_file = ?3) \
+             ) \
+             ORDER BY source_file ASC, target_file ASC, edge_type ASC"
+        } else {
+            // Labeled live-derived fallback (pre-migration snapshot):
+            // the pre-M-3a combined query, verbatim.
             "SELECT DISTINCT src_f.path, tgt_f.path, e.type \
              FROM edges e \
              JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
@@ -2631,8 +2711,9 @@ impl StorageConnection {
              WHERE e.snapshot_uid = ?1 AND e.type IN ('IMPORTS', 'CALLS') \
                AND src_f.path <> tgt_f.path \
                AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
-             ORDER BY src_f.path ASC, tgt_f.path ASC, e.type ASC",
-        )?;
+             ORDER BY src_f.path ASC, tgt_f.path ASC, e.type ASC"
+        };
+        let mut stmt = self.connection().prepare(sql)?;
         let rows = stmt.query_map(
             rusqlite::params![snapshot_uid, like_pattern, exact],
             |row| {

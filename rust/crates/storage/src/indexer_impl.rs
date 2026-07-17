@@ -201,6 +201,40 @@ impl SnapshotLifecyclePort for StorageConnection {
         )
     }
 
+    fn persist_symbol_call_degrees(
+        &mut self,
+        snapshot_uid: &str,
+        degrees: &[ixp::SymbolCallDegree],
+    ) -> Result<(), StorageError> {
+        // Port DTO → storage row (the writer lives in
+        // crud/call_aggregates.rs — the M-3a write census file).
+        let rows: Vec<crate::crud::call_aggregates::SymbolCallDegreeRow> = degrees
+            .iter()
+            .map(|d| crate::crud::call_aggregates::SymbolCallDegreeRow {
+                node_uid: d.node_uid.clone(),
+                call_fan_in: d.call_fan_in,
+                call_fan_out: d.call_fan_out,
+            })
+            .collect();
+        <StorageConnection>::persist_symbol_call_degrees(self, snapshot_uid, &rows)
+    }
+
+    fn persist_resolved_call_file_pairs(
+        &mut self,
+        snapshot_uid: &str,
+        pairs: &[ixp::ResolvedCallFilePair],
+    ) -> Result<(), StorageError> {
+        let rows: Vec<crate::crud::call_aggregates::ResolvedCallFilePairRow> = pairs
+            .iter()
+            .map(|p| crate::crud::call_aggregates::ResolvedCallFilePairRow {
+                source_file: p.source_file.clone(),
+                target_file: p.target_file.clone(),
+                call_edge_count: p.call_edge_count,
+            })
+            .collect();
+        <StorageConnection>::persist_resolved_call_file_pairs(self, snapshot_uid, &rows)
+    }
+
     fn update_snapshot_extraction_diagnostics(
         &mut self,
         snapshot_uid: &str,

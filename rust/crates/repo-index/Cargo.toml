@@ -108,3 +108,9 @@ perf-trace = []
 
 [dev-dependencies]
 tempfile = "3"
+# Raw-row inspection for the EC-1 M-3a parity suite
+# (tests/call_aggregate_parity.rs): the persisted-vs-live comparison
+# reads the SQLite artifact directly through a second connection —
+# storage diagnostics, deliberately NOT a production read surface.
+# Same version/features as the storage crate (one bundled libsqlite3).
+rusqlite = { version = "0.31", features = ["bundled"] }

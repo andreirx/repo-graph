@@ -114,13 +114,14 @@ pub mod migration_027;
 pub mod migration_028;
 pub mod migration_029;
 pub mod migration_030;
+pub mod migration_031;
 
-/// Apply all 30 storage migrations to the given connection.
+/// Apply all 31 storage migrations to the given connection.
 ///
 /// Sets connection-level pragmas, runs migration 001
 /// unconditionally (idempotent via `CREATE TABLE IF NOT EXISTS`),
 /// then reads `MAX(version)` from `schema_migrations` and
-/// version-gates the application of migrations 002 through 021.
+/// version-gates the application of migrations 002 through 031.
 ///
 /// Mirrors the TypeScript `SqliteConnectionProvider.initialize()`
 /// method at `connection-provider.ts:53`.
@@ -254,6 +255,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
     if max_version < 30 {
         migration_030::run(conn)?;
     }
+    if max_version < 31 {
+        migration_031::run(conn)?;
+    }
 
     Ok(())
 }
@@ -372,17 +376,17 @@ mod tests {
     // ── Category 1: Schema creation parity ────────────────────
 
     #[test]
-    fn run_migrations_applies_all_thirty_migrations() {
+    fn run_migrations_applies_all_thirty_one_migrations() {
         let mut conn = fresh_conn();
         run_migrations(&mut conn).expect("run all migrations");
 
-        // schema_migrations table exists and contains rows 1..=30
+        // schema_migrations table exists and contains rows 1..=31
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 30, "expected 30 migration rows after full run");
+        assert_eq!(count, 31, "expected 31 migration rows after full run");
     }
 
     #[test]
@@ -459,6 +463,9 @@ mod tests {
             "generated_code_mappings",
             "boundary_contracts",
             "boundary_interaction_links",
+            // 031-call-aggregate-families
+            "symbol_call_degrees",
+            "resolved_call_file_pairs",
         ];
 
         for table in expected_tables {
@@ -473,7 +480,7 @@ mod tests {
     // ── Category 2: Migration version progression parity ─────
 
     #[test]
-    fn schema_migrations_records_versions_one_through_thirty_in_order() {
+    fn schema_migrations_records_versions_one_through_thirty_one_in_order() {
         let mut conn = fresh_conn();
         run_migrations(&mut conn).expect("run all migrations");
 
@@ -521,6 +528,7 @@ mod tests {
             (28, "028-cache-semantics"),
             (29, "029-repair-orphan-fks"),
             (30, "030-resolved-call-aggregate"),
+            (31, "031-call-aggregate-families"),
         ];
 
         assert_eq!(rows.len(), expected.len());
@@ -536,14 +544,14 @@ mod tests {
         run_migrations(&mut conn).expect("first run");
         run_migrations(&mut conn).expect("second run must not error");
 
-        // Still exactly 30 rows.
+        // Still exactly 31 rows.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
         assert_eq!(
-            count, 30,
+            count, 31,
             "re-run must not duplicate schema_migrations rows"
         );
 
