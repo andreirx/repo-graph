@@ -106,7 +106,10 @@ pub struct ResolutionCounts {
     pub edges_resolved: u64,
     /// Total unresolved edges (from the diagnostics blob).
     pub unresolved_total: u64,
-    /// Resolved CALLS edges (`count_edges_by_type(CALLS)`).
+    /// Resolved CALLS edges. Since EC-1 M-3b: served from the persisted
+    /// snapshot-level aggregate (pipeline-written, provenance-labeled);
+    /// live `count_edges_by_type(CALLS)` only as the labeled fallback for
+    /// pre-migration snapshots.
     pub resolved_calls: u64,
     /// Unresolved CALLS-family edges (from the diagnostics breakdown).
     pub unresolved_calls: u64,

@@ -872,9 +872,25 @@ pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
         .count_active_declarations(repo_uid, "entrypoint")
         .map_err(TrustAssemblyError::Storage)?;
 
-    let resolved_calls = storage
-        .count_edges_by_type(snapshot_uid, "CALLS")
-        .map_err(TrustAssemblyError::Storage)?;
+    // EC-1 M-3b (g1): `resolved_calls` is served from the PERSISTED
+    // snapshot-level aggregate (pipeline-written at index/refresh finalize
+    // and after enrichment promotion, provenance-labeled per the ratified
+    // interim rule). The eager read-time COUNT over CALLS rows is no longer
+    // on the serving path — it remains ONLY as the explicit fallback for
+    // pre-migration snapshots (no aggregate persisted, CALLS rows still
+    // present): the live COUNT is the exact pre-M-3b accounting for those
+    // snapshots, and its source is distinguishable at the artifact layer
+    // (aggregate absent = live-derived). Never fabricate a zero for a
+    // missing aggregate — unknown is never zero.
+    let resolved_calls = match storage
+        .get_resolved_call_aggregate(snapshot_uid)
+        .map_err(TrustAssemblyError::Storage)?
+    {
+        Some(aggregate) => aggregate.count,
+        None => storage
+            .count_edges_by_type(snapshot_uid, "CALLS")
+            .map_err(TrustAssemblyError::Storage)?,
+    };
 
     // CALLS-family classification counts (Variant A reweighting).
     let calls_filter = vec![
@@ -963,8 +979,8 @@ mod tests {
     use crate::storage_port::{
         BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
         ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
-        QueryUnresolvedEdgesInput, TrustModuleStats, TrustUnresolvedEdgeSample,
-        UnresolvedEdgeBasisCode, UnresolvedEdgeClassification,
+        QueryUnresolvedEdgesInput, ResolvedCallAggregate, TrustModuleStats,
+        TrustUnresolvedEdgeSample, UnresolvedEdgeBasisCode, UnresolvedEdgeClassification,
     };
     use std::collections::BTreeMap;
 
@@ -1658,6 +1674,10 @@ mod tests {
         path_prefix_cycles: Vec<PathPrefixModuleCycle>,
         active_entrypoint_count: usize,
         resolved_calls: u64,
+        /// The persisted g1 aggregate (EC-1 M-3b). `None` (the default)
+        /// models a pre-migration snapshot, so every pre-existing test
+        /// exercises the live-COUNT fallback path unchanged.
+        resolved_call_aggregate: Option<ResolvedCallAggregate>,
         calls_classification_counts: Vec<ClassificationCountRow>,
         all_classification_counts: Vec<ClassificationCountRow>,
         all_basis_code_counts: Vec<BasisCodeCountRow>,
@@ -1676,6 +1696,7 @@ mod tests {
                 path_prefix_cycles: vec![],
                 active_entrypoint_count: 1,
                 resolved_calls: 0,
+                resolved_call_aggregate: None,
                 calls_classification_counts: vec![],
                 all_classification_counts: vec![],
                 all_basis_code_counts: vec![],
@@ -1712,6 +1733,16 @@ mod tests {
                 return self.err_result();
             }
             Ok(self.resolved_calls)
+        }
+
+        fn get_resolved_call_aggregate(
+            &self,
+            _snapshot_uid: &str,
+        ) -> Result<Option<ResolvedCallAggregate>, String> {
+            if self.force_error.is_some() {
+                return self.err_result();
+            }
+            Ok(self.resolved_call_aggregate.clone())
         }
 
         fn count_active_declarations(&self, _repo_uid: &str, _kind: &str) -> Result<usize, String> {
@@ -1816,6 +1847,48 @@ mod tests {
             }
             other => panic!("expected Storage error, got {:?}", other),
         }
+    }
+
+    // ── EC-1 M-3b: resolved_calls source swap ─────────────────────────
+
+    /// The persisted aggregate is THE source when present — by design it
+    /// wins even over a divergent live COUNT (the read path performs a
+    /// source swap, not a consistency check; parity between the two is the
+    /// write path's obligation, enforced by the parity validation suite).
+    #[test]
+    fn assembly_serves_resolved_calls_from_persisted_aggregate_when_present() {
+        let mock = MockStorage {
+            resolved_call_aggregate: Some(ResolvedCallAggregate {
+                count: 7,
+                provenance: "pipeline".into(),
+            }),
+            // Deliberately divergent live count: proves the live COUNT is
+            // no longer consulted on the serving path.
+            resolved_calls: 50,
+            ..MockStorage::ok()
+        };
+        let report = assemble_trust_report(&mock, "r1", "snap1", None, None).unwrap();
+        assert_eq!(
+            report.summary.resolved_calls, 7,
+            "persisted aggregate is the serving source, not the live COUNT"
+        );
+    }
+
+    /// Pre-migration snapshot (no persisted aggregate): explicit fallback
+    /// to the live CALLS-row COUNT — the exact pre-M-3b accounting; never
+    /// a fabricated zero.
+    #[test]
+    fn assembly_falls_back_to_live_count_when_aggregate_absent() {
+        let mock = MockStorage {
+            resolved_call_aggregate: None,
+            resolved_calls: 42,
+            ..MockStorage::ok()
+        };
+        let report = assemble_trust_report(&mock, "r1", "snap1", None, None).unwrap();
+        assert_eq!(
+            report.summary.resolved_calls, 42,
+            "aggregate absent → live COUNT, never a fabricated 0"
+        );
     }
 
     #[test]

@@ -133,6 +133,26 @@ pub trait SnapshotLifecyclePort {
     /// nodes_total, edges_total) from the actual data.
     fn update_snapshot_counts(&mut self, snapshot_uid: &str) -> Result<(), Self::Error>;
 
+    /// Persist the snapshot-level resolved-call aggregate (EC-1 M-3b, g1).
+    ///
+    /// `resolved_call_count` is SUPPLIED by the pipeline: the count of
+    /// resolved CALLS results in the resolver's OUTPUT stream (all
+    /// languages — the full FC0 resolution stream), tallied BEFORE the
+    /// edges are handed to storage. The implementation stores it verbatim
+    /// with its provenance label — it must NOT recompute from persisted
+    /// `edges` rows, which become a filtered subset of the stream after a
+    /// per-language CALLS-row drop (EC-1 M-6).
+    ///
+    /// Called in Phase-5 finalization on BOTH the fresh-index and
+    /// delta-refresh paths (they share `run_pipeline`), before the snapshot
+    /// turns READY — a servable post-migration snapshot always carries its
+    /// aggregate.
+    fn persist_resolved_call_aggregate(
+        &mut self,
+        snapshot_uid: &str,
+        resolved_call_count: u64,
+    ) -> Result<(), Self::Error>;
+
     /// Persist extraction diagnostics JSON on a snapshot.
     fn update_snapshot_extraction_diagnostics(
         &mut self,

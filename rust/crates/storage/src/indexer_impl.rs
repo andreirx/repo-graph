@@ -189,6 +189,18 @@ impl SnapshotLifecyclePort for StorageConnection {
         <StorageConnection>::update_snapshot_counts(self, snapshot_uid)
     }
 
+    fn persist_resolved_call_aggregate(
+        &mut self,
+        snapshot_uid: &str,
+        resolved_call_count: u64,
+    ) -> Result<(), StorageError> {
+        <StorageConnection>::persist_resolved_call_aggregate(
+            self,
+            snapshot_uid,
+            resolved_call_count,
+        )
+    }
+
     fn update_snapshot_extraction_diagnostics(
         &mut self,
         snapshot_uid: &str,

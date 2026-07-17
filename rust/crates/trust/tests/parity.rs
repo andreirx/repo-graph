@@ -249,6 +249,17 @@ impl TrustStorageRead for FixtureMockStorage {
         Ok(self.resolved_calls)
     }
 
+    fn get_resolved_call_aggregate(
+        &self,
+        _snapshot_uid: &str,
+    ) -> Result<Option<repo_graph_trust::storage_port::ResolvedCallAggregate>, String> {
+        // The TS-parity fixtures predate the persisted aggregate (EC-1
+        // M-3b): modeling them as pre-migration snapshots keeps every
+        // fixture exercising the live-COUNT fallback path — the exact
+        // accounting the TS baseline used.
+        Ok(None)
+    }
+
     fn count_active_declarations(&self, _repo_uid: &str, _kind: &str) -> Result<usize, String> {
         Ok(self.active_entrypoint_count)
     }

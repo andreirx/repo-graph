@@ -864,6 +864,14 @@ fn run_pipeline<S: IndexerStoragePort>(
     // Batch resolution.
     let batch_size = edge_batch_size.unwrap_or(DEFAULT_EDGE_BATCH_SIZE);
     let mut resolved_total: u64 = 0;
+    // EC-1 M-3b (g1): resolved CALLS results tallied from the resolver's
+    // OUTPUT stream — the full FC0 resolution stream (on delta refresh the
+    // batches below cover ALL extraction edges, copied-forward + fresh).
+    // Tallied BEFORE `insert_resolved_edges` so the persisted aggregate is
+    // independent of storage materialization: after a per-language
+    // CALLS-row drop (M-6) the `edges` table is a filtered subset, and
+    // this stream-side count is the only honest full-stream accounting.
+    let mut resolved_calls_total: u64 = 0;
     let mut unresolved_count: u64 = 0;
     let mut unresolved_breakdown: BTreeMap<String, u64> = BTreeMap::new();
     let mut all_resolved_import_pairs: Vec<(String, String)> = Vec::new();
@@ -904,6 +912,14 @@ fn run_pipeline<S: IndexerStoragePort>(
             .collect();
 
         let result = resolve_edges(&extracted_edges, &index, Some(&import_bindings_by_file));
+
+        // Full-stream CALLS tally (M-3b): counted on the resolver output,
+        // BEFORE the storage handoff below.
+        resolved_calls_total += result
+            .resolved
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls)
+            .count() as u64;
 
         // Persist resolved edges. (Real storage writes → store_ms.)
         if !result.resolved.is_empty() {
@@ -986,6 +1002,17 @@ fn run_pipeline<S: IndexerStoragePort>(
     let finalize_start = std::time::Instant::now();
     emit(crate::types::IndexPhase::Persisting, 0, 0, None)?;
     storage.update_snapshot_counts(snap_uid)?;
+
+    // EC-1 M-3b (g1): persist the snapshot-level resolved-call aggregate,
+    // SUPPLYING the stream-side tally from Phase 3 (full stream — on delta
+    // refresh the resolver re-ran over ALL extraction edges of this
+    // snapshot, copied-forward + fresh, so the value is language-complete;
+    // counted before storage materialization, so it survives any
+    // per-language CALLS-row drop at the insert layer — M-6).
+    // Runs on BOTH index and refresh (they share this pipeline) and BEFORE
+    // the READY transition below. Enrichment promotion later adjusts it
+    // atomically when it mutates the CALLS row set.
+    storage.persist_resolved_call_aggregate(snap_uid, resolved_calls_total)?;
 
     let diagnostics = build_extraction_diagnostics(
         resolved_total + module_edges_count,
@@ -1850,6 +1877,15 @@ mod tests {
         unresolved_edges: Vec<PersistedUnresolvedEdge>,
         file_signals: Vec<FileSignalRow>,
         snap_counter: u32,
+        /// The resolved-call count the pipeline SUPPLIED at Phase-5
+        /// finalization (EC-1 M-3b) — recorded verbatim so tests can
+        /// compare it against what actually materialized in
+        /// `resolved_edges`.
+        persisted_resolved_call_aggregate: Option<u64>,
+        /// M-6 simulation: when set, `insert_resolved_edges` silently
+        /// drops the resolved CALLS edge with this uid (storage-layer
+        /// filtering — the resolver output is untouched).
+        drop_calls_with_uid: Option<String>,
     }
 
     impl SnapshotLifecyclePort for MockStorage {
@@ -1900,6 +1936,13 @@ mod tests {
             Ok(())
         }
         fn update_snapshot_counts(&mut self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn persist_resolved_call_aggregate(&mut self, _: &str, count: u64) -> Result<(), String> {
+            // Record the SUPPLIED count so tests can assert the pipeline
+            // tallied the full resolver-output stream (not the possibly
+            // filtered stored rows).
+            self.persisted_resolved_call_aggregate = Some(count);
             Ok(())
         }
         fn update_snapshot_extraction_diagnostics(
@@ -1983,7 +2026,19 @@ mod tests {
             &mut self,
             edges: &[crate::resolver::ResolvedEdge],
         ) -> Result<(), String> {
-            self.resolved_edges.extend(edges.iter().cloned());
+            // M-6 simulation switch: silently refuse to materialize the
+            // named resolved CALLS result (a per-language CALLS-row drop
+            // filters at exactly this layer). The resolver OUTPUT is
+            // unaffected — only the stored row set shrinks.
+            self.resolved_edges.extend(
+                edges
+                    .iter()
+                    .filter(|e| {
+                        !(e.edge_type == EdgeType::Calls
+                            && Some(e.edge_uid.as_str()) == self.drop_calls_with_uid.as_deref())
+                    })
+                    .cloned(),
+            );
             Ok(())
         }
         fn insert_extraction_edges(&mut self, edges: &[ExtractionEdgeRow]) -> Result<(), String> {
@@ -2315,6 +2370,165 @@ mod tests {
         assert_eq!(snap.status, SnapshotStatus::Ready);
     }
 
+    /// Extractor emitting two function symbols and two CALLS edges whose
+    /// `target_key`s are the sibling's bare (unambiguous) name — the
+    /// "simple function call" arm of `resolve_call_target`, so both
+    /// resolve deterministically through the real resolver.
+    struct CallsPairExtractor {
+        langs: Vec<String>,
+        builtins: RuntimeBuiltinsSet,
+    }
+
+    impl ExtractorPort for CallsPairExtractor {
+        fn name(&self) -> &str {
+            "callspair:1.0.0"
+        }
+        fn languages(&self) -> &[String] {
+            &self.langs
+        }
+        fn runtime_builtins(&self) -> &RuntimeBuiltinsSet {
+            &self.builtins
+        }
+        fn initialize(&mut self) -> Result<(), ExtractorError> {
+            Ok(())
+        }
+        fn extract(
+            &self,
+            _source: &str,
+            file_path: &str,
+            file_uid: &str,
+            repo_uid: &str,
+            snapshot_uid: &str,
+        ) -> Result<ExtractionResult, ExtractorError> {
+            let sym = |uid: &str, key: &str, name: &str| ExtractedNode {
+                node_uid: uid.to_string(),
+                snapshot_uid: snapshot_uid.into(),
+                repo_uid: repo_uid.into(),
+                stable_key: key.to_string(),
+                kind: NodeKind::Symbol,
+                subtype: Some(NodeSubtype::Function),
+                name: name.to_string(),
+                qualified_name: Some(name.to_string()),
+                file_uid: Some(file_uid.into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            };
+            let call = |uid: &str, source_uid: &str, target_key: &str| ExtractedEdge {
+                edge_uid: uid.to_string(),
+                snapshot_uid: snapshot_uid.into(),
+                repo_uid: repo_uid.into(),
+                source_node_uid: source_uid.to_string(),
+                target_key: target_key.to_string(),
+                edge_type: EdgeType::Calls,
+                resolution: Resolution::Static,
+                extractor: "callspair:1.0.0".into(),
+                location: None,
+                metadata_json: None,
+            };
+            let file_node = ExtractedNode {
+                node_uid: format!("{}_node", file_uid),
+                snapshot_uid: snapshot_uid.into(),
+                repo_uid: repo_uid.into(),
+                stable_key: format!("{}:FILE", file_uid),
+                kind: NodeKind::File,
+                subtype: None,
+                name: file_path.rsplit('/').next().unwrap_or(file_path).into(),
+                qualified_name: Some(file_path.into()),
+                file_uid: Some(file_uid.into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            };
+            Ok(ExtractionResult {
+                nodes: vec![
+                    file_node,
+                    sym("n-fna", "KEY_FNA", "fnA"),
+                    sym("n-fnb", "KEY_FNB", "fnB"),
+                ],
+                edges: vec![
+                    call("edge-call-a2b", "n-fna", "fnB"),
+                    call("edge-call-b2a", "n-fnb", "fnA"),
+                ],
+                metrics: BTreeMap::new(),
+                import_bindings: vec![],
+                resolved_callsites: vec![],
+                import_observations: vec![],
+            })
+        }
+    }
+
+    /// EC-1 M-3b review-0 item 1: the persisted g1 aggregate must count the
+    /// FULL resolver output, surviving a resolved CALLS result that is
+    /// deliberately NOT materialized as a stored row (the M-6 per-language
+    /// drop happens at the storage-insert layer). A row-derived recompute
+    /// would persist the filtered undercount; the supplied stream-side
+    /// tally must not.
+    #[test]
+    fn aggregate_counts_full_resolver_output_when_a_calls_row_is_not_materialized() {
+        let mut storage = MockStorage {
+            // Storage refuses to materialize ONE of the two resolved CALLS
+            // results — the resolver output is unaffected.
+            drop_calls_with_uid: Some("edge-call-a2b".to_string()),
+            ..MockStorage::default()
+        };
+        let mut ext = CallsPairExtractor {
+            langs: vec!["typescript".into()],
+            builtins: RuntimeBuiltinsSet {
+                identifiers: vec![],
+                module_specifiers: vec![],
+            },
+        };
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+        let files = vec![FileInput {
+            rel_path: "src/lib.ts".into(),
+            content: "// bodies irrelevant — CallsPairExtractor fabricates the graph".into(),
+            content_hash: "hash1".into(),
+            size_bytes: 10,
+            line_count: 1,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }];
+
+        let result = index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &files,
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+
+        // Both CALLS edges resolved (exact stable-key matches; none
+        // unresolved) — the full resolution stream carries 2.
+        assert_eq!(result.edges_unresolved, 0);
+        let stored_calls = storage
+            .resolved_edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls)
+            .count();
+        assert_eq!(
+            stored_calls, 1,
+            "precondition: storage materialized only ONE of the two resolved CALLS results"
+        );
+        assert_eq!(
+            storage.persisted_resolved_call_aggregate,
+            Some(2),
+            "the persisted aggregate must carry the FULL resolver-output count (2), \
+             not the materialized row count (1) — a row-derived recompute would \
+             persist the M-6 undercount this slice exists to prevent"
+        );
+    }
+
     #[test]
     fn index_repo_populates_real_phase_timings() {
         // PERF-INSTRUMENTATION-1: the orchestrator measures the REAL phase
@@ -2578,6 +2792,9 @@ mod tests {
             }
             fn update_snapshot_counts(&mut self, s: &str) -> Result<(), String> {
                 self.inner.update_snapshot_counts(s)
+            }
+            fn persist_resolved_call_aggregate(&mut self, s: &str, c: u64) -> Result<(), String> {
+                self.inner.persist_resolved_call_aggregate(s, c)
             }
             fn update_snapshot_extraction_diagnostics(
                 &mut self,

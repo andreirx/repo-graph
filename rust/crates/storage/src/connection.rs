@@ -36,7 +36,7 @@
 //!
 //! 1. `open(path)` or `open_in_memory()` → opens the SQLite
 //!    connection, applies WAL + foreign_keys pragmas via the
-//!    migration runner, applies all 29 migrations. Returns
+//!    migration runner, applies all 30 migrations. Returns
 //!    `Ok(StorageConnection)` on success.
 //!
 //! 2. The migration runner is called via
@@ -79,7 +79,7 @@ use crate::migrations::run_migrations;
 /// Owned, fully-initialized connection to a storage database.
 ///
 /// Construction via `open(path)` or `open_in_memory()` opens the
-/// underlying SQLite connection AND runs all 29 migrations
+/// underlying SQLite connection AND runs all 30 migrations
 /// before returning. A successfully-constructed
 /// `StorageConnection` is guaranteed to be backed by a database
 /// at the latest schema version. There is no uninitialized
@@ -368,7 +368,7 @@ mod tests {
     fn open_in_memory_returns_a_fully_initialized_connection() {
         let storage = StorageConnection::open_in_memory().expect("open_in_memory must succeed");
 
-        // Verify all 29 migrations have been applied by checking
+        // Verify all 30 migrations have been applied by checking
         // the schema_migrations table count.
         let count: i64 = storage
             .connection()
@@ -377,8 +377,8 @@ mod tests {
             })
             .expect("query schema_migrations");
         assert_eq!(
-            count, 29,
-            "open_in_memory must run all 29 migrations before returning"
+            count, 30,
+            "open_in_memory must run all 30 migrations before returning"
         );
     }
 
@@ -457,7 +457,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 29);
+        assert_eq!(count, 30);
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
             "row written in first session must persist across re-open"
         );
 
-        // Verify schema_migrations still has exactly 29 rows
+        // Verify schema_migrations still has exactly 30 rows
         // (re-open did not duplicate any).
         let migration_count: i64 = storage_again
             .connection()
@@ -508,7 +508,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            migration_count, 29,
+            migration_count, 30,
             "re-open must not duplicate schema_migrations rows"
         );
     }
@@ -541,7 +541,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 29);
+        assert_eq!(count, 30);
     }
 
     #[test]

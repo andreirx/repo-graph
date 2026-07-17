@@ -333,12 +333,14 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
         // Run promotion filter
         let result = promote_edges(&candidates, &ctx);
 
-        // Delete previously promoted edges (idempotency)
-        let promoted_uids: Vec<_> = result.promoted.iter().map(|e| e.edge_uid.clone()).collect();
-        self.storage.delete_edges_by_uids(&promoted_uids)?;
-
-        // Insert newly promoted edges
-        let persisted_count = self.storage.insert_promoted_edges(&result.promoted)?;
+        // Persist the promotion result ATOMICALLY (EC-1 M-3b): delete
+        // previously-promoted uids (idempotency), insert the new set, and
+        // adjust the persisted resolved-call aggregate by the net CALLS-row
+        // delta — one transaction, so the aggregate and the rows move
+        // together on every success/failure exit (never stale).
+        let persisted_count = self
+            .storage
+            .apply_promotion(snapshot_uid, &result.promoted)?;
 
         Ok(result.to_report(candidates.len(), Some(persisted_count)))
     }

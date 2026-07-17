@@ -113,11 +113,35 @@ pub trait EnrichmentStoragePort {
         class_stable_key: &str,
     ) -> Result<Vec<(String, SymbolInfo)>, StorageError>; // (method_name, method_info)
 
-    /// Delete edges by UID (for idempotent re-promotion).
-    fn delete_edges_by_uids(&self, edge_uids: &[String]) -> Result<usize, StorageError>;
-
-    /// Insert promoted edges.
-    fn insert_promoted_edges(&self, edges: &[PromotedEdge]) -> Result<usize, StorageError>;
+    /// Apply a promotion result to storage ATOMICALLY (EC-1 M-3b).
+    ///
+    /// Performs, as ONE all-or-nothing unit:
+    /// 1. delete any previously-promoted edges carrying the same uids
+    ///    (idempotent re-promotion — unchanged selection semantics),
+    /// 2. insert the newly promoted edges (per-edge insert failures are
+    ///    tolerated and logged, exactly as before — partial success within
+    ///    the set is acceptable; only the ROWS THAT ACTUALLY LANDED count),
+    /// 3. adjust the persisted snapshot-level resolved-call aggregate by
+    ///    the net CALLS-row delta of steps 1–2.
+    ///
+    /// Returns the number of edges actually inserted.
+    ///
+    /// Atomicity is the honesty mechanism (review-0 item 2): promotion
+    /// mutates the resolved CALLS row set AFTER index/refresh finalization,
+    /// and the trust core PREFERS the persisted aggregate — so the
+    /// aggregate must move with the rows or not at all. On any hard failure
+    /// the transaction rolls back: rows and aggregate both revert, and the
+    /// aggregate still exactly describes the stored state. The aggregate is
+    /// adjusted by delta — never recomputed from the `edges` table, which
+    /// becomes a filtered subset of the resolution stream after a
+    /// per-language CALLS-row drop (M-6). A snapshot with NO persisted
+    /// aggregate (pre-migration) keeps NULL: never seeded, so the labeled
+    /// live-COUNT fallback keeps applying.
+    fn apply_promotion(
+        &self,
+        snapshot_uid: &str,
+        promoted: &[PromotedEdge],
+    ) -> Result<usize, StorageError>;
 
     /// Get the repository root path.
     fn get_repo_root(&self, repo_uid: &str) -> Result<String, StorageError>;
@@ -254,11 +278,13 @@ impl EnrichmentStoragePort for InMemoryEnrichmentStorage {
             .unwrap_or_default())
     }
 
-    fn delete_edges_by_uids(&self, _edge_uids: &[String]) -> Result<usize, StorageError> {
-        Ok(0)
-    }
-
-    fn insert_promoted_edges(&self, _edges: &[PromotedEdge]) -> Result<usize, StorageError> {
+    fn apply_promotion(
+        &self,
+        _snapshot_uid: &str,
+        _promoted: &[PromotedEdge],
+    ) -> Result<usize, StorageError> {
+        // In-memory: no persisted rows or aggregate (same stub level as the
+        // write methods the SQLite adapter implements for real).
         Ok(0)
     }
 

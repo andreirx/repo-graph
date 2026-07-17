@@ -529,43 +529,63 @@ impl EnrichmentStoragePort for StorageConnection {
         Ok(methods)
     }
 
-    fn delete_edges_by_uids(&self, edge_uids: &[String]) -> Result<usize, EnrichmentStorageError> {
-        if edge_uids.is_empty() {
+    fn apply_promotion(
+        &self,
+        snapshot_uid: &str,
+        promoted: &[PromotedEdge],
+    ) -> Result<usize, EnrichmentStorageError> {
+        if promoted.is_empty() {
+            // Nothing to delete (the idempotency delete targets exactly the
+            // promoted uids) and nothing to insert → net delta 0; skip the
+            // transaction entirely.
             return Ok(0);
         }
 
         let conn = self.connection();
-        let mut count = 0;
+        // ONE transaction for delete + insert + aggregate adjustment
+        // (review-0 item 2): the trust core PREFERS the persisted
+        // aggregate, so it must move with the rows or not at all. Any hard
+        // error below propagates with `?`; dropping the uncommitted
+        // transaction rolls EVERYTHING back — rows and aggregate revert
+        // together, and the aggregate still exactly describes the stored
+        // state. `unchecked_transaction` because this port takes `&self`
+        // (same pattern as retention/prune.rs).
+        let tx = conn.unchecked_transaction().map_err(StorageError::from)?;
 
-        // Delete in batches to avoid SQL length limits
-        for chunk in edge_uids.chunks(100) {
+        // 1. Idempotency delete of the promoted uids, counting the CALLS
+        //    rows actually removed (exact accounting for the aggregate
+        //    delta; consistent because the SELECT and DELETE share the
+        //    transaction). Chunked to avoid SQL length limits (same bound
+        //    as the pre-M-3b implementation).
+        let uids: Vec<&str> = promoted.iter().map(|e| e.edge_uid.as_str()).collect();
+        let mut deleted_calls: i64 = 0;
+        for chunk in uids.chunks(100) {
             let placeholders: Vec<String> = chunk
                 .iter()
                 .map(|uid| format!("'{}'", uid.replace('\'', "''")))
                 .collect();
+            let list = placeholders.join(", ");
 
-            let sql = format!(
-                "DELETE FROM edges WHERE edge_uid IN ({})",
-                placeholders.join(", ")
-            );
+            let chunk_calls: i64 = tx
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM edges WHERE edge_uid IN ({list}) AND type = 'CALLS'"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StorageError::from)?;
+            deleted_calls += chunk_calls;
 
-            count += conn.execute(&sql, []).map_err(StorageError::from)?;
+            tx.execute(&format!("DELETE FROM edges WHERE edge_uid IN ({list})"), [])
+                .map_err(StorageError::from)?;
         }
 
-        Ok(count)
-    }
-
-    fn insert_promoted_edges(
-        &self,
-        edges: &[PromotedEdge],
-    ) -> Result<usize, EnrichmentStorageError> {
-        if edges.is_empty() {
-            return Ok(0);
-        }
-
-        let conn = self.connection();
-        let mut count = 0;
-
+        // 2. Insert the newly promoted edges. Per-edge failures tolerated
+        //    and logged (pre-existing promotion semantics — partial success
+        //    within the set is acceptable); the aggregate delta counts ONLY
+        //    the CALLS rows that actually landed, so it stays exact even
+        //    when some inserts are skipped.
         let sql = r#"
             INSERT INTO edges (
                 edge_uid,
@@ -584,51 +604,71 @@ impl EnrichmentStoragePort for StorageConnection {
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         "#;
 
-        let mut stmt = conn.prepare(sql).map_err(StorageError::from)?;
+        let mut inserted: usize = 0;
+        let mut inserted_calls: i64 = 0;
+        {
+            let mut stmt = tx.prepare(sql).map_err(StorageError::from)?;
 
-        for edge in edges {
-            let (line_start, col_start, line_end, col_end) = edge
-                .location
-                .as_ref()
-                .map(|loc| {
-                    (
-                        Some(loc.line_start as i64),
-                        Some(loc.col_start as i64),
-                        Some(loc.line_end as i64),
-                        Some(loc.col_end as i64),
-                    )
-                })
-                .unwrap_or((None, None, None, None));
+            for edge in promoted {
+                let (line_start, col_start, line_end, col_end) = edge
+                    .location
+                    .as_ref()
+                    .map(|loc| {
+                        (
+                            Some(loc.line_start as i64),
+                            Some(loc.col_start as i64),
+                            Some(loc.line_end as i64),
+                            Some(loc.col_end as i64),
+                        )
+                    })
+                    .unwrap_or((None, None, None, None));
 
-            let result = stmt.execute(rusqlite::params![
-                edge.edge_uid,
-                edge.snapshot_uid,
-                edge.repo_uid,
-                edge.source_node_uid,
-                edge.target_node_uid,
-                edge.edge_type,
-                edge.resolution,
-                edge.extractor,
-                line_start,
-                col_start,
-                line_end,
-                col_end,
-                edge.metadata_json,
-            ]);
+                let result = stmt.execute(rusqlite::params![
+                    edge.edge_uid,
+                    edge.snapshot_uid,
+                    edge.repo_uid,
+                    edge.source_node_uid,
+                    edge.target_node_uid,
+                    edge.edge_type,
+                    edge.resolution,
+                    edge.extractor,
+                    line_start,
+                    col_start,
+                    line_end,
+                    col_end,
+                    edge.metadata_json,
+                ]);
 
-            match result {
-                Ok(_) => count += 1,
-                Err(e) => {
-                    // Log but continue - partial success acceptable
-                    eprintln!(
-                        "warning: failed to insert promoted edge {}: {}",
-                        edge.edge_uid, e
-                    );
+                match result {
+                    Ok(_) => {
+                        inserted += 1;
+                        if edge.edge_type == "CALLS" {
+                            inserted_calls += 1;
+                        }
+                    }
+                    Err(e) => {
+                        // Log but continue - partial success acceptable
+                        eprintln!(
+                            "warning: failed to insert promoted edge {}: {}",
+                            edge.edge_uid, e
+                        );
+                    }
                 }
             }
-        }
+        } // stmt dropped before commit (it borrows the transaction)
 
-        Ok(count)
+        // 3. Adjust the persisted aggregate by the net CALLS delta INSIDE
+        //    the same transaction (crud/snapshots.rs holds the write
+        //    census). NULL-propagating: a pre-migration snapshot keeps NULL
+        //    (never seeded — the labeled live-COUNT fallback applies).
+        crate::crud::snapshots::adjust_resolved_call_aggregate(
+            &tx,
+            snapshot_uid,
+            inserted_calls - deleted_calls,
+        )?;
+
+        tx.commit().map_err(StorageError::from)?;
+        Ok(inserted)
     }
 
     fn get_repo_root(&self, repo_uid: &str) -> Result<String, EnrichmentStorageError> {
@@ -772,21 +812,12 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_edges_empty() {
+    fn test_apply_promotion_empty() {
         let conn = setup_test_db();
 
-        // Explicitly call trait method (inherent method on StorageConnection returns ())
-        let count = EnrichmentStoragePort::delete_edges_by_uids(&conn, &[]).unwrap();
-
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_insert_promoted_edges_empty() {
-        let conn = setup_test_db();
-
-        // Explicitly call trait method
-        let count = EnrichmentStoragePort::insert_promoted_edges(&conn, &[]).unwrap();
+        // Empty promotion set: nothing deleted, nothing inserted, no
+        // transaction opened, aggregate untouched.
+        let count = EnrichmentStoragePort::apply_promotion(&conn, "snap-1", &[]).unwrap();
 
         assert_eq!(count, 0);
     }
@@ -971,6 +1002,186 @@ mod tests {
         assert_eq!(
             result.promoted[0].target_node_uid, "n-engine-run",
             "the promoted CALLS edge targets the resolved impl method"
+        );
+    }
+
+    // ── EC-1 M-3b: apply_promotion keeps rows + aggregate coherent ─────────────
+    //
+    // Promotion mutates the resolved CALLS row set AFTER index finalization, so
+    // `run_promotion` persists its result through the atomic `apply_promotion`:
+    // delete-by-uid + insert + aggregate delta in ONE transaction. These tests
+    // drive the REAL SQL through the adapter and assert persisted-vs-live parity
+    // on the success path, across an idempotent re-promotion, and across a
+    // forced mid-transaction failure (rollback — never a stale aggregate).
+    // (The full pipeline→tail path needs a live resolver toolchain and is not
+    // drivable in unit tests; the call site is a direct `?`-propagated port
+    // call in `run_promotion`.)
+
+    /// Baseline + one promoted edge, shared by the promotion tests:
+    /// one pipeline-resolved CALLS row and the finalize-time aggregate
+    /// write (what run_pipeline Phase 5 does — supplied stream count 1).
+    fn seed_promotion_baseline() -> (StorageConnection, String) {
+        let (mut storage, snap, _engine_key) = seed_rust_type_with_impl_method();
+        storage
+            .insert_edges(&[crate::types::GraphEdge {
+                edge_uid: "e-base".to_string(),
+                snapshot_uid: snap.clone(),
+                repo_uid: "r1".to_string(),
+                source_node_uid: "n-engine-run".to_string(),
+                target_node_uid: "n-other-run".to_string(),
+                edge_type: "CALLS".to_string(),
+                resolution: "static".to_string(),
+                extractor: "test:0.0.1".to_string(),
+                location: None,
+                metadata_json: None,
+            }])
+            .unwrap();
+        storage.persist_resolved_call_aggregate(&snap, 1).unwrap();
+        (storage, snap)
+    }
+
+    fn promoted_calls_edge(uid: &str, snap: &str) -> enrichment::PromotedEdge {
+        enrichment::PromotedEdge {
+            edge_uid: uid.to_string(),
+            snapshot_uid: snap.to_string(),
+            repo_uid: "r1".to_string(),
+            source_node_uid: "n-engine".to_string(),
+            target_node_uid: "n-engine-run".to_string(),
+            edge_type: "CALLS",
+            resolution: "enriched",
+            extractor: "enrichment:0.1.0".to_string(),
+            location: None,
+            metadata_json: "{}".to_string(),
+        }
+    }
+
+    fn assert_promotion_parity(storage: &StorageConnection, snap: &str, expected: u64, ctx: &str) {
+        use repo_graph_trust::TrustStorageRead;
+        let live = TrustStorageRead::count_edges_by_type(storage, snap, "CALLS").unwrap();
+        let aggregate = TrustStorageRead::get_resolved_call_aggregate(storage, snap)
+            .unwrap()
+            .expect("aggregate persisted");
+        assert_eq!(live, expected, "{ctx}: live CALLS rows");
+        assert_eq!(
+            aggregate.count, live,
+            "{ctx}: persisted aggregate == live COUNT (parity window)"
+        );
+        assert_eq!(
+            aggregate.provenance,
+            crate::crud::snapshots::RESOLVED_CALL_PROVENANCE_PIPELINE,
+            "{ctx}: provenance label survives"
+        );
+    }
+
+    #[test]
+    fn apply_promotion_success_keeps_aggregate_parity_and_is_idempotent() {
+        let (storage, snap) = seed_promotion_baseline();
+        assert_promotion_parity(&storage, &snap, 1, "baseline");
+
+        // Promotion lands a new resolved CALLS row: net +1, atomic.
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            &[promoted_calls_edge("promoted:e1", &snap)],
+        )
+        .unwrap();
+        assert_eq!(inserted, 1);
+        assert_promotion_parity(&storage, &snap, 2, "after promotion");
+
+        // Idempotent re-promotion of the SAME uid: delete 1 + insert 1 →
+        // net 0. The delete-side counting keeps the arithmetic exact.
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            &[promoted_calls_edge("promoted:e1", &snap)],
+        )
+        .unwrap();
+        assert_eq!(inserted, 1);
+        assert_promotion_parity(&storage, &snap, 2, "after re-promotion");
+    }
+
+    /// review-0 item 2 (failure path): a hard failure AFTER rows were
+    /// already mutated inside the promotion transaction must roll back
+    /// EVERYTHING — rows and aggregate revert together; the aggregate is
+    /// never stale relative to a partial mutation.
+    ///
+    /// Mechanism: 101 previously-promoted rows force TWO delete chunks
+    /// (chunk size 100). A SQLite trigger aborts the DELETE that touches
+    /// the 101st uid, so chunk 1's 100 deletions have already executed
+    /// inside the transaction when the hard error fires — the exact
+    /// "batched deletion partially mutates rows before returning an error"
+    /// scenario from the review.
+    #[test]
+    fn apply_promotion_hard_failure_rolls_back_rows_and_aggregate() {
+        let (storage, snap) = seed_promotion_baseline();
+
+        // 101 previously-promoted CALLS rows (a prior promotion pass).
+        let prior: Vec<enrichment::PromotedEdge> = (0..101)
+            .map(|i| promoted_calls_edge(&format!("promoted:e{i:03}"), &snap))
+            .collect();
+        let inserted = EnrichmentStoragePort::apply_promotion(&storage, &snap, &prior).unwrap();
+        assert_eq!(inserted, 101);
+        assert_promotion_parity(&storage, &snap, 102, "after prior promotion");
+
+        // Injected hard failure on the SECOND delete chunk (uid index 100).
+        storage
+            .connection()
+            .execute_batch(
+                "CREATE TRIGGER fail_on_e100 BEFORE DELETE ON edges \
+                 WHEN OLD.edge_uid = 'promoted:e100' \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-promotion failure'); END",
+            )
+            .unwrap();
+
+        // Re-promotion of the same 101 uids now dies mid-delete.
+        let result = EnrichmentStoragePort::apply_promotion(&storage, &snap, &prior);
+        assert!(
+            result.is_err(),
+            "the injected trigger must surface as a hard error"
+        );
+
+        // Rollback proof: chunk 1's 100 deletions were undone with the
+        // transaction — rows AND aggregate exactly as before the call.
+        assert_promotion_parity(&storage, &snap, 102, "after failed promotion");
+
+        // Recovery: drop the trigger; the same promotion applies cleanly
+        // (delete 101 + insert 101 → net 0).
+        storage
+            .connection()
+            .execute_batch("DROP TRIGGER fail_on_e100")
+            .unwrap();
+        let inserted = EnrichmentStoragePort::apply_promotion(&storage, &snap, &prior).unwrap();
+        assert_eq!(inserted, 101);
+        assert_promotion_parity(&storage, &snap, 102, "after recovery");
+    }
+
+    /// A snapshot with NO persisted aggregate (pre-migration shape) keeps
+    /// NULL through a real promotion: the delta is NULL-propagating and the
+    /// aggregate is never seeded from row counts — the labeled live-COUNT
+    /// fallback stays in force (unknown is never fabricated).
+    #[test]
+    fn apply_promotion_never_seeds_a_missing_aggregate() {
+        use repo_graph_trust::TrustStorageRead;
+
+        let (storage, snap, _engine_key) = seed_rust_type_with_impl_method();
+        assert_eq!(
+            TrustStorageRead::get_resolved_call_aggregate(&storage, &snap).unwrap(),
+            None,
+            "precondition: pre-migration shape (no aggregate)"
+        );
+
+        let inserted = EnrichmentStoragePort::apply_promotion(
+            &storage,
+            &snap,
+            &[promoted_calls_edge("promoted:e1", &snap)],
+        )
+        .unwrap();
+        assert_eq!(inserted, 1, "the promotion itself lands");
+
+        assert_eq!(
+            TrustStorageRead::get_resolved_call_aggregate(&storage, &snap).unwrap(),
+            None,
+            "aggregate stays explicitly unavailable — fallback applies; never seeded"
         );
     }
 

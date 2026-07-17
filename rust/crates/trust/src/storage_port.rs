@@ -63,6 +63,34 @@ pub struct PathPrefixModuleCycle {
     pub descendant_stable_key: String,
 }
 
+/// The persisted snapshot-level resolved-call aggregate (EC-1 M-3b, g1).
+///
+/// Written by the pipeline at index/refresh finalization (supplied from
+/// the resolver's full output stream) and adjusted atomically by
+/// enrichment promotion; the trust service serves `resolved_calls` from
+/// it instead of an eager read-time `COUNT` over CALLS rows.
+///
+/// An instance of this DTO is a VALIDATED claim: the adapter only
+/// constructs it from a well-formed persisted state (non-negative count,
+/// non-empty provenance label). Invalid persisted states — a negative
+/// count, a count with no label — are NOT representable here; the adapter
+/// degrades them to "no aggregate" so the labeled live-COUNT fallback
+/// serves instead (a corrupt column must never surface as a measured
+/// value; unknown is never zero).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedCallAggregate {
+    /// The snapshot's resolved CALLS-edge count as persisted by the
+    /// pipeline (full resolution stream, all languages).
+    pub count: u64,
+    /// Explicit provenance label per the ratified interim rule (EC-1 §8
+    /// clause (c)): `"pipeline"` today. Always present — an unlabeled
+    /// count does not reach consumers. Future accountings (recon-design-1)
+    /// will carry their own label; consumers match on the value, they do
+    /// not assume `"pipeline"` is the only one.
+    pub provenance: String,
+}
+
 /// One row from a classification-grouped unresolved-edge count.
 ///
 /// Uses `UnresolvedEdgeClassification` as the typed key instead
@@ -213,7 +241,24 @@ pub trait TrustStorageRead {
     ) -> Result<Option<String>, Self::Error>;
 
     /// Count resolved edges of a specific type in a snapshot.
+    ///
+    /// Since EC-1 M-3b this is NOT on the default `resolved_calls` serving
+    /// path: the service reads the persisted aggregate
+    /// ([`Self::get_resolved_call_aggregate`]) and uses this live COUNT only
+    /// as the labeled fallback for pre-migration snapshots (no aggregate
+    /// persisted, CALLS rows still present).
     fn count_edges_by_type(&self, snapshot_uid: &str, edge_type: &str) -> Result<u64, Self::Error>;
+
+    /// Read the persisted snapshot-level resolved-call aggregate (EC-1 M-3b).
+    ///
+    /// Returns `Ok(None)` for snapshots without a persisted aggregate — a
+    /// pre-migration snapshot or a missing snapshot — never a fabricated
+    /// zero. The caller must fall back to the live CALLS-row count in that
+    /// case (unknown is never zero).
+    fn get_resolved_call_aggregate(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Option<ResolvedCallAggregate>, Self::Error>;
 
     /// Count active declarations of a specific kind for a repo.
     fn count_active_declarations(&self, repo_uid: &str, kind: &str) -> Result<usize, Self::Error>;

@@ -32,8 +32,8 @@ use repo_graph_classification::types::{
 use repo_graph_trust::storage_port::{
     BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
     ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
-    QueryUnresolvedEdgesInput, TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample,
-    UnresolvedEdgeBasisCode,
+    QueryUnresolvedEdgesInput, ResolvedCallAggregate, TrustModuleStats, TrustStorageRead,
+    TrustUnresolvedEdgeSample, UnresolvedEdgeBasisCode,
 };
 
 use crate::connection::StorageConnection;
@@ -185,6 +185,53 @@ impl TrustStorageRead for StorageConnection {
             |row| row.get(0),
         )?;
         Ok(count as u64)
+    }
+
+    fn get_resolved_call_aggregate(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Option<ResolvedCallAggregate>, StorageError> {
+        // EC-1 M-3b (g1): the persisted snapshot-level resolved-call count,
+        // written by `persist_resolved_call_aggregate` (pipeline finalize)
+        // and adjusted by the promotion transaction. Missing snapshot OR
+        // NULL count both map to Ok(None) — "no persisted aggregate" (the
+        // caller falls back to the live COUNT; unknown is never zero). Same
+        // missing-row convention as `get_snapshot_extraction_diagnostics`.
+        //
+        // VALIDATION (review-0 item 3): a persisted state the sanctioned
+        // writers cannot produce — a NEGATIVE count, or a count with a
+        // missing/empty provenance label — is corrupt, and a corrupt column
+        // must never surface as a measurement. It explicitly DEGRADES to
+        // Ok(None): the labeled live-COUNT fallback serves the honest value
+        // instead. Degrade (not error): the trust report should not be
+        // unreachable because one derived column is damaged, and the
+        // fallback IS the defined honest source for "no usable aggregate".
+        // A clamp (`max(0)`) was rejected — it would fabricate a measured
+        // zero from garbage.
+        let result = self.connection().query_row(
+            "SELECT resolved_call_count, resolved_call_provenance \
+             FROM snapshots WHERE snapshot_uid = ?",
+            rusqlite::params![snapshot_uid],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        );
+        match result {
+            Ok((Some(count), Some(provenance))) if count >= 0 && !provenance.is_empty() => {
+                Ok(Some(ResolvedCallAggregate {
+                    count: count as u64,
+                    provenance,
+                }))
+            }
+            // Well-formed absence (NULL count) or invalid persisted state
+            // (negative count / unlabeled count): no servable aggregate.
+            Ok(_) => Ok(None),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Sqlite(e)),
+        }
     }
 
     fn count_active_declarations(&self, repo_uid: &str, kind: &str) -> Result<usize, StorageError> {
@@ -683,6 +730,105 @@ mod tests {
         let snap_uid = setup_with_snapshot(&storage);
         let count = TrustStorageRead::count_edges_by_type(&storage, &snap_uid, "CALLS");
         assert_eq!(count.unwrap(), 0);
+    }
+
+    // ── get_resolved_call_aggregate (EC-1 M-3b) ───────────────
+
+    #[test]
+    fn resolved_call_aggregate_none_for_missing_snapshot() {
+        let storage = setup();
+        let result = TrustStorageRead::get_resolved_call_aggregate(&storage, "nonexistent");
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn resolved_call_aggregate_none_when_not_persisted() {
+        // A pre-migration snapshot: the row exists but carries no
+        // aggregate. None → the service falls back to the live COUNT;
+        // never a fabricated zero.
+        let storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        let result = TrustStorageRead::get_resolved_call_aggregate(&storage, &snap_uid);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn resolved_call_aggregate_reads_persisted_value_and_label() {
+        let storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        // Persist through the ONE production writer with a SUPPLIED
+        // stream-side count of 0: measured zero (Some(0)) is distinct from
+        // not-persisted (None) — the unknown-is-never-zero boundary in
+        // both directions.
+        storage
+            .persist_resolved_call_aggregate(&snap_uid, 0)
+            .unwrap();
+        let aggregate = TrustStorageRead::get_resolved_call_aggregate(&storage, &snap_uid)
+            .unwrap()
+            .expect("aggregate persisted");
+        assert_eq!(aggregate.count, 0);
+        assert_eq!(
+            aggregate.provenance,
+            crate::crud::snapshots::RESOLVED_CALL_PROVENANCE_PIPELINE
+        );
+    }
+
+    /// review-0 item 3: invalid persisted states DEGRADE to None (the
+    /// labeled live-COUNT fallback) — never surface as a measurement.
+    /// A negative count previously clamped to a fabricated measured 0.
+    #[test]
+    fn resolved_call_aggregate_degrades_negative_count_to_none() {
+        let storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        // Corrupt state no sanctioned writer can produce (hand-edited DB).
+        storage
+            .connection()
+            .execute(
+                "UPDATE snapshots SET resolved_call_count = -3, \
+                 resolved_call_provenance = 'pipeline' WHERE snapshot_uid = ?",
+                rusqlite::params![snap_uid],
+            )
+            .unwrap();
+        assert_eq!(
+            TrustStorageRead::get_resolved_call_aggregate(&storage, &snap_uid).unwrap(),
+            None,
+            "negative persisted count is corrupt → degrade to fallback, never a measured value"
+        );
+    }
+
+    /// A count with no provenance label (or an empty one) is an unlabeled
+    /// claim no sanctioned writer produces — degrade to None, fallback
+    /// serves.
+    #[test]
+    fn resolved_call_aggregate_degrades_unlabeled_count_to_none() {
+        let storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        storage
+            .connection()
+            .execute(
+                "UPDATE snapshots SET resolved_call_count = 5, \
+                 resolved_call_provenance = NULL WHERE snapshot_uid = ?",
+                rusqlite::params![snap_uid],
+            )
+            .unwrap();
+        assert_eq!(
+            TrustStorageRead::get_resolved_call_aggregate(&storage, &snap_uid).unwrap(),
+            None,
+            "a count with no provenance label must not be served"
+        );
+
+        storage
+            .connection()
+            .execute(
+                "UPDATE snapshots SET resolved_call_provenance = '' WHERE snapshot_uid = ?",
+                rusqlite::params![snap_uid],
+            )
+            .unwrap();
+        assert_eq!(
+            TrustStorageRead::get_resolved_call_aggregate(&storage, &snap_uid).unwrap(),
+            None,
+            "an empty provenance label is equally unlabeled"
+        );
     }
 
     // ── count_active_declarations ─────────────────────────────

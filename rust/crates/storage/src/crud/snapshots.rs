@@ -25,6 +25,15 @@ const SNAPSHOT_STATUS_BUILDING: &str = "building";
 /// only, not the latest by timestamp regardless of status.
 const SNAPSHOT_STATUS_READY: &str = "ready";
 
+/// Provenance label stamped on the persisted resolved-call aggregate
+/// (EC-1 M-3b): the value is PIPELINE-derived — one coherent accounting,
+/// matching the trust denominator — per the ratified interim rule
+/// (EC-1 §8, D-EC-1/D-EC-7 supersession clause (c)). EXPLICITLY
+/// TEMPORARY: the reconciliation layer (recon-design-1) will introduce
+/// its own accounting/label; readers must treat this as a label to
+/// match on, never as the only value that can ever appear.
+pub const RESOLVED_CALL_PROVENANCE_PIPELINE: &str = "pipeline";
+
 impl StorageConnection {
     /// Create a new snapshot row in `BUILDING` status.
     ///
@@ -211,6 +220,57 @@ impl StorageConnection {
 			   edges_total = (SELECT COUNT(*) FROM edges WHERE snapshot_uid = ?) \
 			 WHERE snapshot_uid = ?",
             rusqlite::params![snapshot_uid, snapshot_uid, snapshot_uid, snapshot_uid],
+        )?;
+        Ok(())
+    }
+
+    /// Persist the snapshot-level resolved-call aggregate (EC-1 M-3b, g1).
+    ///
+    /// Stores the SUPPLIED count — the index/refresh pipeline counts
+    /// resolved CALLS results in the resolver's OUTPUT stream, before any
+    /// storage materialization — and stamps the ratified interim-rule
+    /// provenance label ([`RESOLVED_CALL_PROVENANCE_PIPELINE`]).
+    ///
+    /// Deliberately NOT derived from the `edges` table: after a
+    /// per-language CALLS-row drop (EC-1 M-6), `edges` holds a FILTERED
+    /// subset of the resolution stream, and any `COUNT(*)` over it would
+    /// bake that undercount into the persisted value — the exact failure
+    /// M-3b exists to prevent. While no filtering exists (pre-M-6),
+    /// supplied-count-vs-live-COUNT parity is asserted by the validation
+    /// suite; post-M-6 the two legitimately diverge and the persisted
+    /// value is the honest one.
+    ///
+    /// Write census for the aggregate columns (both writers live in THIS
+    /// file so the census stays auditable):
+    /// - this function — `run_pipeline` Phase-5 finalization (fresh index
+    ///   AND delta refresh share it; the delta path re-resolves ALL
+    ///   extraction edges, copied-forward + fresh, so the supplied value
+    ///   is full-stream and language-complete),
+    /// - [`adjust_resolved_call_aggregate`] — the enrichment promotion
+    ///   transaction, which adjusts the aggregate by promotion's net
+    ///   CALLS-row delta INSIDE the same transaction as the row mutations
+    ///   (coherent on every success and failure exit).
+    ///
+    /// Deliberately NOT folded into [`Self::update_snapshot_counts`]: the
+    /// enrichment tail must adjust THIS aggregate without changing the
+    /// (currently promotion-stale) `files/nodes/edges_total` semantics.
+    pub fn persist_resolved_call_aggregate(
+        &self,
+        snapshot_uid: &str,
+        resolved_call_count: u64,
+    ) -> Result<(), StorageError> {
+        // The count comes from `len()` sums over in-memory resolver output;
+        // a value above i64::MAX cannot arise on a real machine. Assert
+        // rather than silently wrap — a wrapped negative would be
+        // fabricated data (the read side rejects negatives as invalid).
+        let count = i64::try_from(resolved_call_count)
+            .expect("resolved-call count exceeds i64::MAX — impossible for a len()-derived count");
+        self.connection().execute(
+            "UPDATE snapshots SET \
+			   resolved_call_count = ?, \
+			   resolved_call_provenance = ? \
+			 WHERE snapshot_uid = ?",
+            rusqlite::params![count, RESOLVED_CALL_PROVENANCE_PIPELINE, snapshot_uid],
         )?;
         Ok(())
     }
@@ -411,6 +471,38 @@ fn current_iso_timestamp(conn: &Connection) -> Result<String, StorageError> {
         row.get::<_, String>(0)
     })?;
     Ok(ts)
+}
+
+/// Adjust the persisted resolved-call aggregate by a net delta
+/// (EC-1 M-3b — the enrichment-promotion writer; see the write census on
+/// [`StorageConnection::persist_resolved_call_aggregate`]).
+///
+/// Takes a raw [`Connection`] so the caller can pass a
+/// `rusqlite::Transaction` (derefs to `Connection`): the promotion adapter
+/// MUST run this in the SAME transaction as its edge-row mutations, so the
+/// aggregate and the rows commit or roll back together — the aggregate is
+/// never stale relative to a partial mutation.
+///
+/// `resolved_call_count + delta` is NULL-propagating by SQL semantics:
+/// a snapshot with NO persisted aggregate (pre-migration; NULL) stays
+/// NULL — explicitly unavailable, so the trust core's labeled live-COUNT
+/// fallback applies. It is NEVER seeded here: seeding would require
+/// deriving a base from the `edges` table, which is exactly the
+/// filtered-subset accounting M-3b removes. Provenance is deliberately
+/// untouched: it is already stamped when a count exists and stays NULL
+/// when none does.
+pub(crate) fn adjust_resolved_call_aggregate(
+    conn: &Connection,
+    snapshot_uid: &str,
+    delta: i64,
+) -> Result<(), StorageError> {
+    conn.execute(
+        "UPDATE snapshots SET \
+		   resolved_call_count = resolved_call_count + ? \
+		 WHERE snapshot_uid = ?",
+        rusqlite::params![delta, snapshot_uid],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -940,5 +1032,134 @@ mod tests {
         assert_eq!(post.files_total, 1);
         assert_eq!(post.nodes_total, 2);
         assert_eq!(post.edges_total, 1);
+    }
+
+    /// Read the persisted g1 aggregate columns raw (test-side observer —
+    /// production reads go through `TrustStorageRead::get_resolved_call_aggregate`).
+    fn read_aggregate_columns(
+        storage: &StorageConnection,
+        snapshot_uid: &str,
+    ) -> (Option<i64>, Option<String>) {
+        storage
+            .connection()
+            .query_row(
+                "SELECT resolved_call_count, resolved_call_provenance \
+                 FROM snapshots WHERE snapshot_uid = ?",
+                rusqlite::params![snapshot_uid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn persist_resolved_call_aggregate_stores_supplied_count_and_stamps_provenance() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap = create_test_snapshot(&storage);
+
+        // Pre-persist: NULL (not persisted), never a fabricated zero.
+        assert_eq!(
+            read_aggregate_columns(&storage, &snap.snapshot_uid),
+            (None, None)
+        );
+
+        // The pipeline supplies the count it observed in the resolver's
+        // OUTPUT stream. The writer stores it verbatim — deliberately no
+        // `edges` involvement: this snapshot has ZERO edges rows, and the
+        // persisted value must still be the supplied 7 (the full-stream
+        // number survives non-materialization; EC-1 M-6).
+        storage
+            .persist_resolved_call_aggregate(&snap.snapshot_uid, 7)
+            .unwrap();
+
+        let (count, provenance) = read_aggregate_columns(&storage, &snap.snapshot_uid);
+        assert_eq!(
+            count,
+            Some(7),
+            "supplied count stored verbatim — never recomputed from edges rows"
+        );
+        assert_eq!(
+            provenance.as_deref(),
+            Some(RESOLVED_CALL_PROVENANCE_PIPELINE),
+            "the ratified interim-rule provenance label is stamped"
+        );
+    }
+
+    #[test]
+    fn persist_resolved_call_aggregate_zero_is_measured_zero_not_null() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap = create_test_snapshot(&storage);
+
+        storage
+            .persist_resolved_call_aggregate(&snap.snapshot_uid, 0)
+            .unwrap();
+
+        // 0 = measured-and-absent (distinct from NULL = not persisted).
+        let (count, provenance) = read_aggregate_columns(&storage, &snap.snapshot_uid);
+        assert_eq!(count, Some(0));
+        assert_eq!(
+            provenance.as_deref(),
+            Some(RESOLVED_CALL_PROVENANCE_PIPELINE)
+        );
+    }
+
+    #[test]
+    fn adjust_resolved_call_aggregate_applies_net_delta_and_keeps_label() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap = create_test_snapshot(&storage);
+
+        storage
+            .persist_resolved_call_aggregate(&snap.snapshot_uid, 5)
+            .unwrap();
+
+        // Promotion nets +2 CALLS rows…
+        crate::crud::snapshots::adjust_resolved_call_aggregate(
+            storage.connection(),
+            &snap.snapshot_uid,
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            read_aggregate_columns(&storage, &snap.snapshot_uid),
+            (Some(7), Some(RESOLVED_CALL_PROVENANCE_PIPELINE.to_string()))
+        );
+
+        // …and a later pass can net negative (re-promotion shrank the set).
+        crate::crud::snapshots::adjust_resolved_call_aggregate(
+            storage.connection(),
+            &snap.snapshot_uid,
+            -3,
+        )
+        .unwrap();
+        assert_eq!(
+            read_aggregate_columns(&storage, &snap.snapshot_uid),
+            (Some(4), Some(RESOLVED_CALL_PROVENANCE_PIPELINE.to_string()))
+        );
+    }
+
+    #[test]
+    fn adjust_resolved_call_aggregate_null_stays_null_never_seeded() {
+        let storage = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap = create_test_snapshot(&storage);
+
+        // Pre-migration shape: no persisted aggregate. Promotion on such a
+        // snapshot must NOT mint one (a seed would need an edges-derived
+        // base — the filtered accounting M-3b removes). NULL + delta = NULL
+        // by SQL semantics: explicitly unavailable → the labeled live-COUNT
+        // fallback applies.
+        crate::crud::snapshots::adjust_resolved_call_aggregate(
+            storage.connection(),
+            &snap.snapshot_uid,
+            3,
+        )
+        .unwrap();
+        assert_eq!(
+            read_aggregate_columns(&storage, &snap.snapshot_uid),
+            (None, None),
+            "NULL aggregate stays NULL under adjustment — never seeded, never labeled"
+        );
     }
 }
