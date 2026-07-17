@@ -47,3 +47,15 @@ reporting measured/Partial instead of null (raw artifact retained).
 
 The panic is unreachable (tested); the spike's artifact on the same fixture shows 0 panics
 with honest Partial degradation; gates green.
+
+---
+
+## 6. Delivery record (2026-07-17)
+
+**DELIVERED** (see the fail-soft commit; operator close on review-1's explicit
+"acceptance otherwise satisfied" + two ratifications: AST-FILE-SCOPE-REASON — the additive
+`StructuralNodeNoCallGraphContent` variant, after the reviewer correctly rejected the
+UnresolvedAlias reuse as contract-falsifying; REAL-WALK-TEST-SCOPE — the walk test lives
+with its fixture in livegraph-feed). livegraph_panic: 0 on the spike's re-run; the
+data-dependent daemon panic is unreachable (tested, no catch_unwind); RECON-DESIGN-1's
+exhaustive-walk precondition is cleared.
