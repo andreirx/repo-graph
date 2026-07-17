@@ -30,7 +30,9 @@
 > **HONEST SCOPE — coherence did NOT remove the eager SQLite read** [OBSERVED, first-hand: dispatch.rs base
 > use case unconditional in all four handlers]: the base use case still reads SQLite (incl. `nodes`/`edges`
 > for orient/explain/trust) every call; the envelope is assembled ON TOP. SQLite-FREE served count stays
-> **6/10**. So coherence is a SERVING + OUTPUT-HONESTY milestone, NOT an eager-read elimination.
+> **5/10** (corrected 2026-07-17 by the ENGINE-CONSOLIDATION-1 §3 inventory — the earlier
+> "6/10" over-counted; `path` serves pinned-SQLite by ratified posture, see EC-1 §3.4-5).
+> So coherence is a SERVING + OUTPUT-HONESTY milestone, NOT an eager-read elimination.
 > **THE OPTION-B PRODUCER INVESTIGATION CLOSED (NO-GO → Option A); the decommission goal is RE-BOUNDED.**
 > readiness-9 recommended Option B (eliminate the four coherence eager reads) as the incremental path to the
 > eventual global `nodes`/`edges` drop, leaving A-vs-B open. The four-commit arc that followed proved that path

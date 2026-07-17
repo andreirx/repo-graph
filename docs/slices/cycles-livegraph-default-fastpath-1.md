@@ -1,5 +1,11 @@
 # CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: cert-gated LiveGraph default for `rmap cycles`
 
+> **SUPERSEDED (2026-07-16, ENGINE-CONSOLIDATION-1 §8 / D-EC-4 ratified):** this
+> per-surface migration plan is retired. The consolidation end-state + milestone sequence
+> in `docs/slices/engine-consolidation-1.md` (as amended by `recon-design-1.md` §8)
+> replaces it. Kept for the historical record.
+
+
 Slice ID: CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1
 Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-08) — resumed after CYCLES-OUTPUT-CONTRACT-1 unblocked it.**
 D1–D5 ratified (D1=A compare-GREEN only). The slice was BLOCKED at the D4 byte-compatibility gate (the LiveGraph

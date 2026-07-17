@@ -1,5 +1,11 @@
 # ORIENT-SQLITE-FREE-1: eliminate `rmap orient`'s eager SQLite `nodes`/`edges` base read (Stage D)
 
+> **SUPERSEDED (2026-07-16, ENGINE-CONSOLIDATION-1 §8 / D-EC-4 ratified):** this
+> per-surface migration plan is retired. The consolidation end-state + milestone sequence
+> in `docs/slices/engine-consolidation-1.md` (as amended by `recon-design-1.md` §8)
+> replaces it. Kept for the historical record.
+
+
 Slice ID: ORIENT-SQLITE-FREE-1
 Status: **SPEC-FIRST — specification only. NO implementation, NO code, NO deletion, NO migration, NO default
 flip.** This document specifies how `rmap orient` would ELIMINATE its unconditional/eager SQLite base read,

@@ -1,5 +1,11 @@
 # IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1: skip the per-call SQLite read for the imports default
 
+> **SUPERSEDED (2026-07-16, ENGINE-CONSOLIDATION-1 §8 / D-EC-4 ratified):** this
+> per-surface migration plan is retired. The consolidation end-state + milestone sequence
+> in `docs/slices/engine-consolidation-1.md` (as amended by `recon-design-1.md` §8)
+> replaces it. Kept for the historical record.
+
+
 Slice ID: IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1
 Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-07). D1=C, D2=T1+S1.** The imports default now serves LiveGraph
 WITHOUT per-call SQLite when a GREEN repo cert is valid (live: amodx 1st call builds + fastpaths, 2nd file

@@ -1,5 +1,11 @@
 # PATH-LIVEGRAPH-DEFAULT-1: `rmap path` Default → auto (LiveGraph with SQLite fallback) (Stage D)
 
+> **SUPERSEDED (2026-07-16, ENGINE-CONSOLIDATION-1 §8 / D-EC-4 ratified):** this
+> per-surface migration plan is retired. The consolidation end-state + milestone sequence
+> in `docs/slices/engine-consolidation-1.md` (as amended by `recon-design-1.md` §8)
+> replaces it. Kept for the historical record.
+
+
 Slice ID: PATH-LIVEGRAPH-DEFAULT-1
 Status: **IMPLEMENTED + live-validated (2026-06-02).** `path` default flipped to `auto`; serves LiveGraph
 when Exact+Fresh+TS-only AND every rendered node has display metadata, else labelled SQLite fallback. A

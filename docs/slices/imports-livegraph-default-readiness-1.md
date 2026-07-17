@@ -1,5 +1,11 @@
 # IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1: measure whether LiveGraph can replace SQLite `rmap imports`
 
+> **SUPERSEDED (2026-07-16, ENGINE-CONSOLIDATION-1 §8 / D-EC-4 ratified):** this
+> per-surface migration plan is retired. The consolidation end-state + milestone sequence
+> in `docs/slices/engine-consolidation-1.md` (as amended by `recon-design-1.md` §8)
+> replaces it. Kept for the historical record.
+
+
 Slice ID: IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1
 Status: **IMPLEMENTED + MEASURED (2026-06-07). VERDICT: GREEN-SAFE (zero regression across D4); default flip
 DEFERRED to a separate slice.** D1=A; D2 directional no-loss; D3 precondition+sufficiency; D4 EXECUTED
