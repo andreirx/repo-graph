@@ -48,3 +48,27 @@ CI wiring proven (the gate actually executes it).
 
 C-6 holds and is enforced: reader-set drift and undeclared dispatch arms go red in CI;
 the initial manifest matches the ratified inventory; gates green.
+
+## 6. DELIVERY (2026-07-17)
+
+Delivered in 2 relay cycles (opus-4-8 builder, gpt-5.6-sol reviewer; cycle-1 revise
+tightened the guard: mechanical `#[cfg(test)]` verification of the test-scaffolding split,
+LG-writer fact classes corrected to FC1/FC2a/FC2b/FC4/FC8, RHS taxonomy validation,
+preload annotation fix).
+
+- **The witness:** `rust/crates/daemon-runtime/tests/consolidation_witness.rs` — a std-only
+  integration test riding the existing CI gate (`cargo test --workspace`, ci.yml:84; zero
+  new CI surface). 15 tests: 2 gates + violation fixtures (rogue reader, cfg-drift,
+  unknown/empty fact class, stale/missing arm — each proven RED, incl. real injected
+  violations reverted byte-exact).
+- **Manifests:** `witness/livegraph_reader_set.txt` (15 production reader files → the 12
+  ratified §3.3-A surfaces + 2 LG writers; 10 mechanically-verified cfg(test) scaffolding
+  files) and `witness/dispatch_fact_classes.txt` (66 lines == live arm count, classes
+  sourced from EC-1 §3.3, RHS-validated).
+- **STOP-condition result: NO FINDING** — today's tree matches the ratified sanctioned
+  list exactly; 66 arms reconcile with §3.3 (10+16+20+7+13).
+- Gates: witness 15/15 (builder + reviewer + operator EXECUTED); workspace 5141/0
+  (builder); fmt/clippy clean.
+
+**C-6 holds and is enforced**: reader-set drift and undeclared/mis-declared dispatch arms
+go red in CI. New features pay ONE integration by construction. M-1 complete.

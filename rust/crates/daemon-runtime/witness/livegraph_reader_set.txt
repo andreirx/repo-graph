@@ -1,0 +1,81 @@
+# livegraph_reader_set.txt — the sanctioned LiveGraph-field reader set (EC-1 M-1 / C-6)
+#
+# CONTRACT: docs/slices/ec-m1-witness-1.md §2.1; EC-1 (engine-consolidation-1.md)
+#           §5.1 C-6 + §5.2 M-1 + §3.3-A. Enforced by tests/consolidation_witness.rs.
+#
+# WHAT THIS PINS
+#   The `RepoState.livegraph` field (state.rs: `pub livegraph:
+#   RwLock<Option<LiveGraph>>`) is the in-memory current-state engine. EC-1 §7.3's
+#   method (from daemon-w-b-epoch-1.md §7.3) is: trace every FILE that reads that
+#   field crate-wide — NOT grep dispatch.rs — because a request handler reaches the
+#   field through a *called* serving/cert/coherence module, not from its own arm.
+#   This manifest is the committed, reviewed sanctioned list that method must equal.
+#   Drift (a new module reading the field) goes RED until this file is updated under
+#   review. New features pay ONE integration by construction (C-6).
+#
+# THE SANCTIONED SURFACES (ratified, M-1) — a production reader exists to serve
+# exactly one of these 12: the EC-1 §3.3-A mixed-read TEN request handlers
+#   callers, callees, path, imports, cycles, stats, orient, explain, trust,
+#   cycle_completeness_audit
+# plus the TWO LiveGraph WRITERS
+#   livegraph_preload, livegraph_refresh
+# The witness hard-codes this set (SANCTIONED_SURFACES) so a new surface cannot be
+# admitted silently — adding one requires a reviewed change to BOTH the witness
+# constant and this manifest (i.e. a ratified §3.3-A amendment).
+#
+# SCOPE: files under rust/crates/daemon-runtime/src (RepoState — and therefore its
+# `livegraph` field — is owned there; no other crate can name the field). A
+# "field read" is the token `.livegraph` NOT followed by `[A-Za-z0-9_]` — this is a
+# field access/by-ref pass and deliberately EXCLUDES the field DEFINITION
+# (`pub livegraph:`), construction (`livegraph: RwLock::new(..)`), the crate path
+# `repo_graph_livegraph::`, the modules `livegraph_feed`/`livegraph_refresh`, and
+# sibling identifiers (`livegraph_count`, `livegraph_only`, …).
+#
+# FORMAT
+#   [production]        one line per reader:  <src-relative path> = <surface>[, <surface>...]
+#   [test-scaffolding]  one line per file:    <src-relative path>
+# The witness asserts: computed field-reader files == ([production] ∪ [test-scaffolding])
+# (completeness + no-stale), every [production] surface ∈ the sanctioned 12, the UNION
+# of [production] surfaces == the sanctioned 12 exactly, AND every [test-scaffolding]
+# file is `#[cfg(test)]`-gated (mechanically — see the next note).
+#
+# WHY A [test-scaffolding] SECTION (decide-and-record): test modules set up / read
+# the field as fixtures; they are not serving modules, yet the file-granularity
+# reader scan sees them. Listing them (reviewed) keeps the completeness check exact,
+# while the sanctioned-list guarantee lives entirely on [production]. Every file here
+# is MECHANICALLY REQUIRED to be `#[cfg(test)]`-gated: the witness resolves each file's
+# `mod` inclusion chain to the crate root and asserts a `#[cfg(test)]` edge exists on
+# it (directly, or on an ancestor module — e.g. `explain_serve_tests/fanin_fixture.rs`
+# is gated by `#[cfg(test)] mod explain_serve_tests;` at lib.rs). So removing a parent
+# `#[cfg(test)]` — which would silently promote a listed test file into a PRODUCTION
+# field-reader without changing the file SET — goes RED (review-0 item 1). A real
+# serving module can no longer be parked here to dodge the surface check.
+
+[production]
+callgraph_cert/diff.rs                    = callers, callees, path
+callgraph_cert/mod.rs                     = callers, callees, path
+cycle_completeness_audit.rs               = cycle_completeness_audit
+dispatch.rs                               = orient, explain
+explain_coherence.rs                      = explain
+explain_lg_identity.rs                    = explain
+explain_lg_serve.rs                       = explain
+focus_resolution_cert/mod.rs              = orient, explain
+livegraph_feed.rs                         = callers, callees, path, imports, cycles, stats, livegraph_preload
+livegraph_refresh.rs                      = livegraph_refresh
+orient_lg_decisions.rs                    = orient
+orient_lg_decisions/complexity_cert.rs    = orient
+orient_serve/mod.rs                       = orient, explain
+orient_serve/storage_port_impl.rs         = orient, explain
+trust_coherence.rs                        = trust
+
+[test-scaffolding]
+callgraph_cert/test_fixture.rs
+callgraph_cert/tests.rs
+explain_coherence_served_tests.rs
+explain_coherence_tests.rs
+explain_serve_tests/fanin_fixture.rs
+explain_serve_tests/mod.rs
+focus_resolution_cert/test_fixture.rs
+focus_resolution_cert/tests.rs
+orient_lg_decisions/served_e2e.rs
+orient_serve/tests.rs

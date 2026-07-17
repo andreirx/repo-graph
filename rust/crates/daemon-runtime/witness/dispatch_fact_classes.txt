@@ -1,0 +1,107 @@
+# dispatch_fact_classes.txt — per-arm fact-class declaration (EC-1 M-1 / C-6)
+#
+# CONTRACT: docs/slices/ec-m1-witness-1.md §2.2; EC-1 §3.2 (fact-class taxonomy)
+#           + §3.3 (the per-arm inventory). Enforced by tests/consolidation_witness.rs.
+#
+# WHAT THE WITNESS CHECKS (and what it does NOT): every arm of the ONE dispatch
+# match (dispatch.rs `match request.method.as_str()`) appears here exactly once, and
+# no line here names an arm that no longer exists (completeness + no-stale). It
+# also validates the RHS SYNTACTICALLY: every arm declares at least one class, every
+# token is a known §3.2 taxonomy name (below), and `none` may appear only alone. It
+# does NOT verify WHICH classes an arm truly reads — that stays the audit's job
+# (§2.2). The fact-class column is a reviewed DECLARATION surface, sourced from EC-1
+# §3.3, that makes a new arm pay its integration explicitly (a new arm goes RED until
+# it is declared here; a typo'd or empty declaration goes RED too).
+#
+# The live arm count is reconciled against dispatch.rs; it is 66 today (EC-1 §3.3:
+# 10 mixed + 16 SQLite-graph + 20 non-graph + 7 registry + 13 writers). The witness
+# does NOT hard-code 66 — the reconciliation against the live match IS the guard.
+#
+# FACT CLASSES (EC-1 §3.2): FC0 extraction stream (pipeline input) · FC1 structure
+# skeleton · FC2a resolved-call CONTENT · FC2a-agg FC2a-derived aggregates · FC2b
+# structure relations · FC3 unresolved disposition (RED floor) · FC4 measurements ·
+# FC5 declarations/governance · FC6 derived architecture · FC7 docs inventory ·
+# FC8 history/provenance/operational. `none` = touches no fact class (pure stub).
+#
+# FORMAT: one line per arm:  <arm> = <FC>[, <FC>...]
+
+# ── A. Mixed-read — the §3.3-A ten (LiveGraph + SQLite, epoch-pinned) ──
+callers                = FC1, FC2a
+callees                = FC1, FC2a
+path                   = FC1, FC2a, FC2b
+imports                = FC1, FC2b
+cycles                 = FC1, FC2b
+stats                  = FC1, FC2a-agg, FC2b, FC3, FC4, FC5
+orient                 = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
+explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5
+trust                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
+cycle_completeness_audit = FC1, FC2b
+
+# ── B. SQLite-only readers that touch raw-graph tables (16) ──
+map                    = FC1, FC2b, FC2a-agg, FC3, FC4
+gate                   = FC1, FC2b, FC4, FC5, FC6
+check                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
+violations             = FC1, FC2b, FC5
+resource_list          = FC1, FC2b
+resource_readers       = FC1, FC2b
+resource_writers       = FC1, FC2b
+modules_deps           = FC1, FC2b, FC5, FC6
+modules_violations     = FC1, FC2b, FC5, FC6
+modules_list           = FC1, FC2b, FC2a-agg, FC5, FC6
+modules_show           = FC1, FC2b, FC2a-agg, FC3, FC5, FC6
+deps_list              = FC1, FC3
+deps_why               = FC1, FC3
+deps_drift             = FC1, FC3
+hotspots               = FC1, FC4, FC8
+risk                   = FC1, FC4, FC8
+
+# ── C. SQLite readers, non-graph tables only (20) ──
+contracts_list         = FC6
+contracts_show         = FC6
+contracts_elements     = FC6
+contracts_usages       = FC6
+boundaries_list        = FC6
+boundaries_show        = FC6
+boundaries_summary     = FC6
+boundaries_links       = FC6
+surfaces_list          = FC1, FC6
+surfaces_show          = FC1, FC6
+inferences_list        = FC6
+policy                 = FC5
+modules_files          = FC1
+modules_unowned        = FC1
+docs_list              = FC7
+churn                  = FC1, FC8
+perf                   = FC8
+storage_health         = FC8
+repo_info              = FC8
+load_repo              = FC8
+
+# ── D. Registry / in-memory / no store (7) ──
+ping                   = none
+echo                   = none
+daemon_info            = FC8
+unload_repo            = FC8
+list_loaded_repos      = FC8
+resolve_repo           = FC8
+list_repos             = FC8
+
+# ── E. Writers (13) — serialize under the coordinator ──
+index                  = FC0, FC1, FC2a, FC2b, FC3, FC4, FC6, FC8
+refresh                = FC0, FC1, FC2a, FC2b, FC3, FC4, FC6, FC8
+enrich                 = FC0, FC1, FC2a, FC2b, FC3, FC4, FC6, FC8
+# The two LiveGraph writers feed a partition via `repo_graph_livegraph_feed::feed_partition`
+# (livegraph-feed/src/lib.rs:73-75): `load_partition` loads the `PartitionIr` (nodes = FC1
+# projection; `IrEdge::Calls` = FC2a; `IrEdge::Imports` = FC2b) and `load_value_facts` loads
+# complexity = FC4; both also read SQLite registry/snapshots for identity = FC8. Corrected
+# from the earlier `FC2a, FC8` (review-0 item 2), sourced from EC-1 §3.2 (FC classes) + §3.3-E.
+livegraph_preload      = FC1, FC2a, FC2b, FC4, FC8
+livegraph_refresh      = FC1, FC2a, FC2b, FC4, FC8
+coverage               = FC1, FC4
+assess                 = FC4, FC5
+docs_extract           = FC7
+classify_retention     = FC8
+mark_baseline          = FC8
+unmark_baseline        = FC8
+repo_alias             = FC8
+repo_remove            = FC8
