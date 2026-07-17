@@ -1655,6 +1655,13 @@ after ratification.)
 
 ## 8. RATIFICATION (operator + human, 2026-07-16)
 
+> **AMENDED 2026-07-17 by RECON-DESIGN-1 §8 (ratified):** the "two witnesses" phrasing
+> below is superseded by the ratified witness vocabulary (pipeline-primary: shared
+> detection + adopted identity; SCIP contributes independent RESOLUTION + reference
+> kinds). Milestone **M-6's pipeline-CALLS-row deletion is SUPERSEDED for covered
+> languages** — those rows are the reconciliation design's load-bearing second witness
+> (D-R5). See docs/slices/recon-design-1.md §8.
+
 **D-EC-2, D-EC-3, D-EC-4, D-EC-5, D-EC-6, D-EC-8 — RATIFIED AS WRITTEN** (all converged
 in decision-review; see `ratification-packet.md` in the slice workspace for the challenge/
 rebuttal audit trail). The named end-state stands: **SQLite owns the structure skeleton +
