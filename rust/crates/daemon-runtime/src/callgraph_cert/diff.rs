@@ -53,10 +53,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use repo_graph_agent::{AgentCalleeRow, AgentCallerRow, AgentStorageRead};
+use repo_graph_agent::AgentStorageRead;
 use repo_graph_trust_model::Granularity;
 use serde::Serialize;
 
+// RECON-M-R1: the comparison primitives this collector prototyped moved to the graduated
+// substrate (`super::ledger`) — the spike collector now CONSUMES them (recon-design-1 §5.1: the
+// diff.rs collector "graduates from env-gated debug artifact to serving substrate"). Behavior
+// unchanged; this module keeps the artifact report/gating/emission.
+use super::ledger::{
+    callee_pairs, caller_pairs, diff_direction, lg_side, DirectionDiff, EdgeViews, WitnessLedger,
+};
 use super::{lg_callee_rows, lg_caller_rows};
 use crate::state::RepoState;
 
@@ -73,7 +80,11 @@ const ARTIFACT_NAME: &str = "callgraph-diff.json";
 /// ≠ zero). `v3` (review-2) adds [`CanonicalEdgeMagnitude`] — the EDGE-LEVEL magnitude by canonical
 /// `(caller_key, callee_key)` identity — and RENAMES the per-direction `totals` to `projection_incidences`
 /// (`edges` → `incidences`) so the projection counts are never again mistaken for distinct directed edges.
-const SCHEMA: &str = "callgraph-diff/v3";
+/// `v4` (RECON-M-R1) is ADDITIVE over `v3`: a `witness_ledger` block (the stored ledger's summary —
+/// the kind-aligned instance classification + derived verdict) plus the [`CANONICAL_EDGE_NOTE`]
+/// coverage caveat (§3.7-5). Retained `v3` artifacts stay valid evidence; they are never
+/// regenerated in place.
+const SCHEMA: &str = "callgraph-diff/v4";
 
 /// Which physical store each side of the diff was read from, and what producer feeds it — stated as
 /// explicit evidence so the DIRECTION axis ("SCIP-only vs pipeline-only") is traceable, not implied.
@@ -89,36 +100,6 @@ const WITNESS: WitnessMapping = WitnessMapping {
     livegraph: "scip_fed_livegraph",
     sqlite: "tree_sitter_pipeline_sqlite",
 };
-
-/// A per-direction (callers OR callees) classified divergence for one symbol. Multiplicity is preserved
-/// (a repeated CALLS edge appears repeatedly), mirroring the cert's un-DISTINCT multiset compare.
-#[derive(Debug, Default, Serialize)]
-struct DirectionDiff {
-    /// Stable keys the SCIP-fed LiveGraph has but the pipeline (SQLite) lacks — SCIP-only edges.
-    livegraph_only: Vec<String>,
-    /// Stable keys the pipeline (SQLite) has but the LiveGraph lacks — pipeline-only edges.
-    sqlite_only: Vec<String>,
-    /// Same stable key present on BOTH sides with balanced multiplicity, but the enriched row
-    /// (name / file / module) differs — an identity-present, enrichment-divergent edge.
-    field_mismatch: Vec<FieldMismatch>,
-}
-
-impl DirectionDiff {
-    fn is_empty(&self) -> bool {
-        self.livegraph_only.is_empty()
-            && self.sqlite_only.is_empty()
-            && self.field_mismatch.is_empty()
-    }
-}
-
-/// A same-key, different-enrichment divergence: the full rendered rows from each side (all fields), so
-/// the analysis can see exactly which field diverged.
-#[derive(Debug, Serialize)]
-struct FieldMismatch {
-    key: String,
-    livegraph_row: String,
-    sqlite_row: String,
-}
 
 /// Per-(symbol, direction) edge counts, HONEST about unknown ≠ zero (VISION honesty rule). `None`
 /// (serialized `null`) = this witness produced NO measurable answer for this symbol (LiveGraph
@@ -251,6 +232,11 @@ struct CallgraphDiffReport {
     projection_incidences: Option<ProjectionIncidences>,
     rollup: Option<DiffRollup>,
     symbols: Option<Vec<SymbolDivergence>>,
+    /// RECON-M-R1 (`v4`, additive): the STORED witness ledger's summary at this fingerprint — the
+    /// kind-aligned instance classification + the derived verdict (see [`ledger_block`]). This is
+    /// the observation channel for the M-R1 measured-baseline reproductions (amodx / zap-engine /
+    /// the committed fixture) — the artifact stays env-gated, off-by-default, debug-only.
+    witness_ledger: serde_json::Value,
 }
 
 // ── Gate + write ────────────────────────────────────────────────────────────────────────────────
@@ -263,6 +249,7 @@ pub(super) fn maybe_emit(
     snapshot_uid: &str,
     fingerprint: &str,
     cert_is_green: bool,
+    ledger: &WitnessLedger,
 ) {
     let Some(dir) = std::env::var_os(DIFF_ENV) else {
         return; // OFF (default): one env lookup, nothing else.
@@ -273,6 +260,7 @@ pub(super) fn maybe_emit(
         snapshot_uid,
         fingerprint,
         cert_is_green,
+        ledger,
     );
 }
 
@@ -285,13 +273,134 @@ fn emit_report(
     snapshot_uid: &str,
     fingerprint: &str,
     cert_is_green: bool,
+    ledger: &WitnessLedger,
 ) -> Option<PathBuf> {
-    let report = collect(repo_state, snapshot_uid, fingerprint, cert_is_green);
+    let mut report = collect(repo_state, snapshot_uid, fingerprint, cert_is_green);
+    report.witness_ledger = ledger_block(ledger);
     std::fs::create_dir_all(out_dir).ok()?;
     let path = out_dir.join(ARTIFACT_NAME);
     let body = serde_json::to_string_pretty(&report).ok()?;
     std::fs::write(&path, body).ok()?;
     Some(path)
+}
+
+/// Serialize the stored [`WitnessLedger`]'s SUMMARY as a JSON block for the artifact — a boundary
+/// DTO built as raw `serde_json::Value` (the ledger's domain types stay serde-free; only this
+/// debug artifact crosses the boundary). Every population keeps its unit in its field name;
+/// unknown is `null`, never 0 (degenerate ledgers carry `null` measurement blocks).
+fn ledger_block(l: &WitnessLedger) -> serde_json::Value {
+    use serde_json::{json, Value};
+    let language_label = |lang: repo_graph_trust_model::LanguageSupport| -> &'static str {
+        match lang {
+            repo_graph_trust_model::LanguageSupport::TypeScriptPrimary => "typescript",
+            repo_graph_trust_model::LanguageSupport::CppGuarded => "cpp",
+            repo_graph_trust_model::LanguageSupport::RustPartialBeta => "rust",
+        }
+    };
+    let compare = l.compare.as_ref().map(|c| {
+        json!({
+            "corpus_size": c.corpus_size,
+            "divergent_symbols": c.divergent_symbols,
+            "unanswerable_projections": c.unanswerable_projections,
+            "livegraph_panics": c.livegraph_panics,
+            "field_mismatches": c.field_mismatches,
+            "projections": { "total": c.corpus_size * 2, "unanswerable": c.unanswerable_projections },
+            "canonical": {
+                "livegraph_total": c.canonical.livegraph_total,
+                "sqlite_total": c.canonical.sqlite_total,
+                "scip_only": c.canonical.scip_only,
+                "pipeline_only_dual_measured": c.canonical.pipeline_only_dual_measured,
+                "pipeline_only_unmeasured": c.canonical.pipeline_only_unmeasured,
+                "shared": c.canonical.shared,
+                "union_edges": c.canonical.union_edges,
+            },
+        })
+    });
+    let classification = l.classification.as_ref().map(|cl| {
+        let eligible: serde_json::Map<String, Value> = cl
+            .eligible
+            .iter()
+            .map(|(id, lang)| (id.clone(), Value::from(language_label(*lang))))
+            .collect();
+        let colliding: serde_json::Map<String, Value> = cl
+            .colliding_keys
+            .iter()
+            .map(|(part, keys)| {
+                (
+                    part.clone(),
+                    Value::from(keys.iter().cloned().collect::<Vec<String>>()),
+                )
+            })
+            .collect();
+        let rollups: serde_json::Map<String, Value> = cl
+            .rollups
+            .iter()
+            .map(|((lang, part), r)| {
+                (
+                    format!("{}/{}", language_label(*lang), part),
+                    json!({
+                        "s_calls": r.s_calls,
+                        "s_references": r.s_references,
+                        "s_imports": r.s_imports,
+                        "adoption_adopted": r.adoption_adopted,
+                        "adoption_fallback": r.adoption_fallback,
+                        "adoption_file_scope": r.adoption_file_scope,
+                        "both_instances": r.both_instances,
+                        "semantic_new_pair": r.semantic_new_pair,
+                        "semantic_multiplicity": r.semantic_multiplicity,
+                        "withheld_instances": r.withheld_instances,
+                    }),
+                )
+            })
+            .collect();
+        let delta_pairs: Vec<Value> = cl
+            .delta_pairs
+            .iter()
+            .map(|d| json!({ "caller": d.caller, "callee": d.callee, "p": d.p, "s_calls": d.s_calls }))
+            .collect();
+        json!({
+            "eligible_partitions": eligible,
+            "pipeline_calls": cl.pipeline_calls,
+            "union_calls": cl.union_calls,
+            "dual_measured": cl.dual_measured,
+            "both": { "instances": cl.both, "identities": cl.both_identities },
+            "syntactic_only": {
+                "boundary": cl.syntactic.boundary,
+                "file_scope": cl.syntactic.file_scope,
+                "uncorroborated": cl.syntactic.uncorroborated,
+                "multiplicity": cl.syntactic.multiplicity,
+                "instances": cl.syntactic.total(),
+                "identities": cl.syntactic.identities,
+            },
+            "semantic_only_calls": {
+                "new_pair": cl.semantic.new_pair,
+                "multiplicity": cl.semantic.multiplicity,
+                "instances": cl.semantic.total(),
+                "identities": cl.semantic.identities,
+            },
+            "unmeasured_edges": { "instances": cl.unmeasured_edges, "identities": cl.unmeasured_identities },
+            // Percentage points (97.4, not 0.974 — the ratified gate figures; review-0 fix).
+            // Unknown ≠ zero: no dual-measured instance -> the rate is null, never 0%.
+            "agreement_pct": cl.agreement_pct().map(Value::from).unwrap_or(Value::Null),
+            "s_kind_totals": {
+                "calls": cl.s_kind_totals.calls,
+                "references": cl.s_kind_totals.references,
+                "imports": cl.s_kind_totals.imports,
+            },
+            "fallback_key_count": cl.fallback_key_count,
+            "identity_collision": cl.identity_collision,
+            "colliding_keys": colliding,
+            "identity_suspect": cl.identity_suspect,
+            "delta_pairs": delta_pairs,
+            "rollups": rollups,
+        })
+    });
+    json!({
+        "derived_verdict": if l.derived_green() { "GREEN" } else { "RED" },
+        "precondition": l.precondition,
+        "compare": compare,
+        "classification": classification,
+    })
 }
 
 // ── Collector (full corpus, NO short-circuit) ─────────────────────────────────────────────────────
@@ -459,6 +568,8 @@ fn collect(
         projection_incidences: Some(projection_incidences),
         rollup: Some(rollup),
         symbols: Some(symbols),
+        // Attached by `emit_report` from the STORED ledger (this collector walks independently).
+        witness_ledger: serde_json::Value::Null,
     }
 }
 
@@ -488,47 +599,7 @@ fn degenerate(
         projection_incidences: None,
         rollup: None,
         symbols: None,
-    }
-}
-
-/// The LiveGraph side of one direction, computed PANIC-SAFE by [`lg_side`].
-enum LgSide {
-    /// Exact, enriched rows: `(stable_key, all-fields-rendered)` pairs.
-    Rows(Vec<(String, String)>),
-    /// The LiveGraph answered non-Exact / un-enrichable — the note carries the class.
-    Unanswerable(String),
-    /// The LiveGraph answer construction PANICKED (a documented latent invariant — see the module header
-    /// + `repo-graph-livegraph` `lib.rs:303-306`). Caught so the walk survives; recorded as a class.
-    Panicked,
-}
-
-/// Compute the LiveGraph side of a direction WITHOUT letting an upstream panic crash the daemon.
-///
-/// `repo-graph-livegraph::finalize_envelope` has a DOCUMENTED latent panic: a `Partial` answer from a
-/// call-graph-incomplete basis (`AstFileScope`) with no mapped `DegradationReason` panics the `partial`
-/// constructor (`lib.rs:303-306`, "unreachable with current call-graph fixtures"). Whether the SHIPPED
-/// cert hits it is DATA-DEPENDENT, not "never": the verdict short-circuits at the FIRST divergent symbol,
-/// so it escapes the panic ONLY when some symbol diverges before the walk reaches an affected
-/// `AstFileScope` FILE symbol — a graph whose first affected FILE symbol precedes any divergence WOULD
-/// panic the shipped serve path (the P1 fail-soft gap LIVEGRAPH-PARTIAL-FIX-1 owns; the escape observed on
-/// the INGEST-CORE-1 fixture is luck of BTreeSet key order, §5.0). This EXHAUSTIVE collector never
-/// short-circuits, so it reaches the panic on ANY graph that contains an affected symbol; catching it here
-/// keeps the spike usable on a large repo (its whole point) AND turns the crash into a recorded data class
-/// rather than a daemon abort. `rows`/`class` are only invoked here, so [`std::panic::AssertUnwindSafe`] is
-/// sound (no state escapes a caught unwind; the LiveGraph is read-only behind a shared guard, so a caught
-/// read-path panic leaves it intact).
-fn lg_side(
-    rows: impl FnOnce() -> Option<Vec<(String, String)>>,
-    class: impl FnOnce() -> String,
-) -> LgSide {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(rows)) {
-        Ok(Some(pairs)) => LgSide::Rows(pairs),
-        Ok(None) => {
-            let class = std::panic::catch_unwind(std::panic::AssertUnwindSafe(class))
-                .unwrap_or_else(|_| "Panicked".to_string());
-            LgSide::Unanswerable(format!("livegraph_class={class}"))
-        }
-        Err(_) => LgSide::Panicked,
+        witness_ledger: serde_json::Value::Null,
     }
 }
 
@@ -543,60 +614,16 @@ fn accumulate_side(side: &mut SideProjection, incidences: Option<usize>) {
 }
 
 /// Fixed reader's note embedded in every [`CanonicalEdgeMagnitude`] so a retained artifact self-describes
-/// the accounting (why the numbers differ from `projection_incidences`).
+/// the accounting (why the numbers differ from `projection_incidences`). RECON-M-R1 (§3.7-5): the note now
+/// carries the coverage caveat — this block's `*_only` classes BLEND divergence with coverage (an edge
+/// whose second witness measured NEITHER projection lands in a `*_only` class), which the ledger's
+/// dual-measured rule separates.
 const CANONICAL_EDGE_NOTE: &str = "directed edges by canonical identity (caller_key,callee_key), \
 multiplicity preserved, each witness's caller+callee projections merged per identity (an edge seen from \
-both counts once) — NOT projection_incidences summed; union_edges = scip_only + pipeline_only + shared";
-
-/// The two PROJECTION views of ONE witness's directed edges, each keyed by canonical identity
-/// `(caller_key, callee_key)` with multiplicity. A directed edge is witnessed TWICE — once in its caller's
-/// callee-projection, once in its callee's caller-projection — so counting incidences double-counts.
-/// [`EdgeViews::canonical`] reduces the two views to ONE multiset by taking the MAX per identity: agreeing
-/// projections collapse to their shared count (dedup), and an edge whose one projection was UNMEASURED
-/// (that view simply has no entry) is still recovered from the other (unknown ≠ 0). Concrete users: the
-/// two witnesses (`lg` / `sq`) in [`collect`]. Axis: projection view vs canonical directed edge. Simpler
-/// alternative rejected: summing the [`ProjectionIncidences`] directions — the review-2 double-count.
-#[derive(Debug, Default)]
-struct EdgeViews {
-    /// Edges witnessed via caller-projections: `find_symbol_callers(e)` yields `(c, e)` for each caller c.
-    from_caller_projection: BTreeMap<(String, String), usize>,
-    /// Edges witnessed via callee-projections: `find_symbol_callees(c)` yields `(c, e)` for each callee e.
-    from_callee_projection: BTreeMap<(String, String), usize>,
-}
-
-impl EdgeViews {
-    /// Record symbol `target`'s MEASURED caller keys — each caller `c` witnesses the edge `(c, target)`.
-    fn add_callers(&mut self, target: &str, callers: &[String]) {
-        for c in callers {
-            *self
-                .from_caller_projection
-                .entry((c.clone(), target.to_string()))
-                .or_default() += 1;
-        }
-    }
-
-    /// Record symbol `source`'s MEASURED callee keys — each callee `e` witnesses the edge `(source, e)`.
-    fn add_callees(&mut self, source: &str, callees: &[String]) {
-        for e in callees {
-            *self
-                .from_callee_projection
-                .entry((source.to_string(), e.clone()))
-                .or_default() += 1;
-        }
-    }
-
-    /// Reduce the two projection views to ONE canonical directed-edge multiset: per identity, the MAX of
-    /// the two projections' counts (dedup an edge seen from both; recover an edge whose one projection was
-    /// unmeasured). Deterministic (BTreeMap key order).
-    fn canonical(&self) -> BTreeMap<(String, String), usize> {
-        let mut out = self.from_caller_projection.clone();
-        for (id, &n) in &self.from_callee_projection {
-            let slot = out.entry(id.clone()).or_default();
-            *slot = (*slot).max(n);
-        }
-        out
-    }
-}
+both counts once) — NOT projection_incidences summed; union_edges = scip_only + pipeline_only + shared. \
+CAVEAT (RECON-M-R1 §3.6): a *_only edge whose other witness could measure NEITHER projection of the pair \
+is a COVERAGE/answerability fact blended in here, NOT evidence the other witness disagrees — read the \
+witness_ledger block for the dual-measured-separated classes";
 
 /// The EDGE-LEVEL magnitude from the two witnesses' canonical multisets: per identity, the overlap is
 /// `min` (shared), the excess on each side is that side's `*_only`, and `union_edges` sums all three
@@ -628,159 +655,12 @@ fn edge_magnitude(
     }
 }
 
-/// The outcome of classifying one direction for one symbol.
-struct DirOutcome {
-    diff: DirectionDiff,
-    /// `Some` when the LiveGraph was un-answerable / panicked (LG note) OR the SQLite read errored.
-    note: Option<String>,
-    /// True for LiveGraph non-Exact / un-enrichable / panicked (feeds the `livegraph_unanswerable` rollup).
-    lg_unanswerable: bool,
-    /// True only when the LiveGraph answer PANICKED (feeds the distinct `livegraph_panic` rollup).
-    lg_panicked: bool,
-    /// `None` = the LiveGraph side was NOT measurable for this symbol/direction (unanswerable / panicked)
-    /// — UNKNOWN, never 0. `Some(n)` = measured n edges.
-    lg_edges: Option<usize>,
-    /// `None` = the SQLite side was NOT measurable (a read error) — UNKNOWN, never 0.
-    sq_edges: Option<usize>,
-    /// The MEASURED endpoint stable keys on the LiveGraph side (`None` when unmeasured), fed to the
-    /// canonical-edge [`EdgeViews`]. `Some(vec![])` (measured-empty) vs `None` (unmeasured) is the same
-    /// unknown ≠ zero distinction as `lg_edges` — an unmeasured side contributes no canonical edge.
-    lg_keys: Option<Vec<String>>,
-    /// The MEASURED endpoint stable keys on the SQLite side (`None` when the read errored).
-    sq_keys: Option<Vec<String>>,
-}
-
-/// Classify one direction from the panic-safe [`LgSide`] and the SQLite side. Each side is measured
-/// INDEPENDENTLY, so an unmeasured side is `None` (unknown), never 0 — and a SQLite error no longer zeroes
-/// out the LiveGraph side the way the pre-review-1 early-return did. Direction buckets are populated ONLY
-/// when BOTH sides are measured (`Rows` + `Ok`); otherwise they stay empty and the note carries the cause,
-/// so an unknown side is NEVER mislabeled as scip-only / pipeline-only.
-fn diff_direction(lg: LgSide, sq_pairs: Result<Vec<(String, String)>, String>) -> DirOutcome {
-    // SQLite side, measured independently: `Err` → the count is UNKNOWN (None), not 0.
-    let (sq_rows, sq_note): (Option<Vec<(String, String)>>, Option<String>) = match sq_pairs {
-        Ok(v) => (Some(v), None),
-        Err(e) => (None, Some(format!("sqlite_error: {e}"))),
-    };
-    // LiveGraph side, from the panic-safe `LgSide`: `Unanswerable`/`Panicked` → count UNKNOWN (None). The
-    // two flags are derived first (non-binding `matches!` don't move `lg`) so the rows/note match below
-    // stays a 2-tuple — the same shape as the SQLite side, under clippy's `type_complexity` threshold.
-    let lg_unanswerable = !matches!(lg, LgSide::Rows(_));
-    let lg_panicked = matches!(lg, LgSide::Panicked);
-    let (lg_rows, lg_note): (Option<Vec<(String, String)>>, Option<String>) = match lg {
-        LgSide::Rows(pairs) => (Some(pairs), None),
-        LgSide::Unanswerable(note) => (None, Some(note)),
-        LgSide::Panicked => (None, Some("livegraph_panic".to_string())),
-    };
-    // Direction buckets need BOTH sides measured; else empty (unknown is never a direction-only edge).
-    let diff = match (&lg_rows, &sq_rows) {
-        (Some(l), Some(s)) => classify(l, s),
-        _ => DirectionDiff::default(),
-    };
-    let note = match (lg_note, sq_note) {
-        (Some(l), Some(s)) => Some(format!("{l}; {s}")),
-        (l, s) => l.or(s),
-    };
-    // The MEASURED endpoint keys (stable_key = pair.0) feed the canonical [`EdgeViews`]. Extracted from
-    // the SAME measured rows as the counts, so `lg_keys.len() == lg_edges` and an unmeasured side is `None`
-    // in both — the canonical accounting inherits the unknown ≠ zero honesty from this one source.
-    let keys_of = |rows: &Option<Vec<(String, String)>>| {
-        rows.as_ref()
-            .map(|r| r.iter().map(|(k, _)| k.clone()).collect::<Vec<String>>())
-    };
-    DirOutcome {
-        lg_edges: lg_rows.as_ref().map(Vec::len),
-        sq_edges: sq_rows.as_ref().map(Vec::len),
-        lg_keys: keys_of(&lg_rows),
-        sq_keys: keys_of(&sq_rows),
-        diff,
-        note,
-        lg_unanswerable,
-        lg_panicked,
-    }
-}
-
-/// PURE classification of two `(stable_key, rendered_row)` lists into the divergence buckets. Deterministic
-/// (BTreeMap-ordered); multiplicity preserved via signed per-key counts. Buckets are ALL empty iff the two
-/// full-row multisets are equal — i.e. iff the cert's `*_multiset_eq` would return true — so the report's
-/// per-symbol divergence agrees with the verdict by construction.
-fn classify(lg: &[(String, String)], sq: &[(String, String)]) -> DirectionDiff {
-    let mut counts: BTreeMap<&str, i64> = BTreeMap::new();
-    let mut lg_reprs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let mut sq_reprs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for (k, r) in lg {
-        *counts.entry(k).or_default() += 1;
-        lg_reprs.entry(k).or_default().push(r);
-    }
-    for (k, r) in sq {
-        *counts.entry(k).or_default() -= 1;
-        sq_reprs.entry(k).or_default().push(r);
-    }
-
-    let mut diff = DirectionDiff::default();
-    for (k, c) in &counts {
-        match (*c).cmp(&0) {
-            std::cmp::Ordering::Greater => {
-                for _ in 0..*c {
-                    diff.livegraph_only.push((*k).to_string());
-                }
-            }
-            std::cmp::Ordering::Less => {
-                for _ in 0..(-*c) {
-                    diff.sqlite_only.push((*k).to_string());
-                }
-            }
-            std::cmp::Ordering::Equal => {
-                // Balanced key multiplicity: a divergence here is same-key, different-enrichment.
-                let mut a: Vec<&str> = lg_reprs.get(k).cloned().unwrap_or_default();
-                let mut b: Vec<&str> = sq_reprs.get(k).cloned().unwrap_or_default();
-                a.sort_unstable();
-                b.sort_unstable();
-                if a != b {
-                    diff.field_mismatch.push(FieldMismatch {
-                        key: (*k).to_string(),
-                        livegraph_row: a.join(" ;; "),
-                        sqlite_row: b.join(" ;; "),
-                    });
-                }
-            }
-        }
-    }
-    diff
-}
-
-/// `(stable_key, all-fields-rendered)` for a caller row — the key drives the DIRECTION diff, the full
-/// render drives field-mismatch detection + display.
-fn caller_pairs(rows: &[AgentCallerRow]) -> Vec<(String, String)> {
-    rows.iter()
-        .map(|r| {
-            (
-                r.stable_key.clone(),
-                format!(
-                    "{}|{}|{:?}|{:?}|{:?}",
-                    r.stable_key, r.name, r.file, r.module_path, r.module_stable_key
-                ),
-            )
-        })
-        .collect()
-}
-
-fn callee_pairs(rows: &[AgentCalleeRow]) -> Vec<(String, String)> {
-    rows.iter()
-        .map(|r| {
-            (
-                r.stable_key.clone(),
-                format!(
-                    "{}|{}|{:?}|{:?}|{:?}",
-                    r.stable_key, r.name, r.file, r.module_path, r.module_stable_key
-                ),
-            )
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The moved primitives' unit tests stayed with this consumer (minimal-diff); they exercise
+    // `super::ledger`'s pure pieces through the same names.
+    use crate::callgraph_cert::ledger::{classify, LgSide};
 
     fn p(key: &str, repr: &str) -> (String, String) {
         (key.to_string(), repr.to_string())
@@ -1136,12 +1016,33 @@ mod tests {
         // write path produces a valid, schema-tagged artifact (no process env touched — explicit dirs).
         let f = test_fixture::build_fixture(true);
         let green = callgraph_is_green(&f.state, &f.snapshot_uid);
+        // The REAL stored ledger (written by the serve-ladder build above) feeds the v4 block.
+        let ledger = f
+            .state
+            .witness_ledger
+            .read()
+            .clone()
+            .expect("ledger stored by the cert build");
         let d1 = tempfile::tempdir().unwrap();
         let d2 = tempfile::tempdir().unwrap();
-        let p1 =
-            emit_report(d1.path(), &f.state, &f.snapshot_uid, "fp-test", green).expect("written");
-        let p2 =
-            emit_report(d2.path(), &f.state, &f.snapshot_uid, "fp-test", green).expect("written");
+        let p1 = emit_report(
+            d1.path(),
+            &f.state,
+            &f.snapshot_uid,
+            "fp-test",
+            green,
+            &ledger,
+        )
+        .expect("written");
+        let p2 = emit_report(
+            d2.path(),
+            &f.state,
+            &f.snapshot_uid,
+            "fp-test",
+            green,
+            &ledger,
+        )
+        .expect("written");
         let b1 = std::fs::read_to_string(&p1).unwrap();
         let b2 = std::fs::read_to_string(&p2).unwrap();
         assert_eq!(
@@ -1196,9 +1097,18 @@ mod tests {
         // Serialized ARTIFACT level: drive the REAL write path (`emit_report`) and read the bytes back —
         // every measurement field must be JSON `null`. `Value::Null` is exactly distinct from the `0`/`{}`/
         // `[]` the pre-review-3 `v3` degenerate path emitted, so this pins the fix at the artifact boundary.
+        // The ledger on this path is the DEGENERATE one (no LiveGraph → no walk → unknown, not zero).
+        let ledger = WitnessLedger::degenerate("fp-test", &f.snapshot_uid, "no_resident_livegraph");
         let dir = tempfile::tempdir().unwrap();
-        let path =
-            emit_report(dir.path(), &f.state, &f.snapshot_uid, "fp-test", false).expect("written");
+        let path = emit_report(
+            dir.path(),
+            &f.state,
+            &f.snapshot_uid,
+            "fp-test",
+            false,
+            &ledger,
+        )
+        .expect("written");
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["precondition"], "no_resident_livegraph");
@@ -1230,17 +1140,23 @@ mod tests {
         std::env::remove_var(DIFF_ENV); // ensure OFF before the cert build (no emission during it)
         let f = test_fixture::build_fixture(true);
         let green = callgraph_is_green(&f.state, &f.snapshot_uid);
+        let ledger = f
+            .state
+            .witness_ledger
+            .read()
+            .clone()
+            .expect("ledger stored by the cert build");
         let dir = tempfile::tempdir().unwrap();
         let artifact = dir.path().join(ARTIFACT_NAME);
 
         // OFF: var unset → maybe_emit returns after one `var_os` lookup, writes NOTHING.
-        maybe_emit(&f.state, &f.snapshot_uid, "fp-test", green);
+        maybe_emit(&f.state, &f.snapshot_uid, "fp-test", green, &ledger);
         assert!(!artifact.exists(), "gate OFF (var unset) → no artifact");
 
         // ON: var = dir → maybe_emit routes the artifact to exactly the named dir (proves it reads the
         // env VALUE, not a hardcoded path).
         std::env::set_var(DIFF_ENV, dir.path());
-        maybe_emit(&f.state, &f.snapshot_uid, "fp-test", green);
+        maybe_emit(&f.state, &f.snapshot_uid, "fp-test", green, &ledger);
         assert!(
             artifact.exists(),
             "gate ON (var=dir) → artifact written to the named dir"

@@ -119,6 +119,26 @@ struct Slot {
     partition_degradation_reasons: BTreeSet<DegradationReason>,
 }
 
+/// RECON-M-R1: one RESIDENT partition's IR + ledger-relevant state, as returned by
+/// [`LiveGraph::resident_irs`]. A borrow view (no clone of the IR): the witness-ledger build reads
+/// it under the same LiveGraph read guard the callgraph cert already holds.
+///
+/// Abstraction accounting: one concrete consumer (the daemon-runtime witness-ledger build); axis =
+/// read-side exposure of resident per-partition IR (kind-partitioned edges + node identity
+/// sources); simpler alternative rejected — exposing the private `Slot` internals, which would leak
+/// the runtime's slot model (value facts, xref summaries) far beyond what the ledger needs.
+#[derive(Debug)]
+pub struct ResidentIr<'a> {
+    /// Partition id (== the LiveGraph slot key).
+    pub id: &'a str,
+    /// The partition's language maturity (rollup keying; coverage is data-driven from this).
+    pub language: LanguageSupport,
+    /// `status == Fresh` (residency is implied — only resident slots appear in this view).
+    pub fresh: bool,
+    /// The resident partition IR (nodes with `identity_source`, kind-typed edges).
+    pub ir: &'a PartitionIr,
+}
+
 /// The payload of a `callers` answer (`AnswerEnvelope<CallersAnswer>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallersAnswer {
@@ -476,6 +496,31 @@ impl LiveGraph {
     /// The global xref epoch.
     pub fn xref_epoch(&self) -> XrefEpoch {
         XrefEpoch(self.xref_epoch)
+    }
+
+    /// RECON-M-R1 (witness ledger): read-only view of every RESIDENT partition's IR beside its
+    /// ledger-relevant state. The witness-ledger build (daemon-runtime `callgraph_cert::ledger`)
+    /// classifies the SCIP witness's edges KIND-partitioned and its node identities per the
+    /// R-RAT-4 collision guard — both are per-`PartitionIr` facts the query surfaces above do not
+    /// expose (`callers`/`callees` are kind-blind projections). Non-resident slots (summary
+    /// retained, `ir == None`) are EXCLUDED — they hold no edge/node detail to classify.
+    ///
+    /// `fresh` mirrors [`Self::live_partitions`]'s bit exactly (`status == Fresh`; residency is
+    /// already guaranteed here by `ir.is_some()`), so the ledger's W-BOTH eligibility scoping
+    /// (recon-design-1 §4.2: covered ∧ resident ∧ `Fresh`) and the fingerprint's freshness bit
+    /// cannot disagree.
+    pub fn resident_irs(&self) -> Vec<ResidentIr<'_>> {
+        self.slots
+            .iter()
+            .filter_map(|(id, s)| {
+                s.ir.as_ref().map(|ir| ResidentIr {
+                    id,
+                    language: s.language,
+                    fresh: status_freshness(s.status) == FreshnessState::Fresh,
+                    ir,
+                })
+            })
+            .collect()
     }
     /// A partition's current epoch, if known.
     pub fn partition_epoch(&self, id: &str) -> Option<PartitionEpoch> {

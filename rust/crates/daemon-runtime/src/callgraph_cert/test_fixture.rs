@@ -138,6 +138,13 @@ fn import_edge(src_path: &str, dst_path: &str) -> IrEdge {
 /// The resident IR: three files (modules `src` + `lib`), two symbols, one `caller -> callee` CALLS
 /// edge, and the `src` ↔ `lib` FILE-level import cycle (EC-M2: aggregates to ONE module cycle).
 pub(crate) fn build_ir() -> PartitionIr {
+    build_ir_with_calls(1)
+}
+
+/// RECON-M-R1: [`build_ir`] with a parameterized `caller -> callee` CALLS multiplicity (the S
+/// witness's occurrence count for the pair) — the instance-fixture substrate (§3.3: the
+/// `multiplicity` sub-classes are measured-empty at amodx scale, so they are FIXTURE-proven).
+pub(crate) fn build_ir_with_calls(s_calls: usize) -> PartitionIr {
     let mut ir = PartitionIr::new(partition());
     ir.nodes.push(file_node(CALLER_PATH));
     ir.nodes.push(file_node(CALLEE_PATH));
@@ -146,14 +153,16 @@ pub(crate) fn build_ir() -> PartitionIr {
         .push(symbol_node(&caller_key(), "callerFn", CALLER_PATH));
     ir.nodes
         .push(symbol_node(&callee_key(), "calleeFn", CALLEE_PATH));
-    ir.edges.push(IrEdge {
-        src: CanonicalKey::from_existing(caller_key()),
-        dst: CanonicalKey::from_existing(callee_key()),
-        edge_type: EdgeType::Calls,
-        basis: EdgeBasis::SyntaxConfirmedCall,
-        provenance: prov(),
-        import: None,
-    });
+    for _ in 0..s_calls {
+        ir.edges.push(IrEdge {
+            src: CanonicalKey::from_existing(caller_key()),
+            dst: CanonicalKey::from_existing(callee_key()),
+            edge_type: EdgeType::Calls,
+            basis: EdgeBasis::SyntaxConfirmedCall,
+            provenance: prov(),
+            import: None,
+        });
+    }
     ir.edges.push(import_edge(CALLER_PATH, LIB_PATH));
     ir.edges.push(import_edge(LIB_PATH, CALLER_PATH));
     ir
@@ -189,6 +198,16 @@ fn graph_node(uid: &str, stable_key: &str, kind: &str) -> GraphNode {
 /// directory MODULE nodes, OWNS + CALLS edges, files rows). `drop_calls`, when true, omits the CALLS
 /// edge (a divergence the callgraph cert MUST catch -> RED). Returns `(db_path, snapshot_uid)`.
 pub(crate) fn build_sqlite_mirror(dir: &Path, drop_calls: bool) -> (std::path::PathBuf, String) {
+    build_sqlite_mirror_with_calls(dir, if drop_calls { 0 } else { 1 })
+}
+
+/// RECON-M-R1: [`build_sqlite_mirror`] with a parameterized `caller -> callee` CALLS multiplicity
+/// (the P witness's occurrence count for the pair — one `edges` row per instance, mirroring the
+/// real un-DISTINCT pipeline shape).
+pub(crate) fn build_sqlite_mirror_with_calls(
+    dir: &Path,
+    p_calls: usize,
+) -> (std::path::PathBuf, String) {
     let db_path = dir.join("repo.db");
     let mut conn = StorageConnection::open(&db_path).expect("open storage");
     conn.add_repo(&Repo {
@@ -295,9 +314,9 @@ pub(crate) fn build_sqlite_mirror(dir: &Path, drop_calls: bool) -> (std::path::P
         imports_edge(&snapshot_uid, "em0", "nm0", "nm1"),
         imports_edge(&snapshot_uid, "em1", "nm1", "nm0"),
     ];
-    if !drop_calls {
+    for i in 0..p_calls {
         edges.push(GraphEdge {
-            edge_uid: "ec0".into(),
+            edge_uid: format!("ec{i}"),
             snapshot_uid: snapshot_uid.clone(),
             repo_uid: REPO.into(),
             source_node_uid: "ns0".into(),
@@ -367,6 +386,150 @@ pub(crate) fn build_fixture(drop_calls: bool) -> Fixture {
     let (db_path, snapshot_uid) = build_sqlite_mirror(dir.path(), drop_calls);
     let state = RepoState::open(&db_path, REPO).expect("open repo state");
     *state.livegraph.write() = Some(build_livegraph());
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R1 (the §3.3 INSTANCE fixtures): the standard two-symbol pair with INDEPENDENT
+/// per-witness occurrence counts — P holds `p_calls` CALLS rows, S holds `s_calls` strict-`Calls`
+/// IR edges for the SAME `(callerFn, calleeFn)` pair. `(2, 1)` is the P-excess
+/// (`syntactic`/`multiplicity`) fixture; `(1, 2)` the S-excess (`semantic`/`multiplicity`) one —
+/// both measured-empty at amodx scale, hence fixture-proven (M-R1 gate).
+pub(crate) fn build_multiplicity_fixture(p_calls: usize, s_calls: usize) -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let (db_path, snapshot_uid) = build_sqlite_mirror_with_calls(dir.path(), p_calls);
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    let mut lg = LiveGraph::new();
+    lg.load_partition(
+        "p",
+        build_ir_with_calls(s_calls),
+        LanguageSupport::TypeScriptPrimary,
+    );
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R1 (the R-RAT-4 COLLISION-GUARD fixture): the faithful two-symbol pair, EXCEPT the S
+/// side's `calleeFn` node is a `ScipSynthesizedFallback` identity whose key BYTE-EQUALS the
+/// pipeline's `calleeFn` key. The ingest cannot currently MINT this state — that impossibility IS
+/// the contingent spelling disjointness §3.5 measures — so the fixture constructs the IR directly
+/// at the guard's own layer (the established hand-built-`PartitionIr` pattern). Without the guard,
+/// the byte-equal keys would silently merge and mint a false `both`.
+pub(crate) fn build_collision_fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let (db_path, snapshot_uid) = build_sqlite_mirror_with_calls(dir.path(), 1);
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    let mut ir = build_ir_with_calls(1);
+    for n in ir.nodes.iter_mut() {
+        if n.key.as_str() == callee_key() {
+            n.identity_source = IdentitySource::ScipSynthesizedFallback;
+            // Fallback nodes carry no producer AST attributes (unknown, not zero — the IR rule).
+            n.attributes = None;
+        }
+    }
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R1 (the §3.5 guard-3 `identity_suspect` fixture): P resolves `callerFn`'s call to
+/// `target` in `src/b.ts`; the compiler resolves a SAME-NAMED call from the SAME caller to a
+/// DIFFERENT key (`target` in `lib/c.ts`) — the wrong/missed-adoption symptom signature. The P
+/// pair classifies `syntactic` (S holds no call to P's key), the S pair `semantic`/`new_pair`,
+/// and their (caller key, callee NAME) match under different callee keys must fire the detector.
+pub(crate) fn build_suspect_fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    // P side: the standard mirror (callerFn -> calleeFn CALLS, calleeFn named "calleeFn"…) is not
+    // name-matched here; build a custom mirror whose CALLS target is a symbol NAMED `target`.
+    let db_path = dir.path().join("repo.db");
+    let mut conn = StorageConnection::open(&db_path).expect("open storage");
+    conn.add_repo(&Repo {
+        repo_uid: REPO.into(),
+        name: REPO.into(),
+        root_path: ".".into(),
+        default_branch: None,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        metadata_json: None,
+    })
+    .expect("add repo");
+    let snap = conn
+        .create_snapshot(&CreateSnapshotInput {
+            repo_uid: REPO.into(),
+            kind: "full".into(),
+            basis_ref: None,
+            basis_commit: None,
+            parent_snapshot_uid: None,
+            label: None,
+            toolchain_json: None,
+        })
+        .expect("create snapshot");
+    let snapshot_uid = snap.snapshot_uid;
+    let p_target_key = format!("{REPO}:{CALLEE_PATH}#target:SYMBOL:FUNCTION");
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    for (uid, key, name) in [
+        ("ns0", caller_key(), "callerFn"),
+        ("ns1", p_target_key.clone(), "target"),
+    ] {
+        let mut n = graph_node(uid, &key, "SYMBOL");
+        n.snapshot_uid = snapshot_uid.clone();
+        n.name = name.into();
+        nodes.push(n);
+    }
+    conn.insert_nodes(&nodes).expect("insert nodes");
+    conn.insert_edges(&[GraphEdge {
+        edge_uid: "ec0".into(),
+        snapshot_uid: snapshot_uid.clone(),
+        repo_uid: REPO.into(),
+        source_node_uid: "ns0".into(),
+        target_node_uid: "ns1".into(),
+        edge_type: "CALLS".into(),
+        resolution: "resolved".into(),
+        extractor: "test".into(),
+        location: None,
+        metadata_json: None,
+    }])
+    .expect("insert edges");
+    conn.update_snapshot_status(&UpdateSnapshotStatusInput {
+        snapshot_uid: snapshot_uid.clone(),
+        status: "ready".into(),
+        completed_at: None,
+    })
+    .expect("ready snapshot");
+
+    // S side: callerFn calls a same-NAMED symbol under a DIFFERENT key (lib/c.ts#target).
+    let s_target_key = format!("{REPO}:{LIB_PATH}#target:SYMBOL:FUNCTION");
+    let mut ir = PartitionIr::new(partition());
+    ir.nodes.push(file_node(CALLER_PATH));
+    ir.nodes.push(file_node(LIB_PATH));
+    ir.nodes
+        .push(symbol_node(&caller_key(), "callerFn", CALLER_PATH));
+    ir.nodes
+        .push(symbol_node(&s_target_key, "target", LIB_PATH));
+    ir.edges.push(IrEdge {
+        src: CanonicalKey::from_existing(caller_key()),
+        dst: CanonicalKey::from_existing(s_target_key),
+        edge_type: EdgeType::Calls,
+        basis: EdgeBasis::SyntaxConfirmedCall,
+        provenance: prov(),
+        import: None,
+    });
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
+
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    *state.livegraph.write() = Some(lg);
     Fixture {
         _dir: dir,
         state,

@@ -39,10 +39,17 @@
 //! `repo-graph-livegraph` (the `callers`/`callees`/`symbol_context` surfaces). NO new SQLite surface:
 //! the compare reuses `find_symbol_callers`/`callees` + `query_all_nodes` (the SAME read
 //! `focus_resolution_cert` uses).
+//!
+//! **RECON-M-R1.** The compare is now the [`ledger`] module's FULL exhaustive walk (no
+//! first-divergence short-circuit): the stored GREEN/RED verdict is DERIVED from the resulting
+//! witness ledger — byte-compatible on every path that completes — and the ledger (the
+//! instance-level, kind-aligned witness classification M-R2/M-R3 consume) is stored beside the
+//! cert under the same fingerprint key and lifecycle. Serving is UNCHANGED at M-R1: GREEN still
+//! licenses the byte-substitute serve, RED still forces the SQLite fallback, and the
+//! `callgraph_cert_eligibility` capture stays GREEN-gated byte-exact (the capture contract flips
+//! only at M-R2 — recon-design-1 §4.2/§5.1).
 
-use std::collections::BTreeSet;
-
-use repo_graph_agent::{AgentCalleeRow, AgentCallerRow, AgentStorageRead};
+use repo_graph_agent::{AgentCalleeRow, AgentCallerRow};
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_trust_model::{AnswerClass, Granularity};
 
@@ -53,6 +60,16 @@ use crate::state::RepoState;
 /// verdict below is UNCHANGED). See [`diff`] for the gating + artifact contract.
 mod diff;
 
+/// RECON-M-R1: the WITNESS LEDGER — the cert compare generalized into the full-walk, per-fingerprint
+/// witness-agreement classification. The stored GREEN/RED verdict is now DERIVED from it
+/// ([`ledger::WitnessLedger::derived_green`] — behavior byte-unchanged); the shared comparison
+/// primitives live there and [`diff`] consumes them for its env-gated artifact.
+pub(crate) mod ledger;
+
+/// RECON-M-R1 gate tests (instance fixtures, regime matrix, collision guard, capture parity, the
+/// committed-fixture 7/0/2/9 reproduction + per-kind record).
+#[cfg(test)]
+mod ledger_tests;
 #[cfg(test)]
 pub(crate) mod test_fixture;
 #[cfg(test)]
@@ -115,9 +132,14 @@ fn lg_symbol_enrichment(lg: &LiveGraph, key: &str) -> Option<RowEnrichment> {
     })
 }
 
-/// Build the LiveGraph CALLER rows for `target` — one row per incoming `CALLS` edge (multiplicity
-/// preserved, mirroring the un-DISTINCT SQLite `find_symbol_callers`). `None` when the `callers` answer
-/// is non-Exact or any caller cannot be enriched (the cert reads that as a divergence -> RED).
+/// Build the LiveGraph CALLER rows for `target` — one row per incoming LiveGraph edge, KIND-BLIND
+/// (RECON-M-R1 §3.7-2 correction: `LiveGraph::callers` traverses `ir.edges` with NO `EdgeType`
+/// filter, so `References`/`Imports` edges mint rows too — while the SQLite side it mirrors IS
+/// `CALLS`-filtered; on any semantically-enriched graph the byte-equality compare therefore reads
+/// the kind surplus as divergence -> RED. The kind filter is the named M-R2 prerequisite,
+/// recon-design-1 §3.4-3). Multiplicity preserved (mirroring the un-DISTINCT SQLite
+/// `find_symbol_callers`). `None` when the `callers` answer is non-Exact or any caller cannot be
+/// enriched (the cert reads that as a divergence -> RED).
 pub(crate) fn lg_caller_rows(lg: &LiveGraph, target: &str) -> Option<Vec<AgentCallerRow>> {
     let env = lg.callers(target, Granularity::CallerDetail);
     if env.class() != AnswerClass::Exact {
@@ -138,9 +160,11 @@ pub(crate) fn lg_caller_rows(lg: &LiveGraph, target: &str) -> Option<Vec<AgentCa
     Some(rows)
 }
 
-/// Build the LiveGraph CALLEE rows for `target` — one row per outgoing `CALLS` edge (multiplicity
-/// preserved, mirroring the un-DISTINCT SQLite `find_symbol_callees`). `None` when the `callees` answer
-/// is non-Exact or any callee cannot be enriched (the cert reads that as a divergence -> RED).
+/// Build the LiveGraph CALLEE rows for `target` — one row per outgoing LiveGraph edge, KIND-BLIND
+/// (RECON-M-R1 §3.7-2 correction, exactly as [`lg_caller_rows`]: no `EdgeType` filter in
+/// `LiveGraph::callees`; the M-R2 kind filter is the named fix). Multiplicity preserved (mirroring
+/// the un-DISTINCT SQLite `find_symbol_callees`). `None` when the `callees` answer is non-Exact or
+/// any callee cannot be enriched (the cert reads that as a divergence -> RED).
 pub(crate) fn lg_callee_rows(lg: &LiveGraph, target: &str) -> Option<Vec<AgentCalleeRow>> {
     let env = lg.callees(target, Granularity::CallerDetail);
     if env.class() != AnswerClass::Exact {
@@ -168,8 +192,13 @@ pub(crate) fn lg_callee_rows(lg: &LiveGraph, target: &str) -> Option<Vec<AgentCa
 // the COUNT (multiplicity) and the per-row fields without demanding the SQLite query's (undefined) row
 // order. A bare set would hide a repeated `CALLS` edge -> a wrong count served as no-loss; sorting +
 // element compare preserves multiplicity.
+//
+// RECON-M-R1: the PRODUCTION compare now runs through `ledger::classify` (whose buckets are all
+// empty iff these multiset compares return true — the documented equivalence); these helpers remain
+// as the SPECIFICATION oracle the tests assert that equivalence against (test-only compiled).
 
 /// The total order over a caller row for the multiset compare (all fields, so the compare is field-exact).
+#[cfg(test)]
 fn caller_key(r: &AgentCallerRow) -> (&str, &str, Option<&str>, Option<&str>, Option<&str>) {
     (
         r.stable_key.as_str(),
@@ -181,6 +210,7 @@ fn caller_key(r: &AgentCallerRow) -> (&str, &str, Option<&str>, Option<&str>, Op
 }
 
 /// The total order over a callee row for the multiset compare (all fields, so the compare is field-exact).
+#[cfg(test)]
 fn callee_key(r: &AgentCalleeRow) -> (&str, &str, Option<&str>, Option<&str>, Option<&str>) {
     (
         r.stable_key.as_str(),
@@ -192,6 +222,7 @@ fn callee_key(r: &AgentCalleeRow) -> (&str, &str, Option<&str>, Option<&str>, Op
 }
 
 /// Caller rows equal as MULTISETS (same length + element-wise equal after a canonical sort).
+#[cfg(test)]
 pub(crate) fn callers_multiset_eq(lg: &[AgentCallerRow], sq: &[AgentCallerRow]) -> bool {
     if lg.len() != sq.len() {
         return false;
@@ -204,6 +235,7 @@ pub(crate) fn callers_multiset_eq(lg: &[AgentCallerRow], sq: &[AgentCallerRow]) 
 }
 
 /// Callee rows equal as MULTISETS (same length + element-wise equal after a canonical sort).
+#[cfg(test)]
 pub(crate) fn callees_multiset_eq(lg: &[AgentCalleeRow], sq: &[AgentCalleeRow]) -> bool {
     if lg.len() != sq.len() {
         return false;
@@ -215,77 +247,76 @@ pub(crate) fn callees_multiset_eq(lg: &[AgentCalleeRow], sq: &[AgentCalleeRow]) 
     a == b
 }
 
-/// Run the SHARED field-exact callgraph compare -> `Some(true)` iff the LiveGraph caller/callee rows
-/// equal the SQLite rows (as multisets) for EVERY symbol in the UNION corpus; `Some(false)` on the
-/// first divergence (or a non-Exact LiveGraph answer, or an un-enrichable caller/callee, or an absent
-/// producer); `None` only on a storage error (the caller treats it as NOT green -> safe SQLite
-/// fallback). Reads SQLite ONCE per fingerprint (`query_all_nodes` + a point `find_symbol_callers`/
-/// `callees` per corpus symbol); the GREEN SERVE path reads no `edges` (proven in `orient_serve`).
-fn callgraph_compare_is_exact(repo_state: &RepoState, snapshot_uid: &str) -> Option<bool> {
+/// RECON-M-R1: build the WITNESS LEDGER for the current graph state (the generalized cert
+/// compare — see [`ledger`]). Returns the ledger, or `None` ONLY on a storage error (the caller
+/// treats it as "could not reach a verdict" -> nothing stored -> safe SQLite fallback, today's
+/// exact `None` contract). The DEGENERATE paths keep today's verdict semantics as data:
+///
+/// - no resident LiveGraph -> a degenerate ledger, derived verdict RED (the producer cannot
+///   corroborate anything -> never GREEN);
+/// - no resident partitions -> degenerate, RED (an empty-corpus compare would vacuously pass
+///   while SQLite may hold callees -> conservatively NOT green);
+/// - both walk-free: no measurement is minted (unknown ≠ zero — every ledger measurement is
+///   `None` there).
+///
+/// Reads SQLite ONCE per fingerprint (`query_all_nodes` + a point `find_symbol_callers`/`callees`
+/// per corpus symbol — the cert's exact read set); the GREEN SERVE path reads no `edges` (proven
+/// in `orient_serve`). The ONE LiveGraph read guard is held across the whole walk (the same
+/// snapshot-consistency discipline the old compare had).
+fn build_witness_ledger_outcome(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+    fingerprint: &str,
+) -> Option<ledger::WitnessLedger> {
     let guard = repo_state.livegraph.read();
     let lg = match guard.as_ref() {
         Some(lg) => lg,
-        // No LiveGraph -> the producer cannot corroborate anything -> never GREEN.
-        None => return Some(false),
+        None => {
+            return Some(ledger::WitnessLedger::degenerate(
+                fingerprint,
+                snapshot_uid,
+                "no_resident_livegraph",
+            ))
+        }
     };
-    // Producer-absent guard: with no resident partition the corpus is empty and an empty-corpus compare
-    // would vacuously pass while SQLite may hold callees -> conservatively NOT green.
     if lg.live_partitions().is_empty() {
-        return Some(false);
+        return Some(ledger::WitnessLedger::degenerate(
+            fingerprint,
+            snapshot_uid,
+            "no_resident_partitions",
+        ));
     }
     // D-S = S-A: one fresh per-operation connection for the cert-build reads; open failure -> None
-    // (NOT green; safe SQLite fallback). The orient read guard keeps these reads snapshot-consistent.
+    // (NOT green; safe SQLite fallback). The read guard keeps these reads snapshot-consistent.
     let storage = repo_state.storage().ok()?;
-    // The SQLite identity surface — the sanctioned cert-BUILD read (the SAME `query_all_nodes`
-    // `focus_resolution_cert` uses), so the corpus is the UNION of both stores' SYMBOL identities.
-    let sqlite_nodes = storage.query_all_nodes(snapshot_uid).ok()?;
-    let mut corpus: BTreeSet<String> = lg.focus_corpus().symbol_keys.into_iter().collect();
-    for n in &sqlite_nodes {
-        if n.kind.as_str() == "SYMBOL" {
-            corpus.insert(n.stable_key.clone());
-        }
-    }
-
-    for key in &corpus {
-        // ── callers parity (multiset, both directions) ──
-        let lg_callers = match lg_caller_rows(lg, key) {
-            Some(rows) => rows,
-            None => return Some(false),
-        };
-        let sq_callers = storage.find_symbol_callers(snapshot_uid, key).ok()?;
-        if !callers_multiset_eq(&lg_callers, &sq_callers) {
-            return Some(false);
-        }
-        // ── callees parity (multiset, both directions) ──
-        let lg_callees = match lg_callee_rows(lg, key) {
-            Some(rows) => rows,
-            None => return Some(false),
-        };
-        let sq_callees = storage.find_symbol_callees(snapshot_uid, key).ok()?;
-        if !callees_multiset_eq(&lg_callees, &sq_callees) {
-            return Some(false);
-        }
-    }
-
-    Some(true)
+    ledger::build_witness_ledger(lg, &storage, snapshot_uid, fingerprint)
 }
 
 /// Build the callgraph no-loss cert -> verdict, STORE it keyed by `fingerprint`, return `Some(is_green)`
 /// (or `None` if no fingerprint / a storage error -> the caller falls back to SQLite). Mirrors
 /// `build_and_store_focus_resolution_cert` / `build_and_store_cycles_cert`.
+///
+/// RECON-M-R1: the verdict is DERIVED from the witness ledger (`GREEN ⟺ zero divergent symbols ∧
+/// zero unanswerable projections ∧ zero field mismatches` on the measured path; degenerate paths
+/// RED — behavior byte-unchanged; the ONE walk now always runs exhaustively, the §5.1 priced cost
+/// of retaining the classification the one-bit verdict used to discard). The ledger is stored
+/// beside the cert under the SAME fingerprint key + lifecycle.
 pub(crate) fn build_and_store_callgraph_cert(
     repo_state: &RepoState,
     snapshot_uid: &str,
     fingerprint: Option<String>,
 ) -> Option<bool> {
     let fingerprint = fingerprint?;
-    let is_green = callgraph_compare_is_exact(repo_state, snapshot_uid)?;
+    let built = build_witness_ledger_outcome(repo_state, snapshot_uid, &fingerprint)?;
+    let is_green = built.derived_green();
     // RECON-SPIKE-1: additive, env-gated (`RMAP_CALLGRAPH_DIFF`) diff emission — off by default (a single
-    // `var_os` lookup then return), best-effort, and independent of the verdict computed above/stored
+    // `var_os` lookup then return), best-effort, and independent of the verdict derived above/stored
     // below. When the comparison ran (fingerprint present), this captures the per-symbol divergence detail
-    // the one-bit verdict discards. It reads only; it never changes `is_green`.
-    diff::maybe_emit(repo_state, snapshot_uid, &fingerprint, is_green);
+    // the one-bit verdict discards, plus (M-R1) the ledger summary block. It reads only; it never changes
+    // `is_green`.
+    diff::maybe_emit(repo_state, snapshot_uid, &fingerprint, is_green, &built);
     let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
+    *repo_state.witness_ledger.write() = Some(built);
     *repo_state.callgraph_cert.write() = Some(CallgraphNoLossCert {
         verdict,
         fingerprint,

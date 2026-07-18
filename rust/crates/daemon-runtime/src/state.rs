@@ -245,6 +245,17 @@ pub struct RepoState {
     /// serve decision read-locks; the lazy build write-locks.
     pub callgraph_cert: parking_lot::RwLock<Option<crate::callgraph_cert::CallgraphNoLossCert>>,
 
+    /// RECON-M-R1: the WITNESS LEDGER — the callgraph cert's compare generalized into the
+    /// full-walk, instance-level, kind-aligned witness-agreement classification (`None` until
+    /// lazily built; written by the SAME `callgraph_cert::build_and_store_callgraph_cert` that
+    /// stores the cert, under the SAME fingerprint key). The stored cert's GREEN/RED verdict is
+    /// now DERIVED from this ledger (`WitnessLedger::derived_green` — behavior byte-unchanged).
+    /// In-memory ONLY, non-durable, dead on any fingerprint movement — the ratified D-R8 lifecycle
+    /// (no persisted family; a persisted rate could misdescribe the current witness pair).
+    /// M-R1 stores it as measurement infrastructure; M-R2 union serving and M-R3 read surfaces are
+    /// its consumers.
+    pub witness_ledger: parking_lot::RwLock<Option<crate::callgraph_cert::ledger::WitnessLedger>>,
+
     /// EC-M2-LEAF-SERVE-1: the in-memory repo-level MODULE-SUMMARY structural-count NO-LOSS
     /// certificate — the DR-2/DR-E3 `module_stats`-pattern IDENTITY-RECONCILIATION cert (`None`
     /// until lazily built by `module_summary_cert::build_and_store_module_summary_cert`).
@@ -304,6 +315,7 @@ impl RepoState {
             complexity_cert: parking_lot::RwLock::new(None),
             focus_resolution_cert: parking_lot::RwLock::new(None),
             callgraph_cert: parking_lot::RwLock::new(None),
+            witness_ledger: parking_lot::RwLock::new(None),
             module_summary_cert: parking_lot::RwLock::new(None),
         })
     }

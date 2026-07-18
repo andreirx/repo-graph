@@ -70,6 +70,7 @@ orient_serve/storage_port_impl.rs         = orient, explain
 trust_coherence.rs                        = trust
 
 [test-scaffolding]
+callgraph_cert/ledger_tests.rs
 callgraph_cert/test_fixture.rs
 callgraph_cert/tests.rs
 explain_coherence_served_tests.rs
