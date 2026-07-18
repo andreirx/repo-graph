@@ -157,6 +157,10 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
             "parent": retention_stats.as_ref().map(|s| s.parent),
             "baseline_auto": retention_stats.as_ref().map(|s| s.baseline_auto),
             "baseline_user": retention_stats.as_ref().map(|s| s.baseline_user),
+            // EC-M7: stamp-only baseline marks (provenance stamp + measurements
+            // retained; graph rows narrowed) — without this the breakdown would
+            // silently omit a whole retention class (review-1 #6).
+            "baseline_stamp": retention_stats.as_ref().map(|s| s.baseline_stamp),
             "prunable": retention_stats.as_ref().map(|s| s.prunable),
             "unclassified": retention_stats.as_ref().map(|s| s.unclassified),
             "stale_epoch": retention_stats.as_ref().map(|s| s.stale_epoch),

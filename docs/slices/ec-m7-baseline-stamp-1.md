@@ -57,3 +57,30 @@ A default mark retains stamp + measurements only and says so; row retention is a
 with its cost surfaced at mark time and in retention reporting; stamp-only comparisons degrade
 honestly with remediation; pre-existing marks unaffected; keep-set count and W-B window
 byte-for-byte semantics preserved; gates + witness green.
+
+## 6. DELIVERY (2026-07-18)
+
+Delivered in 3 relay cycles (fable-5 builder, gpt-5.6-sol reviewer) + operator close-out
+(review-2 residue was doc-comment-only; fixed by operator, behavior OBSERVED correct by the
+reviewer). Review rounds forced real fixes: FK-safe narrowing order (boundary_links before its
+fact tables, populated-FK commit test), complete/honest cost accounting (index pages + cascade
+children counted, retained-byte render), declarations no longer labeled "measurements",
+propagate-or-degrade on cost-report read failures, non-boolean retain_rows rejected,
+baseline_stamp in the perf retention breakdown, e2e comparative assess on a narrowed stamp,
+cost-read-before-mark ordering (no false failure after a committed write), and the known-empty
+vs narrowed distinction via the snapshots row's recorded index-time totals (no new persisted
+shape; empty-repo opt-in capability restored).
+
+- Default `mark_baseline` = provenance STAMP (class `baseline_stamp`): comparability metadata +
+  measurement rows; graph rows narrow only once the mark leaves the serving pair (never the
+  current/delta-base pair — keep-set count and W-B window untouched, C-8).
+- `retain_rows: true` = the pre-M-7 `baseline_user` capability, explicit, with cost surfaced at
+  mark time and in retention reporting; existing marks keep rows + comparability, labeled.
+- Stamp-only graph-row comparisons degrade to NOT_COMPARABLE with concrete remediation;
+  measurement comparison keeps working (e2e-proven).
+- Gates: storage retention 37/37; retention e2e 13/13; witness 15/15; chunked workspace suites,
+  clippy, fmt, isolated dogfood green (builder-executed, reviewer-spot-checked). REP-1: zero
+  representation change.
+
+**M-7 complete — the EC-1 milestone table is closed** (M-0/1/2/3a/3b/4/7 done; M-6 superseded
+for covered languages by D-R5; M-5 remains recorded as optional hardening, unscheduled).

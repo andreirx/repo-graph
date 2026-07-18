@@ -8,7 +8,7 @@
 //!
 //! Snapshots with stale `derived_cache_epoch` are excluded from
 //! protected roles (current, parent). They can only be marked as
-//! `prunable` or preserved as `baseline_user`.
+//! `prunable` or preserved as a baseline (`baseline_user` or `baseline_stamp`).
 //!
 //! A snapshot is considered "valid epoch" if:
 //! - `derived_cache_epoch == CURRENT_CACHE_EPOCH`, OR
@@ -64,8 +64,12 @@ impl StorageConnection {
     ///
     /// Steady state is ≤ 2 ready snapshots per repo (current + delta base).
     ///
-    /// Does not modify snapshots already marked as `baseline_user` — an explicit
-    /// human "keep this" that survives every reclassification.
+    /// Does not modify snapshots already marked as `baseline_user` or
+    /// `baseline_stamp` — an explicit human "keep this" that survives every
+    /// reclassification. (EC-M7-BASELINE-STAMP-1: both are user baseline marks;
+    /// they differ only in what the mark RETAINS — full graph rows vs the
+    /// provenance stamp + measurements. The keep-set COUNT semantics are
+    /// identical and unchanged.)
     ///
     /// The `baseline_auto` class is no longer *assigned* (the ratified keep-set
     /// dropped it); the enum variant is retained only so legacy rows still parse and
@@ -73,7 +77,7 @@ impl StorageConnection {
     ///
     /// **Whole-snapshot invalidation**: Snapshots with stale `derived_cache_epoch`
     /// are excluded from the protected roles (`current`, `parent`) — they can only
-    /// be `prunable` (or preserved as `baseline_user`). Epoch mismatch invalidates
+    /// be `prunable` (or preserved as `baseline_user`/`baseline_stamp`). Epoch mismatch invalidates
     /// the entire snapshot's derived cache.
     ///
     /// # Transactional Guarantee
@@ -119,20 +123,23 @@ impl StorageConnection {
         let mut current_uid: Option<&str> = None;
         let mut parent_uid: Option<&str> = None;
 
-        // Find current: most recent valid-epoch snapshot (not user baseline)
+        // A user baseline MARK (row-retaining or stamp) is excluded from the
+        // current/parent serving roles and preserved as-is across reclassification.
+        let is_user_mark = |retention: &Option<String>| -> bool {
+            retention
+                .as_ref()
+                .map(|r| r == "baseline_user" || r == "baseline_stamp")
+                .unwrap_or(false)
+        };
+
+        // Find current: most recent valid-epoch snapshot (not a user baseline mark)
         for (uid, parent, retention, epoch) in &snapshots {
-            if is_valid_epoch(epoch) {
-                let is_user_baseline = retention
-                    .as_ref()
-                    .map(|r| r == "baseline_user")
-                    .unwrap_or(false);
-                if !is_user_baseline {
-                    current_uid = Some(uid.as_str());
-                    if let Some(p) = parent {
-                        parent_uid = Some(p.as_str());
-                    }
-                    break;
+            if is_valid_epoch(epoch) && !is_user_mark(retention) {
+                current_uid = Some(uid.as_str());
+                if let Some(p) = parent {
+                    parent_uid = Some(p.as_str());
                 }
+                break;
             }
         }
 
@@ -153,12 +160,8 @@ impl StorageConnection {
         let mut assignments: Vec<(&str, RetentionClass)> = Vec::new();
 
         for (uid, _, existing_retention, epoch) in &snapshots {
-            // Preserve user baselines
-            if existing_retention
-                .as_ref()
-                .map(|r| r == "baseline_user")
-                .unwrap_or(false)
-            {
+            // Preserve user baseline marks (row-retaining AND stamp)
+            if is_user_mark(existing_retention) {
                 continue;
             }
 
@@ -194,6 +197,28 @@ impl StorageConnection {
         Ok(())
     }
 
+    /// Read one snapshot's retention class.
+    ///
+    /// `None` when the snapshot has no class yet (pre-classification) or does
+    /// not exist. Values this codebase never writes parse to `None` too — the
+    /// callers (the mark handler's upgrade/downgrade guards and the per-mark
+    /// retention report) treat both identically as "not a baseline mark".
+    pub fn get_snapshot_retention_class(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Option<RetentionClass>, StorageError> {
+        let class: Option<Option<String>> = match self.connection().query_row(
+            "SELECT retention_class FROM snapshots WHERE snapshot_uid = ?1",
+            rusqlite::params![snapshot_uid],
+            |row| row.get(0),
+        ) {
+            Ok(c) => Some(c),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(e) => return Err(StorageError::Sqlite(e)),
+        };
+        Ok(class.flatten().and_then(|c| RetentionClass::parse(&c)))
+    }
+
     /// Get retention statistics for a repo.
     pub fn get_retention_stats(&self, repo_uid: &str) -> Result<RetentionStats, StorageError> {
         let conn = self.connection();
@@ -216,6 +241,7 @@ impl StorageConnection {
         let parent = count_class("parent")?;
         let baseline_auto = count_class("baseline_auto")?;
         let baseline_user = count_class("baseline_user")?;
+        let baseline_stamp = count_class("baseline_stamp")?;
         let prunable = count_class("prunable")?;
 
         let unclassified: i64 = conn.query_row(
@@ -237,6 +263,7 @@ impl StorageConnection {
             parent,
             baseline_auto,
             baseline_user,
+            baseline_stamp,
             prunable,
             unclassified,
             stale_epoch,
@@ -247,7 +274,9 @@ impl StorageConnection {
     ///
     /// A snapshot has a stale epoch if its `derived_cache_epoch` does not match
     /// the current cache epoch. This does not affect snapshots marked as
-    /// `baseline_user`.
+    /// `baseline_user` or `baseline_stamp` — both are explicit user marks; a
+    /// stamp's retained content (snapshot row + measurements) is epoch-independent
+    /// provenance, so an epoch bump must not silently delete a human's mark.
     ///
     /// Returns the number of snapshots marked.
     pub fn mark_stale_epochs_prunable(&self, repo_uid: &str) -> Result<i64, StorageError> {
@@ -258,7 +287,8 @@ impl StorageConnection {
              WHERE repo_uid = ?1 \
              AND derived_cache_epoch IS NOT NULL \
              AND derived_cache_epoch != ?2 \
-             AND (retention_class IS NULL OR retention_class != 'baseline_user')",
+             AND (retention_class IS NULL \
+                  OR retention_class NOT IN ('baseline_user', 'baseline_stamp'))",
             rusqlite::params![repo_uid, CURRENT_CACHE_EPOCH],
         )?;
 

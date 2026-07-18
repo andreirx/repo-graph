@@ -92,6 +92,10 @@ struct RetentionOutput {
     baseline_auto: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     baseline_user: Option<i64>,
+    /// EC-M7: stamp-only baseline marks (provenance stamp + measurements
+    /// retained; graph rows narrowed). Absent from pre-M-7 daemons.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_stamp: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prunable: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -192,4 +196,74 @@ Output:
 Examples:
   rmap perf                    # current repo metrics"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A daemon-shaped `perf` response (the `handlers::metrics` JSON contract),
+    /// trimmed to the retention breakdown under test.
+    fn daemon_response(retention: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "repo_path": "/repos/x",
+            "db_size_bytes": 1024,
+            "page_size": 4096,
+            "page_count": 10,
+            "tables": [],
+            "tiers": { "tier_a_rows": 1, "tier_b_rows": 2 },
+            "layers": { "layer_01_rows": 1, "layer_2_rows": 0, "layer_3_rows": 0 },
+            "retention": retention,
+        })
+    }
+
+    // EC-M7 (review-1 #6): the retention breakdown carries `baseline_stamp` —
+    // without it a whole retention class was silently absent from `rmap perf`.
+    #[test]
+    fn perf_parses_baseline_stamp_in_retention_breakdown() {
+        let response = daemon_response(serde_json::json!({
+            "total_snapshots": 3,
+            "ready_snapshots": 3,
+            "failed_snapshots": 0,
+            "oldest_snapshot": "2026-01-01T00:00:00Z",
+            "newest_snapshot": "2026-01-03T00:00:00Z",
+            "current": 1,
+            "parent": 1,
+            "baseline_auto": 0,
+            "baseline_user": 0,
+            "baseline_stamp": 1,
+            "prunable": 0,
+            "unclassified": 0,
+            "stale_epoch": 0,
+        }));
+        let output: PerfOutput = serde_json::from_value(response).expect("daemon shape parses");
+        let retention = output.retention.as_ref().expect("retention present");
+        assert_eq!(retention.baseline_stamp, Some(1));
+        assert_eq!(retention.baseline_user, Some(0));
+
+        // The class survives re-serialization (the --json surface).
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["retention"]["baseline_stamp"], 1);
+    }
+
+    // Back-compat: a pre-M-7 daemon response without the field parses with
+    // `None` and the re-serialized JSON omits it (no fabricated zero).
+    #[test]
+    fn perf_tolerates_daemons_without_baseline_stamp() {
+        let response = daemon_response(serde_json::json!({
+            "total_snapshots": 1,
+            "ready_snapshots": 1,
+            "failed_snapshots": 0,
+            "oldest_snapshot": null,
+            "newest_snapshot": null,
+        }));
+        let output: PerfOutput = serde_json::from_value(response).expect("older shape parses");
+        let retention = output.retention.as_ref().expect("retention present");
+        assert_eq!(retention.baseline_stamp, None);
+        let json = serde_json::to_value(&output).unwrap();
+        assert!(
+            json["retention"].get("baseline_stamp").is_none(),
+            "an unmeasured class is omitted, not rendered as zero: {json}"
+        );
+    }
 }

@@ -10,7 +10,9 @@
 //! - `current`: Active snapshot for this repo (always retained)
 //! - `parent`: Parent of current snapshot (retained for incremental refresh)
 //! - `baseline_auto`: Automatically selected comparison baseline
-//! - `baseline_user`: Explicitly marked by user as baseline
+//! - `baseline_user`: Explicitly marked by user as baseline (graph rows retained)
+//! - `baseline_stamp`: Explicitly marked by user as baseline, stamp-only (graph
+//!   rows narrowed once the mark leaves the serving pair; measurements retained)
 //! - `prunable`: Eligible for pruning
 //!
 //! # Derived Cache Epoch
@@ -31,17 +33,26 @@
 //! - `types`: Core types (RetentionClass, RetentionStats, CURRENT_CACHE_EPOCH)
 //! - `classify`: Classification logic (assign retention classes based on relationships)
 //! - `prune`: Pruning logic (transactional deletion of prunable snapshots)
+//! - `narrow`: EC-M7 baseline-stamp narrowing (delete a stamp mark's graph
+//!   families, keep the `snapshots` row + FC4 measurements) + per-mark cost
+//!   measurement
 //!
 //! # References
 //!
 //! - `docs/slices/cache-semantics-1.md`
 //! - `docs/slices/retention-policy-1.md`
+//! - `docs/slices/ec-m7-baseline-stamp-1.md`
 //! - `agent_docs/storage-architecture-v2.md`
 
 mod classify;
+mod narrow;
 mod prune;
 mod types;
 
+pub use narrow::{
+    CascadeChild, FamilyRows, NarrowedBaseline, SnapshotFamilyCost, STAMP_KEEP_AUTHORITY_TABLES,
+    STAMP_KEEP_MEASUREMENT_TABLES, STAMP_NARROW_CASCADE_CHILDREN, STAMP_NARROW_TABLES,
+};
 pub use types::{RetentionClass, RetentionStats, CURRENT_CACHE_EPOCH};
 
 #[cfg(test)]

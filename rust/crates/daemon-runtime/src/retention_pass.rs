@@ -213,6 +213,13 @@ pub struct RetentionPassOutcome {
     pub pruned_count: i64,
     /// Orphaned non-READY (interrupted/failed) snapshots reclaimed in the SAME pass (slice §2).
     pub non_ready_reclaimed: usize,
+    /// EC-M7: `baseline_stamp` marks narrowed to their stamp this pass (graph
+    /// families deleted; the snapshot row + measurements kept). The serving
+    /// pair is structurally excluded (`narrow_stamp_baselines`).
+    pub narrowed_count: i64,
+    /// Rows removed by the narrowing above: direct deletions PLUS cascade-linked
+    /// child deletions (sums `NarrowedBaseline.rows_deleted`).
+    pub narrowed_rows: i64,
     /// Freelist bytes a VACUUM would return to the OS, measured (freelist × page size) BEFORE the
     /// VACUUM decision — the honest gate input.
     pub reclaimable_bytes: u64,
@@ -257,6 +264,8 @@ impl RetentionReport {
             "repo": self.repo_display,
             "pruned_count": self.outcome.pruned_count,
             "non_ready_reclaimed": self.outcome.non_ready_reclaimed,
+            "narrowed_count": self.outcome.narrowed_count,
+            "narrowed_rows": self.outcome.narrowed_rows,
             "reclaimable_bytes": self.outcome.reclaimable_bytes,
             "vacuum_status": self.outcome.vacuum.as_str(),
             "reclaimed_bytes": self.outcome.reclaimed_bytes,
@@ -305,6 +314,16 @@ pub fn run_retention_pass(
     //    DAEMON-VISIBILITY-1 reclaim, re-run here since the retention pass already holds the gates).
     let non_ready = storage.prune_non_ready_snapshots(repo_uid)?;
 
+    // 2b. EC-M7-BASELINE-STAMP-1: narrow eligible `baseline_stamp` marks to their stamp — delete
+    //     their graph-family rows, keep the snapshot row + measurements. Runs here (not at mark
+    //     time) because this is the ONLY place holding the same write discipline as the prunes
+    //     above; the DELETEs are the same WAL-safe regime as step 1, and eligibility structurally
+    //     excludes the serving pair (latest READY + its delta-base parent), so the W-B window and
+    //     the keep-set COUNT are untouched. Runs BEFORE the reclaimable measurement so narrow-freed
+    //     pages feed the same threshold-gated VACUUM decision.
+    let narrowed = storage.narrow_stamp_baselines(repo_uid)?;
+    let narrowed_rows: i64 = narrowed.iter().map(|n| n.rows_deleted).sum();
+
     // 3. Threshold-gated VACUUM. `reclaimable_bytes` measures what a VACUUM would return to the OS
     //    WITHOUT paying it; below threshold we skip (freed pages are reused by the next index).
     let reclaimable = storage.reclaimable_bytes()?;
@@ -341,6 +360,8 @@ pub fn run_retention_pass(
     Ok(RetentionPassOutcome {
         pruned_count,
         non_ready_reclaimed: non_ready.len(),
+        narrowed_count: narrowed.len() as i64,
+        narrowed_rows,
         reclaimable_bytes: reclaimable,
         vacuum,
         reclaimed_bytes,
@@ -483,22 +504,39 @@ fn run_auto_retention(state: &DaemonState, db_path: &Path, repo_uid: &str, repo_
 /// Reader-frame one-liner for the daemon log, honest about all three VACUUM fates: "pruned N, reclaimed
 /// X on disk" | "pruned N (X reclaimable, VACUUM skipped — below threshold, pages recycle)" | "pruned N
 /// (X reclaimable, VACUUM deferred — repo was being read; retries next pass)" | "nothing to prune".
+/// EC-M7: when the pass narrowed baseline stamps, the line names them too — cost changes are never
+/// silent.
 pub fn summarize_outcome(o: &RetentionPassOutcome) -> String {
     let removed = o.total_removed();
+    let narrowed_suffix = if o.narrowed_count > 0 {
+        format!(
+            "; narrowed {} baseline mark(s) to provenance stamps ({} graph rows removed)",
+            o.narrowed_count, o.narrowed_rows
+        )
+    } else {
+        String::new()
+    };
     if removed == 0 {
+        if o.narrowed_count > 0 {
+            // Nothing pruned, but stamps were narrowed — say what happened.
+            return format!(
+                "narrowed {} baseline mark(s) to provenance stamps ({} graph rows removed)",
+                o.narrowed_count, o.narrowed_rows
+            );
+        }
         return "nothing to prune".to_string();
     }
     match o.vacuum {
         VacuumStatus::Ran => format!(
-            "pruned {removed} snapshot(s), reclaimed {} on disk",
+            "pruned {removed} snapshot(s), reclaimed {} on disk{narrowed_suffix}",
             format_bytes(o.reclaimed_bytes)
         ),
         VacuumStatus::SkippedBelowThreshold => format!(
-            "pruned {removed} snapshot(s) ({} reclaimable, VACUUM skipped — below threshold, pages recycle)",
+            "pruned {removed} snapshot(s) ({} reclaimable, VACUUM skipped — below threshold, pages recycle){narrowed_suffix}",
             format_bytes(o.reclaimable_bytes)
         ),
         VacuumStatus::DeferredReadersActive => format!(
-            "pruned {removed} snapshot(s) ({} reclaimable, VACUUM deferred — repo was being read; retries next pass)",
+            "pruned {removed} snapshot(s) ({} reclaimable, VACUUM deferred — repo was being read; retries next pass){narrowed_suffix}",
             format_bytes(o.reclaimable_bytes)
         ),
     }

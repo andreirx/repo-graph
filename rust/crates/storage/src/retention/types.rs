@@ -21,7 +21,14 @@ pub const CURRENT_CACHE_EPOCH: &str = "1.0";
 /// - `Current`: Active snapshot (always retained)
 /// - `Parent`: Parent of current (retained for incremental refresh)
 /// - `BaselineAuto`: Auto-selected comparison baseline
-/// - `BaselineUser`: User-marked baseline (preserved across reclassification)
+/// - `BaselineUser`: User-marked baseline, **row-retaining** (graph-family rows
+///   pinned in full — the pre-M-7 behavior, now the explicit opt-in)
+/// - `BaselineStamp`: User-marked baseline, **stamp-only** (EC-1 M-7 / D-EC-8-D
+///   default): the `snapshots` row (comparability/toolchain/epoch identity),
+///   the FC4 measurement/assessment rows, and the Tier-A `declarations` rows
+///   are retained; graph-family rows are NOT promised and are removed by the
+///   retention pass once the snapshot leaves the serving pair (see
+///   `retention/narrow.rs`)
 /// - `Prunable`: Eligible for deletion
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,8 +39,10 @@ pub enum RetentionClass {
     Parent,
     /// Automatically selected comparison baseline
     BaselineAuto,
-    /// Explicitly marked by user as baseline
+    /// Explicitly marked by user as a row-retaining baseline (graph rows pinned)
     BaselineUser,
+    /// Explicitly marked by user as a provenance stamp (graph rows not retained)
+    BaselineStamp,
     /// Eligible for pruning
     Prunable,
 }
@@ -46,6 +55,7 @@ impl RetentionClass {
             RetentionClass::Parent => "parent",
             RetentionClass::BaselineAuto => "baseline_auto",
             RetentionClass::BaselineUser => "baseline_user",
+            RetentionClass::BaselineStamp => "baseline_stamp",
             RetentionClass::Prunable => "prunable",
         }
     }
@@ -65,6 +75,7 @@ impl FromStr for RetentionClass {
             "parent" => Ok(RetentionClass::Parent),
             "baseline_auto" => Ok(RetentionClass::BaselineAuto),
             "baseline_user" => Ok(RetentionClass::BaselineUser),
+            "baseline_stamp" => Ok(RetentionClass::BaselineStamp),
             "prunable" => Ok(RetentionClass::Prunable),
             _ => Err(()),
         }
@@ -89,8 +100,10 @@ pub struct RetentionStats {
     pub parent: i64,
     /// Auto-baseline snapshots
     pub baseline_auto: i64,
-    /// User-baseline snapshots
+    /// Row-retaining user-baseline snapshots (graph rows pinned)
     pub baseline_user: i64,
+    /// Stamp-only user-baseline snapshots (EC-1 M-7: stamp + measurements retained)
+    pub baseline_stamp: i64,
     /// Prunable snapshots
     pub prunable: i64,
     /// Snapshots with NULL retention_class (pre-classification)

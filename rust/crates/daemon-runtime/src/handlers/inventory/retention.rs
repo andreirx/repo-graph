@@ -22,10 +22,13 @@
 //!
 //! # Invariants
 //!
-//! - Never prunes: current, parent, baseline_auto, baseline_user
+//! - Never prunes: current, parent, baseline_auto, baseline_user, baseline_stamp
+//!   (EC-M7: a `baseline_stamp` mark's SNAPSHOT ROW is never pruned; its
+//!   graph-family rows are narrowed away by the lifecycle once the mark leaves
+//!   the serving pair — see `storage::retention::narrow`)
 //! - Stale-epoch snapshots are prunable because classification made them so
 //! - READY-retention prune is post-snapshot-success only
-//! - Prune is idempotent (no-op if no prunable snapshots)
+//! - Prune is idempotent (no-op if no prunable snapshots); so is the narrow step
 //!
 //! # DAEMON-VISIBILITY-1 (F3) amendment — interrupted-snapshot reclaim (operator Option A, 2026-07-03)
 //!
@@ -63,6 +66,13 @@ pub struct LifecycleResult {
     pub pruned_count: i64,
     /// Number of snapshots marked prunable but not yet deleted
     pub prunable_count: i64,
+    /// EC-M7: `baseline_stamp` marks narrowed to their stamp this run
+    /// (graph families deleted; snapshot row + measurements kept).
+    /// 0 on the classify-only foreground path.
+    pub narrowed_count: i64,
+    /// Rows removed by the narrowing above: direct deletions PLUS cascade-linked
+    /// child deletions (sums `NarrowedBaseline.rows_deleted`).
+    pub narrowed_rows: i64,
     /// Retention stats after lifecycle enforcement
     pub stats: RetentionStats,
 }
@@ -101,17 +111,20 @@ pub fn classify_retention_only(
         .saturating_sub(stats.current)
         .saturating_sub(stats.parent)
         .saturating_sub(stats.baseline_auto)
-        .saturating_sub(stats.baseline_user);
+        .saturating_sub(stats.baseline_user)
+        .saturating_sub(stats.baseline_stamp);
 
     Ok(LifecycleResult {
         classified: true,
         pruned_count: 0,
         prunable_count,
+        narrowed_count: 0,
+        narrowed_rows: 0,
         stats,
     })
 }
 
-/// Enforce full retention lifecycle: classify → prune → return summary.
+/// Enforce full retention lifecycle: classify → prune → narrow → return summary.
 ///
 /// This is the **maintenance** path that includes pruning.
 /// Use for explicit maintenance commands, NOT for interactive index/refresh.
@@ -120,7 +133,10 @@ pub fn classify_retention_only(
 ///
 /// 1. Classify all snapshots for the repo (assigns retention classes)
 /// 2. Prune all snapshots marked `prunable`
-/// 3. Return stats
+/// 3. Narrow eligible `baseline_stamp` marks to their stamp (EC-M7:
+///    graph families deleted, snapshot row + measurements kept; the serving
+///    pair — latest READY + its delta-base parent — is structurally excluded)
+/// 4. Return stats
 ///
 /// # Warning
 ///
@@ -129,13 +145,14 @@ pub fn classify_retention_only(
 ///
 /// # Transaction Boundaries
 ///
-/// Classification and prune are each atomic (single transaction), but
+/// Classification, prune, and narrow are each atomic per snapshot, but
 /// the combined lifecycle is **sequenced, not single-transaction atomic**.
 ///
 /// # Idempotence
 ///
 /// Safe to call multiple times. Second call with no new prunable snapshots
-/// returns pruned_count = 0.
+/// returns pruned_count = 0 (and narrowed_count = 0 — an already-narrowed
+/// stamp deletes nothing).
 pub fn enforce_retention_lifecycle(
     storage: &StorageConnection,
     repo_uid: &str,
@@ -146,7 +163,12 @@ pub fn enforce_retention_lifecycle(
     // 2. Prune prunable snapshots
     let pruned_count = storage.prune_prunable_snapshots(repo_uid)?;
 
-    // 3. Get current retention stats
+    // 3. EC-M7: narrow eligible stamp marks (same write discipline as the
+    //    prune above — the caller already holds the repo write guard).
+    let narrowed = storage.narrow_stamp_baselines(repo_uid)?;
+    let narrowed_rows: i64 = narrowed.iter().map(|n| n.rows_deleted).sum();
+
+    // 4. Get current retention stats
     let stats = storage.get_retention_stats(repo_uid)?;
 
     // Log if anything was pruned
@@ -161,6 +183,8 @@ pub fn enforce_retention_lifecycle(
         classified: true,
         pruned_count,
         prunable_count: 0, // All prunable were just pruned
+        narrowed_count: narrowed.len() as i64,
+        narrowed_rows,
         stats,
     })
 }
@@ -277,17 +301,27 @@ pub fn handle_classify_retention(state: &DaemonState, request: &Request) -> Disp
         .map(|m| m.len())
         .unwrap_or(0);
 
+    // EC-M7: per-mark cost report — retention reporting shows what each
+    // baseline mark retains and costs, either way (D-EC-8-D clause 2).
+    let baseline_marks = baseline_marks_report(&storage, repo_uid);
+
     let response = json!({
         "classified": result.classified,
         "pruned_count": result.pruned_count,
+        // EC-M7: stamp marks narrowed this run (graph families deleted; stamp
+        // + measurements kept).
+        "narrowed_count": result.narrowed_count,
+        "narrowed_rows": result.narrowed_rows,
         "retention": {
             "current": result.stats.current,
             "parent": result.stats.parent,
             "baseline_auto": result.stats.baseline_auto,
             "baseline_user": result.stats.baseline_user,
+            "baseline_stamp": result.stats.baseline_stamp,
             "prunable": result.stats.prunable,
             "total": result.stats.total,
         },
+        "baseline_marks": baseline_marks,
         // F3: interrupted snapshots that were present (named for the report), + the reclaim outcome.
         "interrupted_snapshots": interrupted,
         "non_ready_reclaim": reclaim,
@@ -296,6 +330,101 @@ pub fn handle_classify_retention(state: &DaemonState, request: &Request) -> Disp
     });
 
     DispatchResult::success(&request.id, response)
+}
+
+/// EC-M7: one entry per baseline mark — class, what it retains, its measured
+/// cost (exact rows; estimated-or-unknown bytes), and the graph-row
+/// comparability contract with remediation.
+///
+/// # Failure honesty (review-1 #4)
+///
+/// Every read failure is an EXPLICIT entry, never a silent conversion:
+/// - `list_snapshots` failure → one entry naming the failed report (an empty
+///   list must mean "no marks", not "could not look");
+/// - a per-mark class / graph-row-presence / cost read failure → an entry for
+///   that mark naming the error (a `present=false` guess could misdirect the
+///   reader to re-index when rows may still exist).
+fn baseline_marks_report(storage: &StorageConnection, repo_uid: &str) -> Vec<serde_json::Value> {
+    use repo_graph_storage::retention::RetentionClass;
+
+    let snapshots = match storage.list_snapshots(repo_uid) {
+        Ok(s) => s,
+        Err(e) => {
+            return vec![json!({
+                "error": format!(
+                    "baseline-mark report unavailable — could not list snapshots: {e}"
+                ),
+            })]
+        }
+    };
+    let mut marks = Vec::new();
+    for snap in snapshots {
+        let class = match storage.get_snapshot_retention_class(&snap.snapshot_uid) {
+            Ok(Some(c @ (RetentionClass::BaselineUser | RetentionClass::BaselineStamp))) => c,
+            Ok(_) => continue,
+            Err(e) => {
+                marks.push(json!({
+                    "snapshot_uid": snap.snapshot_uid,
+                    "error": format!("could not read retention class: {e}"),
+                }));
+                continue;
+            }
+        };
+        let rows_present = match storage.snapshot_graph_rows_present(&snap.snapshot_uid) {
+            Ok(p) => p,
+            Err(e) => {
+                marks.push(json!({
+                    "snapshot_uid": snap.snapshot_uid,
+                    "retention_class": class.as_str(),
+                    "error": format!("could not check graph-row presence: {e}"),
+                }));
+                continue;
+            }
+        };
+        let cost = match storage.snapshot_family_cost(&snap.snapshot_uid) {
+            Ok(c) => c,
+            Err(e) => {
+                marks.push(json!({
+                    "snapshot_uid": snap.snapshot_uid,
+                    "retention_class": class.as_str(),
+                    "error": format!("could not measure cost: {e}"),
+                }));
+                continue;
+            }
+        };
+        // Review-1 #2: disambiguate absent rows — recorded empty at index time
+        // vs narrowed away. Deterministic from the recorded index-time totals
+        // on the snapshots row (see `baseline::known_empty_at_index`).
+        let recorded_empty = super::baseline::known_empty_at_index(&snap);
+        marks.push(json!({
+            "snapshot_uid": snap.snapshot_uid,
+            "retention_class": class.as_str(),
+            "created_at": snap.created_at,
+            "label": snap.label,
+            // Reader-frame retention split: what the mark pins vs the stamp.
+            "graph_rows": {
+                "retained": class == RetentionClass::BaselineUser,
+                "present": rows_present,
+                "recorded_empty_at_index": recorded_empty,
+                "rows_total": cost.graph_rows_total,
+                "estimated_bytes": cost.graph_estimated_bytes,
+            },
+            // FC4 measurement/assessment families only; retained declarations
+            // are authority, reported under their own key (review-1 #3).
+            "measurements": {
+                "rows_total": cost.measurement_rows_total,
+                "estimated_bytes": cost.measurement_estimated_bytes,
+            },
+            "declarations": {
+                "rows_total": cost.declaration_rows,
+                "estimated_bytes": cost.declaration_estimated_bytes,
+            },
+            "estimate_basis": cost.estimate_basis,
+            "graph_row_comparisons": super::baseline::comparability_token(class),
+            "remediation": super::baseline::stamp_remediation(class, rows_present, recorded_empty),
+        }));
+    }
+    marks
 }
 
 /// DAEMON-VISIBILITY-1 (F3, operator Option A): delete + reclaim the ORPHANED non-READY snapshots for
@@ -371,4 +500,186 @@ fn reclaim_orphaned_non_ready(
         "deleted_count": deleted.len(),
         "reclaimed_bytes": size_before.saturating_sub(size_after),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use repo_graph_storage::retention::RetentionClass;
+
+    /// Test fixture writes go through `execute_raw` — the storage crate's
+    /// sanctioned cross-crate integration-test seam.
+    fn storage_with_repo() -> StorageConnection {
+        let storage = StorageConnection::open_in_memory().unwrap();
+        storage
+            .execute_raw(
+                "INSERT INTO repos (repo_uid, name, root_path, created_at) \
+                 VALUES ('r1', 'test', '/test', '2025-01-01T00:00:00Z')",
+            )
+            .unwrap();
+        storage
+    }
+
+    // Review-1 #4: a failed snapshot listing must yield an EXPLICIT
+    // degradation entry — an empty `baseline_marks` array must always mean
+    // "no marks exist", never "the report could not be read".
+    #[test]
+    fn report_degrades_explicitly_when_snapshot_listing_fails() {
+        let storage = storage_with_repo();
+        // Force the read failure a corrupt store would produce.
+        storage.execute_raw("DROP TABLE snapshots").unwrap();
+
+        let marks = baseline_marks_report(&storage, "r1");
+        assert_eq!(marks.len(), 1, "one explicit degradation entry: {marks:?}");
+        let err = marks[0]["error"].as_str().expect("entry names the error");
+        assert!(
+            err.contains("could not list snapshots"),
+            "the degradation names its cause: {err}"
+        );
+    }
+
+    // Review-1 #4: a graph-row-presence read failure must be a per-mark error
+    // entry — never a silent `present=false`, which would misdirect the reader
+    // to re-index while rows may still exist.
+    #[test]
+    fn report_names_presence_read_failure_per_mark_instead_of_guessing_false() {
+        let storage = storage_with_repo();
+        storage
+            .execute_raw(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at) \
+                 VALUES ('s1', 'r1', 'full', 'ready', '2025-01-01T00:00:00Z')",
+            )
+            .unwrap();
+        storage
+            .mark_snapshot_retention("s1", RetentionClass::BaselineStamp)
+            .unwrap();
+        // Break exactly the presence read: one narrow table missing.
+        storage
+            .execute_raw("DROP TABLE project_surface_evidence")
+            .unwrap();
+
+        let marks = baseline_marks_report(&storage, "r1");
+        assert_eq!(marks.len(), 1, "the mark still appears: {marks:?}");
+        let m = &marks[0];
+        assert_eq!(m["snapshot_uid"], "s1");
+        assert_eq!(m["retention_class"], "baseline_stamp");
+        let err = m["error"].as_str().expect("entry names the error");
+        assert!(
+            err.contains("graph-row presence"),
+            "the failure names what could not be read: {err}"
+        );
+        assert!(
+            m.get("graph_rows").is_none(),
+            "no fabricated presence/cost object accompanies the error: {m}"
+        );
+    }
+
+    // Review-2 #2: the report distinguishes the two absent-rows states — a
+    // KNOWN-EMPTY stamp (index recorded 0 files/nodes/edges; nothing was ever
+    // removed) from a NARROWED stamp (recorded rows now gone) — via the
+    // recorded index-time totals, deterministically, with matching remediation
+    // text (no false "rows are already gone" claim for a graph that never had
+    // rows).
+    #[test]
+    fn report_distinguishes_recorded_empty_from_narrowed_marks() {
+        let storage = storage_with_repo();
+        // s-empty: a finalized empty index — READY, totals recorded 0/0/0.
+        storage
+            .execute_raw(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, \
+                 files_total, nodes_total, edges_total, created_at) \
+                 VALUES ('s-empty', 'r1', 'full', 'ready', 0, 0, 0, '2025-01-01T00:00:00Z')",
+            )
+            .unwrap();
+        // s-narrowed: the index recorded rows (nonzero totals) but its family
+        // rows are physically gone — the post-narrow state.
+        storage
+            .execute_raw(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, \
+                 files_total, nodes_total, edges_total, created_at) \
+                 VALUES ('s-narrowed', 'r1', 'full', 'ready', 2, 5, 3, '2025-01-02T00:00:00Z')",
+            )
+            .unwrap();
+        storage
+            .mark_snapshot_retention("s-empty", RetentionClass::BaselineStamp)
+            .unwrap();
+        storage
+            .mark_snapshot_retention("s-narrowed", RetentionClass::BaselineStamp)
+            .unwrap();
+
+        let marks = baseline_marks_report(&storage, "r1");
+        assert_eq!(marks.len(), 2, "{marks:?}");
+        let by_uid = |uid: &str| {
+            marks
+                .iter()
+                .find(|m| m["snapshot_uid"] == uid)
+                .unwrap_or_else(|| panic!("mark {uid} in report: {marks:?}"))
+        };
+
+        let empty = by_uid("s-empty");
+        assert_eq!(empty["graph_rows"]["recorded_empty_at_index"], true);
+        assert_eq!(empty["graph_rows"]["present"], false);
+        let empty_remediation = empty["remediation"].as_str().unwrap();
+        assert!(
+            empty_remediation.contains("recorded empty at index time"),
+            "known-empty remediation states the graph never had rows: {empty_remediation}"
+        );
+        assert!(
+            !empty_remediation.contains("already gone"),
+            "no false removal claim for a graph that never had rows: {empty_remediation}"
+        );
+
+        let narrowed = by_uid("s-narrowed");
+        assert_eq!(narrowed["graph_rows"]["recorded_empty_at_index"], false);
+        assert_eq!(narrowed["graph_rows"]["present"], false);
+        let narrowed_remediation = narrowed["remediation"].as_str().unwrap();
+        assert!(
+            narrowed_remediation.contains("already gone"),
+            "narrowed remediation states the rows were removed: {narrowed_remediation}"
+        );
+    }
+
+    // The healthy path keeps the measurement/declaration split (review-1 #3):
+    // declarations are never folded into the measurements figure.
+    #[test]
+    fn report_separates_measurements_from_declarations() {
+        let storage = storage_with_repo();
+        storage
+            .execute_raw(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at) \
+                 VALUES ('s1', 'r1', 'full', 'ready', '2025-01-01T00:00:00Z')",
+            )
+            .unwrap();
+        storage
+            .mark_snapshot_retention("s1", RetentionClass::BaselineStamp)
+            .unwrap();
+        storage
+            .execute_raw(
+                "INSERT INTO measurements (measurement_uid, snapshot_uid, repo_uid, \
+                 target_stable_key, kind, value_json, source, created_at) \
+                 VALUES ('m1', 's1', 'r1', 'k1', 'cyclomatic_complexity', '{\"value\": 3}', \
+                         'test', '2025-01-01T00:00:00Z')",
+            )
+            .unwrap();
+        storage
+            .execute_raw(
+                "INSERT INTO declarations (declaration_uid, repo_uid, snapshot_uid, \
+                 target_stable_key, kind, value_json, created_at, is_active) \
+                 VALUES ('d1', 'r1', 's1', 'r1:REPO', 'quality_policy', '{}', \
+                         '2025-01-01T00:00:00Z', 1)",
+            )
+            .unwrap();
+
+        let marks = baseline_marks_report(&storage, "r1");
+        assert_eq!(marks.len(), 1);
+        let m = &marks[0];
+        assert_eq!(
+            m["measurements"]["rows_total"], 1,
+            "measurements count FC4 rows only: {m}"
+        );
+        assert_eq!(
+            m["declarations"]["rows_total"], 1,
+            "declarations reported separately as retained authority: {m}"
+        );
+    }
 }

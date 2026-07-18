@@ -2793,6 +2793,7 @@ impl ServiceDispatcher {
                                     "parent": lifecycle.stats.parent,
                                     "baseline_auto": lifecycle.stats.baseline_auto,
                                     "baseline_user": lifecycle.stats.baseline_user,
+                                    "baseline_stamp": lifecycle.stats.baseline_stamp,
                                     "total": lifecycle.stats.total,
                                 });
                             }
@@ -3087,6 +3088,7 @@ impl ServiceDispatcher {
                             "parent": lifecycle.stats.parent,
                             "baseline_auto": lifecycle.stats.baseline_auto,
                             "baseline_user": lifecycle.stats.baseline_user,
+                            "baseline_stamp": lifecycle.stats.baseline_stamp,
                             "total": lifecycle.stats.total,
                         });
                     }

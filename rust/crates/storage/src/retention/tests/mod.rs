@@ -12,6 +12,7 @@ mod baseline;
 mod classify;
 mod epoch;
 mod lifecycle;
+mod narrow;
 mod prune;
 mod types;
 

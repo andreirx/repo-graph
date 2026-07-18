@@ -43,7 +43,8 @@ Cannot be reconstructed from source code or re-derived automatically.
 | Table/Field | Description |
 |-------------|-------------|
 | `declarations` | Boundaries, requirements, waivers, quality policies |
-| `snapshots.retention_class = 'baseline_user'` | Explicit user baseline marking |
+| `snapshots.retention_class = 'baseline_user'` | Explicit user baseline marking, row-retaining (graph rows pinned — the EC-M7 opt-in) |
+| `snapshots.retention_class = 'baseline_stamp'` | Explicit user baseline marking, stamp-only (EC-M7 default: snapshot row + measurement/assessment rows retained, declarations untouched as Tier-A authority; graph rows narrowed only once the mark leaves the serving pair — it is neither the latest READY snapshot nor the latest's delta-base parent) |
 | `registry.alias` | User-assigned repo aliases |
 
 **Properties**:

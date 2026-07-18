@@ -818,3 +818,760 @@ fn attempt_label(a: &RetentionAttempt) -> String {
         RetentionAttempt::Failed(e) => format!("Failed({e})"),
     }
 }
+
+// ── EC-M7-BASELINE-STAMP-1 — baseline marks are provenance stamps by default ──────────────────────
+
+/// Row count for one family table scoped to one snapshot, read through the
+/// SAME public cost surface the mark handler and retention report use
+/// (`snapshot_family_cost` — exact `COUNT(*)` measurements; 0 when the family
+/// has no rows for this snapshot).
+fn snapshot_rows(db_path: &str, table: &str, snapshot_uid: &str) -> i64 {
+    let conn = StorageConnection::open(db_path).unwrap();
+    let cost = conn.snapshot_family_cost(snapshot_uid).unwrap();
+    cost.graph_families
+        .iter()
+        .chain(cost.measurement_families.iter())
+        .find(|f| f.table == table)
+        .map(|f| f.rows)
+        .unwrap_or(0)
+}
+
+/// Parent uid of a snapshot (the delta-chain witness), via the public snapshot read.
+fn parent_of(db_path: &str, snapshot_uid: &str) -> Option<String> {
+    let conn = StorageConnection::open(db_path).unwrap();
+    conn.get_snapshot(snapshot_uid)
+        .unwrap()
+        .expect("snapshot exists")
+        .parent_snapshot_uid
+}
+
+/// The full M-7 lifecycle through REAL dispatched ops — fresh index AND delta refreshes
+/// (Persistence Completeness): a DEFAULT `mark_baseline` is a stamp whose cost and
+/// comparability contract are surfaced at mark time; the mark keeps its graph rows while it
+/// is in the serving pair (the W-B window / delta base — C-8 untouched), narrows to
+/// stamp + measurements once it leaves that pair, and the keep-set COUNT is preserved throughout
+/// (current + parent + the mark — never fewer snapshots rows than the ratified keep-set).
+#[test]
+fn default_mark_is_a_stamp_that_narrows_only_after_leaving_the_serving_pair() {
+    let _serial = serial_guard();
+    set_overrides(false); // deterministic: we drive the pass synchronously
+
+    let (dispatcher, state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+
+    write_base(&repo_dir);
+    let i1 = index(&dispatcher, "m7-idx1", &repo_dir);
+    let db_path = i1["db_path"].as_str().unwrap().to_string();
+    let repo_uid = i1["repo_uid"].as_str().unwrap().to_string();
+    let s1 = i1["snapshot_uid"].as_str().unwrap().to_string();
+
+    // ── Mark time: the DEFAULT mark is a stamp, and its cost is SURFACED ──
+    let mark = expect_success(run(
+        &dispatcher,
+        "m7-mark1",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy() }),
+    ));
+    assert_eq!(mark["retention_class"], "baseline_stamp", "{mark}");
+    assert_eq!(mark["retains"]["graph_rows"], false, "{mark}");
+    assert_eq!(mark["graph_row_comparisons"], "not_comparable", "{mark}");
+    assert!(
+        mark["remediation"]
+            .as_str()
+            .unwrap()
+            .contains("retain_rows"),
+        "the concrete remediation is named at mark time: {mark}"
+    );
+    let graph_rows_at_mark = mark["graph_row_cost"]["rows_total"].as_i64().unwrap();
+    assert!(
+        graph_rows_at_mark > 0,
+        "a real index has real graph rows to price: {mark}"
+    );
+    let measurement_rows_at_mark = mark["retains"]["measurements"]["rows_total"]
+        .as_i64()
+        .unwrap();
+    assert!(
+        measurement_rows_at_mark > 0,
+        "a real TS index persists per-function measurements — the stamp retains them: {mark}"
+    );
+
+    // ── Refresh #1 (delta): s1 becomes the delta-base parent → still protected ──
+    add_module(&repo_dir, 7, 10);
+    let r1 = expect_success(run(
+        &dispatcher,
+        "m7-ref1",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    let s2 = r1["snapshot_uid"].as_str().unwrap().to_string();
+    assert_eq!(
+        parent_of(&db_path, &s2).as_deref(),
+        Some(s1.as_str()),
+        "the refresh chained s1 as its delta-base parent (the W-B window's N)"
+    );
+
+    let outcome1 = match try_retention_attempt(
+        &state,
+        Path::new(&db_path),
+        &repo_uid,
+        &repo_dir.to_string_lossy(),
+    ) {
+        RetentionAttempt::Ran(o) => o,
+        other => panic!("pass must run: {}", attempt_label(&other)),
+    };
+    assert_eq!(
+        outcome1.narrowed_count, 0,
+        "a stamp in the serving pair (delta-base parent) is NEVER narrowed"
+    );
+    assert!(
+        snapshot_rows(&db_path, "nodes", &s1) > 0,
+        "s1 keeps its graph rows while it is the copy-forward source"
+    );
+
+    // ── Refresh #2: s1 leaves the serving pair → the pass narrows it ──
+    add_module(&repo_dir, 8, 10);
+    let r2 = expect_success(run(
+        &dispatcher,
+        "m7-ref2",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    let s3 = r2["snapshot_uid"].as_str().unwrap().to_string();
+    assert_eq!(parent_of(&db_path, &s3).as_deref(), Some(s2.as_str()));
+
+    let outcome2 = match try_retention_attempt(
+        &state,
+        Path::new(&db_path),
+        &repo_uid,
+        &repo_dir.to_string_lossy(),
+    ) {
+        RetentionAttempt::Ran(o) => o,
+        other => panic!("pass must run: {}", attempt_label(&other)),
+    };
+    assert_eq!(
+        outcome2.narrowed_count, 1,
+        "s1 narrows once it left the serving pair"
+    );
+    assert!(outcome2.narrowed_rows > 0);
+
+    // The stamp: graph families gone; snapshots row + measurements intact.
+    assert_eq!(snapshot_rows(&db_path, "nodes", &s1), 0);
+    assert_eq!(snapshot_rows(&db_path, "edges", &s1), 0);
+    assert_eq!(snapshot_rows(&db_path, "unresolved_edges", &s1), 0);
+    assert_eq!(
+        snapshot_rows(&db_path, "measurements", &s1),
+        measurement_rows_at_mark,
+        "the FC4 measurement rows survive the narrow byte-for-byte in count"
+    );
+
+    // C-8 keep-set COUNT: current (s3) + delta-base parent (s2) + the mark (s1).
+    let mut expect = vec![s1.clone(), s2.clone(), s3.clone()];
+    expect.sort();
+    assert_eq!(
+        ready_snapshot_uids(&db_path, &repo_uid),
+        expect,
+        "keep-set count preserved: current + parent + the baseline mark"
+    );
+
+    // ── Retention reporting: the per-mark cost report labels the stamp honestly ──
+    let report = expect_success(run(
+        &dispatcher,
+        "m7-classify",
+        "classify_retention",
+        json!({ "path": repo_dir.to_string_lossy() }),
+    ));
+    assert_eq!(report["retention"]["baseline_stamp"], 1, "{report}");
+    let marks = report["baseline_marks"].as_array().unwrap();
+    let m = marks
+        .iter()
+        .find(|m| m["snapshot_uid"] == s1.as_str())
+        .expect("the stamp mark appears in the per-mark report");
+    assert_eq!(m["retention_class"], "baseline_stamp");
+    assert_eq!(m["graph_rows"]["retained"], false);
+    assert_eq!(m["graph_rows"]["present"], false, "already narrowed");
+    assert_eq!(m["graph_row_comparisons"], "not_comparable");
+    assert!(
+        m["remediation"].as_str().unwrap().contains("rmap index"),
+        "an already-narrowed stamp's remediation names re-indexing: {m}"
+    );
+    assert_eq!(
+        m["measurements"]["rows_total"].as_i64().unwrap(),
+        measurement_rows_at_mark
+    );
+
+    // ── Guard: a row-retaining promise cannot be made over narrowed rows ──
+    let err = match run(
+        &dispatcher,
+        "m7-mark-narrowed",
+        "mark_baseline",
+        json!({
+            "path": repo_dir.to_string_lossy(),
+            "snapshot_uid": s1,
+            "retain_rows": true
+        }),
+    ) {
+        DispatchResult::Error(e) => e,
+        DispatchResult::Success(s) => panic!(
+            "retain_rows over narrowed rows must be refused (a 'row-retaining' mark with no rows would lie): {}",
+            s.result
+        ),
+    };
+    assert!(
+        err.error.message.contains("retain_rows=true"),
+        "the refusal names the concrete remediation: {}",
+        err.error.message
+    );
+}
+
+/// The explicit opt-in (D-EC-8-D's B-behavior) and clause-7 back-compat: a
+/// `retain_rows=true` mark pins full graph rows through supersession and stays
+/// comparable, and a later DEFAULT re-mark call never silently downgrades it.
+#[test]
+fn retain_rows_mark_keeps_rows_and_a_default_remark_never_downgrades_it() {
+    let _serial = serial_guard();
+    set_overrides(false);
+
+    let (dispatcher, state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+
+    write_base(&repo_dir);
+    let i1 = index(&dispatcher, "m7b-idx1", &repo_dir);
+    let db_path = i1["db_path"].as_str().unwrap().to_string();
+    let repo_uid = i1["repo_uid"].as_str().unwrap().to_string();
+    let s1 = i1["snapshot_uid"].as_str().unwrap().to_string();
+
+    // Explicit opt-in: the cost of the pinned rows is surfaced at mark time.
+    let mark = expect_success(run(
+        &dispatcher,
+        "m7b-mark1",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy(), "retain_rows": true }),
+    ));
+    assert_eq!(mark["retention_class"], "baseline_user", "{mark}");
+    assert_eq!(mark["retains"]["graph_rows"], true);
+    assert_eq!(mark["graph_row_comparisons"], "comparable");
+    assert!(
+        mark["remediation"].is_null(),
+        "nothing to remediate: {mark}"
+    );
+    let rows_at_mark = mark["graph_row_cost"]["rows_total"].as_i64().unwrap();
+    assert!(rows_at_mark > 0);
+
+    // Supersede twice; the pass must narrow NOTHING (this mark pins its rows).
+    add_module(&repo_dir, 7, 10);
+    expect_success(run(
+        &dispatcher,
+        "m7b-ref1",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    add_module(&repo_dir, 8, 10);
+    expect_success(run(
+        &dispatcher,
+        "m7b-ref2",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    let outcome = match try_retention_attempt(
+        &state,
+        Path::new(&db_path),
+        &repo_uid,
+        &repo_dir.to_string_lossy(),
+    ) {
+        RetentionAttempt::Ran(o) => o,
+        other => panic!("pass must run: {}", attempt_label(&other)),
+    };
+    assert_eq!(
+        outcome.narrowed_count, 0,
+        "a row-retaining mark is never narrowed (clause 7)"
+    );
+    assert!(
+        snapshot_rows(&db_path, "nodes", &s1) > 0,
+        "the mark's graph rows stay pinned through supersession"
+    );
+
+    // A DEFAULT re-mark call keeps the row promise (no silent downgrade).
+    let remark = expect_success(run(
+        &dispatcher,
+        "m7b-remark",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy(), "snapshot_uid": s1 }),
+    ));
+    assert_eq!(
+        remark["retention_class"], "baseline_user",
+        "a default mark on an existing row-retaining mark keeps it: {remark}"
+    );
+    assert!(
+        remark["note"].as_str().unwrap().contains("kept"),
+        "the response says the existing promise was kept: {remark}"
+    );
+
+    // The per-mark report labels it as a row-retaining mark, comparable.
+    let report = expect_success(run(
+        &dispatcher,
+        "m7b-classify",
+        "classify_retention",
+        json!({ "path": repo_dir.to_string_lossy() }),
+    ));
+    assert_eq!(report["retention"]["baseline_user"], 1);
+    let marks = report["baseline_marks"].as_array().unwrap();
+    let m = marks
+        .iter()
+        .find(|m| m["snapshot_uid"] == s1.as_str())
+        .expect("the row-retaining mark appears in the report");
+    assert_eq!(m["retention_class"], "baseline_user");
+    assert_eq!(m["graph_rows"]["retained"], true);
+    assert_eq!(m["graph_rows"]["present"], true);
+    assert_eq!(m["graph_row_comparisons"], "comparable");
+}
+
+/// PROTOCOL TYPE GUARD (review-1 #5): a present, non-boolean `retain_rows`
+/// (e.g. the string "true") is REJECTED with a reader-frame error — never
+/// silently read as `false`, which would turn an intended row-retention
+/// promise into eventual row deletion by the narrow pass.
+#[test]
+fn mark_baseline_rejects_non_boolean_retain_rows() {
+    let _serial = serial_guard();
+    set_overrides(false);
+
+    let (dispatcher, _state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+
+    write_base(&repo_dir);
+    let i1 = index(&dispatcher, "m7c-idx", &repo_dir);
+    let db_path = i1["db_path"].as_str().unwrap().to_string();
+    let s1 = i1["snapshot_uid"].as_str().unwrap().to_string();
+
+    // The truthy-looking string a mistyped client would send.
+    let err = match run(
+        &dispatcher,
+        "m7c-mark-string",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy(), "retain_rows": "true" }),
+    ) {
+        DispatchResult::Error(e) => e,
+        DispatchResult::Success(s) => panic!(
+            "a non-boolean retain_rows must be rejected, not coerced: {}",
+            s.result
+        ),
+    };
+    assert!(
+        err.error.message.contains("must be a boolean"),
+        "the refusal names the expected type: {}",
+        err.error.message
+    );
+
+    // The rejected call changed NOTHING: the snapshot carries no baseline class.
+    let conn = StorageConnection::open(&db_path).unwrap();
+    let class = conn.get_snapshot_retention_class(&s1).unwrap();
+    assert!(
+        !matches!(
+            class,
+            Some(
+                repo_graph_storage::retention::RetentionClass::BaselineUser
+                    | repo_graph_storage::retention::RetentionClass::BaselineStamp
+            )
+        ),
+        "the rejected request must not have marked anything: {class:?}"
+    );
+    drop(conn);
+
+    // A well-typed boolean still works (the guard rejects types, not intent).
+    let ok = expect_success(run(
+        &dispatcher,
+        "m7c-mark-bool",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy(), "retain_rows": true }),
+    ));
+    assert_eq!(ok["retention_class"], "baseline_user", "{ok}");
+}
+
+/// CLAUSE-3 CONSUMER PROOF (review-1 #7): a real comparative `assess` runs
+/// against a NARROWED stamp baseline — measurement-level comparison keeps
+/// working after the graph rows are gone, including a scoped policy. The
+/// baseline lookup consumes the retained `measurements` rows by
+/// `(stable_key, kind)`; precision is asserted (only the genuinely-new
+/// complex function violates `no_new` — if the narrowed baseline's
+/// measurements were missing, EVERY current function would read as new).
+#[test]
+fn comparative_assess_works_against_a_narrowed_stamp_baseline() {
+    use repo_graph_storage::crud::declarations::{quality_policy_identity_key, DeclarationInsert};
+
+    let _serial = serial_guard();
+    set_overrides(false); // deterministic: we drive the narrow pass synchronously
+
+    let (dispatcher, state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+
+    write_base(&repo_dir);
+    add_module(&repo_dir, 2, 3);
+    let i1 = index(&dispatcher, "m7d-idx", &repo_dir);
+    let db_path = i1["db_path"].as_str().unwrap().to_string();
+    let repo_uid = i1["repo_uid"].as_str().unwrap().to_string();
+    let s1 = i1["snapshot_uid"].as_str().unwrap().to_string();
+
+    // Two comparative policies through the REAL declaration write path:
+    // repo-wide no_new, and a file-SCOPED no_worsened (the reviewer-requested
+    // scoped case).
+    {
+        let conn = StorageConnection::open(&db_path).unwrap();
+        let declare = |policy_id: &str, payload: serde_json::Value| {
+            let decl = DeclarationInsert {
+                identity_key: quality_policy_identity_key(&repo_uid, policy_id, 1),
+                repo_uid: repo_uid.clone(),
+                target_stable_key: format!("{repo_uid}:REPO"),
+                kind: "quality_policy".to_string(),
+                value_json: payload.to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                created_by: Some("test".to_string()),
+                supersedes_uid: None,
+                authored_basis_json: None,
+            };
+            let result = conn.insert_declaration(&decl).unwrap();
+            assert!(result.inserted, "policy {policy_id} declared");
+        };
+        declare(
+            "QP-M7-NO-NEW",
+            json!({
+                "policy_id": "QP-M7-NO-NEW",
+                "version": 1,
+                "scope_clauses": [],
+                "measurement_kind": "cyclomatic_complexity",
+                "policy_kind": "no_new",
+                "threshold": 2.0,
+                "severity": "fail",
+                "description": "new functions must stay simple",
+            }),
+        );
+        declare(
+            "QP-M7-SCOPED",
+            json!({
+                "policy_id": "QP-M7-SCOPED",
+                "version": 1,
+                "scope_clauses": [{ "type": "file", "selector": "main.ts" }],
+                "measurement_kind": "cyclomatic_complexity",
+                "policy_kind": "no_worsened",
+                "threshold": 2.0,
+                "severity": "fail",
+                "description": "main.ts must not get worse",
+            }),
+        );
+    }
+
+    // Default (stamp) mark on s1, then supersede it twice and narrow it.
+    let mark = expect_success(run(
+        &dispatcher,
+        "m7d-mark",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy() }),
+    ));
+    assert_eq!(mark["retention_class"], "baseline_stamp", "{mark}");
+
+    add_module(&repo_dir, 7, 2);
+    expect_success(run(
+        &dispatcher,
+        "m7d-ref1",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    add_module(&repo_dir, 8, 2);
+    expect_success(run(
+        &dispatcher,
+        "m7d-ref2",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    let outcome = match try_retention_attempt(
+        &state,
+        Path::new(&db_path),
+        &repo_uid,
+        &repo_dir.to_string_lossy(),
+    ) {
+        RetentionAttempt::Ran(o) => o,
+        other => panic!("pass must run: {}", attempt_label(&other)),
+    };
+    assert_eq!(outcome.narrowed_count, 1, "s1 narrowed to its stamp");
+    assert_eq!(
+        snapshot_rows(&db_path, "nodes", &s1),
+        0,
+        "the baseline's graph rows are GONE — the comparison below can only \
+         ride on the retained measurements"
+    );
+
+    // A genuinely-new complex function (cyclomatic > 2), then refresh to the
+    // snapshot assess will evaluate.
+    std::fs::write(
+        repo_dir.join("complex.ts"),
+        "export function complexBeast(x: number): number {\n\
+             if (x > 10) { return 1; }\n\
+             else if (x > 5) { return 2; }\n\
+             else if (x > 2) { return 3; }\n\
+             if (x < -10) { return 4; }\n\
+             return 0;\n\
+         }\n",
+    )
+    .unwrap();
+    let r3 = expect_success(run(
+        &dispatcher,
+        "m7d-ref3",
+        "refresh",
+        json!({ "repo": repo_dir.to_string_lossy() }),
+    ));
+    let s4 = r3["snapshot_uid"].as_str().unwrap().to_string();
+
+    // The comparative assess against the NARROWED stamp baseline.
+    let assess = expect_success(run(
+        &dispatcher,
+        "m7d-assess",
+        "assess",
+        json!({ "repo": repo_dir.to_string_lossy(), "baseline": s1 }),
+    ));
+    assert_eq!(assess["baseline_snapshot"], s1.as_str(), "{assess}");
+    assert_eq!(assess["baseline_required_count"], 2, "{assess}");
+    assert_eq!(
+        assess["assessments"]["total"], 2,
+        "both comparative policies were evaluated: {assess}"
+    );
+    assert_eq!(
+        assess["assessments"]["not_comparable"], 0,
+        "measurement-level comparison WORKS against a narrowed stamp — \
+         no NOT_COMPARABLE degradation: {assess}"
+    );
+    assert_eq!(
+        assess["assessments"]["fail"], 1,
+        "no_new catches the new complex function: {assess}"
+    );
+    assert_eq!(
+        assess["assessments"]["pass"], 1,
+        "the SCOPED no_worsened policy passes (main.ts unchanged): {assess}"
+    );
+
+    // Precision: exactly ONE violation, naming the genuinely-new function.
+    // Pre-baseline functions resolved through the narrowed baseline's
+    // retained measurements — none were misread as "new".
+    let conn = StorageConnection::open(&db_path).unwrap();
+    let fail_rows: i64 = conn
+        .query_scalar(&format!(
+            "SELECT COUNT(*) FROM quality_assessments \
+             WHERE snapshot_uid = '{s4}' AND computed_verdict = 'FAIL'"
+        ))
+        .unwrap();
+    assert_eq!(fail_rows, 1);
+    let violations_json: String = conn
+        .query_scalar(&format!(
+            "SELECT violations_json FROM quality_assessments \
+             WHERE snapshot_uid = '{s4}' AND computed_verdict = 'FAIL'"
+        ))
+        .unwrap();
+    let violations: Vec<serde_json::Value> = serde_json::from_str(&violations_json).unwrap();
+    assert_eq!(
+        violations.len(),
+        1,
+        "exactly the new function violates — the baseline lookup consumed the \
+         retained measurements: {violations_json}"
+    );
+    assert!(
+        violations[0]["target_stable_key"]
+            .as_str()
+            .unwrap()
+            .contains("complexBeast"),
+        "the violation names the new function: {violations_json}"
+    );
+}
+
+/// REVIEW-2 #1 REGRESSION: the mark-time cost read runs BEFORE the A1
+/// authority write — a cost-read failure fails the request WITHOUT having
+/// committed the mark, so the response can never report failure after
+/// success. Induced through storage's sanctioned `execute_raw` seam by
+/// dropping `quality_assessments`: a KEEP table read ONLY by
+/// `snapshot_family_cost` (the graph-row presence check walks the narrow
+/// tables, none of which is touched), so every read before the cost
+/// measurement still succeeds and the failure isolates the ordering under
+/// test.
+#[test]
+fn mark_baseline_cost_read_failure_precedes_the_mark_and_leaves_class_unchanged() {
+    use repo_graph_storage::retention::RetentionClass;
+
+    let _serial = serial_guard();
+    set_overrides(false);
+
+    let (dispatcher, _state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_base(&repo_dir);
+    let i1 = index(&dispatcher, "m7e-idx", &repo_dir);
+    let db_path = i1["db_path"].as_str().unwrap().to_string();
+    let s1 = i1["snapshot_uid"].as_str().unwrap().to_string();
+
+    // Capture the pre-request class, then break exactly the cost read.
+    let class_before = {
+        let conn = StorageConnection::open(&db_path).unwrap();
+        let c = conn.get_snapshot_retention_class(&s1).unwrap();
+        conn.execute_raw("DROP TABLE quality_assessments").unwrap();
+        c
+    };
+
+    let err = match run(
+        &dispatcher,
+        "m7e-mark",
+        "mark_baseline",
+        json!({ "path": repo_dir.to_string_lossy() }),
+    ) {
+        DispatchResult::Error(e) => e,
+        DispatchResult::Success(s) => panic!(
+            "a failed cost read must fail the request (never a success whose \
+             cost figures were fabricated): {}",
+            s.result
+        ),
+    };
+    assert!(
+        err.error.message.contains("quality_assessments"),
+        "the error names the failed read: {}",
+        err.error.message
+    );
+
+    // The A1 mark was NOT committed: the retention class is byte-identical to
+    // the pre-request state, and in particular no baseline class appeared.
+    let class_after = {
+        let conn = StorageConnection::open(&db_path).unwrap();
+        conn.get_snapshot_retention_class(&s1).unwrap()
+    };
+    assert_eq!(
+        class_after, class_before,
+        "the failed request must not have mutated the retention class"
+    );
+    assert!(
+        !matches!(
+            class_after,
+            Some(RetentionClass::BaselineUser | RetentionClass::BaselineStamp)
+        ),
+        "no baseline mark was committed by the failed request: {class_after:?}"
+    );
+}
+
+/// REVIEW-2 #2: `retain_rows=true` distinguishes deterministically between an
+/// intact KNOWN-EMPTY snapshot and a NARROWED one. Basis: the recorded
+/// index-time totals on the `snapshots` row (`update_snapshot_counts` writes
+/// them from physical `COUNT(*)` at finalization; narrowing never touches
+/// that row). A known-empty snapshot may be marked row-retaining — the
+/// pre-M-7 capability preserved — and every surface (mark response, stamp
+/// remediation, per-mark report) labels the empty graph as recorded-empty,
+/// never as removed. The NARROWED-rows refusal is proven in
+/// `default_mark_is_a_stamp_that_narrows_only_after_leaving_the_serving_pair`.
+#[test]
+fn retain_rows_on_a_known_empty_snapshot_is_allowed_and_labeled() {
+    let _serial = serial_guard();
+    set_overrides(false);
+
+    let (dispatcher, _state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_base(&repo_dir);
+    let i1 = index(&dispatcher, "m7f-idx", &repo_dir);
+    let db_path = i1["db_path"].as_str().unwrap().to_string();
+    let repo_uid = i1["repo_uid"].as_str().unwrap().to_string();
+
+    // Seed two snapshots exactly as a finalized EMPTY index leaves them:
+    // READY, totals recorded 0/0/0 (the physical COUNT(*) over zero rows), no
+    // family rows. Seeded OLDER than the real index's snapshot so neither
+    // enters the serving pair.
+    {
+        let conn = StorageConnection::open(&db_path).unwrap();
+        for (uid, ts) in [
+            ("s-empty-user", "2020-01-01T00:00:00Z"),
+            ("s-empty-stamp", "2020-01-02T00:00:00Z"),
+        ] {
+            conn.execute_raw(&format!(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, \
+                 files_total, nodes_total, edges_total, created_at) \
+                 VALUES ('{uid}', '{repo_uid}', 'full', 'ready', 0, 0, 0, '{ts}')"
+            ))
+            .unwrap();
+        }
+    }
+
+    // The explicit opt-in on a known-empty snapshot is ALLOWED (pre-M-7
+    // capability): class baseline_user, labeled recorded-empty, comparable.
+    let mark = expect_success(run(
+        &dispatcher,
+        "m7f-mark-user",
+        "mark_baseline",
+        json!({
+            "path": repo_dir.to_string_lossy(),
+            "snapshot_uid": "s-empty-user",
+            "retain_rows": true
+        }),
+    ));
+    assert_eq!(mark["retention_class"], "baseline_user", "{mark}");
+    assert_eq!(mark["retains"]["graph_rows"], true, "{mark}");
+    assert_eq!(mark["graph_row_cost"]["rows_total"], 0, "{mark}");
+    assert_eq!(
+        mark["graph_row_cost"]["recorded_empty_at_index"], true,
+        "the zero is disambiguated: recorded empty, not narrowed: {mark}"
+    );
+    assert_eq!(mark["graph_row_comparisons"], "comparable", "{mark}");
+    assert!(
+        mark["note"].as_str().unwrap().contains("recorded 0"),
+        "the note states the graph was recorded empty: {mark}"
+    );
+
+    // A DEFAULT (stamp) mark on a known-empty snapshot: the remediation names
+    // the recorded-empty state — never the false claim that rows were removed.
+    let stamp = expect_success(run(
+        &dispatcher,
+        "m7f-mark-stamp",
+        "mark_baseline",
+        json!({
+            "path": repo_dir.to_string_lossy(),
+            "snapshot_uid": "s-empty-stamp"
+        }),
+    ));
+    assert_eq!(stamp["retention_class"], "baseline_stamp", "{stamp}");
+    assert_eq!(
+        stamp["graph_row_cost"]["recorded_empty_at_index"], true,
+        "{stamp}"
+    );
+    let remediation = stamp["remediation"].as_str().unwrap();
+    assert!(
+        remediation.contains("recorded empty at index time"),
+        "{remediation}"
+    );
+    assert!(
+        !remediation.contains("already gone"),
+        "no false removal claim for a graph that never had rows: {remediation}"
+    );
+
+    // The per-mark retention report carries the same distinction.
+    let report = expect_success(run(
+        &dispatcher,
+        "m7f-classify",
+        "classify_retention",
+        json!({ "path": repo_dir.to_string_lossy() }),
+    ));
+    let marks = report["baseline_marks"].as_array().unwrap();
+    let by_uid = |uid: &str| {
+        marks
+            .iter()
+            .find(|m| m["snapshot_uid"] == uid)
+            .unwrap_or_else(|| panic!("mark {uid} in report: {marks:?}"))
+    };
+    let user_mark = by_uid("s-empty-user");
+    assert_eq!(user_mark["retention_class"], "baseline_user");
+    assert_eq!(user_mark["graph_rows"]["retained"], true);
+    assert_eq!(user_mark["graph_rows"]["present"], false);
+    assert_eq!(user_mark["graph_rows"]["recorded_empty_at_index"], true);
+    let stamp_mark = by_uid("s-empty-stamp");
+    assert_eq!(stamp_mark["retention_class"], "baseline_stamp");
+    assert_eq!(stamp_mark["graph_rows"]["recorded_empty_at_index"], true);
+    assert!(
+        stamp_mark["remediation"]
+            .as_str()
+            .unwrap()
+            .contains("recorded empty at index time"),
+        "{stamp_mark}"
+    );
+}
