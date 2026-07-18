@@ -15,7 +15,7 @@
 //!
 //! `explain/call_ranking.rs` is the model (caller/callee module-concentration ranking).
 //! These are the complementary comparators:
-//!   - cross-command: `sort_cycles`, `sort_boundary_violations` — each has ≥2 concrete
+//!   - cross-command: `canonicalize_cycles`, `sort_boundary_violations` — each has ≥2 concrete
 //!     callers across BOTH the orient aggregators AND the explain pipeline with an IDENTICAL
 //!     non-trivial comparator, so the logic lives once here (the "shared generic helper"
 //!     mandate; the rejected alternative — duplicating the 3-key comparator at 5 sites — is
@@ -35,7 +35,7 @@
 //!
 //! NEWLY ORDERED — this module owns the comparator, applied just before the existing cut:
 //!   - cycles: explain symbol+path, orient `aggregators::cycles` ×2,
-//!     `orient::symbol::aggregate_cycles_for_module` ............ `sort_cycles` (length DESC, ring)
+//!     `orient::symbol::aggregate_cycles_for_module` ............ `canonicalize_cycles` (ring sorted, length DESC)
 //!   - boundary: explain symbol+path .......................... `sort_boundary_violations`
 //!   - explain files (path focus) ............................. `sort_explain_files` (symbol_count DESC, path)
 //!   - explain symbols (file focus) ........................... `sort_explain_symbols` (line_start, name, key)
@@ -61,12 +61,36 @@ use crate::storage_port::{
     AgentComplexityMeasurement, AgentCycle, AgentFileEntry, AgentImportEntry, AgentSymbolEntry,
 };
 
-/// Module dependency cycles: bigger cycles first (`length` DESC), then ring members
-/// lexicographically. Cycles are canonicalised by the storage port (each appears once,
-/// rotated to its smallest member), so `modules` is unique per cycle — a TOTAL,
-/// source-independent tiebreak. Used by orient (`aggregators::cycles` ×2,
-/// `orient::symbol::aggregate_cycles_for_module`) and explain (symbol + path cycle sections).
-pub(crate) fn sort_cycles(cycles: &mut [AgentCycle]) {
+/// Module dependency cycles — the CANONICAL, backend-independent value form (EC-M2-LEAF-SERVE-1 /
+/// CYCLES-B; the orient/explain value-layer analogue of the ratified CYCLES-OUTPUT-CONTRACT-1 basis).
+///
+/// TWO determinisms, in order:
+///   1. WITHIN each cycle: `modules` sorted lexicographically. A strongly-connected component is a
+///      SET, not a ring — `graph-algorithms` documents member order as "stack pop order", a Tarjan
+///      artifact; the SQLite and LiveGraph traversals order the same SCC differently. Sorting makes
+///      the member list a pure function of the member SET. (NO dedup: a duplicate rendered name —
+///      e.g. two same-basename modules at repo scope — is preserved; multiset semantics, so a
+///      representation divergence is caught by the cycle-VALUES cert instead of silently collapsed.)
+///   2. ACROSS cycles: bigger cycles first (`length` DESC), then the now-canonical member vector
+///      lexicographically — a TOTAL, source-independent order (TRUNCATION-AUDIT-1), so `take(N)`
+///      selects the same cycles regardless of which store produced the set.
+///
+/// NOTE (name-vs-semantics correction): the previous `sort_cycles` doc claimed the storage port
+/// rotated each cycle to its smallest member — VERIFIED FALSE first-hand (`queries.rs`
+/// `find_cycles_cancellable` emits `scc.members` in traversal order, no rotation). Step 1 makes the
+/// claimed property actually hold, which is exactly what licenses a cert-proven-set-equal LiveGraph
+/// serve to render byte-identically (the DR-EXPLAIN-CALLER-ORDER principle: canonicalize the full
+/// set by a pure function of the set, THEN cut). This is a sanctioned wire change to the shipped
+/// cycle `modules` order (EC-1 §5.2 M-2 ratifies CYCLES-B).
+///
+/// Used by orient (`aggregators::cycles` ×2, `orient::symbol::aggregate_cycles_for_module`) and
+/// explain (symbol + path cycle sections); `pub` so the daemon's cycle-VALUES no-loss cert
+/// (`daemon-runtime::livegraph_feed`) compares the EXACT canonical shape the agent renders — one
+/// canonicalization, two engines, zero drift.
+pub fn canonicalize_cycles(cycles: &mut [AgentCycle]) {
+    for c in cycles.iter_mut() {
+        c.modules.sort();
+    }
     cycles.sort_by(|a, b| {
         b.length
             .cmp(&a.length)
@@ -286,18 +310,36 @@ mod tests {
             cycle(2, &["a", "c"]),
             cycle(3, &["b", "c", "d"]),
         ];
-        assert_order_independent(&rows, sort_cycles, |s| {
+        assert_order_independent(&rows, canonicalize_cycles, |s| {
             s.iter()
                 .map(|c| (c.length, c.modules.clone()))
                 .collect::<Vec<_>>()
         });
         let mut sorted = rows.clone();
-        sort_cycles(&mut sorted);
+        canonicalize_cycles(&mut sorted);
         let lengths: Vec<usize> = sorted.iter().map(|c| c.length).collect();
         assert_eq!(lengths, vec![4, 3, 2, 2], "length DESC, then modules ASC");
         // The two length-2 cycles break the tie by modules lexicographically: [a,b] < [a,c].
         assert_eq!(sorted[2].modules, vec!["a", "b"]);
         assert_eq!(sorted[3].modules, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn cycles_ring_order_is_canonical_and_source_independent() {
+        // CYCLES-B: the SAME SCC arrives in two different traversal orders (the SQLite Tarjan and
+        // the LiveGraph Tarjan order members independently). Canonicalization must render BOTH as
+        // the SAME sorted member vector — the property that lets a set-equal LiveGraph serve be
+        // byte-identical. Duplicate rendered names are PRESERVED (multiset; no silent collapse).
+        let mut sqlite_shape = vec![cycle(3, &["core", "api", "util"])];
+        let mut livegraph_shape = vec![cycle(3, &["util", "core", "api"])];
+        canonicalize_cycles(&mut sqlite_shape);
+        canonicalize_cycles(&mut livegraph_shape);
+        assert_eq!(sqlite_shape, livegraph_shape);
+        assert_eq!(sqlite_shape[0].modules, vec!["api", "core", "util"]);
+
+        let mut dup = vec![cycle(2, &["src", "src"])];
+        canonicalize_cycles(&mut dup);
+        assert_eq!(dup[0].modules, vec!["src", "src"], "no dedup (multiset)");
     }
 
     #[test]
@@ -310,7 +352,7 @@ mod tests {
         ];
         let raw_top1 = raw[0].length;
         let mut ranked = raw.clone();
-        sort_cycles(&mut ranked);
+        canonicalize_cycles(&mut ranked);
         assert_ne!(
             raw_top1, ranked[0].length,
             "ranking changes the truncated top-1"

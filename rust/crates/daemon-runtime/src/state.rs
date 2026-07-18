@@ -244,6 +244,19 @@ pub struct RepoState {
     /// mismatch invalidates + rebuilds. NOT durable (rebuilt on restart). Interior mutability: the orient
     /// serve decision read-locks; the lazy build write-locks.
     pub callgraph_cert: parking_lot::RwLock<Option<crate::callgraph_cert::CallgraphNoLossCert>>,
+
+    /// EC-M2-LEAF-SERVE-1: the in-memory repo-level MODULE-SUMMARY structural-count NO-LOSS
+    /// certificate — the DR-2/DR-E3 `module_stats`-pattern IDENTITY-RECONCILIATION cert (`None`
+    /// until lazily built by `module_summary_cert::build_and_store_module_summary_cert`).
+    /// `verdict == GREEN` iff the LiveGraph per-file structural inventory reconciles with the
+    /// SQLite one at EVERY granularity: per-file (path presence + AST-symbol count + language),
+    /// per-module (dirname rollup — the ratified per-module identity reconciliation), AND the
+    /// exact `compute_repo_summary` totals (file/symbol/languages). ANY divergence ⇒ RED ⇒ the
+    /// decorator keeps serving `compute_{repo,path,file}_summary` from SQLite (no silent drift —
+    /// the RISK-E answer). Keyed by the SAME SQLite-free fingerprint as its sibling certs; a
+    /// fingerprint mismatch invalidates + rebuilds. NOT durable (rebuilt on restart).
+    pub module_summary_cert:
+        parking_lot::RwLock<Option<crate::module_summary_cert::ModuleSummaryNoLossCert>>,
 }
 
 impl RepoState {
@@ -291,6 +304,7 @@ impl RepoState {
             complexity_cert: parking_lot::RwLock::new(None),
             focus_resolution_cert: parking_lot::RwLock::new(None),
             callgraph_cert: parking_lot::RwLock::new(None),
+            module_summary_cert: parking_lot::RwLock::new(None),
         })
     }
 

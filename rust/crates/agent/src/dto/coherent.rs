@@ -108,6 +108,13 @@ pub struct OrientLgDecisions {
     pub callers_summary: Option<OrientLeafLabel>,
     /// CALLEES_SUMMARY (symbol focus) — migrated `callees` `Auto` ladder + per-symbol no-loss key compare.
     pub callees_summary: Option<OrientLeafLabel>,
+    /// MODULE_SUMMARY (EC-M2-LEAF-SERVE-1) — the structural counts (file/symbol/languages) were
+    /// ACTUALLY served from the LiveGraph structural inventory under the module-summary
+    /// identity-reconciliation cert. `None` = not served (any reason) → the pre-M-2 fixed sqlite
+    /// leaf, byte-identical: unlike the four LG-first codes above, an absent decision here routes
+    /// through `fixed_leaf` (which folds the signal's own L2 freshness link), NOT `sqlite_leaf` —
+    /// preserving today's RED-path bytes exactly.
+    pub module_summary: Option<OrientLeafLabel>,
 }
 
 impl OrientLgDecisions {
@@ -341,7 +348,14 @@ fn fixed_leaf(signal: Signal, base: BaseSource, stale: bool) -> CoherenceEnvelop
 fn livegraph_served_is_multi_source(code: SignalCode) -> bool {
     matches!(
         code,
-        SignalCode::CallersSummary | SignalCode::CalleesSummary | SignalCode::HighComplexity
+        SignalCode::CallersSummary
+            | SignalCode::CalleesSummary
+            | SignalCode::HighComplexity
+            // EC-M2-LEAF-SERVE-1: the served MODULE_SUMMARY structural counts come from the
+            // LiveGraph inventory, but the evidence's module-DISCOVERY half
+            // (discovered_module_count / module_kinds / top_modules / package_groups) stays
+            // SQLite-built — a genuinely two-source leaf.
+            | SignalCode::ModuleSummary
     )
 }
 
@@ -561,6 +575,15 @@ pub fn to_coherent(
                 // The daemon did not attempt the LiveGraph (no populated LG / not in scope) -> the proven
                 // SQLite primary. Honest: source = {sqlite}, no fallback reason (no LG was tried).
                 None => CoherenceEnvelope::sqlite_leaf(signal, stale),
+            }
+        } else if code == SignalCode::ModuleSummary {
+            // EC-M2-LEAF-SERVE-1: MODULE_SUMMARY is served-decision-gated, NOT an is_lg_first code:
+            // its absent-decision path must stay `fixed_leaf` (which folds the signal's own L2
+            // freshness link) so every non-served request renders byte-identically to the pre-M-2
+            // daemon. A present decision means the decorator ACTUALLY served the counts.
+            match lg.module_summary.as_ref() {
+                Some(label) => lg_first_leaf(signal, label, stale),
+                None => fixed_leaf(signal, base_source(code), stale),
             }
         } else {
             fixed_leaf(signal, base_source(code), stale)

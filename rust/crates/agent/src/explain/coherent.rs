@@ -80,8 +80,12 @@ use crate::dto::signal::{Signal, SignalCode};
 /// pure conversion can label provenance/trust/freshness.
 #[derive(Debug, Clone, Default)]
 pub struct ExplainLgDecisions {
-    /// EXPLAIN_IDENTITY (symbol focus) — residency + `node_display` anchor; served value = SQLite identity
-    /// with the `name`/`subtype` anchor overridden from current-state LiveGraph IR → `{livegraph, sqlite}`.
+    /// EXPLAIN_IDENTITY — two served cases, both → `{livegraph, sqlite}` (multi-source):
+    /// SYMBOL focus: residency + `node_display` anchor (served value = SQLite identity with the
+    /// `name`/`subtype` anchor overridden from current-state LiveGraph IR). FILE/PATH focus
+    /// (EC-M2-LEAF-SERVE-1): the structural COUNTS (`symbol_count`/`file_count`/languages via
+    /// `compute_{file,path}_summary`) were decorator-served from the LiveGraph inventory under the
+    /// module-summary identity-reconciliation cert.
     pub identity: Option<OrientLeafLabel>,
     /// EXPLAIN_CALLERS (symbol focus) — migrated `callers` `Auto` ladder + per-symbol no-loss key compare.
     pub callers: Option<OrientLeafLabel>,

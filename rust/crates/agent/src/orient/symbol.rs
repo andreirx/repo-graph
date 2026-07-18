@@ -312,7 +312,7 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
 
     // TRUNCATION-AUDIT-1: rank (length DESC, then ring members) BEFORE the top-3 cut so the
     // surviving cycles are the biggest, deterministically — not a storage-order prefix.
-    ordering::sort_cycles(&mut cycles);
+    ordering::canonicalize_cycles(&mut cycles);
     let cycle_count = cycles.len() as u64;
     let top: Vec<CycleEvidence> = cycles
         .into_iter()

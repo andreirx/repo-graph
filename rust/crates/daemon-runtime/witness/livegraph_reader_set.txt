@@ -62,6 +62,7 @@ explain_lg_serve.rs                       = explain
 focus_resolution_cert/mod.rs              = orient, explain
 livegraph_feed.rs                         = callers, callees, path, imports, cycles, stats, livegraph_preload
 livegraph_refresh.rs                      = livegraph_refresh
+module_summary_cert/mod.rs                = orient, explain
 orient_lg_decisions.rs                    = orient
 orient_lg_decisions/complexity_cert.rs    = orient
 orient_serve/mod.rs                       = orient, explain

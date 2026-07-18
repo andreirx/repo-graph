@@ -91,9 +91,13 @@ pub struct AgentStaleFile {
 
 /// A module-level dependency cycle found in the import graph.
 ///
-/// `modules` is ordered in ring order; the first entry is the
-/// canonical smallest module UID (the cycle is deduplicated in
-/// storage).
+/// `modules` arrives from the storage port in TRAVERSAL order (a Tarjan
+/// artifact — an SCC is a set, not a ring; the prior doc claim that storage
+/// rotated each cycle to its smallest member was verified false,
+/// EC-M2-LEAF-SERVE-1). Every rendered consumer canonicalizes via
+/// `ordering::canonicalize_cycles` (members sorted; list length-DESC) before
+/// truncation, so the output is a pure function of the cycle SET regardless
+/// of which store produced it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCycle {
     pub length: usize,

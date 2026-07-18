@@ -2,10 +2,12 @@
 //! decorator (split from `orient_serve::mod` per the 500-line structural guardrail; mirrors the
 //! focus-resolution producer's type/test split).
 //!
-//! The six (b) methods (focus resolution + callers/callees) SERVE from the LiveGraph when the answer is
-//! `Exact`, else DELEGATE to the inner SQLite port; every other read DELEGATES verbatim. The serve
-//! helpers ([`super::map_path_resolution`] etc., [`crate::callgraph_cert::lg_caller_rows`]) live beside
-//! the cert that proved them no-loss, so "what the cert proved" and "what is served" are the same bytes.
+//! The six (b) methods (focus resolution + callers/callees) SERVE from the LiveGraph when the captured
+//! BOUNDED decision is on (`bounded_epoch_resident` — review-0 #1: independent of the M-2 leaf flags)
+//! and the answer is `Exact`, else DELEGATE to the inner SQLite port; every other read DELEGATES
+//! verbatim. The serve helpers ([`super::map_path_resolution`] etc.,
+//! [`crate::callgraph_cert::lg_caller_rows`]) live beside the cert that proved them no-loss, so "what
+//! the cert proved" and "what is served" are the same bytes.
 
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
@@ -25,6 +27,127 @@ use repo_graph_trust_model::AnswerClass;
 use super::{map_candidate, map_path_resolution, map_symbol_context, OrientServeDecorator};
 use crate::callgraph_cert::{lg_callee_rows, lg_caller_rows};
 
+// ── EC-M2-LEAF-SERVE-1: the M-2 leaf gates + value mappers (cycle VALUES / MODULE_SUMMARY) ───────
+
+impl<S: AgentStorageRead + GateStorageRead + ?Sized> OrientServeDecorator<'_, S> {
+    /// MODULE_SUMMARY gate: `Some(inventory)` iff the captured witness said the module-summary cert
+    /// is GREEN (`m2.module_summary`), the epoch is still resident (EV-A), and the inventory answer
+    /// is `Exact`. `None` ⇒ the summary methods delegate to the pinned SQLite snapshot.
+    fn m2_summary_inventory(&self) -> Option<repo_graph_livegraph::StructuralInventoryAnswer> {
+        if !self.m2.module_summary {
+            return None;
+        }
+        let guard = self.livegraph.read();
+        let lg = guard.as_ref()?;
+        if !self.epoch_resident(lg) {
+            return None;
+        }
+        let env = lg.structural_file_inventory();
+        if env.class() != AnswerClass::Exact {
+            return None;
+        }
+        env.data().cloned()
+    }
+
+    /// Cycle-VALUES gate (non-cancellable): `Some(qualified member lists)` iff the captured witness
+    /// said the cycles cert's VALUES verdict is GREEN (`m2.cycle_values`), the epoch is still
+    /// resident, and the module-cycle answer is `Exact`. `None` ⇒ delegate to SQLite.
+    fn m2_module_cycles(&self) -> Option<Vec<Vec<String>>> {
+        if !self.m2.cycle_values {
+            return None;
+        }
+        let guard = self.livegraph.read();
+        let lg = guard.as_ref()?;
+        if !self.epoch_resident(lg) {
+            return None;
+        }
+        let env = lg.module_import_cycles();
+        if env.class() != AnswerClass::Exact {
+            return None;
+        }
+        env.data()
+            .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect())
+    }
+
+    /// The cancellable sibling of [`Self::m2_module_cycles`] — threads the cooperative checkpoint
+    /// into the LiveGraph SCC (DAEMON-CANCEL-1 discipline holds on the M-2 serve path too).
+    /// `Err` = the peer disconnected mid-traversal (mapped to the standard cancelled storage error);
+    /// `Ok(None)` = not servable ⇒ delegate.
+    fn m2_module_cycles_cancellable(
+        &self,
+        method: &'static str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<Option<Vec<Vec<String>>>, AgentStorageError> {
+        if !self.m2.cycle_values {
+            return Ok(None);
+        }
+        let guard = self.livegraph.read();
+        let Some(lg) = guard.as_ref() else {
+            return Ok(None);
+        };
+        if !self.epoch_resident(lg) {
+            return Ok(None);
+        }
+        let env = lg.module_import_cycles_cancellable(cancel).map_err(|_| {
+            AgentStorageError::new(
+                method,
+                "cancelled (client disconnected during cycle computation)",
+            )
+        })?;
+        if env.class() != AnswerClass::Exact {
+            return Ok(None);
+        }
+        Ok(env
+            .data()
+            .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect()))
+    }
+}
+
+/// Map LiveGraph module cycles (qualified dirname members) to the REPO-level agent shape: SHORT
+/// (basename) names, mirroring SQLite `find_module_cycles`' `CycleNode.name` render. The cycle
+/// VALUES cert proved this exact canonical shape byte-equal (`values_verdict`); downstream the
+/// agent's `canonicalize_cycles` makes the order a pure function of the set on both engines.
+fn cycles_repo_shape(cycles: &[Vec<String>]) -> Vec<AgentCycle> {
+    cycles
+        .iter()
+        .map(|members| AgentCycle {
+            length: members.len(),
+            modules: members
+                .iter()
+                .map(|m| crate::cycle_output::module_basename(m).to_string())
+                .collect(),
+        })
+        .collect()
+}
+
+/// Map + FILTER LiveGraph module cycles to the QUALIFIED agent shape of
+/// `find_cycles_involving_path` (prefix scope: member == prefix or under `prefix/`) or
+/// `find_cycles_involving_module` (exact membership) — the same predicates the SQLite
+/// implementations apply to their qualified names.
+fn cycles_qualified_filtered(
+    cycles: &[Vec<String>],
+    target: &str,
+    prefix_scope: bool,
+) -> Vec<AgentCycle> {
+    let prefix = format!("{target}/");
+    cycles
+        .iter()
+        .filter(|members| {
+            members.iter().any(|m| {
+                if prefix_scope {
+                    m == target || m.starts_with(&prefix)
+                } else {
+                    m == target
+                }
+            })
+        })
+        .map(|members| AgentCycle {
+            length: members.len(),
+            modules: members.clone(),
+        })
+        .collect()
+}
+
 impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     for OrientServeDecorator<'_, S>
 {
@@ -38,7 +161,7 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if self.epoch_resident(lg) {
+                if self.bounded_epoch_resident(lg) {
                     let env = lg.resolve_path(path);
                     if env.class() == AnswerClass::Exact {
                         if let Some(d) = env.data() {
@@ -59,7 +182,7 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if self.epoch_resident(lg) {
+                if self.bounded_epoch_resident(lg) {
                     let env = lg.resolve_stable_key(stable_key);
                     if env.class() == AnswerClass::Exact {
                         if let Some(d) = env.data() {
@@ -81,7 +204,7 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if self.epoch_resident(lg) {
+                if self.bounded_epoch_resident(lg) {
                     let env = lg.resolve_symbol_name(name);
                     if env.class() == AnswerClass::Exact {
                         if let Some(d) = env.data() {
@@ -102,7 +225,7 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if self.epoch_resident(lg) {
+                if self.bounded_epoch_resident(lg) {
                     let env = lg.symbol_context(symbol_stable_key);
                     if env.class() == AnswerClass::Exact {
                         if let Some(d) = env.data() {
@@ -124,7 +247,7 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if self.epoch_resident(lg) {
+                if self.bounded_epoch_resident(lg) {
                     if let Some(rows) = lg_caller_rows(lg, symbol_stable_key) {
                         return Ok(rows);
                     }
@@ -143,7 +266,7 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         {
             let guard = self.livegraph.read();
             if let Some(lg) = guard.as_ref() {
-                if self.epoch_resident(lg) {
+                if self.bounded_epoch_resident(lg) {
                     if let Some(rows) = lg_callee_rows(lg, symbol_stable_key) {
                         return Ok(rows);
                     }
@@ -182,19 +305,32 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         self.inner.get_stale_files(snapshot_uid)
     }
 
+    // EC-M2-LEAF-SERVE-1 (CYCLES-B): cycle VALUES serve from the LiveGraph module-cycle SCC when
+    // the cycles cert's VALUES verdict is GREEN at the pinned epoch (the canonical agent shapes
+    // were proven byte-equal at cert build); otherwise DELEGATE to the pinned SQLite snapshot
+    // (RATIFIED CYCLES-A posture, unchanged).
+
     fn find_module_cycles(&self, snapshot_uid: &str) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        if let Some(cycles) = self.m2_module_cycles() {
+            return Ok(cycles_repo_shape(&cycles));
+        }
         self.inner.find_module_cycles(snapshot_uid)
     }
 
-    // DAEMON-CANCEL-3: cycles have no LiveGraph home (delegated to SQLite, CYCLES-A),
-    // so the serve decorator just FORWARDS the cancellable variant + checkpoint to the
-    // inner port. Without this forward, the trait default would drop the checkpoint and
-    // green-path orient/explain would run the Tarjan to completion after a disconnect.
+    // DAEMON-CANCEL-3: the checkpoint threads into WHICHEVER Tarjan runs — the LiveGraph SCC on
+    // the M-2 green serve, the SQLite SCC on delegate. Without this forward, the trait default
+    // would drop the checkpoint and green-path orient/explain would run the Tarjan to completion
+    // after a disconnect.
     fn find_module_cycles_cancellable(
         &self,
         snapshot_uid: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        if let Some(cycles) =
+            self.m2_module_cycles_cancellable("find_module_cycles", &mut *cancel)?
+        {
+            return Ok(cycles_repo_shape(&cycles));
+        }
         self.inner
             .find_module_cycles_cancellable(snapshot_uid, cancel)
     }
@@ -226,10 +362,20 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             .find_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
     }
 
+    // EC-M2-LEAF-SERVE-1: MODULE_SUMMARY structural counts serve from the LiveGraph structural
+    // inventory when the identity-reconciliation cert is GREEN at the pinned epoch (per-file +
+    // per-module + exact-totals reconciled at cert build ⇒ these computed values are byte-equal to
+    // the SQLite reads); otherwise DELEGATE (the pre-M-2 posture, byte-identical).
+
     fn compute_repo_summary(
         &self,
         snapshot_uid: &str,
     ) -> Result<AgentRepoSummary, AgentStorageError> {
+        if let Some(inv) = self.m2_summary_inventory() {
+            return Ok(crate::module_summary_cert::repo_summary_from_inventory(
+                &inv,
+            ));
+        }
         self.inner.compute_repo_summary(snapshot_uid)
     }
 
@@ -266,6 +412,12 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
         path_prefix: &str,
     ) -> Result<AgentRepoSummary, AgentStorageError> {
+        if let Some(inv) = self.m2_summary_inventory() {
+            return Ok(crate::module_summary_cert::path_summary_from_inventory(
+                &inv,
+                path_prefix,
+            ));
+        }
         self.inner.compute_path_summary(snapshot_uid, path_prefix)
     }
 
@@ -274,6 +426,11 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
         file_path: &str,
     ) -> Result<AgentRepoSummary, AgentStorageError> {
+        if let Some(inv) = self.m2_summary_inventory() {
+            return Ok(crate::module_summary_cert::file_summary_from_inventory(
+                &inv, file_path,
+            ));
+        }
         self.inner.compute_file_summary(snapshot_uid, file_path)
     }
 
@@ -291,6 +448,9 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
         path_prefix: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        if let Some(cycles) = self.m2_module_cycles() {
+            return Ok(cycles_qualified_filtered(&cycles, path_prefix, true));
+        }
         self.inner
             .find_cycles_involving_path(snapshot_uid, path_prefix)
     }
@@ -301,6 +461,11 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         path_prefix: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        if let Some(cycles) =
+            self.m2_module_cycles_cancellable("find_cycles_involving_path", &mut *cancel)?
+        {
+            return Ok(cycles_qualified_filtered(&cycles, path_prefix, true));
+        }
         self.inner
             .find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)
     }
@@ -310,6 +475,13 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
         module_qualified_name: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        if let Some(cycles) = self.m2_module_cycles() {
+            return Ok(cycles_qualified_filtered(
+                &cycles,
+                module_qualified_name,
+                false,
+            ));
+        }
         self.inner
             .find_cycles_involving_module(snapshot_uid, module_qualified_name)
     }
@@ -320,6 +492,15 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         module_qualified_name: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        if let Some(cycles) =
+            self.m2_module_cycles_cancellable("find_cycles_involving_module", &mut *cancel)?
+        {
+            return Ok(cycles_qualified_filtered(
+                &cycles,
+                module_qualified_name,
+                false,
+            ));
+        }
         self.inner.find_cycles_involving_module_cancellable(
             snapshot_uid,
             module_qualified_name,

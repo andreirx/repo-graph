@@ -4,7 +4,7 @@
 //! `IMPORT_CYCLES` when at least one cycle is present. Evidence
 //! carries the total cycle count plus the top 3 cycles as
 //! summaries. TRUNCATION-AUDIT-1: the "top 3" slice is taken AFTER
-//! ranking the full set by `ordering::sort_cycles` (length DESC,
+//! ranking the full set by `ordering::canonicalize_cycles` (length DESC,
 //! then ring members) — so the surviving cycles are the biggest,
 //! and the order is deterministic and source-independent rather
 //! than relying on the storage UID order.
@@ -41,7 +41,7 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
         return Ok(AggregatorOutput::empty());
     }
 
-    ordering::sort_cycles(&mut cycles);
+    ordering::canonicalize_cycles(&mut cycles);
     let cycle_count = cycles.len() as u64;
     let top: Vec<CycleEvidence> = cycles
         .into_iter()
@@ -93,7 +93,7 @@ pub fn aggregate_path_cancellable<S: AgentStorageRead + ?Sized>(
         return Ok(AggregatorOutput::empty());
     }
 
-    ordering::sort_cycles(&mut cycles);
+    ordering::canonicalize_cycles(&mut cycles);
     let cycle_count = cycles.len() as u64;
     let top: Vec<CycleEvidence> = cycles
         .into_iter()

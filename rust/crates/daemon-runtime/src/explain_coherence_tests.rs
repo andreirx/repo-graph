@@ -259,7 +259,7 @@ fn explain_callers_falls_back_to_sqlite_without_livegraph() {
             items_omitted_count: None,
         })],
     );
-    let env = build_explain_envelope(&state, REPO, result, false);
+    let env = build_explain_envelope(&state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -311,7 +311,7 @@ fn explain_identity_symbol_focus_without_livegraph_is_labelled_sqlite_fallback()
             symbol_count: None,
         })],
     );
-    let env = build_explain_envelope(&state, REPO, result, false);
+    let env = build_explain_envelope(&state, REPO, result, false, false);
     let id = env
         .value
         .signals
@@ -363,7 +363,7 @@ fn explain_callers_serves_live_name_from_livegraph() {
             items_omitted_count: None,
         })],
     );
-    let env = build_explain_envelope(&f.state, REPO, result, false);
+    let env = build_explain_envelope(&f.state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -433,7 +433,7 @@ fn explain_callees_serves_live_name_from_livegraph() {
             items_omitted_count: None,
         })],
     );
-    let env = build_explain_envelope(&f.state, REPO, result, false);
+    let env = build_explain_envelope(&f.state, REPO, result, false, false);
     let leaf = env
         .value
         .signals

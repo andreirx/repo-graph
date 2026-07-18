@@ -36,10 +36,13 @@ use crate::state::RepoState;
 ///   `OrientServeDecorator` (orient/explain) can serve it back from `get_latest_snapshot` (pinning explain's
 ///   whole request without an agent-crate change — `daemon-w-b-epoch-1.md` §5.2).
 /// - `fingerprint` — the LG-serve eligibility witness, captured BUILD-THEN-PEEK (§6.4) via
-///   `orient_serve::orient_bounded_cert_eligibility` (orient/explain — FOCUS-RESOLUTION ∧ CALLGRAPH bounded
-///   cert) or `callgraph_cert::callgraph_cert_eligibility` (callers/callees — CALLGRAPH cert). `Some(fp)` =
-///   a GREEN no-loss cert exists at EXACTLY the resident fingerprint for `snapshot_uid` (the resident
-///   partitions are cert-proven no-loss-equal to SQLite@`snapshot_uid`); `None` = no green cert ⇒ eager
+///   `orient_serve::orient_serve_witness` (orient/explain — EC-M2 review-0 #1: `Some(fp)` iff AT LEAST ONE
+///   of the three independent leaf decisions — the FOCUS-RESOLUTION ∧ CALLGRAPH bounded fold, cycle
+///   VALUES, MODULE_SUMMARY — is GREEN at `fp`; which leaves actually serve rides beside it on the
+///   witness) or `callgraph_cert::callgraph_cert_eligibility` (callers/callees — CALLGRAPH cert, where
+///   `Some(fp)` = that one GREEN cert). Either way a `Some` fingerprint means a GREEN no-loss cert exists
+///   at EXACTLY the resident fingerprint for `snapshot_uid` (the resident partitions are cert-proven
+///   no-loss-equal to SQLite@`snapshot_uid` for the serving leaves); `None` = no green cert ⇒ eager
 ///   SQLite, no LiveGraph serve. At each serve site the resident fingerprint is re-validated against this
 ///   captured value under the data read guard (EV-A); on mismatch the leaf fails soft to the pinned SQLite
 ///   snapshot — never a cross-epoch mix.
@@ -2182,6 +2185,12 @@ struct ModuleCycleCompareData {
     >,
     /// The resident MODULE identities (for classification).
     lg_modules: std::collections::BTreeSet<String>,
+    /// EC-M2-LEAF-SERVE-1 (CYCLES-B): true iff the CANONICAL agent-value shapes agree — the
+    /// repo-level SHORT-name cycle list (SQLite `CycleNode.name` vs LiveGraph member basename) AND
+    /// the qualified cycle list, both canonicalized by the agent's `canonicalize_cycles`. Strictly
+    /// stronger than the set compare; the extra strength covers the SHORT-name rendering the set
+    /// compare never sees.
+    values_exact: bool,
 }
 
 /// Compute the shared [`ModuleCycleCompareData`] — the SQLite MODULE cycles mapped to QUALIFIED module
@@ -2252,6 +2261,53 @@ fn module_cycle_compare_data_cancellable(
         }
     };
     let comparison = compare_module_cycles(&lg_cycles, &sqlite_qualified);
+    // EC-M2-LEAF-SERVE-1 (CYCLES-B): compare the CANONICAL agent-VALUE shapes the decorator would
+    // serve — the exact bytes-that-render check, computed from data already in hand (no extra
+    // store read). Repo level: SQLite renders `CycleNode.name` (SHORT); the LiveGraph member is the
+    // qualified dirname path, rendered via its basename. Path/module level: both render qualified.
+    // Both shapes canonicalized by the SAME `canonicalize_cycles` the agent applies, so equality
+    // here IS byte-equality of the served values (one canonicalization, zero drift).
+    let values_exact = {
+        use repo_graph_agent::ordering::canonicalize_cycles;
+        use repo_graph_agent::AgentCycle;
+        let mut sq_repo: Vec<AgentCycle> = sqlite_cycles
+            .iter()
+            .map(|c| AgentCycle {
+                length: c.length,
+                modules: c.nodes.iter().map(|n| n.name.clone()).collect(),
+            })
+            .collect();
+        let mut lg_repo: Vec<AgentCycle> = lg_cycles
+            .iter()
+            .map(|members| AgentCycle {
+                length: members.len(),
+                modules: members
+                    .iter()
+                    .map(|m| crate::cycle_output::module_basename(m).to_string())
+                    .collect(),
+            })
+            .collect();
+        let mut sq_qual: Vec<AgentCycle> = sqlite_qualified
+            .iter()
+            .zip(sqlite_cycles.iter())
+            .map(|(quals, c)| AgentCycle {
+                length: c.length,
+                modules: quals.clone(),
+            })
+            .collect();
+        let mut lg_qual: Vec<AgentCycle> = lg_cycles
+            .iter()
+            .map(|members| AgentCycle {
+                length: members.len(),
+                modules: members.clone(),
+            })
+            .collect();
+        canonicalize_cycles(&mut sq_repo);
+        canonicalize_cycles(&mut lg_repo);
+        canonicalize_cycles(&mut sq_qual);
+        canonicalize_cycles(&mut lg_qual);
+        sq_repo == lg_repo && sq_qual == lg_qual
+    };
     Ok(ModuleCycleCompareData {
         comparison,
         sqlite_cycles,
@@ -2260,6 +2316,7 @@ fn module_cycle_compare_data_cancellable(
         livegraph_class,
         obs_by_module,
         lg_modules,
+        values_exact,
     })
 }
 
@@ -2339,6 +2396,15 @@ pub fn module_cycle_compare_response(
 pub struct CycleNoLossCert {
     /// The module-cycle compare verdict (`GREEN` = no-loss / `RED` = a missing or extra cycle).
     pub verdict: String,
+    /// EC-M2-LEAF-SERVE-1 (CYCLES-B): the cycle-VALUES verdict — `GREEN` iff, ON TOP of the set
+    /// compare above, the CANONICAL agent-value shapes (repo-level SHORT-name cycles AND the
+    /// qualified-name cycles, both via `repo_graph_agent::ordering::canonicalize_cycles`) are
+    /// byte-equal between the two stores. This is what licenses the `OrientServeDecorator` to serve
+    /// orient/explain cycle VALUES from the LiveGraph: set equality alone does NOT prove the
+    /// rendered short names agree (a SQLite MODULE node `name` that is not the basename of its
+    /// `qualified_name` would diverge silently). `verdict` keeps its shipped set-based semantics —
+    /// the cycles-command fastpath and the IMPORT_CYCLES corroboration label are UNCHANGED.
+    pub values_verdict: String,
     /// The SQLite-free fingerprint this verdict was computed at (the invalidation key).
     pub fingerprint: String,
 }
@@ -2455,8 +2521,19 @@ pub(crate) fn build_and_store_cycles_cert_cancellable(
     };
     let is_green = data.comparison.is_exact();
     let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
+    // EC-M2-LEAF-SERVE-1 (CYCLES-B): the VALUES verdict requires BOTH the set compare AND the
+    // canonical served-shape compare (`values_exact`); a set-equal repo whose SHORT-name rendering
+    // diverges keeps `verdict=GREEN` (the shipped set semantics for the cycles-command fastpath +
+    // the corroboration label) but `values_verdict=RED` (the decorator keeps serving SQLite).
+    let values_verdict = if is_green && data.values_exact {
+        "GREEN"
+    } else {
+        "RED"
+    }
+    .to_string();
     *repo_state.cycles_cert.write() = Some(CycleNoLossCert {
         verdict,
+        values_verdict,
         fingerprint,
     });
     Ok(Some(is_green))

@@ -163,11 +163,25 @@ pub(crate) fn serve_cycles(
         };
         let answer = lg.module_import_cycles();
         let all = answer.data().map(|d| d.cycles.clone()).unwrap_or_default();
-        all.into_iter()
+        // EC-M2-LEAF-SERVE-1 (CYCLES-B): CANONICALIZE through the SAME `canonicalize_cycles` the
+        // agent applies to its own (SQLite- or decorator-served) cycle value — members sorted, list
+        // length-DESC — BEFORE the budget cut. Without this the rebuild rendered raw Tarjan member
+        // order, so a green rebuild could differ byte-wise from the agent's canonical value; with
+        // it, both are the same pure function of the cert-proven-equal cycle set.
+        let mut agent_cycles: Vec<repo_graph_agent::AgentCycle> = all
+            .into_iter()
             .filter(|c| cycle_involves(&c.members, target, is_path_focus))
-            .map(|c| CycleEvidence {
+            .map(|c| repo_graph_agent::AgentCycle {
                 length: c.members.len(),
                 modules: c.members,
+            })
+            .collect();
+        repo_graph_agent::ordering::canonicalize_cycles(&mut agent_cycles);
+        agent_cycles
+            .into_iter()
+            .map(|c| CycleEvidence {
+                length: c.length,
+                modules: c.modules,
             })
             .collect()
     };

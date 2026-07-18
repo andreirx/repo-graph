@@ -4,9 +4,11 @@
 //! A spy over the real SQLite storage. `panicking()` PANICS on the six decorator-served (b) methods — the
 //! no-eager-`nodes`-read proof: on green they are served from the LiveGraph, so the panics never fire.
 //! `recording()` delegates the served methods but RECORDS the four FILE/PATH summary/listing `nodes` reads
-//! — the honest-bound proof: those DO fire on green (delegated to SQLite). Every other read DELEGATES
-//! verbatim. Mirrors `orient_serve::tests::PartialSpy` (kept separate per the orient_serve "no behavior
-//! change" scope).
+//! plus the two cycle finders (EC-M2): on the pre-M-2 `new()` decorator the summary flags fire (the
+//! honest-bound proof); on the M-2-enabled `with_leaf_serves` decorator the summary + cycle flags must
+//! stay FALSE (the review-0 #3 explain no-eager-read proof — those reads serve from the LiveGraph).
+//! Every other read DELEGATES verbatim. Mirrors `orient_serve::tests::PartialSpy` (kept separate per the
+//! orient_serve "no behavior change" scope).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,6 +36,10 @@ pub(super) struct ServeSpy<'a, S: ?Sized> {
     pub(super) read_compute_path_summary: AtomicBool,
     pub(super) read_list_symbols_in_file: AtomicBool,
     pub(super) read_list_files_in_path: AtomicBool,
+    /// EC-M2 (review-0 #3): the two explain cycle finders (the cancellable variants funnel here
+    /// through the trait defaults) — must stay FALSE through the M-2-enabled decorator.
+    pub(super) read_find_cycles_involving_path: AtomicBool,
+    pub(super) read_find_cycles_involving_module: AtomicBool,
 }
 
 impl<'a, S: ?Sized> ServeSpy<'a, S> {
@@ -60,6 +66,8 @@ impl<'a, S: ?Sized> ServeSpy<'a, S> {
             read_compute_path_summary: AtomicBool::new(false),
             read_list_symbols_in_file: AtomicBool::new(false),
             read_list_files_in_path: AtomicBool::new(false),
+            read_find_cycles_involving_path: AtomicBool::new(false),
+            read_find_cycles_involving_module: AtomicBool::new(false),
         }
     }
 }
@@ -242,6 +250,8 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
         s: &str,
         p: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.read_find_cycles_involving_path
+            .store(true, Ordering::Relaxed);
         self.inner.find_cycles_involving_path(s, p)
     }
     fn find_cycles_involving_module(
@@ -249,6 +259,8 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
         s: &str,
         m: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        self.read_find_cycles_involving_module
+            .store(true, Ordering::Relaxed);
         self.inner.find_cycles_involving_module(s, m)
     }
     fn find_file_imports(

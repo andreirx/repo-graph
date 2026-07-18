@@ -143,6 +143,7 @@ fn seed_cycles_cert_green(state: &RepoState, snapshot_uid: &str) {
     };
     *state.cycles_cert.write() = Some(CycleNoLossCert {
         verdict: "GREEN".to_string(),
+        values_verdict: "GREEN".to_string(),
         fingerprint: fp,
     });
 }
@@ -224,7 +225,7 @@ fn explain_identity_serves_live_anchor_from_livegraph() {
             symbol_count: None,
         })],
     );
-    let env = build_explain_envelope(&state, REPO, result, false);
+    let env = build_explain_envelope(&state, REPO, result, false, false);
     let id = env
         .value
         .signals
@@ -301,7 +302,7 @@ fn explain_imports_serves_live_view_from_livegraph() {
             items_omitted_count: None,
         })],
     );
-    let env = build_explain_envelope(&state, REPO, result, false);
+    let env = build_explain_envelope(&state, REPO, result, false, false);
     let imports = env
         .value
         .signals
@@ -371,7 +372,7 @@ fn explain_cycles_serves_live_cycles_from_livegraph() {
             items_omitted_count: None,
         })],
     );
-    let env = build_explain_envelope(&state, REPO, result, false);
+    let env = build_explain_envelope(&state, REPO, result, false, false);
     let cycles = env
         .value
         .signals
@@ -403,4 +404,68 @@ fn explain_cycles_serves_live_cycles_from_livegraph() {
         "cycles served from the field-exact module-cycle cert is single-source {{livegraph}}"
     );
     assert!(cycles.provenance.fallback_reason.is_none());
+}
+
+// ── EC-M2-LEAF-SERVE-1: FILE/PATH identity structural counts — the label follows the ACTUAL serve ──
+
+/// `summary_served == true` (dispatch: module-summary cert GREEN at the witness fingerprint —
+/// review-0 #1: independent of the bounded fold — ∧ epoch still resident) → the FILE-focus
+/// EXPLAIN_IDENTITY leaf (whose `symbol_count`/`file_count` came from the decorator-served
+/// `compute_file_summary`) is the multi-source `{livegraph, sqlite}` identity treatment.
+/// `summary_served == false` → NO decision: the pre-M-2 unlabelled `{sqlite}` leaf,
+/// byte-identical (the DR-E3 listing half keeps its `nodes` reads and sqlite label always).
+#[test]
+fn explain_identity_file_focus_counts_label_follows_actual_serve() {
+    let dir = tempdir().unwrap();
+    let (db_path, snapshot_uid) = build_db_with_calls(dir.path(), REPO, &[]);
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    *state.livegraph.write() = Some(cyclic_lg());
+
+    let identity_signal = || {
+        Signal::explain_identity(ExplainIdentityEvidence {
+            target_kind: "file".to_string(),
+            path: Some("alpha/a.ts".to_string()),
+            stable_key: None,
+            name: None,
+            subtype: None,
+            line_start: None,
+            language: Some("typescript".to_string()),
+            is_test: Some(false),
+            module_path: None,
+            file_count: None,
+            symbol_count: Some(1),
+        })
+    };
+
+    // SERVED: the counts were decorator-served from the LiveGraph inventory.
+    let result = explain_file_result(&snapshot_uid, "alpha/a.ts", vec![identity_signal()]);
+    let env = build_explain_envelope(&state, REPO, result, false, true);
+    let id = env
+        .value
+        .signals
+        .iter()
+        .find(|l| l.value.code() == repo_graph_agent::SignalCode::ExplainIdentity)
+        .expect("identity leaf present");
+    assert_eq!(
+        id.provenance.source,
+        BTreeSet::from([Source::Livegraph, Source::Sqlite]),
+        "served FILE-focus counts -> multi-source {{livegraph, sqlite}} identity"
+    );
+    assert!(id.provenance.fallback_reason.is_none());
+
+    // NOT SERVED: the pre-M-2 unlabelled sqlite leaf (no decision, no fallback reason).
+    let result = explain_file_result(&snapshot_uid, "alpha/a.ts", vec![identity_signal()]);
+    let env = build_explain_envelope(&state, REPO, result, false, false);
+    let id = env
+        .value
+        .signals
+        .iter()
+        .find(|l| l.value.code() == repo_graph_agent::SignalCode::ExplainIdentity)
+        .expect("identity leaf present");
+    assert_eq!(
+        id.provenance.source,
+        BTreeSet::from([Source::Sqlite]),
+        "unserved FILE-focus identity stays the plain sqlite leaf (byte-identical pre-M-2 path)"
+    );
+    assert!(id.provenance.fallback_reason.is_none());
 }

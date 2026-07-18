@@ -67,6 +67,12 @@ pub(crate) fn build_explain_envelope(
     repo_uid: &str,
     mut result: OrientResult,
     budget_large: bool,
+    // EC-M2-LEAF-SERVE-1: true iff the decorator ACTUALLY served the FILE/PATH identity structural
+    // counts (`compute_{path,file}_summary`) from the LiveGraph this request (module-summary cert
+    // GREEN at the captured witness fingerprint — review-0 #1: INDEPENDENT of the bounded fold —
+    // ∧ the epoch still resident post-use-case). Gates the FILE/PATH identity leaf label only;
+    // `false` keeps the pre-M-2 no-attempt `{sqlite}` label byte-identically.
+    summary_served: bool,
 ) -> CoherenceEnvelope<CoherentOrientResult> {
     let snapshot_uid = result.snapshot.clone();
 
@@ -118,6 +124,21 @@ pub(crate) fn build_explain_envelope(
                 explain_lg_identity::serve_identity(repo_state, symbol_key, identity_sig);
             decisions.identity = label;
             replacements.extend(replacement);
+        } else if summary_served
+            && matches!(
+                result.focus.resolved_kind,
+                Some(ResolvedKind::File) | Some(ResolvedKind::Module)
+            )
+        {
+            // EC-M2-LEAF-SERVE-1: FILE/PATH focus — the identity leaf's structural COUNTS
+            // (symbol_count / file_count via `compute_{file,path}_summary`) were decorator-served
+            // from the LiveGraph under the module-summary identity-reconciliation cert. The leaf
+            // is the shipped multi-source `{livegraph, sqlite}` identity treatment (counts +
+            // focus resolution live; coordinate/freshness half SQLite) — provenance follows the
+            // ACTUAL serve. No value replacement: the served values are already in the signal.
+            decisions.identity = Some(crate::orient_coherence::map_outcome(
+                crate::module_summary_cert::module_summary_served_outcome(),
+            ));
         }
     }
 

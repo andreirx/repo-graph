@@ -67,6 +67,9 @@ pub mod handlers;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
+// EC-M2-LEAF-SERVE-1: the MODULE_SUMMARY identity-reconciliation cert + the decorator's
+// summary serve helpers (a sibling cert module like focus_resolution_cert / callgraph_cert).
+pub mod module_summary_cert;
 // DAEMON-CRASH-RECOVERY-1 (F8): op-lifecycle lines in the daemon LOG (index/refresh/enrich/retention/
 // reconcile), so a crashed op's forensics survive in the ONE surface a dead daemon leaves behind.
 pub mod oplog;

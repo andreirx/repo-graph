@@ -1,13 +1,27 @@
 //! COHERENCE-LEAF-SERVE-IMPL-1: a SHARED faithful fixture — a resident LiveGraph AND a byte-faithful
-//! SQLite mirror built from the SAME explicit facts (two files in one module, a CALLS edge), so a GREEN
-//! focus-resolution + callgraph cert IS the byte/value parity proof (the cert is a field-exact compare;
-//! GREEN == "the LiveGraph (b) leaves equal the SQLite leaves"). Reused by `callgraph_cert::tests` and
-//! `orient_serve::tests` (`pub(crate)` so the consumer's parity + no-eager-read proofs share one fixture
-//! — no drift between what the cert proved and what the decorator serves).
+//! SQLite mirror built from the SAME explicit facts (three files in two modules, a CALLS edge, a
+//! `src` ↔ `lib` import cycle), so a GREEN focus-resolution + callgraph cert IS the byte/value parity
+//! proof (the cert is a field-exact compare; GREEN == "the LiveGraph (b) leaves equal the SQLite
+//! leaves"). Reused by `callgraph_cert::tests` and `orient_serve::tests` (`pub(crate)` so the
+//! consumer's parity + no-eager-read proofs share one fixture — no drift between what the cert proved
+//! and what the decorator serves).
+//!
+//! EC-M2-LEAF-SERVE-1 extended the mirror with the facts the M-2 leaves need, mirroring the REAL
+//! writers' output shape:
+//! - `file_versions` rows for every tracked file (the real index writes them; `compute_repo_summary`
+//!   counts files/languages through the `file_versions` join, so the module-summary
+//!   identity-reconciliation cert needs them on the SQLite side);
+//! - a THIRD file `lib/c.ts` and a REAL two-module import cycle `src` ↔ `lib`, present on BOTH sides:
+//!   LiveGraph as FILE-level `AstImport` IR edges (module cycles aggregate by dirname), SQLite as the
+//!   indexer's shape [OBSERVED: orchestrator.rs create_module_* — MODULE nodes with `name` =
+//!   directory basename + `qualified_name` = full dir path; FILE→FILE and MODULE→MODULE IMPORTS
+//!   edges]. The MODULE `name` = basename fidelity is load-bearing for the cycle-VALUES cert (the
+//!   repo-level cycle render uses `CycleNode.name`).
 
 use repo_graph_ir::{
-    CanonicalKey, EdgeBasis, EdgeType, IdentitySource, IrEdge, IrNode, IrVisibility, Partition,
-    PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange, SymbolAttributes,
+    CanonicalKey, EdgeBasis, EdgeType, IdentitySource, ImportEdgeMeta, ImportResolution, IrEdge,
+    IrNode, IrVisibility, Partition, PartitionId, PartitionIr, PartitionKind, Provenance,
+    SourceRange, SymbolAttributes,
 };
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_storage::types::{
@@ -24,6 +38,10 @@ pub(crate) const REPO: &str = "repo_callgraph_cert";
 pub(crate) const CALLER_PATH: &str = "src/a.ts";
 pub(crate) const CALLEE_PATH: &str = "src/b.ts";
 pub(crate) const MODULE_DIR: &str = "src";
+/// EC-M2-LEAF-SERVE-1: the second module's file — `src` ↔ `lib` is the fixture's REAL module
+/// import cycle (both stores), exercising the cycle-VALUES serve with a non-empty answer.
+pub(crate) const LIB_PATH: &str = "lib/c.ts";
+pub(crate) const LIB_DIR: &str = "lib";
 
 pub(crate) fn caller_key() -> String {
     format!("{REPO}:{CALLER_PATH}#callerFn:SYMBOL:FUNCTION")
@@ -34,8 +52,8 @@ pub(crate) fn callee_key() -> String {
 fn file_key(path: &str) -> String {
     format!("{REPO}:{path}:FILE")
 }
-fn module_key() -> String {
-    format!("{REPO}:{MODULE_DIR}:MODULE")
+fn module_key_for(dir: &str) -> String {
+    format!("{REPO}:{dir}:MODULE")
 }
 fn file_uid(path: &str) -> String {
     format!("fuid::{path}")
@@ -100,11 +118,30 @@ fn symbol_node(key: &str, name: &str, path: &str) -> IrNode {
     }
 }
 
-/// The resident IR: two files (one module `src`), two symbols, one `caller -> callee` CALLS edge.
+/// A FILE-level `AstImport` IR edge (`src_path` imports `dst_path`) — the LiveGraph's import
+/// substrate; `module_import_cycles` aggregates these to dirname modules before Tarjan.
+fn import_edge(src_path: &str, dst_path: &str) -> IrEdge {
+    IrEdge {
+        src: CanonicalKey::from_existing(file_key(src_path)),
+        dst: CanonicalKey::from_existing(file_key(dst_path)),
+        edge_type: EdgeType::Imports,
+        basis: EdgeBasis::AstImport,
+        provenance: prov(),
+        import: Some(ImportEdgeMeta {
+            raw_specifier: format!("../{}", dst_path.trim_end_matches(".ts")),
+            resolved_path: dst_path.to_string(),
+            resolution: ImportResolution::StaticResolved,
+        }),
+    }
+}
+
+/// The resident IR: three files (modules `src` + `lib`), two symbols, one `caller -> callee` CALLS
+/// edge, and the `src` ↔ `lib` FILE-level import cycle (EC-M2: aggregates to ONE module cycle).
 pub(crate) fn build_ir() -> PartitionIr {
     let mut ir = PartitionIr::new(partition());
     ir.nodes.push(file_node(CALLER_PATH));
     ir.nodes.push(file_node(CALLEE_PATH));
+    ir.nodes.push(file_node(LIB_PATH));
     ir.nodes
         .push(symbol_node(&caller_key(), "callerFn", CALLER_PATH));
     ir.nodes
@@ -117,6 +154,8 @@ pub(crate) fn build_ir() -> PartitionIr {
         provenance: prov(),
         import: None,
     });
+    ir.edges.push(import_edge(CALLER_PATH, LIB_PATH));
+    ir.edges.push(import_edge(LIB_PATH, CALLER_PATH));
     ir
 }
 
@@ -174,8 +213,9 @@ pub(crate) fn build_sqlite_mirror(dir: &Path, drop_calls: bool) -> (std::path::P
         .expect("create snapshot");
     let snapshot_uid = snap.snapshot_uid;
 
-    // files
-    let tracked: Vec<TrackedFile> = [CALLER_PATH, CALLEE_PATH]
+    // files + file_versions (EC-M2: the real index writes BOTH; `compute_repo_summary` and the
+    // module-summary cert's `file_structural_rows` count through the `file_versions` join)
+    let tracked: Vec<TrackedFile> = [CALLER_PATH, CALLEE_PATH, LIB_PATH]
         .iter()
         .map(|path| TrackedFile {
             file_uid: file_uid(path),
@@ -188,19 +228,41 @@ pub(crate) fn build_sqlite_mirror(dir: &Path, drop_calls: bool) -> (std::path::P
         })
         .collect();
     conn.upsert_files(&tracked).expect("upsert files");
+    let versions: Vec<repo_graph_storage::types::FileVersion> =
+        [CALLER_PATH, CALLEE_PATH, LIB_PATH]
+            .iter()
+            .map(|path| repo_graph_storage::types::FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: file_uid(path),
+                content_hash: "deadbeef".into(),
+                ast_hash: None,
+                extractor: Some("test".into()),
+                parse_status: "parsed".into(),
+                size_bytes: Some(1),
+                line_count: Some(1),
+                indexed_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .collect();
+    conn.upsert_file_versions(&versions)
+        .expect("upsert file versions");
 
-    // nodes: FILE (a, b), MODULE (src), SYMBOL (caller, callee)
+    // nodes: FILE (a, b, c), MODULE (src, lib), SYMBOL (caller, callee). MODULE `name` is the
+    // directory BASENAME + `qualified_name` the full dir path — the real writer's shape
+    // [orchestrator.rs create_module_nodes] — load-bearing for the repo-level cycle render.
     let mut nodes: Vec<GraphNode> = Vec::new();
-    for (i, path) in [CALLER_PATH, CALLEE_PATH].iter().enumerate() {
+    for (i, path) in [CALLER_PATH, CALLEE_PATH, LIB_PATH].iter().enumerate() {
         let mut n = graph_node(&format!("nf{i}"), &file_key(path), "FILE");
         n.snapshot_uid = snapshot_uid.clone();
         n.file_uid = Some(file_uid(path));
         nodes.push(n);
     }
-    let mut module = graph_node("nm0", &module_key(), "MODULE");
-    module.snapshot_uid = snapshot_uid.clone();
-    module.qualified_name = Some(MODULE_DIR.into());
-    nodes.push(module);
+    for (uid, dir) in [("nm0", MODULE_DIR), ("nm1", LIB_DIR)] {
+        let mut module = graph_node(uid, &module_key_for(dir), "MODULE");
+        module.snapshot_uid = snapshot_uid.clone();
+        module.name = dir.rsplit('/').next().unwrap_or(dir).into();
+        module.qualified_name = Some(dir.into());
+        nodes.push(module);
+    }
     for (uid, key, name, path) in [
         ("ns0", caller_key(), "callerFn", CALLER_PATH),
         ("ns1", callee_key(), "calleeFn", CALLEE_PATH),
@@ -221,10 +283,17 @@ pub(crate) fn build_sqlite_mirror(dir: &Path, drop_calls: bool) -> (std::path::P
     }
     conn.insert_nodes(&nodes).expect("insert nodes");
 
-    // edges: OWNS (module -> each FILE), CALLS (caller -> callee)
+    // edges: OWNS (module -> each FILE), CALLS (caller -> callee), and the `src` ↔ `lib` import
+    // cycle in the real writer's TWO granularities — FILE→FILE IMPORTS (resolved file imports)
+    // AND MODULE→MODULE IMPORTS (`find_cycles(level=module)` walks ONLY MODULE-kind endpoints).
     let mut edges: Vec<GraphEdge> = vec![
         owns_edge(&snapshot_uid, "eo0", "nm0", "nf0"),
         owns_edge(&snapshot_uid, "eo1", "nm0", "nf1"),
+        owns_edge(&snapshot_uid, "eo2", "nm1", "nf2"),
+        imports_edge(&snapshot_uid, "ei0", "nf0", "nf2"),
+        imports_edge(&snapshot_uid, "ei1", "nf2", "nf0"),
+        imports_edge(&snapshot_uid, "em0", "nm0", "nm1"),
+        imports_edge(&snapshot_uid, "em1", "nm1", "nm0"),
     ];
     if !drop_calls {
         edges.push(GraphEdge {
@@ -260,6 +329,23 @@ fn owns_edge(snapshot_uid: &str, uid: &str, module_uid: &str, file_uid: &str) ->
         source_node_uid: module_uid.into(),
         target_node_uid: file_uid.into(),
         edge_type: "OWNS".into(),
+        resolution: "resolved".into(),
+        extractor: "test".into(),
+        location: None,
+        metadata_json: None,
+    }
+}
+
+/// EC-M2-LEAF-SERVE-1: a resolved IMPORTS edge (FILE→FILE or MODULE→MODULE — the writer emits both
+/// granularities from resolved file imports).
+fn imports_edge(snapshot_uid: &str, uid: &str, source_uid: &str, target_uid: &str) -> GraphEdge {
+    GraphEdge {
+        edge_uid: uid.into(),
+        snapshot_uid: snapshot_uid.into(),
+        repo_uid: REPO.into(),
+        source_node_uid: source_uid.into(),
+        target_node_uid: target_uid.into(),
+        edge_type: "IMPORTS".into(),
         resolution: "resolved".into(),
         extractor: "test".into(),
         location: None,

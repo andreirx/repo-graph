@@ -3677,46 +3677,63 @@ impl ServiceDispatcher {
             );
         }
 
-        // COHERENCE-LEAF-SERVE-IMPL-1: orient bounded (b)-leaf SERVE-THEN-FALLBACK. Resolve the latest
-        // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the bounded
-        // orient cert (FOCUS-RESOLUTION ∧ CALLGRAPH no-loss) can be evaluated BEFORE the use case runs.
-        // GREEN -> run orient through the StoragePort decorator: focus resolution + callers/callees are
-        // served from the CURRENT-STATE LiveGraph with ZERO eager `nodes`/`edges` reads for those leaves.
-        // The (c) trust contributor and the MODULE_SUMMARY counts stay SQLite — delegated by the decorator
-        // and SQLite-LABELLED. Cycle VALUES also stay SQLite (the decorator delegates `find_module_cycles*`,
-        // RATIFIED CYCLES-A), but the IMPORT_CYCLES leaf LABEL is UNCHANGED shipped behavior: the hybrid
-        // cert-gated `orient_cycles_outcome` in `build_orient_envelope` labels it `livegraph` on a GREEN
-        // `cycles_cert`, else SQLite. Cycles are NOT in the bounded orient cert and are NOT LG-value-served
-        // here (CYCLES-B is the deferred follow-up). `build_orient_envelope`'s CALLGRAPH leaf LABEL follows
-        // this SAME `serve_from_lg` decision (review-3 item 1): on green the served callers/callees outcomes
+        // COHERENCE-LEAF-SERVE-IMPL-1 + EC-M2-LEAF-SERVE-1: orient bounded (b)-leaf
+        // SERVE-THEN-FALLBACK. Resolve the latest snapshot uid first (a cheap `snapshots` read —
+        // NOT a `nodes`/`edges` read) so the serve WITNESS — the bounded FOCUS-RESOLUTION ∧
+        // CALLGRAPH cert PLUS the per-leaf M-2 decisions — can be evaluated BEFORE the use case
+        // runs. GREEN -> run orient through the StoragePort decorator: focus resolution +
+        // callers/callees are served from the CURRENT-STATE LiveGraph with ZERO eager
+        // `nodes`/`edges` reads for those leaves; cycle VALUES additionally serve from the
+        // LiveGraph module-cycle SCC when the cycles cert's VALUES verdict is GREEN (EC-M2 /
+        // CYCLES-B — the canonical agent shapes proven byte-equal at cert build; supersedes the
+        // CYCLES-A delegate-always posture), and MODULE_SUMMARY structural counts serve from the
+        // LiveGraph structural inventory when the module-summary identity-reconciliation cert is
+        // GREEN (EC-M2 / DR-2; divergence ⇒ RED ⇒ SQLite). The (c) trust contributor stays SQLite
+        // FOREVER (Contract Clause 3) — delegated and SQLite-LABELLED. The IMPORT_CYCLES leaf
+        // LABEL keeps the shipped cert-gated `orient_cycles_outcome` semantics; the MODULE_SUMMARY
+        // leaf LABEL follows the ACTUAL M-2 serve (a new decision; absent = today's plain sqlite
+        // leaf, byte-identical). `build_orient_envelope`'s CALLGRAPH leaf LABEL follows this SAME
+        // `serve_from_lg` decision (review-3 item 1): on green the served callers/callees outcomes
         // peek the GREEN callgraph cert so the full served path is zero per-call read for the callgraph leaf
-        // (not just the decorator's value serve); on RED they are SQLite-LABELLED. RED / non-resident /
-        // non-TS / no-snapshot -> the unchanged eager SQLite path. The cert build reads SQLite ONCE per
-        // fingerprint (the drilldown invariant).
+        // (not just the decorator's value serve); on RED they are SQLite-LABELLED. Each leaf degrades
+        // independently (review-0 #1); ALL leaves RED / non-resident / non-TS / no-snapshot -> the
+        // unchanged eager SQLite path. Every cert build reads SQLite ONCE per fingerprint (the drilldown
+        // invariant).
         //
         // W-B-EPOCH-IMPL-1: capture the request epoch ONCE here. This single resolve REPLACES both the
         // prior serve-decision resolve AND the orient use case's internal `get_latest_snapshot` (the
         // double-resolve, now deleted in `orient/repo.rs`): the pinned `&AgentSnapshot` is threaded into
-        // `orient_cancellable`. `epoch.fingerprint` is the BUILD-THEN-PEEK bounded-cert LG-serve
-        // eligibility witness (`Some` iff focus-resolution ∧ callgraph are both GREEN at the resident
-        // fingerprint); `serve_from_lg = epoch.fingerprint.is_some()` is the SAME serve decision the prior
-        // `orient_bounded_cert_is_green(...)` produced under W-A. No READY snapshot -> the prior
-        // `OrientError::NoSnapshot` (raised by the use case before) is raised HERE.
+        // `orient_cancellable`. `epoch.fingerprint` is the BUILD-THEN-PEEK LG-serve witness pin (EC-M2
+        // review-0 #1: `Some` iff AT LEAST ONE of the three independent leaf decisions is GREEN at the
+        // resident fingerprint); `serve_from_lg = serve_witness.bounded` is the SAME bounded (fr∧cg)
+        // serve decision the prior `orient_bounded_cert_is_green(...)` produced under W-A — now ONE of
+        // the three, gating only the six (b) methods + the callgraph leaf label. No READY snapshot ->
+        // the prior `OrientError::NoSnapshot` (raised by the use case before) is raised HERE.
         // The agent-DTO snapshot (`AgentSnapshot`) via the `AgentStorageRead` trait — NOT the inherent
         // `StorageConnection::get_latest_snapshot` (which returns the storage `Snapshot`); the use case and
         // the `RequestEpoch` both speak the agent DTO. Same READY-row selection (the trait impl delegates to
         // the inherent method).
-        let epoch =
+        // EC-M2-LEAF-SERVE-1 (review-0 #1): the eligibility capture is now the FULL serve witness —
+        // the EV-A pin fingerprint PLUS three INDEPENDENT leaf decisions peeked at it: the bounded
+        // (fr∧cg) fold for the six (b) methods, and the per-leaf M-2 decisions (cycle VALUES /
+        // MODULE_SUMMARY). The M-2 leaf certs are warmed whenever a fingerprint is computable
+        // (once per fingerprint, pre-use-case) — INDEPENDENT of the bounded outcome, so a GREEN
+        // M-2 leaf serves even when an unrelated bounded sub-cert is RED. Only when NO leaf serves
+        // (fingerprint None) is the path byte-identical bare SQLite (the pre-M-2 daemon).
+        let (epoch, serve_witness) =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snapshot)) => {
-                    let fingerprint = crate::orient_serve::orient_bounded_cert_eligibility(
+                    let witness = crate::orient_serve::orient_serve_witness(
                         &repo_state,
                         &snapshot.snapshot_uid,
                     );
-                    crate::livegraph_feed::RequestEpoch {
-                        snapshot,
-                        fingerprint,
-                    }
+                    (
+                        crate::livegraph_feed::RequestEpoch {
+                            snapshot,
+                            fingerprint: witness.fingerprint.clone(),
+                        },
+                        witness,
+                    )
                 }
                 Ok(None) => {
                     // DAEMON-VISIBILITY-1 (F2): never a bare "index the repo first" when a partial
@@ -3735,7 +3752,11 @@ impl ServiceDispatcher {
                     );
                 }
             };
-        let serve_from_lg = epoch.fingerprint.is_some();
+        // review-0 #1: `serve_from_lg` is the BOUNDED (fr∧cg) decision ONLY — it gates the six (b)
+        // methods' serve AND the callgraph leaf LABEL below (the review-3 item-1 honesty gate:
+        // labelling from `fingerprint.is_some()` would mint false `livegraph` callgraph provenance
+        // on an M-2-only serve). The decorator itself is constructed whenever ANY leaf serves.
+        let serve_from_lg = serve_witness.bounded;
 
         // Call the agent orient use case.
         //
@@ -3751,11 +3772,17 @@ impl ServiceDispatcher {
         let orient_start = Instant::now();
         let orient_outcome = {
             let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_orient");
-            if serve_from_lg {
-                let decorator = crate::orient_serve::OrientServeDecorator::new(
+            if epoch.fingerprint.is_some() {
+                // EC-M2-LEAF-SERVE-1 (review-0 #1): construct the decorator whenever ANY leaf
+                // decision is GREEN, carrying ALL THREE independently — the bounded fold gates the
+                // six (b) methods; cycle VALUES + MODULE_SUMMARY serve iff their own certs were
+                // GREEN at the captured fingerprint (each leaf degrades independently to SQLite).
+                let decorator = crate::orient_serve::OrientServeDecorator::with_leaf_serves(
                     &repo_state.livegraph,
                     &storage,
                     &epoch,
+                    serve_witness.bounded,
+                    serve_witness.m2,
                 );
                 repo_graph_agent::orient_cancellable(
                     &decorator,
@@ -3829,6 +3856,15 @@ impl ServiceDispatcher {
             &repo_uid,
             result,
             serve_from_lg,
+            // EC-M2-LEAF-SERVE-1: the MODULE_SUMMARY leaf label follows the ACTUAL serve — the
+            // decorator served the counts from the LiveGraph iff the module-summary cert was
+            // GREEN at the captured fingerprint (review-0 #1: INDEPENDENT of the bounded fold —
+            // a GREEN witness always constructs the decorator) ∧ the epoch is STILL resident
+            // after the use case ran (a mid-request swap made the decorator's EV-A gate delegate
+            // to SQLite — the post-serve revalidation keeps the label from minting false
+            // `{livegraph}` provenance on that race; under-claim only, never over-claim).
+            serve_witness.m2.module_summary
+                && crate::orient_serve::epoch_still_resident(&repo_state.livegraph, &epoch),
         );
         let output = match serde_json::to_value(&envelope) {
             Ok(v) => v,
@@ -4056,19 +4092,25 @@ impl ServiceDispatcher {
             );
         }
 
-        // COHERENCE-LEAF-SERVE-IMPL-2: explain bounded (b)-leaf SERVE-THEN-FALLBACK (the EXPLAIN consumer of
-        // the focus-resolution producer; sibling of handle_orient's IMPL-1 wiring). Resolve the latest
-        // snapshot uid first (a cheap `snapshots` read — NOT a `nodes`/`edges` read) so the SHARED bounded
-        // cert (FOCUS-RESOLUTION ∧ CALLGRAPH no-loss — the SAME `orient_bounded_cert_is_green` orient uses)
-        // can be evaluated BEFORE the use case runs. GREEN -> run explain through the SAME `OrientServeDecorator`:
-        // focus resolution (`resolve_path_focus`/`resolve_stable_key_focus`/`get_symbol_context`/
-        // `resolve_symbol_name`) is served from the CURRENT-STATE LiveGraph with ZERO eager `nodes` reads, so
-        // explain SYMBOL-focus is `nodes`-FREE on green (the `explain_symbol` pipeline emits no MODULE_SUMMARY;
-        // its only `nodes` reads ARE those four focus-resolution methods, all decorator-served). The (c) trust
-        // contributor (`get_trust_summary`, edges+unresolved_edges) and cycles (`find_cycles_involving_*`,
-        // edges) stay SQLite — delegated by the decorator (Contract Clause 3 + CYCLES-A); explain is NEVER
-        // `edges`-free. explain FILE/PATH keep their `compute_*_summary` / `list_*` `nodes` reads (delegated;
-        // the HONEST BOUND — the explain analogue of orient REPO/PATH/FILE's MODULE_SUMMARY; NOT `nodes`-free).
+        // COHERENCE-LEAF-SERVE-IMPL-2 + EC-M2-LEAF-SERVE-1: explain bounded (b)-leaf
+        // SERVE-THEN-FALLBACK (the EXPLAIN consumer of the focus-resolution producer; sibling of
+        // handle_orient's wiring). Resolve the latest snapshot uid first (a cheap `snapshots` read —
+        // NOT a `nodes`/`edges` read) so the SHARED serve witness (bounded FOCUS-RESOLUTION ∧
+        // CALLGRAPH + the per-leaf M-2 decisions) can be evaluated BEFORE the use case runs.
+        // GREEN -> run explain through the SAME `OrientServeDecorator`: focus resolution
+        // (`resolve_path_focus`/`resolve_stable_key_focus`/`get_symbol_context`/
+        // `resolve_symbol_name`) is served from the CURRENT-STATE LiveGraph with ZERO eager `nodes`
+        // reads, so explain SYMBOL-focus is `nodes`-FREE on green (the `explain_symbol` pipeline
+        // emits no MODULE_SUMMARY; its only `nodes` reads ARE those four focus-resolution methods,
+        // all decorator-served); cycle VALUES (`find_cycles_involving_*`) additionally serve from
+        // the LiveGraph SCC when the cycles cert's VALUES verdict is GREEN (EC-M2 / CYCLES-B), and
+        // the FILE/PATH identity structural counts (`compute_{path,file}_summary`) serve from the
+        // LiveGraph inventory when the module-summary identity-reconciliation cert is GREEN
+        // (EC-M2 / DR-E3). The (c) trust contributor (`get_trust_summary`,
+        // edges+unresolved_edges) stays SQLite FOREVER (Contract Clause 3); explain is NEVER
+        // `edges`-free on repos where those certs are RED, and the `list_symbols_in_file` /
+        // `list_files_in_path` per-item LISTINGS keep their `nodes` reads (no LiveGraph home —
+        // the DR-E3 listing half; NOT in M-2's scope).
         // RED / non-resident / non-TS / no-snapshot -> the unchanged eager bare-SQLite path. The cert build
         // reads SQLite ONCE per fingerprint (the drilldown invariant); a cached GREEN/RED reads none.
         //
@@ -4078,21 +4120,25 @@ impl ServiceDispatcher {
         // `get_latest_snapshot` returns the PINNED snapshot (`storage_port_impl`). `run_explain` derives its
         // `snapshot_uid` SOLELY from that call and threads it into every SQLite read + the response stamp, so
         // the whole explain request resolves to ONE epoch with NO mid-request "latest" re-read (the explain
-        // analogue of orient's double-resolve removal — no agent-crate change needed). The fingerprint then
-        // gates the (b)-leaf serve: GREEN serves the LiveGraph (EV-A), RED delegates to SQLite at the pinned
-        // uid. A missing READY snapshot keeps the bare-SQLite path, where `run_explain` raises
-        // `ExplainError::NoSnapshot` exactly as before.
+        // analogue of orient's double-resolve removal — no agent-crate change needed). The fingerprint is
+        // the EV-A pin; each leaf's OWN witness decision (bounded / cycle-values / module-summary) gates
+        // its serve at that pin, and a `false` (or an all-off fingerprint-None witness) delegates that
+        // leaf to SQLite at the pinned uid. A missing READY snapshot keeps the bare-SQLite path, where
+        // `run_explain` raises `ExplainError::NoSnapshot` exactly as before.
+        // EC-M2-LEAF-SERVE-1 (review-0 #1): the SAME full serve witness orient captures — the
+        // EV-A pin plus the THREE INDEPENDENT leaf decisions (bounded fr∧cg for the six (b)
+        // methods; cycle VALUES; MODULE_SUMMARY counts) — so explain's decorator serves each
+        // GREEN leaf even when an unrelated leaf's cert is RED.
+        let mut serve_witness = crate::orient_serve::OrientServeWitness::default();
         let epoch = repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid)
             .ok()
             .flatten()
             .map(|snapshot| {
-                let fingerprint = crate::orient_serve::orient_bounded_cert_eligibility(
-                    &repo_state,
-                    &snapshot.snapshot_uid,
-                );
+                serve_witness =
+                    crate::orient_serve::orient_serve_witness(&repo_state, &snapshot.snapshot_uid);
                 crate::livegraph_feed::RequestEpoch {
                     snapshot,
-                    fingerprint,
+                    fingerprint: serve_witness.fingerprint.clone(),
                 }
             });
 
@@ -4108,14 +4154,18 @@ impl ServiceDispatcher {
             let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_explain");
             if let Some(epoch) = epoch.as_ref() {
                 // W-B-EPOCH-IMPL-1: wrap the epoch-pinned decorator whenever a READY snapshot was captured —
-                // GREEN *and* RED. On green the (b) leaves serve from the LiveGraph (EV-A gate); on red they
-                // delegate to SQLite at the pinned uid (`epoch_resident` is false). EITHER WAY the decorator's
-                // `get_latest_snapshot` returns the PINNED snapshot, so `run_explain` resolves the snapshot
-                // ONCE (no mid-request "latest" re-read) and the whole explain request is coherent at epoch N.
-                let decorator = crate::orient_serve::OrientServeDecorator::new(
+                // serving and non-serving witnesses alike. Each GREEN leaf decision serves from the LiveGraph
+                // (EV-A gate); every other leaf delegates to SQLite at the pinned uid (review-0 #1: the
+                // bounded fold and the M-2 leaves degrade independently; all-off ⇒ `epoch_resident` false ⇒
+                // byte-transparent). EITHER WAY the decorator's `get_latest_snapshot` returns the PINNED
+                // snapshot, so `run_explain` resolves the snapshot ONCE (no mid-request "latest" re-read)
+                // and the whole explain request is coherent at epoch N.
+                let decorator = crate::orient_serve::OrientServeDecorator::with_leaf_serves(
                     &repo_state.livegraph,
                     &storage,
                     epoch,
+                    serve_witness.bounded,
+                    serve_witness.m2,
                 );
                 repo_graph_agent::run_explain_cancellable(
                     &decorator,
@@ -4183,6 +4233,17 @@ impl ServiceDispatcher {
             &repo_uid,
             result,
             matches!(budget, Budget::Large),
+            // EC-M2-LEAF-SERVE-1: the FILE/PATH identity structural counts were decorator-served
+            // from the LiveGraph iff the module-summary cert was GREEN at the captured
+            // fingerprint (review-0 #1: INDEPENDENT of the bounded fold; a GREEN M-2 decision
+            // implies the witness minted a fingerprint) ∧ the epoch is STILL resident after the
+            // use case ran (the post-serve revalidation — a mid-request swap made the decorator
+            // delegate to SQLite, so labelling from the pre-captured decision alone would mint
+            // false `{livegraph}` provenance; under-claim only, mirroring the orient site).
+            epoch.as_ref().is_some_and(|e| {
+                serve_witness.m2.module_summary
+                    && crate::orient_serve::epoch_still_resident(&repo_state.livegraph, e)
+            }),
         );
         match serde_json::to_value(&envelope) {
             Ok(v) => DispatchResult::success(&request.id, v),

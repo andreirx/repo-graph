@@ -256,6 +256,7 @@ fn seed_certs_green(state: &RepoState, snapshot_uid: &str) {
     };
     *state.cycles_cert.write() = Some(CycleNoLossCert {
         verdict: "GREEN".to_string(),
+        values_verdict: "GREEN".to_string(),
         fingerprint: fp.clone(),
     });
     *state.complexity_cert.write() = Some(ComplexityNoLossCert {
@@ -437,7 +438,7 @@ fn build_orient_envelope_symbol_focus_callers_leaf_is_multi_source() {
             top_modules: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true);
+    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
     let leaf = env
         .value
         .signals
@@ -476,7 +477,7 @@ fn build_orient_envelope_symbol_focus_callees_leaf_is_multi_source() {
             top_modules: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true);
+    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
     let leaf = env
         .value
         .signals
@@ -502,7 +503,7 @@ fn build_orient_envelope_repo_focus_cycles_leaf_is_livegraph() {
             cycles: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true);
+    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
     let leaf = env
         .value
         .signals
@@ -536,7 +537,7 @@ fn build_orient_envelope_emits_producer_unavailable_limit_without_livegraph() {
             cycles: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false);
+    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -573,7 +574,7 @@ fn build_orient_envelope_repo_focus_complexity_leaf_is_multi_source() {
         Focus::repo(),
         vec![high_complexity_signal()],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true);
+    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
     let leaf = env
         .value
         .signals
@@ -616,7 +617,7 @@ fn build_orient_envelope_complexity_no_livegraph_falls_back_unavailable() {
         Focus::repo(),
         vec![high_complexity_signal()],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false);
+    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -651,7 +652,7 @@ fn build_orient_envelope_complexity_cert_divergence_falls_back() {
         Focus::repo(),
         vec![high_complexity_signal()],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, false);
+    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -700,7 +701,7 @@ fn build_orient_envelope_stale_index_marks_leaves_stale_without_trust_signal() {
         "fixture: no TRUST_STALE_SNAPSHOT signal is emitted"
     );
 
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false);
+    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -749,7 +750,7 @@ fn build_orient_envelope_fresh_index_keeps_leaves_fresh() {
             created_at: "2026-01-01T00:00:00Z".to_string(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false);
+    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -870,7 +871,8 @@ fn build_orient_envelope_symbol_focus_callgraph_leaf_livegraph_via_cert() {
         &f.state,
         crate::callgraph_cert::test_fixture::REPO,
         result,
-        true, // serve_from_lg: handle_orient SERVED (bounded cert GREEN, asserted above)
+        true,  // serve_from_lg: handle_orient SERVED (bounded cert GREEN, asserted above)
+        false, // module_summary_served: not exercised by this fixture (pre-M-2 label path)
     );
     let leaf = env
         .value
@@ -881,6 +883,85 @@ fn build_orient_envelope_symbol_focus_callgraph_leaf_livegraph_via_cert() {
     assert!(
         leaf.provenance.source.contains(&Source::Livegraph),
         "GREEN callgraph cert -> CALLERS_SUMMARY labelled livegraph through the full envelope path"
+    );
+    assert!(leaf.provenance.fallback_reason.is_none());
+}
+
+// ── EC-M2-LEAF-SERVE-1: the MODULE_SUMMARY leaf LABEL follows the ACTUAL M-2 serve ──
+
+/// `module_summary_served == true` (dispatch: module-summary cert GREEN at the witness
+/// fingerprint — review-0 #1: independent of the bounded fold — ∧ epoch still resident) → the
+/// MODULE_SUMMARY leaf is the multi-source `{livegraph, sqlite}` treatment (counts from the
+/// LiveGraph inventory; the module-DISCOVERY half stays SQLite-built).
+/// `module_summary_served == false` → the decision is ABSENT and the leaf renders the pre-M-2
+/// fixed `{sqlite}` leaf byte-identically (every fallback path, incl. a RED module-summary cert
+/// under a GREEN bounded fold).
+#[test]
+fn build_orient_envelope_module_summary_leaf_follows_actual_serve() {
+    let f = setup();
+    let module_summary_signal = || {
+        Signal::module_summary(repo_graph_agent::ModuleSummaryEvidence {
+            file_count: 3,
+            symbol_count: 2,
+            languages: vec!["typescript".to_string()],
+            discovered_module_count: None,
+            module_kinds: None,
+            top_modules: Vec::new(),
+            package_groups: Vec::new(),
+            root_manifest_limitation: None,
+        })
+    };
+
+    // SERVED: the leaf is multi-source {livegraph, sqlite}.
+    let served_env = crate::orient_coherence::build_orient_envelope(
+        &f.state,
+        REPO,
+        orient_result(
+            REPO,
+            &f.snapshot_uid,
+            Focus::repo(),
+            vec![module_summary_signal()],
+        ),
+        true, // serve_from_lg
+        true, // module_summary_served
+    );
+    let leaf = served_env
+        .value
+        .signals
+        .iter()
+        .find(|l| l.value.code() == SignalCode::ModuleSummary)
+        .expect("module summary leaf present");
+    assert_eq!(
+        leaf.provenance.source,
+        BTreeSet::from([Source::Livegraph, Source::Sqlite]),
+        "served counts -> multi-source {{livegraph, sqlite}} (counts live, discovery half SQLite)"
+    );
+    assert!(leaf.provenance.fallback_reason.is_none());
+
+    // NOT SERVED: the pre-M-2 fixed sqlite leaf, byte-identical (no fallback reason minted — an
+    // unserved MODULE_SUMMARY is the proven SQLite primary, not a failed LiveGraph attempt).
+    let unserved_env = crate::orient_coherence::build_orient_envelope(
+        &f.state,
+        REPO,
+        orient_result(
+            REPO,
+            &f.snapshot_uid,
+            Focus::repo(),
+            vec![module_summary_signal()],
+        ),
+        true,  // serve_from_lg (bounded GREEN — e.g. the module-summary cert alone was RED)
+        false, // module_summary_served
+    );
+    let leaf = unserved_env
+        .value
+        .signals
+        .iter()
+        .find(|l| l.value.code() == SignalCode::ModuleSummary)
+        .expect("module summary leaf present");
+    assert_eq!(
+        leaf.provenance.source,
+        BTreeSet::from([Source::Sqlite]),
+        "unserved counts stay the plain sqlite leaf (RED path byte-identical)"
     );
     assert!(leaf.provenance.fallback_reason.is_none());
 }

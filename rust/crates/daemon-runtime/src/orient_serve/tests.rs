@@ -393,6 +393,29 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for PartialSpy<'_, S> {
     fn get_module_summary(&self, s: &str) -> Result<Option<AgentModuleSummary>, AgentStorageError> {
         self.0.get_module_summary(s)
     }
+    // The three (c)-class discovery reads whose TRAIT DEFAULTS are EMPTY (the decorator forwards
+    // them explicitly for the same reason): without these delegates the spy would silently drop
+    // `package_groups`/module names on repo focus — violating this spy's "delegates everything
+    // else" contract (surfaced by the M-2 independence parity test).
+    fn list_module_sizes(
+        &self,
+        s: &str,
+        limit: usize,
+    ) -> Result<Vec<repo_graph_agent::AgentModuleSize>, AgentStorageError> {
+        self.0.list_module_sizes(s, limit)
+    }
+    fn list_directory_groups(
+        &self,
+        s: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentDirectoryGroup>, AgentStorageError> {
+        self.0.list_directory_groups(s)
+    }
+    fn list_manifest_roots(
+        &self,
+        s: &str,
+    ) -> Result<Vec<repo_graph_agent::ManifestRoot>, AgentStorageError> {
+        self.0.list_manifest_roots(s)
+    }
     fn get_boundary_links_freshness(
         &self,
         s: &str,
@@ -594,8 +617,13 @@ fn assert_callgraph_leaf_livegraph(
 ) {
     // serve_from_lg = true: the caller (`served_path_build_envelope_callgraph_label_zero_per_call_read`)
     // models the SERVED path — the bounded precheck cached the callgraph cert GREEN, so the label peeks it.
-    let env =
-        crate::orient_coherence::build_orient_envelope(state, test_fixture::REPO, result, true);
+    let env = crate::orient_coherence::build_orient_envelope(
+        state,
+        test_fixture::REPO,
+        result,
+        true,
+        false,
+    );
     let leaf = env
         .value
         .signals
@@ -695,6 +723,7 @@ fn red_bounded_cert_labels_callgraph_sqlite_despite_green_callgraph_cert() {
         test_fixture::REPO,
         result,
         false, // serve_from_lg: dispatch fell back to bare SQLite (bounded cert RED)
+        false, // module_summary_served: never on a fallback path
     );
 
     // 4. The callgraph leaf MUST be SQLite — NOT livegraph — DESPITE the GREEN callgraph cert.
@@ -719,5 +748,782 @@ fn red_bounded_cert_labels_callgraph_sqlite_despite_green_callgraph_cert() {
         leaf.provenance.fallback_reason,
         Some(repo_graph_coherence::CoherenceFallbackReason::LiveGraphBoundedServeDeclined),
         "the leaf carries the honest bounded-serve-declined reason"
+    );
+}
+
+// ── EC-M2-LEAF-SERVE-1: the M-2 leaf serves (MODULE_SUMMARY counts + cycle VALUES) ───────────────
+//
+// The stateful integration proofs the `module_summary_cert::tests` header points here for, on the
+// SHARED faithful fixture (now carrying `file_versions` + a real `src` ↔ `lib` module cycle):
+//
+// - the module-summary identity-reconciliation cert is GREEN on the faithful mirror and RED on a
+//   real divergence (a tracked file the LiveGraph does not carry), with the witness degrading ONLY
+//   that leaf (divergence ⇒ SQLite serve — the slice's no-silent-drift clause);
+// - `orient_serve_witness` peeks the cycles cert's VALUES verdict (not the set verdict) for the
+//   cycle-VALUES leaf;
+// - V1 PARITY with the leaves ON: orient through `with_leaf_serves(both)` == bare-SQLite orient,
+//   byte/value-identical, REPO focus (repo summary + SHORT-name cycles) and PATH focus (LIKE-prefix
+//   summary + qualified cycles) — the GREEN serve == SQLite serve byte-compare at unit level;
+// - V2 NO-EAGER-READ with the leaves ON: a spy that PANICS on the summary + cycle SQLite methods
+//   (the cancellable variants funnel through the non-cancellable ones via the trait defaults).
+
+/// A partial spy that PANICS on the SIX M-2-served value methods (three summaries + three cycle
+/// finders) and DELEGATES everything else — the complement of [`PartialSpy`] (which panics on the
+/// six focus/callgraph methods and delegates these). On `with_leaf_serves(both)` + GREEN certs the
+/// decorator serves all six from the LiveGraph, so none may reach SQLite.
+struct M2Spy<'a, S: ?Sized>(&'a S);
+
+impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
+    // ── the SIX M-2 served methods: must be served from the LiveGraph, NEVER reached here ──
+    fn compute_repo_summary(&self, _: &str) -> Result<AgentRepoSummary, AgentStorageError> {
+        panic!(
+            "compute_repo_summary must be served from the LiveGraph on a GREEN module-summary cert"
+        )
+    }
+    fn compute_path_summary(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<AgentRepoSummary, AgentStorageError> {
+        panic!(
+            "compute_path_summary must be served from the LiveGraph on a GREEN module-summary cert"
+        )
+    }
+    fn compute_file_summary(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<AgentRepoSummary, AgentStorageError> {
+        panic!(
+            "compute_file_summary must be served from the LiveGraph on a GREEN module-summary cert"
+        )
+    }
+    fn find_module_cycles(&self, _: &str) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        panic!("find_module_cycles must be served from the LiveGraph on a GREEN cycle-VALUES cert")
+    }
+    fn find_cycles_involving_path(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        panic!("find_cycles_involving_path must be served from the LiveGraph on a GREEN cycle-VALUES cert")
+    }
+    fn find_cycles_involving_module(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+        panic!("find_cycles_involving_module must be served from the LiveGraph on a GREEN cycle-VALUES cert")
+    }
+
+    // ── everything else: DELEGATED (allowed reads — focus resolution/callers are covered by the
+    //    sibling PartialSpy proof; trust/gate/docs/module-discovery stay SQLite by contract) ──
+    fn get_repo(&self, repo_uid: &str) -> Result<Option<AgentRepo>, AgentStorageError> {
+        self.0.get_repo(repo_uid)
+    }
+    fn get_latest_snapshot(
+        &self,
+        repo_uid: &str,
+    ) -> Result<Option<AgentSnapshot>, AgentStorageError> {
+        self.0.get_latest_snapshot(repo_uid)
+    }
+    fn get_stale_files(&self, s: &str) -> Result<Vec<AgentStaleFile>, AgentStorageError> {
+        self.0.get_stale_files(s)
+    }
+    fn resolve_path_focus(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<AgentPathResolution, AgentStorageError> {
+        self.0.resolve_path_focus(s, p)
+    }
+    fn resolve_stable_key_focus(
+        &self,
+        s: &str,
+        k: &str,
+    ) -> Result<Option<AgentFocusCandidate>, AgentStorageError> {
+        self.0.resolve_stable_key_focus(s, k)
+    }
+    fn resolve_symbol_name(
+        &self,
+        s: &str,
+        n: &str,
+    ) -> Result<Vec<AgentFocusCandidate>, AgentStorageError> {
+        self.0.resolve_symbol_name(s, n)
+    }
+    fn get_symbol_context(
+        &self,
+        s: &str,
+        k: &str,
+    ) -> Result<Option<AgentSymbolContext>, AgentStorageError> {
+        self.0.get_symbol_context(s, k)
+    }
+    fn find_symbol_callers(
+        &self,
+        s: &str,
+        k: &str,
+    ) -> Result<Vec<AgentCallerRow>, AgentStorageError> {
+        self.0.find_symbol_callers(s, k)
+    }
+    fn find_symbol_callees(
+        &self,
+        s: &str,
+        k: &str,
+    ) -> Result<Vec<AgentCalleeRow>, AgentStorageError> {
+        self.0.find_symbol_callees(s, k)
+    }
+    fn find_dead_nodes(
+        &self,
+        s: &str,
+        r: &str,
+        k: Option<&str>,
+    ) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+        self.0.find_dead_nodes(s, r, k)
+    }
+    fn get_active_boundary_declarations(
+        &self,
+        r: &str,
+    ) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError> {
+        self.0.get_active_boundary_declarations(r)
+    }
+    fn find_imports_between_paths(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        self.0.find_imports_between_paths(s, a, b)
+    }
+    fn get_trust_summary(&self, r: &str, s: &str) -> Result<AgentTrustSummary, AgentStorageError> {
+        self.0.get_trust_summary(r, s)
+    }
+    fn find_dead_nodes_in_path(
+        &self,
+        s: &str,
+        r: &str,
+        p: &str,
+    ) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+        self.0.find_dead_nodes_in_path(s, r, p)
+    }
+    fn find_dead_nodes_in_file(
+        &self,
+        s: &str,
+        r: &str,
+        p: &str,
+    ) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+        self.0.find_dead_nodes_in_file(s, r, p)
+    }
+    fn find_boundary_declarations_in_path(
+        &self,
+        r: &str,
+        p: &str,
+    ) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError> {
+        self.0.find_boundary_declarations_in_path(r, p)
+    }
+    fn list_symbols_in_file(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentSymbolEntry>, AgentStorageError> {
+        self.0.list_symbols_in_file(s, p)
+    }
+    fn list_files_in_path(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentFileEntry>, AgentStorageError> {
+        self.0.list_files_in_path(s, p)
+    }
+    fn find_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        self.0.find_file_imports(s, p)
+    }
+    fn get_doc_inventory(&self, r: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
+        self.0.get_doc_inventory(r)
+    }
+    fn query_high_complexity_symbols(
+        &self,
+        s: &str,
+        t: u64,
+        l: usize,
+    ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
+        self.0.query_high_complexity_symbols(s, t, l)
+    }
+    fn has_complexity_measurements(&self, s: &str) -> Result<bool, AgentStorageError> {
+        self.0.has_complexity_measurements(s)
+    }
+    fn count_high_complexity_symbols(&self, s: &str, t: u64) -> Result<u64, AgentStorageError> {
+        self.0.count_high_complexity_symbols(s, t)
+    }
+    fn get_module_summary(&self, s: &str) -> Result<Option<AgentModuleSummary>, AgentStorageError> {
+        self.0.get_module_summary(s)
+    }
+    // Same three empty-default (c)-class delegates as `PartialSpy` (see the note there): without
+    // them the M-2 parity-over-spy proofs would spuriously diverge on `package_groups`.
+    fn list_module_sizes(
+        &self,
+        s: &str,
+        limit: usize,
+    ) -> Result<Vec<repo_graph_agent::AgentModuleSize>, AgentStorageError> {
+        self.0.list_module_sizes(s, limit)
+    }
+    fn list_directory_groups(
+        &self,
+        s: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentDirectoryGroup>, AgentStorageError> {
+        self.0.list_directory_groups(s)
+    }
+    fn list_manifest_roots(
+        &self,
+        s: &str,
+    ) -> Result<Vec<repo_graph_agent::ManifestRoot>, AgentStorageError> {
+        self.0.list_manifest_roots(s)
+    }
+    fn get_boundary_links_freshness(
+        &self,
+        s: &str,
+    ) -> Result<AgentBoundaryLinksFreshness, AgentStorageError> {
+        self.0.get_boundary_links_freshness(s)
+    }
+}
+
+impl<S: GateStorageRead + ?Sized> GateStorageRead for M2Spy<'_, S> {
+    fn get_active_requirements(&self, r: &str) -> Result<Vec<GateRequirement>, GateStorageError> {
+        self.0.get_active_requirements(r)
+    }
+    fn get_boundary_declarations(
+        &self,
+        r: &str,
+    ) -> Result<Vec<GateBoundaryDeclaration>, GateStorageError> {
+        self.0.get_boundary_declarations(r)
+    }
+    fn find_boundary_imports(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        self.0.find_boundary_imports(s, a, b)
+    }
+    fn get_coverage_measurements(&self, s: &str) -> Result<Vec<GateMeasurement>, GateStorageError> {
+        self.0.get_coverage_measurements(s)
+    }
+    fn get_complexity_measurements(
+        &self,
+        s: &str,
+    ) -> Result<Vec<GateMeasurement>, GateStorageError> {
+        self.0.get_complexity_measurements(s)
+    }
+    fn get_hotspot_inferences(&self, s: &str) -> Result<Vec<GateInference>, GateStorageError> {
+        self.0.get_hotspot_inferences(s)
+    }
+    fn find_waivers(
+        &self,
+        r: &str,
+        i: &str,
+        v: i64,
+        o: &str,
+        n: &str,
+    ) -> Result<Vec<GateWaiver>, GateStorageError> {
+        self.0.find_waivers(r, i, v, o, n)
+    }
+    fn evaluate_module_violations(
+        &self,
+        r: &str,
+        s: &str,
+    ) -> Result<GateModuleViolationEvidence, GateStorageError> {
+        self.0.evaluate_module_violations(r, s)
+    }
+    fn get_quality_assessment_facts_for_gate(
+        &self,
+        r: &str,
+        s: &str,
+    ) -> Result<Vec<GateQualityAssessmentFact>, GateStorageError> {
+        self.0.get_quality_assessment_facts_for_gate(r, s)
+    }
+}
+
+/// The module-summary identity-reconciliation cert is GREEN on the faithful mirror (per-file,
+/// per-module, and exact-`compute_repo_summary`-totals all reconcile).
+#[test]
+fn m2_module_summary_cert_green_on_faithful_fixture() {
+    let f = test_fixture::build_fixture(false);
+    let fp = orient_bounded_cert_eligibility(&f.state, &f.snapshot_uid);
+    assert!(fp.is_some(), "bounded eligibility GREEN on the mirror");
+    let green = crate::module_summary_cert::build_and_store_module_summary_cert(
+        &f.state,
+        &f.snapshot_uid,
+        fp,
+    );
+    assert_eq!(green, Some(true), "identity reconciliation GREEN");
+    let cert = f.state.module_summary_cert.read();
+    assert_eq!(cert.as_ref().unwrap().verdict, "GREEN");
+}
+
+/// The FULL serve witness on the faithful fixture: bounded fingerprint + BOTH M-2 leaves servable
+/// (the cycles cert's VALUES verdict is GREEN over the real `src` ↔ `lib` cycle; the module-summary
+/// cert is GREEN over the reconciled inventory).
+#[test]
+fn m2_serve_witness_green_serves_both_leaves() {
+    let f = test_fixture::build_fixture(false);
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(w.fingerprint.is_some(), "serve witness minted (≥1 leaf)");
+    assert!(w.bounded, "bounded fold GREEN on the faithful mirror");
+    assert!(
+        w.m2.cycle_values,
+        "cycle VALUES servable (values_verdict GREEN)"
+    );
+    assert!(
+        w.m2.module_summary,
+        "MODULE_SUMMARY servable (identity cert GREEN)"
+    );
+    // The warmed certs sit at the witness fingerprint (build-then-peek discipline).
+    let fp = w.fingerprint.unwrap();
+    assert_eq!(f.state.cycles_cert.read().as_ref().unwrap().fingerprint, fp);
+    assert_eq!(
+        f.state
+            .module_summary_cert
+            .read()
+            .as_ref()
+            .unwrap()
+            .fingerprint,
+        fp
+    );
+}
+
+/// A REAL divergence (a SQLite-tracked file the LiveGraph does not carry — the config-file class)
+/// turns the module-summary cert RED and the witness degrades ONLY that leaf: cycle VALUES keep
+/// serving, MODULE_SUMMARY falls back to SQLite (divergence ⇒ SQLite serve; no silent drift).
+#[test]
+fn m2_module_summary_cert_red_on_tracked_file_absent_from_livegraph() {
+    let f = test_fixture::build_fixture(false);
+    {
+        // Track `package.json` (language NULL — the scanner's config-file shape) in SQLite only.
+        let mut conn = repo_graph_storage::StorageConnection::open(f._dir.path().join("repo.db"))
+            .expect("reopen storage");
+        conn.upsert_files(&[repo_graph_storage::types::TrackedFile {
+            file_uid: "fuid::package.json".into(),
+            repo_uid: test_fixture::REPO.into(),
+            path: "package.json".into(),
+            language: None,
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }])
+        .expect("upsert files");
+        conn.upsert_file_versions(&[repo_graph_storage::types::FileVersion {
+            snapshot_uid: f.snapshot_uid.clone(),
+            file_uid: "fuid::package.json".into(),
+            content_hash: "cfg".into(),
+            ast_hash: None,
+            extractor: None,
+            parse_status: "parsed".into(),
+            size_bytes: Some(2),
+            line_count: Some(1),
+            indexed_at: "2026-01-01T00:00:00Z".into(),
+        }])
+        .expect("upsert file versions");
+    }
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(
+        w.fingerprint.is_some() && w.bounded,
+        "bounded fold stays GREEN (focus-resolution + callgraph unaffected)"
+    );
+    assert!(
+        w.m2.cycle_values,
+        "cycle VALUES leaf unaffected by the summary divergence"
+    );
+    assert!(
+        !w.m2.module_summary,
+        "a tracked file with no LiveGraph presence is an identity divergence -> RED -> SQLite serve"
+    );
+    let cert = f.state.module_summary_cert.read();
+    assert_eq!(cert.as_ref().unwrap().verdict, "RED");
+    // The divergence is NAMED in the compare data (diagnosable evidence, not a bare boolean).
+    let data = crate::module_summary_cert::module_summary_compare_data(&f.state, &f.snapshot_uid)
+        .expect("compare data");
+    assert!(
+        data.missing_in_livegraph
+            .contains(&"package.json".to_string()),
+        "the diverging path is named: {:?}",
+        data.missing_in_livegraph
+    );
+}
+
+/// The witness peeks the cycles cert's VALUES verdict, NOT the set verdict: a set-equal repo whose
+/// canonical served shapes diverge (values_verdict RED) keeps the cycles-command fastpath GREEN but
+/// must NOT license the decorator's cycle-VALUES serve.
+#[test]
+fn m2_witness_cycle_values_follows_values_verdict_not_set_verdict() {
+    let f = test_fixture::build_fixture(false);
+    // Warm everything once (both leaves GREEN), then force the values verdict RED at the SAME
+    // fingerprint — the witness must flip ONLY cycle_values.
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    let fp = w.fingerprint.expect("serve witness minted");
+    assert!(w.m2.cycle_values && w.m2.module_summary);
+    *f.state.cycles_cert.write() = Some(crate::livegraph_feed::CycleNoLossCert {
+        verdict: "GREEN".to_string(),
+        values_verdict: "RED".to_string(),
+        fingerprint: fp,
+    });
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(
+        w.fingerprint.is_some() && w.bounded,
+        "bounded fold still GREEN"
+    );
+    assert!(
+        !w.m2.cycle_values,
+        "values_verdict RED -> the cycle-VALUES leaf delegates to SQLite (set verdict irrelevant)"
+    );
+    assert!(w.m2.module_summary, "the summary leaf is independent");
+}
+
+/// V1 PARITY with the M-2 leaves ON — REPO focus: orient through `with_leaf_serves(both)` (the
+/// summary and SHORT-name cycles served from the LiveGraph) is byte/value-identical to the
+/// bare-SQLite orient, and the served answer carries the REAL non-empty `src` ↔ `lib` cycle.
+#[test]
+fn m2_parity_full_serve_equals_sqlite_repo_focus() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let now = "2026-01-01T00:00:00Z";
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(w.bounded && w.m2.cycle_values && w.m2.module_summary);
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        repo_graph_agent::orient(
+            &decorator,
+            test_fixture::REPO,
+            None,
+            repo_graph_agent::Budget::Small,
+            now,
+        )
+        .expect("decorator orient ok")
+    };
+    let plain = repo_graph_agent::orient(
+        &storage,
+        test_fixture::REPO,
+        None,
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("sqlite orient ok");
+    assert_eq!(
+        serde_json::to_value(&served).unwrap(),
+        serde_json::to_value(&plain).unwrap(),
+        "M-2 GREEN serve is byte/value-identical to the SQLite serve (repo focus)"
+    );
+    // Not vacuous: the repo-focus answer carries the REAL module cycle (canonical SHORT names).
+    let cycles = served
+        .signals
+        .iter()
+        .find(|s| s.code() == repo_graph_agent::SignalCode::ImportCycles)
+        .expect("IMPORT_CYCLES present (the src <-> lib cycle)");
+    let v = serde_json::to_value(cycles).unwrap();
+    assert_eq!(
+        v["evidence"]["cycles"][0]["modules"],
+        serde_json::json!(["lib", "src"]),
+        "the served cycle is the canonicalized (member-sorted) SHORT-name ring"
+    );
+}
+
+/// V1 PARITY with the M-2 leaves ON — PATH focus (`src`): the LIKE-prefix summary + the qualified
+/// filtered cycles serve from the LiveGraph, byte/value-identical to SQLite.
+#[test]
+fn m2_parity_full_serve_equals_sqlite_path_focus() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let now = "2026-01-01T00:00:00Z";
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(w.bounded && w.m2.cycle_values && w.m2.module_summary);
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        repo_graph_agent::orient(
+            &decorator,
+            test_fixture::REPO,
+            Some(test_fixture::MODULE_DIR),
+            repo_graph_agent::Budget::Small,
+            now,
+        )
+        .expect("decorator orient ok")
+    };
+    let plain = repo_graph_agent::orient(
+        &storage,
+        test_fixture::REPO,
+        Some(test_fixture::MODULE_DIR),
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("sqlite orient ok");
+    assert_eq!(
+        serde_json::to_value(&served).unwrap(),
+        serde_json::to_value(&plain).unwrap(),
+        "M-2 GREEN serve is byte/value-identical to the SQLite serve (path focus)"
+    );
+}
+
+/// V2 NO-EAGER-READ with the M-2 leaves ON — REPO focus: the decorator over a spy that PANICS on
+/// the six M-2 value methods completes, proving the summary + cycle values did NOT touch SQLite
+/// (the cancellable cycle variants funnel through the panicking non-cancellable defaults).
+#[test]
+fn m2_no_eager_read_repo_focus_serves_summary_and_cycles_from_livegraph() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(w.bounded && w.m2.cycle_values && w.m2.module_summary);
+    let spy = M2Spy(&storage);
+    let epoch = green_epoch(&f.state, &f.snapshot_uid);
+    let decorator =
+        OrientServeDecorator::with_leaf_serves(&f.state.livegraph, &spy, &epoch, w.bounded, w.m2);
+    let result = repo_graph_agent::orient(
+        &decorator,
+        test_fixture::REPO,
+        None,
+        repo_graph_agent::Budget::Small,
+        "2026-01-01T00:00:00Z",
+    )
+    .expect("orient over the M-2 spy completes without a summary/cycles SQLite read");
+    assert!(
+        result
+            .signals
+            .iter()
+            .any(|s| s.code() == repo_graph_agent::SignalCode::ImportCycles),
+        "the LiveGraph-served cycle VALUES are present"
+    );
+    assert!(
+        result
+            .signals
+            .iter()
+            .any(|s| s.code() == repo_graph_agent::SignalCode::ModuleSummary),
+        "the LiveGraph-served MODULE_SUMMARY counts are present"
+    );
+}
+
+/// The M-2 leaves degrade INDEPENDENTLY and byte-identically: with `M2LeafServe::default()` (both
+/// off — the pre-M-2 constructor path) the decorator DELEGATES the six M-2 methods, and the result
+/// still equals the bare-SQLite orient (the RED/fallback path is unchanged).
+#[test]
+fn m2_leaves_off_delegates_byte_identically() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let now = "2026-01-01T00:00:00Z";
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
+        repo_graph_agent::orient(
+            &decorator,
+            test_fixture::REPO,
+            None,
+            repo_graph_agent::Budget::Small,
+            now,
+        )
+        .expect("decorator orient ok")
+    };
+    let plain = repo_graph_agent::orient(
+        &storage,
+        test_fixture::REPO,
+        None,
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("sqlite orient ok");
+    assert_eq!(
+        serde_json::to_value(&served).unwrap(),
+        serde_json::to_value(&plain).unwrap(),
+        "leaves-off decorator == bare SQLite (the pre-M-2 posture, byte-identical)"
+    );
+}
+
+/// A captured `RequestEpoch` carrying an EXPLICIT fingerprint — the sibling of [`green_epoch`] for
+/// the decoupling tests, where the epoch pin comes from the FULL serve witness (which mints a
+/// fingerprint on ANY green leaf), not the bounded-only eligibility.
+fn epoch_with(
+    state: &crate::state::RepoState,
+    fingerprint: Option<String>,
+) -> crate::livegraph_feed::RequestEpoch {
+    let storage = state.storage().expect("storage");
+    let snapshot =
+        repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+            .expect("get_latest_snapshot ok")
+            .expect("ready snapshot");
+    crate::livegraph_feed::RequestEpoch {
+        snapshot,
+        fingerprint,
+    }
+}
+
+/// review-0 #1 (the reviewer's REQUIRED scenario): an UNRELATED bounded sub-cert RED (seeded
+/// focus-resolution RED — the same isolation mechanism as the review-3 label guard) with EACH M-2
+/// cert GREEN. The witness must mint the fingerprint with `bounded == false` and BOTH M-2 leaves
+/// true, and the decorator must serve the M-2 leaves from the LiveGraph while the six (b)
+/// focus/callgraph methods DELEGATE to SQLite:
+///
+/// - **Phase A (M-2 leaves SERVE):** REPO-focus orient over the `M2Spy` (PANICS on the six M-2
+///   value methods) completes — the summary + cycle VALUES did not touch SQLite despite the RED
+///   fold — and equals the bare-SQLite orient byte-for-byte (the certs prove value equality).
+/// - **Phase B ((b) methods DELEGATE):** after DELETING the SQLite CALLS edge (stores now
+///   distinguishable: SQLite callers(calleeFn)=∅, LiveGraph=1; a SQLite-only mutation moves no
+///   fingerprint, so every cached cert survives), SYMBOL-focus orient through the same decorator
+///   emits **NO CALLERS_SUMMARY** (zero SQLite callers) — the callgraph read went to SQLite. A
+///   regression that served the (b) leaves on `bounded == false` would emit the signal with the
+///   LiveGraph caller (1) and fail.
+#[test]
+fn m2_leaves_serve_independently_when_unrelated_bounded_cert_red() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let now = "2026-01-01T00:00:00Z";
+
+    // The bare-SQLite baseline for phase A, read BEFORE the phase-B mutation.
+    let plain_repo = repo_graph_agent::orient(
+        &storage,
+        test_fixture::REPO,
+        None,
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("sqlite orient ok");
+
+    // Warm everything green once, then force the UNRELATED focus-resolution cert RED at the live
+    // fingerprint. The callgraph cert stays independently GREEN (cached).
+    let warm = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(warm.bounded && warm.m2.cycle_values && warm.m2.module_summary);
+    seed_focus_resolution_cert_red(&f.state, &f.snapshot_uid);
+    assert!(
+        crate::callgraph_cert::callgraph_cached_green(&f.state, &f.snapshot_uid),
+        "the callgraph half of the fold is independently GREEN — focus-resolution is the sole RED"
+    );
+
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(
+        w.fingerprint.is_some(),
+        "a GREEN M-2 leaf mints the serve witness despite the RED bounded fold"
+    );
+    assert!(!w.bounded, "the bounded fold is RED (focus-resolution)");
+    assert!(
+        w.m2.cycle_values && w.m2.module_summary,
+        "each M-2 cert is GREEN and INDEPENDENT of the unrelated RED cert (review-0 #1)"
+    );
+
+    // Phase A: M-2 leaves serve from the LiveGraph (spy would panic on any SQLite summary/cycle
+    // read), byte-identical to the bare-SQLite orient.
+    let epoch = epoch_with(&f.state, w.fingerprint.clone());
+    let spy = M2Spy(&storage);
+    let decorator =
+        OrientServeDecorator::with_leaf_serves(&f.state.livegraph, &spy, &epoch, w.bounded, w.m2);
+    let served_repo = repo_graph_agent::orient(
+        &decorator,
+        test_fixture::REPO,
+        None,
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("REPO orient over the M2Spy completes — no SQLite summary/cycle read on the RED fold");
+    assert_eq!(
+        serde_json::to_value(&served_repo).unwrap(),
+        serde_json::to_value(&plain_repo).unwrap(),
+        "the M-2-only serve is byte/value-identical to the SQLite serve"
+    );
+
+    // Phase B: the six (b) methods DELEGATE. Diverge the stores (SQLite loses its CALLS edge; the
+    // fingerprint — LiveGraph partitions + snapshot — is untouched, so the witness decisions and
+    // the EV-A pin survive), then observe WHICH store answered the callers read.
+    storage
+        .delete_edges_by_uids(&["ec0".to_string()])
+        .expect("delete the SQLite CALLS edge");
+    let callee = test_fixture::callee_key();
+    let decorator = OrientServeDecorator::with_leaf_serves(
+        &f.state.livegraph,
+        &storage,
+        &epoch,
+        w.bounded,
+        w.m2,
+    );
+    let symbol_result = repo_graph_agent::orient(
+        &decorator,
+        test_fixture::REPO,
+        Some(callee.as_str()),
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("SYMBOL orient ok");
+    assert!(
+        symbol_result
+            .signals
+            .iter()
+            .all(|s| s.code() != repo_graph_agent::SignalCode::CallersSummary),
+        "bounded == false ⇒ find_symbol_callers DELEGATED to the (divergent, emptied) SQLite — \
+         zero callers emit NO CALLERS_SUMMARY; the LiveGraph caller (1) leaking through the (b) \
+         leaf would have emitted the signal"
+    );
+}
+
+/// review-0 #3: orient FILE-focus GREEN parity + no-eager-read — the third summary shape
+/// (`compute_file_summary`) through the M-2-enabled decorator. Runs over the `M2Spy`, so the same
+/// execution PROVES the FILE summary was LiveGraph-served (a delegate would panic) AND
+/// byte-identical to the bare-SQLite orient.
+#[test]
+fn m2_parity_full_serve_equals_sqlite_file_focus() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let now = "2026-01-01T00:00:00Z";
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(w.bounded && w.m2.cycle_values && w.m2.module_summary);
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let spy = M2Spy(&storage);
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &spy,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        repo_graph_agent::orient(
+            &decorator,
+            test_fixture::REPO,
+            Some(test_fixture::CALLER_PATH),
+            repo_graph_agent::Budget::Small,
+            now,
+        )
+        .expect(
+            "FILE-focus orient over the M2Spy completes — compute_file_summary LiveGraph-served",
+        )
+    };
+    let plain = repo_graph_agent::orient(
+        &storage,
+        test_fixture::REPO,
+        Some(test_fixture::CALLER_PATH),
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("sqlite orient ok");
+    assert_eq!(
+        serde_json::to_value(&served).unwrap(),
+        serde_json::to_value(&plain).unwrap(),
+        "M-2 GREEN serve is byte/value-identical to the SQLite serve (FILE focus)"
+    );
+    // Not vacuous: the FILE focus emits the MODULE_SUMMARY signal (the compute_file_summary leaf).
+    assert!(
+        served
+            .signals
+            .iter()
+            .any(|s| s.code() == repo_graph_agent::SignalCode::ModuleSummary),
+        "FILE focus emits MODULE_SUMMARY (served from the LiveGraph inventory)"
     );
 }

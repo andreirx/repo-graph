@@ -382,7 +382,7 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         if !cycles.is_empty() {
             // TRUNCATION-AUDIT-1: rank the FULL cycle set (length DESC, then ring members)
             // BEFORE the cut so the surviving top-N are the biggest cycles, deterministically.
-            ordering::sort_cycles(&mut cycles);
+            ordering::canonicalize_cycles(&mut cycles);
             let count = cycles.len() as u64;
             let mut items: Vec<CycleEvidence> = cycles
                 .into_iter()
@@ -700,7 +700,7 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
         storage.find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)?;
     if !cycles.is_empty() {
         // TRUNCATION-AUDIT-1: length DESC, then ring members — biggest cycles survive the cut.
-        ordering::sort_cycles(&mut cycles);
+        ordering::canonicalize_cycles(&mut cycles);
         let count = cycles.len() as u64;
         let mut items: Vec<CycleEvidence> = cycles
             .into_iter()

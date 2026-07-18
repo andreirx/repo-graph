@@ -1625,6 +1625,71 @@ impl LiveGraph {
         capture_envelope(data, missing, worst, languages)
     }
 
+    /// EC-M2-LEAF-SERVE-1: the per-file STRUCTURAL inventory of the resident IR — the LiveGraph half
+    /// of the MODULE_SUMMARY identity-reconciliation cert AND the value source for the decorator's
+    /// `compute_{repo,path,file}_summary` serve on GREEN.
+    ///
+    /// Semantics deliberately mirror the SQLite `compute_*_summary` universe as far as the IR can
+    /// see it (the cert judges the rest):
+    /// - one row per DISTINCT `AstFileScope` repo-relative path — INCLUDING repo-root files (no
+    ///   dirname exclusion; the `module_stats` root exclusion was one of the DR-CLS-2-REVISED
+    ///   divergences) — `has_file_node = true`;
+    /// - `ast_symbol_count` counts ALL `AstAdopted` symbols attributed to the path via
+    ///   `range.file` — every visibility (NOT the exported-only `module_stats` predicate; the
+    ///   second DR-CLS-2-REVISED divergence);
+    /// - an `AstAdopted` symbol whose `range.file` has NO FILE-scope node still produces a row
+    ///   (`has_file_node = false`) so the cert SEES the anomaly instead of silently absorbing it;
+    /// - `unattributed_symbols` counts `AstAdopted` symbols with NO `range` at all (they belong to
+    ///   the repo symbol TOTAL but to no per-file row — the honest remainder);
+    /// - `ScipSynthesizedFallback` nodes contribute NOTHING (no producer identity — unknown, not
+    ///   zero; any resulting divergence turns the cert RED, never a silently wrong count).
+    ///
+    /// Rows are path-ASCENDING (BTreeMap iteration) for a deterministic compare. The completeness
+    /// envelope is INHERITED from `whole_graph_completeness` exactly like `module_stats` (all
+    /// resident + Fresh + TS → `Exact`; a missing partition → `Partial`; else `Stale`).
+    pub fn structural_file_inventory(&self) -> AnswerEnvelope<StructuralInventoryAnswer> {
+        let mut rows: BTreeMap<String, StructuralFileRow> = BTreeMap::new();
+        let mut unattributed_symbols: u64 = 0;
+        for s in self.slots.values() {
+            let Some(ir) = &s.ir else { continue };
+            for n in &ir.nodes {
+                match n.identity_source {
+                    IdentitySource::AstFileScope => {
+                        if let Some(path) = file_key_path(n.key.as_str()) {
+                            rows.entry(path.to_string())
+                                .or_insert_with(|| StructuralFileRow {
+                                    path: path.to_string(),
+                                    has_file_node: true,
+                                    ast_symbol_count: 0,
+                                })
+                                .has_file_node = true;
+                        }
+                    }
+                    IdentitySource::AstAdopted => match &n.range {
+                        Some(range) => {
+                            rows.entry(range.file.clone())
+                                .or_insert_with(|| StructuralFileRow {
+                                    path: range.file.clone(),
+                                    has_file_node: false,
+                                    ast_symbol_count: 0,
+                                })
+                                .ast_symbol_count += 1;
+                        }
+                        None => unattributed_symbols += 1,
+                    },
+                    IdentitySource::ScipSynthesizedFallback => {}
+                }
+            }
+        }
+        let (missing, worst, languages, epochs) = self.whole_graph_completeness();
+        let data = StructuralInventoryAnswer {
+            files: rows.into_values().collect(),
+            unattributed_symbols,
+            contributing_epochs: epochs,
+        };
+        capture_envelope(data, missing, worst, languages)
+    }
+
     /// The resident MODULE paths (MODULE-CYCLES-COMPARE-CLASSIFY-1 D5): `module_path_of` each resident
     /// FILE-scope node key. These are the dirname module identities the LiveGraph actually has — the
     /// classifier uses them to tell a non-resident cycle module from an identity divergence.
@@ -2180,6 +2245,31 @@ pub struct ModuleStatsAnswer {
     pub modules: Vec<ModuleStatRow>,
     /// The scope — the captured FILE graph + module aggregation (shared with the module-cycle answer).
     pub scope: ModuleImportCycleScope,
+    /// Epoch per contributing partition (every slot, resident or not).
+    pub contributing_epochs: BTreeMap<String, u64>,
+}
+
+/// EC-M2-LEAF-SERVE-1: one file's structural row in [`LiveGraph::structural_file_inventory`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralFileRow {
+    /// Repo-relative file path (the FILE-scope key path / the symbol's `range.file`).
+    pub path: String,
+    /// True iff an `AstFileScope` FILE node exists for this path; false = symbols were attributed
+    /// to a path with NO FILE node (an anomaly the cert must SEE, never a tracked file).
+    pub has_file_node: bool,
+    /// Count of ALL `AstAdopted` symbols attributed to this path (every visibility).
+    pub ast_symbol_count: u64,
+}
+
+/// Answer for [`LiveGraph::structural_file_inventory`]: path-ascending per-file rows + the honest
+/// unattributed-symbol remainder + epochs. Like the sibling answers it makes NO claim beyond the
+/// resident IR; the envelope carries residency/freshness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralInventoryAnswer {
+    /// Per-file structural rows, path-ASCENDING.
+    pub files: Vec<StructuralFileRow>,
+    /// `AstAdopted` symbols with no `range` — countable in the repo TOTAL, attributable to no file.
+    pub unattributed_symbols: u64,
     /// Epoch per contributing partition (every slot, resident or not).
     pub contributing_epochs: BTreeMap<String, u64>,
 }

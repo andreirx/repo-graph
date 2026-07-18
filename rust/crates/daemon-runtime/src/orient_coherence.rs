@@ -50,6 +50,13 @@ pub(crate) fn build_orient_envelope(
     repo_uid: &str,
     result: OrientResult,
     serve_from_lg: bool,
+    // EC-M2-LEAF-SERVE-1: true iff the decorator ACTUALLY served the MODULE_SUMMARY structural
+    // counts from the LiveGraph this request (module-summary cert GREEN at the captured witness
+    // fingerprint — review-0 #1: INDEPENDENT of `serve_from_lg`/the bounded fold — ∧ the epoch
+    // still resident post-use-case). The leaf label follows the actual serve — on `false` the
+    // decision is ABSENT and the leaf renders exactly as before M-2 (the plain sqlite leaf; RED
+    // path byte-identical).
+    module_summary_served: bool,
 ) -> CoherenceEnvelope<CoherentOrientResult> {
     let snapshot_uid = result.snapshot.clone();
 
@@ -80,17 +87,30 @@ pub(crate) fn build_orient_envelope(
     let mut present_complexity = false;
     let mut present_callers = false;
     let mut present_callees = false;
+    let mut present_module_summary = false;
     for s in &result.signals {
         match s.code() {
             SignalCode::ImportCycles => present_cycles = true,
             SignalCode::HighComplexity => present_complexity = true,
             SignalCode::CallersSummary => present_callers = true,
             SignalCode::CalleesSummary => present_callees = true,
+            SignalCode::ModuleSummary => present_module_summary = true,
             _ => {}
         }
     }
 
     let mut decisions = OrientLgDecisions::default();
+
+    // EC-M2-LEAF-SERVE-1: the MODULE_SUMMARY leaf decision EXISTS only when the decorator actually
+    // served the structural counts from the LiveGraph this request (provenance follows the ACTUAL
+    // serve, the review-3 discipline). When absent, `to_coherent` keeps the pre-M-2 fixed sqlite
+    // leaf — byte-identical on every non-served path, including bounded-GREEN with a RED
+    // module-summary cert (an attempted-but-declined serve is still the proven SQLite primary).
+    if present_module_summary && module_summary_served {
+        decisions.module_summary = Some(map_outcome(
+            crate::module_summary_cert::module_summary_served_outcome(),
+        ));
+    }
 
     if present_cycles {
         decisions.import_cycles = Some(map_outcome(orient_cycles_outcome(

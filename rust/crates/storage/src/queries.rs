@@ -421,6 +421,17 @@ pub struct CycleNode {
     pub file: Option<String>,
 }
 
+/// EC-M2-LEAF-SERVE-1: one tracked file's structural row for the MODULE_SUMMARY
+/// identity-reconciliation cert build — the snapshot's `(path, stored language, SYMBOL count)`.
+/// `language` is the SCAN-time `files.language` (NULL for tracked non-code files — config/contract);
+/// `symbol_count` is the `kind='SYMBOL'` `nodes` count joined by `file_uid` (0 for symbol-less files).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStructuralRow {
+    pub path: String,
+    pub language: Option<String>,
+    pub symbol_count: u64,
+}
+
 /// STATS-LIVEGRAPH-IMPL-1: the SHARED Martin-metric derivation `(instability, abstractness,
 /// distance_from_main_sequence)` from the raw degree + symbol-classification counts, 2-dp rounded
 /// (mirrors TS `Math.round(x * 100) / 100`).
@@ -1301,6 +1312,45 @@ impl StorageConnection {
             })?
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
         Ok(map)
+    }
+
+    /// EC-M2-LEAF-SERVE-1: the per-file STRUCTURAL rows of one snapshot — `(path, stored language,
+    /// SYMBOL-node count)` — the SQLite half of the MODULE_SUMMARY identity-reconciliation cert
+    /// BUILD (read ONCE per fingerprint, the drilldown invariant; never on the serve path).
+    ///
+    /// Semantics mirror the served `compute_{repo,path,file}_summary` reads exactly:
+    /// one row per `file_versions` entry of the snapshot (the tracked-file universe — source AND
+    /// config/contract files, language NULL for non-code); `symbol_count` counts `nodes` rows with
+    /// `kind='SYMBOL'` joined by `file_uid` (the same join the path/file summaries use — a SYMBOL
+    /// row with a NULL/orphan `file_uid` counts in NO per-file row, exactly as it counts in no
+    /// path/file summary; the repo-total reconciliation against `compute_repo_summary` is the
+    /// cert's separate totals compare). Ordered path-ASC (deterministic compare).
+    pub fn file_structural_rows(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<FileStructuralRow>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT f.path, f.language, COUNT(n.node_uid)
+             FROM file_versions fv
+             JOIN files f ON f.file_uid = fv.file_uid
+             LEFT JOIN nodes n
+               ON n.file_uid = fv.file_uid
+              AND n.snapshot_uid = fv.snapshot_uid
+              AND n.kind = 'SYMBOL'
+             WHERE fv.snapshot_uid = ?
+             GROUP BY fv.file_uid, f.path, f.language
+             ORDER BY f.path ASC",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![snapshot_uid], |row| {
+                Ok(FileStructuralRow {
+                    path: row.get(0)?,
+                    language: row.get(1)?,
+                    symbol_count: row.get::<_, i64>(2)?.max(0) as u64,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// CYCLES-COMPLETENESS-AUDIT-1 (D3-A): the DISTINCT non-null `files.language` values for a repo -- the

@@ -18,12 +18,17 @@
 //!   `nodes` methods (+ the two callgraph methods) on the INNER SQLite port. explain SYMBOL through the
 //!   decorator-over-spy completes WITHOUT panicking -> explain SYMBOL is `nodes`-FREE on green. The (c)
 //!   trust read + cycles + gate/Authority reads ARE allowed (delegated to the real storage).
-//! - **HONEST BOUND (FILE / PATH)**: a RECORDING spy proves explain FILE still reads `compute_file_summary` /
-//!   `list_symbols_in_file` and explain PATH still reads `compute_path_summary` / `list_files_in_path` ON
-//!   GREEN — this slice did NOT silently claim FILE/PATH `nodes`-free (mirrors the packet HONEST-BOUND GUARD).
-//! - **RED FALLBACK**: on a RED bounded cert (callgraph diverges) the daemon declines the decorator and runs
+//! - **HONEST BOUND (FILE / PATH)**: a RECORDING spy proves the M-2-LEAVES-OFF decorator (`new()` — the
+//!   pre-M-2 posture) still reads `compute_file_summary` / `list_symbols_in_file` (FILE) and
+//!   `compute_path_summary` / `list_files_in_path` (PATH) — nothing silently claimed `nodes`-free there.
+//!   EC-M2 NARROWED the green bound: through `with_leaf_serves` the summaries + cycle finders serve from
+//!   the LiveGraph (`m2_no_eager_read_explain_file_and_path_serve_from_livegraph`), and ONLY the per-item
+//!   LISTINGS remain SQLite (the DR-E3 listing half — still asserted).
+//! - **RED FALLBACK**: on a RED bounded cert (callgraph diverges) the daemon runs the six (b) methods over
 //!   bare SQLite; the answer is the bare SQLite answer (no LiveGraph leak) and the callgraph leaf is
 //!   SQLite-LABELLED.
+//! - **EC-M2 (review-0 #3)**: FILE/PATH parity through the M-2-enabled decorator (`m2_parity_explain_*`),
+//!   a NON-EMPTY served explain cycle, and the FILE/PATH no-eager-read proof.
 
 use std::sync::atomic::Ordering;
 
@@ -142,8 +147,8 @@ fn parity_explain_symbol_high_fanin_ranked_equals_sqlite() {
     // (c) The assembled `CoherenceEnvelope` (what the daemon serializes for `rmap explain`) is also
     // byte/value-identical — the ranked item order flows through `serve_callers` unchanged (it swaps live
     // names per key but preserves the agent's row order).
-    let env_served = build_explain_envelope(&f.state, fanin_fixture::REPO, served, false);
-    let env_plain = build_explain_envelope(&f.state, fanin_fixture::REPO, plain, false);
+    let env_served = build_explain_envelope(&f.state, fanin_fixture::REPO, served, false, false);
+    let env_plain = build_explain_envelope(&f.state, fanin_fixture::REPO, plain, false, false);
     assert_eq!(
         serde_json::to_value(&env_served).unwrap(),
         serde_json::to_value(&env_plain).unwrap(),
@@ -203,19 +208,22 @@ fn honest_bound_explain_file_still_reads_nodes_on_green() {
     {
         let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
         let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
-        // FILE focus: focus resolution is served (no `nodes` read for resolution), but `explain_file`
-        // reads `compute_file_summary` + `list_symbols_in_file` (the identity/symbols leaves) — `nodes`
-        // reads, DELEGATED to SQLite. They are NOT decorator-served (the honest bound).
+        // FILE focus through the M-2-LEAVES-OFF decorator (`new()` — the pre-M-2 posture): focus
+        // resolution is served, but `explain_file` reads `compute_file_summary` +
+        // `list_symbols_in_file` — `nodes` reads, DELEGATED to SQLite. EC-M2 serves the summary
+        // ONLY through `with_leaf_serves` on a GREEN module-summary cert (proven in
+        // `m2_no_eager_read_explain_file_and_path_serve_from_livegraph`); the leaves-off path
+        // must keep delegating byte-identically.
         let _ = run_explain(&decorator, test_fixture::REPO, test_fixture::CALLER_PATH);
         // "src/a.ts"
     }
     assert!(
         spy.read_compute_file_summary.load(Ordering::Relaxed),
-        "explain FILE STILL reads compute_file_summary (`nodes`) on green — NOT `nodes`-free (honest bound)"
+        "explain FILE reads compute_file_summary (`nodes`) on the M-2-leaves-off decorator (honest bound)"
     );
     assert!(
         spy.read_list_symbols_in_file.load(Ordering::Relaxed),
-        "explain FILE STILL reads list_symbols_in_file (`nodes`) on green (honest bound)"
+        "explain FILE STILL reads list_symbols_in_file (`nodes`) on green (honest bound — ALL paths)"
     );
 }
 
@@ -230,18 +238,20 @@ fn honest_bound_explain_path_still_reads_nodes_on_green() {
     {
         let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
         let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
-        // PATH focus: focus resolution served, but `explain_path` reads `compute_path_summary` +
-        // `list_files_in_path` (the identity/files leaves) — `nodes` reads, DELEGATED to SQLite.
+        // PATH focus through the M-2-LEAVES-OFF decorator (`new()` — the pre-M-2 posture):
+        // `explain_path` reads `compute_path_summary` + `list_files_in_path` — DELEGATED to
+        // SQLite. The M-2 serve happens only through `with_leaf_serves` (see
+        // `m2_no_eager_read_explain_file_and_path_serve_from_livegraph`).
         let _ = run_explain(&decorator, test_fixture::REPO, test_fixture::MODULE_DIR);
         // "src"
     }
     assert!(
         spy.read_compute_path_summary.load(Ordering::Relaxed),
-        "explain PATH STILL reads compute_path_summary (`nodes`) on green — NOT `nodes`-free (honest bound)"
+        "explain PATH reads compute_path_summary (`nodes`) on the M-2-leaves-off decorator (honest bound)"
     );
     assert!(
         spy.read_list_files_in_path.load(Ordering::Relaxed),
-        "explain PATH STILL reads list_files_in_path (`nodes`) on green (honest bound)"
+        "explain PATH STILL reads list_files_in_path (`nodes`) on green (honest bound — ALL paths)"
     );
 }
 
@@ -287,7 +297,7 @@ fn red_bounded_cert_falls_back_to_bare_sqlite() {
     );
 
     // The assembled envelope labels the callgraph leaf SQLite (the RED-path honest provenance).
-    let env = build_explain_envelope(&f.state, test_fixture::REPO, result, false);
+    let env = build_explain_envelope(&f.state, test_fixture::REPO, result, false, false);
     let leaf = env
         .value
         .signals
@@ -382,11 +392,15 @@ fn explain_ev_a_falls_back_to_pinned_sqlite_after_swap() {
     );
 }
 
-/// (c) RED bounded cert: explain STILL pins, and the always-wrap change is transparent. `handle_explain`
-/// wraps the decorator even on RED (eligibility `None`), so the `epoch_resident` short-circuit makes the
-/// (b) leaves delegate to SQLite at the pinned uid while `get_latest_snapshot` returns the pinned snapshot.
-/// The decorator-served RED answer is therefore byte/value-identical to bare-SQLite explain — the pin adds
-/// coherence without changing the RED output.
+/// (c) ALL-OFF witness: explain STILL pins, and the always-wrap change is transparent. `handle_explain`
+/// wraps the decorator even when NO leaf serves (fingerprint `None` — e.g. no resident LiveGraph, or
+/// every leaf cert RED), so the `epoch_resident` short-circuit makes every leaf delegate to SQLite at
+/// the pinned uid while `get_latest_snapshot` returns the pinned snapshot. The decorator-served answer
+/// is therefore byte/value-identical to bare-SQLite explain — the pin adds coherence without changing
+/// the output. (Constructed here via the BOUNDED-only eligibility, which is `None` on this fixture;
+/// under EC-M2 review-0 #1 the REAL dispatch witness on this fixture would mint a fingerprint from the
+/// still-GREEN module-summary leaf and serve THAT leaf — the all-off shape this test pins remains real
+/// for the no-LiveGraph / all-RED states.)
 #[test]
 fn explain_red_epoch_pins_and_is_transparent() {
     // drop_calls = true: the SQLite mirror omits the CALLS edge -> callgraph diverges -> bounded cert RED.
@@ -394,11 +408,11 @@ fn explain_red_epoch_pins_and_is_transparent() {
     let storage = f.state.storage().unwrap();
     assert!(!orient_bounded_cert_is_green(&f.state, &f.snapshot_uid));
 
-    // The captured epoch carries NO eligibility witness on RED (`fingerprint == None`).
+    // The BOUNDED eligibility carries no witness on a RED fold (`fingerprint == None`) — the all-off epoch.
     let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
     assert!(
         epoch.fingerprint.is_none(),
-        "RED bounded cert -> no eligibility witness (fingerprint None)"
+        "RED bounded cert -> no BOUNDED eligibility witness (fingerprint None)"
     );
 
     let callee = test_fixture::callee_key();
@@ -416,5 +430,154 @@ fn explain_red_epoch_pins_and_is_transparent() {
     assert_eq!(
         via_decorator.snapshot, f.snapshot_uid,
         "RED path still stamps the pinned snapshot (get_latest_snapshot returns epoch.snapshot)"
+    );
+}
+
+// ── EC-M2-LEAF-SERVE-1 (review-0 #3): explain FILE/PATH parity + no-eager-read through the
+//    M-2-enabled decorator — the missing GREEN-path coverage for the newly served methods
+//    (`compute_{file,path}_summary`, `find_cycles_involving_path`). Sibling of the orient proofs in
+//    `orient_serve::tests` (`m2_parity_*`), through `run_explain` — the changed explain surface. ──
+
+/// The EXACT `handle_explain` capture sequence: resolve the READY snapshot, capture the FULL serve
+/// witness, pin the epoch at the witness fingerprint. Returns both so tests can assert the witness
+/// decisions and construct the decorator dispatch would.
+fn witness_epoch(
+    state: &crate::state::RepoState,
+    repo: &str,
+) -> (
+    crate::livegraph_feed::RequestEpoch,
+    crate::orient_serve::OrientServeWitness,
+) {
+    let storage = state.storage().expect("storage");
+    let snapshot = repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, repo)
+        .expect("get_latest_snapshot ok")
+        .expect("ready snapshot");
+    let w = crate::orient_serve::orient_serve_witness(state, &snapshot.snapshot_uid);
+    (
+        crate::livegraph_feed::RequestEpoch {
+            snapshot,
+            fingerprint: w.fingerprint.clone(),
+        },
+        w,
+    )
+}
+
+/// explain FILE-focus parity: `run_explain("src/a.ts")` through the M-2-enabled decorator (the
+/// FILE identity counts served from the LiveGraph inventory) is byte/value-identical to bare
+/// SQLite. Non-vacuous: the FILE identity leaf is present.
+#[test]
+fn m2_parity_explain_file_focus_equals_sqlite() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let (epoch, w) = witness_epoch(&f.state, test_fixture::REPO);
+    assert!(w.bounded && w.m2.module_summary && w.m2.cycle_values);
+
+    let served = {
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        run_explain(&decorator, test_fixture::REPO, test_fixture::CALLER_PATH)
+    };
+    let plain = run_explain(&storage, test_fixture::REPO, test_fixture::CALLER_PATH);
+    assert_eq!(
+        serde_json::to_value(&served).unwrap(),
+        serde_json::to_value(&plain).unwrap(),
+        "M-2 GREEN explain FILE focus is byte/value-identical decorator-vs-SQLite"
+    );
+    assert!(
+        served
+            .signals
+            .iter()
+            .any(|s| s.code() == SignalCode::ExplainIdentity),
+        "FILE focus emits EXPLAIN_IDENTITY (its counts are the compute_file_summary leaf)"
+    );
+}
+
+/// explain PATH-focus parity with a NON-EMPTY cycle: `run_explain("src")` through the M-2-enabled
+/// decorator serves `compute_path_summary` + `find_cycles_involving_path` from the LiveGraph,
+/// byte/value-identical to bare SQLite — and the answer carries the REAL `src` ↔ `lib` cycle
+/// (canonical qualified members), so the cycle-VALUES serve is exercised non-vacuously.
+#[test]
+fn m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let (epoch, w) = witness_epoch(&f.state, test_fixture::REPO);
+    assert!(w.bounded && w.m2.module_summary && w.m2.cycle_values);
+
+    let served = {
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        run_explain(&decorator, test_fixture::REPO, test_fixture::MODULE_DIR)
+    };
+    let plain = run_explain(&storage, test_fixture::REPO, test_fixture::MODULE_DIR);
+    assert_eq!(
+        serde_json::to_value(&served).unwrap(),
+        serde_json::to_value(&plain).unwrap(),
+        "M-2 GREEN explain PATH focus is byte/value-identical decorator-vs-SQLite"
+    );
+    let cycles = served
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainCycles)
+        .expect("EXPLAIN_CYCLES present (the src <-> lib cycle)");
+    let v = serde_json::to_value(cycles).unwrap();
+    assert_eq!(
+        v["evidence"]["items"][0]["modules"],
+        serde_json::json!(["lib", "src"]),
+        "the served explain cycle is the canonicalized (member-sorted) QUALIFIED ring — non-empty"
+    );
+}
+
+/// The review-0 #3 explain NO-EAGER-READ proof: through the M-2-enabled decorator, explain FILE
+/// must NOT read `compute_file_summary` from SQLite and explain PATH must NOT read
+/// `compute_path_summary` / `find_cycles_involving_path` (all LiveGraph-served; the cancellable
+/// cycle variant funnels through the recorded non-cancellable default). The per-item LISTING reads
+/// (`list_symbols_in_file` / `list_files_in_path`) still delegate — the DR-E3 honest bound,
+/// asserted here so this slice's claim stays bounded.
+#[test]
+fn m2_no_eager_read_explain_file_and_path_serve_from_livegraph() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let (epoch, w) = witness_epoch(&f.state, test_fixture::REPO);
+    assert!(w.bounded && w.m2.module_summary && w.m2.cycle_values);
+
+    let spy = ServeSpy::recording(&storage);
+    {
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &spy,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        let _ = run_explain(&decorator, test_fixture::REPO, test_fixture::CALLER_PATH);
+        let _ = run_explain(&decorator, test_fixture::REPO, test_fixture::MODULE_DIR);
+    }
+    assert!(
+        !spy.read_compute_file_summary.load(Ordering::Relaxed),
+        "explain FILE served compute_file_summary from the LiveGraph — zero SQLite read (M-2)"
+    );
+    assert!(
+        !spy.read_compute_path_summary.load(Ordering::Relaxed),
+        "explain PATH served compute_path_summary from the LiveGraph — zero SQLite read (M-2)"
+    );
+    assert!(
+        !spy.read_find_cycles_involving_path.load(Ordering::Relaxed),
+        "explain PATH served find_cycles_involving_path from the LiveGraph SCC — zero SQLite read"
+    );
+    // The honest bound is UNCHANGED: the per-item listings still read SQLite on green.
+    assert!(
+        spy.read_list_symbols_in_file.load(Ordering::Relaxed)
+            && spy.read_list_files_in_path.load(Ordering::Relaxed),
+        "the FILE/PATH per-item LISTINGS still delegate to SQLite (the DR-E3 honest bound)"
     );
 }
