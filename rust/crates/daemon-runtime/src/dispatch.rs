@@ -2339,10 +2339,13 @@ impl ServiceDispatcher {
         };
 
         // Shortest path: CALLS + IMPORTS, max depth 8
-        // QUERY-AUTO-LAZY-SQLITE-1: the SQLite path read is LAZY -- the closure runs ONLY when LiveGraph cannot
-        // serve (or for --engine sqlite/compare). The LiveGraph-served default (incl. a no-path EXACT) SKIPS
-        // it. (PATH-LIVEGRAPH-DEFAULT-1 migrated path's Auto to LiveGraph-first; the prior "does NOT
-        // auto-migrate" comment was STALE.)
+        // Auto serves the PINNED SQLite snapshot -- the RATIFIED posture (D-EC-6-C,
+        // engine-consolidation-1 §8, re-affirming the W-B D-CC refinement; EC-1 M-4 fixed this
+        // comment, which stale-claimed a LiveGraph-first Auto). The authoritative arm is
+        // `path_engine_response` (livegraph_feed.rs): the SQLite closure below ALWAYS runs on
+        // Auto/`--engine sqlite`; it is lazy only for the explicit LiveGraph/compare arms. Under the
+        // ratified reconciliation frame (recon-design-1 D-R5) CALLS rows persist as the pipeline
+        // witness, so this posture has no scheduled flip; a change requires a D-EC-6 re-ratification.
         let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
             &request.params,
             "engine",
