@@ -352,6 +352,20 @@ pub enum Direction {
     Callees,
 }
 
+/// RECON-M-R2 (the §4.2 transient-2 record): a witness-ledger BUILD FAILURE, retained on
+/// `RepoState.witness_ledger_build_failure` so doctor CAN report "ledger absent + build-failure
+/// reason" (rendering is M-R3a's; this is the substance). The M-R1 build contract returns `None`
+/// ONLY on a SQLite error during the walk, so the reason is that CLASS — the per-site error detail
+/// is discarded by the walk's `.ok()?` sites and deliberately NOT threaded out here (the class
+/// fully determines today's failure taxonomy; finer detail is M-R3a's call if rendering needs it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedgerBuildFailure {
+    /// The fingerprint the failed build was keyed at (what the capture was trying to warm).
+    pub fingerprint: String,
+    /// The failure class (today always the SQLite-error-during-walk class).
+    pub reason: String,
+}
+
 /// The witness ledger for ONE `(snapshot_uid, livegraph_fingerprint)` witness pair. In-memory,
 /// non-durable, fingerprint-keyed (the cert lifecycle). See the module doc for the two layers.
 #[derive(Debug, Clone, PartialEq)]

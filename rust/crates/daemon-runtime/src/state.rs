@@ -256,6 +256,17 @@ pub struct RepoState {
     /// its consumers.
     pub witness_ledger: parking_lot::RwLock<Option<crate::callgraph_cert::ledger::WitnessLedger>>,
 
+    /// RECON-M-R2 (the §4.2 transient-2 retention): the LAST witness-ledger BUILD FAILURE, retained
+    /// so doctor CAN report "ledger absent + build-failure reason" (recon-design-1 §5.4 — the
+    /// RENDERING is M-R3a's, exactly like the M-R1 collision-rendering amendment; this field is the
+    /// SUBSTANCE). `Some` iff the most recent ledger build attempt returned `None` (M-R1 contract:
+    /// that happens ONLY on a SQLite error during the walk — the reason granularity is therefore
+    /// the class, not the underlying error string). Cleared by every successful ledger store. An
+    /// OPERATIONAL fact about US (our capture), never a per-edge or regime label — it changes NO
+    /// served bytes.
+    pub witness_ledger_build_failure:
+        parking_lot::RwLock<Option<crate::callgraph_cert::ledger::LedgerBuildFailure>>,
+
     /// EC-M2-LEAF-SERVE-1: the in-memory repo-level MODULE-SUMMARY structural-count NO-LOSS
     /// certificate — the DR-2/DR-E3 `module_stats`-pattern IDENTITY-RECONCILIATION cert (`None`
     /// until lazily built by `module_summary_cert::build_and_store_module_summary_cert`).
@@ -316,6 +327,7 @@ impl RepoState {
             focus_resolution_cert: parking_lot::RwLock::new(None),
             callgraph_cert: parking_lot::RwLock::new(None),
             witness_ledger: parking_lot::RwLock::new(None),
+            witness_ledger_build_failure: parking_lot::RwLock::new(None),
             module_summary_cert: parking_lot::RwLock::new(None),
         })
     }

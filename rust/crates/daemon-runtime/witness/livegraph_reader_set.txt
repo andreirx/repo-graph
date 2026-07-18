@@ -68,6 +68,7 @@ orient_lg_decisions/complexity_cert.rs    = orient
 orient_serve/mod.rs                       = orient, explain
 orient_serve/storage_port_impl.rs         = orient, explain
 trust_coherence.rs                        = trust
+union_serve/mod.rs                        = callers, callees
 
 [test-scaffolding]
 callgraph_cert/ledger_tests.rs
@@ -81,3 +82,4 @@ focus_resolution_cert/test_fixture.rs
 focus_resolution_cert/tests.rs
 orient_lg_decisions/served_e2e.rs
 orient_serve/tests.rs
+union_serve/tests.rs

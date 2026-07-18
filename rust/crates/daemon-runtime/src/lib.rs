@@ -91,6 +91,9 @@ pub mod retention_pass;
 pub mod snapshot_facts;
 pub mod state;
 pub mod trust_coherence;
+/// RECON-M-R2: flag-gated UNION serving for callers/callees in W-BOTH (recon-design-1 §5.2 /
+/// §6.1 M-R2). Flag off ⇒ never entered ⇒ byte-identical serving everywhere.
+pub mod union_serve;
 pub mod util;
 
 // COHERENCE-LEAF-SERVE-IMPL-2: explain's consumer of the SHARED `OrientServeDecorator` + bounded cert

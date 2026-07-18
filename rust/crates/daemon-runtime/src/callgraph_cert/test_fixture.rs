@@ -69,8 +69,14 @@ fn prov() -> Provenance {
 }
 
 fn partition() -> Partition {
+    partition_with_id("p")
+}
+
+/// RECON-M-R2: [`partition`] with an explicit id — the pipeline-only fixture loads TWO partitions
+/// (the `boundary` sub-class needs endpoints in DISTINCT compiler runs).
+fn partition_with_id(id: &str) -> Partition {
     Partition {
-        id: PartitionId::new("p"),
+        id: PartitionId::new(id),
         kind: PartitionKind::TsPackage,
         root: ".".into(),
         indexer: "scip-typescript".into(),
@@ -83,12 +89,16 @@ fn partition() -> Partition {
 }
 
 fn file_node(path: &str) -> IrNode {
+    file_node_in(path, "p")
+}
+
+fn file_node_in(path: &str, pid: &str) -> IrNode {
     IrNode {
         key: CanonicalKey::from_existing(file_key(path)),
         subtype: "File".into(),
         name: path.rsplit('/').next().unwrap_or(path).into(),
         range: None,
-        partition_id: PartitionId::new("p"),
+        partition_id: PartitionId::new(pid),
         identity_source: IdentitySource::AstFileScope,
         provenance: prov(),
         attributes: None,
@@ -96,6 +106,10 @@ fn file_node(path: &str) -> IrNode {
 }
 
 fn symbol_node(key: &str, name: &str, path: &str) -> IrNode {
+    symbol_node_in(key, name, path, "p")
+}
+
+fn symbol_node_in(key: &str, name: &str, path: &str, pid: &str) -> IrNode {
     IrNode {
         key: CanonicalKey::from_existing(key.to_string()),
         subtype: "Term".into(),
@@ -107,7 +121,7 @@ fn symbol_node(key: &str, name: &str, path: &str) -> IrNode {
             end_line: 1,
             end_col: 0,
         }),
-        partition_id: PartitionId::new("p"),
+        partition_id: PartitionId::new(pid),
         identity_source: IdentitySource::AstAdopted,
         provenance: prov(),
         attributes: Some(SymbolAttributes {
@@ -436,6 +450,457 @@ pub(crate) fn build_collision_fixture() -> Fixture {
     }
     let mut lg = LiveGraph::new();
     lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R2 keys for the PIPELINE-ONLY fixture (below).
+pub(crate) fn other_key() -> String {
+    format!("{REPO}:{CALLER_PATH}#otherFn:SYMBOL:FUNCTION")
+}
+pub(crate) const RUST_PATH: &str = "src/r.rs";
+pub(crate) fn rust_fn_key() -> String {
+    format!("{REPO}:{RUST_PATH}#rustFn:SYMBOL:FUNCTION")
+}
+pub(crate) fn rust_caller_key() -> String {
+    format!("{REPO}:{RUST_PATH}#rustCaller:SYMBOL:FUNCTION")
+}
+
+/// RECON-M-R2 (the M-R2 gate's ADDED pipeline-only fixture): P rows ABSENT from S — the committed
+/// fixture cannot produce this shape (spike §5.3: pipeline_only = 0); the amodx artifacts prove it
+/// live and INFORM the fixture's two dual-measured sub-class shapes (recon-design-1 §3.1/§3.0b):
+///
+/// - **boundary**: `callerFn` (partition `p1`) CALLS `calleeFn` (partition `p2`) — both endpoints
+///   known to S, partition sets DISJOINT (two compiler runs; amodx's dominant class, 11/13);
+/// - **uncorroborated ×2**: `callerFn` CALLS `otherFn` (SAME partition `p1`; S measured, holds no
+///   such call — amodx's misresolution-bearing class) AND `callerFn` CALLS `rustFn` (an endpoint
+///   ABSENT from S entirely — the M-R1 precedence rule's "no two-compiler-runs story" arm);
+/// - **unmeasured**: `rustCaller` CALLS `rustFn` — BOTH endpoints outside S (an uncovered-`.rs`
+///   pair; zap-engine's 98.2% lesson at fixture scale): coverage, never divergence (§3.6), and
+///   the R-1 mixed-repo scoping shape for serving (the answer falls back, byte-identical).
+///
+/// The S side holds NO call edges at all, so the ledger verdict is RED (divergent) — which also
+/// makes this the M-R2 DIVERGENT-CAPTURE fixture class (flag-ON captures, flag-OFF does not).
+pub(crate) fn build_pipeline_only_fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("repo.db");
+    let mut conn = StorageConnection::open(&db_path).expect("open storage");
+    conn.add_repo(&Repo {
+        repo_uid: REPO.into(),
+        name: REPO.into(),
+        root_path: ".".into(),
+        default_branch: None,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        metadata_json: None,
+    })
+    .expect("add repo");
+    let snap = conn
+        .create_snapshot(&CreateSnapshotInput {
+            repo_uid: REPO.into(),
+            kind: "full".into(),
+            basis_ref: None,
+            basis_commit: None,
+            parent_snapshot_uid: None,
+            label: None,
+            toolchain_json: None,
+        })
+        .expect("create snapshot");
+    let snapshot_uid = snap.snapshot_uid;
+
+    // files: the two covered TS files + the uncovered Rust file (language honest per row).
+    let tracked: Vec<TrackedFile> = [
+        (CALLER_PATH, "typescript"),
+        (CALLEE_PATH, "typescript"),
+        (RUST_PATH, "rust"),
+    ]
+    .iter()
+    .map(|(path, lang)| TrackedFile {
+        file_uid: file_uid(path),
+        repo_uid: REPO.into(),
+        path: (*path).into(),
+        language: Some((*lang).into()),
+        is_test: false,
+        is_generated: false,
+        is_excluded: false,
+    })
+    .collect();
+    conn.upsert_files(&tracked).expect("upsert files");
+
+    // SYMBOL nodes with real files + locations (P rows must serve VERBATIM with their definition
+    // locations beside the null-location S-minted rows — the §3.3a contrast).
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    for (uid, key, name, path) in [
+        ("ns0", caller_key(), "callerFn", CALLER_PATH),
+        ("ns1", callee_key(), "calleeFn", CALLEE_PATH),
+        ("ns2", other_key(), "otherFn", CALLER_PATH),
+        ("ns3", rust_fn_key(), "rustFn", RUST_PATH),
+        ("ns4", rust_caller_key(), "rustCaller", RUST_PATH),
+    ] {
+        let mut n = graph_node(uid, &key, "SYMBOL");
+        n.snapshot_uid = snapshot_uid.clone();
+        n.name = name.into();
+        n.qualified_name = Some(name.into());
+        n.subtype = Some("FUNCTION".into());
+        n.file_uid = Some(file_uid(path));
+        n.location = Some(SourceLocation {
+            line_start: 1,
+            col_start: 0,
+            line_end: 1,
+            col_end: 0,
+        });
+        nodes.push(n);
+    }
+    conn.insert_nodes(&nodes).expect("insert nodes");
+
+    // P CALLS: boundary + uncorroborated(same-partition) + uncorroborated(endpoint-absent) +
+    // unmeasured(uncovered pair). One `edges` row per instance (the un-DISTINCT pipeline shape).
+    let calls: Vec<GraphEdge> = [
+        ("ec0", "ns0", "ns1"), // callerFn -> calleeFn  (boundary)
+        ("ec1", "ns0", "ns2"), // callerFn -> otherFn   (uncorroborated, same partition)
+        ("ec2", "ns0", "ns3"), // callerFn -> rustFn    (uncorroborated, endpoint absent from S)
+        ("ec3", "ns4", "ns3"), // rustCaller -> rustFn  (unmeasured — both endpoints outside S)
+    ]
+    .iter()
+    .map(|(uid, src, dst)| GraphEdge {
+        edge_uid: (*uid).into(),
+        snapshot_uid: snapshot_uid.clone(),
+        repo_uid: REPO.into(),
+        source_node_uid: (*src).into(),
+        target_node_uid: (*dst).into(),
+        edge_type: "CALLS".into(),
+        resolution: "resolved".into(),
+        extractor: "test".into(),
+        location: None,
+        metadata_json: None,
+    })
+    .collect();
+    conn.insert_edges(&calls).expect("insert edges");
+
+    conn.update_snapshot_status(&UpdateSnapshotStatusInput {
+        snapshot_uid: snapshot_uid.clone(),
+        status: "ready".into(),
+        completed_at: None,
+    })
+    .expect("ready snapshot");
+
+    // S side: TWO partitions, NO call edges. p1 holds callerFn + otherFn; p2 holds calleeFn.
+    // rustFn / rustCaller are absent from S entirely (the uncovered language).
+    let mut ir1 = PartitionIr::new(partition_with_id("p1"));
+    ir1.nodes.push(file_node_in(CALLER_PATH, "p1"));
+    ir1.nodes
+        .push(symbol_node_in(&caller_key(), "callerFn", CALLER_PATH, "p1"));
+    ir1.nodes
+        .push(symbol_node_in(&other_key(), "otherFn", CALLER_PATH, "p1"));
+    let mut ir2 = PartitionIr::new(partition_with_id("p2"));
+    ir2.nodes.push(file_node_in(CALLEE_PATH, "p2"));
+    ir2.nodes
+        .push(symbol_node_in(&callee_key(), "calleeFn", CALLEE_PATH, "p2"));
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p1", ir1, LanguageSupport::TypeScriptPrimary);
+    lg.load_partition("p2", ir2, LanguageSupport::TypeScriptPrimary);
+
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R2 iteration 2: the third symbol of the per-symbol-unanswerability fixture (below).
+pub(crate) fn clean_fn_key() -> String {
+    format!("{REPO}:{CALLER_PATH}#cleanFn:SYMBOL:FUNCTION")
+}
+
+/// RECON-M-R2 iteration 2 (the review-1 §3.6 serving fix's fixture): an anchor in a
+/// Fresh/resident ELIGIBLE TS partition whose OWN callers/callees projection is `Partial` —
+/// per-symbol unanswerability INSIDE W-BOTH — with one pair measured from the OTHER endpoint's
+/// projection and one pair neither projection measured:
+///
+/// - S partition `p` holds `callerFn` (AstAdopted), `calleeFn` (**`ScipSynthesizedFallback`
+///   whose key byte-equals P's — the collision-guard shape**), `cleanFn` (AstAdopted, NO
+///   outgoing S edges), and ONE S `Calls` edge `callerFn -> calleeFn` (WITHHELD by the guard).
+/// - P holds `callerFn -> calleeFn` AND `cleanFn -> calleeFn`.
+///
+/// Ledger mechanics at the shared fingerprint: every projection touching the fallback-identity
+/// `calleeFn` degrades to `Partial` (`ScipFallbackIdentity` — unanswerable, `lg_caller_rows`/
+/// `lg_callee_rows` are Exact-only), so `(callerFn, calleeFn)` is measured by NEITHER projection
+/// → `dual_measured: false` → its served row is UNMEASURED (no witness field). `cleanFn`'s
+/// callees-projection is `Exact` (measured-empty: no S edges, touches no degraded node), so
+/// `(cleanFn, calleeFn)` IS dual-measured with `s_calls == 0` → `syntactic`/uncorroborated.
+/// `callers(calleeFn)` therefore serves a MIXED union answer {syntactic: 1, unmeasured: 1} whose
+/// own projection is `Partial`; `callees(callerFn)` serves {unmeasured: 1} — both directions of
+/// the review-1 required test. The withheld S instance can never serve: the ledger's
+/// collision-excluded `s_calls` is the assembly's ONLY S source (the structural barrier — now the
+/// SOLE barrier, since a per-symbol `Partial` no longer falls back).
+pub(crate) fn build_partial_unanswerable_fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("repo.db");
+    let mut conn = StorageConnection::open(&db_path).expect("open storage");
+    conn.add_repo(&Repo {
+        repo_uid: REPO.into(),
+        name: REPO.into(),
+        root_path: ".".into(),
+        default_branch: None,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        metadata_json: None,
+    })
+    .expect("add repo");
+    let snap = conn
+        .create_snapshot(&CreateSnapshotInput {
+            repo_uid: REPO.into(),
+            kind: "full".into(),
+            basis_ref: None,
+            basis_commit: None,
+            parent_snapshot_uid: None,
+            label: None,
+            toolchain_json: None,
+        })
+        .expect("create snapshot");
+    let snapshot_uid = snap.snapshot_uid;
+
+    let tracked: Vec<TrackedFile> = [CALLER_PATH, CALLEE_PATH]
+        .iter()
+        .map(|path| TrackedFile {
+            file_uid: file_uid(path),
+            repo_uid: REPO.into(),
+            path: (*path).into(),
+            language: Some("typescript".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        })
+        .collect();
+    conn.upsert_files(&tracked).expect("upsert files");
+
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    for (uid, key, name, path) in [
+        ("ns0", caller_key(), "callerFn", CALLER_PATH),
+        ("ns1", callee_key(), "calleeFn", CALLEE_PATH),
+        ("ns2", clean_fn_key(), "cleanFn", CALLER_PATH),
+    ] {
+        let mut n = graph_node(uid, &key, "SYMBOL");
+        n.snapshot_uid = snapshot_uid.clone();
+        n.name = name.into();
+        n.qualified_name = Some(name.into());
+        n.subtype = Some("FUNCTION".into());
+        n.file_uid = Some(file_uid(path));
+        n.location = Some(SourceLocation {
+            line_start: 1,
+            col_start: 0,
+            line_end: 1,
+            col_end: 0,
+        });
+        nodes.push(n);
+    }
+    conn.insert_nodes(&nodes).expect("insert nodes");
+
+    let calls: Vec<GraphEdge> = [
+        ("ec0", "ns0", "ns1"), // callerFn -> calleeFn (pair neither projection measures)
+        ("ec1", "ns2", "ns1"), // cleanFn  -> calleeFn (pair measured from cleanFn's side)
+    ]
+    .iter()
+    .map(|(uid, src, dst)| GraphEdge {
+        edge_uid: (*uid).into(),
+        snapshot_uid: snapshot_uid.clone(),
+        repo_uid: REPO.into(),
+        source_node_uid: (*src).into(),
+        target_node_uid: (*dst).into(),
+        edge_type: "CALLS".into(),
+        resolution: "resolved".into(),
+        extractor: "test".into(),
+        location: None,
+        metadata_json: None,
+    })
+    .collect();
+    conn.insert_edges(&calls).expect("insert edges");
+
+    conn.update_snapshot_status(&UpdateSnapshotStatusInput {
+        snapshot_uid: snapshot_uid.clone(),
+        status: "ready".into(),
+        completed_at: None,
+    })
+    .expect("ready snapshot");
+
+    // S side: one Fresh TS partition; calleeFn is the colliding fallback identity; cleanFn has
+    // no outgoing edges (its callees-projection stays Exact — the measured side).
+    let mut ir = PartitionIr::new(partition());
+    ir.nodes.push(file_node(CALLER_PATH));
+    ir.nodes.push(file_node(CALLEE_PATH));
+    ir.nodes
+        .push(symbol_node(&caller_key(), "callerFn", CALLER_PATH));
+    ir.nodes
+        .push(symbol_node(&clean_fn_key(), "cleanFn", CALLER_PATH));
+    let mut callee = symbol_node(&callee_key(), "calleeFn", CALLEE_PATH);
+    callee.identity_source = IdentitySource::ScipSynthesizedFallback;
+    // Fallback nodes carry no producer AST attributes (unknown, not zero — the IR rule).
+    callee.attributes = None;
+    ir.nodes.push(callee);
+    ir.edges.push(IrEdge {
+        src: CanonicalKey::from_existing(caller_key()),
+        dst: CanonicalKey::from_existing(callee_key()),
+        edge_type: EdgeType::Calls,
+        basis: EdgeBasis::SyntaxConfirmedCall,
+        provenance: prov(),
+        import: None,
+    });
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
+
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R2 iteration 3: the ghost symbols of the Unavailable-in-W-BOTH fixture (below) —
+/// pipeline symbols in RESIDENT TS files that S's producer never emitted (absent from the xref).
+pub(crate) fn ghost_fn_key() -> String {
+    format!("{REPO}:{CALLEE_PATH}#ghostFn:SYMBOL:FUNCTION")
+}
+pub(crate) fn ghost_caller_key() -> String {
+    format!("{REPO}:{CALLER_PATH}#ghostCaller:SYMBOL:FUNCTION")
+}
+pub(crate) fn ghost_target_key() -> String {
+    format!("{REPO}:{CALLEE_PATH}#ghostTarget:SYMBOL:FUNCTION")
+}
+
+/// RECON-M-R2 iteration 3 (the review-2 fix's fixture): a P-only anchor in a Fresh, RESIDENT,
+/// TS file that is ABSENT from the S xref — per-symbol `Unavailable` INSIDE W-BOTH (§3.6's
+/// second unanswerable class; measured real at amodx scale: 128 `Unavailable` projections on a
+/// fully-covered TS corpus). The anchor's own envelope carries NO regime evidence
+/// (`FreshnessState::Unavailable`, empty languages), so serving eligibility comes from its
+/// FILE's partition state (`LiveGraph::file_partition_status`) — the review-2 discriminator.
+///
+/// Shape (per direction, one dual-measured + one unmeasured pair):
+/// - S partition `p` (Fresh, TS) holds FILE nodes for BOTH TS files plus `callerFn`/`calleeFn`
+///   (AstAdopted), and NO call edges. `ghostFn`/`ghostCaller`/`ghostTarget` exist ONLY in P.
+/// - P CALLS: `callerFn -> ghostFn` (measured from callerFn's Exact callees-projection →
+///   `syntactic`/uncorroborated), `ghostCaller -> ghostFn` (NEITHER projection measures →
+///   unmeasured), `ghostFn -> calleeFn` (measured from calleeFn's Exact callers-projection →
+///   `syntactic`), `ghostFn -> ghostTarget` (neither → unmeasured).
+///
+/// `callers(ghostFn)` and `callees(ghostFn)` therefore each serve a MIXED union answer
+/// {syntactic: 1, unmeasured: 1} on an anchor whose OWN class is `Unavailable` — the review-2
+/// required test's both-direction substrate. Distinct builder (abstraction ledger): users are
+/// the two direction assertions of the review-2 gate test; axis: `Unavailable`-class anchor
+/// inside an eligible partition (vs the sibling fixture's `Partial`-class anchor); simpler
+/// alternative rejected: extending `build_pipeline_only_fixture` — every ghost edge placement
+/// would shift that ratified fixture's amodx-informed gate assertions.
+pub(crate) fn build_unavailable_in_w_both_fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("repo.db");
+    let mut conn = StorageConnection::open(&db_path).expect("open storage");
+    conn.add_repo(&Repo {
+        repo_uid: REPO.into(),
+        name: REPO.into(),
+        root_path: ".".into(),
+        default_branch: None,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        metadata_json: None,
+    })
+    .expect("add repo");
+    let snap = conn
+        .create_snapshot(&CreateSnapshotInput {
+            repo_uid: REPO.into(),
+            kind: "full".into(),
+            basis_ref: None,
+            basis_commit: None,
+            parent_snapshot_uid: None,
+            label: None,
+            toolchain_json: None,
+        })
+        .expect("create snapshot");
+    let snapshot_uid = snap.snapshot_uid;
+
+    let tracked: Vec<TrackedFile> = [CALLER_PATH, CALLEE_PATH]
+        .iter()
+        .map(|path| TrackedFile {
+            file_uid: file_uid(path),
+            repo_uid: REPO.into(),
+            path: (*path).into(),
+            language: Some("typescript".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        })
+        .collect();
+    conn.upsert_files(&tracked).expect("upsert files");
+
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    for (uid, key, name, path) in [
+        ("ns0", caller_key(), "callerFn", CALLER_PATH),
+        ("ns1", callee_key(), "calleeFn", CALLEE_PATH),
+        ("ns2", ghost_fn_key(), "ghostFn", CALLEE_PATH),
+        ("ns3", ghost_caller_key(), "ghostCaller", CALLER_PATH),
+        ("ns4", ghost_target_key(), "ghostTarget", CALLEE_PATH),
+    ] {
+        let mut n = graph_node(uid, &key, "SYMBOL");
+        n.snapshot_uid = snapshot_uid.clone();
+        n.name = name.into();
+        n.qualified_name = Some(name.into());
+        n.subtype = Some("FUNCTION".into());
+        n.file_uid = Some(file_uid(path));
+        n.location = Some(SourceLocation {
+            line_start: 1,
+            col_start: 0,
+            line_end: 1,
+            col_end: 0,
+        });
+        nodes.push(n);
+    }
+    conn.insert_nodes(&nodes).expect("insert nodes");
+
+    let calls: Vec<GraphEdge> = [
+        ("ec0", "ns0", "ns2"), // callerFn   -> ghostFn     (dual-measured via callerFn's side)
+        ("ec1", "ns3", "ns2"), // ghostCaller -> ghostFn    (neither side measures — unmeasured)
+        ("ec2", "ns2", "ns1"), // ghostFn    -> calleeFn    (dual-measured via calleeFn's side)
+        ("ec3", "ns2", "ns4"), // ghostFn    -> ghostTarget (neither side measures — unmeasured)
+    ]
+    .iter()
+    .map(|(uid, src, dst)| GraphEdge {
+        edge_uid: (*uid).into(),
+        snapshot_uid: snapshot_uid.clone(),
+        repo_uid: REPO.into(),
+        source_node_uid: (*src).into(),
+        target_node_uid: (*dst).into(),
+        edge_type: "CALLS".into(),
+        resolution: "resolved".into(),
+        extractor: "test".into(),
+        location: None,
+        metadata_json: None,
+    })
+    .collect();
+    conn.insert_edges(&calls).expect("insert edges");
+
+    conn.update_snapshot_status(&UpdateSnapshotStatusInput {
+        snapshot_uid: snapshot_uid.clone(),
+        status: "ready".into(),
+        completed_at: None,
+    })
+    .expect("ready snapshot");
+
+    // S side: ONE Fresh TS partition holding both FILE nodes and the two S-known symbols only —
+    // the ghosts are structurally absent from S's world, while their FILES are inside it.
+    let mut ir = PartitionIr::new(partition());
+    ir.nodes.push(file_node(CALLER_PATH));
+    ir.nodes.push(file_node(CALLEE_PATH));
+    ir.nodes
+        .push(symbol_node(&caller_key(), "callerFn", CALLER_PATH));
+    ir.nodes
+        .push(symbol_node(&callee_key(), "calleeFn", CALLEE_PATH));
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
+
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
     *state.livegraph.write() = Some(lg);
     Fixture {
         _dir: dir,

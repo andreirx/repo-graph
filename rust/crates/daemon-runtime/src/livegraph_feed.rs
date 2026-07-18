@@ -477,6 +477,13 @@ fn livegraph_callees_auto(
     })
 }
 
+/// The LEGACY key→row builder (recon-design-1 §3.7-3/-4 defects: `edge_type: "CALLS"` hardcoded on
+/// a KIND-BLIND key set; `""`/`0` placeholders standing in for unknown locations). RECON-M-R2
+/// REPLACED it on the union path — `union_serve` builds rows with the kind-partitioned ledger
+/// projection and null-not-zero locations. It survives HERE for exactly the byte-frozen legacy
+/// paths: the flag-OFF GREEN-cert `Auto` serve and the explicit `--engine livegraph` 1B dev path,
+/// whose served bytes are parity-mandated until the recorded default flip (do NOT "fix" the
+/// placeholders here — that would change flag-off bytes).
 fn caller_results_from_keys(keys: &[String]) -> Vec<CallerResult> {
     keys.iter()
         .map(|k| CallerResult {
@@ -496,6 +503,8 @@ fn caller_results_from_keys(keys: &[String]) -> Vec<CallerResult> {
         .collect()
 }
 
+/// Legacy key→row builder, callees side — see [`caller_results_from_keys`] (the same §3.7-3/-4
+/// status: replaced on the union path, byte-frozen on the legacy paths).
 fn callee_results_from_keys(keys: &[String]) -> Vec<CalleeResult> {
     keys.iter()
         .map(|k| CalleeResult {
@@ -617,7 +626,9 @@ pub fn callers_engine_response(
 /// reason=Some`). The closure is STRUCTURALLY unreachable when `served` is `Some` -> the LiveGraph-served path
 /// never touches `nodes`/`edges`. Pure (no RepoState) -> a panicking-closure unit test proves the served path
 /// is lazy and the fallback path calls SQLite + propagates its error.
-fn callers_auto_or_sqlite(
+/// `pub(crate)`: RECON-M-R2 — `union_serve`'s fallback arms reuse THIS builder so a flag-ON
+/// non-W-BOTH answer is byte-identical to today's fallback (one builder, no drift).
+pub(crate) fn callers_auto_or_sqlite(
     target: &ResolvedSymbol,
     served: Option<Vec<String>>,
     fallback_reason: Option<FallbackReason>,
@@ -714,8 +725,8 @@ pub fn callees_engine_response(
 
 /// QUERY-AUTO-LAZY-SQLITE-1: callees analogue of [`callers_auto_or_sqlite`]. Serve LiveGraph keys (no SQLite
 /// read) when `served` is `Some`; else call `sqlite_fetch` LAZILY. The closure is structurally unreachable on
-/// the served path.
-fn callees_auto_or_sqlite(
+/// the served path. `pub(crate)`: RECON-M-R2 — reused by `union_serve`'s fallback arms (see the callers twin).
+pub(crate) fn callees_auto_or_sqlite(
     target: &ResolvedSymbol,
     served: Option<Vec<String>>,
     fallback_reason: Option<FallbackReason>,

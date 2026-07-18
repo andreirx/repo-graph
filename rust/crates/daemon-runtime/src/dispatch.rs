@@ -1152,6 +1152,18 @@ impl ServiceDispatcher {
             }
         };
 
+        // RECON-M-R2 (flag-gated, non-default): union serving rides the `Auto` engine arm ONLY.
+        // The engine parse moves ABOVE the epoch capture (pure param parsing, no side effects) so
+        // the capture function can be chosen per arm: flag-ON `Auto` captures the
+        // LEDGER-validity-gated `callgraph_union_eligibility` (verdict-independent — §4.2); every
+        // other combination keeps the GREEN-gated capture + serve byte-exact.
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let union_serving = crate::union_serve::union_serving_enabled()
+            && engine == crate::livegraph_feed::Engine::Auto;
+
         // W-B-EPOCH-IMPL-1: capture the request epoch ONCE (the pinned `AgentSnapshot` via the
         // `AgentStorageRead` trait + the BUILD-THEN-PEEK CALLGRAPH-cert LG-serve eligibility). The callers
         // handler already resolved the snapshot exactly once and threaded its uid to every SQLite read, so
@@ -1159,10 +1171,17 @@ impl ServiceDispatcher {
         let epoch =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snapshot)) => {
-                    let fingerprint = crate::callgraph_cert::callgraph_cert_eligibility(
-                        &repo_state,
-                        &snapshot.snapshot_uid,
-                    );
+                    let fingerprint = if union_serving {
+                        crate::callgraph_cert::callgraph_union_eligibility(
+                            &repo_state,
+                            &snapshot.snapshot_uid,
+                        )
+                    } else {
+                        crate::callgraph_cert::callgraph_cert_eligibility(
+                            &repo_state,
+                            &snapshot.snapshot_uid,
+                        )
+                    };
                     crate::livegraph_feed::RequestEpoch {
                         snapshot,
                         fingerprint,
@@ -1210,22 +1229,32 @@ impl ServiceDispatcher {
         // QUERY-AUTO-LAZY-SQLITE-1: the SQLite read is now LAZY -- a closure the engine_response calls ONLY
         // when LiveGraph cannot serve (or for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
         let edge_types = ["CALLS"];
-        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
-            &request.params,
-            "engine",
-        ));
         let repo_root = Self::get_optional_string_param(&request.params, "repo")
             .unwrap_or("")
             .to_string();
-        let value = crate::livegraph_feed::callers_engine_response(
-            engine,
-            &repo_state,
-            &epoch,
-            &target,
-            || storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge_types),
-            symbol,
-            &repo_root,
-        );
+        let value = if union_serving {
+            // RECON-M-R2: the flag-ON `Auto` arm — union rows in W-BOTH activation; today's exact
+            // fallback bytes everywhere else (the shared `callers_auto_or_sqlite` builder).
+            crate::union_serve::callers_union_response(&repo_state, &epoch, &target, || {
+                storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge_types)
+            })
+        } else {
+            crate::livegraph_feed::callers_engine_response(
+                engine,
+                &repo_state,
+                &epoch,
+                &target,
+                || {
+                    storage.find_direct_callers(
+                        epoch.snapshot_uid(),
+                        &target.stable_key,
+                        &edge_types,
+                    )
+                },
+                symbol,
+                &repo_root,
+            )
+        };
         match value {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(
@@ -1259,16 +1288,32 @@ impl ServiceDispatcher {
             }
         };
 
+        // RECON-M-R2 (flag-gated): engine parse above the capture; the flag-ON `Auto` arm captures
+        // the LEDGER-validity-gated eligibility and serves the union (see handle_callers).
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let union_serving = crate::union_serve::union_serving_enabled()
+            && engine == crate::livegraph_feed::Engine::Auto;
+
         // W-B-EPOCH-IMPL-1: capture the request epoch ONCE (pinned `AgentSnapshot` + the BUILD-THEN-PEEK
         // CALLGRAPH-cert eligibility). Like callers, callees already resolved once — the epoch adds the EV-A
         // serve gate (`epoch.fingerprint`).
         let epoch =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snapshot)) => {
-                    let fingerprint = crate::callgraph_cert::callgraph_cert_eligibility(
-                        &repo_state,
-                        &snapshot.snapshot_uid,
-                    );
+                    let fingerprint = if union_serving {
+                        crate::callgraph_cert::callgraph_union_eligibility(
+                            &repo_state,
+                            &snapshot.snapshot_uid,
+                        )
+                    } else {
+                        crate::callgraph_cert::callgraph_cert_eligibility(
+                            &repo_state,
+                            &snapshot.snapshot_uid,
+                        )
+                    };
                     crate::livegraph_feed::RequestEpoch {
                         snapshot,
                         fingerprint,
@@ -1316,22 +1361,30 @@ impl ServiceDispatcher {
         // QUERY-AUTO-LAZY-SQLITE-1: LAZY SQLite read -- the closure runs ONLY when LiveGraph cannot serve (or
         // for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
         let edge_types = ["CALLS"];
-        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
-            &request.params,
-            "engine",
-        ));
         let repo_root = Self::get_optional_string_param(&request.params, "repo")
             .unwrap_or("")
             .to_string();
-        let value = crate::livegraph_feed::callees_engine_response(
-            engine,
-            &repo_state,
-            &epoch,
-            &target,
-            || storage.find_direct_callees(epoch.snapshot_uid(), &target.stable_key, &edge_types),
-            symbol,
-            &repo_root,
-        );
+        let value = if union_serving {
+            crate::union_serve::callees_union_response(&repo_state, &epoch, &target, || {
+                storage.find_direct_callees(epoch.snapshot_uid(), &target.stable_key, &edge_types)
+            })
+        } else {
+            crate::livegraph_feed::callees_engine_response(
+                engine,
+                &repo_state,
+                &epoch,
+                &target,
+                || {
+                    storage.find_direct_callees(
+                        epoch.snapshot_uid(),
+                        &target.stable_key,
+                        &edge_types,
+                    )
+                },
+                symbol,
+                &repo_root,
+            )
+        };
         match value {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(

@@ -708,3 +708,66 @@ fn committed_fixture_reproduces_spike_7_0_2_9_and_records_all_references_kinds()
         "the fixture's real fallback-key population"
     );
 }
+
+// ── RECON-M-R2: the ADDED pipeline-only fixture (classification layer) ───────────────────────
+
+#[test]
+fn pipeline_only_fixture_classifies_boundary_uncorroborated_and_unmeasured() {
+    // The M-R2 gate's ADDED fixture — a P row absent from S (the committed fixture cannot
+    // produce the shape; the amodx artifacts inform it): one BOUNDARY pair (endpoints in two
+    // compiler runs, partition sets disjoint), two UNCORROBORATED pairs (same partition; and an
+    // endpoint absent from S entirely), and one UNMEASURED pair (both endpoints outside S — the
+    // coverage-not-divergence rule, §3.6).
+    let f = test_fixture::build_pipeline_only_fixture();
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+
+    assert_eq!(c.pipeline_calls, 4);
+    assert_eq!(c.both, 0, "S corroborates nothing (no S call edges)");
+    assert_eq!(c.semantic.total(), 0);
+    assert_eq!(c.syntactic.boundary, 1, "callerFn(p1) -> calleeFn(p2)");
+    assert_eq!(c.syntactic.file_scope, 0);
+    assert_eq!(
+        c.syntactic.uncorroborated, 2,
+        "same-partition (otherFn) + endpoint-absent-from-S (rustFn)"
+    );
+    assert_eq!(c.syntactic.multiplicity, 0);
+    assert_eq!(c.syntactic.identities, 3);
+    assert_eq!(
+        c.unmeasured_edges, 1,
+        "rustCaller -> rustFn: coverage, never divergence (§3.6)"
+    );
+    assert_eq!(c.unmeasured_identities, 1);
+    assert_eq!(c.dual_measured, 3);
+    assert_eq!(
+        c.union_calls, 4,
+        "closure: both 0 + syntactic 3 + semantic 0 + unmeasured 1"
+    );
+    assert_eq!(
+        c.agreement_pct(),
+        Some(0.0),
+        "0/3 dual-measured corroborate"
+    );
+    // Two eligible TS partitions (the boundary sub-class's substrate).
+    assert_eq!(c.eligible.len(), 2);
+    assert!(c.eligible.contains_key("p1") && c.eligible.contains_key("p2"));
+    // Pair records (the serving substrate) carry the sub-classes.
+    use super::ledger::PairSubclass;
+    let rec = |a: String, b: String| c.pairs.get(&(a, b)).expect("pair record").clone();
+    assert_eq!(
+        rec(test_fixture::caller_key(), test_fixture::callee_key()).syntactic_subclass,
+        Some(PairSubclass::Boundary)
+    );
+    assert_eq!(
+        rec(test_fixture::caller_key(), test_fixture::other_key()).syntactic_subclass,
+        Some(PairSubclass::Uncorroborated)
+    );
+    assert_eq!(
+        rec(test_fixture::caller_key(), test_fixture::rust_fn_key()).syntactic_subclass,
+        Some(PairSubclass::Uncorroborated)
+    );
+    assert!(
+        !rec(test_fixture::rust_caller_key(), test_fixture::rust_fn_key()).dual_measured,
+        "the uncovered pair is unmeasured — no witness class exists for it"
+    );
+}

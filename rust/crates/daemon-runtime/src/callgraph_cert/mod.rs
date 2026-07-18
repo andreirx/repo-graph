@@ -48,6 +48,14 @@
 //! licenses the byte-substitute serve, RED still forces the SQLite fallback, and the
 //! `callgraph_cert_eligibility` capture stays GREEN-gated byte-exact (the capture contract flips
 //! only at M-R2 — recon-design-1 §4.2/§5.1).
+//!
+//! **RECON-M-R2 (flag-gated).** [`callgraph_union_eligibility`] is the redefined capture for the
+//! callers/callees UNION path: LEDGER-validity-gated, verdict-independent (§4.2 activation) — it
+//! rides the `union_serve` flag and is called ONLY on the flag-ON `Auto` arm. The GREEN-gated
+//! capture above stays byte-exact for every other consumer (the default path + the bounded-orient
+//! cert's LG-as-byte-substitute serving keep their GREEN gate — §5.1 "untouched" list). A ledger
+//! build failure is retained on `RepoState::witness_ledger_build_failure` (transient 2; doctor's
+//! rendering lands with M-R3a).
 
 use repo_graph_agent::{AgentCalleeRow, AgentCallerRow};
 use repo_graph_livegraph::LiveGraph;
@@ -307,7 +315,20 @@ pub(crate) fn build_and_store_callgraph_cert(
     fingerprint: Option<String>,
 ) -> Option<bool> {
     let fingerprint = fingerprint?;
-    let built = build_witness_ledger_outcome(repo_state, snapshot_uid, &fingerprint)?;
+    let built = match build_witness_ledger_outcome(repo_state, snapshot_uid, &fingerprint) {
+        Some(b) => b,
+        None => {
+            // RECON-M-R2 (§4.2 transient 2): RETAIN the build failure so doctor can report
+            // "ledger absent + reason" (rendering = M-R3a). The M-R1 `None` contract is
+            // SQLite-error-only, so the reason is that class. Serving is unchanged: `None` still
+            // stores nothing and the caller falls back to SQLite.
+            *repo_state.witness_ledger_build_failure.write() = Some(ledger::LedgerBuildFailure {
+                fingerprint,
+                reason: "sqlite_error_during_ledger_walk".to_string(),
+            });
+            return None;
+        }
+    };
     let is_green = built.derived_green();
     // RECON-SPIKE-1: additive, env-gated (`RMAP_CALLGRAPH_DIFF`) diff emission — off by default (a single
     // `var_os` lookup then return), best-effort, and independent of the verdict derived above/stored
@@ -316,6 +337,8 @@ pub(crate) fn build_and_store_callgraph_cert(
     // `is_green`.
     diff::maybe_emit(repo_state, snapshot_uid, &fingerprint, is_green, &built);
     let verdict = if is_green { "GREEN" } else { "RED" }.to_string();
+    // A successful store supersedes any retained build failure (the transient healed).
+    *repo_state.witness_ledger_build_failure.write() = None;
     *repo_state.witness_ledger.write() = Some(built);
     *repo_state.callgraph_cert.write() = Some(CallgraphNoLossCert {
         verdict,
@@ -413,6 +436,38 @@ pub fn callgraph_cert_eligibility(repo_state: &RepoState, snapshot_uid: &str) ->
     let cached = repo_state.callgraph_cert.read();
     match cached.as_ref() {
         Some(c) if c.fingerprint == current_fp && c.verdict == "GREEN" => Some(current_fp),
+        _ => None,
+    }
+}
+
+/// RECON-M-R2: the CAPTURE-CONTRACT FLIP — the LEDGER-VALIDITY-gated, VERDICT-INDEPENDENT capture
+/// (recon-design-1 §4.2 activation / §5.1). `Some(current_fp)` ⟺ a MEASURED witness ledger exists
+/// at EXACTLY the current resident fingerprint for `snapshot_uid` — the GREEN/RED verdict is NOT
+/// consulted, because semantic enrichment GUARANTEES RED and a GREEN-gated capture would make
+/// W-BOTH unrepresentable on exactly the repos union serving exists for.
+///
+/// **Rides the M-R2 union-serving flag** (`union_serve::union_serving_enabled`): the dispatch arms
+/// call THIS capture only on the flag-ON `Auto` path; every other path keeps the GREEN-gated
+/// [`callgraph_cert_eligibility`] byte-exact (the default flip is its own recorded step, gated on
+/// S-1..S-3 — recon-design-1 §6.2).
+///
+/// Mechanism (build-then-peek, verbatim from the GREEN twin): (1) WARM via `callgraph_is_green` —
+/// the SAME lazy build that stores ledger + cert together, so a cert at the current fingerprint
+/// implies a ledger at it (one store event); a SQLite error during the build stores NOTHING and is
+/// retained on `witness_ledger_build_failure` (§4.2 transient 2). (2) PEEK under ONE livegraph
+/// read guard: recompute the fingerprint and require a ledger at exactly it. "Valid ledger" =
+/// `classification.is_some()` — a DEGENERATE ledger (no LiveGraph / no partitions) measured
+/// nothing and licenses no union serve (decide-and-record; those states fall back through today's
+/// `LiveGraphUnavailable` channel anyway).
+pub fn callgraph_union_eligibility(repo_state: &RepoState, snapshot_uid: &str) -> Option<String> {
+    // 1. WARM (same step as the GREEN twin; verdict ignored — ledger validity is the gate).
+    let _ = callgraph_is_green(repo_state, snapshot_uid);
+    // 2. PEEK under ONE read guard (atomic w.r.t. a swap — a swap needs `livegraph.write()`).
+    let guard = repo_state.livegraph.read();
+    let current_fp = import_cert_fingerprint(&guard.as_ref()?.live_partitions(), snapshot_uid);
+    let stored = repo_state.witness_ledger.read();
+    match stored.as_ref() {
+        Some(l) if l.fingerprint == current_fp && l.classification.is_some() => Some(current_fp),
         _ => None,
     }
 }
