@@ -215,6 +215,16 @@ pub struct CoherentOrientResult {
     /// language is measured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measurement_coverage: Option<serde_json::Value>,
+    /// RECON-M-R3a (g1u, recon-design-1 §5.3.2): the ADDITIVE union-accounting call block from
+    /// the daemon's shared witness projection — the reconciled call total beside the pipeline
+    /// figure, coverage-labeled. Carried as opaque `serde_json::Value` (same technique as
+    /// `trust_briefing`/`measurement_coverage` — the agent crate keeps its no-daemon-dependency
+    /// boundary). Populated post-fold by the daemon adapter ONLY in W-BOTH with a current
+    /// measured ledger; `None` (absent on the wire) otherwise — zero-SCIP output byte-identical
+    /// (R-0). Never replaces a pipeline figure. Orient sets it; check never does (§5.3.1
+    /// byte-invariance for check).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witnesses: Option<serde_json::Value>,
 }
 
 // ── Source classification (pure, by signal code) ──────────────────
@@ -561,6 +571,8 @@ pub fn to_coherent(
             // METRIC-LANG-COVERAGE-1: also populated post-fold; a zero-signal
             // (ambiguous / no-match) orient has no complexity surface to caveat.
             measurement_coverage: None,
+            // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.
+            witnesses: None,
         };
         return CoherenceEnvelope::resolution_only(value);
     }
@@ -635,6 +647,8 @@ pub fn to_coherent(
         // METRIC-LANG-COVERAGE-1: populated post-fold by build_orient_envelope
         // when the HIGH_COMPLEXITY signal is present.
         measurement_coverage: None,
+        // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.
+        witnesses: None,
     };
 
     CoherenceEnvelope::new(value, root_provenance, root_trust, root_freshness)

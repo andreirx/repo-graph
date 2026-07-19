@@ -139,6 +139,23 @@ pub struct ResidentIr<'a> {
     pub ir: &'a PartitionIr,
 }
 
+/// RECON-M-R3a: one KNOWN partition's posture-relevant state (resident or summary-retained), as
+/// returned by [`LiveGraph::partition_states`]. `freshness` is the slot status projected through
+/// the trust vocabulary (`Current`→`Fresh`, `Refreshing`→`PrecisionPending`, `Stale`→`Stale`,
+/// `RefreshFailed`→`RefreshFailed`); for a NON-resident slot the load state, not freshness, is the
+/// operative fact (nothing resident exists to be stale — recon-design-1 §4.2 reason ladder).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartitionState {
+    /// Partition id (== the LiveGraph slot key).
+    pub id: String,
+    /// The partition's language maturity.
+    pub language: LanguageSupport,
+    /// `true` iff the partition IR is resident (an unloaded slot retains only its xref summary).
+    pub resident: bool,
+    /// The slot's refresh status in the trust vocabulary (see the struct doc).
+    pub freshness: FreshnessState,
+}
+
 /// The payload of a `callers` answer (`AnswerEnvelope<CallersAnswer>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallersAnswer {
@@ -522,6 +539,36 @@ impl LiveGraph {
             })
             .collect()
     }
+    /// RECON-M-R3a (witness read surfaces): every KNOWN partition's posture-relevant state —
+    /// resident AND summary-retained (unloaded) slots — sorted by id (deterministic; the slot map
+    /// is a `HashMap`). This is the coverage-regime substrate for the shared witness projection
+    /// (recon-design-1 §4.2): residency splits W-ONE's reason space first, `freshness` carries the
+    /// stale/pending/failed detail behind the single `stale` reason. Producer availability is
+    /// deliberately NOT exposed here: the §4.2 stale∧producer-absent compound is governed by
+    /// CURRENT provisioning (the consumer's read-time discovery probe), not by the historical
+    /// slot-level warm-cache flag — a slot loaded producer-absent may sit beside a producer
+    /// provisioned since (review-1 item 4; the M-R3a recorded decision).
+    ///
+    /// Abstraction accounting: one concrete consumer (the daemon-runtime witness projection —
+    /// M-R3a's trust/doctor regime rendering); axis = read-side exposure of per-slot posture
+    /// state; simpler alternative rejected — deriving residency by diffing `live_partitions()`
+    /// against `resident_irs()` (two accessors, and neither exposes the status detail or
+    /// residency directly).
+    pub fn partition_states(&self) -> Vec<PartitionState> {
+        let mut out: Vec<PartitionState> = self
+            .slots
+            .iter()
+            .map(|(id, s)| PartitionState {
+                id: id.clone(),
+                language: s.language,
+                resident: s.ir.is_some(),
+                freshness: status_freshness(s.status),
+            })
+            .collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        out
+    }
+
     /// A partition's current epoch, if known.
     pub fn partition_epoch(&self, id: &str) -> Option<PartitionEpoch> {
         self.slots.get(id).map(|s| s.epoch)

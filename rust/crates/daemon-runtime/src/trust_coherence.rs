@@ -59,7 +59,16 @@ pub(crate) fn build_trust_envelope(
     };
 
     let posture = build_posture_leaf(repo_state, epoch);
-    trust_to_coherent(report, posture, stale)
+    let mut envelope = trust_to_coherent(report, posture, stale);
+    // RECON-M-R3a: the additive `witnesses` block (recon-design-1 §5.4) from the SHARED witness
+    // projection — attached AFTER the pure fold, outside the MEET (absence of a second witness
+    // is coverage truth, not v1-report degradation). `None` on repos with no witness evidence →
+    // the field is absent on the wire and every byte matches today (R-0; the §5.3.1 invariance:
+    // ledger absent vs present differs ONLY in this labeled block).
+    envelope.value.witnesses =
+        crate::witness_projection::WitnessProjection::compute(repo_state, epoch.snapshot_uid())
+            .map(|p| p.trust_block());
+    envelope
 }
 
 /// Build the Half-A current-state posture leaf from REAL LiveGraph runtime state (D-TRUST-2). Cold /
@@ -92,9 +101,16 @@ fn build_posture_leaf(
     // Unavailable posture (F3 — unknown, NOT a Fresh known-zero), the same leaf a cold LiveGraph yields. The
     // Half-A posture is therefore NEVER computed from an epoch incoherent with the pinned v1 report — never the
     // SQLite@N + LiveGraph@N+1 split-brain this arc exists to prevent. Mirrors the stats/cycles EV-A serve gate.
+    // M-R3A-TRUST-POSTURE (ratified 2026-07-19): a failed EV-A gate WITHHOLDS the posture VALUES
+    // exactly as before, but the leaf now states the two facts the old `unavailable_leaf` shape
+    // conflated — the LiveGraph IS resident (observed above, under this same read guard); only
+    // the coherent-serve eligibility failed. The old shape claimed `resident: false` here, which
+    // the human render turned into the false "LiveGraph not loaded" (review-0 CONTRADICTION
+    // finding — forbidden by the VISION honesty rules). The witnesses block states partition
+    // residency from the same runtime facts, so block and posture can no longer contradict.
     let current_fp = import_cert_fingerprint(&partitions, epoch.snapshot_uid());
     if epoch.fingerprint.as_deref() != Some(current_fp.as_str()) {
-        return LiveGraphPosture::unavailable_leaf();
+        return LiveGraphPosture::resident_withheld_leaf();
     }
 
     // The repo-wide current-state structural answer — a REAL read over the in-memory IR (the same surface the
@@ -130,6 +146,10 @@ fn build_posture_leaf(
         partitions: partition_rows,
         producer_available,
         migrated_answer_capability,
+        // M-R3A-TRUST-POSTURE: the served path states both facts explicitly (resident AND
+        // eligible — the two-fact contract; on this path they are both true by construction).
+        livegraph_resident: Some(true),
+        coherent_serve_eligible: Some(true),
     }
     .into_leaf(posture_trust, posture_freshness)
 }
@@ -355,6 +375,10 @@ mod tests {
         assert_eq!(posture.trust.class, AnswerClass::Unavailable);
         assert_eq!(posture.freshness, FreshnessState::Unavailable);
         assert!(!posture.value.resident);
+        // M-R3A-TRUST-POSTURE: on the genuinely-cold path the amendment fields are ABSENT
+        // (`resident: false` is the complete truth; the zero-SCIP wire stays byte-identical, R-0).
+        assert_eq!(posture.value.livegraph_resident, None);
+        assert_eq!(posture.value.coherent_serve_eligible, None);
 
         // Half B fully served + Fresh + sqlite-labelled (the v1 report is available, honestly labelled).
         assert_eq!(env.value.reliability.freshness, FreshnessState::Fresh);
@@ -524,6 +548,108 @@ mod tests {
         );
     }
 
+    // ── RECON-M-R3a: the §5.3.1 NAMED INVARIANCE — ledger absent vs present differs ONLY in
+    // the additive, explicitly-labeled `witnesses` block ────────────────────────────────────
+
+    /// recon-design-1 §5.3.1: "trust output byte-identical with the ledger absent vs present,
+    /// EXCEPT the additive, explicitly-labeled union blocks." Serializes the FULL trust
+    /// envelope in both states, strips only `value.witnesses`, and demands byte equality —
+    /// so no ratio input, leaf, posture or label can shift when the ledger lands. Also pins
+    /// the labeling half: the present block carries `accounting: "union"` + its coverage
+    /// basis (§5.3.0 — a union value never ships unlabeled).
+    #[test]
+    fn witnesses_block_is_the_only_delta_between_ledger_absent_and_present() {
+        let (_dir, state, snapshot_uid) = warm_state();
+        let (epoch, _resident) = capture_via_stats_cert(&state, &snapshot_uid);
+
+        // Ledger ABSENT: the witnesses block renders the honest unknown (never a number).
+        let absent = build_trust_envelope(&state, &epoch, minimal_report(&snapshot_uid));
+        let absent_witnesses = absent
+            .value
+            .witnesses
+            .clone()
+            .expect("slot evidence exists");
+        assert!(
+            absent_witnesses["measured"].is_null(),
+            "no ledger → unknown, never a stale number"
+        );
+
+        // Warm the ledger through the SAME production store path the daemon uses.
+        let _ = crate::callgraph_cert::callgraph_is_green(&state, &snapshot_uid);
+        assert!(state.witness_ledger.read().is_some());
+
+        let present = build_trust_envelope(&state, &epoch, minimal_report(&snapshot_uid));
+        let present_witnesses = present
+            .value
+            .witnesses
+            .clone()
+            .expect("measured block present");
+        let measured = &present_witnesses["measured"];
+        assert!(!measured.is_null(), "the ledger landed → measured renders");
+        assert_eq!(measured["accounting"], "union", "labeled (§5.3.0)");
+        assert!(measured["coverage"]["fingerprint"].is_string());
+
+        // Strip ONLY the witnesses field; everything else must be byte-identical.
+        let mut a = serde_json::to_value(&absent).unwrap();
+        let mut b = serde_json::to_value(&present).unwrap();
+        a["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("witnesses")
+            .expect("absent-state block present (slot evidence)");
+        b["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("witnesses")
+            .expect("present-state block present");
+        assert_eq!(
+            a.to_string(),
+            b.to_string(),
+            "ledger absent vs present may differ ONLY in the witnesses block (§5.3.1)"
+        );
+    }
+
+    /// M-R3A-TRUST-POSTURE (ratified 2026-07-19) — the review-0 CONTRADICTION state, now
+    /// unmintable: a RESIDENT LiveGraph with a MEASURED current ledger (the witnesses block
+    /// renders the W-BOTH regime row) while the coherence-cert gate fails (no GREEN cert
+    /// witness at capture → EV-A refuses the posture VALUES). The old shape rendered
+    /// `resident: false` ("LiveGraph not loaded") BESIDE "compiler-side analysis is current" —
+    /// two contradicting state claims in one response. The amended leaf states both facts:
+    /// resident yes, coherent-serve-eligible no; the posture block and the W-BOTH witness block
+    /// must never contradict (the ratified constraint, asserted here).
+    #[test]
+    fn resident_cert_gated_state_renders_two_labeled_facts_never_not_loaded() {
+        let (_dir, state, snapshot_uid) = warm_state();
+        // NO green stats cert at capture: the epoch carries no eligibility witness — the exact
+        // state the reviewer's retained trust-after.json captured (resident + cert-gated).
+        let epoch = capture_epoch(&state, &snapshot_uid, None);
+        // Warm the ledger through the production store path: the witnesses block will render a
+        // MEASURED W-BOTH state for the same resident partition the posture refuses to serve.
+        let _ = crate::callgraph_cert::callgraph_is_green(&state, &snapshot_uid);
+        assert!(state.witness_ledger.read().is_some());
+
+        let env = build_trust_envelope(&state, &epoch, minimal_report(&snapshot_uid));
+
+        // The witnesses block states the partition-level fact: W-BOTH, analysis current.
+        let witnesses = env.value.witnesses.as_ref().expect("slot evidence exists");
+        let regimes = witnesses["regimes"].as_array().expect("regime rows");
+        assert_eq!(regimes[0]["regime"], "W-BOTH");
+        assert!(!witnesses["measured"].is_null(), "current measured ledger");
+
+        // The posture leaf: VALUES withheld (epoch invariant untouched — legacy `resident`
+        // stays false, class Unavailable), but the TWO FACTS are stated and AGREE with the
+        // witness block: the graph IS resident; only coherent-serve eligibility failed.
+        let posture = &env.value.current_state_posture;
+        assert!(!posture.value.resident, "the serve fact is unchanged");
+        assert_eq!(posture.trust.class, AnswerClass::Unavailable);
+        assert_eq!(
+            posture.value.livegraph_resident,
+            Some(true),
+            "the residency fact must match the W-BOTH witness row — never 'not loaded'"
+        );
+        assert_eq!(posture.value.coherent_serve_eligible, Some(false));
+    }
+
     /// EV-A (mirror `ev_a_stats_serves_livegraph_on_green_then_pinned_sqlite_after_swap`): on a matching
     /// epoch trust serves the LiveGraph Half-A posture COHERENT with its v1 report (Exact/Fresh, root
     /// Exact/Fresh). A mid-request swap moves the resident fingerprint so the captured epoch no longer
@@ -562,6 +688,15 @@ mod tests {
         );
         assert_eq!(posture2.trust.class, AnswerClass::Unavailable);
         assert_eq!(posture2.freshness, FreshnessState::Unavailable);
+        // M-R3A-TRUST-POSTURE: the fail-soft leaf states BOTH facts — the graph IS resident
+        // (a swap does not unload it), only the coherent-serve eligibility failed. Never again
+        // the false "not loaded" claim on a loaded graph.
+        assert_eq!(posture2.value.livegraph_resident, Some(true));
+        assert_eq!(posture2.value.coherent_serve_eligible, Some(false));
+        assert!(
+            posture2.value.partitions.is_empty(),
+            "posture VALUES (partition detail) stay withheld on an incoherent epoch"
+        );
 
         // Half B (the v1 report) is still fully served + Fresh + sqlite-labelled across the swap (the SQLite
         // side is pinned and untouched; only the cross-epoch LiveGraph posture is withheld).

@@ -68,10 +68,17 @@ pub struct LiveGraphPartitionPosture {
 /// AnswerEnvelope); this crate only carries + serializes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveGraphPosture {
-    /// Whether an in-memory LiveGraph with at least one resident partition exists for this repo (cold /
-    /// non-preloaded => `false`, and the posture leaf is `Unavailable` — NOT empty-as-known-zero, F3).
+    /// Whether the posture VALUES below are SERVED from a resident LiveGraph coherent with the
+    /// pinned v1 report. NAME-VS-SEMANTICS NOTE (M-R3A-TRUST-POSTURE, 2026-07-19): despite its
+    /// name this is the SERVE fact, not the residency fact — it is also `false` when a LiveGraph
+    /// IS resident but the coherent-serve eligibility gate failed (see the two amendment fields
+    /// below, which state the two facts separately; renaming this wire field is a breaking JSON
+    /// change deferred to its own ratification). Cold / non-preloaded => `false` and the leaf is
+    /// `Unavailable` — NOT empty-as-known-zero, F3.
     pub resident: bool,
-    /// The per-resident-partition posture rows (empty when not resident).
+    /// The per-resident-partition posture rows (empty when not resident, and empty when the
+    /// posture is withheld — `coherent_serve_eligible: Some(false)` — because partition detail is
+    /// a posture VALUE and stays eligibility-gated).
     pub partitions: Vec<LiveGraphPartitionPosture>,
     /// Whether the SCIP producer was available for the resident partitions: `false` when the LiveGraph
     /// reports a `ProducerUnavailable` degradation (warm-loaded producer-absent, LIVEGRAPH-INTEGRATION-1C),
@@ -81,6 +88,28 @@ pub struct LiveGraphPosture {
     /// (callers/callees/imports/cycles/stats) over the resident graph — projected from the repo-wide
     /// current-state `module_stats()` answer class. `false` when degraded/cold.
     pub migrated_answer_capability: bool,
+
+    // ── M-R3A-TRUST-POSTURE amendment (ratified 2026-07-19): ACTUAL RESIDENCY and
+    // COHERENT-SERVE ELIGIBILITY are TWO facts with TWO labels. The legacy `resident` field
+    // conflates them (it is the AND), which minted the false "LiveGraph not loaded" claim on a
+    // resident-but-cert-gated state. Both fields are ADDITIVE (`Option` + skip-if-none +
+    // default): absent on pre-amendment daemon JSON AND on the cold path (where `resident:
+    // false` already states the whole truth and the zero-SCIP wire stays byte-identical — R-0);
+    // present, both populated, whenever the posture build observed a resident LiveGraph. ──
+    /// ACTUAL RESIDENCY: `Some(true)` = the posture build observed an in-memory LiveGraph with
+    /// ≥1 resident partition for this repo (a runtime fact under the same read guard, stated
+    /// regardless of serve eligibility). `None` = not stated (cold path or pre-amendment
+    /// producer) — the legacy `resident` field then carries the complete truth.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub livegraph_resident: Option<bool>,
+    /// COHERENT-SERVE ELIGIBILITY: `Some(true)` = this request could serve the posture VALUES
+    /// coherently with the pinned v1 report (a current no-loss certification witness captured
+    /// AND still matching the resident fingerprint at read — the EV-A gate). `Some(false)` +
+    /// `livegraph_resident: Some(true)` is the resident-but-withheld state the amendment names:
+    /// analysis loaded, posture values withheld rather than risk a cross-epoch mix. `None` = not
+    /// stated (cold/legacy).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub coherent_serve_eligible: Option<bool>,
 }
 
 // ── Half-B leaf payload DTOs (split from the v1 `TrustSummary`; reused axis types stay byte-identical) ──
@@ -187,6 +216,17 @@ pub struct CoherentTrustReport {
     // ── Half A — current-state reliability posture leaf (source = livegraph) ──
     /// The NEW current-state LiveGraph posture (D-TRUST-2).
     pub current_state_posture: CoherenceEnvelope<LiveGraphPosture>,
+
+    /// RECON-M-R3a: the additive `witnesses` block (recon-design-1 §5.4) — divergence posture +
+    /// the union accounting, built by the daemon's SHARED witness projection and attached AFTER
+    /// the pure fold (labels/blocks only; the trust RATIO's inputs are untouched, §5.3.1).
+    /// Deliberately a plain `Option<Value>` OUTSIDE the coherence MEET fold: an absent second
+    /// witness is coverage truth, not degradation of the v1 report — folding an `Unavailable`
+    /// witnesses leaf into the root would downgrade every zero-SCIP repo's trust posture (a
+    /// false claim; recorded decision). Absent on the wire when `None` (R-0: zero-SCIP repos
+    /// byte-identical).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub witnesses: Option<Value>,
 }
 
 // ── Posture helpers ────────────────────────────────────────────────────────────────────────────────
@@ -404,6 +444,8 @@ pub fn trust_to_coherent(
         modules: modules_leaf,
         caveats: caveats_leaf,
         current_state_posture: posture,
+        // RECON-M-R3a: attached by the daemon adapter AFTER this pure fold (never part of it).
+        witnesses: None,
     };
 
     CoherenceEnvelope::new(value, provenance, trust, freshness)
@@ -413,13 +455,17 @@ pub fn trust_to_coherent(
 
 impl LiveGraphPosture {
     /// The cold / non-resident posture VALUE (no LiveGraph loaded for this repo, or zero resident
-    /// partitions). Pairs with [`LiveGraphPosture::unavailable_leaf`].
+    /// partitions). Pairs with [`LiveGraphPosture::unavailable_leaf`]. The amendment fields stay
+    /// `None` (absent on the wire): on the cold path `resident: false` IS the complete truth, and
+    /// the zero-SCIP wire stays byte-identical (R-0).
     pub fn cold() -> Self {
         Self {
             resident: false,
             partitions: Vec::new(),
             producer_available: false,
             migrated_answer_capability: false,
+            livegraph_resident: None,
+            coherent_serve_eligible: None,
         }
     }
 
@@ -440,6 +486,31 @@ impl LiveGraphPosture {
     /// mislabelling a SCIP degradation reason onto a cold graph (the check-style honesty choice).
     pub fn unavailable_leaf() -> CoherenceEnvelope<LiveGraphPosture> {
         Self::cold().into_leaf(
+            TrustPosture {
+                class: AnswerClass::Unavailable,
+                completeness: QueryCompleteness::Unknown,
+                degradation_reasons: Vec::new(),
+                contributing_languages: BTreeSet::new(),
+            },
+            FreshnessState::Unavailable,
+        )
+    }
+
+    /// M-R3A-TRUST-POSTURE (ratified 2026-07-19): the RESIDENT-BUT-WITHHELD Half-A leaf — a
+    /// LiveGraph IS resident (≥1 partition observed under the read guard) but the coherent-serve
+    /// eligibility gate failed (no current no-loss certification witness, or the fingerprint
+    /// moved since capture — EV-A), so the posture VALUES are withheld exactly as before. Same
+    /// `Unavailable` coherence posture and same legacy `resident: false` serve fact as
+    /// [`LiveGraphPosture::unavailable_leaf`] (the epoch invariant is untouched); the amendment
+    /// fields state the two facts the legacy shape conflated: `livegraph_resident: Some(true)`,
+    /// `coherent_serve_eligible: Some(false)` — so the wire can never claim "not loaded" about a
+    /// loaded graph, and the witnesses block (which states partition residency from the same
+    /// runtime facts) can never contradict this leaf.
+    pub fn resident_withheld_leaf() -> CoherenceEnvelope<LiveGraphPosture> {
+        let mut value = Self::cold();
+        value.livegraph_resident = Some(true);
+        value.coherent_serve_eligible = Some(false);
+        value.into_leaf(
             TrustPosture {
                 class: AnswerClass::Unavailable,
                 completeness: QueryCompleteness::Unknown,

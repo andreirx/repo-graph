@@ -54,6 +54,9 @@ pub mod path;
 pub mod stats;
 pub mod surfaces;
 pub mod trust;
+/// RECON-M-R3a: shared witness-block rendering (union accounting → reader lines) for
+/// trust/orient/stats — one client-side projection, no per-surface phrasing drift.
+pub mod witnesses;
 
 // Group 5: Boundaries (CLI-OUT-4)
 pub mod boundaries_list;

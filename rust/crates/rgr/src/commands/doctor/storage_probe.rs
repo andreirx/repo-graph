@@ -173,6 +173,184 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
     }
 }
 
+/// RECON-M-R3a: the `witness_ledger` doctor probe from the `storage_health` facts — the
+/// OPERATIONAL half of the divergence posture (recon-design-1 §5.4): ledger presence/currency +
+/// the LAST BUILD OUTCOME with its failure reason when absent, per-partition adoption counts,
+/// the R-RAT-4 colliding keys, the occurrence-delta enumeration, and the per-partition coverage
+/// regimes with their reason-specific next actions. `None` when the daemon attached no block
+/// (zero-SCIP repos: absence, never zeros — R-0).
+///
+/// Health verdict: always `passed` — an absent/superseded/failed-to-build ledger is a
+/// self-healing measurement state (rebuilt on the next call-graph read), never installation
+/// ill-health; the FACT is stated, the verdict unchanged (the F9 transient precedent). A
+/// genuine storage fault also fails the sibling `storage` probe on its own evidence.
+pub(super) fn witness_probe_from_facts(response: &serde_json::Value) -> Option<ProbeResult> {
+    let block = response.get("witness_ledger")?;
+    let ledger = block.get("ledger")?;
+    let mut details: Vec<String> = Vec::new();
+
+    let message = if ledger.get("current").and_then(|v| v.as_bool()) == Some(true) {
+        match block.get("measured") {
+            Some(m) if !m.is_null() => {
+                details.extend(crate::presentation::witnesses::measurement_lines(m));
+                witness_measured_details(m, &mut details);
+                let fp = ledger
+                    .get("fingerprint")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                details.push(format!("measured at fingerprint {fp}"));
+                "ledger current — union accounting measured".to_string()
+            }
+            _ => {
+                let reason = ledger
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unmeasured");
+                format!("ledger present but measured nothing ({reason})")
+            }
+        }
+    } else if ledger.get("present").and_then(|v| v.as_bool()) == Some(true) {
+        // Review-0 defect (a): a superseded ledger must not MASK a failed latest rebuild —
+        // when the daemon retained a failure beside the superseded fact, both render.
+        if ledger.get("last_build_outcome").and_then(|v| v.as_str()) == Some("failed") {
+            let reason = ledger
+                .get("failure_reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown reason");
+            if let Some(fp) = ledger.get("failed_fingerprint").and_then(|v| v.as_str()) {
+                details.push(format!("failed rebuild was keyed at fingerprint {fp}"));
+            }
+            format!(
+                "ledger superseded by witness movement, and the latest re-measurement \
+                 attempt failed ({reason}) — retried on the next call-graph read"
+            )
+        } else {
+            "ledger superseded by witness movement — re-measured on the next call-graph read"
+                .to_string()
+        }
+    } else {
+        // Absent: the LAST CAPTURE OUTCOME + its failure reason (the §4.2 transient-2 fact —
+        // an operational truth about US, stated here, never on a repo-facts surface).
+        match ledger.get("last_build_outcome").and_then(|v| v.as_str()) {
+            Some("failed") => {
+                let reason = ledger
+                    .get("failure_reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown reason");
+                if let Some(fp) = ledger.get("failed_fingerprint").and_then(|v| v.as_str()) {
+                    details.push(format!("failed build was keyed at fingerprint {fp}"));
+                }
+                format!("ledger absent — last measurement attempt failed ({reason})")
+            }
+            Some(outcome) => format!("ledger absent — {outcome}"),
+            None => "ledger absent".to_string(),
+        }
+    };
+
+    // Producer capability truth (doctor's toolchain surface — the D-R1 carve-out).
+    if let Some(producer) = block.get("producer") {
+        if let (Some(name), Some(provisioned)) = (
+            producer.get("name").and_then(|v| v.as_str()),
+            producer.get("provisioned").and_then(|v| v.as_bool()),
+        ) {
+            details.push(format!(
+                "producer {name}: {}",
+                if provisioned {
+                    "provisioned"
+                } else {
+                    "not provisioned"
+                }
+            ));
+        }
+    }
+    // The reason-specific W-ONE posture lines (three distinct reasons + next actions).
+    details.extend(crate::presentation::witnesses::regime_lines(block));
+
+    Some(ProbeResult {
+        name: "witness_ledger".to_string(),
+        passed: true,
+        message,
+        details: if details.is_empty() {
+            None
+        } else {
+            Some(details.join("\n        "))
+        },
+    })
+}
+
+/// The measured block's OPERATIONAL detail lines (doctor-only tier): per-partition adoption
+/// counts, colliding keys, and the occurrence-delta enumeration. Long enumerations truncate
+/// WITH a stated count (no silent caps).
+fn witness_measured_details(measured: &serde_json::Value, details: &mut Vec<String>) {
+    if let Some(adoption) = measured.get("adoption").and_then(|v| v.as_object()) {
+        for (partition, counts) in adoption {
+            // Review-1 item 5: all three populations or no line — a missing field must never
+            // render as a measured zero (malformed/additive payload → the line is absent).
+            let (Some(adopted), Some(fallback), Some(file_scope)) = (
+                counts.get("adopted").and_then(|v| v.as_u64()),
+                counts.get("fallback").and_then(|v| v.as_u64()),
+                counts.get("file_scope").and_then(|v| v.as_u64()),
+            ) else {
+                continue;
+            };
+            details.push(format!(
+                "adoption {partition}: {adopted} adopted / {fallback} fallback / \
+                 {file_scope} file-scope"
+            ));
+        }
+    }
+    if let Some(colliding) = measured.get("colliding_keys").and_then(|v| v.as_object()) {
+        if let Some(line) = measured.get("collision_line").and_then(|v| v.as_str()) {
+            details.push(line.to_string());
+        }
+        const KEY_CAP: usize = 8;
+        for (partition, keys) in colliding {
+            let keys: Vec<&str> = keys
+                .as_array()
+                .map(|a| a.iter().filter_map(|k| k.as_str()).collect())
+                .unwrap_or_default();
+            let shown: Vec<&str> = keys.iter().take(KEY_CAP).copied().collect();
+            let suffix = if keys.len() > KEY_CAP {
+                format!(" … and {} more", keys.len() - KEY_CAP)
+            } else {
+                String::new()
+            };
+            details.push(format!(
+                "colliding keys in {partition}: {}{suffix}",
+                shown.join(", ")
+            ));
+        }
+    }
+    if let Some(deltas) = measured
+        .get("occurrence_delta_pairs")
+        .and_then(|v| v.as_array())
+    {
+        const DELTA_CAP: usize = 8;
+        // Review-1 item 5: a pair renders only with BOTH its counts — a missing count must
+        // never render as "syntax 0" / "compiler 0" (an invented measurement). The stated
+        // remainder counts RENDERABLE pairs, so the cap line stays truthful under skips.
+        let renderable: Vec<String> = deltas
+            .iter()
+            .filter_map(|d| {
+                let caller = d.get("caller").and_then(|v| v.as_str())?;
+                let callee = d.get("callee").and_then(|v| v.as_str())?;
+                let p = d.get("p").and_then(|v| v.as_u64())?;
+                let s = d.get("s_calls").and_then(|v| v.as_u64())?;
+                Some(format!(
+                    "occurrence delta: {caller} → {callee} (syntax {p}, compiler {s})"
+                ))
+            })
+            .collect();
+        details.extend(renderable.iter().take(DELTA_CAP).cloned());
+        if renderable.len() > DELTA_CAP {
+            details.push(format!(
+                "… and {} more occurrence deltas",
+                renderable.len() - DELTA_CAP
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +530,209 @@ mod tests {
             !probe.message.to_lowercase().contains("cannot read"),
             "must not read as a corrupt-DB failure: {}",
             probe.message
+        );
+    }
+
+    // ── RECON-M-R3a: the witness-ledger operational probe ───────────────────────────────
+
+    // R-0: no daemon block → no probe (absence, never zeros).
+    #[test]
+    fn witness_probe_absent_when_daemon_attached_no_block() {
+        let response = json!({ "db_size_bytes": 1, "in_use_by_daemon": false });
+        assert!(witness_probe_from_facts(&response).is_none());
+    }
+
+    // Ledger absent + retained build failure: the LAST CAPTURE OUTCOME + its reason render
+    // (the M-R3a gate's ledger-ABSENT doctor rendering) — and the probe stays healthy (a
+    // self-healing measurement state is not installation ill-health).
+    #[test]
+    fn witness_probe_renders_last_build_failure_reason() {
+        let response = json!({
+            "db_size_bytes": 1, "in_use_by_daemon": false,
+            "witness_ledger": {
+                "producer": {"name": "scip-typescript", "provisioned": false},
+                "regimes": [],
+                "ledger": {
+                    "present": false,
+                    "last_build_outcome": "failed",
+                    "failed_fingerprint": "fp1",
+                    "failure_reason": "sqlite_error_during_ledger_walk",
+                },
+            },
+        });
+        let probe = witness_probe_from_facts(&response).expect("block → probe");
+        assert!(probe.passed, "measurement absence is not ill-health");
+        assert!(
+            probe.message.contains("last measurement attempt failed")
+                && probe.message.contains("sqlite_error_during_ledger_walk"),
+            "{}",
+            probe.message
+        );
+        let details = probe.details.expect("failure fingerprint + producer line");
+        assert!(details.contains("fp1"), "{details}");
+        assert!(details.contains("producer scip-typescript: not provisioned"));
+    }
+
+    // Review-0 defect (a): a superseded ledger with a retained failure renders BOTH facts —
+    // the supersession AND the latest failed rebuild — never "superseded" alone.
+    #[test]
+    fn witness_probe_superseded_renders_the_latest_build_failure_beside_it() {
+        let response = json!({
+            "db_size_bytes": 1, "in_use_by_daemon": false,
+            "witness_ledger": {
+                "producer": {"name": "scip-typescript", "provisioned": true},
+                "regimes": [],
+                "ledger": {
+                    "present": true,
+                    "current": false,
+                    "note": "superseded by witness movement; rebuilt on the next call-graph read",
+                    "last_build_outcome": "failed",
+                    "failed_fingerprint": "fp_new",
+                    "failure_reason": "sqlite_error_during_ledger_walk",
+                },
+            },
+        });
+        let probe = witness_probe_from_facts(&response).expect("block → probe");
+        assert!(probe.passed, "self-healing measurement state stays healthy");
+        assert!(
+            probe.message.contains("superseded")
+                && probe
+                    .message
+                    .contains("failed (sqlite_error_during_ledger_walk)"),
+            "both facts must render (the masked-failure defect): {}",
+            probe.message
+        );
+        assert!(probe
+            .details
+            .expect("fingerprint detail")
+            .contains("fp_new"));
+
+        // Without a retained failure the plain superseded line is unchanged.
+        let plain = json!({
+            "db_size_bytes": 1, "in_use_by_daemon": false,
+            "witness_ledger": {
+                "producer": {"name": "scip-typescript", "provisioned": true},
+                "regimes": [],
+                "ledger": {"present": true, "current": false},
+            },
+        });
+        let probe = witness_probe_from_facts(&plain).expect("block → probe");
+        assert!(
+            probe.message.contains("superseded") && !probe.message.contains("failed"),
+            "{}",
+            probe.message
+        );
+    }
+
+    // Measured: the operational tier renders adoption counts, the collision line + keys, the
+    // occurrence-delta enumeration, and the W-ONE regime next-actions.
+    #[test]
+    fn witness_probe_renders_measured_operational_detail() {
+        let response = json!({
+            "db_size_bytes": 1, "in_use_by_daemon": false,
+            "witness_ledger": {
+                "producer": {"name": "scip-typescript", "provisioned": true},
+                "regimes": [
+                    {"partition": "app", "language": "TypeScript", "regime": "W-ONE",
+                     "reason": "stale",
+                     "posture": "compiler-side analysis here is out of date (the source changed after the compiler last ran)",
+                     "next_action": "refresh `app` to re-enable corroboration"},
+                ],
+                "ledger": {"present": true, "current": true, "fingerprint": "fp2"},
+                "measured": {
+                    "accounting": "union",
+                    "coverage": {"languages": ["TypeScript"], "partitions": ["app"], "fingerprint": "fp2"},
+                    "pipeline_calls": 10, "union_calls": 12, "dual_measured": 9,
+                    "agreement_pct": 88.9,
+                    "both": {"instances": 8, "identities": 8},
+                    "syntactic_only": {"boundary": 1, "file_scope": 0, "uncorroborated": 0, "multiplicity": 0, "identities": 1},
+                    "semantic_only_calls": {"new_pair": 2, "multiplicity": 1, "identities": 2},
+                    "unmeasured_edges": {"instances": 1, "identities": 1},
+                    "identity_suspect": 0,
+                    "identity_collision": {"instances": 2, "identities": 2},
+                    "projections": {"total": 20, "unanswerable": 3},
+                    "references": 40,
+                    "adoption": {"app": {"language": "TypeScript", "adopted": 5, "fallback": 2, "file_scope": 1}},
+                    "colliding_keys": {"app": ["k1", "k2"]},
+                    "collision_line": "2 symbol identities collide between the syntax index and the compiler index — 2 compiler-witnessed call instances withheld; shown separately, never merged",
+                    "occurrence_delta_pairs": [{"caller": "a", "callee": "b", "p": 2, "s_calls": 1}],
+                },
+            },
+        });
+        let probe = witness_probe_from_facts(&response).expect("block → probe");
+        assert!(
+            probe.message.contains("ledger current"),
+            "{}",
+            probe.message
+        );
+        let details = probe.details.expect("operational detail");
+        assert!(details.contains("adoption app: 5 adopted / 2 fallback / 1 file-scope"));
+        // Defect (b): both populations, each with its unit (keys collide; instances withheld).
+        assert!(details.contains("2 symbol identities collide"), "{details}");
+        assert!(
+            details.contains("2 compiler-witnessed call instances withheld"),
+            "{details}"
+        );
+        assert!(details.contains("colliding keys in app: k1, k2"));
+        assert!(
+            details.contains("occurrence delta: a → b (syntax 2, compiler 1)"),
+            "{details}"
+        );
+        assert!(
+            details.contains("app: compiler-side analysis here is out of date")
+                && details.contains("refresh `app` to re-enable corroboration"),
+            "the W-ONE reason line + next action render on doctor: {details}"
+        );
+        assert!(details.contains("measured at fingerprint fp2"));
+    }
+
+    /// Review-1 item 5: a malformed/additive measured payload must never render an absent
+    /// count as a measured zero — the adoption line requires ALL three populations, and a
+    /// delta pair requires BOTH counts; malformed entries render absence, intact ones render.
+    #[test]
+    fn witness_probe_malformed_counts_render_absence_never_invented_zeros() {
+        let response = json!({
+            "db_size_bytes": 1, "in_use_by_daemon": false,
+            "witness_ledger": {
+                "producer": {"name": "scip-typescript", "provisioned": true},
+                "regimes": [],
+                "ledger": {"present": true, "current": true, "fingerprint": "fp3"},
+                "measured": {
+                    "accounting": "union",
+                    "coverage": {"languages": ["TypeScript"], "partitions": ["app"], "fingerprint": "fp3"},
+                    "pipeline_calls": 10, "union_calls": 10, "dual_measured": 9,
+                    "both": {"instances": 9, "identities": 9},
+                    // `fallback` missing on `app`; `broken` carries no counts at all.
+                    "adoption": {
+                        "app": {"language": "TypeScript", "adopted": 5, "file_scope": 1},
+                        "ok": {"language": "TypeScript", "adopted": 3, "fallback": 0, "file_scope": 2},
+                        "broken": {"language": "TypeScript"},
+                    },
+                    // First pair lacks `s_calls`; second is intact.
+                    "occurrence_delta_pairs": [
+                        {"caller": "a", "callee": "b", "p": 2},
+                        {"caller": "c", "callee": "d", "p": 1, "s_calls": 3},
+                    ],
+                },
+            },
+        });
+        let probe = witness_probe_from_facts(&response).expect("block → probe");
+        let details = probe.details.expect("detail lines");
+        assert!(
+            !details.contains("adoption app:") && !details.contains("adoption broken:"),
+            "a partial adoption row must not render invented zeros: {details}"
+        );
+        assert!(
+            details.contains("adoption ok: 3 adopted / 0 fallback / 2 file-scope"),
+            "the intact row still renders (0 here is MEASURED, present in the payload): {details}"
+        );
+        assert!(
+            !details.contains("a → b"),
+            "a delta pair without both counts must not render: {details}"
+        );
+        assert!(
+            details.contains("occurrence delta: c → d (syntax 1, compiler 3)"),
+            "{details}"
         );
     }
 

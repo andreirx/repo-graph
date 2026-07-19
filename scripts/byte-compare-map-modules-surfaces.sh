@@ -206,9 +206,13 @@ guard "${WORK}/out-B" "B/candidate"
 #  6. map artifacts stamp "snapshot <uuid8>" (bare 8-hex slice of rule 1's
 #     uuid — map.rs banner + modules_show snapshot line).
 #  7. module-candidate uids are SHA256 slices computed OVER the per-run
-#     repo ULID ("<kind>-mod-" + 16 hex; generate_module_uid — OBSERVED:
-#     package_json.rs:222-235, inferred_modules.rs:842-853) — rule 4's
-#     volatility in hashed form, rendered by the modules JSON surfaces.
+#     repo ULID ("<kind>-mod-" + 1..16 hex — the u64 renders via UNPADDED
+#     `{:x}`, so ~1/16 of repo uids yield 15 chars, 1/256 yield 14, …;
+#     generate_module_uid — OBSERVED: package_json.rs:222-235,
+#     inferred_modules.rs:842-853) — rule 4's volatility in hashed form,
+#     rendered by the modules JSON surfaces. The width bound was `{16}`
+#     until 2026-07-19, letting short-hash runs escape the mask (observed
+#     live: a 15-char baseline uid → spurious AvsB diff).
 normalize() { # $1=in  $2=out
     sed -E \
         -e 's|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z?|<TS>|g' \
@@ -218,7 +222,7 @@ normalize() { # $1=in  $2=out
         -e 's|…[0-9a-f]{8}|…<UID8>|g' \
         -e 's|snapshot [0-9a-f]{8}|snapshot <UID8>|g' \
         -e 's|[0-9]+(\.[0-9]+)?(ms\|s\|m\|h)( ago)?|<DUR>\3|g' \
-        -e 's|[a-z0-9]+-mod-[0-9a-f]{16}|<MODUID>|g' \
+        -e 's|[a-z0-9]+-mod-[0-9a-f]{1,16}|<MODUID>|g' \
         "$1" > "$2"
 }
 

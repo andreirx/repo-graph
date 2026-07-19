@@ -236,7 +236,44 @@ pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
         })
         .collect();
 
-    let response = serde_json::json!({
+    // RECON-M-R3a (g3u, §5.3.4): the union-only CALL file pairs for the dependency sketch —
+    // `semantic`/`new_pair` instances only (the sole class that can add a sketch pair; the
+    // union is ⊇ pipeline by construction, no pair is ever lost). Scoped to this request's
+    // subtree, minus pairs the pipeline sketch already holds; the DELTA is recorded in the
+    // block (`pair_delta`) so the measured magnitude is a stated fact. `None` outside
+    // W-BOTH-with-current-ledger → field absent → today's exact map (R-0; determinism is
+    // per witness pair — the coverage label names the basis).
+    let witnesses_block = crate::witness_projection::WitnessProjection::compute(
+        &repo_state,
+        &snapshot_uid,
+    )
+    .and_then(|p| {
+        let pairs = p.g3u_new_call_file_pairs()?;
+        let label = p.g3u_label()?;
+        let existing: std::collections::BTreeSet<(&str, &str)> = dependency_edges_json
+            .iter()
+            .filter_map(|e| Some((e.get("source")?.as_str()?, e.get("target")?.as_str()?)))
+            .collect();
+        let in_scope =
+            |file: &str| path.is_empty() || file == path || file.starts_with(&format!("{path}/"));
+        let added: Vec<serde_json::Value> = pairs
+            .iter()
+            .filter(|(src, dst)| in_scope(src) && !existing.contains(&(src.as_str(), dst.as_str())))
+            .map(|(src, dst)| serde_json::json!({ "source": src, "target": dst }))
+            .collect();
+        let mut block = serde_json::json!({
+            "pair_delta": added.len(),
+            "dependency_call_pairs_added": added,
+        });
+        if let (Some(b), Some(l)) = (block.as_object_mut(), label.as_object()) {
+            for (k, v) in l {
+                b.insert(k.clone(), v.clone());
+            }
+        }
+        Some(block)
+    });
+
+    let mut response = serde_json::json!({
         "command": "map",
         "repo": repo_uid,
         "repo_name": repo_name,
@@ -259,6 +296,10 @@ pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
         // complexity-coverage block — honest about which languages are measured.
         "measurement_coverage": crate::util::measurement_coverage_json(&storage, &snapshot_uid),
     });
+    // RECON-M-R3a (g3u): additive, labeled; absent outside W-BOTH (R-0).
+    if let Some(block) = witnesses_block {
+        response["witnesses"] = block;
+    }
 
     DispatchResult::success(&request.id, response)
 }

@@ -529,6 +529,14 @@ pub struct CallClassification {
     /// Syntactic-class pairs whose (caller key, callee NAME) matches a semantic-class pair under
     /// a DIFFERENT callee key — the wrong/missed-adoption symptom signature (§3.5 guard 3).
     pub identity_suspect: usize,
+    /// RECON-M-R3a (g2u substrate, §5.3.3a): keys with ≥1 INCOMING compiler-witnessed edge from
+    /// the eligible IRs — the dst of every non-withheld strict-`Calls` instance ∪ the dst of every
+    /// `References` instance whose dst is not a detected collision key. Self-edges (src == dst)
+    /// are EXCLUDED (a self-reference cannot make a symbol "referenced by something else" — the
+    /// reduction stays conservative; recorded decision). `Imports` edges enter neither (§3.4-3).
+    /// Consumer: the modules "unref?" REDUCTION-ONLY rollup — a pipeline-flagged unreferenced
+    /// symbol found here is a KNOWN false positive of the syntax-only view.
+    pub s_incoming_witnessed: BTreeSet<String>,
     /// Per-pair records for every union-call / P pair (the M-R2 serving substrate): exact
     /// `(p, s)` multiplicities, dual-measurability, and the pair-level syntactic sub-class.
     pub pairs: BTreeMap<(String, String), PairRecord>,
@@ -687,10 +695,9 @@ pub struct PartitionRollup {
 
 /// The W-ONE reason ladder (deterministic — residency splits the space first, then producer
 /// presence; each actual state maps to exactly one reason).
-// M-R1 consumers: the §4.2 exhaustive-matrix tests (the gate demands them); the production
-// consumer is M-R3a's reason-specific posture rendering (trust/doctor) — not built here (M-R1
-// changes no served bytes), hence the non-test allow.
-#[cfg_attr(not(test), allow(dead_code))]
+// Consumers: the §4.2 exhaustive-matrix tests (M-R1 gate) + the M-R3a shared witness
+// projection's reason-specific posture rendering (`witness_projection` — the production
+// consumer M-R1 named in advance; its dead-code allow came off with M-R3a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WOneReason {
     /// Resident, status ≠ `Fresh` (staleness is a property OF resident data).
@@ -702,8 +709,11 @@ pub enum WOneReason {
 }
 
 /// The pin-state axis of ONE request's activation (only meaningful inside a W-BOTH-eligible
-/// partition set — a pin cannot exist elsewhere).
-#[cfg_attr(not(test), allow(dead_code))] // M-R1: matrix tests; production consumer = M-R2 capture flip.
+/// partition set — a pin cannot exist elsewhere). Production consumer: the M-R3a projection
+/// (which passes `Match` — read surfaces describe PARTITION state, §4.2; the transient cells
+/// `Moved`/`NoPin` are request-scoped fail-softs that never render as posture, so ONLY the
+/// §4.2 matrix tests construct them — hence the variant-scoped allow).
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinState {
     /// The captured fingerprint matches the resident fingerprint at data read.
@@ -719,8 +729,7 @@ pub enum PinState {
 /// the two transient states are request-scoped fail-softs INSIDE the W-BOTH regime — never
 /// regimes, never W-ONE reasons (the type makes the distinction structural: [`WOneReason`] has
 /// exactly three variants).
-#[cfg_attr(not(test), allow(dead_code))]
-// M-R1: matrix tests; production consumers = M-R2/M-R3a.
+// Production consumer: the M-R3a shared witness projection (regime rows).
 // The `W-*` prefixes are the OPERATOR-RATIFIED regime vocabulary (R-RAT-6: W-BOTH / W-ONE /
 // W-NONE — the names grade the SECOND witness); the lint yields to the ratified names.
 #[allow(clippy::enum_variant_names)]
@@ -760,7 +769,7 @@ pub enum StateClass {
 /// `producer_provisioned` is deliberately NOT an eligibility conjunct (Fresh resident data
 /// corroborates regardless — the producer gates the NEXT refresh, so it enters only the W-ONE
 /// ladder and the stale compound's blocker). `pin` only decides among the W-BOTH cells.
-#[cfg_attr(not(test), allow(dead_code))] // M-R1: matrix tests; production consumers = M-R2/M-R3a.
+// Production consumer: the M-R3a shared witness projection (`witness_projection::regime_row`).
 pub fn classify_state(
     covered: bool,
     resident: bool,
@@ -1041,6 +1050,7 @@ pub(super) fn build_witness_ledger(
     let mut s_kind_totals = SKindTotals::default();
     let mut identity_collision = 0usize;
     let mut withheld_pairs: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut s_incoming_witnessed: BTreeSet<String> = BTreeSet::new();
     // pair -> partition -> instance count (attribution substrate) — strict Calls only.
     let mut s_calls_by_partition: BTreeMap<(String, String), BTreeMap<String, usize>> =
         BTreeMap::new();
@@ -1059,6 +1069,11 @@ pub(super) fn build_witness_ledger(
                         rollup.withheld_instances += 1;
                         withheld_pairs.insert(pair);
                     } else {
+                        // M-R3a g2u: a non-withheld compiler-witnessed incoming call (self-edges
+                        // excluded — see the field doc).
+                        if pair.0 != pair.1 {
+                            s_incoming_witnessed.insert(pair.1.clone());
+                        }
                         *s_calls_by_partition
                             .entry(pair)
                             .or_default()
@@ -1069,6 +1084,13 @@ pub(super) fn build_witness_ledger(
                 EdgeType::References => {
                     s_kind_totals.references += 1;
                     rollup.s_references += 1;
+                    // M-R3a g2u: a compiler-verified incoming reference — witnessed unless the
+                    // target key is a detected collision (guard 2: never attribute an S fact to
+                    // the pipeline's entity under a colliding key) or a self-reference.
+                    let (src, dst) = (e.src.as_str(), e.dst.as_str());
+                    if src != dst && !collision_keys.contains(dst) {
+                        s_incoming_witnessed.insert(dst.to_string());
+                    }
                 }
                 EdgeType::Imports => {
                     s_kind_totals.imports += 1;
@@ -1102,6 +1124,7 @@ pub(super) fn build_witness_ledger(
         colliding_keys,
         withheld_pairs,
         identity_suspect: 0,
+        s_incoming_witnessed,
         pairs: BTreeMap::new(),
         delta_pairs: Vec::new(),
         rollups,

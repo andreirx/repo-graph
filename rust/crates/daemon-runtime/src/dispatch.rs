@@ -1708,6 +1708,18 @@ impl ServiceDispatcher {
             }
         };
 
+        // RECON-M-R3a (g1u, §5.3.2): the ADDITIVE union-accounting call block from the shared
+        // witness projection, computed ONCE and injected on EVERY engine path below (the four
+        // bodies share `inject_stats_summary_fields`, so fastpath and SQLite carry the identical
+        // additive field — the stats cert's byte-freeze covers only the `stats` rows, which this
+        // never touches). `None` outside W-BOTH-with-current-ledger → field absent (R-0).
+        let witnesses_field: Option<serde_json::Value> =
+            crate::witness_projection::WitnessProjection::compute(
+                &repo_state,
+                &snapshot.snapshot_uid,
+            )
+            .and_then(|p| p.g1u_block());
+
         // STATS-LIVEGRAPH-IMPL-1: engine routing. DEFAULT (no flags == `auto`) = the cert-gated LiveGraph
         // module-stats FASTPATH (`stats_auto_response`): serves the LiveGraph stats WITHOUT
         // `compute_module_stats` on a GREEN repo cert at the current fingerprint, else a labelled SQLite
@@ -1761,6 +1773,7 @@ impl ServiceDispatcher {
                             import_graph_reliability_field.as_ref(),
                             relationship_next_action.as_deref(),
                             &manifest_roots,
+                            witnesses_field.as_ref(),
                         );
                         DispatchResult::success(&request.id, v)
                     }
@@ -1790,6 +1803,7 @@ impl ServiceDispatcher {
                     import_graph_reliability_field.as_ref(),
                     relationship_next_action.as_deref(),
                     &manifest_roots,
+                    witnesses_field.as_ref(),
                 );
                 return DispatchResult::success(&request.id, v);
             }
@@ -1812,6 +1826,7 @@ impl ServiceDispatcher {
                             import_graph_reliability_field.as_ref(),
                             relationship_next_action.as_deref(),
                             &manifest_roots,
+                            witnesses_field.as_ref(),
                         );
                         DispatchResult::success(&request.id, v)
                     }
@@ -1911,6 +1926,7 @@ impl ServiceDispatcher {
             import_graph_reliability_field.as_ref(),
             relationship_next_action.as_deref(),
             &manifest_roots,
+            witnesses_field.as_ref(),
         );
         DispatchResult::success(&request.id, body)
     }
@@ -1938,12 +1954,18 @@ impl ServiceDispatcher {
         import_graph_reliability: Option<&serde_json::Value>,
         relationship_next_action: Option<&str>,
         manifest_roots: &[repo_graph_agent::ManifestRoot],
+        witnesses: Option<&serde_json::Value>,
     ) {
         let Some(obj) = body.as_object_mut() else {
             return;
         };
         if let Some(total) = total_symbols {
             obj.insert("total_symbols".to_string(), serde_json::json!(total));
+        }
+        // RECON-M-R3a (g1u): the additive, coverage-labeled union call block — OMITTED when
+        // absent (never an empty/zero placeholder; R-0 byte-identity outside W-BOTH).
+        if let Some(block) = witnesses {
+            obj.insert("witnesses".to_string(), block.clone());
         }
         if let Some(axis) = import_graph_reliability {
             obj.insert("import_graph_reliability".to_string(), axis.clone());
@@ -4304,7 +4326,20 @@ impl ServiceDispatcher {
             }),
         );
         match serde_json::to_value(&envelope) {
-            Ok(v) => DispatchResult::success(&request.id, v),
+            Ok(mut v) => {
+                // RECON-M-R3a (g2u-b, §5.3.3b): on a SYMBOL focus, add the union-degree second
+                // figure to the callers/callees evidence WHERE it differs — additive `union`
+                // object with its accounting/coverage label; nothing else changes (zero-SCIP /
+                // ledger-absent / no pinned snapshot → no-op, byte-identical, R-0).
+                if let Some(epoch) = epoch.as_ref() {
+                    crate::witness_projection::WitnessProjection::attach_explain_union_degrees(
+                        &repo_state,
+                        epoch.snapshot_uid(),
+                        &mut v,
+                    );
+                }
+                DispatchResult::success(&request.id, v)
+            }
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -7746,6 +7781,31 @@ impl ServiceDispatcher {
             })
             .collect();
 
+        // RECON-M-R3a (g2u-a, §5.3.3a): the REDUCTION-ONLY unref overlay for THIS module — the
+        // flagged symbols (same dead_nodes rows the rollup consumes, attributed by owned file)
+        // tested against the ledger's compiler-witnessed incoming set. Ledger absent / not
+        // current → `None` → exactly today's rollup (strict generalization); can only REMOVE
+        // flags from the reader's view, never add (the pipeline count itself is untouched).
+        let unref_reduction_block = {
+            let owned: std::collections::BTreeSet<&str> = facts
+                .context
+                .owned_files
+                .iter()
+                .filter(|f| f.module_candidate_uid == resolved_module.module_candidate_uid)
+                .map(|f| f.file_path.as_str())
+                .collect();
+            let flagged: Vec<&str> = dead_nodes
+                .iter()
+                .filter(|d| d.file.as_deref().is_some_and(|f| owned.contains(f)))
+                .map(|d| d.stable_key.as_str())
+                .collect();
+            crate::witness_projection::WitnessProjection::compute(
+                &repo_state,
+                &snapshot.snapshot_uid,
+            )
+            .and_then(|p| p.unref_reduction_block(flagged))
+        };
+
         let dead_node_facts: Vec<DeadNodeFact> = dead_nodes
             .into_iter()
             .filter_map(|d| {
@@ -7782,7 +7842,7 @@ impl ServiceDispatcher {
             .iter()
             .find(|r| r.module_uid == resolved_module.module_candidate_uid);
 
-        let rollups_output = serde_json::json!({
+        let mut rollups_output = serde_json::json!({
             "owned_file_count": module_rollup.map_or(0, |r| r.owned_file_count),
             "owned_test_file_count": module_rollup.map_or(0, |r| r.owned_test_file_count),
             "outbound_dependency_count": module_rollup.map_or(0, |r| r.outbound_dependency_count),
@@ -7797,6 +7857,11 @@ impl ServiceDispatcher {
             "dead_symbol_count": module_rollup.map_or(0, |r| r.dead_symbol_count),
             "dead_test_symbol_count": module_rollup.map_or(0, |r| r.dead_test_symbol_count),
         });
+        // RECON-M-R3a (g2u-a): additive, labeled, reduction-only — beside the pipeline count,
+        // never replacing it; absent when nothing measured or the reduction is 0 (R-0).
+        if let Some(block) = unref_reduction_block {
+            rollups_output["unref_reduction"] = block;
+        }
 
         // Compute weighted neighbors
         let weighted =
@@ -8008,6 +8073,30 @@ impl ServiceDispatcher {
             })
             .collect();
 
+        // RECON-M-R3a (g2u-a, §5.3.3a): per-module flagged symbol keys (file→module join over
+        // the SAME dead_nodes rows the rollup consumes) for the REDUCTION-ONLY unref overlay;
+        // one shared-projection compute for the whole list. Ledger absent → `None` → today's
+        // exact rows (strict generalization).
+        let witness_projection = crate::witness_projection::WitnessProjection::compute(
+            &repo_state,
+            &snapshot.snapshot_uid,
+        );
+        let flagged_by_module: HashMap<String, Vec<String>> = {
+            let file_to_module: HashMap<&str, &str> = owned_file_facts
+                .iter()
+                .map(|f| (f.file_path.as_str(), f.module_uid.as_str()))
+                .collect();
+            let mut map: HashMap<String, Vec<String>> = HashMap::new();
+            for d in &dead_nodes {
+                if let Some(module) = d.file.as_deref().and_then(|f| file_to_module.get(f)) {
+                    map.entry((*module).to_string())
+                        .or_default()
+                        .push(d.stable_key.clone());
+                }
+            }
+            map
+        };
+
         let dead_node_facts: Vec<DeadNodeFact> = dead_nodes
             .into_iter()
             .filter_map(|d| {
@@ -8055,7 +8144,7 @@ impl ServiceDispatcher {
             .iter()
             .map(|m| {
                 let rollup = rollup_map.get(m.module_candidate_uid.as_str());
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "module_uid": m.module_candidate_uid,
                     "module_key": m.module_key,
                     "canonical_root_path": m.canonical_root_path,
@@ -8075,7 +8164,20 @@ impl ServiceDispatcher {
                     },
                     "dead_symbol_count": rollup.map_or(0, |r| r.dead_symbol_count),
                     "dead_test_symbol_count": rollup.map_or(0, |r| r.dead_test_symbol_count),
-                })
+                });
+                // RECON-M-R3a (g2u-a): additive reduction-only overlay beside the pipeline
+                // count (absent when unmeasured or zero — R-0).
+                let flagged: &[String] = flagged_by_module
+                    .get(m.module_candidate_uid.as_str())
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                if let Some(block) = witness_projection
+                    .as_ref()
+                    .and_then(|p| p.unref_reduction_block(flagged.iter().map(String::as_str)))
+                {
+                    row["unref_reduction"] = block;
+                }
+                row
             })
             .collect();
 

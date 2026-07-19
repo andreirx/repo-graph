@@ -139,6 +139,8 @@ pub fn check_to_coherent(
         relationship_next_action: None,
         // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; check never renders it.
         measurement_coverage: None,
+        // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.
+        witnesses: None,
     };
 
     CoherenceEnvelope::new(value, provenance, trust, freshness)

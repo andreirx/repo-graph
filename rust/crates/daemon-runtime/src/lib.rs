@@ -95,6 +95,11 @@ pub mod trust_coherence;
 /// §6.1 M-R2). Flag off ⇒ never entered ⇒ byte-identical serving everywhere.
 pub mod union_serve;
 pub mod util;
+/// RECON-M-R3a: the SHARED WITNESS PROJECTION — ONE computation feeding every witness read
+/// surface (trust witnesses block, doctor operational block, orient/stats g1u, modules g2u,
+/// explain union degree, map g3u). Peek-only over the M-R1 ledger + partition state; renders
+/// unknown, never a stale number (recon-design-1 §5.3.2-4/§5.4).
+pub mod witness_projection;
 
 // COHERENCE-LEAF-SERVE-IMPL-2: explain's consumer of the SHARED `OrientServeDecorator` + bounded cert
 // (the dispatch wiring lives in `dispatch::handle_explain`; these are its serve/no-eager-read/honest-bound/

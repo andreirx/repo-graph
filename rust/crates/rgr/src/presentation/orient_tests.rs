@@ -31,6 +31,7 @@ fn minimal_response() -> OrientResponse {
         trust_briefing: None,
         relationship_next_action: None,
         measurement_coverage: None,
+        witnesses: None,
     }
 }
 

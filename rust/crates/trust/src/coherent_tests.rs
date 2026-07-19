@@ -107,6 +107,9 @@ fn fresh_posture_leaf() -> CoherenceEnvelope<LiveGraphPosture> {
         }],
         producer_available: true,
         migrated_answer_capability: true,
+        // M-R3A-TRUST-POSTURE: the served path carries both facts explicitly.
+        livegraph_resident: Some(true),
+        coherent_serve_eligible: Some(true),
     }
     .into_leaf(
         TrustPosture {
@@ -325,4 +328,37 @@ fn wire_shape_carries_the_wrapper_and_the_posture_leaf() {
     assert!(json.get("freshness").is_some());
     assert!(json["value"].get("current_state_posture").is_some());
     assert!(json["value"]["current_state_posture"]["value"]["resident"].as_bool() == Some(true));
+}
+
+// ── M-R3A-TRUST-POSTURE (ratified 2026-07-19): the two-fact wire contract ────────────────────────
+
+/// The COLD leaf serializes WITHOUT the amendment fields — `resident: false` is the complete
+/// truth there and the zero-SCIP wire stays byte-identical to the pre-amendment shape (R-0).
+#[test]
+fn cold_posture_wire_omits_the_amendment_fields() {
+    let cold = trust_to_coherent(report(true), LiveGraphPosture::unavailable_leaf(), false);
+    let posture = &serde_json::to_value(&cold).unwrap()["value"]["current_state_posture"]["value"];
+    assert_eq!(posture["resident"].as_bool(), Some(false));
+    assert!(posture.get("livegraph_resident").is_none(), "{posture}");
+    assert!(
+        posture.get("coherent_serve_eligible").is_none(),
+        "{posture}"
+    );
+}
+
+/// The RESIDENT-BUT-WITHHELD leaf carries BOTH facts explicitly labeled — residency true,
+/// eligibility false — while the legacy serve fact (`resident`) and the Unavailable class are
+/// unchanged (the epoch invariant; values stay withheld).
+#[test]
+fn resident_withheld_posture_wire_states_both_facts() {
+    let env = trust_to_coherent(
+        report(true),
+        LiveGraphPosture::resident_withheld_leaf(),
+        false,
+    );
+    let posture = &serde_json::to_value(&env).unwrap()["value"]["current_state_posture"]["value"];
+    assert_eq!(posture["resident"].as_bool(), Some(false));
+    assert_eq!(posture["livegraph_resident"].as_bool(), Some(true));
+    assert_eq!(posture["coherent_serve_eligible"].as_bool(), Some(false));
+    assert_eq!(posture["partitions"].as_array().map(Vec::len), Some(0));
 }

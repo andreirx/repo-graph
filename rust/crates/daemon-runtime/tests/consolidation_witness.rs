@@ -63,11 +63,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The 12 ratified sanctioned surfaces (EC-1 M-1: the sanctioned list is the §3.3-A
+/// The ratified sanctioned surfaces (EC-1 M-1: the sanctioned list is the §3.3-A
 /// mixed-read handlers together with the two LiveGraph writers). Hard-coded here — NOT
 /// derived from the manifest — so a new surface cannot be admitted silently: adding one
 /// requires a reviewed change to BOTH this constant and `livegraph_reader_set.txt`
 /// (i.e. a ratified §3.3-A amendment).
+///
+/// RECON-M-R3a AMENDMENT (2026-07-18, shipped for review with the M-R3a slice): FOUR read
+/// surfaces added — `modules_show`, `modules_list`, `map`, `storage_health` — because the
+/// ratified recon-design-1 §6.1 M-R3a row mandates the witness-ledger read surfaces on
+/// modules (g2u), map (g3u) and doctor (the §5.4 operational block via `storage_health`),
+/// and rendering a ledger FIGURE honestly requires the resident-fingerprint currency check
+/// (a `.livegraph` read; "never a stale number"). All four read through ONE module
+/// (`witness_projection/mod.rs`), peek-only.
 const SANCTIONED_SURFACES: &[&str] = &[
     // §3.3-A mixed-read ten (the LiveGraph-field readers among request handlers)
     "callers",
@@ -83,6 +91,12 @@ const SANCTIONED_SURFACES: &[&str] = &[
     // the two LiveGraph writers
     "livegraph_preload",
     "livegraph_refresh",
+    // RECON-M-R3a witness read surfaces — M-R3A-READER-SET-AMENDMENT, operator-RATIFIED
+    // 2026-07-19 (the manifest header carries the amendment record; two-site change).
+    "modules_show",
+    "modules_list",
+    "map",
+    "storage_health",
 ];
 
 /// The fact-class taxonomy (EC-1 §3.2), hard-coded like `SANCTIONED_SURFACES`. A token in

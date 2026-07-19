@@ -219,6 +219,35 @@ pub fn handle_storage_health(state: &DaemonState, request: &Request) -> Dispatch
     // own lock produced (contract E). When idle, it enumerates every snapshot's state + outcome +
     // size (contract F) and preserves the pre-existing `db_size_bytes` / `total_snapshots` /
     // `prunable_snapshots` fields (additive superset — doctor's existing rendering is unaffected).
-    let facts = crate::snapshot_facts::collect_snapshot_facts(state, db_path, repo_uid);
+    let mut facts = crate::snapshot_facts::collect_snapshot_facts(state, db_path, repo_uid);
+    // RECON-M-R3a: the witness-ledger OPERATIONAL block (recon-design-1 §5.4 doctor half) —
+    // ledger presence/currency + last build outcome + coverage regimes with reason-specific
+    // next actions. PEEK-only (renders ledger state, never builds it). Attached ONLY on the
+    // idle path (the E contract's in-use short-circuit must not be followed by a busy open),
+    // scoped to `storage_health` (doctor's per-repo request; `repo_info` deliberately
+    // untouched — least-new-surface, recorded), and only when a READY snapshot exists (the
+    // currency fingerprint is snapshot-scoped — a ledger cannot exist without one). Absent on
+    // repos with no witness evidence (R-0 data-driven absence).
+    let in_use = facts
+        .get("in_use_by_daemon")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if !in_use {
+        if let Ok(repo_state) = state.load_repo(db_path, repo_uid) {
+            let ready_uid = repo_state.storage().ok().and_then(|s| {
+                repo_graph_agent::AgentStorageRead::get_latest_snapshot(&s, repo_uid)
+                    .ok()
+                    .flatten()
+                    .map(|snap| snap.snapshot_uid)
+            });
+            if let Some(uid) = ready_uid {
+                if let Some(p) =
+                    crate::witness_projection::WitnessProjection::compute(&repo_state, &uid)
+                {
+                    facts["witness_ledger"] = p.doctor_block();
+                }
+            }
+        }
+    }
     DispatchResult::success(&request.id, facts)
 }

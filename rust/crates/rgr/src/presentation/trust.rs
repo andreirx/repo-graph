@@ -169,6 +169,15 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
         out.push('\n');
     }
 
+    // RECON-M-R3a: the additive Witnesses section (union accounting / divergence posture) —
+    // rendered by the SHARED client-side witness projection; ABSENT entirely on zero-SCIP repos
+    // (R-0: the daemon omits the field; this renders nothing on None).
+    let witnesses = crate::presentation::witnesses::render_trust_section(v.witnesses.as_ref());
+    if !witnesses.is_empty() {
+        out.push_str(&witnesses);
+        out.push('\n');
+    }
+
     let suspicious = render_suspicious_modules(v);
     if !suspicious.is_empty() {
         out.push_str(&suspicious);
@@ -204,6 +213,17 @@ fn render_posture(leaf: &CoherenceEnvelope<LiveGraphPosture>) -> String {
     let mut out = labelled_heading("Current-State Posture", leaf, "current-state");
 
     if !p.resident {
+        // M-R3A-TRUST-POSTURE (ratified 2026-07-19): the legacy `resident` field is the SERVE
+        // fact; the amendment fields carry the two distinguished facts. A resident-but-withheld
+        // state must NEVER read as "not loaded" (the review-0 contradiction — a false state
+        // claim beside a W-BOTH witnesses block).
+        if p.livegraph_resident == Some(true) && p.coherent_serve_eligible == Some(false) {
+            out.push_str(&bullet(
+                "Resident: yes (compiler analysis is loaded) — current-state detail withheld: \
+                 not verified coherent with this report's snapshot for this request",
+            ));
+            return out;
+        }
         out.push_str(&bullet(
             "Resident: no (LiveGraph not loaded for this repo — current-state posture unavailable)",
         ));

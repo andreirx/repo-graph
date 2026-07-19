@@ -143,6 +143,11 @@ pub struct StatsResponse {
     /// suppressed — a genuine single-package or manifest-less repo carries no marker.
     #[serde(default)]
     pub root_manifest_limitation: Option<String>,
+    /// RECON-M-R3a (g1u): the daemon's ADDITIVE union-accounting call block (opaque JSON —
+    /// rendered through the shared `presentation::witnesses` projection). Present ONLY in
+    /// W-BOTH with a current measured ledger; absent on the wire otherwise (R-0).
+    #[serde(default)]
+    pub witnesses: Option<serde_json::Value>,
 }
 
 /// MODULE-MODEL-2 §13 D4/D7: one folded package group in the stats response — the
@@ -318,6 +323,18 @@ impl StatsResponse {
             out.push_str(line);
             out.push('\n');
         }
+        // RECON-M-R3a (g1u, §5.3.2): the ADDITIVE reconciled union-call line — rendered ONLY
+        // when the daemon attached the coverage-labeled block (W-BOTH with a current measured
+        // ledger); absent otherwise (byte-identical output, R-0). Same shared renderer as
+        // orient, so the two surfaces carry one phrasing.
+        if let Some(line) = self
+            .witnesses
+            .as_ref()
+            .and_then(crate::presentation::witnesses::g1u_line)
+        {
+            out.push_str(&line);
+            out.push('\n');
+        }
 
         // ── By fan-in (MODULE-MODEL-2 §13 D7 bounded — see "By size") ──
         out.push_str(&heading("By fan-in"));
@@ -463,6 +480,7 @@ mod tests {
             import_graph_reliability: None,
             relationship_next_action: None,
             root_manifest_limitation: None,
+            witnesses: None,
             // The daemon folds these 3 dirs (no manifest, shared `src` prefix) into
             // 3 package groups — pre-computed here since the client no longer folds.
             package_groups: vec![
@@ -639,6 +657,7 @@ mod tests {
             import_graph_reliability: None,
             relationship_next_action: None,
             root_manifest_limitation: None,
+            witnesses: None,
             package_groups: vec![],
             stats: vec![],
         };
@@ -659,6 +678,7 @@ mod tests {
             import_graph_reliability: None,
             relationship_next_action: None,
             root_manifest_limitation: None,
+            witnesses: None,
             package_groups: vec![],
             stats: vec![],
         };
@@ -730,6 +750,7 @@ mod tests {
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
             relationship_next_action: None,
             root_manifest_limitation: None,
+            witnesses: None,
             package_groups: vec![],
             stats: vec![degenerate_module()],
         };
@@ -761,6 +782,7 @@ mod tests {
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
             relationship_next_action: None,
             root_manifest_limitation: None,
+            witnesses: None,
             package_groups: vec![],
             stats: vec![degenerate_module()],
         };

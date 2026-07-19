@@ -113,12 +113,11 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     let granular_probes = granular_socket_probes();
     probes.extend(granular_probes);
 
-    // Add storage summary probe (PERF-OBS-1)
+    // Add storage summary probe (PERF-OBS-1) + the witness-ledger operational probe when the
+    // daemon attached one (RECON-M-R3a; absent on zero-SCIP repos — R-0 data-driven absence).
     // Uses DaemonClient which handles transport fallback (socket → stdio)
     // so this works in both normal and sandboxed environments
-    if let Some(storage_probe) = storage_summary_probe() {
-        probes.push(storage_probe);
-    }
+    probes.extend(storage_summary_probes());
 
     // daemon_info-derived probes: authority policy (STATE-ROOT-SEPARATION-1) plus
     // daemon memory + total storage (DOCTOR-RESOURCE-REPORT), from one round-trip.
@@ -150,32 +149,34 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     (output, healthy)
 }
 
-/// Query daemon for storage summary (DB size, snapshot count).
+/// Query daemon for storage summary (DB size, snapshot count) + the witness-ledger
+/// operational block (RECON-M-R3a) — ONE `storage_health` round-trip, one or two probes.
 ///
-/// Returns a probe with storage info on success, or a degraded/info probe on error.
-/// Never returns None — failures should be visible in diagnostics.
-fn storage_summary_probe() -> Option<ProbeResult> {
+/// Always returns at least the `storage` probe (failures visible in diagnostics, never
+/// silent); the `witness_ledger` probe rides only when the daemon attached the block.
+/// (Renamed from `storage_summary_probe` with the plural contract — local, recorded.)
+fn storage_summary_probes() -> Vec<ProbeResult> {
     let cwd = match std::env::current_dir() {
         Ok(p) => p,
         Err(e) => {
-            return Some(ProbeResult {
+            return vec![ProbeResult {
                 name: "storage".to_string(),
                 passed: false,
                 message: "failed to get cwd".to_string(),
                 details: Some(format!("{}", e)),
-            });
+            }];
         }
     };
 
     let mut client = match DaemonClient::new() {
         Ok(c) => c,
         Err(e) => {
-            return Some(ProbeResult {
+            return vec![ProbeResult {
                 name: "storage".to_string(),
                 passed: false,
                 message: "daemon unavailable".to_string(),
                 details: Some(format!("{}", e)),
-            });
+            }];
         }
     };
 
@@ -191,24 +192,26 @@ fn storage_summary_probe() -> Option<ProbeResult> {
             let msg = format!("{}", e);
             if msg.contains("not indexed") {
                 // Not an error — just no repo in cwd
-                return Some(ProbeResult {
+                return vec![ProbeResult {
                     name: "storage".to_string(),
                     passed: true,
                     message: "no repo indexed in cwd".to_string(),
                     details: None,
-                });
+                }];
             }
             // Other errors are degraded diagnostics
-            return Some(ProbeResult {
+            return vec![ProbeResult {
                 name: "storage".to_string(),
                 passed: false,
                 message: "query failed".to_string(),
                 details: Some(msg),
-            });
+            }];
         }
     };
 
-    Some(storage_probe::storage_probe_from_facts(&response))
+    let mut probes = vec![storage_probe::storage_probe_from_facts(&response)];
+    probes.extend(storage_probe::witness_probe_from_facts(&response));
+    probes
 }
 
 /// Format size in human-readable form.
@@ -330,17 +333,23 @@ fn print_human_output(output: &DoctorOutput) {
         }
     }
 
-    // Storage (PERF-OBS-1)
+    // Storage (PERF-OBS-1) + the witness-ledger operational line (RECON-M-R3a; the probe name
+    // must be listed here or human output hides it — the section-filter gotcha above).
     let storage_probes: Vec<_> = output
         .probes
         .iter()
-        .filter(|p| p.name == "storage")
+        .filter(|p| matches!(p.name.as_str(), "storage" | "witness_ledger"))
         .collect();
 
     if !storage_probes.is_empty() {
         println!("Storage:");
         for probe in &storage_probes {
-            print_probe(probe);
+            let label = match probe.name.as_str() {
+                // Reader-frame label for the machine-readable probe name.
+                "witness_ledger" => "call-graph witnesses",
+                other => other,
+            };
+            print_probe_labeled(probe, label);
         }
         println!();
     }

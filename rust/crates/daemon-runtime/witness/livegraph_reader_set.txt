@@ -23,6 +23,16 @@
 # admitted silently — adding one requires a reviewed change to BOTH the witness
 # constant and this manifest (i.e. a ratified §3.3-A amendment).
 #
+# AMENDMENT (M-R3A-READER-SET-AMENDMENT, operator-RATIFIED 2026-07-19): FOUR read
+# surfaces added — modules_show, modules_list, map, storage_health — all reading
+# through the ONE shared witness projection (witness_projection/mod.rs), implied by
+# the ratified M-R3a row (g2u modules overlays, g3u map pairs, doctor operational
+# block via storage_health) and by the never-stale rule (rendering a ledger FIGURE
+# requires the resident-fingerprint currency check, a `.livegraph` read). The
+# sanctioned set is now these 16. Recorded from the RECON-M-R3A-READ-SURFACES-1
+# review-0 escalate resolution; the two-site change (this manifest +
+# SANCTIONED_SURFACES) landed together, as this contract demands.
+#
 # SCOPE: files under rust/crates/daemon-runtime/src (RepoState — and therefore its
 # `livegraph` field — is owned there; no other crate can name the field). A
 # "field read" is the token `.livegraph` NOT followed by `[A-Za-z0-9_]` — this is a
@@ -69,6 +79,14 @@ orient_serve/mod.rs                       = orient, explain
 orient_serve/storage_port_impl.rs         = orient, explain
 trust_coherence.rs                        = trust
 union_serve/mod.rs                        = callers, callees
+# RECON-M-R3a: the SHARED witness projection — the ratified §6.1 M-R3a row's read surfaces
+# (recon-design-1 §5.3.2-4/§5.4: trust witnesses block, doctor operational block via
+# storage_health, orient/stats g1u, modules g2u, map g3u, explain union degree). PEEK-only
+# (partition inventory + resident fingerprint for the never-stale currency check; it never
+# builds the ledger). The FOUR surfaces beyond the prior sanctioned set (modules_show,
+# modules_list, map, storage_health) are the §3.3-A amendment RATIFIED 2026-07-19
+# (M-R3A-READER-SET-AMENDMENT — see the header amendment note).
+witness_projection/mod.rs                 = trust, orient, stats, explain, modules_show, modules_list, map, storage_health
 
 [test-scaffolding]
 callgraph_cert/ledger_tests.rs
@@ -83,3 +101,4 @@ focus_resolution_cert/tests.rs
 orient_lg_decisions/served_e2e.rs
 orient_serve/tests.rs
 union_serve/tests.rs
+witness_projection/tests.rs

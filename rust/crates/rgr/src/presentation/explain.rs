@@ -377,6 +377,110 @@ mod tests {
         assert!(out.contains("handleLogin (src/controllers)"));
     }
 
+    /// Review-1 item 3: the NONZERO g2u-b union-degree second figure through final human
+    /// rendering — the daemon-attached `union` object renders as the labeled heading suffix
+    /// on BOTH callers and callees, beside the untouched pipeline count.
+    #[test]
+    fn render_shows_union_degree_suffix_where_it_differs() {
+        let mut r = minimal_response();
+        r.signals = vec![
+            leaf(ExplainSignal {
+                code: "EXPLAIN_CALLERS".to_string(),
+                summary: "1 direct caller.".to_string(),
+                evidence: Some(serde_json::json!({
+                    "count": 1,
+                    "items": [{"name": "handleLogin", "module": "src/controllers"}],
+                    "union": {
+                        "count": 2, "pipeline_count": 1, "accounting": "union",
+                        "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+                    },
+                })),
+            }),
+            leaf(ExplainSignal {
+                code: "EXPLAIN_CALLEES".to_string(),
+                summary: "2 callees.".to_string(),
+                evidence: Some(serde_json::json!({
+                    "count": 2,
+                    "items": [{"name": "audit", "module": "src/log"}],
+                    "union": {
+                        "count": 3, "pipeline_count": 2, "accounting": "union",
+                        "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+                    },
+                })),
+            }),
+        ];
+        let out = r.render_human(false);
+        // Review-2 item 1: the coverage basis renders BESIDE the reconciled value — the
+        // §5.3.0 human frame, not a bare labeled count.
+        assert!(
+            out.contains(
+                "Callers (1 · reconciled 2 — combined analyses (coverage: TypeScript (1 partition)))"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "Callees (2 · reconciled 3 — combined analyses (coverage: TypeScript (1 partition)))"
+            ),
+            "{out}"
+        );
+        // No union object (degrees agree / no ledger) → today's exact heading.
+        let mut plain = minimal_response();
+        plain.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "1 direct caller.".to_string(),
+            evidence: Some(serde_json::json!({"count": 1, "items": []})),
+        })];
+        let plain_out = plain.render_human(false);
+        assert!(plain_out.contains("Callers (1)"), "{plain_out}");
+        assert!(!plain_out.contains("reconciled"), "{plain_out}");
+    }
+
+    /// Review-2 item 1 (negative): a `union` object that fails the §5.3.0 labeling gate —
+    /// missing `accounting: "union"`, or missing/malformed coverage — SUPPRESSES the union
+    /// degree entirely: the heading is exactly the pipeline heading, never an unlabeled
+    /// reconciled figure.
+    #[test]
+    fn union_degree_without_accounting_or_coverage_never_renders() {
+        // Case 1: coverage well-formed, accounting marker ABSENT.
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "1 direct caller.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 1,
+                "items": [],
+                "union": {
+                    "count": 2, "pipeline_count": 1,
+                    "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+                },
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(out.contains("Callers (1)"), "{out}");
+        assert!(!out.contains("Callers (1 ·"), "{out}");
+        assert!(!out.contains("reconciled"), "{out}");
+
+        // Case 2: accounting present, coverage MALFORMED (empty languages).
+        let mut r2 = minimal_response();
+        r2.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CALLEES".to_string(),
+            summary: "2 callees.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 2,
+                "items": [],
+                "union": {
+                    "count": 3, "pipeline_count": 2, "accounting": "union",
+                    "coverage": {"languages": [], "partitions": ["p"], "fingerprint": "fp"},
+                },
+            })),
+        })];
+        let out2 = r2.render_human(false);
+        assert!(out2.contains("Callees (2)"), "{out2}");
+        assert!(!out2.contains("Callees (2 ·"), "{out2}");
+        assert!(!out2.contains("reconciled"), "{out2}");
+    }
+
     #[test]
     fn render_shows_trust() {
         let mut r = minimal_response();

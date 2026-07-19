@@ -56,6 +56,12 @@ pub struct ModuleRollups {
     pub dead_symbol_count: usize,
     #[serde(default)]
     pub dead_test_symbol_count: usize,
+    /// RECON-M-R3a (g2u-a): the daemon's REDUCTION-ONLY unref overlay
+    /// (`{fewer_flagged, accounting, coverage, basis}`) — flagged symbols the compiler
+    /// witnessed incoming references for (known false positives of the syntax-only
+    /// estimate). Absent unless measured and nonzero (R-0).
+    #[serde(default)]
+    pub unref_reduction: Option<serde_json::Value>,
 }
 
 /// Module dependency edge (from daemon inbound/outbound_dependencies).
@@ -250,6 +256,28 @@ impl ModulesShowResponse {
                 )
             ));
         }
+        // RECON-M-R3a (g2u-a, §5.3.3a): the reduction-only compiler-witness line — rendered
+        // ONLY when the daemon attached a nonzero reduction (W-BOTH with a current measured
+        // ledger) AND the block passes the §5.3.0 labeling gate (review-2 item 1:
+        // `accounting: "union"` + coverage basis, via the ONE shared gate) — the coverage
+        // renders beside the reconciled value. It shrinks the false-positive claim; the
+        // pipeline count above stays untouched.
+        if let Some((n, coverage)) = self.rollups.unref_reduction.as_ref().and_then(|b| {
+            let coverage = crate::presentation::witnesses::union_coverage_phrase(b)?;
+            // Reduction-only truth: a zero/absent/malformed reduction renders NOTHING (the
+            // daemon never attaches zero; defensive parity with the modules_list aggregate —
+            // a zero line would be noise, a coerced zero an invented claim).
+            let n = b
+                .get("fewer_flagged")
+                .and_then(|v| v.as_u64())
+                .filter(|n| *n > 0)?;
+            Some((n, coverage))
+        }) {
+            out.push_str(&format!(
+                "  {n} fewer flagged: compiler-verified references found \
+                 (reconciled — combined analyses; coverage: {coverage})\n"
+            ));
+        }
         out.push_str(
             "  note: unreferenced = no inbound reference in the indexed graph \
              (syntactic estimate); over-counts under low call-graph resolution; \
@@ -314,6 +342,7 @@ mod tests {
                 violation_count: 1,
                 dead_symbol_count: 25,
                 dead_test_symbol_count: 5,
+                unref_reduction: None,
             },
             outbound_dependencies: vec![ModuleDependency {
                 module_uid: "mod-lib".to_string(),
@@ -371,6 +400,7 @@ mod tests {
                 violation_count: 0,
                 dead_symbol_count: 10,
                 dead_test_symbol_count: 0,
+                unref_reduction: None,
             },
             outbound_dependencies: vec![],
             inbound_dependencies: vec![],
@@ -386,6 +416,59 @@ mod tests {
         let resp = sample_show_response();
         let output = resp.render_human();
         assert!(output.contains("Module: src"));
+    }
+
+    /// Review-1 item 3: the NONZERO g2u reduction through final human rendering — the
+    /// labeled line renders beside (never instead of) the untouched pipeline count.
+    #[test]
+    fn show_render_nonzero_unref_reduction_renders_beside_pipeline_count() {
+        let mut resp = sample_show_response();
+        resp.rollups.unref_reduction = Some(serde_json::json!({
+            "accounting": "union",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 3,
+            "basis": "compiler-verified references found",
+        }));
+        let output = resp.render_human();
+        // Review-2 item 1: the coverage basis renders beside the reconciled value.
+        assert!(
+            output.contains(
+                "3 fewer flagged: compiler-verified references found \
+                 (reconciled — combined analyses; coverage: TypeScript (1 partition))"
+            ),
+            "{output}"
+        );
+        assert!(
+            output.contains("25 unreferenced symbols"),
+            "the pipeline count stays untouched: {output}"
+        );
+    }
+
+    /// A zero or malformed reduction renders NOTHING — the daemon never attaches zero, and a
+    /// coerced zero would be an invented claim (review-1 item 5's rule at this surface).
+    /// Review-2 item 1 extends the malformed class: a NONZERO reduction missing its
+    /// `accounting: "union"` marker or its coverage basis is suppressed too — the union
+    /// value never renders unlabeled.
+    #[test]
+    fn show_render_zero_or_malformed_reduction_renders_nothing() {
+        let mut resp = sample_show_response();
+        resp.rollups.unref_reduction = Some(serde_json::json!({"fewer_flagged": 0}));
+        assert!(!resp.render_human().contains("fewer flagged"));
+        resp.rollups.unref_reduction = Some(serde_json::json!({"basis": "no count field"}));
+        assert!(!resp.render_human().contains("fewer flagged"));
+        // Nonzero count, accounting marker ABSENT (coverage well-formed) → suppressed.
+        resp.rollups.unref_reduction = Some(serde_json::json!({
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 3,
+        }));
+        assert!(!resp.render_human().contains("fewer flagged"));
+        // Nonzero count, accounting present, coverage MALFORMED (no languages) → suppressed.
+        resp.rollups.unref_reduction = Some(serde_json::json!({
+            "accounting": "union",
+            "coverage": {"partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 3,
+        }));
+        assert!(!resp.render_human().contains("fewer flagged"));
     }
 
     #[test]

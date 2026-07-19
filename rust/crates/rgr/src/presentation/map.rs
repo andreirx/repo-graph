@@ -95,6 +95,12 @@ pub struct MapFacts {
     /// (partial coverage) or reason (coverage unavailable) is surfaced so
     /// complexity numbers — and their absence — are never read as complete.
     pub measurement_coverage: serde_json::Value,
+    /// RECON-M-R3a (g3u): the daemon's union-sketch block — compiler-witnessed CALL file
+    /// pairs the syntax sketch lacks (`dependency_call_pairs_added`) + the recorded
+    /// `pair_delta`, coverage-labeled. Absent outside W-BOTH with a current measured
+    /// ledger (R-0: the sketch is then exactly today's).
+    #[serde(default)]
+    pub witnesses: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -539,14 +545,65 @@ fn render_dir_map(
             }
         }
     }
-    if !dep_targets.is_empty() {
-        s.push_str(&format!("## Dependencies ({})\n", dep_targets.len()));
+    // RECON-M-R3a (g3u, §5.3.4): fold in the compiler-witnessed CALL pairs the syntax
+    // sketch lacks (`semantic`/`new_pair` only — the union never loses a pipeline pair).
+    // Targets reachable ONLY through a witness pair are labeled inline; absent block →
+    // exactly today's sketch (R-0). Review-1 item 2 + the §5.3.0 labeling rule, via the
+    // ONE shared gate (`union_coverage_phrase`, review-2 item 1): the additions fold ONLY
+    // when the block carries `accounting: "union"` + a derivable coverage basis (a union
+    // value never renders unlabeled), and the basis RENDERS beside them — coverage is part
+    // of the fact, stated where the fact renders.
+    let mut witness_only: BTreeSet<&str> = BTreeSet::new();
+    let mut witness_coverage: Option<String> = None;
+    if let Some(w) = facts.witnesses.as_ref() {
+        if let (Some(coverage), Some(pairs)) = (
+            crate::presentation::witnesses::union_coverage_phrase(w),
+            w.get("dependency_call_pairs_added")
+                .and_then(|v| v.as_array()),
+        ) {
+            let dir_paths: BTreeSet<&str> = dir_files.iter().map(|f| f.path.as_str()).collect();
+            for p in pairs {
+                let (Some(src), Some(dst)) = (
+                    p.get("source").and_then(|v| v.as_str()),
+                    p.get("target").and_then(|v| v.as_str()),
+                ) else {
+                    continue;
+                };
+                if dir_paths.contains(src) && !dep_targets.contains(dst) {
+                    witness_only.insert(dst);
+                }
+            }
+            if !witness_only.is_empty() {
+                witness_coverage = Some(coverage);
+            }
+        }
+    }
+    if !dep_targets.is_empty() || !witness_only.is_empty() {
+        s.push_str(&format!(
+            "## Dependencies ({})\n",
+            dep_targets.len() + witness_only.len()
+        ));
         s.push_str(
             "Resolved intra-repo dependency targets (import + call edges) of this directory's \
              files. External / unresolved imports appear in each file's map.\n",
         );
-        for t in &dep_targets {
-            s.push_str(&format!("- {}\n", t));
+        // The §5.3.0 human frame for the union-witnessed additions, coverage beside the fact.
+        if let Some(coverage) = &witness_coverage {
+            s.push_str(&format!(
+                "Compiler-witnessed additions below are reconciled — combined analyses \
+                 (coverage: {coverage}).\n"
+            ));
+        }
+        let merged: BTreeSet<&str> = dep_targets.union(&witness_only).copied().collect();
+        for t in &merged {
+            if witness_only.contains(t) {
+                s.push_str(&format!(
+                    "- {} (compiler-witnessed call — reconciled, syntax+compiler)\n",
+                    t
+                ));
+            } else {
+                s.push_str(&format!("- {}\n", t));
+            }
         }
         s.push('\n');
     }
@@ -873,6 +930,7 @@ mod tests {
                 "status": "available",
                 "caveat": "Complexity measured for Rust only."
             }),
+            witnesses: None,
         }
     }
 
@@ -1085,6 +1143,90 @@ mod tests {
         assert!(src.contains("- src/util/helper.rs\n"));
         assert!(src.contains("## Complexity coverage\nComplexity measured for Rust only.\n"));
         assert!(rendered.iter().any(|r| r.rel_path == "src/util/MAP.md"));
+    }
+
+    /// Review-1 items 2+3: a NONZERO g3u overlay through FINAL document rendering. The
+    /// witness-only pair folds in labeled AND the section carries the coverage basis
+    /// (§5.3.0: a union value never renders without accounting + coverage; VISION: coverage
+    /// renders with the fact); a pair whose target the pipeline sketch already reaches is
+    /// subtracted (renders plain, never double-counted, never re-labeled).
+    #[test]
+    fn witness_pairs_render_labeled_with_coverage_and_subtract_known_targets() {
+        let mut facts = fixture();
+        facts.witnesses = Some(serde_json::json!({
+            "accounting": "union",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["app", "lib"], "fingerprint": "fp9"},
+            "pair_delta": 2,
+            "dependency_call_pairs_added": [
+                // Witness-only: target NOT in the pipeline sketch → labeled + counted.
+                {"source": "src/a.rs", "target": "src/net/client.rs"},
+                // Target already in the pipeline sketch → subtracted at render.
+                {"source": "src/a.rs", "target": "src/b.rs"},
+            ],
+        }));
+        let rendered = render_maps(&facts);
+        let src = dir_map(&rendered, "src/MAP.md");
+        // 3 pipeline targets + exactly 1 witness-only addition (the b.rs pair subtracted).
+        assert!(src.contains("## Dependencies (4)"), "{src}");
+        assert!(
+            src.contains(
+                "Compiler-witnessed additions below are reconciled — combined analyses \
+                 (coverage: TypeScript (2 partitions))."
+            ),
+            "the coverage basis must render beside the witness additions: {src}"
+        );
+        assert!(
+            src.contains(
+                "- src/net/client.rs (compiler-witnessed call — reconciled, syntax+compiler)\n"
+            ),
+            "{src}"
+        );
+        assert!(
+            src.contains("- src/b.rs\n") && !src.contains("- src/b.rs (compiler-witnessed"),
+            "a pipeline-reachable target renders plain — subtraction holds: {src}"
+        );
+    }
+
+    /// Review-1 item 2 (the labeling gate): a witness block whose coverage basis is missing
+    /// or malformed must fold NOTHING — a union value never renders unlabeled (§5.3.0), and
+    /// the sketch stays exactly the pipeline sketch.
+    #[test]
+    fn witness_pairs_without_coverage_basis_never_fold() {
+        let mut facts = fixture();
+        facts.witnesses = Some(serde_json::json!({
+            "accounting": "union",
+            // coverage ABSENT (malformed/additive payload)
+            "pair_delta": 1,
+            "dependency_call_pairs_added": [
+                {"source": "src/a.rs", "target": "src/net/client.rs"},
+            ],
+        }));
+        let rendered = render_maps(&facts);
+        let src = dir_map(&rendered, "src/MAP.md");
+        assert!(src.contains("## Dependencies (3)"), "{src}");
+        assert!(!src.contains("compiler-witnessed"), "{src}");
+        assert!(!src.contains("src/net/client.rs"), "{src}");
+    }
+
+    /// Review-2 item 1 (the gate's OTHER half): a witness block with a valid coverage basis
+    /// but no `accounting: "union"` marker folds NOTHING either — both §5.3.0 labels are
+    /// required, through the one shared gate.
+    #[test]
+    fn witness_pairs_without_the_accounting_marker_never_fold() {
+        let mut facts = fixture();
+        facts.witnesses = Some(serde_json::json!({
+            // accounting ABSENT; coverage well-formed
+            "coverage": {"languages": ["TypeScript"], "partitions": ["app"], "fingerprint": "fp9"},
+            "pair_delta": 1,
+            "dependency_call_pairs_added": [
+                {"source": "src/a.rs", "target": "src/net/client.rs"},
+            ],
+        }));
+        let rendered = render_maps(&facts);
+        let src = dir_map(&rendered, "src/MAP.md");
+        assert!(src.contains("## Dependencies (3)"), "{src}");
+        assert!(!src.contains("compiler-witnessed"), "{src}");
+        assert!(!src.contains("src/net/client.rs"), "{src}");
     }
 
     #[test]

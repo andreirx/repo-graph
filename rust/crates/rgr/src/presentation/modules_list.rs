@@ -39,6 +39,10 @@ pub struct ModuleListEntry {
     pub owned_file_count: usize,
     #[serde(default)]
     pub owned_test_file_count: usize,
+    /// RECON-M-R3a (g2u-a): the daemon's per-module REDUCTION-ONLY unref overlay
+    /// (`{fewer_flagged, …}` — see `modules_show`). Absent unless measured and nonzero.
+    #[serde(default)]
+    pub unref_reduction: Option<serde_json::Value>,
     #[serde(default)]
     pub outbound_dependency_count: usize,
     #[serde(default)]
@@ -133,6 +137,42 @@ impl ModulesListResponse {
              (syntactic estimate); over-counts under low call-graph resolution; \
              run `rmap trust` for reliability.\n",
         );
+        // RECON-M-R3a (g2u-a): the reduction-only compiler-witness aggregate — rendered ONLY
+        // when the daemon attached nonzero reductions (W-BOTH with a current measured ledger)
+        // that pass the §5.3.0 labeling gate (review-2 item 1: `accounting: "union"` +
+        // coverage basis, per row, via the ONE shared gate) — the coverage renders beside the
+        // aggregate. A row failing the gate contributes NOTHING (its union value is
+        // suppressed, never rendered unlabeled). Per-module figures ride the JSON. Reduction
+        // only: the `unref?` column is untouched.
+        let mut reduced = 0u64;
+        let mut modules_with = 0usize;
+        // All rows come from the ONE shared projection, so today the set holds one phrase;
+        // collecting a set keeps the join honest if that ever diverges.
+        let mut coverages: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for m in &self.results {
+            if let Some((n, coverage)) = m.unref_reduction.as_ref().and_then(|b| {
+                let coverage = crate::presentation::witnesses::union_coverage_phrase(b)?;
+                let n = b
+                    .get("fewer_flagged")
+                    .and_then(|v| v.as_u64())
+                    .filter(|n| *n > 0)?;
+                Some((n, coverage))
+            }) {
+                reduced += n;
+                modules_with += 1;
+                coverages.insert(coverage);
+            }
+        }
+        if reduced > 0 {
+            out.push_str(&format!(
+                "reconciled: {} fewer flagged across {} module{} — compiler-verified \
+                 references found — combined analyses (coverage: {}).\n",
+                reduced,
+                modules_with,
+                if modules_with == 1 { "" } else { "s" },
+                coverages.into_iter().collect::<Vec<_>>().join("; "),
+            ));
+        }
 
         // ── Cross-module dependency summary ────────────────────────
         let total_outbound: usize = self
@@ -185,6 +225,7 @@ mod tests {
                     confidence: 0.7,
                     owned_file_count: 100,
                     owned_test_file_count: 10,
+                    unref_reduction: None,
                     outbound_dependency_count: 0,
                     outbound_import_count: 50,
                     inbound_dependency_count: 0,
@@ -202,6 +243,7 @@ mod tests {
                     confidence: 1.0,
                     owned_file_count: 20,
                     owned_test_file_count: 0,
+                    unref_reduction: None,
                     outbound_dependency_count: 1,
                     outbound_import_count: 5,
                     inbound_dependency_count: 1,
@@ -228,6 +270,78 @@ mod tests {
         let resp = sample_list_response();
         let output = resp.render_human();
         assert!(output.starts_with("Modules\n"));
+    }
+
+    /// Review-1 item 3: the NONZERO g2u aggregate through final human rendering — the
+    /// reconciled footnote sums the per-module reductions beside the untouched `unref?`
+    /// column figures.
+    #[test]
+    fn list_render_nonzero_reduction_renders_the_reconciled_footnote() {
+        let mut resp = sample_list_response();
+        resp.results[0].unref_reduction = Some(serde_json::json!({
+            "accounting": "union",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 2,
+            "basis": "compiler-verified references found",
+        }));
+        let output = resp.render_human();
+        // Review-2 item 1: the coverage basis renders beside the reconciled aggregate.
+        assert!(
+            output.contains(
+                "reconciled: 2 fewer flagged across 1 module — compiler-verified \
+                 references found — combined analyses (coverage: TypeScript (1 partition))."
+            ),
+            "{output}"
+        );
+        assert!(
+            output.contains("25 unref?"),
+            "the pipeline column stays untouched: {output}"
+        );
+    }
+
+    /// Review-2 item 1 (negative): a row whose reduction block fails the §5.3.0 labeling
+    /// gate — missing `accounting: "union"`, or missing/malformed coverage — contributes
+    /// NOTHING: with no passing row the footnote is entirely absent, never an unlabeled
+    /// reconciled figure.
+    #[test]
+    fn list_render_unlabeled_reduction_rows_render_no_footnote() {
+        // Accounting marker absent (coverage well-formed).
+        let mut resp = sample_list_response();
+        resp.results[0].unref_reduction = Some(serde_json::json!({
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 2,
+        }));
+        let output = resp.render_human();
+        assert!(!output.contains("reconciled"), "{output}");
+        assert!(!output.contains("fewer flagged"), "{output}");
+
+        // Accounting present, coverage malformed (empty languages).
+        resp.results[0].unref_reduction = Some(serde_json::json!({
+            "accounting": "union",
+            "coverage": {"languages": [], "partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 2,
+        }));
+        let output = resp.render_human();
+        assert!(!output.contains("reconciled"), "{output}");
+        assert!(!output.contains("fewer flagged"), "{output}");
+
+        // Mixed: one labeled row + one unlabeled row → the gate is PER ROW: only the
+        // labeled row's reduction aggregates; the unlabeled row's value is suppressed.
+        resp.results[0].unref_reduction = Some(serde_json::json!({
+            "accounting": "union",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "fewer_flagged": 2,
+        }));
+        resp.results[1].unref_reduction = Some(serde_json::json!({"fewer_flagged": 5}));
+        let output = resp.render_human();
+        assert!(
+            output.contains(
+                "reconciled: 2 fewer flagged across 1 module — compiler-verified \
+                 references found — combined analyses (coverage: TypeScript (1 partition))."
+            ),
+            "{output}"
+        );
+        assert!(!output.contains("7 fewer"), "{output}");
     }
 
     #[test]

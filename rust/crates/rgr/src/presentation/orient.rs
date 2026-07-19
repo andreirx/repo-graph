@@ -298,6 +298,11 @@ pub struct OrientResponse {
     /// no complexity centers to describe.
     #[serde(default)]
     pub measurement_coverage: Option<MeasurementCoverageBlock>,
+    /// RECON-M-R3a (g1u): the daemon's ADDITIVE union-accounting call block (opaque JSON —
+    /// rendered through the shared `presentation::witnesses` projection). Present ONLY in
+    /// W-BOTH with a current measured ledger; absent on the wire otherwise (R-0).
+    #[serde(default)]
+    pub witnesses: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -437,6 +442,18 @@ impl OrientResponse {
             out.push('\n');
         }
         if let Some(line) = self.reliability_caveat_line() {
+            out.push_str(&line);
+            out.push('\n');
+        }
+        // RECON-M-R3a (g1u, §5.3.2): the ADDITIVE reconciled union-call line beside the
+        // pipeline reliability figures — rendered ONLY when the daemon attached the
+        // coverage-labeled block (W-BOTH with a current measured ledger); absent otherwise
+        // (zero-SCIP output byte-identical, R-0). Never replaces a pipeline figure.
+        if let Some(line) = self
+            .witnesses
+            .as_ref()
+            .and_then(crate::presentation::witnesses::g1u_line)
+        {
             out.push_str(&line);
             out.push('\n');
         }

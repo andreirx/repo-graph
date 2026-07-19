@@ -348,6 +348,8 @@ pub fn explain_to_coherent(
             relationship_next_action: None,
             // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; explain never renders it.
             measurement_coverage: None,
+            // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.
+            witnesses: None,
         };
         return CoherenceEnvelope::resolution_only(value);
     }
@@ -410,6 +412,8 @@ pub fn explain_to_coherent(
         relationship_next_action: None,
         // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; explain never renders it.
         measurement_coverage: None,
+        // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.
+        witnesses: None,
     };
 
     CoherenceEnvelope::new(value, root_provenance, root_trust, root_freshness)

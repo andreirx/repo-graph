@@ -26,6 +26,26 @@ use repo_graph_agent::reliability;
 use super::explain::{ExplainResponse, ExplainSignal};
 use super::{bullet, heading};
 
+/// RECON-M-R3a (g2u-b): the union-degree second-figure heading suffix — present ONLY when the
+/// daemon attached the additive `union` object (W-BOTH with a current measured ledger AND the
+/// union degree differs, §5.3.3b) AND the object passes the §5.3.0 labeling gate (review-2
+/// item 1: `accounting: "union"` + a derivable coverage basis, via the ONE shared gate). The
+/// coverage renders beside the reconciled value — the mandated human frame "reconciled —
+/// combined analyses (coverage: …)"; a missing/malformed label SUPPRESSES the union figure
+/// (the heading stays exactly the pipeline heading), never renders it unlabeled.
+fn union_degree_suffix(evidence: &serde_json::Value) -> String {
+    evidence
+        .get("union")
+        .and_then(|u| {
+            let coverage = crate::presentation::witnesses::union_coverage_phrase(u)?;
+            let n = u.get("count").and_then(|v| v.as_u64())?;
+            Some(format!(
+                " · reconciled {n} — combined analyses (coverage: {coverage})"
+            ))
+        })
+        .unwrap_or_default()
+}
+
 impl ExplainResponse {
     /// Render a single signal's section. `full` lifts the per-section display cap (see the module doc):
     /// it is the `--full` flag, threaded so the human render is uncapped for grep.
@@ -54,7 +74,11 @@ impl ExplainResponse {
 
     fn render_callers(&self, evidence: &serde_json::Value, full: bool) -> String {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Callers ({})", count));
+        let mut out = heading(&format!(
+            "Callers ({}{})",
+            count,
+            union_degree_suffix(evidence)
+        ));
 
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
             let shown = if full { items.len() } else { 10 };
@@ -80,7 +104,11 @@ impl ExplainResponse {
 
     fn render_callees(&self, evidence: &serde_json::Value, full: bool) -> String {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        let mut out = heading(&format!("Callees ({})", count));
+        let mut out = heading(&format!(
+            "Callees ({}{})",
+            count,
+            union_degree_suffix(evidence)
+        ));
 
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
             let shown = if full { items.len() } else { 10 };

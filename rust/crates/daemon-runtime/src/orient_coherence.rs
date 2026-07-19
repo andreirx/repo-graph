@@ -180,6 +180,14 @@ pub(crate) fn build_orient_envelope(
         envelope.value.measurement_coverage = Some(block);
     }
 
+    // RECON-M-R3a (g1u, §5.3.2): the ADDITIVE, coverage-labeled union call block from the
+    // shared witness projection — present ONLY in W-BOTH with a current measured ledger
+    // (peek-only; zero-SCIP repos: `None` → absent on the wire, byte-identical output, R-0).
+    // Same post-fold reader-hint placement as the two blocks above (NOT a coherence leaf).
+    envelope.value.witnesses =
+        crate::witness_projection::WitnessProjection::compute(repo_state, &snapshot_uid)
+            .and_then(|p| p.g1u_block());
+
     envelope
 }
 

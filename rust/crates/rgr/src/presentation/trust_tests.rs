@@ -89,6 +89,9 @@ fn warm_posture() -> CoherenceEnvelope<LiveGraphPosture> {
         }],
         producer_available: true,
         migrated_answer_capability: true,
+        // M-R3A-TRUST-POSTURE: the served path carries both facts explicitly.
+        livegraph_resident: Some(true),
+        coherent_serve_eligible: Some(true),
     }
     .into_leaf(
         TrustPosture {
@@ -430,6 +433,29 @@ fn cold_livegraph_posture_renders_unavailable_and_degrades_overall() {
     assert!(out.contains("Posture: Unavailable (Unavailable)"));
     // Half B is still rendered (the v1 report is available).
     assert!(out.contains("Reliability  (sqlite, snapshot-scoped extraction, Fresh)"));
+}
+
+/// M-R3A-TRUST-POSTURE (ratified 2026-07-19): the resident-but-cert-gated leaf renders BOTH
+/// facts — "Resident: yes" (the residency fact, agreeing with any W-BOTH witness row beside it)
+/// + the withheld-detail clause (the eligibility fact) — and NEVER the false "not loaded" line.
+#[test]
+fn resident_withheld_posture_renders_loaded_with_detail_withheld_never_not_loaded() {
+    let env = trust_to_coherent(report(), LiveGraphPosture::resident_withheld_leaf(), false);
+    let out = render_trust_envelope(&env);
+    assert!(
+        out.contains("Resident: yes (compiler analysis is loaded)"),
+        "the residency fact renders true:\n{out}"
+    );
+    assert!(
+        out.contains("current-state detail withheld"),
+        "the eligibility fact renders as withholding:\n{out}"
+    );
+    assert!(
+        !out.contains("not loaded"),
+        "a resident graph must never read as not loaded:\n{out}"
+    );
+    // The epoch invariant is untouched: the leaf still degrades the overall posture.
+    assert!(out.contains("Posture: Unavailable (Unavailable)"));
 }
 
 #[test]
