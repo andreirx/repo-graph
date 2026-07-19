@@ -540,6 +540,14 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                 // is byte-identical to before. UNLIKE check, explain derives NO exit code from the verdict —
                 // both success arms return SUCCESS (explain is not CI-facing), so there is no exit-code remap
                 // and no silent-CI-break hazard; a stale deserialization fails LOUDLY (exit 2).
+                // RECON-M-R3b: the reference tier rides the explain response's inner `value`
+                // (`result["value"]["references"]`) — render it from the raw value before the
+                // typed deserialize (which ignores the additive field), and append it after the
+                // sections. Absent (R-0/R-1 / non-symbol focus) → byte-identical.
+                let reference_section =
+                    crate::presentation::witnesses::render_reference_tier_section(
+                        result.get("value").and_then(|v| v.get("references")),
+                    );
                 match serde_json::from_value::<CoherenceEnvelope<ExplainResponse>>(result) {
                     Ok(envelope) => {
                         // TRUNCATION-AUDIT-1 review-1 #1: thread `full` so the human render is uncapped under
@@ -547,6 +555,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                         // per-section `.take(N)` would re-truncate the human output and `--full | grep` would
                         // miss items past the display cap.
                         println!("{}", envelope.value.render_human(full));
+                        print!("{}", reference_section);
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

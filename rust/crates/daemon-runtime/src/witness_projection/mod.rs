@@ -64,6 +64,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use repo_graph_ir::{CanonicalKey, EdgeType};
 use repo_graph_livegraph::PartitionState;
 use repo_graph_trust_model::{FreshnessState, LanguageSupport};
 use serde_json::{json, Value};
@@ -79,6 +80,40 @@ use crate::state::RepoState;
 /// The one shipped SCIP producer's reader-facing name (the target of
 /// [`discover_scip_typescript`] — the projection names what discovery probes).
 const PRODUCER_NAME: &str = "scip-typescript";
+
+/// RECON-M-R3b: the reference tier's per-answer budget (recon-design-1 §5.2 —
+/// "truncate-with-count per orient's budget-ladder precedent; S-4 sizes the budget"). Rationale
+/// RECORDED from the fixture-scale evidence (§3.0b): amodx incoming references mean 5.8 (the vast
+/// majority of symbols list in FULL), top-8 ≥ 268, max fan-in 456 (`ui/label.tsx#Label`) — a hot
+/// symbol truncates with a NAMED count, never silently. 25 shows a useful orientation sample
+/// while bounding a hot symbol's output; S-4 (the monorepo field measurement) sizes the
+/// production budget before any default flip — this is the M-R3b gate's fixture-scale bound.
+const REFERENCE_TIER_BUDGET: usize = 25;
+
+/// RECON-M-R3b: which reference direction a tier surfaces (recon-design-1 §5.2 — the reference
+/// tier on callers/callees/explain SYMBOL focus). `callers`/explain ⇒ incoming ("which symbols
+/// reference this"); `callees` ⇒ outgoing ("which symbols this references"). Two variants, three
+/// concrete call sites (the callers + explain arms pass `Incoming`, the callees arm `Outgoing`);
+/// the simpler alternative rejected — a bare `bool` — loses the self-documenting call sites and
+/// the reader-frame `direction` string this owns.
+#[derive(Clone, Copy)]
+pub enum ReferenceDirection {
+    /// Incoming references — edges whose `dst` is the target (who references it).
+    Incoming,
+    /// Outgoing references — edges whose `src` is the target (what it references).
+    Outgoing,
+}
+
+impl ReferenceDirection {
+    /// The machine-readable direction id carried on the block (reader-frame phrasing lives in the
+    /// client renderer — one phrasing owner).
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Incoming => "incoming",
+            Self::Outgoing => "outgoing",
+        }
+    }
+}
 
 /// Reader-frame language name (labels speak the reader's language — the enum's internal
 /// maturity names never ship).
@@ -467,6 +502,150 @@ impl WitnessProjection {
         }
     }
 
+    // ── Reference tier (M-R3b): the §3.4-2 / §5.2 "compiler-verified references" enrichment ──
+
+    /// RECON-M-R3b: the reference tier for one symbol — the SCIP semantic overlay's non-`Calls`
+    /// `References` edges (reads / writes / type references, §3.4-2) INCOMING to (callers/explain)
+    /// or OUTGOING from (callees) `target`, coverage-labeled through the shared §5.3.0 gate and
+    /// budget-truncated with a NAMED count. `Some` ONLY in W-BOTH with a current measured ledger
+    /// AND ≥1 non-withheld reference — absent otherwise (R-0/R-1 byte-identical; an empty tier
+    /// adds no information, the M-R3a data-driven-absence rule). Additive beside the call rows:
+    /// it never touches `count`, the call multiset, or the trust denominator (§3.4-2).
+    ///
+    /// **Where the edges come from.** The witness LEDGER holds only reference COUNTS
+    /// (`s_kind_totals.references`, a trust/doctor aggregate) — not per-symbol reference edges —
+    /// so the tier reads the LIVE resident IRs (the S witness). It reads under ONE LiveGraph read
+    /// guard with the SAME never-stale peek every witness surface shares
+    /// (`compute_with_seam_probe` / `callgraph_union_eligibility` / `union_serve`): recompute the
+    /// resident fingerprint, require the stored ledger MEASURED at exactly it. A reference served
+    /// here is thereby pinned to the same `(snapshot, livegraph_fingerprint)` witness pair the
+    /// call surfaces pin — no stale row. It is DATA-DRIVEN (not `RMAP_RECON_UNION`-gated): a
+    /// §5.3.0 union-accounting read surface like every M-R3a block; the M-R2 flag governs the
+    /// call-union ROWS, which this tier never joins.
+    ///
+    /// **What the ledger contributes (not re-derived):** the R-RAT-4 COLLISION set (§3.5 guard 2
+    /// — an endpoint under a detected identity collision is WITHHELD, never attributed to the
+    /// pipeline's entity under a byte-equal key) and the ELIGIBLE partition set, which is exactly
+    /// the coverage basis — so the tier's partition scope and its coverage label can never
+    /// disagree (R-1 mixed-repo scoping falls out: only covered partitions contribute).
+    ///
+    /// **Population:** DISTINCT endpoint symbols (deduped; self-references excluded — the ledger's
+    /// own g2u convention, a self-reference does not make a symbol "referenced by something
+    /// else"). This answers the orientation question "which symbols reference this" — the instance
+    /// magnitude ("456 references") stays the trust/doctor aggregate, never re-counted here.
+    /// Deterministic order: the endpoints' canonical-key order (`BTreeSet`).
+    pub fn reference_tier_block(
+        repo_state: &RepoState,
+        snapshot_uid: &str,
+        target: &str,
+        direction: ReferenceDirection,
+    ) -> Option<Value> {
+        let guard = repo_state.livegraph.read();
+        let lg = guard.as_ref()?;
+        // The never-stale peek (one guard; the swap needs `livegraph.write()`): the ledger must be
+        // MEASURED at exactly the current resident fingerprint, or the tier is absent.
+        let current_fp = import_cert_fingerprint(&lg.live_partitions(), snapshot_uid);
+        let stored = repo_state.witness_ledger.read();
+        let ledger = stored.as_ref()?;
+        if ledger.fingerprint != current_fp {
+            return None;
+        }
+        let c = ledger.classification.as_ref()?;
+
+        // The R-RAT-4 collision set (§3.5 guard 2), flattened from the ledger's per-partition keys.
+        let collisions: BTreeSet<&str> = c
+            .colliding_keys
+            .values()
+            .flat_map(|ks| ks.iter().map(String::as_str))
+            .collect();
+
+        // Distinct, non-self, collision-guarded endpoint keys — scoped to the ledger's ELIGIBLE
+        // partitions (== the coverage basis; guaranteed equal to the ledger's own edge iteration
+        // by the pinned fingerprint). `BTreeSet` ⇒ deterministic order.
+        let mut endpoints: BTreeSet<String> = BTreeSet::new();
+        for view in lg.resident_irs() {
+            if !c.eligible.contains_key(view.id) {
+                continue;
+            }
+            for e in &view.ir.edges {
+                if e.edge_type != EdgeType::References {
+                    continue;
+                }
+                let (src, dst) = (e.src.as_str(), e.dst.as_str());
+                if src == dst {
+                    continue; // self-reference — the ledger's g2u exclusion, kept here for parity
+                }
+                let (anchor, other) = match direction {
+                    ReferenceDirection::Incoming => (dst, src),
+                    ReferenceDirection::Outgoing => (src, dst),
+                };
+                if anchor != target {
+                    continue;
+                }
+                // Guard 2: never surface an S fact under a colliding identity (either endpoint).
+                if collisions.contains(anchor) || collisions.contains(other) {
+                    continue;
+                }
+                endpoints.insert(other.to_string());
+            }
+        }
+
+        let total = endpoints.len();
+        if total == 0 {
+            return None; // data-driven absence — an empty tier is not a claim of zero
+        }
+        // Budget-truncate; resolve display for ONLY the shown ≤budget endpoints (name from the
+        // live IR — cross-partition; file from the canonical key's own path segment).
+        let items: Vec<Value> = endpoints
+            .iter()
+            .take(REFERENCE_TIER_BUDGET)
+            .map(|key| {
+                let name = lg
+                    .node_display(&CanonicalKey::from_existing(key.clone()))
+                    .map(|(n, _)| n);
+                json!({ "stable_key": key, "name": name, "file": key_file_path(key) })
+            })
+            .collect();
+        let shown = items.len();
+        Some(json!({
+            "accounting": "union",
+            "coverage": coverage_json_parts(&c.eligible, &current_fp),
+            "direction": direction.as_str(),
+            "total": total,
+            "shown": shown,
+            "truncated": total - shown,
+            "references": items,
+        }))
+    }
+
+    /// RECON-M-R3b: attach the reference tier (incoming — "which symbols reference this") to a
+    /// serialized explain response, for a SYMBOL-focus answer only (mirrors
+    /// [`Self::attach_explain_union_degrees`]). No-op outside W-BOTH-with-current-ledger, on a
+    /// non-symbol focus, or with no non-withheld references — byte-identical, R-0.
+    pub fn attach_explain_reference_tier(
+        repo_state: &RepoState,
+        snapshot_uid: &str,
+        response: &mut Value,
+    ) {
+        let symbol = match (
+            response["value"]["focus"]["resolved_kind"].as_str(),
+            response["value"]["focus"]["resolved_key"].as_str(),
+        ) {
+            (Some("symbol"), Some(key)) => key.to_string(),
+            _ => return,
+        };
+        if let Some(block) = Self::reference_tier_block(
+            repo_state,
+            snapshot_uid,
+            &symbol,
+            ReferenceDirection::Incoming,
+        ) {
+            if let Some(obj) = response["value"].as_object_mut() {
+                obj.insert("references".to_string(), block);
+            }
+        }
+    }
+
     // ── Map: the §5.3.4 g3u sketch pairs ─────────────────────────────────────────────────────
 
     /// The union-only CALL file pairs (`semantic`/`new_pair` — the ONLY class that can add a
@@ -664,17 +843,21 @@ enum MeasurementDetail {
 
 /// The §5.3.0 coverage basis of a measured ledger: languages + partitions + fingerprint.
 fn coverage_json(m: &MeasuredView) -> Value {
-    let languages: BTreeSet<&'static str> = m
-        .classification
-        .eligible
-        .values()
-        .map(|l| language_label(*l))
-        .collect();
-    let partitions: Vec<&String> = m.classification.eligible.keys().collect();
+    coverage_json_parts(&m.classification.eligible, &m.fingerprint)
+}
+
+/// The §5.3.0 coverage basis from its parts (eligible partition→language map + fingerprint). Two
+/// concrete callers: [`coverage_json`] (the measurement blocks) and [`WitnessProjection::
+/// reference_tier_block`] (M-R3b), which holds the classification under a guard and never clones
+/// a [`MeasuredView`]. Extracting this keeps ONE coverage-basis constructor, so a reference tier
+/// and a measurement block over the same ledger can never label coverage differently.
+fn coverage_json_parts(eligible: &BTreeMap<String, LanguageSupport>, fingerprint: &str) -> Value {
+    let languages: BTreeSet<&'static str> = eligible.values().map(|l| language_label(*l)).collect();
+    let partitions: Vec<&String> = eligible.keys().collect();
     json!({
         "languages": languages.into_iter().collect::<Vec<_>>(),
         "partitions": partitions,
-        "fingerprint": m.fingerprint,
+        "fingerprint": fingerprint,
     })
 }
 

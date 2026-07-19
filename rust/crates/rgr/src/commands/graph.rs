@@ -488,6 +488,13 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                 {
                     eprintln!("livegraph comparison written to {}", p);
                 }
+                // RECON-M-R3b: render the reference tier (if present) from the RAW value before the
+                // strip consumes `result`; append it after the call rows (additive, W-BOTH only —
+                // absent, this is byte-identical to the pre-M-R3b render).
+                let reference_section =
+                    crate::presentation::witnesses::render_reference_tier_section(
+                        result.get("references"),
+                    );
                 if let Some(obj) = result.as_object_mut() {
                     obj.remove("livegraph_compare");
                     obj.remove("livegraph_compare_sidecar");
@@ -495,11 +502,13 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                     // them so the human render is unaffected (no new trust metadata in human output).
                     obj.remove("backend_used");
                     obj.remove("fallback_reason");
+                    obj.remove("references"); // rendered above; keep the struct render unaffected
                 }
                 use crate::presentation::graph_edges::CallersResponse;
                 match serde_json::from_value::<CallersResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
+                        print!("{}", reference_section);
                         ExitCode::SUCCESS
                     }
                     Err(e) => {
@@ -600,17 +609,25 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                 {
                     eprintln!("livegraph comparison written to {}", p);
                 }
+                // RECON-M-R3b: render the reference tier (if present) before the strip; append it
+                // after the call rows (additive, W-BOTH only — absent = byte-identical).
+                let reference_section =
+                    crate::presentation::witnesses::render_reference_tier_section(
+                        result.get("references"),
+                    );
                 if let Some(obj) = result.as_object_mut() {
                     obj.remove("livegraph_compare");
                     obj.remove("livegraph_compare_sidecar");
                     // QUERY-MIGRATION-CLI-1: strip JSON-only metadata before the human render.
                     obj.remove("backend_used");
                     obj.remove("fallback_reason");
+                    obj.remove("references"); // rendered above; keep the struct render unaffected
                 }
                 use crate::presentation::graph_edges::CalleesResponse;
                 match serde_json::from_value::<CalleesResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
+                        print!("{}", reference_section);
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

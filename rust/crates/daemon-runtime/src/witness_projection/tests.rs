@@ -645,3 +645,175 @@ fn explain_attach_is_a_no_op_without_a_ledger_or_on_non_symbol_focus() {
     WitnessProjection::attach_explain_union_degrees(&f.state, &f.snapshot_uid, &mut repo_focus);
     assert_eq!(before, repo_focus.to_string(), "non-symbol focus → no-op");
 }
+
+// ── RECON-M-R3b: the reference tier (recon-design-1 §5.2 / §6.1 M-R3b gate) ──────────────────
+
+use serde_json::json;
+
+#[test]
+fn reference_tier_incoming_renders_labeled_truncated_and_collision_withheld() {
+    let f = test_fixture::build_reference_tier_fixture();
+    warm_ledger(&f);
+    let block = WitnessProjection::reference_tier_block(
+        &f.state,
+        &f.snapshot_uid,
+        &test_fixture::callee_key(),
+        ReferenceDirection::Incoming,
+    )
+    .expect("W-BOTH with a measured ledger renders the tier");
+
+    // §5.3.0 labeling: accounting + a complete coverage basis.
+    assert_eq!(block["accounting"], "union");
+    assert_eq!(block["direction"], "incoming");
+    assert!(block["coverage"]["fingerprint"].is_string());
+    assert_eq!(block["coverage"]["languages"], json!(["TypeScript"]));
+    assert_eq!(block["coverage"]["partitions"], json!(["p"]));
+
+    // 31 incoming reference edges (30 ref{i} + the collision referrer) minus the WITHHELD
+    // collision (§3.5 guard 2) = 30; the self-reference is excluded. Budget 25 ⇒ NAMED truncation.
+    assert_eq!(
+        block["total"], 30,
+        "collision referrer withheld, self-ref excluded"
+    );
+    assert_eq!(block["shown"], 25, "the budget bounds the listing");
+    assert_eq!(block["truncated"], 5, "named truncation — never silent");
+
+    let items = block["references"].as_array().unwrap();
+    assert_eq!(items.len(), 25);
+    let keys: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i["stable_key"].as_str())
+        .collect();
+    assert!(
+        !keys.contains(&test_fixture::caller_key().as_str()),
+        "the collision-withheld referrer (callerFn's colliding key) never surfaces: {keys:?}"
+    );
+    // Every listed item carries a resolved name + file (the reader's orientation anchor).
+    assert!(items[0]["name"].as_str().unwrap().starts_with("ref"));
+    assert!(items[0]["file"].as_str().unwrap().ends_with("refs.ts"));
+}
+
+#[test]
+fn reference_tier_outgoing_lists_referenced_symbols() {
+    let f = test_fixture::build_reference_tier_fixture();
+    warm_ledger(&f);
+    let block = WitnessProjection::reference_tier_block(
+        &f.state,
+        &f.snapshot_uid,
+        &test_fixture::callee_key(),
+        ReferenceDirection::Outgoing,
+    )
+    .expect("outgoing references render");
+    assert_eq!(block["direction"], "outgoing");
+    // calleeFn -> {outA, outB}; the self-reference is excluded. No truncation (2 ≤ 25).
+    assert_eq!(block["total"], 2);
+    assert_eq!(block["truncated"], 0);
+    let names: Vec<&str> = block["references"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"outA") && names.contains(&"outB"),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn reference_tier_absent_without_a_current_ledger_r0() {
+    // No ledger warmed → the tier is absent (R-0: zero-SCIP / not-yet-measured renders nothing).
+    let f = test_fixture::build_reference_tier_fixture();
+    assert!(
+        WitnessProjection::reference_tier_block(
+            &f.state,
+            &f.snapshot_uid,
+            &test_fixture::callee_key(),
+            ReferenceDirection::Incoming,
+        )
+        .is_none(),
+        "no ledger → tier absent"
+    );
+    // No LiveGraph at all → absent.
+    let f2 = test_fixture::build_fixture(false);
+    *f2.state.livegraph.write() = None;
+    assert!(WitnessProjection::reference_tier_block(
+        &f2.state,
+        &f2.snapshot_uid,
+        &test_fixture::callee_key(),
+        ReferenceDirection::Incoming,
+    )
+    .is_none());
+}
+
+#[test]
+fn reference_tier_scopes_to_covered_partitions_r1() {
+    // A stale second partition q ALSO references calleeFn, but is not W-BOTH-eligible — its
+    // reference must NOT count and the coverage basis lists only the covered partition (R-1).
+    let f = test_fixture::build_reference_tier_mixed_fixture();
+    warm_ledger(&f);
+    let block = WitnessProjection::reference_tier_block(
+        &f.state,
+        &f.snapshot_uid,
+        &test_fixture::callee_key(),
+        ReferenceDirection::Incoming,
+    )
+    .expect("the eligible partition still renders");
+    assert_eq!(
+        block["total"], 30,
+        "the stale partition q's reference is excluded — covered-partition scoping"
+    );
+    assert_eq!(
+        block["coverage"]["partitions"],
+        json!(["p"]),
+        "coverage lists only the eligible partition"
+    );
+    let keys: Vec<&str> = block["references"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["stable_key"].as_str())
+        .collect();
+    assert!(
+        !keys.contains(&test_fixture::stale_ref_key().as_str()),
+        "the stale partition's referrer never surfaces: {keys:?}"
+    );
+}
+
+#[test]
+fn reference_tier_absent_on_witness_movement() {
+    // Never a stale row: a witness movement (the partition goes stale) supersedes the warmed
+    // ledger, so the currency peek fails and the tier is absent rather than serving old edges.
+    let f = test_fixture::build_reference_tier_fixture();
+    warm_ledger(&f);
+    f.state.livegraph.write().as_mut().unwrap().mark_stale("p");
+    assert!(
+        WitnessProjection::reference_tier_block(
+            &f.state,
+            &f.snapshot_uid,
+            &test_fixture::callee_key(),
+            ReferenceDirection::Incoming,
+        )
+        .is_none(),
+        "witness movement supersedes the ledger → tier absent (never a stale row)"
+    );
+}
+
+#[test]
+fn attach_explain_reference_tier_on_symbol_focus_only() {
+    let f = test_fixture::build_reference_tier_fixture();
+    warm_ledger(&f);
+    let mut response = json!({
+        "value": { "focus": { "resolved_kind": "symbol", "resolved_key": test_fixture::callee_key() } },
+    });
+    WitnessProjection::attach_explain_reference_tier(&f.state, &f.snapshot_uid, &mut response);
+    let block = &response["value"]["references"];
+    assert_eq!(block["direction"], "incoming");
+    assert_eq!(block["total"], 30);
+
+    // Non-symbol focus → no-op (byte-identical).
+    let mut repo_focus = json!({ "value": { "focus": { "resolved_kind": "repo" } } });
+    let before = repo_focus.to_string();
+    WitnessProjection::attach_explain_reference_tier(&f.state, &f.snapshot_uid, &mut repo_focus);
+    assert_eq!(before, repo_focus.to_string(), "non-symbol focus → no-op");
+}

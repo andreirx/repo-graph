@@ -909,6 +909,117 @@ pub(crate) fn build_unavailable_in_w_both_fixture() -> Fixture {
     }
 }
 
+// ── RECON-M-R3b: the reference-tier fixture ─────────────────────────────────────────────────
+
+pub(crate) const REFS_PATH: &str = "src/refs.ts";
+pub(crate) const OUT_PATH: &str = "src/out.ts";
+/// Distinct incoming referrers of `calleeFn` — > `REFERENCE_TIER_BUDGET` (25) so the tier
+/// truncates with a NAMED count (the M-R3b gate's fixture-scale bound stands in for amodx's 456).
+pub(crate) const REFERENCE_TIER_INCOMING: usize = 30;
+
+pub(crate) fn ref_source_key(i: usize) -> String {
+    format!("{REPO}:{REFS_PATH}#ref{i}:SYMBOL:FUNCTION")
+}
+pub(crate) fn ref_out_key(name: &str) -> String {
+    format!("{REPO}:{OUT_PATH}#{name}:SYMBOL:FUNCTION")
+}
+
+/// An `EdgeType::References` IR edge (`src` references `dst`) — the SCIP semantic overlay's
+/// non-`Calls` reference kind (basis `DerivedReference`); the M-R3b reference-tier substrate.
+fn reference_edge(src: &str, dst: &str) -> IrEdge {
+    IrEdge {
+        src: CanonicalKey::from_existing(src.to_string()),
+        dst: CanonicalKey::from_existing(dst.to_string()),
+        edge_type: EdgeType::References,
+        basis: EdgeBasis::DerivedReference,
+        provenance: prov(),
+        import: None,
+    }
+}
+
+/// RECON-M-R3b: the reference-tier fixture. A faithful CALL mirror (so `callgraph_is_green` warms
+/// a MEASURED ledger) whose S IR additionally carries `EdgeType::References` edges:
+/// - `REFERENCE_TIER_INCOMING` (30) DISTINCT `ref{i}` symbols each referencing `calleeFn`
+///   (INCOMING > the budget 25 → the tier truncates with a NAMED count);
+/// - TWO outgoing references `calleeFn -> {outA, outB}` (the callees-direction population);
+/// - a SELF-reference `calleeFn -> calleeFn` (EXCLUDED — the ledger's g2u convention);
+/// - a COLLISION referrer: a `ScipSynthesizedFallback` node whose key BYTE-EQUALS the pipeline's
+///   `callerFn` key, referencing `calleeFn` — WITHHELD by §3.5 guard 2 (so the incoming total
+///   stays 30, not 31: proof the guard excludes it).
+///
+/// The `References` edges make the kind-BLIND callgraph cert RED (§3.4 — expected; the reference
+/// tier is a W-BOTH read surface that renders on the MEASURED ledger regardless of verdict).
+pub(crate) fn build_reference_tier_fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let (db_path, snapshot_uid) = build_sqlite_mirror_with_calls(dir.path(), 1);
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+
+    let mut ir = build_ir_with_calls(1);
+    ir.nodes.push(file_node(REFS_PATH));
+    ir.nodes.push(file_node(OUT_PATH));
+    // 30 distinct incoming referrers of calleeFn.
+    for i in 0..REFERENCE_TIER_INCOMING {
+        let key = ref_source_key(i);
+        ir.nodes
+            .push(symbol_node(&key, &format!("ref{i}"), REFS_PATH));
+        ir.edges.push(reference_edge(&key, &callee_key()));
+    }
+    // Two outgoing references from calleeFn.
+    for name in ["outA", "outB"] {
+        let key = ref_out_key(name);
+        ir.nodes.push(symbol_node(&key, name, OUT_PATH));
+        ir.edges.push(reference_edge(&callee_key(), &key));
+    }
+    // Self-reference — excluded from both directions.
+    ir.edges.push(reference_edge(&callee_key(), &callee_key()));
+    // Collision referrer: a fallback identity whose key byte-equals the pipeline's callerFn key
+    // (mixed sources under one key → the §3.5 guard-2 collision), referencing calleeFn.
+    let mut collide = symbol_node(&caller_key(), "callerFn", CALLER_PATH);
+    collide.identity_source = IdentitySource::ScipSynthesizedFallback;
+    collide.attributes = None;
+    ir.nodes.push(collide);
+    ir.edges.push(reference_edge(&caller_key(), &callee_key()));
+
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R3b (R-1 scoping): [`build_reference_tier_fixture`] plus a SECOND, STALE TS partition
+/// `q` that ALSO references `calleeFn`. `q` is not W-BOTH-eligible (¬Fresh), so the ledger's
+/// `eligible` set excludes it and the reference tier must NOT count its reference — the covered-
+/// partition scoping the M-R3b gate's R-1 requires (a mixed repo surfaces only its covered part).
+pub(crate) const STALE_PARTITION: &str = "q";
+pub(crate) const STALE_PATH: &str = "q/stale.ts";
+pub(crate) fn stale_ref_key() -> String {
+    format!("{REPO}:{STALE_PATH}#staleRef:SYMBOL:FUNCTION")
+}
+pub(crate) fn build_reference_tier_mixed_fixture() -> Fixture {
+    let f = build_reference_tier_fixture();
+    {
+        let mut guard = f.state.livegraph.write();
+        let lg = guard.as_mut().unwrap();
+        let mut ir = PartitionIr::new(partition_with_id(STALE_PARTITION));
+        ir.nodes.push(file_node_in(STALE_PATH, STALE_PARTITION));
+        ir.nodes.push(symbol_node_in(
+            &stale_ref_key(),
+            "staleRef",
+            STALE_PATH,
+            STALE_PARTITION,
+        ));
+        ir.edges
+            .push(reference_edge(&stale_ref_key(), &callee_key()));
+        lg.load_partition(STALE_PARTITION, ir, LanguageSupport::TypeScriptPrimary);
+        lg.mark_stale(STALE_PARTITION);
+    }
+    f
+}
+
 /// RECON-M-R1 (the §3.5 guard-3 `identity_suspect` fixture): P resolves `callerFn`'s call to
 /// `target` in `src/b.ts`; the compiler resolves a SAME-NAMED call from the SAME caller to a
 /// DIFFERENT key (`target` in `lib/c.ts`) — the wrong/missed-adoption symptom signature. The P

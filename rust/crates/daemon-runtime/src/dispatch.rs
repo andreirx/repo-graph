@@ -1256,11 +1256,46 @@ impl ServiceDispatcher {
             )
         };
         match value {
-            Ok(v) => DispatchResult::success(&request.id, v),
+            Ok(mut v) => {
+                // RECON-M-R3b: attach the INCOMING reference tier ("which symbols reference this")
+                // — data-driven, W-BOTH only; additive beside the call rows (never touches `count`
+                // or the call multiset). No-op outside a current measured ledger (R-0/R-1).
+                Self::attach_reference_tier(
+                    &repo_state,
+                    epoch.snapshot_uid(),
+                    &target.stable_key,
+                    crate::witness_projection::ReferenceDirection::Incoming,
+                    &mut v,
+                );
+                DispatchResult::success(&request.id, v)
+            }
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
             ),
+        }
+    }
+
+    /// RECON-M-R3b: attach the reference tier to a callers/callees response value (the shared
+    /// path both drilldown arms use; explain uses [`WitnessProjection::attach_explain_reference_tier`]).
+    /// Additive `references` block when W-BOTH has a current measured ledger with ≥1 non-withheld
+    /// reference; a no-op (byte-identical) otherwise — the R-0/R-1 absence.
+    fn attach_reference_tier(
+        repo_state: &crate::state::RepoState,
+        snapshot_uid: &str,
+        target_key: &str,
+        direction: crate::witness_projection::ReferenceDirection,
+        value: &mut serde_json::Value,
+    ) {
+        if let Some(block) = crate::witness_projection::WitnessProjection::reference_tier_block(
+            repo_state,
+            snapshot_uid,
+            target_key,
+            direction,
+        ) {
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("references".to_string(), block);
+            }
         }
     }
 
@@ -1386,7 +1421,19 @@ impl ServiceDispatcher {
             )
         };
         match value {
-            Ok(v) => DispatchResult::success(&request.id, v),
+            Ok(mut v) => {
+                // RECON-M-R3b: attach the OUTGOING reference tier ("which symbols this references")
+                // — data-driven, W-BOTH only; additive beside the call rows. No-op outside a
+                // current measured ledger (R-0/R-1).
+                Self::attach_reference_tier(
+                    &repo_state,
+                    epoch.snapshot_uid(),
+                    &target.stable_key,
+                    crate::witness_projection::ReferenceDirection::Outgoing,
+                    &mut v,
+                );
+                DispatchResult::success(&request.id, v)
+            }
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -4333,6 +4380,13 @@ impl ServiceDispatcher {
                 // ledger-absent / no pinned snapshot → no-op, byte-identical, R-0).
                 if let Some(epoch) = epoch.as_ref() {
                     crate::witness_projection::WitnessProjection::attach_explain_union_degrees(
+                        &repo_state,
+                        epoch.snapshot_uid(),
+                        &mut v,
+                    );
+                    // RECON-M-R3b: the incoming reference tier ("which symbols reference this")
+                    // on SYMBOL focus — additive, W-BOTH only; R-0/R-1 no-op.
+                    crate::witness_projection::WitnessProjection::attach_explain_reference_tier(
                         &repo_state,
                         epoch.snapshot_uid(),
                         &mut v,

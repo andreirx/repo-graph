@@ -86,7 +86,13 @@ union_serve/mod.rs                        = callers, callees
 # builds the ledger). The FOUR surfaces beyond the prior sanctioned set (modules_show,
 # modules_list, map, storage_health) are the §3.3-A amendment RATIFIED 2026-07-19
 # (M-R3A-READER-SET-AMENDMENT — see the header amendment note).
-witness_projection/mod.rs                 = trust, orient, stats, explain, modules_show, modules_list, map, storage_health
+# RECON-M-R3b (annotation): the reference tier (WitnessProjection::reference_tier_block) reads
+# the LIVE resident IRs for the callers/callees/explain drilldowns, so this file is now ALSO
+# reached from `callers` + `callees` (explain was already listed). No NEW file reads .livegraph
+# and the sanctioned-surface UNION is unchanged (callers/callees are already sanctioned via
+# union_serve/livegraph_feed) — the witness stays green; this line's surface list is updated
+# for honesty (the reviewed declaration must reflect the added reachability).
+witness_projection/mod.rs                 = callers, callees, trust, orient, stats, explain, modules_show, modules_list, map, storage_health
 
 [test-scaffolding]
 callgraph_cert/ledger_tests.rs

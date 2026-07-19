@@ -286,6 +286,83 @@ pub fn render_trust_section(block: Option<&Value>) -> String {
     out
 }
 
+/// RECON-M-R3b: the reference-tier section (recon-design-1 §5.2 — "compiler-verified references
+/// (reads / writes / type references)"): the §5.3.0-gated coverage label, the NAMED truncation
+/// count (never silent), and the listed endpoint symbols. Empty string when `block` is `None`
+/// (absent tier — R-0/R-1) or fails the §5.3.0 gate (no accounting marker / no coverage basis →
+/// absence, never unlabeled figures). Defensive AND fail-closed on the count metadata (review-0
+/// item 1): the listing array + `shown` + `truncated` must all be present and mutually consistent
+/// (`shown == |references|` and `total == shown + truncated`) or the WHOLE section is suppressed —
+/// a malformed block never renders a total its listing contradicts (which would be an UNNAMED
+/// truncation, the §5.2 violation this tier exists to prevent). A missing/malformed field renders
+/// absence, never a panic or an invented zero. `pub`: callers/callees/explain client renders share
+/// this ONE projection — no per-surface phrasing drift.
+pub fn render_reference_tier_section(block: Option<&Value>) -> String {
+    let Some(block) = block else {
+        return String::new();
+    };
+    // §5.3.0 gate: a union value renders ONLY with its accounting marker + a complete coverage
+    // basis. `union_coverage_phrase` enforces both — a label-less block suppresses the section.
+    let Some(coverage) = union_coverage_phrase(block) else {
+        return String::new();
+    };
+    let (Some(total), Some(direction)) = (
+        u(block, "total"),
+        block.get("direction").and_then(Value::as_str),
+    ) else {
+        return String::new();
+    };
+    // Reader-frame noun for the direction (incoming = who references this; outgoing = what this
+    // references). An unknown direction id suppresses the section (never a guessed frame).
+    let noun = match direction {
+        "incoming" => "referencing",
+        "outgoing" => "referenced",
+        _ => return String::new(),
+    };
+    // FAIL-CLOSED count metadata (review-0 item 1): §5.2 truncation must be NAMED, never silent, so
+    // the totals and the listing must be mutually consistent or the whole section is suppressed.
+    // Require the listing array AND both counts; demand `shown == |references|` and
+    // `total == shown + truncated`. Without this, a malformed block (a dropped/short `references`
+    // array, an absent `truncated`, a `shown` disagreeing with the listing) could render "30
+    // referencing symbols", list none, and omit the "showing N of M" phrase — an UNNAMED
+    // truncation. `checked_add` keeps a crafted overflow from panicking (the module's never-panic
+    // contract). A byte-well-formed daemon block ALWAYS satisfies all three
+    // (`reference_tier_block` emits `shown == items.len()`, `truncated == total - shown`), so this
+    // rejects only corruption, never a valid answer.
+    let (Some(items), Some(shown), Some(truncated)) = (
+        block.get("references").and_then(Value::as_array),
+        u(block, "shown"),
+        u(block, "truncated"),
+    ) else {
+        return String::new();
+    };
+    if shown != items.len() as u64 || shown.checked_add(truncated) != Some(total) {
+        return String::new();
+    }
+
+    let mut out = heading(&format!(
+        "Compiler-Verified References  (reads / writes / type references — reconciled, {coverage})"
+    ));
+    // NAMED truncation (§5.2 — never silent): "showing N of M" only when the daemon truncated.
+    let count_line = if truncated > 0 {
+        format!("showing {shown} of {total} {noun} symbols")
+    } else {
+        format!("{total} {noun} symbol{}", if total == 1 { "" } else { "s" })
+    };
+    out.push_str(&bullet(&count_line));
+    for item in items {
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .or_else(|| item.get("stable_key").and_then(Value::as_str))
+            .unwrap_or("-");
+        let file = item.get("file").and_then(Value::as_str).unwrap_or("-");
+        out.push_str(&bullet(&format!("{name}  {file}")));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,6 +618,150 @@ mod tests {
         assert_eq!(
             union_coverage_phrase(&g1u_fixture()).as_deref(),
             Some("TypeScript (2 partitions)")
+        );
+    }
+
+    // ── RECON-M-R3b: the reference-tier section ─────────────────────────────────────────────
+
+    fn reference_block(total: u64, item_count: usize, direction: &str) -> Value {
+        let items: Vec<Value> = (0..item_count)
+            .map(|i| {
+                json!({
+                    "stable_key": format!("repo:src/f{i}.ts#s{i}:SYMBOL:FUNCTION"),
+                    "name": format!("s{i}"),
+                    "file": format!("src/f{i}.ts"),
+                })
+            })
+            .collect();
+        let shown = item_count as u64;
+        json!({
+            "accounting": "union",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "direction": direction,
+            "total": total,
+            "shown": shown,
+            "truncated": total - shown,
+            "references": items,
+        })
+    }
+
+    #[test]
+    fn reference_tier_section_renders_labeled_with_named_truncation() {
+        // total 30, only 3 shown → NAMED truncation (never silent).
+        let block = reference_block(30, 3, "incoming");
+        let s = render_reference_tier_section(Some(&block));
+        assert!(s.contains("Compiler-Verified References"));
+        assert!(s.contains("reads / writes / type references"));
+        assert!(s.contains("reconciled, TypeScript (1 partition)"));
+        assert!(
+            s.contains("showing 3 of 30 referencing symbols"),
+            "named truncation: {s}"
+        );
+        assert!(s.contains("s0  src/f0.ts"));
+    }
+
+    #[test]
+    fn reference_tier_section_full_listing_has_no_truncation_phrase() {
+        let block = reference_block(2, 2, "outgoing");
+        let s = render_reference_tier_section(Some(&block));
+        assert!(s.contains("2 referenced symbols"), "{s}");
+        assert!(
+            !s.contains("showing"),
+            "no truncation phrase when complete: {s}"
+        );
+    }
+
+    #[test]
+    fn reference_tier_section_absent_when_block_absent() {
+        assert_eq!(render_reference_tier_section(None), "");
+    }
+
+    #[test]
+    fn reference_tier_section_suppressed_without_the_accounting_marker() {
+        // §5.3.0 gate: a union value without its accounting marker never renders (even with a
+        // valid coverage basis) — the shared gate governs the reference tier too.
+        let mut block = reference_block(2, 2, "incoming");
+        block.as_object_mut().unwrap().remove("accounting");
+        assert_eq!(render_reference_tier_section(Some(&block)), "");
+        block["accounting"] = json!("pipeline");
+        assert_eq!(render_reference_tier_section(Some(&block)), "");
+    }
+
+    #[test]
+    fn reference_tier_section_suppressed_on_incomplete_coverage_or_bad_direction() {
+        // Incomplete coverage basis (empty fingerprint) suppresses (the §5.3.0 gate).
+        let mut block = reference_block(2, 2, "incoming");
+        block["coverage"]["fingerprint"] = json!("");
+        assert_eq!(render_reference_tier_section(Some(&block)), "");
+        // An unknown direction id is never given a guessed reader frame.
+        let bad_dir = reference_block(2, 2, "sideways");
+        assert_eq!(render_reference_tier_section(Some(&bad_dir)), "");
+    }
+
+    /// Review-0 (iteration 0) item 1 — FAIL CLOSED on inconsistent count metadata: a block whose
+    /// `total` its listing + counts cannot back must suppress the WHOLE section, never render an
+    /// UNNAMED truncation ("30 referencing symbols" listing none, no "showing N of M"). Each case
+    /// breaks exactly one consistency rule from a known-good (total 30 / shown 3 / truncated 27)
+    /// block; each must render "".
+    #[test]
+    fn reference_tier_section_fails_closed_on_inconsistent_count_metadata() {
+        // The exact defect the reviewer named: a totals-only block (no listing array, no `shown`,
+        // no `truncated`). The old renderer showed "30 referencing symbols" — a phantom count.
+        let phantom = json!({
+            "accounting": "union",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "direction": "incoming",
+            "total": 30,
+        });
+        assert_eq!(
+            render_reference_tier_section(Some(&phantom)),
+            "",
+            "a totals-only block must suppress, never render an unnamed truncation"
+        );
+
+        // Each mutation breaks exactly one consistency rule of a known-good
+        // (total 30 / shown 3 / truncated 27) block; each must suppress the whole section.
+        let suppressed = |mutate: &dyn Fn(&mut Value)| {
+            let mut b = reference_block(30, 3, "incoming");
+            mutate(&mut b);
+            render_reference_tier_section(Some(&b)).is_empty()
+        };
+        assert!(
+            suppressed(&|b| {
+                b.as_object_mut().unwrap().remove("references");
+            }),
+            "references array absent must suppress"
+        );
+        assert!(
+            suppressed(&|b| {
+                b.as_object_mut().unwrap().remove("shown");
+            }),
+            "shown absent must suppress"
+        );
+        assert!(
+            suppressed(&|b| {
+                b.as_object_mut().unwrap().remove("truncated");
+            }),
+            "truncated absent must suppress"
+        );
+        assert!(
+            suppressed(&|b| {
+                b["shown"] = json!(25); // claims 25 shown, lists 3
+            }),
+            "shown disagreeing with the listing length must suppress"
+        );
+        assert!(
+            suppressed(&|b| {
+                b["truncated"] = json!(0); // 30 != 3 + 0
+            }),
+            "total != shown + truncated must suppress"
+        );
+
+        // The guard is not over-broad: the known-good block still renders its named truncation.
+        assert!(
+            render_reference_tier_section(Some(&reference_block(30, 3, "incoming")))
+                .contains("showing 3 of 30 referencing symbols"),
+            "a consistent block must still render"
         );
     }
 }
