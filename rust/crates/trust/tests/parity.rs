@@ -29,7 +29,7 @@ use repo_graph_trust::service::{assemble_trust_report, TrustAssemblyError};
 use repo_graph_trust::storage_port::{
     BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
     ExternalDependencyAttribution, PathPrefixModuleCycle, QueryUnresolvedEdgesInput,
-    TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample,
+    TrustModuleStats, TrustStorageRead, TrustUnresolvedEdgeSample, UnresolvedCallSite,
 };
 use repo_graph_trust::types::ReliabilityLevel;
 use repo_graph_trust::{
@@ -288,6 +288,14 @@ impl TrustStorageRead for FixtureMockStorage {
         _limit: u32,
     ) -> Result<ExternalDependencyAttribution, String> {
         Ok(self.external_dependencies.clone())
+    }
+
+    fn unresolved_call_sites(
+        &self,
+        _snapshot_uid: &str,
+        _caller_filter: Option<&str>,
+    ) -> Result<Vec<UnresolvedCallSite>, String> {
+        Ok(Vec::new())
     }
 
     fn query_unresolved_edges(

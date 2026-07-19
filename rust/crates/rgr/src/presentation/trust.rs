@@ -162,6 +162,17 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
         out.push('\n');
     }
 
+    // RECON-M-R4 (§5.5): the Layer-2 landing on the "where they go" surface — unresolved calls the
+    // compiler resolved (likely resolutions) + contested resolutions (syntax vs compiler disagree).
+    // ABSENT on zero-SCIP / no-hint repos (the daemon omits the field; renders nothing on None).
+    let layer2 = crate::presentation::witnesses::render_layer2_resolution_section(
+        v.layer2_resolution.as_ref(),
+    );
+    if !layer2.is_empty() {
+        out.push_str(&layer2);
+        out.push('\n');
+    }
+
     // EY1-A: the likely-external receiver-call orientation projection (Layer-2, read-side).
     let external_receivers = render_enrichment_external(v);
     if !external_receivers.is_empty() {

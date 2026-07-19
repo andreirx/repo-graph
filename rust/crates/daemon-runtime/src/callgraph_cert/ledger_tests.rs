@@ -370,6 +370,233 @@ fn identity_suspect_fires_on_same_caller_same_name_different_callee_key() {
     );
 }
 
+// ── RECON-M-R4 (§5.5): the contested detail + the case-1 semantic index ──────────────────────
+
+#[test]
+fn contested_detail_records_the_suspect_pair_consistent_with_the_count() {
+    // §5.5 case 2: the identity_suspect symptom, RECORDED as detail. Computed in ONE pass over the
+    // same index. For a SINGLE-candidate suspect (this fixture) the contested row fires; the
+    // ≥2-candidate case is refused (`contested_refuses_ambiguous_candidates_but_still_suspects`).
+    let f = test_fixture::build_suspect_fixture();
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+
+    assert_eq!(c.identity_suspect, 1);
+    assert_eq!(c.contested.len(), 1, "one (A, B) match recorded");
+    let cr = &c.contested[0];
+    assert_eq!(cr.caller, test_fixture::caller_key());
+    assert_eq!(
+        cr.name, "target",
+        "the shared callee NAME (the exact-name join key)"
+    );
+    assert_eq!(
+        cr.syntactic_key,
+        format!(
+            "{}:{}#target:SYMBOL:FUNCTION",
+            test_fixture::REPO,
+            test_fixture::CALLEE_PATH
+        ),
+        "syntax resolved to src/b.ts#target"
+    );
+    assert_eq!(
+        cr.semantic_key,
+        format!(
+            "{}:{}#target:SYMBOL:FUNCTION",
+            test_fixture::REPO,
+            test_fixture::LIB_PATH
+        ),
+        "the compiler resolved a same-named call to lib/c.ts#target"
+    );
+    // The semantic target is a PROJECT symbol by construction (external bindings are dropped at
+    // ingest and never reach a `semantic` edge) — the §5.5 honest scope.
+    assert_ne!(
+        cr.syntactic_key, cr.semantic_key,
+        "distinct targets — a genuine contest"
+    );
+}
+
+#[test]
+fn semantic_call_targets_index_new_pair_calls_by_caller_and_name() {
+    // §5.5 case 1: a SCIP-only `callerFn -> cn` call is indexed by (callerFn, "cn") for the
+    // Layer-2 unresolved-site join. Exactly one target → the join can land a "likely" hint.
+    let f = test_fixture::build_layer2_fixture(false);
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+
+    let targets = c
+        .semantic_call_targets
+        .get(&(test_fixture::caller_key(), "cn".to_string()))
+        .expect("cn indexed by (caller, name)");
+    assert_eq!(targets.len(), 1, "one same-named compiler target");
+    assert!(targets.contains(&test_fixture::cn_key()));
+    // FULLY corroborated (s == p) — excluded: every compiler call instance on the
+    // `callerFn -> calleeFn` pair (p = 1, s = 1) is P-confirmed, so NO compiler-only excess
+    // exists to attribute (review-2: the exclusion rule is `s_calls == p`, NOT `p > 0` — a
+    // `multiplicity` pair with s > p ≥ 1 DOES candidate, proven below).
+    assert!(!c
+        .semantic_call_targets
+        .contains_key(&(test_fixture::caller_key(), "calleeFn".to_string())));
+}
+
+#[test]
+fn semantic_multiplicity_pair_enters_the_layer2_candidate_index() {
+    // review-2 #1: the S-EXCESS pair (p = 1, s = 2 → `semantic`/`multiplicity`) IS a Layer-2
+    // candidate — the excess instance is a call the compiler witnessed that P did not, exactly
+    // the unresolved-site class. The mechanical rule is `s_calls > p`, sub-class-blind.
+    let f = test_fixture::build_multiplicity_fixture(1, 2);
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+    assert_eq!(c.semantic.multiplicity, 1, "the S-excess instance");
+    assert_eq!(
+        c.semantic.new_pair, 0,
+        "no new_pair — the candidate is multiplicity-class"
+    );
+
+    let targets = c
+        .semantic_call_targets
+        .get(&(test_fixture::caller_key(), "calleeFn".to_string()))
+        .expect("the multiplicity pair candidates under (caller, name)");
+    assert_eq!(targets.len(), 1, "one same-named compiler target");
+    assert!(targets.contains(&test_fixture::callee_key()));
+
+    // The mechanical boundary, other side: P-excess (p = 2, s = 1 → `syntactic`/`multiplicity`)
+    // has NO compiler-only excess (`s_calls < p`) → never a candidate.
+    let g = test_fixture::build_multiplicity_fixture(2, 1);
+    let lg = built_ledger(&g);
+    let cg = lg.classification.as_ref().expect("measured path");
+    assert!(
+        cg.semantic_call_targets.is_empty(),
+        "P-excess mints no Layer-2 candidate: {:?}",
+        cg.semantic_call_targets
+    );
+}
+
+#[test]
+fn contested_join_sees_a_semantic_multiplicity_competitor() {
+    // review-2 #2: the compiler's competitor is `semantic`/`multiplicity` (lib/c.ts#target,
+    // p = 1, s = 2), NOT a new_pair — the reversed join must still surface the disagreement on
+    // the syntactic pair (syntax → src/b.ts#target vs compiler → lib/c.ts#target).
+    let f = test_fixture::build_contested_multiplicity_fixture();
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+
+    assert_eq!(
+        c.semantic.multiplicity, 1,
+        "the competitor is the S-excess instance"
+    );
+    assert_eq!(
+        c.semantic.new_pair, 0,
+        "no new_pair competitor exists in this fixture"
+    );
+    assert_eq!(c.both, 1, "P's own lib/c.ts call stays corroborated");
+    assert_eq!(
+        c.identity_suspect, 1,
+        "the symptom detector (unchanged, full sem_index)"
+    );
+    assert_eq!(
+        c.contested.len(),
+        1,
+        "the multiplicity competitor participates"
+    );
+    let cr = &c.contested[0];
+    assert_eq!(cr.caller, test_fixture::caller_key());
+    assert_eq!(cr.name, "target");
+    assert_eq!(
+        cr.syntactic_key,
+        format!(
+            "{}:{}#target:SYMBOL:FUNCTION",
+            test_fixture::REPO,
+            test_fixture::CALLEE_PATH
+        )
+    );
+    assert_eq!(
+        cr.semantic_key,
+        format!(
+            "{}:{}#target:SYMBOL:FUNCTION",
+            test_fixture::REPO,
+            test_fixture::LIB_PATH
+        ),
+        "the compiler's competing binding is the multiplicity pair's target"
+    );
+}
+
+#[test]
+fn refusal_spans_new_pair_and_multiplicity_candidates() {
+    // review-2 #2: TWO same-named candidates, one from EACH sub-class — lib/c.ts#target
+    // (`multiplicity`, p = 1, s = 2) + lib/d.ts#target (`new_pair`, p = 0, s = 1) → the
+    // ambiguity guard refuses the contested join across the sub-class span (never a pick),
+    // while `identity_suspect` still counts the syntactic pair.
+    let f = test_fixture::build_layer2_cross_subclass_ambiguous_fixture();
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+
+    assert_eq!(
+        c.semantic.multiplicity, 1,
+        "candidate 1: the S-excess sub-class"
+    );
+    assert_eq!(
+        c.semantic.new_pair, 1,
+        "candidate 2: the new_pair sub-class"
+    );
+    assert_eq!(
+        c.semantic_call_targets
+            .get(&(test_fixture::caller_key(), "target".to_string()))
+            .map(|s| s.len()),
+        Some(2),
+        "the index holds BOTH sub-classes' candidates"
+    );
+    assert!(
+        c.contested.is_empty(),
+        "≥ 2 candidates spanning sub-classes → the contested join REFUSES: {:?}",
+        c.contested
+    );
+    assert_eq!(c.identity_suspect, 1, "the suspicion count still fires");
+}
+
+#[test]
+fn semantic_call_targets_records_two_same_named_candidates_for_ambiguity() {
+    // The ambiguity substrate: two same-named `cn` targets in one caller → the read-side join
+    // must REFUSE (proven at the projection layer). Here: the index holds BOTH keys.
+    let f = test_fixture::build_layer2_fixture(true);
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+    let targets = c
+        .semantic_call_targets
+        .get(&(test_fixture::caller_key(), "cn".to_string()))
+        .expect("cn indexed");
+    assert_eq!(targets.len(), 2, "two same-named candidates → ambiguous");
+    assert!(targets.contains(&test_fixture::cn_key()));
+    assert!(targets.contains(&test_fixture::cn2_key()));
+}
+
+#[test]
+fn contested_refuses_ambiguous_candidates_but_still_suspects() {
+    // review-1 #1: the REVERSED join carries the SAME ambiguity guard as case 1. One syntactic
+    // `target` (P → src/b.ts#target) + TWO same-named compiler targets (lib/c.ts, lib/d.ts) →
+    // the compiler resolution is itself ambiguous → NO contested row selected or emitted. The
+    // wrong/missed-adoption SYMPTOM (`identity_suspect`) still fires — a distinct signal, unchanged.
+    let f = test_fixture::build_contested_ambiguous_fixture();
+    let l = built_ledger(&f);
+    let c = l.classification.as_ref().expect("measured path");
+
+    assert_eq!(
+        c.semantic_call_targets
+            .get(&(test_fixture::caller_key(), "target".to_string()))
+            .map(|s| s.len()),
+        Some(2),
+        "the index holds both same-named compiler candidates"
+    );
+    assert!(
+        c.contested.is_empty(),
+        "≥ 2 same-named candidates → the contested join REFUSES (never a pick): {:?}",
+        c.contested
+    );
+    assert_eq!(
+        c.identity_suspect, 1,
+        "the suspicion count still fires on the one syntactic pair (value unchanged by the guard)"
+    );
+}
+
 // ── The committed fixture: the spike's 7/0/2/9 + the per-kind RECORD (§3.4/§6.1) ─────────────
 
 /// The spike baseline on the COMMITTED real fixture (`repo-graph-scip-ingest`'s

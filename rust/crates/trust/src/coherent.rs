@@ -227,6 +227,17 @@ pub struct CoherentTrustReport {
     /// byte-identical).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub witnesses: Option<Value>,
+
+    /// RECON-M-R4: the additive Layer-2 attribution block (recon-design-1 §5.5) — "this
+    /// unresolved call likely resolves to `X`" hints (compiler-resolved same-named calls the
+    /// syntax pipeline could not confirm) + contested-resolution signals (syntax and compiler
+    /// disagree). Built by the daemon's shared witness projection over the repo's unresolved CALL
+    /// sites, attached AFTER the pure fold (labels/blocks only — the trust RATIO and the
+    /// unresolved COUNT are byte-untouched, the §5.5 denominator-invariance). A plain
+    /// `Option<Value>` OUTSIDE the MEET fold (a Layer-2 hint never downgrades the v1 posture) and
+    /// absent on the wire when `None` (R-0: zero-SCIP + no-hint repos byte-identical).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub layer2_resolution: Option<Value>,
 }
 
 // ── Posture helpers ────────────────────────────────────────────────────────────────────────────────
@@ -444,8 +455,9 @@ pub fn trust_to_coherent(
         modules: modules_leaf,
         caveats: caveats_leaf,
         current_state_posture: posture,
-        // RECON-M-R3a: attached by the daemon adapter AFTER this pure fold (never part of it).
+        // RECON-M-R3a / M-R4: attached by the daemon adapter AFTER this pure fold (never part of it).
         witnesses: None,
+        layer2_resolution: None,
     };
 
     CoherenceEnvelope::new(value, provenance, trust, freshness)

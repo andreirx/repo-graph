@@ -27,6 +27,7 @@
 use repo_graph_coherence::{
     AnswerClass, CoherenceEnvelope, DegradationReason, FreshnessState, TrustPosture,
 };
+use repo_graph_trust::storage_port::TrustStorageRead;
 use repo_graph_trust::types::TrustReport;
 use repo_graph_trust::{
     trust_to_coherent, CoherentTrustReport, LiveGraphPartitionPosture, LiveGraphPosture,
@@ -60,14 +61,27 @@ pub(crate) fn build_trust_envelope(
 
     let posture = build_posture_leaf(repo_state, epoch);
     let mut envelope = trust_to_coherent(report, posture, stale);
-    // RECON-M-R3a: the additive `witnesses` block (recon-design-1 §5.4) from the SHARED witness
-    // projection — attached AFTER the pure fold, outside the MEET (absence of a second witness
-    // is coverage truth, not v1-report degradation). `None` on repos with no witness evidence →
-    // the field is absent on the wire and every byte matches today (R-0; the §5.3.1 invariance:
-    // ledger absent vs present differs ONLY in this labeled block).
-    envelope.value.witnesses =
-        crate::witness_projection::WitnessProjection::compute(repo_state, epoch.snapshot_uid())
-            .map(|p| p.trust_block());
+    // RECON-M-R3a / M-R4: the additive witness blocks from the SHARED witness projection —
+    // attached AFTER the pure fold, outside the MEET (absence of a second witness is coverage
+    // truth, not v1-report degradation). Computed ONCE and consumed twice. `None` on repos with
+    // no witness evidence → the fields are absent on the wire and every byte matches today (R-0;
+    // §5.3.1 invariance: ledger absent vs present differs ONLY in these labeled blocks).
+    let projection =
+        crate::witness_projection::WitnessProjection::compute(repo_state, epoch.snapshot_uid());
+    envelope.value.witnesses = projection.as_ref().map(|p| p.trust_block());
+    // RECON-M-R4 (§5.5): the Layer-2 landing on the "Unresolved references — where they go"
+    // surface — likely resolutions + contested signals over the repo's unresolved CALL sites.
+    // Case 1 needs the per-site unresolved rows (the RED floor — SQLite only), read read-only at
+    // the pinned snapshot; a read failure yields NO block (never a partial claim). ADDITIVE:
+    // touches no ratio, no unresolved count (the denominator-invariance non-negotiable).
+    envelope.value.layer2_resolution = projection.as_ref().and_then(|p| {
+        let sites = repo_state
+            .storage()
+            .ok()?
+            .unresolved_call_sites(epoch.snapshot_uid(), None)
+            .ok()?;
+        p.layer2_attribution_block(&sites, None)
+    });
     envelope
 }
 
@@ -589,23 +603,82 @@ mod tests {
         assert_eq!(measured["accounting"], "union", "labeled (§5.3.0)");
         assert!(measured["coverage"]["fingerprint"].is_string());
 
-        // Strip ONLY the witnesses field; everything else must be byte-identical.
+        // Strip the additive witness blocks (`witnesses` + RECON-M-R4 `layer2_resolution`);
+        // everything else must be byte-identical. `layer2_resolution` is absent on this fixture
+        // (no contested pair, no unresolved sites) — `.remove` returns `None`, which is fine; the
+        // point is that stripping the additive blocks leaves the ratio/leaves byte-equal.
         let mut a = serde_json::to_value(&absent).unwrap();
         let mut b = serde_json::to_value(&present).unwrap();
-        a["value"]
-            .as_object_mut()
-            .unwrap()
-            .remove("witnesses")
-            .expect("absent-state block present (slot evidence)");
-        b["value"]
-            .as_object_mut()
-            .unwrap()
-            .remove("witnesses")
-            .expect("present-state block present");
+        for v in [&mut a, &mut b] {
+            let obj = v["value"].as_object_mut().unwrap();
+            obj.remove("witnesses")
+                .expect("witnesses slot evidence present");
+            obj.remove("layer2_resolution");
+        }
         assert_eq!(
             a.to_string(),
             b.to_string(),
-            "ledger absent vs present may differ ONLY in the witnesses block (§5.3.1)"
+            "ledger absent vs present may differ ONLY in the additive witness blocks (§5.3.1)"
+        );
+    }
+
+    /// RECON-M-R4 (§5.5 DENOMINATOR-INVARIANCE non-negotiable): the Layer-2 block is PURELY
+    /// ADDITIVE. With a NON-EMPTY block present (a contested signal from the suspect fixture), the
+    /// trust ratio, resolution, summary, and every other byte are identical to the block-absent
+    /// state. The denominator never moves — the §5.5 stop condition, proven on this surface.
+    #[test]
+    fn layer2_block_is_additive_the_trust_ratio_is_byte_invariant() {
+        use crate::callgraph_cert::test_fixture;
+        // The suspect fixture: syntax resolves callerFn→A, the compiler a same-named call→B → a
+        // contested signal (ledger-only, needs no unresolved sites).
+        let f = test_fixture::build_suspect_fixture();
+        let storage = f.state.storage().expect("open storage");
+        let snapshot = AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+            .expect("get_latest_snapshot")
+            .expect("a ready snapshot exists");
+        // The Layer-2 block reads only the ledger (the never-stale peek), independent of the
+        // posture's EV-A pin — so a `None` fingerprint (posture withheld) does not affect it.
+        let epoch = RequestEpoch {
+            snapshot,
+            fingerprint: None,
+        };
+
+        let absent = build_trust_envelope(&f.state, &epoch, minimal_report(&f.snapshot_uid));
+        assert!(
+            absent.value.layer2_resolution.is_none(),
+            "no ledger → no Layer-2 block"
+        );
+
+        let _ = crate::callgraph_cert::callgraph_is_green(&f.state, &f.snapshot_uid);
+        assert!(f.state.witness_ledger.read().is_some());
+        let present = build_trust_envelope(&f.state, &epoch, minimal_report(&f.snapshot_uid));
+        let block = present
+            .value
+            .layer2_resolution
+            .as_ref()
+            .expect("ledger present → the contested block renders");
+        assert_eq!(
+            block["accounting"], "layer2",
+            "labeled Layer-2 certainty class"
+        );
+        assert!(
+            !block["contested"].as_array().unwrap().is_empty(),
+            "the contested signal landed (a NON-EMPTY block — the invariance is meaningful)"
+        );
+
+        // Strip the two additive witness blocks; EVERY other byte — ratio, resolution, summary,
+        // reliability, posture — must be identical whether the Layer-2 block is present or not.
+        let mut a = serde_json::to_value(&absent).unwrap();
+        let mut b = serde_json::to_value(&present).unwrap();
+        for v in [&mut a, &mut b] {
+            let obj = v["value"].as_object_mut().unwrap();
+            obj.remove("witnesses");
+            obj.remove("layer2_resolution");
+        }
+        assert_eq!(
+            a.to_string(),
+            b.to_string(),
+            "the Layer-2 block is purely additive — the trust ratio/count is byte-invariant (§5.5)"
         );
     }
 

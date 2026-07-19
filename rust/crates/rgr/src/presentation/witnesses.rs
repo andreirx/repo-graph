@@ -363,6 +363,157 @@ pub fn render_reference_tier_section(block: Option<&Value>) -> String {
     out
 }
 
+/// RECON-M-R4 (§5.5): the Layer-2 attribution section — "likely resolves to X" hints
+/// (the compiler resolved a same-named call the syntax pipeline could not confirm) + the
+/// contested-resolution signals (syntax and compiler resolutions disagree). Empty when `block` is
+/// `None` (R-0/R-1) or fails the layer2 accounting/coverage gate (absence, never unlabeled
+/// figures). Every line is a Layer-2 CLAIM per the labels rule (§5.5 #4): "likely" (certainty
+/// distinct from "resolves"), the BASIS named (compiler resolution + same-name), never implying
+/// syntax/pipeline confirmation. Defensive: a malformed item renders absence, never a panic or an
+/// invented target. NAMED truncation (§5.2 — never silent). `pub`: trust + explain share this ONE
+/// projection — no per-surface phrasing drift.
+pub fn render_layer2_resolution_section(block: Option<&Value>) -> String {
+    let Some(block) = block else {
+        return String::new();
+    };
+    // The layer2 accounting marker + a complete coverage basis (a label-less block suppresses the
+    // section — a Layer-2 hint never renders without its certainty class + coverage).
+    if block.get("accounting").and_then(Value::as_str) != Some("layer2") {
+        return String::new();
+    }
+    let Some(coverage) = coverage_phrase(block) else {
+        return String::new();
+    };
+
+    // A reader-frame endpoint phrase "name (file)" from a target object; `None` when neither is
+    // present (the item is then skipped — never a half-blank claim).
+    let endpoint = |t: Option<&Value>| -> Option<String> {
+        let t = t?;
+        let name = t
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
+        let file = t
+            .get("file")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
+        match (name, file) {
+            (Some(n), Some(f)) => Some(format!("{n} ({f})")),
+            (Some(n), None) => Some(n.to_string()),
+            (None, Some(f)) => Some(f.to_string()),
+            (None, None) => None,
+        }
+    };
+    let caller_of = |item: &Value| -> Option<String> {
+        item.get("caller_name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .or_else(|| item.get("caller").and_then(Value::as_str))
+            .map(str::to_string)
+    };
+
+    let mut out = String::new();
+
+    // ── Case 1: unresolved calls the compiler resolved — the likely resolutions AND the
+    //    ambiguity guard's refusals. Both are outcomes of the SAME §5.5 name-guarded join over
+    //    pipeline-unresolved sites (some sites resolve to exactly one same-named compiler target →
+    //    "likely"; some to ≥ 2 → REFUSED as ambiguous), so they share ONE Layer-2/coverage
+    //    heading. An ambiguity-ONLY state is still a Layer-2 attribution outcome and renders under
+    //    that heading — never an orphaned bullet, and the refusal reads grammatically whether or
+    //    not a likely hint preceded it (review-0 required-change #3). ──
+    let likely_items = block
+        .get("likely")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    // Render the likely bullets into a buffer FIRST so the heading and the "more" prefix reflect
+    // what ACTUALLY rendered — a defensively-skipped malformed item never leaves a headed-but-empty
+    // section, nor a dangling "more".
+    let mut likely_body = String::new();
+    for item in likely_items {
+        let (Some(caller), Some(call), Some(target)) = (
+            caller_of(item),
+            item.get("call").and_then(Value::as_str),
+            endpoint(item.get("resolves_to")),
+        ) else {
+            continue;
+        };
+        // Per-site (§5.5 / review-1 #2): append THIS site's own call-site line when the floor
+        // recorded it, so two unresolved sites of the same call in one caller are distinct and
+        // locatable (the location is the site's, never an arbitrary first). Appended AT THE END so
+        // the basis clause the labels-rule audit checks is a stable prefix.
+        let at = item
+            .get("line")
+            .and_then(Value::as_i64)
+            .map(|l| format!(" (line {l})"))
+            .unwrap_or_default();
+        likely_body.push_str(&bullet(&format!(
+            "in {caller}, {call}(…) likely resolves to {target} — a same-named call the \
+             compiler resolved; syntax did not confirm it{at}"
+        )));
+    }
+    let likely_rendered = !likely_body.is_empty();
+    let ambiguous = u(block, "ambiguous").filter(|n| *n > 0);
+    if likely_rendered || ambiguous.is_some() {
+        // ONE umbrella heading honest for BOTH sub-outcomes AND for the CERTAINTY class (review-1
+        // #3): "Compiler Evidence for Unresolved Calls" names the BASIS (compiler-side evidence)
+        // without claiming exact resolution — the bullets say "likely resolves", the section must
+        // not upgrade that to "…the Compiler Resolved". Honest for a likely hint, an ambiguity
+        // refusal, or both.
+        out.push_str(&heading(&format!(
+            "Compiler Evidence for Unresolved Calls  (Layer-2 — syntax could not confirm these, \
+             {coverage})"
+        )));
+        // Named truncation of the likely list (§5.2 — never silent), only when hints rendered.
+        if likely_rendered && u(block, "likely_truncated").unwrap_or(0) > 0 {
+            let total = u(block, "likely_total").unwrap_or(likely_items.len() as u64);
+            let shown = u(block, "likely_shown").unwrap_or(likely_items.len() as u64);
+            out.push_str(&bullet(&format!("showing {shown} of {total}")));
+        }
+        out.push_str(&likely_body);
+        // The ambiguity guard's refusals — counted, never guessed (§5.5). "more" ONLY after a
+        // shown likely hint (else this is the first/only line → grammatical without it).
+        if let Some(ambiguous) = ambiguous {
+            let more = if likely_rendered { "more " } else { "" };
+            out.push_str(&bullet(&format!(
+                "{ambiguous} {more}unresolved call{} had multiple same-named compiler candidates \
+                 — not attributed (ambiguous)",
+                if ambiguous == 1 { "" } else { "s" }
+            )));
+        }
+    }
+
+    // ── Case 2: contested resolutions ──
+    if let Some(items) = block.get("contested").and_then(Value::as_array) {
+        if !items.is_empty() {
+            out.push_str(&heading(&format!(
+                "Contested Resolutions  (Layer-2 — syntax and compiler resolutions disagree, \
+                 {coverage})"
+            )));
+            let total = u(block, "contested_total").unwrap_or(items.len() as u64);
+            if u(block, "contested_truncated").unwrap_or(0) > 0 {
+                let shown = u(block, "contested_shown").unwrap_or(items.len() as u64);
+                out.push_str(&bullet(&format!("showing {shown} of {total}")));
+            }
+            for item in items {
+                let (Some(caller), Some(call), Some(syntax), Some(compiler)) = (
+                    caller_of(item),
+                    item.get("call").and_then(Value::as_str),
+                    endpoint(item.get("syntax_target")),
+                    endpoint(item.get("compiler_target")),
+                ) else {
+                    continue;
+                };
+                out.push_str(&bullet(&format!(
+                    "in {caller}, {call}: syntax points to {syntax}; the compiler resolved a \
+                     same-named call to {compiler}"
+                )));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,6 +913,146 @@ mod tests {
             render_reference_tier_section(Some(&reference_block(30, 3, "incoming")))
                 .contains("showing 3 of 30 referencing symbols"),
             "a consistent block must still render"
+        );
+    }
+
+    // ── RECON-M-R4: the Layer-2 attribution section (labels-rule audit) ──────────────────────
+
+    fn layer2_block() -> Value {
+        json!({
+            "accounting": "layer2",
+            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
+            "likely": [{
+                "caller": "repo:src/Toolbar.tsx#Toolbar:SYMBOL:FUNCTION",
+                "caller_name": "Toolbar", "call": "cn",
+                "resolves_to": {"name": "cn", "file": "src/utils.ts",
+                                "stable_key": "repo:src/utils.ts#cn:SYMBOL:FUNCTION"},
+                "line": 12, "col": 4,
+            }],
+            "likely_total": 1, "likely_shown": 1, "likely_truncated": 0,
+            "ambiguous": 2,
+            "contested": [{
+                "caller": "repo:src/cart.ts#getStoredConsent:SYMBOL:FUNCTION",
+                "caller_name": "getStoredConsent", "call": "removeItem",
+                "syntax_target": {"name": "removeItem", "file": "src/cart.ts", "stable_key": "a"},
+                "compiler_target": {"name": "removeItem", "file": "src/other.ts", "stable_key": "b"},
+            }],
+            "contested_total": 1, "contested_shown": 1, "contested_truncated": 0,
+        })
+    }
+
+    /// The labels rule (§5.5 #4): certainty distinct ("likely resolves" ≠ "resolves"), basis
+    /// named, never implying pipeline/syntax confirmation, Layer-2 marked, coverage labeled.
+    #[test]
+    fn layer2_section_renders_likely_contested_with_labels_rule_wording() {
+        let s = render_layer2_resolution_section(Some(&layer2_block()));
+        // review-1 #3: the heading names the BASIS, never claims exact resolution ("…Resolved").
+        assert!(s.contains("Compiler Evidence for Unresolved Calls"));
+        assert!(
+            !s.contains("the Compiler Resolved"),
+            "the heading must not upgrade 'likely resolves' to an exact-resolution claim: {s}"
+        );
+        assert!(
+            s.contains("Layer-2"),
+            "the Layer-2 certainty class is stated"
+        );
+        assert!(s.contains("TypeScript (1 partition)"), "coverage labeled");
+        assert!(
+            s.contains("in Toolbar, cn(…) likely resolves to cn (src/utils.ts)"),
+            "certainty distinct — 'likely resolves', target named: {s}"
+        );
+        assert!(
+            s.contains("a same-named call the compiler resolved; syntax did not confirm it"),
+            "basis named + never implies syntax confirmation: {s}"
+        );
+        // review-1 #2: the per-site call-site line is rendered (the fixture site is line 12).
+        assert!(
+            s.contains("syntax did not confirm it (line 12)"),
+            "the site's own call-site line renders (per-site, not arbitrary): {s}"
+        );
+        // The ambiguity refusal is counted, never guessed.
+        assert!(s.contains(
+            "2 more unresolved calls had multiple same-named compiler candidates — not attributed \
+             (ambiguous)"
+        ));
+        // Contested: disagreement stated, both targets' files shown.
+        assert!(s.contains("Contested Resolutions"));
+        assert!(s.contains("disagree"));
+        assert!(s.contains(
+            "in getStoredConsent, removeItem: syntax points to removeItem (src/cart.ts); the \
+             compiler resolved a same-named call to removeItem (src/other.ts)"
+        ));
+    }
+
+    #[test]
+    fn layer2_section_suppressed_on_none_wrong_accounting_or_incomplete_coverage() {
+        assert_eq!(render_layer2_resolution_section(None), "");
+        // Wrong certainty class → never rendered as a Layer-2 hint.
+        let mut b = layer2_block();
+        b["accounting"] = json!("union");
+        assert_eq!(render_layer2_resolution_section(Some(&b)), "");
+        // Incomplete coverage basis → suppressed (a Layer-2 hint never renders unlabeled).
+        let mut b2 = layer2_block();
+        b2["coverage"]["fingerprint"] = json!("");
+        assert_eq!(render_layer2_resolution_section(Some(&b2)), "");
+    }
+
+    #[test]
+    fn layer2_section_names_truncation_and_is_silent_at_zero_ambiguous() {
+        let mut b = layer2_block();
+        b["likely_total"] = json!(30);
+        b["likely_truncated"] = json!(29);
+        let s = render_layer2_resolution_section(Some(&b));
+        assert!(
+            s.contains("showing 1 of 30"),
+            "named truncation, never silent: {s}"
+        );
+
+        let mut b2 = layer2_block();
+        b2["ambiguous"] = json!(0);
+        b2.as_object_mut().unwrap().remove("contested");
+        let s2 = render_layer2_resolution_section(Some(&b2));
+        assert!(
+            !s2.contains("ambiguous") && !s2.contains("Contested"),
+            "zero ambiguous + no contested → no noise: {s2}"
+        );
+    }
+
+    /// review-0 required-change #3: the AMBIGUITY-ONLY production state (`likely=[]`,
+    /// `ambiguous>0`, `contested=[]`) — the state `layer2_refuses_an_ambiguous_site_never_a_guess`
+    /// produces. It must render UNDER a Layer-2/coverage heading (never an orphaned bullet) with a
+    /// GRAMMATICAL refusal: no dangling "more" when no likely hint preceded it.
+    #[test]
+    fn layer2_ambiguity_only_state_is_headed_and_grammatical() {
+        let mut b = layer2_block();
+        b["likely"] = json!([]);
+        b["likely_total"] = json!(0);
+        b["likely_shown"] = json!(0);
+        b["likely_truncated"] = json!(0);
+        b["ambiguous"] = json!(1);
+        b.as_object_mut().unwrap().remove("contested");
+        let s = render_layer2_resolution_section(Some(&b));
+
+        // The Layer-2/coverage heading is present — the refusal is never an orphaned bullet.
+        assert!(
+            s.contains("Compiler Evidence for Unresolved Calls") && s.contains("Layer-2"),
+            "ambiguity-only state must carry the Layer-2 heading: {s}"
+        );
+        assert!(
+            s.contains("TypeScript (1 partition)"),
+            "coverage labeled: {s}"
+        );
+        // Grammatical singular refusal, and NO dangling "more" (nothing preceded it).
+        assert!(
+            s.contains(
+                "1 unresolved call had multiple same-named compiler candidates — not attributed \
+                 (ambiguous)"
+            ),
+            "grammatical singular refusal: {s}"
+        );
+        assert!(
+            !s.contains("more unresolved"),
+            "no 'more' without a preceding shown hint: {s}"
         );
     }
 }

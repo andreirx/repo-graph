@@ -529,6 +529,36 @@ pub struct CallClassification {
     /// Syntactic-class pairs whose (caller key, callee NAME) matches a semantic-class pair under
     /// a DIFFERENT callee key — the wrong/missed-adoption symptom signature (§3.5 guard 3).
     pub identity_suspect: usize,
+    /// RECON-M-R4 (§5.5, the CONTESTED-RESOLUTION signal): the NAME-GUARDED, AMBIGUITY-REFUSING
+    /// detail beside `identity_suspect`. Each record is a syntactic pair (caller, callee NAME →
+    /// target A) whose name the compiler resolved in the same caller to EXACTLY ONE same-named
+    /// target B (B ≠ A) — "syntax and compiler resolutions disagree here". Computed in the SAME
+    /// pass as `identity_suspect` over the same `semantic_call_targets` index (review-1 #1): a
+    /// syntactic pair with ≥ 2 same-named compiler candidates is AMBIGUOUS → mints NO contested row
+    /// (§5.5 "Ambiguous (≥2 candidates) → NOT landed", the SAME guard case 1 applies), while
+    /// `identity_suspect` still counts it. So `contested.len() ≤ identity_suspect`, and
+    /// `identity_suspect == 0 ⟹ contested.is_empty()` (one direction only — the guard breaks the
+    /// old `⟺`). Scope is honest BY CONSTRUCTION (§5.5): a `semantic` edge exists only for a callee the
+    /// compiler RESOLVED — external bindings are dropped at ingest [scip-ingest lib.rs:720-726],
+    /// so `semantic_key` is always a project/internal symbol, never an external API (the measured
+    /// amodx misresolutions bound to external APIs and thus surface via their divergence class,
+    /// not here). Deterministic (BTreeSet-ordered syntactic × semantic iteration).
+    pub contested: Vec<ContestedResolution>,
+    /// RECON-M-R4 (§5.5 case 1, the LAYER-2 landing substrate): `semantic`-class (compiler-only)
+    /// call targets indexed by `(caller key, callee NAME)` → the set of resolved callee keys. The
+    /// join key for landing "this call likely resolves to `X`" on an unresolved SITE whose target
+    /// expression HEAD equals the callee NAME (§5.5 name guard — EXACT, no stemming/fuzzing). A
+    /// lookup returning ≥ 2 keys is AMBIGUOUS → the surface REFUSES to annotate (never a guess).
+    /// EVERY pair with compiler-only excess enters — mechanically `s_calls > p` (review-2): both
+    /// `new_pair` (`p == 0`) AND `multiplicity` (`s_calls > p ≥ 1`; the S-excess instance is a
+    /// call the compiler witnessed that P did NOT, exactly the unresolved-site class — the pair
+    /// being partly corroborated does not corroborate the excess instance). A FULLY corroborated
+    /// pair (`s_calls == p`) never enters: no compiler-only excess exists to attribute. A
+    /// collision-withheld pair never enters (its withheld S edges are excluded from `s_calls`, so
+    /// `s_calls == 0` — guard 2 holds mechanically). Callee names are the same `n.name` the
+    /// classification uses (one name source — the read surface never re-resolves). Deterministic
+    /// (BTreeMap/BTreeSet order).
+    pub semantic_call_targets: BTreeMap<(String, String), BTreeSet<String>>,
     /// RECON-M-R3a (g2u substrate, §5.3.3a): keys with ≥1 INCOMING compiler-witnessed edge from
     /// the eligible IRs — the dst of every non-withheld strict-`Calls` instance ∪ the dst of every
     /// `References` instance whose dst is not a detected collision key. Self-edges (src == dst)
@@ -658,6 +688,25 @@ pub struct DeltaPair {
     pub p: usize,
     /// S strict-`Calls` occurrence count.
     pub s_calls: usize,
+}
+
+/// RECON-M-R4 (§5.5, the CONTESTED-RESOLUTION signal): one syntax-vs-compiler resolution
+/// disagreement within a single caller — the syntax pipeline resolved a call named `name` to
+/// `syntactic_key`, and the compiler resolved a same-named call in the same caller to a DIFFERENT
+/// target `semantic_key`. A Layer-2 hint ("this is what we noticed; here is the basis"), never a
+/// rewrite of either witness's fact.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContestedResolution {
+    /// The caller symbol key both resolutions share (the site's containing symbol).
+    pub caller: String,
+    /// The shared callee NAME — syntax resolved a call of this name, the compiler resolved a
+    /// same-named call (the exact-name join, §5.5 name guard).
+    pub name: String,
+    /// The target the SYNTAX pipeline resolved the call to (P's uncorroborated/pipeline-only edge).
+    pub syntactic_key: String,
+    /// The DIFFERENT target the COMPILER (SCIP) resolved a same-named call to (a `semantic` edge —
+    /// a project/internal symbol by construction; external bindings never reach here).
+    pub semantic_key: String,
 }
 
 /// Per language×partition rollup — the mechanically per-partition-attributable facts. Class
@@ -1124,6 +1173,8 @@ pub(super) fn build_witness_ledger(
         colliding_keys,
         withheld_pairs,
         identity_suspect: 0,
+        contested: Vec::new(),
+        semantic_call_targets: BTreeMap::new(),
         s_incoming_witnessed,
         pairs: BTreeMap::new(),
         delta_pairs: Vec::new(),
@@ -1276,23 +1327,75 @@ pub(super) fn build_witness_ledger(
     cls.union_calls =
         cls.both + cls.syntactic.total() + cls.semantic.total() + cls.unmeasured_edges;
 
-    // ── identity_suspect (guard 3): syntactic (caller, callee-NAME) matching a semantic pair
-    //    under a DIFFERENT callee key. Names from P first, else the S node inventory; a pair with
-    //    no derivable name makes NO claim (skipped).
     let name_of = |key: &str| -> Option<&String> { p_name.get(key).or_else(|| s_name.get(key)) };
+
+    // ── RECON-M-R4 (§5.5): index the `semantic`-class (compiler-only) call targets by
+    //    (caller, callee NAME). This ONE index is the compiler's set of same-named resolutions
+    //    with instances the pipeline lacks — the join key AND the shared AMBIGUITY GUARD for BOTH
+    //    Layer-2 cases: case 1 lands "likely resolves to X" on an unresolved SITE (read side);
+    //    case 2 (below) lands the contested signal on a P-RESOLVED site. Built HERE, before the
+    //    contested loop reads it, then moved. The candidate rule is mechanical (review-2):
+    //    `s_calls > p` — every compiler-only semantic pair, BOTH sub-classes (`new_pair` p == 0;
+    //    `multiplicity` s > p ≥ 1), NEVER a fully corroborated pair (s == p: no compiler-only
+    //    excess). The scan over `cls.pairs` is complete for that rule: the P-side loop inserted
+    //    every P pair (p ≥ 1) with its true `s_calls`, the S-side loop every p == 0 pair; a
+    //    withheld pair has `s_calls == 0` (collision guard) and never qualifies. A callee with no
+    //    derivable name makes no claim.
+    let mut semantic_call_targets: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+    for (pair, rec) in &cls.pairs {
+        if rec.s_calls > rec.p {
+            if let Some(name) = name_of(&pair.1) {
+                semantic_call_targets
+                    .entry((pair.0.clone(), name.clone()))
+                    .or_default()
+                    .insert(pair.1.clone());
+            }
+        }
+    }
+
+    // ── identity_suspect (guard 3) + the CONTESTED detail (§5.5 case 2), one pass over the
+    //    syntactic pairs. `identity_suspect` counts distinct syntactic pairs with ≥ 1 same-named
+    //    semantic pair under a DIFFERENT callee key (the wrong/missed-adoption symptom) — its value
+    //    is UNCHANGED (still measured over the full `sem_index`, both new_pair and multiplicity).
+    //    `contested` is the NAME-GUARDED, AMBIGUITY-REFUSING subset (review-1 #1): it records a
+    //    disagreement ONLY when the compiler resolved the name to EXACTLY ONE same-named target
+    //    (`semantic_call_targets`) that differs from P's — the SAME "≥ 2 candidates → refuse" guard
+    //    case 1 applies (§5.5 "Ambiguous (≥2 candidates) → NOT landed; unknown stays unknown"). So
+    //    `contested.len() ≤ identity_suspect`, and `identity_suspect == 0 ⟹ contested.is_empty()`
+    //    (a suspect with ≥ 2 candidates still counts, but mints no contested row). Names from P
+    //    first, else the S node inventory; a pair with no derivable name makes no claim (skipped).
     let sem_index: BTreeSet<(&str, &String, &str)> = sem_pairs
         .iter()
         .filter_map(|(a, b)| name_of(b).map(|n| (a.as_str(), n, b.as_str())))
         .collect();
     for (a, b) in &syn_pairs {
         let Some(bn) = name_of(b) else { continue };
-        let hit = sem_index
+        if sem_index
             .iter()
-            .any(|(sa, sn, sb)| *sa == a.as_str() && *sn == bn && *sb != b.as_str());
-        if hit {
+            .any(|(sa, sn, sb)| *sa == a.as_str() && *sn == bn && *sb != b.as_str())
+        {
             cls.identity_suspect += 1;
         }
+        // The ambiguity guard: a single unambiguous compiler competitor only (never a pick among
+        // ≥ 2 same-named candidates). `into_iter().flatten()` over the `Option<&set>` yields the
+        // (Some, None) = exactly-one shape — the same guard `Layer2Match` applies on the read side.
+        let mut cand = semantic_call_targets
+            .get(&(a.clone(), bn.clone()))
+            .into_iter()
+            .flatten();
+        if let (Some(sb), None) = (cand.next(), cand.next()) {
+            if sb != b {
+                cls.contested.push(ContestedResolution {
+                    caller: a.clone(),
+                    name: bn.clone(),
+                    syntactic_key: b.clone(),
+                    semantic_key: sb.clone(),
+                });
+            }
+        }
     }
+
+    cls.semantic_call_targets = semantic_call_targets;
 
     Some(WitnessLedger {
         fingerprint: fingerprint.to_string(),

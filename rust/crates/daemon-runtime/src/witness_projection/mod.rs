@@ -66,12 +66,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use repo_graph_ir::{CanonicalKey, EdgeType};
 use repo_graph_livegraph::PartitionState;
+use repo_graph_trust::storage_port::UnresolvedCallSite;
 use repo_graph_trust_model::{FreshnessState, LanguageSupport};
 use serde_json::{json, Value};
 
 use crate::callgraph_cert::ledger::{
-    classify_state, CallClassification, LedgerBuildFailure, PinState, StateClass, WOneReason,
-    WitnessLedger,
+    classify_state, CallClassification, ContestedResolution, LedgerBuildFailure, PinState,
+    StateClass, WOneReason, WitnessLedger,
 };
 use crate::livegraph_feed::import_cert_fingerprint;
 use crate::livegraph_refresh::discover_scip_typescript;
@@ -89,6 +90,12 @@ const PRODUCER_NAME: &str = "scip-typescript";
 /// while bounding a hot symbol's output; S-4 (the monorepo field measurement) sizes the
 /// production budget before any default flip — this is the M-R3b gate's fixture-scale bound.
 const REFERENCE_TIER_BUDGET: usize = 25;
+
+/// RECON-M-R4 (§5.5): the per-answer budget for Layer-2 hint lists (likely resolutions +
+/// contested resolutions), truncate-with-a-NAMED-count per the reference-tier precedent. 25
+/// samples orient without flooding a hot caller; S-2 (the monorepo field measurement) sizes the
+/// production budget before any default flip. Named, never silent (the §5.2 truncation rule).
+const LAYER2_BUDGET: usize = 25;
 
 /// RECON-M-R3b: which reference direction a tier surfaces (recon-design-1 §5.2 — the reference
 /// tier on callers/callees/explain SYMBOL focus). `callers`/explain ⇒ incoming ("which symbols
@@ -114,6 +121,26 @@ impl ReferenceDirection {
         }
     }
 }
+
+/// RECON-M-R4 (§5.5 case 1): the outcome of joining ONE unresolved SITE `(caller, target head)`
+/// against the ledger's `semantic`-class (compiler-only) call targets — BOTH sub-classes
+/// (`new_pair` AND S-excess `multiplicity`, review-2). The AMBIGUITY GUARD is
+/// structural (`Ambiguous` ≠ a guess): a site with ≥ 2 same-named compiler-resolved candidates is
+/// NEVER annotated (§5.5 "Ambiguous (≥2 candidates) → NOT landed; unknown stays unknown").
+enum Layer2Match<'a> {
+    /// No `semantic` target of this name in this caller — no hint (the dominant case).
+    NoCandidate,
+    /// Exactly ONE — the likely resolution (the resolved callee's canonical key).
+    Likely(&'a str),
+    /// ≥ 2 same-named candidates — AMBIGUOUS; refuse to annotate (name guard alone can't pick).
+    Ambiguous,
+}
+
+/// One per-site Layer-2 "likely" hint before JSON assembly:
+/// `(caller key, call head name, resolved callee key, call-site line, call-site col)`. A tuple
+/// behind an alias per clippy's type-complexity lint; `Ord`-sorted for output determinism (§5.5 is
+/// per SITE, so distinct sites of one call are distinct hints — review-1 #2).
+type LikelyHint = (String, String, String, Option<i64>, Option<i64>);
 
 /// Reader-frame language name (labels speak the reader's language — the enum's internal
 /// maturity names never ship).
@@ -646,6 +673,182 @@ impl WitnessProjection {
         }
     }
 
+    /// RECON-M-R4 (§5.5): attach the Layer-2 landing (likely resolutions + contested signals) to
+    /// a serialized explain response, for a SYMBOL-focus answer only (mirrors
+    /// [`Self::attach_explain_reference_tier`]). `sites` are the FOCUS CALLER's unresolved CALL
+    /// rows, read from SQLite by the handler — this module never touches SQLite (its PEEK-only
+    /// contract). No-op outside W-BOTH-with-current-ledger, on a non-symbol focus, or with no hint
+    /// — byte-identical, R-0/R-1. Additive: inserts only the labeled `layer2_resolution` block.
+    pub fn attach_explain_layer2(
+        repo_state: &RepoState,
+        snapshot_uid: &str,
+        sites: &[UnresolvedCallSite],
+        response: &mut Value,
+    ) {
+        let symbol = match (
+            response["value"]["focus"]["resolved_kind"].as_str(),
+            response["value"]["focus"]["resolved_key"].as_str(),
+        ) {
+            (Some("symbol"), Some(key)) => key.to_string(),
+            _ => return,
+        };
+        let Some(projection) = Self::compute(repo_state, snapshot_uid) else {
+            return;
+        };
+        if let Some(block) = projection.layer2_attribution_block(sites, Some(&symbol)) {
+            if let Some(obj) = response["value"].as_object_mut() {
+                obj.insert("layer2_resolution".to_string(), block);
+            }
+        }
+    }
+
+    // ── Layer-2 landing (M-R4): §5.5 unresolved-site attribution + contested resolutions ──────
+
+    /// RECON-M-R4 (§5.5 case 1): join ONE unresolved SITE `(caller, target expression HEAD)`
+    /// against the ledger's `semantic`-class (compiler-only) call targets — every pair with
+    /// compiler-only excess (`s_calls > p`: `new_pair` and `multiplicity` alike, review-2; a
+    /// fully corroborated pair never candidates). EXACT name match (the
+    /// §5.5 guard — no stemming/fuzzing); ≥ 2 same-named candidates → [`Layer2Match::Ambiguous`]
+    /// (refuse to annotate). `NoCandidate` outside a current measured ledger (W-BOTH-only, R-0/R-1
+    /// — the caller never annotates without one). Pure: reads only the retained index.
+    fn layer2_match(&self, caller_key: &str, target_head: &str) -> Layer2Match<'_> {
+        let Some(m) = self.measured() else {
+            return Layer2Match::NoCandidate;
+        };
+        let Some(keys) = m
+            .classification
+            .semantic_call_targets
+            .get(&(caller_key.to_string(), target_head.to_string()))
+        else {
+            return Layer2Match::NoCandidate;
+        };
+        let mut it = keys.iter();
+        match (it.next(), it.next()) {
+            (Some(k), None) => Layer2Match::Likely(k),
+            (Some(_), Some(_)) => Layer2Match::Ambiguous,
+            // An empty set is never stored (`or_default().insert(..)` always adds) — treated as
+            // no candidate for total safety.
+            _ => Layer2Match::NoCandidate,
+        }
+    }
+
+    /// RECON-M-R4 (§5.5 case 2): the retained contested resolutions, optionally scoped to one
+    /// caller (explain SYMBOL focus passes `Some(focus)`; trust passes `None` for the whole repo).
+    /// Empty outside a current measured ledger (W-BOTH-only). Deterministic (ledger order).
+    fn contested_resolutions(&self, focus: Option<&str>) -> Vec<&ContestedResolution> {
+        let Some(m) = self.measured() else {
+            return Vec::new();
+        };
+        m.classification
+            .contested
+            .iter()
+            .filter(|c| focus.is_none_or(|f| c.caller == f))
+            .collect()
+    }
+
+    /// RECON-M-R4 (§5.5): the Layer-2 attribution block over a set of unresolved CALL sites — the
+    /// "likely resolves to `X`" hints (case 1, name-guarded + ambiguity-refusing) and the
+    /// contested-resolution signals (case 2), coverage-labeled and budget-truncated with NAMED
+    /// counts. `Some` ONLY in W-BOTH with a current measured ledger AND ≥ 1 hint of any kind
+    /// (data-driven absence otherwise — an empty block is never a claim of zero; R-0/R-1). `focus`
+    /// scopes the contested list AND (defensively) the sites to one caller for explain SYMBOL
+    /// focus; `None` = the whole repo (trust). ADDITIVE: reads only the ledger + the passed sites,
+    /// touches NO counter — the §5.5 denominator-invariance non-negotiable (the trust ratio and
+    /// unresolved count are computed elsewhere and never see this block).
+    pub fn layer2_attribution_block(
+        &self,
+        sites: &[UnresolvedCallSite],
+        focus: Option<&str>,
+    ) -> Option<Value> {
+        let m = self.measured()?;
+
+        // Case 1 — the exact-name-head join, PER unresolved SITE (§5.5: the unit is the SITE, an
+        // `unresolved_edges` row). Every site whose (caller, target head) resolves to EXACTLY ONE
+        // same-named compiler target lands its OWN "likely" hint carrying THAT site's location
+        // (never an arbitrary first — review-1 #2); a site whose head has ≥ 2 same-named candidates
+        // is AMBIGUOUS → REFUSED and counted (never a guess, §5.5 name guard). Every count below is
+        // a SITE count. Tuple `(caller, head, callee key, line, col)`, sorted for output
+        // determinism independent of the read order (the module's deterministic-ordering invariant).
+        let mut likely: Vec<LikelyHint> = Vec::new();
+        let mut ambiguous_sites = 0usize;
+        for site in sites {
+            if focus.is_some_and(|f| site.caller_key != f) {
+                continue;
+            }
+            let Some(head) = head_name(&site.target_key) else {
+                continue;
+            };
+            match self.layer2_match(&site.caller_key, head) {
+                Layer2Match::Likely(callee) => likely.push((
+                    site.caller_key.clone(),
+                    head.to_string(),
+                    callee.to_string(),
+                    site.line_start,
+                    site.col_start,
+                )),
+                Layer2Match::Ambiguous => ambiguous_sites += 1,
+                Layer2Match::NoCandidate => {}
+            }
+        }
+        likely.sort();
+
+        // Case 2 — contested resolutions (ledger-computed; project-scoped + ambiguity-guarded in
+        // the ledger — §5.5 case 2, review-1 #1).
+        let contested = self.contested_resolutions(focus);
+
+        if likely.is_empty() && ambiguous_sites == 0 && contested.is_empty() {
+            return None; // data-driven absence — never a claim of zero
+        }
+
+        // Budget-truncate both lists with NAMED counts (§5.2 — never silent). Counts are SITES.
+        let likely_total = likely.len();
+        let likely_items: Vec<Value> = likely
+            .iter()
+            .take(LAYER2_BUDGET)
+            .map(|(caller, head, callee, line, col)| {
+                json!({
+                    "caller": caller,
+                    "caller_name": key_symbol_name(caller),
+                    "call": head,
+                    "resolves_to": target_json(callee),
+                    "line": line,
+                    "col": col,
+                })
+            })
+            .collect();
+        let likely_shown = likely_items.len();
+
+        let contested_total = contested.len();
+        let contested_items: Vec<Value> = contested
+            .iter()
+            .take(LAYER2_BUDGET)
+            .map(|c| {
+                json!({
+                    "caller": c.caller,
+                    "caller_name": key_symbol_name(&c.caller),
+                    "call": c.name,
+                    "syntax_target": target_json(&c.syntactic_key),
+                    "compiler_target": target_json(&c.semantic_key),
+                })
+            })
+            .collect();
+        let contested_shown = contested_items.len();
+
+        Some(json!({
+            "accounting": "layer2",
+            "coverage": coverage_json(m),
+            "likely": likely_items,
+            "likely_total": likely_total,
+            "likely_shown": likely_shown,
+            "likely_truncated": likely_total - likely_shown,
+            "ambiguous": ambiguous_sites,
+            "contested": contested_items,
+            "contested_total": contested_total,
+            "contested_shown": contested_shown,
+            "contested_truncated": contested_total - contested_shown,
+        }))
+    }
+
     // ── Map: the §5.3.4 g3u sketch pairs ─────────────────────────────────────────────────────
 
     /// The union-only CALL file pairs (`semantic`/`new_pair` — the ONLY class that can add a
@@ -972,6 +1175,36 @@ fn key_file_path(key: &str) -> Option<&str> {
     let after_uid = &key[key.find(':')? + 1..];
     let path = &after_uid[..after_uid.find('#')?];
     (!path.is_empty()).then_some(path)
+}
+
+/// RECON-M-R4 (§5.5 name guard): the called identifier of a raw CALLS `target_key` — the LAST
+/// dotted segment (`foo.bar` → `bar`; a bare `cn` → `cn`). The extractor may rewrite the receiver
+/// head to a resolved type but ALWAYS preserves the method name as the final segment
+/// [ts-extractor `resolve_receiver_type`], so this equals the resolved callee symbol's own `name`
+/// — the exact join key, no stemming/fuzzing. `None` for an empty/degenerate key (no claim).
+fn head_name(target_key: &str) -> Option<&str> {
+    let head = target_key.rsplit('.').next()?.trim();
+    (!head.is_empty()).then_some(head)
+}
+
+/// The symbol NAME segment of a canonical key (`{repo_uid}:{path}#{name}:SYMBOL:{seg}` — the
+/// text between the FIRST `#` and the following `:`). `None` for a key without that shape (e.g. a
+/// FILE key) — renders as unknown, never a guessed name.
+fn key_symbol_name(key: &str) -> Option<&str> {
+    let after_hash = &key[key.find('#')? + 1..];
+    let name = &after_hash[..after_hash.find(':')?];
+    (!name.is_empty()).then_some(name)
+}
+
+/// A resolved-target descriptor for a Layer-2 hint (§5.5): name + file (both derived from the
+/// canonical key) + the key itself (the agent's follow anchor). Name/file are `null` when the key
+/// shape does not carry them (unknown ≠ empty).
+fn target_json(key: &str) -> Value {
+    json!({
+        "name": key_symbol_name(key),
+        "file": key_file_path(key),
+        "stable_key": key,
+    })
 }
 
 #[cfg(test)]

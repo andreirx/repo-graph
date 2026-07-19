@@ -793,6 +793,73 @@ fn render_reframes_unresolved_breakdown_in_reader_frame() {
     );
 }
 
+/// review-0 required-change #4 (the §2 gate: attribution/trust/check unresolved + ratio inputs
+/// byte-identical with Layer-2 present) — the ATTRIBUTION surface. The daemon-level test proves
+/// the trust ENVELOPE ratio/count bytes are invariant; this proves the RENDERING is too: injecting
+/// a non-empty `layer2_resolution` inserts ONLY the labeled Layer-2 section — the "Unresolved
+/// references — where they go" counts and the in-scope resolution ratio are byte-for-byte
+/// unchanged (the §5.5 denominator-invariance, on the surface where the block actually renders).
+#[test]
+fn layer2_is_additive_on_the_attribution_surface_ratio_and_counts_byte_invariant() {
+    let mut env = trust_to_coherent(report_with_all_basis(), warm_posture(), false);
+    // Baseline: Layer-2 absent (today's wire on a zero-SCIP repo).
+    assert!(env.value.layer2_resolution.is_none());
+    let baseline = render_trust_envelope(&env);
+    // The counts + ratio that must not move are actually present to protect.
+    assert!(baseline.contains("Unresolved references — where they go"));
+    assert!(baseline.contains("your own code (call target not resolved): 12 references"));
+    assert!(
+        baseline.contains("your code's calls 91% resolved (50 of 55 in-scope or unclassified)"),
+        "the in-scope resolution ratio is present in the baseline:\n{baseline}"
+    );
+
+    // Inject a NON-EMPTY Layer-2 block (a likely resolution + a contested signal) — the meaningful
+    // case: the additive block renders, yet must move no denominator byte.
+    env.value.layer2_resolution = Some(serde_json::json!({
+        "accounting": "layer2",
+        "coverage": {"languages": ["TypeScript"], "partitions": ["app"], "fingerprint": "fp"},
+        "likely": [{
+            "caller": "r:src/Toolbar.tsx#Toolbar:SYMBOL:FUNCTION", "caller_name": "Toolbar",
+            "call": "cn",
+            "resolves_to": {"name": "cn", "file": "src/utils.ts", "stable_key": "k"},
+        }],
+        "likely_total": 1, "likely_shown": 1, "likely_truncated": 0,
+        "ambiguous": 0,
+        "contested": [{
+            "caller": "r:src/cart.ts#g:SYMBOL:FUNCTION", "caller_name": "g", "call": "removeItem",
+            "syntax_target": {"name": "removeItem", "file": "src/cart.ts", "stable_key": "a"},
+            "compiler_target": {"name": "removeItem", "file": "src/other.ts", "stable_key": "b"},
+        }],
+        "contested_total": 1, "contested_shown": 1, "contested_truncated": 0,
+    }));
+    let with_layer2 = render_trust_envelope(&env);
+
+    // The Layer-2 section renders AFTER the two denominator-bearing sections (Resolution — the
+    // in-scope ratio; and "Unresolved references — where they go" — the unresolved counts). So the
+    // entire render UP TO the Layer-2 heading must be byte-identical to the baseline's prefix:
+    // Layer-2 moves no ratio and no unresolved count.
+    let heading = "Compiler Evidence for Unresolved Calls";
+    assert!(
+        !baseline.contains(heading),
+        "the baseline (Layer-2 absent) carries no Layer-2 section"
+    );
+    let cut = with_layer2
+        .find(heading)
+        .expect("the additive Layer-2 section rendered");
+    let denominator_prefix = with_layer2[..cut].trim_end();
+    assert!(
+        baseline.starts_with(denominator_prefix),
+        "the in-scope ratio + every 'where they go' count is byte-identical with Layer-2 present \
+         (§5.5 denominator-invariance):\n--- prefix ---\n{denominator_prefix}\n--- baseline ---\n{baseline}"
+    );
+    // Nothing denominator-bearing is dropped after the insertion point (in this fixture no section
+    // renders after attribution): the baseline's remaining tail is only separators.
+    assert!(
+        baseline[denominator_prefix.len()..].trim().is_empty(),
+        "no denominator content follows the Layer-2 insertion point:\n{baseline}"
+    );
+}
+
 #[test]
 fn render_names_top_library_dependencies_with_provenance() {
     // review-1 REVISE #1 (named-provenance present): a repo whose external references are the

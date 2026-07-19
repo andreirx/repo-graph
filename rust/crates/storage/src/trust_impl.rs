@@ -33,7 +33,7 @@ use repo_graph_trust::storage_port::{
     BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
     ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
     QueryUnresolvedEdgesInput, ResolvedCallAggregate, TrustModuleStats, TrustStorageRead,
-    TrustUnresolvedEdgeSample, UnresolvedEdgeBasisCode,
+    TrustUnresolvedEdgeSample, UnresolvedCallSite, UnresolvedEdgeBasisCode,
 };
 
 use crate::connection::StorageConnection;
@@ -500,6 +500,53 @@ impl TrustStorageRead for StorageConnection {
             });
         }
         Ok(result)
+    }
+
+    fn unresolved_call_sites(
+        &self,
+        snapshot_uid: &str,
+        caller_filter: Option<&str>,
+    ) -> Result<Vec<UnresolvedCallSite>, StorageError> {
+        // RECON-M-R4 (§5.5): per-site unresolved CALL rows for the Layer-2 landing. INNER JOIN
+        // to `nodes` for the caller's stable key — `source_node_uid` is an FK to `nodes`
+        // (migration_007), so every unresolved edge has a caller node; the join drops nothing
+        // real. `ue.type = 'CALLS'` scopes to call sites (imports/instantiations are not calls).
+        // `caller_filter` bounds the read to one caller (explain SYMBOL focus). Deterministic
+        // order. Read-only over the ratified floor — no counter, no write path touched.
+        let mut sql = String::from(
+            "SELECT n.stable_key, ue.target_key, ue.line_start, ue.col_start \
+             FROM unresolved_edges ue \
+             JOIN nodes n ON n.node_uid = ue.source_node_uid \
+             WHERE ue.snapshot_uid = ? AND ue.type = 'CALLS'",
+        );
+        if caller_filter.is_some() {
+            sql.push_str(" AND n.stable_key = ?");
+        }
+        sql.push_str(" ORDER BY n.stable_key, ue.target_key, ue.edge_uid");
+
+        let mut stmt = self.connection().prepare(&sql)?;
+        fn map_row(row: &rusqlite::Row) -> rusqlite::Result<UnresolvedCallSite> {
+            Ok(UnresolvedCallSite {
+                caller_key: row.get(0)?,
+                target_key: row.get(1)?,
+                line_start: row.get(2)?,
+                col_start: row.get(3)?,
+            })
+        }
+        let mut out = Vec::new();
+        match caller_filter {
+            Some(k) => {
+                for r in stmt.query_map(rusqlite::params![snapshot_uid, k], map_row)? {
+                    out.push(r?);
+                }
+            }
+            None => {
+                for r in stmt.query_map(rusqlite::params![snapshot_uid], map_row)? {
+                    out.push(r?);
+                }
+            }
+        }
+        Ok(out)
     }
 
     fn find_path_prefix_module_cycles(
@@ -1650,6 +1697,57 @@ mod tests {
                 metadata_json: None,
             }])
             .unwrap();
+    }
+
+    // ── RECON-M-R4 (§5.5): unresolved_call_sites (per-site read for the Layer-2 join) ──────────
+
+    #[test]
+    fn unresolved_call_sites_returns_per_site_caller_and_raw_target() {
+        let mut storage = setup();
+        let snap = setup_with_snapshot(&storage);
+        // A caller node + two unresolved CALLS from it (a bare `cn`, a dotted `obj.foo`).
+        insert_node_in_file(&mut storage, &snap, "ncaller", "f1", "src/a.ts");
+        let caller_key = "r1:src/a.ts:ncaller:SYMBOL";
+        insert_unresolved_edge_with_target(
+            &storage,
+            &snap,
+            "ue0",
+            "ncaller",
+            "cn",
+            "internal_candidate",
+            "calls_function_ambiguous_or_missing",
+            "name",
+        );
+        insert_unresolved_edge_with_target(
+            &storage,
+            &snap,
+            "ue1",
+            "ncaller",
+            "obj.foo",
+            "internal_candidate",
+            "calls_function_ambiguous_or_missing",
+            "name",
+        );
+
+        // Whole-repo read (trust): both sites, each carrying the caller's stable key + raw target.
+        let all = TrustStorageRead::unresolved_call_sites(&storage, &snap, None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().all(|s| s.caller_key == caller_key));
+        let targets: Vec<&str> = all.iter().map(|s| s.target_key.as_str()).collect();
+        assert!(targets.contains(&"cn") && targets.contains(&"obj.foo"));
+
+        // Caller filter (explain focus): a non-matching key returns nothing; the real caller both.
+        assert!(
+            TrustStorageRead::unresolved_call_sites(&storage, &snap, Some("r1:x.ts:z:SYMBOL"))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            TrustStorageRead::unresolved_call_sites(&storage, &snap, Some(caller_key))
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     /// Insert a `file_signals` row (the persisted import-binding + declared-dependency facts

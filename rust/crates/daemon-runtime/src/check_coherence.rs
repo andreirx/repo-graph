@@ -322,4 +322,44 @@ mod tests {
         let verdict = verdict_leaf(&env);
         assert_eq!(verdict.provenance.source, BTreeSet::from([Source::Sqlite]));
     }
+
+    /// RECON-M-R4 review-0 required-change #4 (the §2 gate names attribution/trust/**check**):
+    /// the Layer-2 landing NEVER perturbs check. check's envelope value (`CoherentOrientResult`)
+    /// carries no Layer-2 field and `build_check_envelope` never reads the witness ledger — so
+    /// WARMING the Layer-2 substrate (the ledger, through the SAME production store path the daemon
+    /// uses) leaves check's verdict, freshness, and EVERY resolution/unresolved byte identical.
+    /// The denominator-invariance non-negotiable (§5.5), proven on the check surface.
+    #[test]
+    fn layer2_ledger_warm_does_not_perturb_check() {
+        use crate::callgraph_cert::{callgraph_is_green, test_fixture};
+
+        // A fixture whose RepoState CAN warm a ledger (a SCIP LiveGraph partition + a queryable
+        // SQLite snapshot check reads for its stale flag).
+        let f = test_fixture::build_layer2_fixture(false);
+
+        // Baseline: no ledger warmed (Layer-2 inactive). Built from an OrientResult with a fresh,
+        // identical shape each call so ONLY the ledger state differs across the two renders.
+        assert!(f.state.witness_ledger.read().is_none());
+        let before = build_check_envelope(&f.state, check_result(&f.snapshot_uid, pass_signal()));
+        let before_json = serde_json::to_string(&before).unwrap();
+
+        // Warm the Layer-2 substrate (the ledger).
+        let _ = callgraph_is_green(&f.state, &f.snapshot_uid);
+        assert!(
+            f.state.witness_ledger.read().is_some(),
+            "the warm path stored a ledger — Layer-2 is now active"
+        );
+        let after = build_check_envelope(&f.state, check_result(&f.snapshot_uid, pass_signal()));
+        let after_json = serde_json::to_string(&after).unwrap();
+
+        assert_eq!(
+            before_json, after_json,
+            "warming the Layer-2 ledger must not change any check byte (§5.5 denominator-invariance)"
+        );
+        // And check structurally cannot carry a Layer-2 / witness block at all.
+        assert!(
+            !after_json.contains("layer2_resolution") && !after_json.contains("\"witnesses\""),
+            "check must never surface a Layer-2/witness block:\n{after_json}"
+        );
+    }
 }

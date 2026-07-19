@@ -1787,6 +1787,17 @@ mod tests {
             Ok(self.external_dependencies.clone())
         }
 
+        fn unresolved_call_sites(
+            &self,
+            _snapshot_uid: &str,
+            _caller_filter: Option<&str>,
+        ) -> Result<Vec<crate::storage_port::UnresolvedCallSite>, String> {
+            if self.force_error.is_some() {
+                return self.err_result();
+            }
+            Ok(Vec::new())
+        }
+
         fn query_unresolved_edges(
             &self,
             _input: &QueryUnresolvedEdgesInput,

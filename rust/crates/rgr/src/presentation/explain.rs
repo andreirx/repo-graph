@@ -87,6 +87,11 @@ pub struct ExplainResponse {
     pub signals: Vec<CoherenceEnvelope<ExplainSignal>>,
     #[serde(default)]
     pub truncated: bool,
+    /// RECON-M-R4 (§5.5): the additive Layer-2 attribution block the daemon attaches on SYMBOL
+    /// focus (`layer2_resolution` — likely resolutions + contested signals). `None` on zero-SCIP /
+    /// non-symbol / no-hint answers (absent on the wire); rendered by the shared witness projection.
+    #[serde(default)]
+    pub layer2_resolution: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +166,17 @@ impl ExplainResponse {
                 out.push_str(&section);
                 out.push('\n');
             }
+        }
+
+        // ── RECON-M-R4 (§5.5): the Layer-2 landing for this focus symbol ──
+        // "This call likely resolves to X" hints + contested resolutions. Empty (nothing
+        // appended) on zero-SCIP / non-symbol / no-hint answers — byte-identical there.
+        let layer2 = crate::presentation::witnesses::render_layer2_resolution_section(
+            self.layer2_resolution.as_ref(),
+        );
+        if !layer2.is_empty() {
+            out.push_str(&layer2);
+            out.push('\n');
         }
 
         // ── Truncation warning ──────────────────────���──────────────
@@ -290,6 +306,7 @@ mod tests {
             confidence: "high".to_string(),
             signals: vec![],
             truncated: false,
+            layer2_resolution: None,
         }
     }
 

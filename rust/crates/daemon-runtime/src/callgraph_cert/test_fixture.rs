@@ -1026,6 +1026,48 @@ pub(crate) fn build_reference_tier_mixed_fixture() -> Fixture {
 /// pair classifies `syntactic` (S holds no call to P's key), the S pair `semantic`/`new_pair`,
 /// and their (caller key, callee NAME) match under different callee keys must fire the detector.
 pub(crate) fn build_suspect_fixture() -> Fixture {
+    build_suspect_fixture_impl(None, false)
+}
+
+/// RECON-M-R4 (§5.5 review-1 #1): the suspect fixture PLUS a SECOND same-named `target` the
+/// compiler resolved (`lib/d.ts#target`, a different key again) → TWO same-named candidates for
+/// (callerFn, "target"). The §5.5 ambiguity guard REFUSES the contested signal (`contested`
+/// empty — never a pick among ≥ 2), while `identity_suspect` STILL fires (its value is unchanged).
+/// Proves "one syntactic target + two same-named semantic targets → no contested target selected".
+pub(crate) fn build_contested_ambiguous_fixture() -> Fixture {
+    let key2 = format!("{REPO}:lib/d.ts#target:SYMBOL:FUNCTION");
+    build_suspect_fixture_impl(Some((&key2, "lib/d.ts")), false)
+}
+
+/// RECON-M-R4 (review-2 #2): the suspect shape where the compiler's competitor is a
+/// `semantic`/`MULTIPLICITY` pair, not a `new_pair` — P ALSO resolved one call to
+/// `lib/c.ts#target` (p = 1) while the compiler witnessed it TWICE (s = 2). The S-excess
+/// instance is compiler-only evidence, so the pair MUST candidate in the Layer-2 index and the
+/// contested join must see it (syntax `src/b.ts#target` vs compiler `lib/c.ts#target`).
+pub(crate) fn build_contested_multiplicity_fixture() -> Fixture {
+    build_suspect_fixture_impl(None, true)
+}
+
+/// RECON-M-R4 (review-2 #2): candidates SPANNING the sub-classes — `lib/c.ts#target` as
+/// `semantic`/`multiplicity` (p = 1, s = 2) AND `lib/d.ts#target` as `semantic`/`new_pair`
+/// (p = 0, s = 1), both named `target` in `callerFn` → the `(callerFn, "target")` lookup holds
+/// TWO candidates → the §5.5 ambiguity guard refuses BOTH joins (contested empty; an unresolved
+/// site of that head is counted ambiguous, never annotated).
+pub(crate) fn build_layer2_cross_subclass_ambiguous_fixture() -> Fixture {
+    let key2 = format!("{REPO}:lib/d.ts#target:SYMBOL:FUNCTION");
+    build_suspect_fixture_impl(Some((&key2, "lib/d.ts")), true)
+}
+
+/// The suspect fixture, parameterized on an optional SECOND same-named semantic target
+/// `(key, file)` — `None` = the single-candidate case; `Some` = a `new_pair` extra candidate —
+/// and on `corroborate_first`: when true, P ALSO holds ONE call to the first semantic target
+/// (`lib/c.ts#target`) while S holds TWO, turning that pair `semantic`/`multiplicity`
+/// (s = 2 > p = 1) instead of `new_pair` (review-2 #1: both sub-classes are Layer-2 candidates).
+/// Four concrete callers; axes = compiler-candidate multiplicity × first-candidate sub-class.
+fn build_suspect_fixture_impl(
+    second_semantic: Option<(&str, &str)>,
+    corroborate_first: bool,
+) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     // P side: the standard mirror (callerFn -> calleeFn CALLS, calleeFn named "calleeFn"…) is not
     // name-matched here; build a custom mirror whose CALLS target is a symbol NAMED `target`.
@@ -1053,30 +1095,40 @@ pub(crate) fn build_suspect_fixture() -> Fixture {
         .expect("create snapshot");
     let snapshot_uid = snap.snapshot_uid;
     let p_target_key = format!("{REPO}:{CALLEE_PATH}#target:SYMBOL:FUNCTION");
+    let s_target_key = format!("{REPO}:{LIB_PATH}#target:SYMBOL:FUNCTION");
+    let mut p_symbols: Vec<(String, String)> = vec![
+        ("ns0".into(), caller_key()),
+        ("ns1".into(), p_target_key.clone()),
+    ];
+    if corroborate_first {
+        // The multiplicity variant: P resolved ONE call to the compiler's target too (p = 1).
+        p_symbols.push(("ns2".into(), s_target_key.clone()));
+    }
     let mut nodes: Vec<GraphNode> = Vec::new();
-    for (uid, key, name) in [
-        ("ns0", caller_key(), "callerFn"),
-        ("ns1", p_target_key.clone(), "target"),
-    ] {
-        let mut n = graph_node(uid, &key, "SYMBOL");
+    for (uid, key) in &p_symbols {
+        let mut n = graph_node(uid, key, "SYMBOL");
         n.snapshot_uid = snapshot_uid.clone();
-        n.name = name.into();
+        n.name = if uid == "ns0" { "callerFn" } else { "target" }.into();
         nodes.push(n);
     }
     conn.insert_nodes(&nodes).expect("insert nodes");
-    conn.insert_edges(&[GraphEdge {
-        edge_uid: "ec0".into(),
+    let p_calls_edge = |edge_uid: &str, target_node_uid: &str| GraphEdge {
+        edge_uid: edge_uid.into(),
         snapshot_uid: snapshot_uid.clone(),
         repo_uid: REPO.into(),
         source_node_uid: "ns0".into(),
-        target_node_uid: "ns1".into(),
+        target_node_uid: target_node_uid.into(),
         edge_type: "CALLS".into(),
         resolution: "resolved".into(),
         extractor: "test".into(),
         location: None,
         metadata_json: None,
-    }])
-    .expect("insert edges");
+    };
+    let mut p_edges = vec![p_calls_edge("ec0", "ns1")];
+    if corroborate_first {
+        p_edges.push(p_calls_edge("ec1", "ns2"));
+    }
+    conn.insert_edges(&p_edges).expect("insert edges");
     conn.update_snapshot_status(&UpdateSnapshotStatusInput {
         snapshot_uid: snapshot_uid.clone(),
         status: "ready".into(),
@@ -1085,7 +1137,6 @@ pub(crate) fn build_suspect_fixture() -> Fixture {
     .expect("ready snapshot");
 
     // S side: callerFn calls a same-NAMED symbol under a DIFFERENT key (lib/c.ts#target).
-    let s_target_key = format!("{REPO}:{LIB_PATH}#target:SYMBOL:FUNCTION");
     let mut ir = PartitionIr::new(partition());
     ir.nodes.push(file_node(CALLER_PATH));
     ir.nodes.push(file_node(LIB_PATH));
@@ -1093,18 +1144,69 @@ pub(crate) fn build_suspect_fixture() -> Fixture {
         .push(symbol_node(&caller_key(), "callerFn", CALLER_PATH));
     ir.nodes
         .push(symbol_node(&s_target_key, "target", LIB_PATH));
-    ir.edges.push(IrEdge {
-        src: CanonicalKey::from_existing(caller_key()),
-        dst: CanonicalKey::from_existing(s_target_key),
-        edge_type: EdgeType::Calls,
-        basis: EdgeBasis::SyntaxConfirmedCall,
-        provenance: prov(),
-        import: None,
-    });
+    ir.edges.push(calls_edge(&caller_key(), &s_target_key));
+    if corroborate_first {
+        // The S-EXCESS instance: the compiler witnessed the call TWICE (s = 2 > p = 1) — the
+        // pair classifies `semantic`/`multiplicity`, and the excess is compiler-only evidence.
+        ir.edges.push(calls_edge(&caller_key(), &s_target_key));
+    }
+    // The ambiguity variant: a SECOND same-named `target` the compiler resolved (new_pair — P
+    // holds no call to it) → the (callerFn, "target") lookup now has TWO candidates.
+    if let Some((key2, path2)) = second_semantic {
+        ir.nodes.push(symbol_node(key2, "target", path2));
+        ir.edges.push(calls_edge(&caller_key(), key2));
+    }
     let mut lg = LiveGraph::new();
     lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
 
     let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    *state.livegraph.write() = Some(lg);
+    Fixture {
+        _dir: dir,
+        state,
+        snapshot_uid,
+    }
+}
+
+/// RECON-M-R4 (§5.5 case 1) key: a SCIP-only `cn` the pipeline leaves unresolved.
+pub(crate) fn cn_key() -> String {
+    format!("{REPO}:src/utils.ts#cn:SYMBOL:FUNCTION")
+}
+/// A SECOND same-named `cn` in a different file — the AMBIGUITY variant's extra candidate.
+pub(crate) fn cn2_key() -> String {
+    format!("{REPO}:lib/other.ts#cn:SYMBOL:FUNCTION")
+}
+
+/// An S strict-`Calls` IR edge `src_key -> dst_key` (`SyntaxConfirmedCall`).
+fn calls_edge(src_key: &str, dst_key: &str) -> IrEdge {
+    IrEdge {
+        src: CanonicalKey::from_existing(src_key.to_string()),
+        dst: CanonicalKey::from_existing(dst_key.to_string()),
+        edge_type: EdgeType::Calls,
+        basis: EdgeBasis::SyntaxConfirmedCall,
+        provenance: prov(),
+        import: None,
+    }
+}
+
+/// RECON-M-R4 (§5.5 case 1, the LAYER-2 landing fixture): the faithful `callerFn -> calleeFn`
+/// call (corroborated `both`) PLUS a SCIP-ONLY `callerFn -> cn` call the pipeline lacks — a
+/// `semantic`/`new_pair` named `cn`, indexed by `(callerFn, "cn")`. A hand-built unresolved site
+/// `(callerFn, "cn")` then joins to it → "likely resolves to cn". With `ambiguous`, a SECOND
+/// same-named `cn` (another file) makes the `(callerFn, "cn")` lookup AMBIGUOUS → the join refuses.
+pub(crate) fn build_layer2_fixture(ambiguous: bool) -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let (db_path, snapshot_uid) = build_sqlite_mirror(dir.path(), false);
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    let mut ir = build_ir();
+    ir.nodes.push(symbol_node(&cn_key(), "cn", "src/utils.ts"));
+    ir.edges.push(calls_edge(&caller_key(), &cn_key()));
+    if ambiguous {
+        ir.nodes.push(symbol_node(&cn2_key(), "cn", "lib/other.ts"));
+        ir.edges.push(calls_edge(&caller_key(), &cn2_key()));
+    }
+    let mut lg = LiveGraph::new();
+    lg.load_partition("p", ir, LanguageSupport::TypeScriptPrimary);
     *state.livegraph.write() = Some(lg);
     Fixture {
         _dir: dir,

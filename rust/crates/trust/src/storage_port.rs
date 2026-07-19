@@ -161,6 +161,38 @@ pub struct ExternalDependencyAttribution {
     pub unidentified: u64,
 }
 
+/// RECON-M-R4 (§5.5): one PER-SITE unresolved CALL — a raw row read from `unresolved_edges`
+/// (the ratified RED floor, read-only), joined to `nodes` for the caller's stable key. The
+/// Layer-2 landing joins each such site against the witness ledger's `semantic` (SCIP-only)
+/// call targets by `(caller_key, target expression HEAD)`. Raw boundary DTO: `target_key` is
+/// verbatim from the extractor (a bare callee `cn` or a dotted `receiver.method`); head
+/// extraction + the name-guard join are the reader-side surface's job, never storage's.
+///
+/// Abstraction ledger (review-1 #4): this DTO + [`TrustStorageRead::unresolved_call_sites`] are
+/// the ONE new boundary surface M-R4 adds (an ADDED method on the EXISTING dependency-inverted
+/// read port, not a new boundary). Concrete current users (2): the trust envelope assembly
+/// (`trust_coherence::build_trust_envelope`, `caller_filter = None` — whole repo) and the explain
+/// SYMBOL-focus dispatch (`caller_filter = Some(focus)` — bounds the read). Axis of variation: the
+/// `caller_filter` (whole-repo vs one-caller). Simpler alternatives rejected: reusing
+/// [`TrustUnresolvedEdgeSample`] / [`TrustStorageRead::query_unresolved_edges`] — that DTO carries
+/// classification/basis fields but NOT the caller stable key or the raw target expression the
+/// name-guard join needs, and widening it would burden its existing consumers with fields they do
+/// not read (the narrow-surface rule); a bare `(String, String, Option<i64>, Option<i64>)` tuple
+/// crossing the port — rejected, an unlabeled shape at a boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnresolvedCallSite {
+    /// The CALLER's canonical stable key (`nodes.stable_key` for `source_node_uid`).
+    pub caller_key: String,
+    /// The raw callee expression the extractor recorded (no call parens; a bare identifier or a
+    /// dotted `receiver.method` whose LAST segment is the called name).
+    pub target_key: String,
+    /// The call site's 1-based line, when the extractor recorded it (`unresolved_edges` DOES
+    /// persist the occurrence site — unlike the served resolved edges). `None` = not recorded.
+    pub line_start: Option<i64>,
+    /// The call site's column, when recorded.
+    pub col_start: Option<i64>,
+}
+
 /// One row from a `query_unresolved_edges` sample query.
 ///
 /// Narrowed to the fields the trust service reads. Uses the
@@ -298,6 +330,17 @@ pub trait TrustStorageRead {
         snapshot_uid: &str,
         limit: u32,
     ) -> Result<ExternalDependencyAttribution, Self::Error>;
+
+    /// RECON-M-R4 (§5.5): the per-site UNRESOLVED CALL rows for the Layer-2 landing — a
+    /// read-only `unresolved_edges` scan (type `CALLS`) joined to `nodes` for the caller's
+    /// stable key. `caller_filter`, when `Some(stable_key)`, restricts to one caller (explain
+    /// SYMBOL focus — bounds the read); `None` returns every unresolved call site (trust,
+    /// whole repo). Read-only over the ratified floor: touches no counter, no write path.
+    fn unresolved_call_sites(
+        &self,
+        snapshot_uid: &str,
+        caller_filter: Option<&str>,
+    ) -> Result<Vec<UnresolvedCallSite>, Self::Error>;
 
     /// Query unresolved edge samples filtered by classification.
     fn query_unresolved_edges(

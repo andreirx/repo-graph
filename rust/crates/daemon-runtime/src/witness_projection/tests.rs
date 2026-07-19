@@ -817,3 +817,279 @@ fn attach_explain_reference_tier_on_symbol_focus_only() {
     WitnessProjection::attach_explain_reference_tier(&f.state, &f.snapshot_uid, &mut repo_focus);
     assert_eq!(before, repo_focus.to_string(), "non-symbol focus → no-op");
 }
+
+// ── RECON-M-R4 (§5.5): the Layer-2 landing block ─────────────────────────────────────────────
+
+use repo_graph_trust::storage_port::UnresolvedCallSite;
+
+fn site(caller: &str, target: &str) -> UnresolvedCallSite {
+    UnresolvedCallSite {
+        caller_key: caller.to_string(),
+        target_key: target.to_string(),
+        line_start: Some(12),
+        col_start: Some(4),
+    }
+}
+
+#[test]
+fn layer2_lands_a_likely_resolution_with_basis_and_provenance() {
+    // §5.5 case 1: a SCIP-only `callerFn -> cn` call + an unresolved site (callerFn, "cn") →
+    // "likely resolves to cn", labeled (accounting + coverage) and name-guarded exactly.
+    let f = test_fixture::build_layer2_fixture(false);
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let block = p
+        .layer2_attribution_block(&[site(&test_fixture::caller_key(), "cn")], None)
+        .expect("a likely hint lands");
+
+    assert_eq!(
+        block["accounting"], "layer2",
+        "Layer-2 certainty class, not union"
+    );
+    assert!(
+        block["coverage"]["fingerprint"].is_string(),
+        "labeled with its coverage basis (never unlabeled)"
+    );
+    let likely = block["likely"].as_array().unwrap();
+    assert_eq!(likely.len(), 1);
+    assert_eq!(likely[0]["call"], "cn");
+    assert_eq!(likely[0]["resolves_to"]["name"], "cn");
+    assert_eq!(likely[0]["resolves_to"]["file"], "src/utils.ts");
+    assert_eq!(block["ambiguous"], 0);
+    assert_eq!(block["likely_total"], 1);
+}
+
+#[test]
+fn layer2_refuses_an_ambiguous_site_never_a_guess() {
+    // §5.5 name guard: two same-named `cn` compiler targets → AMBIGUOUS; NO annotation (counted,
+    // never guessed — unknown stays unknown).
+    let f = test_fixture::build_layer2_fixture(true);
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let block = p
+        .layer2_attribution_block(&[site(&test_fixture::caller_key(), "cn")], None)
+        .expect("the ambiguous refusal is reported");
+    assert!(
+        block["likely"].as_array().unwrap().is_empty(),
+        "no likely hint on ambiguity — the join refuses"
+    );
+    assert_eq!(block["ambiguous"], 1, "the refusal is counted, not hidden");
+}
+
+#[test]
+fn layer2_name_head_is_the_last_dotted_segment_exact() {
+    // The name guard uses the CALLED identifier (last dotted segment): `obj.cn` → head `cn` joins;
+    // a different name never joins (EXACT — no stemming/fuzzing).
+    let f = test_fixture::build_layer2_fixture(false);
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+
+    let joins = p
+        .layer2_attribution_block(&[site(&test_fixture::caller_key(), "obj.cn")], None)
+        .expect("dotted method head `cn` joins");
+    assert_eq!(joins["likely"].as_array().unwrap()[0]["call"], "cn");
+
+    assert!(
+        p.layer2_attribution_block(&[site(&test_fixture::caller_key(), "cnX")], None)
+            .is_none(),
+        "cnX ≠ cn → no candidate → no block (exact match only)"
+    );
+}
+
+#[test]
+fn layer2_lands_a_contested_resolution_ledger_only() {
+    // §5.5 case 2: the suspect fixture (syntax → src/b.ts#target; compiler → lib/c.ts#target) →
+    // a contested signal, no unresolved sites needed.
+    let f = test_fixture::build_suspect_fixture();
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let block = p
+        .layer2_attribution_block(&[], None)
+        .expect("a contested signal lands");
+    let contested = block["contested"].as_array().unwrap();
+    assert_eq!(contested.len(), 1);
+    assert_eq!(contested[0]["call"], "target");
+    assert_eq!(contested[0]["syntax_target"]["file"], "src/b.ts");
+    assert_eq!(contested[0]["compiler_target"]["file"], "lib/c.ts");
+    assert!(
+        block["likely"].as_array().unwrap().is_empty(),
+        "no unresolved sites passed → no likely hints"
+    );
+}
+
+#[test]
+fn layer2_absent_without_a_measured_ledger() {
+    // R-0 / W-BOTH gate: no measured ledger (not warmed) → NO annotation, even with sites.
+    let f = test_fixture::build_layer2_fixture(false);
+    let block = project(&f, true)
+        .and_then(|p| p.layer2_attribution_block(&[site(&test_fixture::caller_key(), "cn")], None));
+    assert!(block.is_none(), "no measured ledger → no annotation");
+}
+
+#[test]
+fn layer2_absent_on_a_stale_partition() {
+    // Eligibility scoping (§4.2 / §5.5 W-BOTH gate): a stale partition supersedes the ledger
+    // (fingerprint moves) → measured() None → NO annotation from a stale/ineligible partition.
+    let f = test_fixture::build_layer2_fixture(false);
+    warm_ledger(&f);
+    f.state.livegraph.write().as_mut().unwrap().mark_stale("p");
+    let p = project(&f, true).expect("a superseded projection still exists (regime rows)");
+    assert!(
+        p.layer2_attribution_block(&[site(&test_fixture::caller_key(), "cn")], None)
+            .is_none(),
+        "a stale partition mints no Layer-2 annotation"
+    );
+}
+
+#[test]
+fn layer2_scopes_to_the_focus_caller() {
+    // explain SYMBOL focus passes `Some(focus)`: only that caller's contested/likely render.
+    let f = test_fixture::build_suspect_fixture();
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let other = format!("{}:src/z.ts#zzz:SYMBOL:FUNCTION", test_fixture::REPO);
+    assert!(
+        p.layer2_attribution_block(&[], Some(&other)).is_none(),
+        "a caller with no contested/likely gets no block"
+    );
+    let block = p
+        .layer2_attribution_block(&[], Some(&test_fixture::caller_key()))
+        .expect("the focus caller's contested renders");
+    assert_eq!(block["contested"].as_array().unwrap().len(), 1);
+}
+
+fn site_at(caller: &str, target: &str, line: i64) -> UnresolvedCallSite {
+    UnresolvedCallSite {
+        caller_key: caller.to_string(),
+        target_key: target.to_string(),
+        line_start: Some(line),
+        col_start: Some(0),
+    }
+}
+
+#[test]
+fn layer2_preserves_each_unresolved_site_as_its_own_likely_hint() {
+    // review-1 #2: TWO distinct unresolved `cn` sites in ONE caller (lines 12 and 20) — the join
+    // is per SITE, so BOTH land, each carrying its OWN call-site line (never collapsed to one hint
+    // with an arbitrary retained location). The counts are SITE counts, not (caller, name) groups.
+    let f = test_fixture::build_layer2_fixture(false);
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let caller = test_fixture::caller_key();
+    let sites = [site_at(&caller, "cn", 12), site_at(&caller, "cn", 20)];
+
+    let block = p
+        .layer2_attribution_block(&sites, None)
+        .expect("both sites land");
+    let likely = block["likely"].as_array().unwrap();
+    assert_eq!(likely.len(), 2, "each site is its own hint (not deduped)");
+    assert_eq!(
+        block["likely_total"], 2,
+        "the count is SITES, not (caller, name) groups"
+    );
+    let lines: Vec<i64> = likely.iter().map(|h| h["line"].as_i64().unwrap()).collect();
+    assert!(
+        lines.contains(&12) && lines.contains(&20),
+        "each hint keeps its OWN site line: {lines:?}"
+    );
+}
+
+#[test]
+fn layer2_counts_each_ambiguous_site_not_the_group() {
+    // review-1 #2 (ambiguous outcome): TWO unresolved `cn` sites whose head has ≥ 2 same-named
+    // compiler candidates → BOTH refused, and BOTH counted (ambiguous == 2 SITES, never 1 group).
+    let f = test_fixture::build_layer2_fixture(true);
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let caller = test_fixture::caller_key();
+    let sites = [site_at(&caller, "cn", 12), site_at(&caller, "cn", 20)];
+
+    let block = p
+        .layer2_attribution_block(&sites, None)
+        .expect("the refusals are reported");
+    assert!(
+        block["likely"].as_array().unwrap().is_empty(),
+        "ambiguous → no likely hint"
+    );
+    assert_eq!(
+        block["ambiguous"], 2,
+        "each ambiguous SITE is counted, never collapsed to one"
+    );
+}
+
+#[test]
+fn layer2_refuses_a_contested_ambiguity_no_block_rendered() {
+    // review-1 #1 at the READ surface: two same-named compiler candidates for the caller's
+    // resolved `target` → the ledger emits NO contested row → with no likely/ambiguous sites the
+    // block is absent (no contested target is selected or rendered).
+    let f = test_fixture::build_contested_ambiguous_fixture();
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    assert!(
+        p.layer2_attribution_block(&[], None).is_none(),
+        "≥ 2 candidates → no contested → no block"
+    );
+}
+
+#[test]
+fn layer2_lands_a_likely_hint_from_a_semantic_multiplicity_pair() {
+    // review-2 #2: p = 1, s = 2 (`semantic`/`multiplicity` — the compiler witnessed the
+    // `callerFn -> calleeFn` call TWICE, P resolved it ONCE) + a matching unresolved site →
+    // the likely hint lands: the S-excess instance is compiler-only evidence for the site.
+    let f = test_fixture::build_multiplicity_fixture(1, 2);
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let block = p
+        .layer2_attribution_block(&[site(&test_fixture::caller_key(), "calleeFn")], None)
+        .expect("the multiplicity-backed likely hint lands");
+
+    assert_eq!(block["accounting"], "layer2");
+    let likely = block["likely"].as_array().unwrap();
+    assert_eq!(likely.len(), 1, "one hint for the one site");
+    assert_eq!(likely[0]["call"], "calleeFn");
+    assert_eq!(likely[0]["resolves_to"]["name"], "calleeFn");
+    assert_eq!(likely[0]["resolves_to"]["file"], "src/b.ts");
+    assert_eq!(block["ambiguous"], 0, "a single candidate is not ambiguous");
+}
+
+#[test]
+fn layer2_contested_renders_a_multiplicity_competitor() {
+    // review-2 #2 at the READ surface: the compiler's competing binding is a
+    // `semantic`/`multiplicity` pair (lib/c.ts#target, p = 1, s = 2) — the contested signal
+    // renders it exactly as a new_pair competitor would (the read side is sub-class-blind).
+    let f = test_fixture::build_contested_multiplicity_fixture();
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let block = p
+        .layer2_attribution_block(&[], None)
+        .expect("the contested signal lands");
+    let contested = block["contested"].as_array().unwrap();
+    assert_eq!(contested.len(), 1);
+    assert_eq!(contested[0]["call"], "target");
+    assert_eq!(contested[0]["syntax_target"]["file"], "src/b.ts");
+    assert_eq!(contested[0]["compiler_target"]["file"], "lib/c.ts");
+}
+
+#[test]
+fn layer2_refuses_ambiguity_spanning_new_pair_and_multiplicity() {
+    // review-2 #2 at the READ surface: candidates from BOTH sub-classes (lib/c.ts `multiplicity`
+    // + lib/d.ts `new_pair`, both named `target`) → an unresolved site of that head is REFUSED
+    // (counted ambiguous, never annotated) and no contested row rendered — the §5.5 guard spans
+    // the sub-classes.
+    let f = test_fixture::build_layer2_cross_subclass_ambiguous_fixture();
+    warm_ledger(&f);
+    let p = project(&f, true).expect("measured projection");
+    let block = p
+        .layer2_attribution_block(&[site(&test_fixture::caller_key(), "target")], None)
+        .expect("the refusal is reported");
+    assert!(
+        block["likely"].as_array().unwrap().is_empty(),
+        "no likely hint — the guard refuses across sub-classes"
+    );
+    assert_eq!(block["ambiguous"], 1, "the refused site is counted");
+    assert!(
+        block["contested"].as_array().unwrap().is_empty(),
+        "no contested row — the same guard, same index"
+    );
+    assert_eq!(block["contested_total"], 0);
+}

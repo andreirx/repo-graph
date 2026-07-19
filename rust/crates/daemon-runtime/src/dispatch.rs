@@ -4391,6 +4391,29 @@ impl ServiceDispatcher {
                         epoch.snapshot_uid(),
                         &mut v,
                     );
+                    // RECON-M-R4 (§5.5): the Layer-2 landing on SYMBOL focus — "this call likely
+                    // resolves to X" hints + contested signals for the focus caller. Reads the
+                    // focus caller's unresolved CALL sites (the RED floor — SQLite only) at the
+                    // pinned snapshot; the projection stays SQLite-free (sites passed in).
+                    // Additive, W-BOTH only, no counter touched (R-0/R-1 no-op).
+                    use repo_graph_trust::storage_port::TrustStorageRead as _;
+                    let layer2_sites = v["value"]["focus"]["resolved_key"]
+                        .as_str()
+                        .filter(|_| v["value"]["focus"]["resolved_kind"].as_str() == Some("symbol"))
+                        .and_then(|key| {
+                            repo_state
+                                .storage()
+                                .ok()?
+                                .unresolved_call_sites(epoch.snapshot_uid(), Some(key))
+                                .ok()
+                        })
+                        .unwrap_or_default();
+                    crate::witness_projection::WitnessProjection::attach_explain_layer2(
+                        &repo_state,
+                        epoch.snapshot_uid(),
+                        &layer2_sites,
+                        &mut v,
+                    );
                 }
                 DispatchResult::success(&request.id, v)
             }
