@@ -13,8 +13,9 @@
 # §3.3, that makes a new arm pay its integration explicitly (a new arm goes RED until
 # it is declared here; a typo'd or empty declaration goes RED too).
 #
-# The live arm count is reconciled against dispatch.rs; it is 66 today (EC-1 §3.3:
-# 10 mixed + 16 SQLite-graph + 20 non-graph + 7 registry + 13 writers). The witness
+# The live arm count is reconciled against dispatch.rs; it is 67 today (EC-1 §3.3:
+# 10 mixed + 17 SQLite-graph + 20 non-graph + 7 registry + 13 writers; +1 SQLite-graph
+# = `reliability`, RESOLUTION-BREAKDOWN-CLI-1). The witness
 # does NOT hard-code 66 — the reconciliation against the live match IS the guard.
 #
 # FACT CLASSES (EC-1 §3.2): FC0 extraction stream (pipeline input) · FC1 structure
@@ -37,10 +38,14 @@ explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5
 trust                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
 cycle_completeness_audit = FC1, FC2b
 
-# ── B. SQLite-only readers that touch raw-graph tables (16) ──
+# ── B. SQLite-only readers that touch raw-graph tables (17) ──
 map                    = FC1, FC2b, FC2a-agg, FC3, FC4
 gate                   = FC1, FC2b, FC4, FC5, FC6
 check                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
+# reliability reads the grouped call-resolution tables (FC1/FC2a-agg/FC2b/FC3) AND,
+# for the shared enrichment state (RESOLUTION-BREAKDOWN-CLI-1 review-0 F1), the trust
+# aggregate via `get_trust_summary` — so it declares the same set `check`/`trust` do.
+reliability            = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
 violations             = FC1, FC2b, FC5
 resource_list          = FC1, FC2b
 resource_readers       = FC1, FC2b

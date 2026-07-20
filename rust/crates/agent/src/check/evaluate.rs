@@ -12,6 +12,48 @@ use super::types::{
     CheckInput, ConditionCode, ConditionResult, ConditionStatus, GateOutcomeForCheck,
 };
 
+// ── Shared ENRICHMENT_STATE reader vocabulary (RESOLUTION-BREAKDOWN-CLI-1 F1) ──
+//
+// The four reader-facing summaries for the enrichment axis, extracted from the
+// inline literals below so the `reliability` breakdown surface can render the SAME
+// wording (review-0 F1: "include the shared enrichment state without inventing new
+// wording"). ONE home; check maps its Pass/Fail/Incomplete status separately. Byte
+// identity on `check` is the guard that the extraction changed nothing.
+
+/// `EnrichmentState::Ran` — the enrichment phase executed (yield may be zero).
+pub const ENRICHMENT_SUMMARY_RAN: &str = "Enrichment phase executed.";
+/// `EnrichmentState::NotApplicable` — no eligible edges to enrich.
+pub const ENRICHMENT_SUMMARY_NOT_APPLICABLE: &str = "No eligible edges for enrichment.";
+/// `EnrichmentState::NotRun` — eligible edges existed but the phase never ran.
+pub const ENRICHMENT_SUMMARY_NOT_RUN: &str = "Enrichment phase did not run.";
+/// No enrichment state available (e.g. the trust summary could not be assembled).
+pub const ENRICHMENT_SUMMARY_UNAVAILABLE: &str = "Enrichment state data unavailable.";
+
+/// The reader-frame ENRICHMENT_STATE summary for a (possibly absent) state — the
+/// SINGLE source of this wording, called by both `check`'s condition and the
+/// `reliability` breakdown's enrichment line. `None` = state unavailable.
+pub fn enrichment_state_summary(state: Option<EnrichmentState>) -> &'static str {
+    match state {
+        Some(EnrichmentState::Ran) => ENRICHMENT_SUMMARY_RAN,
+        Some(EnrichmentState::NotApplicable) => ENRICHMENT_SUMMARY_NOT_APPLICABLE,
+        Some(EnrichmentState::NotRun) => ENRICHMENT_SUMMARY_NOT_RUN,
+        None => ENRICHMENT_SUMMARY_UNAVAILABLE,
+    }
+}
+
+/// The machine wire token for the enrichment state — the SAME snake_case tokens the
+/// `repo_graph_enrichment` crate serializes (`ran`/`not_run`/`not_applicable`), so the
+/// `reliability` JSON surface speaks the established vocabulary. `None` = unavailable
+/// (serialized as JSON `null`, never a fabricated token).
+pub fn enrichment_state_token(state: Option<EnrichmentState>) -> Option<&'static str> {
+    match state {
+        Some(EnrichmentState::Ran) => Some("ran"),
+        Some(EnrichmentState::NotApplicable) => Some("not_applicable"),
+        Some(EnrichmentState::NotRun) => Some("not_run"),
+        None => None,
+    }
+}
+
 /// Evaluate all applicable conditions from the pre-fetched input.
 ///
 /// Returns one `ConditionResult` per evaluated condition code.
@@ -151,35 +193,24 @@ pub fn evaluate_conditions(input: &CheckInput) -> Vec<ConditionResult> {
     }
 
     // ── 5. ENRICHMENT_STATE ─────────────────────────────────
-    match input.enrichment_state {
-        Some(EnrichmentState::Ran) => {
-            results.push(ConditionResult {
-                code: ConditionCode::EnrichmentState,
-                status: ConditionStatus::Pass,
-                summary: "Enrichment phase executed.".to_string(),
-            });
-        }
-        Some(EnrichmentState::NotApplicable) => {
-            results.push(ConditionResult {
-                code: ConditionCode::EnrichmentState,
-                status: ConditionStatus::Pass,
-                summary: "No eligible edges for enrichment.".to_string(),
-            });
-        }
-        Some(EnrichmentState::NotRun) => {
-            results.push(ConditionResult {
-                code: ConditionCode::EnrichmentState,
-                status: ConditionStatus::Fail,
-                summary: "Enrichment phase did not run.".to_string(),
-            });
-        }
-        None => {
-            results.push(ConditionResult {
-                code: ConditionCode::EnrichmentState,
-                status: ConditionStatus::Incomplete,
-                summary: "Enrichment state data unavailable.".to_string(),
-            });
-        }
+    // The reader-facing SUMMARY strings are shared consts (below), reused verbatim
+    // by the `reliability` breakdown surface so the enrichment vocabulary has ONE
+    // home (RESOLUTION-BREAKDOWN-CLI-1 review-0 F1). check keeps its own Pass/Fail/
+    // Incomplete status mapping; only the wording is consolidated. Output is
+    // byte-identical (the consts hold the exact prior literals).
+    {
+        let status = match input.enrichment_state {
+            Some(EnrichmentState::Ran) | Some(EnrichmentState::NotApplicable) => {
+                ConditionStatus::Pass
+            }
+            Some(EnrichmentState::NotRun) => ConditionStatus::Fail,
+            None => ConditionStatus::Incomplete,
+        };
+        results.push(ConditionResult {
+            code: ConditionCode::EnrichmentState,
+            status,
+            summary: enrichment_state_summary(input.enrichment_state).to_string(),
+        });
     }
 
     // ── 7. GATE_STATUS ──────────────────────────────────────

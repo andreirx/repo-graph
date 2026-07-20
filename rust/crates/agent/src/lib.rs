@@ -70,6 +70,7 @@ pub mod orient;
 pub mod package_groups;
 pub mod ranking;
 pub mod reliability;
+pub mod reliability_breakdown;
 pub mod storage_port;
 
 // ── Public surface (locked at Rust-42) ────────────────────────

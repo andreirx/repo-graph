@@ -15,7 +15,11 @@ pub mod reduce;
 pub mod types;
 
 pub use coherent::check_to_coherent;
-pub use evaluate::evaluate_conditions;
+pub use evaluate::{
+    enrichment_state_summary, enrichment_state_token, evaluate_conditions,
+    ENRICHMENT_SUMMARY_NOT_APPLICABLE, ENRICHMENT_SUMMARY_NOT_RUN, ENRICHMENT_SUMMARY_RAN,
+    ENRICHMENT_SUMMARY_UNAVAILABLE,
+};
 pub use reduce::{check, reduce_verdict};
 pub use types::*;
 

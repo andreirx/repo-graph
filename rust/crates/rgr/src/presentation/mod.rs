@@ -51,6 +51,7 @@ pub mod orient;
 pub mod orient_reliability;
 pub mod orient_sections;
 pub mod path;
+pub mod reliability;
 pub mod stats;
 pub mod surfaces;
 pub mod trust;

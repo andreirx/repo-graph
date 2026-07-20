@@ -79,6 +79,7 @@ pub fn print_usage() {
     eprintln!();
     eprintln!("Quality and risk (resolve repo from cwd):");
     eprintln!("  rmap trust");
+    eprintln!("  rmap reliability [--by-language] [--by-module] [--json]");
     eprintln!("  rmap churn [--since <expr>]");
     eprintln!("  rmap hotspots [--since <expr>] [--exclude-tests] [--exclude-vendored]");
     eprintln!("  rmap risk");

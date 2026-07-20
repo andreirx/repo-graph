@@ -325,6 +325,10 @@ impl Dispatcher for ServiceDispatcher {
             // ── Trust and governance ────────────────────────────────
             // RMAPD-PERF-1: trust emits heartbeat for long queries
             "trust" => self.handle_trust(request, emitter),
+            // RESOLUTION-BREAKDOWN-CLI-1: per-language/per-module call-resolution
+            // breakdown — the decomposition of the aggregate reliability figure.
+            // Handler extracted to handlers/reliability.rs (dispatch stays wiring).
+            "reliability" => crate::handlers::reliability::handle_reliability(&self.state, request),
             "gate" => self.handle_gate(request),
 
             // ── Quality queries (LEGACY-CONTRACT-MIGRATION-1B) ──────

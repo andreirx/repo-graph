@@ -163,6 +163,7 @@ mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
 mod agent_orient_reads; // ORIENT-DENSITY-1: dense-orient discovery reads (module sizes + doc inventory)
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
+mod call_resolution_reads; // RESOLUTION-BREAKDOWN-CLI-1: per-language/module call-resolution grouping reads
 mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)
 pub mod connection;
 mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection
