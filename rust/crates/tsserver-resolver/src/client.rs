@@ -157,6 +157,25 @@ impl ReceiverTypeResolver for TsServerResolver {
             return Vec::new();
         }
 
+        // tsserver associates files with a project by ABSOLUTE path — an `open` with a relative path
+        // lands the file in no project, so a later `quickinfo` throws "Cannot read properties of
+        // undefined (reading 'getSourceFile')". The stored repo root is RELATIVE (pathdiff from the DB
+        // dir), which is fine for a configured project (its files load from the tsconfig up front) but
+        // breaks tsserver's INFERRED project (loose JS/JSX with no tsconfig), which only knows the files
+        // it is explicitly `open`ed with. Canonicalize the repo root once here so every derived path
+        // (warm-up file, per-edge file, and the session `current_dir`) is absolute. Falls back to the
+        // raw path if it cannot be resolved (then the downstream ops degrade honestly, not panic).
+        // This is a genuine bug fix, not a JS-only change: the relative-root defect ALSO cost
+        // configured TS projects real resolutions when tsserver needed the absolute path (measured:
+        // a configured-TS receiver goes 0→1 after this — a compiler fact the bug was dropping, now
+        // recovered — NOT fabricated). So it improves TS too; it is load-bearing for the JS
+        // inferred-project path (JS-ENRICHMENT-1) and correctness-restoring for TS. (The earlier
+        // "byte-neutral for TS" claim here was FALSE and is corrected — the measured 0→1 disproves it.)
+        let repo_root_abs = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
+        let repo_root = repo_root_abs.as_path();
+
         // Build ownership resolver to determine which tsconfig owns each file.
         // This replaces the naive "nearest config by directory" grouping.
         let ownership_resolver = match crate::ownership::TsProjectOwnershipResolver::build(
@@ -951,14 +970,33 @@ fn resolve_wildcard_receiver(
 ///
 /// Returns:
 /// - Map of project_root → edges owned by that project
-/// - Vec of failures for edges with Unowned or Ambiguous ownership
+/// - Vec of failures for edges with Unowned (TS) or Ambiguous ownership
+///
+/// # JS-ENRICHMENT-1: the package.json Node-context fallback for Unowned JavaScript
+///
+/// A JavaScript-family file (`.js`/`.jsx`/`.mjs`/`.cjs`) is legitimately part of a Node project that
+/// declares itself with `package.json` and carries NO `tsconfig.json`/`jsconfig.json` (e.g. a Vite +
+/// React app). tsconfig ownership therefore reports such a file `Unowned` — but tsserver CAN resolve
+/// it: an opened loose `.js`/`.jsx` file lands in tsserver's inferred project, which enables `allowJs`
+/// and resolves imported library types from `node_modules` exactly as an editor does. That is a real
+/// TypeScript language-service fact, not a fabricated or synthesized context (we write no config).
+///
+/// So a JS-family `Unowned` edge is routed to its nearest `package.json`/repo-root context via the
+/// existing directory-based [`group_by_project_root`] (which already treats `package.json` as a project
+/// boundary) instead of being failed. tsserver's inferred project then resolves it or honestly fails —
+/// never fabricates. TypeScript `Unowned` edges keep the explicit failure: a `.ts` file with no owning
+/// tsconfig is a config gap the reader should close, and TS enrichment output stays byte-unchanged
+/// (byte-parity — the JS branch never runs for a TS-only repo). `Owned`/`Ambiguous` are unchanged; the
+/// merged groups still start exactly one tsserver session per project root (no session thrash).
 fn group_by_ownership(
     resolver: &crate::ownership::TsProjectOwnershipResolver,
-    _repo_root: &Path,
+    repo_root: &Path,
     edges: &[EligibleEdge],
 ) -> (HashMap<PathBuf, Vec<EligibleEdge>>, Vec<ReceiverTypeResult>) {
     let mut groups: HashMap<PathBuf, Vec<EligibleEdge>> = HashMap::new();
     let mut failures: Vec<ReceiverTypeResult> = Vec::new();
+    // JS-family files that no tsconfig owns → resolved via their package.json Node context below.
+    let mut js_unowned: Vec<EligibleEdge> = Vec::new();
 
     for edge in edges {
         let file_path = Path::new(&edge.source_file_path);
@@ -968,11 +1006,17 @@ fn group_by_ownership(
                 groups.entry(project_root).or_default().push(edge.clone());
             }
             crate::ownership::ProjectOwnership::Unowned => {
-                // File not covered by any tsconfig — explicit failure
-                failures.push(ReceiverTypeResult::failed(
-                    edge.edge_uid.clone(),
-                    "ts_project_ownership_not_found",
-                ));
+                if is_js_family(&edge.source_file_path) {
+                    // No tsconfig owns this JS/JSX file → fall back to its package.json Node context
+                    // (tsserver inferred project, allowJs). Batched + grouped after the loop.
+                    js_unowned.push(edge.clone());
+                } else {
+                    // A TypeScript file with no owning tsconfig — explicit failure (byte-parity).
+                    failures.push(ReceiverTypeResult::failed(
+                        edge.edge_uid.clone(),
+                        "ts_project_ownership_not_found",
+                    ));
+                }
             }
             crate::ownership::ProjectOwnership::Ambiguous { candidates } => {
                 // Multiple tsconfigs claim ownership — explicit failure
@@ -989,7 +1033,30 @@ fn group_by_ownership(
         }
     }
 
+    // Route the JS-family Unowned edges to their nearest package.json/repo-root context and merge into
+    // the ownership groups (an Owned tsconfig dir that coincides with a package.json dir shares the one
+    // session for that root — no thrash).
+    if !js_unowned.is_empty() {
+        for (project_root, edges) in group_by_project_root(repo_root, &js_unowned) {
+            groups.entry(project_root).or_default().extend(edges);
+        }
+    }
+
     (groups, failures)
+}
+
+/// Whether a repo-relative path is a JavaScript-family source file (`.js`/`.jsx`/`.mjs`/`.cjs`).
+///
+/// Used only by [`group_by_ownership`] to scope the package.json Node-context fallback to JavaScript
+/// (JS-ENRICHMENT-1): TypeScript files that no tsconfig owns keep their explicit failure. Extension
+/// match on the source path — the same extensions the extractor classifies as `javascript`/`jsx` and
+/// that `EnrichmentLanguage::from_extension` folds into the TypeScript resolver.
+fn is_js_family(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".js")
+        || lower.ends_with(".jsx")
+        || lower.ends_with(".mjs")
+        || lower.ends_with(".cjs")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1146,5 +1213,136 @@ mod tests {
 
         assert!(!is_external_type("MyClass"));
         assert!(!is_external_type("UserService"));
+    }
+
+    // ── JS-ENRICHMENT-1: the package.json Node-context fallback for Unowned JavaScript ──────────────
+
+    #[test]
+    fn is_js_family_matches_js_extensions_only() {
+        for p in ["a.js", "a.jsx", "a.mjs", "a.cjs", "dir/App.JSX", "x/y/z.Js"] {
+            assert!(is_js_family(p), "{p} must be JS-family");
+        }
+        for p in [
+            "a.ts", "a.tsx", "a.mts", "a.cts", "a.rs", "a.py", "noext", "a.json",
+        ] {
+            assert!(!is_js_family(p), "{p} must NOT be JS-family");
+        }
+    }
+
+    /// The load-bearing behavior change: in a Node project with a `package.json` but NO
+    /// tsconfig/jsconfig (a Vite/React app — the glam frontend shape), an Unowned `.jsx`/`.js` file is
+    /// routed to its package.json context for tsserver (inferred project, allowJs) instead of being
+    /// failed, while an Unowned `.ts` file keeps its explicit `ts_project_ownership_not_found` failure
+    /// (TS byte-parity). Drives the REAL `group_by_ownership` + ownership resolver over a temp dir.
+    #[test]
+    fn js_unowned_routes_to_package_json_context_ts_stays_failed() {
+        use enrichment::UnresolvedCategory;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        // Node project: package.json only, NO tsconfig/jsconfig → every file is Unowned by tsconfig.
+        std::fs::write(root.join("package.json"), "{}").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/App.jsx"), "export const a = 1;\n").unwrap();
+        std::fs::write(root.join("src/util.js"), "export const b = 2;\n").unwrap();
+        std::fs::write(root.join("src/main.ts"), "export const c = 3;\n").unwrap();
+
+        let resolver = crate::ownership::TsProjectOwnershipResolver::build(root).unwrap();
+
+        let mk = |uid: &str, path: &str| EligibleEdge {
+            edge_uid: uid.to_string(),
+            snapshot_uid: "s".to_string(),
+            repo_uid: "r".to_string(),
+            source_node_uid: "n".to_string(),
+            target_key: "obj.method".to_string(),
+            source_file_path: path.to_string(),
+            line_start: 1,
+            col_start: 1,
+            category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            language: EnrichmentLanguage::TypeScript, // JS folds to TypeScript for the resolver
+        };
+        let edges = vec![
+            mk("jsx", "src/App.jsx"),
+            mk("js", "src/util.js"),
+            mk("ts", "src/main.ts"),
+        ];
+
+        let (groups, failures) = group_by_ownership(&resolver, root, &edges);
+
+        let grouped: Vec<&str> = groups
+            .values()
+            .flatten()
+            .map(|e| e.edge_uid.as_str())
+            .collect();
+        // JS-family Unowned edges reach tsserver (grouped under a project context), not failed.
+        assert!(
+            grouped.contains(&"jsx") && grouped.contains(&"js"),
+            "JS-family Unowned edges are routed to a Node context for tsserver: {grouped:?}"
+        );
+        // The one project root is the package.json dir (the repo root here).
+        assert!(
+            groups.contains_key(root),
+            "JS edges grouped under the package.json/repo-root context"
+        );
+        // The TS Unowned edge keeps its explicit failure (byte-parity: TS behavior unchanged).
+        assert!(
+            failures.iter().any(|f| f.edge_uid == "ts"
+                && f.failure_reason.as_deref() == Some("ts_project_ownership_not_found")),
+            "TS Unowned edge keeps ts_project_ownership_not_found"
+        );
+        assert!(
+            !grouped.contains(&"ts"),
+            "TS Unowned edge is NOT sent to tsserver"
+        );
+        assert!(
+            !failures
+                .iter()
+                .any(|f| f.edge_uid == "jsx" || f.edge_uid == "js"),
+            "no JS-family edge is failed by ownership anymore"
+        );
+    }
+
+    /// Byte-parity guard: when a tsconfig DOES own the files, the JS fallback never triggers — every
+    /// edge is grouped by ownership exactly as before, and there are no ownership failures.
+    #[test]
+    fn owned_files_are_unaffected_by_the_js_fallback() {
+        use enrichment::UnresolvedCategory;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("tsconfig.json"), r#"{"include":["src/**/*"]}"#).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/App.jsx"), "export const a = 1;\n").unwrap();
+        std::fs::write(root.join("src/main.ts"), "export const c = 3;\n").unwrap();
+
+        let resolver = crate::ownership::TsProjectOwnershipResolver::build(root).unwrap();
+        let mk = |uid: &str, path: &str| EligibleEdge {
+            edge_uid: uid.to_string(),
+            snapshot_uid: "s".to_string(),
+            repo_uid: "r".to_string(),
+            source_node_uid: "n".to_string(),
+            target_key: "obj.method".to_string(),
+            source_file_path: path.to_string(),
+            line_start: 1,
+            col_start: 1,
+            category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            language: EnrichmentLanguage::TypeScript,
+        };
+        let edges = vec![mk("jsx", "src/App.jsx"), mk("ts", "src/main.ts")];
+        let (groups, failures) = group_by_ownership(&resolver, root, &edges);
+
+        let grouped: Vec<&str> = groups
+            .values()
+            .flatten()
+            .map(|e| e.edge_uid.as_str())
+            .collect();
+        assert!(
+            grouped.contains(&"jsx") && grouped.contains(&"ts"),
+            "tsconfig-owned files are grouped by ownership as before: {grouped:?}"
+        );
+        assert!(
+            failures.is_empty(),
+            "no ownership failures when a tsconfig owns the files"
+        );
     }
 }

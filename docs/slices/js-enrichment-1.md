@@ -82,3 +82,38 @@ partial. Do NOT commit.
 attribution + the per-language breakdown (JSX rises above its pipeline ceiling on glamCRM, proven
 live); allowJs-absent and bare-JS cases degrade honestly with named next-actions; TS enrichment
 unchanged; the trust denominator untouched; gates green. JS dependencies are no longer invisible.
+
+## 6. RATIFICATION + DELIVERY (2026-07-20) — DoD amended per measured evidence
+
+The builder escalated honestly; the operator ratified two decisions:
+
+**A — the tsserver path fix is RETAINED (governance: TS/trust touch ratified).** The builder
+found a real defect: tsserver associates files with a project by ABSOLUTE path, but repo-graph
+passed a RELATIVE repo root — silently breaking tsserver's inferred project AND costing configured
+TS a resolution (measured 0→1). The canonicalization fix RECOVERS a compiler fact the bug was
+dropping (not fabricated). The slice's "TS enrichment unchanged" clause was a guardrail against
+scope-creep/fabrication, NOT against fixing a shared bug — lifting it is correct. The false
+"byte-neutral for TS" comment is corrected to the truth. (Restrict-to-JS was rejected: it would
+knowingly retain the TS defect.)
+
+**B — the DoD is AMENDED (the untyped-JS ceiling is a measured FINDING, not a failure to hide).**
+The original DoD ("JS dependencies visible / JSX rises off its ceiling") is UNACHIEVABLE on untyped
+JS and is retracted. Measured on glamCRM (preserved: `.agent-manager/slices/JS-ENRICHMENT-1/
+measurements-preserved/`): admission works mechanically (57 receivers resolved, 2 promotions) but
+the lift is +1 call (jsx 112→113, 37%→37%) because tsserver returns `quickinfo_no_type` for ~148
+untyped-JSX receivers, and the few resolved types are DOM/JS built-ins, not app dependencies — the
+attribution surface is byte-identical. **The ceiling is a property of untyped JS, not a repo-graph
+gap.** The real lever for "treat JS seriously" is porting the frontend to TS (operator direction,
+now data-justified) — typed JS is the only thing tsserver can resolve.
+
+**AMENDED DoD (what this slice actually delivers):** (1) the tsserver relative-root bug is fixed,
+recovering real TS + enabling the JS inferred-project path; (2) `.js/.jsx` admission to tsserver
+enrichment is landed as a documented foundation; (3) the untyped-JS resolution ceiling is measured
+and recorded as the finding. JS failures are recorded honestly (`quickinfo_no_type`), never
+fabricated.
+
+**DEFERRED DEBT (recorded, per the escalate):** the `allowJs`-absent *labeled* degradation path
+(a `.js` in a tsconfig-without-allowJs project → "JS not resolved: no allowJs") was not built.
+Honesty is preserved without it (failures record as `quickinfo_no_type`, not fabricated
+resolutions); the labeled variant is a nicety deprioritized under decision B (JS stays limited;
+TS port is the lever). File if a real repo needs the distinction.
