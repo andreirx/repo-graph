@@ -300,6 +300,20 @@ full rationale to `docs/FUTURE-ITERATIONS.md` (§ Quality Trend Discovery);
 VISION amended same date. Current-state quality signals (complexity, hotspots,
 cycles — coverage-labelled) remain in scope as orientation aids.
 
+## Candidate track — take JavaScript seriously (operator-surfaced 2026-07-20)
+
+Today JS/JSX gets pipeline extraction (structure, calls, modules) but NO semantic
+second witness: the reconciliation union is TS-only (`scip-typescript`), and there is
+no JS resolver equivalent to tsserver/rust-analyzer. Real JS frontends (e.g. glamCRM's
+React-in-JSX web app) therefore read lower on call resolution and stay single-witness —
+correct today, but a coverage ceiling the operator wants lifted, not just tolerated.
+**Scope deliberately UNSET** — to be shaped against the concrete glamCRM index evidence
+(the isolated verify run after GRADLE-DEP-READER-1), not in the abstract. Candidate
+axes to weigh then: whether `scip-typescript`'s JS mode (`allowJs`/`checkJs`) yields a
+usable second witness on JSX; a tsserver-on-JS enrichment path; and the honest-labeling
+work so JS coverage reads as a distinct, named posture rather than "low reliability."
+Not ratified scope; a named direction on the queue.
+
 ## Parallel strategic bet — non-TS LiveGraph coverage
 
 The structural ceiling of the SCIP pivot: non-TS repos (Rust / C / C++ / Java /
