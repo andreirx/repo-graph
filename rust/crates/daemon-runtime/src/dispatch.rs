@@ -7278,12 +7278,12 @@ impl ServiceDispatcher {
         let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
             Ok(f) => f,
             Err(e) => {
-                return DispatchResult::error(
+                // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
+                // degradation, not a bare InternalError.
+                return crate::module_degradation::module_facts_error_result(
                     &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::InternalError,
-                        format!("failed to load module graph facts: {}", e),
-                    ),
+                    "modules deps",
+                    e,
                 );
             }
         };
@@ -7412,12 +7412,12 @@ impl ServiceDispatcher {
         let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
             Ok(f) => f,
             Err(e) => {
-                return DispatchResult::error(
+                // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
+                // degradation, not a bare InternalError.
+                return crate::module_degradation::module_facts_error_result(
                     &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::InternalError,
-                        format!("failed to load module graph facts: {}", e),
-                    ),
+                    "modules violations",
+                    e,
                 );
             }
         };
@@ -7722,12 +7722,12 @@ impl ServiceDispatcher {
         let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
             Ok(f) => f,
             Err(e) => {
-                return DispatchResult::error(
+                // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
+                // degradation, not a bare InternalError.
+                return crate::module_degradation::module_facts_error_result(
                     &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::InternalError,
-                        format!("failed to load module graph facts: {}", e),
-                    ),
+                    "modules show",
+                    e,
                 );
             }
         };
@@ -8108,12 +8108,12 @@ impl ServiceDispatcher {
         let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
             Ok(f) => f,
             Err(e) => {
-                return DispatchResult::error(
+                // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
+                // degradation, not a bare InternalError.
+                return crate::module_degradation::module_facts_error_result(
                     &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::InternalError,
-                        format!("failed to load module graph facts: {}", e),
-                    ),
+                    "modules list",
+                    e,
                 );
             }
         };

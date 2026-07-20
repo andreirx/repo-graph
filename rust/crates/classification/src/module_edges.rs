@@ -74,6 +74,15 @@ pub enum ModuleEdgeDerivationError {
     ///
     /// Module edge derivation requires single-valued ownership.
     /// Duplicate ownership produces unstable architecture facts.
+    ///
+    /// This hard error is retained as the invariant witness (MODULE-OWNERSHIP-
+    /// DUPLICATE-1): generation resolves the known npm-vs-inferred collision (npm
+    /// wins, `repo-index` compose), so this should not fire on the module command
+    /// path. The module-command surface pre-detects duplicate ownership in
+    /// `module-queries::load_module_graph_facts` and degrades honestly (naming the
+    /// affected files) BEFORE reaching this function; this error stays the
+    /// last-line guard for other callers (e.g. gate evaluation) and as
+    /// defense-in-depth.
     DuplicateOwnership {
         file_uid: String,
         module_uids: Vec<String>,

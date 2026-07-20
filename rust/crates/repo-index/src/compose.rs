@@ -322,11 +322,52 @@ pub enum ModuleEcosystem {
 
 impl ModuleEcosystem {
     /// Check if this ecosystem covers a file based on its extension.
+    ///
+    /// INVARIANT (MODULE-OWNERSHIP-DUPLICATE-1): this set MUST cover every
+    /// extension whose files that ecosystem's ownership filter claims in the
+    /// matching `persist_*_modules`. Ownership assigns a file to a declared module
+    /// iff `routing::detect_language` maps it into the ecosystem's language set;
+    /// this same coverage check is what removes those files from inferred
+    /// detection/ownership (`is_file_covered_by_roots`). If coverage is MISSING an
+    /// owned extension, a file is owned by BOTH the declared module AND an inferred
+    /// module → duplicate ownership → the module-graph guard aborts the whole
+    /// module command family (`module_edges.rs` / `module_rollup.rs`). Covering
+    /// MORE than ownership claims does not cause that crash, but leaves those extra
+    /// files unowned — so the npm arm is locked to exact EQUALITY (below), Cargo is
+    /// exact, and Python/Gradle are deliberate safe supersets (also below).
+    ///
+    /// The npm arm previously omitted `mts`/`cts`: those were added to
+    /// `detect_language` by FD-SUPPORT-EXT-JSTS (so npm ownership DID claim them)
+    /// but never propagated here, so vscode's `extensions/*.mts` build scripts were
+    /// claimed by both the npm package and an inferred module. `covers_extension`
+    /// deliberately stays a fast raw-extension matcher (no `detect_language` call
+    /// per file); the `npm_coverage_matches_npm_ownership_language_set` test locks
+    /// the npm arm to the npm ownership language set in BOTH directions (equality),
+    /// across every extension the routing layer recognizes — no npm-owned extension
+    /// left uncovered (this bug) and no non-npm-owned extension covered (a
+    /// covered-but-unowned file). An extension routing does not recognize is
+    /// outside the lock but also inert: ownership only ever claims
+    /// routing-recognized files, so such an entry can produce neither collision.
+    ///
+    /// Cargo/Python/Gradle: Cargo is exact (`rs`); Python covers `pyi` and Gradle
+    /// covers `kt`/`scala`, which `detect_language` does not emit, so their
+    /// ownership never claims those — a coverage superset never produces double
+    /// ownership, only leaves a file unowned.
     fn covers_extension(&self, ext: &str) -> bool {
         match self {
+            // Cargo ownership: detect_language == "rust" → .rs
             ModuleEcosystem::Cargo => ext == "rs",
-            ModuleEcosystem::Npm => matches!(ext, "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs"),
+            // npm ownership: detect_language ∈ {typescript, tsx, javascript, jsx}
+            //   → .ts .mts .cts (typescript) · .tsx (tsx) · .js .mjs .cjs (javascript) · .jsx (jsx)
+            ModuleEcosystem::Npm => {
+                matches!(
+                    ext,
+                    "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+                )
+            }
+            // Python ownership: detect_language == "python" → .py (pyi is a safe superset)
             ModuleEcosystem::Python => matches!(ext, "py" | "pyi"),
+            // Gradle ownership: detect_language == "java" → .java (kt/scala are a safe superset)
             ModuleEcosystem::Gradle => matches!(ext, "java" | "kt" | "scala"),
         }
     }
@@ -4098,6 +4139,201 @@ fn ensure_repo(
 mod tests {
     use super::*;
     use std::fs;
+
+    // ── MODULE-OWNERSHIP-DUPLICATE-1: npm-vs-inferred duplicate ownership ──────
+
+    /// The npm ecosystem's inferred-exclusion coverage MUST EQUAL the set of files
+    /// npm ownership claims — in BOTH directions, over every extension the routing
+    /// layer recognizes. `persist_npm_modules` assigns ownership to a file iff
+    /// `routing::detect_language(path) ∈ {typescript, tsx, javascript, jsx}`, so:
+    ///   forward  — every npm-owned extension MUST be covered, else the file is
+    ///              claimed by both the npm module and an inferred module →
+    ///              duplicate ownership → the module command family aborts (the
+    ///              vscode `extensions/*.mts` field bug: `.mts`/`.cts` were owned
+    ///              but uncovered);
+    ///   backward — no non-npm-owned extension may be covered, else the file is
+    ///              excluded from inferred ownership yet never npm-owned → silently
+    ///              unowned.
+    /// Equality genuinely holds today; this test locks it so neither direction can
+    /// drift for any extension routing recognizes. (Python/Gradle deliberately
+    /// diverge — safe supersets — and are NOT asserted here; see `covers_extension`.)
+    #[test]
+    fn npm_coverage_matches_npm_ownership_language_set() {
+        // A path with `ext_with_dot` is npm-OWNED iff detect_language routes it into
+        // the npm ownership language set (persist_npm_modules).
+        let is_npm_owned = |ext_with_dot: &str| -> bool {
+            matches!(
+                routing::detect_language(&format!("pkg/file{ext_with_dot}")),
+                Some("typescript" | "tsx" | "javascript" | "jsx")
+            )
+        };
+
+        // Domain: every extension the routing layer recognizes (the union over all
+        // languages it maps). Includes all npm-owned extensions (forward direction)
+        // AND all non-npm-owned source extensions (backward direction).
+        let all_langs = [
+            "typescript",
+            "tsx",
+            "javascript",
+            "rust",
+            "java",
+            "python",
+            "c",
+            "cpp",
+        ];
+        for lang in all_langs {
+            for ext_with_dot in routing::language_to_extensions(lang) {
+                let ext = ext_with_dot.trim_start_matches('.');
+                assert_eq!(
+                    ModuleEcosystem::Npm.covers_extension(ext),
+                    is_npm_owned(ext_with_dot),
+                    "npm inferred-exclusion coverage must EQUAL npm ownership for \
+                     .{ext}: covers_extension = {}, npm-owned = {} \
+                     (MODULE-OWNERSHIP-DUPLICATE-1)",
+                    ModuleEcosystem::Npm.covers_extension(ext),
+                    is_npm_owned(ext_with_dot),
+                );
+            }
+        }
+
+        // The exact regression (forward): the two extensions that were missing are
+        // npm-owned AND now covered.
+        assert!(is_npm_owned(".mts") && ModuleEcosystem::Npm.covers_extension("mts"));
+        assert!(is_npm_owned(".cts") && ModuleEcosystem::Npm.covers_extension("cts"));
+        // Negative control (backward): a Rust file is neither npm-owned nor covered.
+        assert!(!is_npm_owned(".rs") && !ModuleEcosystem::Npm.covers_extension("rs"));
+    }
+
+    /// vscode-shaped fixture: an npm package rooted at `extensions/` whose shared
+    /// `.mts` build script sits directly under `extensions/`, alongside a non-JS
+    /// source file that forces an inferred module ALSO rooted at `extensions`.
+    ///
+    /// Before the fix, `covers_extension` omitted `mts`, so the `.mts` file was
+    /// left in the inferred gap-fill's uncovered set and swept up by the inferred
+    /// module's longest-prefix ownership — while npm ownership (detect_language →
+    /// typescript) also claimed it → duplicate ownership. After the fix npm covers
+    /// `.mts`, so it is excluded from inferred ownership and only npm owns it.
+    ///
+    /// (A plain `package.json`, not a `workspaces` manifest, reproduces the
+    /// collision: the bug is about npm-vs-inferred ownership of a `.mts` under any
+    /// npm root, independent of workspace resolution.)
+    fn make_vscode_shape_npm_mts_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Root manifest declaring `extensions` as a workspace member (the vscode
+        // shape). npm modules are only created from the root package.json's
+        // `workspaces` (or pnpm-workspace.yaml) — a standalone nested package.json
+        // yields no module. No `name` on the root → no root module, just the member.
+        fs::write(
+            root.join("package.json"),
+            r#"{"private": true, "workspaces": ["extensions"]}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("extensions")).unwrap();
+        // npm workspace member → declared module rooted at "extensions".
+        fs::write(
+            root.join("extensions/package.json"),
+            r#"{"name": "vscode-extensions", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+        // The shared build script (.mts): npm owns it (detect_language → typescript).
+        fs::write(
+            root.join("extensions/esbuild-common.mts"),
+            "export const shared = 1;\n",
+        )
+        .unwrap();
+        // A normal covered TS file (excluded from inferred detection).
+        fs::create_dir_all(root.join("extensions/foo")).unwrap();
+        fs::write(
+            root.join("extensions/foo/index.ts"),
+            "export const x = 1;\n",
+        )
+        .unwrap();
+        // A non-JS/TS source file directly under extensions/ → uncovered → forces an
+        // inferred module rooted at "extensions", whose ownership sweep is what used
+        // to also claim the .mts build script.
+        fs::write(
+            root.join("extensions/build.py"),
+            "def compile_all():\n    return 1\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    /// RED before the fix / GREEN after: the `.mts` build script under an npm root
+    /// must have a single owner (the declared npm module), not two.
+    #[test]
+    fn vscode_shape_npm_mts_file_has_single_owner() {
+        let fixture = make_vscode_shape_npm_mts_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "vscode-shape",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+
+        let ownership = storage
+            .get_file_ownership_for_snapshot(&result.snapshot_uid)
+            .unwrap();
+
+        // The .mts build script must have EXACTLY ONE owner (RED before fix: two).
+        let mts_owners: Vec<&str> = ownership
+            .iter()
+            .filter(|o| o.file_uid.ends_with(":extensions/esbuild-common.mts"))
+            .map(|o| o.module_candidate_uid.as_str())
+            .collect();
+        assert_eq!(
+            mts_owners.len(),
+            1,
+            "extensions/esbuild-common.mts must have a single owner; got {mts_owners:?}"
+        );
+
+        // And the winner is the DECLARED npm module (npm > inferred), rooted at
+        // "extensions" — not the inferred module.
+        let modules = storage
+            .get_module_candidates_for_snapshot(&result.snapshot_uid)
+            .unwrap();
+        let owner = modules
+            .iter()
+            .find(|m| m.module_candidate_uid == mts_owners[0])
+            .expect("owner module must exist");
+        assert_eq!(owner.canonical_root_path, "extensions");
+        assert_ne!(
+            owner.module_kind, "inferred",
+            "declared npm module must win over inferred; owner kind was {}",
+            owner.module_kind
+        );
+
+        // Full-graph proof: derivation must succeed (no DuplicateOwnership abort).
+        let facts = repo_graph_classification::module_edges::derive_module_dependency_edges(
+            repo_graph_classification::module_edges::ModuleEdgeDerivationInput {
+                imports: vec![],
+                ownership: ownership
+                    .iter()
+                    .map(
+                        |o| repo_graph_classification::module_edges::FileOwnershipFact {
+                            file_uid: o.file_uid.clone(),
+                            module_uid: o.module_candidate_uid.clone(),
+                        },
+                    )
+                    .collect(),
+                modules: modules
+                    .iter()
+                    .map(|m| repo_graph_classification::module_edges::ModuleRef {
+                        module_uid: m.module_candidate_uid.clone(),
+                        canonical_path: m.canonical_root_path.clone(),
+                    })
+                    .collect(),
+            },
+        );
+        assert!(
+            facts.is_ok(),
+            "module edge derivation must not abort on duplicate ownership: {:?}",
+            facts.err()
+        );
+    }
 
     /// PERSIST-RECURSION-1: the per-file depth guard detects pathologically deep
     /// trees iteratively — it never recurses, so the check itself cannot overflow

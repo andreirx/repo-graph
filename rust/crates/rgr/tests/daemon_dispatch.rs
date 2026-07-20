@@ -4228,6 +4228,186 @@ fn modules_list_repo_not_indexed_returns_error() {
     );
 }
 
+// ── MODULE-OWNERSHIP-DUPLICATE-1: end-to-end degradation across the surface ──
+
+/// The degradation-path safety net, exercised end-to-end through the real
+/// dispatcher on a REAL duplicate-ownership snapshot.
+///
+/// Generation now resolves the npm-vs-inferred collision (npm wins), so a natural
+/// snapshot no longer carries duplicate ownership. To exercise the *downstream*
+/// guard we index a normal npm repo and then INJECT a real second ownership row for
+/// an already-owned file (a second module also claiming it) directly into storage —
+/// reproducing the invariant defect (`module_file_ownership` has no single-owner
+/// constraint; the derivation layer owns that check). Every changed surface —
+/// `modules list`/`deps`/`show`/`violations` and top-level `violations` — must then
+/// return the LABELED `StateUnavailable` degradation:
+///   - NOT a bare `InternalError`,
+///   - NOT a success / known-zero envelope ("No modules detected" would be a false
+///     zero on a repo that has modules — VISION: unknown is never zero),
+///   - naming the affected file in BOTH the human `message` and the structured
+///     `data.affected_files`, as a reader-facing rel path (no internal file_uid).
+#[test]
+fn modules_family_duplicate_ownership_degrades_across_all_surfaces() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // A minimal npm repo: one package → one declared module owning one .ts file.
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("dup-ownership-repo");
+    std::fs::create_dir_all(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function main() {}",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+    let index_request = format!(
+        r#"{{"id":"dup-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (repo_uid, db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // ── Inject a real duplicate-ownership row directly into the snapshot ──────
+    // Read the indexed ownership triple for the .ts file, then add a SECOND module
+    // that also claims that exact file (the vscode shape: npm module + inferred
+    // module claiming one file). `rusqlite` is a dev-dependency of rgr, so the test
+    // opens the on-disk snapshot DB directly and injects with bound params — no
+    // production surface is widened (`StorageConnection::connection()` is
+    // `pub(crate)` by design). The connection is dropped before dispatch reopens it.
+    let expected_path;
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("open indexed snapshot db");
+        let (snapshot_uid, owner_repo_uid, file_uid): (String, String, String) = conn
+            .query_row(
+                "SELECT snapshot_uid, repo_uid, file_uid FROM module_file_ownership \
+                 WHERE file_uid LIKE '%index.ts' LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("indexed snapshot must own the .ts file in module_file_ownership");
+
+        // The reader-facing path is the file_uid with its `{repo_uid}:` prefix
+        // stripped — exactly the transform `module_degradation` applies.
+        expected_path = file_uid
+            .split_once(':')
+            .map(|(_, p)| p.to_string())
+            .unwrap_or_else(|| file_uid.clone());
+
+        // A second module candidate (inferred kind) rooted at a DIFFERENT path.
+        conn.execute(
+            "INSERT INTO module_candidates \
+             (module_candidate_uid, snapshot_uid, repo_uid, module_key, module_kind, \
+              canonical_root_path, confidence, display_name, metadata_json) \
+             VALUES ('injected-inferred-mod', ?1, ?2, 'inferred:packages', 'inferred', \
+                     'packages', 1.0, NULL, NULL)",
+            rusqlite::params![snapshot_uid, owner_repo_uid],
+        )
+        .expect("insert second module candidate");
+
+        // The duplicate ownership row: the SAME file, now claimed by the 2nd module.
+        conn.execute(
+            "INSERT INTO module_file_ownership \
+             (snapshot_uid, repo_uid, file_uid, module_candidate_uid, \
+              assignment_kind, confidence, basis_json) \
+             VALUES (?1, ?2, ?3, 'injected-inferred-mod', 'inferred', 1.0, NULL)",
+            rusqlite::params![snapshot_uid, owner_repo_uid, file_uid],
+        )
+        .expect("insert duplicate ownership row");
+    } // connection dropped → released before dispatch reopens the DB
+
+    // ── Every changed surface must degrade honestly ──────────────────────────
+    let surfaces: [(&str, String); 5] = [
+        (
+            "modules list",
+            format!(
+                r#"{{"id":"dup-list","method":"modules_list","params":{{"repo":"{canonical_path}"}}}}"#
+            ),
+        ),
+        (
+            "modules deps",
+            format!(
+                r#"{{"id":"dup-deps","method":"modules_deps","params":{{"repo":"{canonical_path}"}}}}"#
+            ),
+        ),
+        (
+            "modules show",
+            format!(
+                r#"{{"id":"dup-show","method":"modules_show","params":{{"repo":"{canonical_path}","module":"packages/core"}}}}"#
+            ),
+        ),
+        (
+            "modules violations",
+            format!(
+                r#"{{"id":"dup-mviol","method":"modules_violations","params":{{"repo":"{canonical_path}"}}}}"#
+            ),
+        ),
+        (
+            "violations",
+            format!(
+                r#"{{"id":"dup-viol","method":"violations","params":{{"repo":"{canonical_path}"}}}}"#
+            ),
+        ),
+    ];
+
+    for (label, request) in surfaces {
+        let results = run_daemon_requests_with_state(vec![&request], Arc::clone(&state));
+        let output = &results[0];
+        let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+        // No success / known-zero envelope.
+        assert!(
+            parsed.get("result").is_none(),
+            "{label}: expected a degradation error, got a success envelope: {output}"
+        );
+        let error = parsed
+            .get("error")
+            .unwrap_or_else(|| panic!("{label}: expected an error object: {output}"));
+
+        // Labeled StateUnavailable — NOT a bare InternalError.
+        assert_eq!(
+            error["code"], "StateUnavailable",
+            "{label}: expected StateUnavailable, got: {output}"
+        );
+        assert_ne!(
+            error["code"], "InternalError",
+            "{label}: must not be a bare InternalError: {output}"
+        );
+
+        // Affected path visible in the HUMAN message, as a reader-facing rel path.
+        let message = error["message"].as_str().unwrap_or("");
+        assert!(
+            message.contains(&expected_path),
+            "{label}: human message must name the affected file '{expected_path}': {output}"
+        );
+        assert!(
+            !message.contains(&format!("{repo_uid}:")),
+            "{label}: message must not leak the internal file_uid prefix: {output}"
+        );
+
+        // Affected path visible in the STRUCTURED data for --json consumers.
+        assert_eq!(
+            error["data"]["kind"], "duplicate_file_ownership",
+            "{label}: structured data must classify the defect: {output}"
+        );
+        let affected = error["data"]["affected_files"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: data.affected_files must be an array: {output}"));
+        assert!(
+            affected
+                .iter()
+                .any(|v| v.as_str() == Some(expected_path.as_str())),
+            "{label}: data.affected_files must contain '{expected_path}': {output}"
+        );
+    }
+}
+
 // ── CLI-OUT-3: Graph drilldown success-path tests ───────────────────────────
 
 /// Create a test repo with inter-file function calls for graph drilldown tests.

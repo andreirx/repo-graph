@@ -94,6 +94,12 @@ pub enum ModuleRollupError {
     ///
     /// Same contract as RS-MG-2: duplicate ownership is an explicit
     /// error, not silent overwrite.
+    ///
+    /// Retained as the invariant witness (MODULE-OWNERSHIP-DUPLICATE-1). On the
+    /// module command path the surface pre-detects duplicate ownership in
+    /// `module-queries::load_module_graph_facts` (which runs before every rollup)
+    /// and degrades honestly, so this should not fire there; it stays the
+    /// last-line guard and defense-in-depth for direct callers.
     DuplicateOwnership {
         file_path: String,
         module_uids: Vec<String>,

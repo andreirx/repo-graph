@@ -67,6 +67,11 @@ pub mod handlers;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
+// MODULE-OWNERSHIP-DUPLICATE-1: maps a duplicate-ownership load failure to a labeled
+// degradation for the module command surface (keeps it out of the oversized dispatch.rs).
+// Crate-internal: the five callers (dispatch.rs + governance/violations.rs) are all in
+// this crate, so this stays `pub(crate)` — no external consumer.
+pub(crate) mod module_degradation;
 // EC-M2-LEAF-SERVE-1: the MODULE_SUMMARY identity-reconciliation cert + the decorator's
 // summary serve helpers (a sibling cert module like focus_resolution_cert / callgraph_cert).
 pub mod module_summary_cert;
