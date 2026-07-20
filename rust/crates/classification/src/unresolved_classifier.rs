@@ -440,15 +440,20 @@ fn base_specifier(specifier: &str) -> &str {
 
 /// Reduce an import specifier to the DECLARED dependency name it matches, if any — the
 /// package-dependency matching `classify_unresolved_import` performs, returning the matched
-/// *declared* name instead of a bare verdict. Reduces a scoped path to its base
-/// (`serde::de` → `serde`; `repo_graph_indexer::types` → `repo_graph_indexer`), applies Rust
-/// hyphen normalization (`repo_graph_indexer` → `repo-graph-indexer`) and Java group-prefix
-/// matching, and returns the manifest entry that matched (`repo-graph-indexer`), or `None`.
+/// *declared* name (`repo-graph-indexer`) instead of the raw specifier
+/// (`repo_graph_indexer::types`) or a bare verdict. Reduces a scoped path to its base
+/// (`serde::de` → `serde`), applies Rust hyphen normalization
+/// (`repo_graph_indexer` → `repo-graph-indexer`), then Java PACKAGE-SEGMENT matching: a dotted
+/// Maven group matches an import it EQUALS or extends on a `.` boundary (`com.foo` matches
+/// `com.foo` and `com.foo.Bar`, never `com.foobar`), and the LONGEST matching group wins
+/// (`com.foo.bar` beats `com.foo` for `com.foo.bar.Type`). Returns the manifest entry, or `None`.
 ///
-/// The returned name is the DECLARED dependency (`repo-graph-indexer`), never the raw
-/// specifier (`repo_graph_indexer::types`) — the review-2 defect this fixes. `is_some()` is
-/// true in exactly the cases the classifier's three package-dependency checks returned
-/// external, so the classifier verdict is preserved.
+/// This one reduction is deliberately shared by TWO callers so they can never diverge:
+/// `classify_unresolved_import` gates the external verdict on `.is_some()` here, and
+/// `resolve_external_dependency_name` (ATTRIBUTION-1) returns this name for attribution.
+/// Tightening the match to a `.` boundary + longest-group therefore removes false attributions
+/// AND the false external verdicts that produced them, in lockstep — matching can only become
+/// more precise (it never fabricates), so the honesty contract is strengthened, not weakened.
 pub(crate) fn resolve_declared_dependency(
     specifier: &str,
     declared: &PackageDependencySet,
@@ -462,14 +467,28 @@ pub(crate) fn resolve_declared_dependency(
     if hyphenated != base && has_package_dependency(declared, &hyphenated) {
         return Some(hyphenated);
     }
-    // Java prefix: "org.springframework.web.bind" matches Maven group
-    // "org.springframework.boot" when the specifier starts with the dep name.
+    // Java package-segment match. A dotted Maven group owns a Java import package
+    // when the import EQUALS the group or extends it on a `.` boundary — e.g.
+    // `org.springframework.boot.autoconfigure.SpringBootApplication` matches group
+    // `org.springframework.boot`. Raw character prefixing is wrong: `com.foo` must
+    // NOT swallow `com.foobar.Type` (they diverge mid-segment). Among all declared
+    // groups that match, the LONGEST (most specific) wins, so a declared
+    // `com.foo.bar` beats `com.foo` for the import `com.foo.bar.Type`.
     if specifier.contains('.') && !specifier.contains("::") && !specifier.contains('/') {
+        let mut best: Option<&String> = None;
         for dep in &declared.names {
-            if dep.contains('.') && specifier.starts_with(dep.as_str()) {
-                return Some(dep.clone());
+            if !dep.contains('.') {
+                continue;
+            }
+            let is_segment_match = specifier == dep.as_str()
+                || specifier
+                    .strip_prefix(dep.as_str())
+                    .is_some_and(|rest| rest.starts_with('.'));
+            if is_segment_match && best.is_none_or(|b| dep.len() > b.len()) {
+                best = Some(dep);
             }
         }
+        return best.cloned();
     }
     None
 }
@@ -1076,5 +1095,67 @@ mod tests {
             "Java group-prefix match returns the declared group"
         );
         assert_eq!(resolve_declared_dependency("tokio", &d), None);
+    }
+
+    /// Segment-boundary matching: a declared group must not swallow an import that
+    /// only shares a CHARACTER prefix. `com.foo` matches `com.foo.Type` and the bare
+    /// `com.foo`, but NOT `com.foobar.Type` — the false-prefix defect this fixes
+    /// (they diverge inside the second package segment).
+    #[test]
+    fn resolve_declared_dependency_rejects_false_character_prefix() {
+        let d = deps(&["com.foo"]);
+        assert_eq!(
+            resolve_declared_dependency("com.foo.Type", &d),
+            Some("com.foo".to_string()),
+            "a true dot-bounded extension matches"
+        );
+        assert_eq!(
+            resolve_declared_dependency("com.foobar.Type", &d),
+            None,
+            "com.foo must NOT match com.foobar (character prefix, not a package segment)"
+        );
+        assert_eq!(
+            resolve_declared_dependency("com.foo", &d),
+            Some("com.foo".to_string()),
+            "an import equal to the group matches"
+        );
+    }
+
+    /// Overlapping declared groups: the LONGEST (most specific) match wins, so an
+    /// import under the deeper group is attributed to it, not the shorter parent.
+    #[test]
+    fn resolve_declared_dependency_prefers_longest_group() {
+        let d = deps(&["com.foo", "com.foo.bar"]);
+        assert_eq!(
+            resolve_declared_dependency("com.foo.bar.Type", &d),
+            Some("com.foo.bar".to_string()),
+            "the deeper declared group com.foo.bar is the more specific owner"
+        );
+        // An import under only the shorter group still attributes to the shorter one.
+        assert_eq!(
+            resolve_declared_dependency("com.foo.other.Type", &d),
+            Some("com.foo".to_string())
+        );
+    }
+
+    #[test]
+    fn guava_group_degrades_honestly() {
+        // GRADLE-DEP-READER-1's canonical counterexample: guava's Gradle group is
+        // `com.google.guava`, but its packages live under `com.google.common.*`.
+        // The group-prefix rule therefore CANNOT match a guava import — and must
+        // degrade to None (honest "dependency not identified"), never fabricate a
+        // name. This locks the honest-degradation half of the load-bearing decision.
+        let d = deps(&["com.google.guava"]);
+        assert_eq!(
+            resolve_declared_dependency("com.google.common.collect.ImmutableList", &d),
+            None,
+            "guava import must NOT be force-attributed to the com.google.guava group"
+        );
+        // Where the group DOES prefix the package, the same declared set matches.
+        let d2 = deps(&["com.google.guava"]);
+        assert_eq!(
+            resolve_declared_dependency("com.google.guava.SomeType", &d2),
+            Some("com.google.guava".to_string())
+        );
     }
 }

@@ -483,11 +483,13 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                 }
 
                 // Language-aware dependency resolution — explicit per language.
-                // Only the owning manifest type is resolved per language.
-                // No language-specific fallback: Java/C/C++ files receive empty
-                // signals until dedicated manifest readers exist for those languages.
-                // This prevents mixed-repo contamination where a nearby package.json
-                // would wrongly appear as dependency context for a Java or C file.
+                // Only the owning manifest type is resolved per language: Rust →
+                // Cargo.toml, JS/TS → package.json, Java → build.gradle[.kts].
+                // Languages without a dedicated manifest reader (C, C++, Python)
+                // receive empty dependency signals rather than inheriting a nearby
+                // manifest — this prevents mixed-repo contamination where a nearby
+                // package.json would wrongly appear as dependency context for a
+                // C or C++ file.
                 let language = routing::detect_language(&ok.rel_path);
                 let empty_deps = PackageDependencySet { names: vec![] };
                 let empty_tsconfig = TsconfigAliases { entries: vec![] };
@@ -503,8 +505,15 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                         let ts = config_ctx.resolve_tsconfig_aliases(&ok.rel_path, repo_path);
                         (pkg, ts)
                     }
+                    Some("java") => {
+                        // Java: build.gradle / build.gradle.kts (Gradle) — declared
+                        // dependency group ids for Java attribution (GRADLE-DEP-READER-1).
+                        // Maven (pom.xml) is not yet supported; tsconfig N/A.
+                        let gradle_deps = config_ctx.resolve_gradle_deps(&ok.rel_path, repo_path);
+                        (gradle_deps, empty_tsconfig)
+                    }
                     _ => {
-                        // Java, C, C++, unknown: no manifest reader implemented yet.
+                        // C, C++, Python, unknown: no manifest reader implemented yet.
                         // Return empty rather than inheriting a nearby package.json.
                         (empty_deps, empty_tsconfig)
                     }

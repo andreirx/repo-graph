@@ -93,6 +93,7 @@ const RECOGNIZED_CONFIGS: &[&str] = &[
     "tsconfig.json",
     "Cargo.toml",
     "build.gradle",
+    "build.gradle.kts",
     "settings.gradle",
     "pyproject.toml",
     "compile_commands.json",
@@ -337,6 +338,37 @@ mod tests {
         assert_eq!(plan.counts.changed, 1); // tsconfig.json
         assert_eq!(plan.counts.config_widened, 1); // src/sub/a.ts
         assert_eq!(plan.counts.unchanged, 1); // src/other/b.ts (out of scope)
+    }
+
+    /// A changed `build.gradle.kts` (Kotlin DSL) widens the scope of unchanged
+    /// Java sources under its directory, so their declared-dependency context is
+    /// re-derived on refresh — the refresh-completeness half of
+    /// GRADLE-DEP-READER-1. A source outside that directory stays unchanged.
+    #[test]
+    fn build_gradle_kts_change_widens_java_scope() {
+        let parent = make_parent_hashes(
+            &[
+                ("app/build.gradle.kts", "old"),
+                ("app/src/main/java/App.java", "h1"),
+                ("other/src/main/java/Other.java", "h2"),
+            ],
+            "r1",
+        );
+        let current = vec![
+            make_current("app/build.gradle.kts", "new", "r1"),
+            make_current("app/src/main/java/App.java", "h1", "r1"),
+            make_current("other/src/main/java/Other.java", "h2", "r1"),
+        ];
+        let plan = build_invalidation_plan("snap1", &parent, &current, "r1");
+        assert_eq!(plan.counts.changed, 1, "build.gradle.kts itself changed");
+        assert_eq!(
+            plan.counts.config_widened, 1,
+            "app/src/main/java/App.java is in the changed build.gradle.kts's scope"
+        );
+        assert_eq!(
+            plan.counts.unchanged, 1,
+            "other/…/Other.java is out of the app/ scope and stays unchanged"
+        );
     }
 
     #[test]
