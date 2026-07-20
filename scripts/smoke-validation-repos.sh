@@ -92,6 +92,9 @@ DEFER_LAST=(${SMOKE_DEFER_LAST:-vscode storybook linux})
 # Optional: run ONLY these repos (space-separated names), e.g.
 #   SMOKE_ONLY="mempalace nginx" ./scripts/smoke-validation-repos.sh <task> ...
 SMOKE_ONLY="${SMOKE_ONLY:-}"
+# Optional: SKIP these repos (space-separated names) — the complement filter, e.g.
+#   SMOKE_SKIP="linux" for a batch without the kernel-scale index.
+SMOKE_SKIP="${SMOKE_SKIP:-}"
 
 usage() {
     echo "usage: $0 [--retain] [--adhoc] <task> [commands...]" >&2
@@ -288,6 +291,21 @@ if [[ -n "$SMOKE_ONLY" ]]; then
     ALL_NAMES=("${only_names[@]}")
     ALL_PATHS=("${only_paths[@]}")
     ALL_CATEGORIES=("${only_cats[@]}")
+fi
+
+# Optional complement: SMOKE_SKIP="n1 n2 ..." drops those repos from the batch.
+if [[ -n "$SMOKE_SKIP" ]]; then
+    keep_names=(); keep_paths=(); keep_cats=()
+    for idx in "${!ALL_NAMES[@]}"; do
+        if [[ " $SMOKE_SKIP " != *" ${ALL_NAMES[$idx]} "* ]]; then
+            keep_names+=("${ALL_NAMES[$idx]}")
+            keep_paths+=("${ALL_PATHS[$idx]}")
+            keep_cats+=("${ALL_CATEGORIES[$idx]}")
+        fi
+    done
+    ALL_NAMES=("${keep_names[@]}")
+    ALL_PATHS=("${keep_paths[@]}")
+    ALL_CATEGORIES=("${keep_cats[@]}")
 fi
 
 # State isolation paths (REG-1 daemon model)
