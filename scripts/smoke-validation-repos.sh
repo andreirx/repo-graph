@@ -86,8 +86,9 @@ INTERNAL_PATHS=(
 )
 
 # Giant repos to run LAST so a huge index does not head-of-line-block the batch on
-# the serial daemon (e.g. the Linux kernel). Override: SMOKE_DEFER_LAST="a b".
-DEFER_LAST=(${SMOKE_DEFER_LAST:-linux})
+# the serial daemon (e.g. the Linux kernel; the vscode/storybook TS giants).
+# Override: SMOKE_DEFER_LAST="a b".
+DEFER_LAST=(${SMOKE_DEFER_LAST:-vscode storybook linux})
 # Optional: run ONLY these repos (space-separated names), e.g.
 #   SMOKE_ONLY="mempalace nginx" ./scripts/smoke-validation-repos.sh <task> ...
 SMOKE_ONLY="${SMOKE_ONLY:-}"
@@ -247,6 +248,7 @@ if [[ $# -eq 0 ]]; then
         "dead" "violations" "gate" "assess"
         "surfaces list" "boundaries list" "boundaries summary" "resource list"
         "docs list" "inferences list" "deps list"
+        "map" "doctor"
     )
 else
     COMMANDS=("$@")
