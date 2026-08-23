@@ -1,0 +1,613 @@
+{
+ "model": "text-embedding-nomic-embed-text-v1.5",
+ "tasks": [
+  {
+   "task": "Where does the serverless backend fetch currency exchange rates from the national bank (BNR)?",
+   "anchors": [
+    "serverless/packages/backend/src/services/bnr-service.ts",
+    "serverless/packages/backend/src/handlers/exchange-rates.ts"
+   ],
+   "F": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/bnr-service.ts",
+     "serverless/packages/backend/src/services/exchange-rate-service.ts",
+     "serverless/packages/shared/src/types/exchange-rate.ts"
+    ]
+   },
+   "S": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/bnr-service.ts",
+     "serverless/packages/shared/src/types/exchange-rate.ts",
+     "serverless/packages/backend/src/services/exchange-rate-service.ts"
+    ]
+   },
+   "L": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/bnr-service.ts",
+     "serverless/packages/backend/src/services/exchange-rate-service.ts",
+     "serverless/packages/infra/lib/constructs/scheduler.ts"
+    ]
+   }
+  },
+  {
+   "task": "How does the frontend authenticate users with AWS Cognito?",
+   "anchors": [
+    "frontend/web/src/auth/CognitoAuthAdapter.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/workspace/src/auth/CognitoAuthAdapter.ts",
+     "frontend/web/src/auth/CognitoAuthAdapter.ts",
+     "serverless/packages/backend/src/services/cognito-service.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/cognito-service.ts",
+     "frontend/web/src/auth/CognitoAuthAdapter.ts",
+     "frontend/workspace/src/auth/CognitoAuthAdapter.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/cognito-service.ts",
+     "frontend/workspace/src/api/users.ts",
+     "frontend/workspace/src/pages/AccountPage.tsx"
+    ]
+   }
+  },
+  {
+   "task": "Where is the PDF document for an estimate generated?",
+   "anchors": [
+    "serverless/packages/backend/src/services/estimate-service.ts",
+    "backend/src/main/java/soft/bijuterie/glam/backend/core/estimate/EstimateDocumentService.java"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/pdf-estimate-service.ts",
+     "frontend/web/src/api/estimate.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/core/estimate/EstimateDocumentManager.java"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/pdf-estimate-service.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/external/files/pdf/PdfEstimateDocumentManager.java",
+     "serverless/packages/shared/src/types/estimate.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "frontend/workspace/src/api/estimates.ts",
+     "serverless/packages/backend/src/services/pdf-estimate-service.ts",
+     "serverless/packages/backend/src/scripts/render-deviz-sample.ts"
+    ]
+   }
+  },
+  {
+   "task": "Which code decides the applicable VAT rate for an offer?",
+   "anchors": [
+    "serverless/packages/backend/src/services/applicable-vat-service.ts",
+    "serverless/packages/backend/src/handlers/vat.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/workspace/src/api/vats.ts",
+     "serverless/packages/shared/src/types/applicable-vat.ts",
+     "serverless/packages/backend/src/services/applicable-vat-service.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/applicable-vat.ts",
+     "serverless/packages/backend/src/services/applicable-vat-service.ts",
+     "frontend/web/src/components/CreateOfferDialog.tsx"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/tools/migration/MigrationChecks.java",
+     "frontend/workspace/src/pages/NewOfferPage.tsx",
+     "serverless/packages/backend/src/services/pdf-estimate-service.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where does the frontend configure the API base URL and the HTTP client used for REST calls?",
+   "anchors": [
+    "frontend/web/src/config/api-client.ts",
+    "frontend/web/src/config/runtime-config.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/workspace/src/config/api-client.ts",
+     "frontend/web/src/config/api-client.ts",
+     "frontend/web/src/main.tsx"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/web/src/App.tsx",
+     "frontend/workspace/src/config/runtime-config.ts",
+     "serverless/packages/infra/lib/constructs/frontend.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/workspace/src/api/products.ts",
+     "frontend/web/src/config/runtime-config.ts",
+     "frontend/web/src/api/project.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where are tenant branding settings (logo, title) served by the backend?",
+   "anchors": [
+    "serverless/packages/backend/src/handlers/tenant-brand.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/tenant-brand.ts",
+     "serverless/packages/backend/src/services/tenant-brand-service.ts",
+     "frontend/workspace/src/lib/brand.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "serverless/packages/shared/src/types/tenant-brand.ts",
+     "serverless/packages/backend/src/services/tenant-brand-service.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/core/tenantconfig/TenantConfig.java"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/dtos/TenantConfigPutDTO.java",
+     "frontend/web/src/pages/TenantConfigPage.tsx",
+     "serverless/packages/shared/src/types/tenant-config.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where does the React frontend call the offers REST endpoints?",
+   "anchors": [
+    "frontend/web/src/api/offer.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/workspace/src/api/offers.ts",
+     "frontend/web/src/api/offer.ts",
+     "frontend/web/src/pages/OfferPage.tsx"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/web/src/App.tsx",
+     "frontend/web/src/api/offer.ts",
+     "frontend/workspace/src/roles.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/workspace/src/features/offer-view/OfferReadView.tsx",
+     "frontend/workspace/src/roles.ts",
+     "frontend/web/src/api/offer.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where is the activity log written when a user changes data?",
+   "anchors": [
+    "serverless/packages/backend/src/services/activity-log-service.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/activity-log.ts",
+     "serverless/packages/backend/src/repositories/activity-log-repository.ts",
+     "serverless/packages/backend/src/services/activity-log-service.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/activity-log.ts",
+     "serverless/packages/backend/src/services/activity-log-service.ts",
+     "serverless/packages/backend/src/repositories/activity-log-repository.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "serverless/packages/backend/src/scripts/transform-codification-storage.ts",
+     "serverless/packages/shared/src/types/manager-tablou.ts",
+     "serverless/packages/shared/src/types/order-needs.ts"
+    ]
+   }
+  },
+  {
+   "task": "How are uploaded files stored and downloaded (S3 presigned URLs)?",
+   "anchors": [
+    "serverless/packages/backend/src/handlers/files-v2.ts",
+    "serverless/packages/backend/src/handlers/files.ts",
+    "frontend/web/src/api/fileHosting.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/file-hosting-storage.ts",
+     "serverless/packages/backend/src/services/s3-file-hosting-storage.ts",
+     "serverless/packages/backend/src/services/s3-service.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/file-hosting-storage.ts",
+     "serverless/packages/backend/src/services/s3-file-hosting-storage.ts",
+     "serverless/packages/shared/src/types/file-hosting.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "serverless/packages/shared/src/types/document.ts",
+     "frontend/workspace/src/api/file-hosting.ts",
+     "serverless/packages/backend/src/repositories/file-registry-repository.ts"
+    ]
+   }
+  },
+  {
+   "task": "Which lambda handler runs on a schedule (cron)?",
+   "anchors": [
+    "serverless/packages/backend/src/handlers/scheduled"
+   ],
+   "F": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/handlers/scheduled/process-notifications.ts",
+     "serverless/packages/backend/src/utils/crud-handler.ts",
+     "serverless/packages/backend/src/handlers/scheduled/reconcile-files.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/infra/lib/constructs/scheduler.ts",
+     "frontend/workspace/src/auth/CognitoAuthAdapter.ts",
+     "frontend/web/src/auth/CognitoAuthAdapter.ts"
+    ]
+   },
+   "L": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/handlers/scheduled/process-notifications.ts",
+     "serverless/packages/backend/src/handlers/etape.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/schedulers/ExchangeRateScheduler.java"
+    ]
+   }
+  },
+  {
+   "task": "Where does the one-off migration script transform etape (stage) data?",
+   "anchors": [
+    "serverless/packages/backend/src/scripts/transform-etape.ts"
+   ],
+   "F": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/scripts/transform-etape.ts",
+     "serverless/packages/backend/src/handlers/etape.ts",
+     "serverless/packages/shared/src/types/etapa.ts"
+    ]
+   },
+   "S": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/scripts/transform-etape.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/tools/migration/MigrationChecks.java",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/tools/migration/MigrationRunbook.java"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/scripts/transform-codification-storage.ts",
+     "serverless/packages/backend/src/scripts/transform-offer-item-canonical.ts",
+     "serverless/packages/backend/src/scripts/backfill-deal-binding.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where is the warm-up lambda that keeps functions hot?",
+   "anchors": [
+    "serverless/packages/backend/src/handlers/warmup.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/utils/warmup.ts",
+     "serverless/packages/backend/src/handlers/warmup.ts",
+     "serverless/packages/infra/lambda/bootstrap.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/utils/warmup.ts",
+     "serverless/packages/backend/src/handlers/warmup.ts",
+     "frontend/web/src/auth/CognitoAuthAdapter.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/handlers/order-needs.ts",
+     "frontend/workspace/src/auth/CognitoAuthAdapter.ts",
+     "frontend/web/src/auth/CognitoAuthAdapter.ts"
+    ]
+   }
+  },
+  {
+   "task": "Which Java backend code manages price lists?",
+   "anchors": [
+    "backend/src/main/java/soft/bijuterie/glam/backend/core/pricelist",
+    "backend/src/main/java/soft/bijuterie/glam/backend/app/controllers/PriceListController.java"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/price-list.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/core/pricelist/PriceListRepository.java",
+     "backend/src/main/java/soft/bijuterie/glam/backend/external/postgres/pricelist/PriceListDB.java"
+    ]
+   },
+   "S": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "backend/src/main/java/soft/bijuterie/glam/backend/core/pricelist/PriceListRepository.java",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/controllers/PriceListController.java",
+     "backend/src/main/java/soft/bijuterie/glam/backend/core/pricelist/PriceList.java"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "frontend/web/src/components/CreateProductDialog.tsx",
+     "serverless/packages/shared/src/enums/user-role.ts",
+     "serverless/packages/shared/src/types/order-needs.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where are sales targets per company computed?",
+   "anchors": [
+    "serverless/packages/backend/src/handlers/company-targets.ts",
+    "serverless/packages/backend/src/handlers/sales-targets.ts",
+    "serverless/packages/backend/src/services/sales-target-service.ts"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/company-target.ts",
+     "serverless/packages/shared/src/types/sales-target.ts",
+     "serverless/packages/backend/src/repositories/company-target-repository.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/shared/src/types/company-target.ts",
+     "serverless/packages/backend/src/handlers/sales-targets.ts",
+     "serverless/packages/backend/src/services/sales-target-service.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "frontend/workspace/src/features/tablou/TablouYearView.tsx",
+     "serverless/packages/backend/src/handlers/order-needs.ts",
+     "serverless/packages/shared/src/types/company-target.ts"
+    ]
+   }
+  },
+  {
+   "task": "Where does the UI let a user edit an existing offer?",
+   "anchors": [
+    "frontend/web/src/pages/EditOfferPage.tsx",
+    "frontend/workspace/src/pages/OfferDetailPage.tsx"
+   ],
+   "F": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "frontend/workspace/src/features/offer-view/OfferReadView.tsx",
+     "serverless/packages/backend/src/services/offer-service.ts",
+     "frontend/workspace/src/api/offer-items.ts"
+    ]
+   },
+   "S": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/services/offer-service.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/core/offer/OfferService.java",
+     "frontend/workspace/src/pages/OfferDetailPage.tsx"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": false,
+    "hit@10": false,
+    "top3": [
+     "serverless/packages/backend/src/scripts/transform-offer-item-canonical.ts",
+     "serverless/packages/shared/src/schemas/product.ts",
+     "frontend/workspace/src/pages/MyCatalogPage.tsx"
+    ]
+   }
+  },
+  {
+   "task": "Which handler serves health checks?",
+   "anchors": [
+    "serverless/packages/backend/src/handlers/health.ts"
+   ],
+   "F": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/handlers/health.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/controllers/HealthCheckController.java",
+     "serverless/packages/backend/src/utils/error-handler.ts"
+    ]
+   },
+   "S": {
+    "hit@1": true,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/handlers/health.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/controllers/HealthCheckController.java",
+     "serverless/packages/backend/src/utils/error-handler.ts"
+    ]
+   },
+   "L": {
+    "hit@1": false,
+    "hit@5": true,
+    "hit@10": true,
+    "top3": [
+     "serverless/packages/backend/src/handlers/tenant-brand.ts",
+     "frontend/web/playwright.config.ts",
+     "backend/src/main/java/soft/bijuterie/glam/backend/app/config/security/SecurityConfig.java"
+    ]
+   }
+  }
+ ],
+ "summary": {
+  "F": [
+   4,
+   14,
+   15
+  ],
+  "S": [
+   4,
+   13,
+   15
+  ],
+  "L": [
+   2,
+   8,
+   9
+  ]
+ },
+ "n": 16,
+ "corpus": {
+  "files": 598,
+  "symbols": 3363
+ }
+}
