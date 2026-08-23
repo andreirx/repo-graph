@@ -8,6 +8,7 @@
 //! Usage:
 //!   rmap maintenance prune           # prune prunable snapshots for current repo
 //!   rmap maintenance prune --json    # JSON output
+//!   rmap maintenance gc [--dry-run]  # reclaim orphan DB files + stray sidecars (FORGET-REPO-1)
 //!
 //! The prune operation:
 //! 1. Classifies all snapshots (assigns retention classes)
@@ -116,6 +117,7 @@ pub fn run_maintenance(args: &[String]) -> ExitCode {
 
     match args[0].as_str() {
         "prune" => run_prune(&args[1..]),
+        "gc" => run_gc(&args[1..]),
         "--help" | "-h" => {
             print_usage();
             ExitCode::SUCCESS
@@ -124,6 +126,157 @@ pub fn run_maintenance(args: &[String]) -> ExitCode {
             eprintln!("unknown subcommand: {}", other);
             print_usage();
             ExitCode::from(1)
+        }
+    }
+}
+
+/// FORGET-REPO-1 §2.3: `rmap maintenance gc [--dry-run] [--json]`.
+///
+/// Reclaims orphan DB files + stray sidecars (daemon storage nothing in the registry tracks) and
+/// reports the bytes freed. Dead-path registry entries (a registered repo whose path is gone) are
+/// LISTED with the exact `rmap repo remove <path>` next action, NEVER auto-removed (the path may be a
+/// temporarily-unmounted volume). `--dry-run` lists candidates without deleting. Daemon-global — not
+/// scoped to the cwd repo.
+fn run_gc(args: &[String]) -> ExitCode {
+    let mut dry_run = false;
+    let mut json_output = false;
+    for arg in args {
+        match arg.as_str() {
+            "--dry-run" => dry_run = true,
+            "--json" => json_output = true,
+            "--help" | "-h" => {
+                print_gc_usage();
+                return ExitCode::SUCCESS;
+            }
+            other => {
+                eprintln!("unknown option: {}", other);
+                print_gc_usage();
+                return ExitCode::from(1);
+            }
+        }
+    }
+
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: failed to connect to daemon: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    let params = serde_json::json!({ "dry_run": dry_run });
+    match client.request("maintenance_gc", Some(params)) {
+        Ok(result) => {
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+                );
+            } else {
+                print_gc_human(&result);
+            }
+            // Non-zero exit if a real removal failed (dry-run never fails).
+            if result["ok"].as_bool().unwrap_or(true) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Human render of the `maintenance gc` outcome (dry-run and real modes).
+fn print_gc_human(result: &serde_json::Value) {
+    let dry_run = result["dry_run"].as_bool().unwrap_or(false);
+
+    // review-1 #2: an incomplete scan is UNKNOWN, never zero. Warn, and below never render an
+    // unscannable/partly-scanned store as the clean "No orphan files to reclaim."
+    let scan_incomplete = if let Some(err) = result["scan_error"].as_str() {
+        eprintln!("warning: could not fully scan storage: {err}");
+        true
+    } else {
+        false
+    };
+
+    let items = result["items"].as_array().cloned().unwrap_or_default();
+    let removed_count = result["removed_count"].as_u64().unwrap_or(0);
+    let candidate_count = result["candidate_count"].as_u64().unwrap_or(0);
+    let reclaimed = result["reclaimed_bytes"].as_u64().unwrap_or(0);
+    let would = result["would_reclaim_bytes"].as_u64().unwrap_or(0);
+
+    if candidate_count == 0 {
+        if scan_incomplete {
+            println!(
+                "Could not determine orphan files — the storage scan was incomplete (see warning above)."
+            );
+        } else {
+            println!("No orphan files to reclaim.");
+        }
+    } else if dry_run {
+        println!(
+            "Would reclaim {} orphan file(s), freeing {} (dry-run — nothing deleted):",
+            candidate_count,
+            format_bytes(would)
+        );
+        for item in &items {
+            let path = item["path"].as_str().unwrap_or("?");
+            let bytes = item["bytes"].as_u64().unwrap_or(0);
+            let kind = item["kind"].as_str().unwrap_or("");
+            println!("  - [{kind}] {path} ({})", format_bytes(bytes));
+        }
+    } else {
+        let skipped_count = result["skipped_count"].as_u64().unwrap_or(0);
+        println!(
+            "Reclaimed {} orphan file(s), freed {} on disk:",
+            removed_count,
+            format_bytes(reclaimed)
+        );
+        for item in &items {
+            let path = item["path"].as_str().unwrap_or("?");
+            let bytes = item["bytes"].as_u64().unwrap_or(0);
+            let kind = item["kind"].as_str().unwrap_or("");
+            if item["removed"].as_bool().unwrap_or(false) {
+                println!("  - removed [{kind}] {path} ({})", format_bytes(bytes));
+            } else if let Some(err) = item["error"].as_str() {
+                println!("  - FAILED [{kind}] {path} — {err}");
+            } else if let Some(reason) = item["skipped"].as_str() {
+                // operator ruling 2: a candidate a concurrent (re-)index re-claimed between the scan
+                // and the unlink is SKIPPED, not deleted. Surface it (a silent drop would make the
+                // reclaimed count unexplainably smaller than the candidate count).
+                println!("  - SKIPPED [{kind}] {path} — {reason}");
+            }
+        }
+        if skipped_count > 0 {
+            println!(
+                "{} candidate(s) were left intact — a live index re-claimed them after the scan; re-run `rmap maintenance gc` once indexing settles.",
+                skipped_count
+            );
+        }
+    }
+
+    // Dead-path registry entries: LISTED with the next action, never auto-removed.
+    let dead = result["dead_path_entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !dead.is_empty() {
+        println!();
+        println!(
+            "{} registered repo(s) point at a path that no longer exists (not auto-removed — the path may be a temporarily-unmounted volume):",
+            dead.len()
+        );
+        for d in &dead {
+            let path = d["path"].as_str().unwrap_or("?");
+            let action = d["next_action"]
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("rmap repo remove {path}"));
+            println!("  - {path}");
+            println!("      next: {action}");
         }
     }
 }
@@ -567,13 +720,41 @@ MAINTENANCE-CLI-1: Explicit maintenance operations.
 
 Subcommands:
   prune          Prune prunable snapshots for current repo
+  gc             Reclaim orphan DB files + stray sidecars (daemon-global)
 
 Options:
   --help, -h     Show this help
 
 Examples:
   rmap maintenance prune           # prune current repo
-  rmap maintenance prune --json    # JSON output"
+  rmap maintenance prune --json    # JSON output
+  rmap maintenance gc --dry-run    # list reclaimable orphan storage, delete nothing
+  rmap maintenance gc              # reclaim orphan storage, report bytes freed"
+    );
+}
+
+fn print_gc_usage() {
+    eprintln!(
+        "Usage: rmap maintenance gc [OPTIONS]
+
+Reclaim orphaned daemon storage the registry no longer tracks:
+  - orphan DB files (a .db in databases/ no registered repo references)
+  - stray sidecars (a -wal/-shm with no base .db file)
+
+Both are deleted and the reclaimed bytes are reported.
+
+Dead-path registry entries (a registered repo whose path no longer exists) are
+LISTED with the exact 'rmap repo remove <path>' next action, but NOT auto-removed
+— the path may be a temporarily-unmounted volume.
+
+Options:
+  --dry-run      List what would be reclaimed; delete nothing
+  --json         Output JSON instead of human-readable text
+  --help, -h     Show this help
+
+Examples:
+  rmap maintenance gc --dry-run    # preview
+  rmap maintenance gc              # reclaim and report bytes freed"
     );
 }
 

@@ -7,7 +7,7 @@
 //! - `rmap repo list` — list all registered repos
 //! - `rmap repo info [repo]` — show details for a repo
 //! - `rmap repo alias <repo> <alias>` — set or change alias
-//! - `rmap repo remove <repo> [--delete-db]` — remove repo from registry
+//! - `rmap repo remove <repo> [--keep-db]` — forget repo (registry + database + `.rgr/`); FORGET-REPO-1
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -23,7 +23,9 @@ pub fn run_repo(args: &[String]) -> ExitCode {
         eprintln!("  list              List all registered repos");
         eprintln!("  info [repo]       Show details for a repo (default: cwd)");
         eprintln!("  alias <repo> <name>  Set or change alias");
-        eprintln!("  remove <repo> [--delete-db]  Remove repo from registry");
+        eprintln!(
+            "  remove <repo> [--keep-db]  Forget repo: registry + database + .rgr/ (destructive)"
+        );
         return ExitCode::from(1);
     }
 
@@ -328,15 +330,80 @@ fn run_repo_alias(args: &[String]) -> ExitCode {
     }
 }
 
-/// Run `rmap repo remove <repo> [--delete-db]`.
-fn run_repo_remove(args: &[String]) -> ExitCode {
-    if args.is_empty() {
-        eprintln!("usage: rmap repo remove <repo> [--delete-db]");
-        return ExitCode::from(1);
-    }
+/// Run `rmap repo forget <repo> [--keep-db]` (aka `rmap repo remove`).
+///
+/// FORGET-REPO-1: FORGETS by default — removes the registry entry, evicts in-memory state, drops
+/// the `db_runtimes` slot, and deletes `.db`/`-wal`/`-shm` + `<repo>/.rgr/`. Reports each artifact
+/// `removed | absent | failed(<reason>)`; ANY `failed` → non-zero exit. `--keep-db` opts out and
+/// keeps the DB file (printing where it stays). `--delete-db` is accepted as a no-op (deletion is
+/// the default now). Refuses (nothing deleted) while an index/refresh is in flight.
+/// Parsed `rmap repo remove` arguments (review-1 #1).
+#[derive(Debug)]
+struct RemoveArgs {
+    repo_ref: String,
+    /// `--keep-db`: opt out of the forget-by-default deletion (keep the `.db` file).
+    keep_db: bool,
+}
 
-    let repo_ref = &args[0];
-    let delete_db = args.iter().any(|a| a == "--delete-db");
+/// Parse `rmap repo remove` arguments STRICTLY (review-1 #1).
+///
+/// Accepts exactly one positional `<repo>`, the `--keep-db` opt-out, and the legacy `--delete-db`
+/// (a no-op now that deletion is the default). Any other flag, a second positional, or a missing
+/// repo is a hard error — so a typo can never silently perform the destructive default. `--keep-db`
+/// together with the (contradictory) explicit `--delete-db` is rejected rather than silently picking
+/// one.
+fn parse_remove_args(args: &[String]) -> Result<RemoveArgs, String> {
+    let mut repo: Option<String> = None;
+    let mut keep_db = false;
+    let mut delete_db = false;
+    for arg in args {
+        match arg.as_str() {
+            "--keep-db" => keep_db = true,
+            "--delete-db" => delete_db = true, // legacy muscle-memory flag; deletion is the default
+            other if other.starts_with('-') => return Err(format!("unknown option: {other}")),
+            positional => {
+                if repo.is_some() {
+                    return Err(format!(
+                        "unexpected extra argument: {positional} (expected exactly one <repo>)"
+                    ));
+                }
+                repo = Some(positional.to_string());
+            }
+        }
+    }
+    if keep_db && delete_db {
+        return Err("--keep-db and --delete-db are contradictory; pass at most one".to_string());
+    }
+    let repo_ref = repo.ok_or_else(|| "missing <repo> argument".to_string())?;
+    Ok(RemoveArgs { repo_ref, keep_db })
+}
+
+/// Usage for `rmap repo remove` (shared by the arg-error and `--help` paths).
+fn print_remove_usage() {
+    eprintln!("usage: rmap repo remove <repo> [--keep-db]");
+    eprintln!("  Forgets repo X: removes the registry entry, in-memory state, the database");
+    eprintln!("  (.db/-wal/-shm) and <repo>/.rgr/. --keep-db keeps the database file.");
+    eprintln!("  --delete-db is accepted for muscle memory (deletion is the default).");
+}
+
+fn run_repo_remove(args: &[String]) -> ExitCode {
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print_remove_usage();
+        return ExitCode::SUCCESS;
+    }
+    // review-1 #1: parse strictly BEFORE any destructive action. An unrecognized flag or an extra
+    // positional is a hard error — never a silent fall-through to the destructive default (e.g. a
+    // `--keep-dbb` typo must NOT forget-and-delete the DB).
+    let parsed = match parse_remove_args(args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_remove_usage();
+            return ExitCode::from(1);
+        }
+    };
+    let repo_ref = parsed.repo_ref;
+    let keep_db = parsed.keep_db;
 
     let mut client = match DaemonClient::new() {
         Ok(c) => c,
@@ -348,30 +415,129 @@ fn run_repo_remove(args: &[String]) -> ExitCode {
 
     let params = serde_json::json!({
         "repo": repo_ref,
-        "delete_db": delete_db,
+        "keep_db": keep_db,
     });
 
     match client.request("repo_remove", Some(params)) {
-        Ok(result) => {
-            let path = result["canonical_path"].as_str().unwrap_or("?");
-            let db_path = result["db_path"].as_str().unwrap_or("?");
-            let db_deleted = result["db_deleted"].as_bool().unwrap_or(false);
-
-            eprintln!("Removed from registry: {}", path);
-            if db_deleted {
-                eprintln!("Database deleted: {}", db_path);
-            } else {
-                eprintln!("Database retained: {}", db_path);
-            }
-            ExitCode::SUCCESS
-        }
+        Ok(result) => render_forget_result(&result),
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
-            eprintln!("error: daemon returned {}: {}", code, message);
+            // A refusal (in-flight write) comes back as a StateUnavailable error — surface it plainly.
+            eprintln!("error: cannot forget repo: {}", message);
+            let _ = code;
             ExitCode::from(2)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
         }
+    }
+}
+
+/// Render the per-artifact forget report and pick the exit code (non-zero on any `failed`).
+fn render_forget_result(result: &serde_json::Value) -> ExitCode {
+    let path = result["canonical_path"].as_str().unwrap_or("?");
+    let db_path = result["db_path"].as_str().unwrap_or("?");
+    let kept_db = result["kept_db"].as_bool().unwrap_or(false);
+    let ok = result["ok"].as_bool().unwrap_or(false);
+
+    eprintln!("Forgot repo: {}", path);
+    if let Some(artifacts) = result["artifacts"].as_array() {
+        for a in artifacts {
+            let kind = a["kind"].as_str().unwrap_or("?");
+            let status = a["status"].as_str().unwrap_or("?");
+            let artifact = a["artifact"].as_str().unwrap_or("");
+            match status {
+                "removed" => {
+                    // `bytes: null` = size unknown (a sizing fault, named in size_error) — render
+                    // it as unknown, NEVER as 0 or as nothing (unknown is never zero).
+                    match a["bytes"].as_u64() {
+                        Some(bytes) if bytes > 0 => {
+                            eprintln!("  removed {kind}: {artifact} ({})", format_bytes(bytes))
+                        }
+                        Some(_) => eprintln!("  removed {kind}: {artifact}"),
+                        None => {
+                            let why = a["size_error"].as_str().unwrap_or("sizing failed");
+                            eprintln!("  removed {kind}: {artifact} (size unknown — {why})")
+                        }
+                    }
+                }
+                "absent" => eprintln!("  absent  {kind}: {artifact} (nothing to remove)"),
+                "failed" => {
+                    let reason = a["reason"].as_str().unwrap_or("unknown error");
+                    eprintln!("  FAILED  {kind}: {artifact} — {reason}");
+                }
+                other => eprintln!("  {other}  {kind}: {artifact}"),
+            }
+        }
+    }
+    if kept_db {
+        eprintln!("Database retained (--keep-db): {}", db_path);
+    }
+
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("error: one or more artifacts could not be removed (see FAILED lines above)");
+        ExitCode::from(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // review-1 #1: the happy paths — one repo, optional --keep-db, legacy --delete-db no-op.
+    #[test]
+    fn parse_remove_accepts_repo_and_known_flags() {
+        let p = parse_remove_args(&args(&["/repo"])).unwrap();
+        assert_eq!(p.repo_ref, "/repo");
+        assert!(!p.keep_db, "forget-by-default: no --keep-db → delete");
+
+        let p = parse_remove_args(&args(&["/repo", "--keep-db"])).unwrap();
+        assert!(p.keep_db);
+        // Order-independent.
+        let p = parse_remove_args(&args(&["--keep-db", "/repo"])).unwrap();
+        assert!(p.keep_db && p.repo_ref == "/repo");
+
+        // Legacy --delete-db is a no-op (deletion is the default) — accepted, keep_db stays false.
+        let p = parse_remove_args(&args(&["/repo", "--delete-db"])).unwrap();
+        assert!(!p.keep_db);
+    }
+
+    // review-1 #1: THE bug — an unknown/typo flag must be REJECTED, never silently ignored so the
+    // destructive default runs anyway.
+    #[test]
+    fn parse_remove_rejects_unknown_flag() {
+        let err = parse_remove_args(&args(&["/repo", "--keep-dbb"])).unwrap_err();
+        assert!(err.contains("unknown option"), "{err}");
+        assert!(err.contains("--keep-dbb"), "{err}");
+        // Any unrelated flag likewise.
+        assert!(parse_remove_args(&args(&["/repo", "--force"])).is_err());
+    }
+
+    #[test]
+    fn parse_remove_rejects_extra_positional() {
+        let err = parse_remove_args(&args(&["/repo", "/other"])).unwrap_err();
+        assert!(err.contains("extra argument"), "{err}");
+    }
+
+    #[test]
+    fn parse_remove_requires_a_repo() {
+        assert!(parse_remove_args(&args(&[]))
+            .unwrap_err()
+            .contains("missing"));
+        assert!(parse_remove_args(&args(&["--keep-db"]))
+            .unwrap_err()
+            .contains("missing"));
+    }
+
+    #[test]
+    fn parse_remove_rejects_contradictory_keep_and_delete() {
+        let err = parse_remove_args(&args(&["/repo", "--keep-db", "--delete-db"])).unwrap_err();
+        assert!(err.contains("contradictory"), "{err}");
     }
 }

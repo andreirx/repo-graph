@@ -71,7 +71,7 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::error::StorageError;
 use crate::migrations::run_migrations;
@@ -134,6 +134,65 @@ impl StorageConnection {
         let mut conn = Connection::open(path.as_ref())?;
         run_migrations(&mut conn)?;
         Ok(Self { conn })
+    }
+
+    /// Open an EXISTING file-backed storage database WITHOUT creating it, run the
+    /// idempotent migration check, and return the initialized connection.
+    ///
+    /// This is the NO-CREATE counterpart to [`open`](Self::open) and the constructor
+    /// every serving/read path (and every writer on an already-registered DB) must
+    /// use. Only the index/registration path may bring a database into existence
+    /// (via [`open`](Self::open)); everywhere else, a missing file is an honest
+    /// [`StorageError::DatabaseMissing`], NOT a freshly-created empty database.
+    ///
+    /// ## Why this exists (FORGET-REPO-1, operator ruling 2, 2026-08-24)
+    ///
+    /// [`open`](Self::open) passes SQLite `SQLITE_OPEN_CREATE`, so it materialises and
+    /// migrates a missing file. On a serving path that is a *read that writes*: after
+    /// a repo is forgotten, a request still holding a stale `RepoState` handle could
+    /// reopen its deleted DB and recreate it as an unregistered orphan — the exact
+    /// condition FORGET-REPO-1 must prevent. Opening without `SQLITE_OPEN_CREATE`
+    /// closes that resurrection at the choke point: the stale open fails honestly and
+    /// no file is written.
+    ///
+    /// ## Behaviour
+    ///
+    /// - Missing file → [`StorageError::DatabaseMissing`] (the absence fact), whether
+    ///   the miss is caught by the pre-check or by SQLite's `CANTOPEN` — never a bare
+    ///   SQLite/io error leaks for the missing-file case.
+    /// - Present but unopenable (corruption, permissions) → [`StorageError::Sqlite`],
+    ///   the true I/O fault.
+    /// - Present and healthy → identical to [`open`](Self::open): the idempotent
+    ///   migration check runs (no create-time DDL executes on an already-migrated DB;
+    ///   this constructor does NOT introduce a fast-open that could serve an unmigrated
+    ///   schema — same §14 honesty guarantee as [`open`](Self::open)).
+    pub fn open_existing<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
+        let path = path.as_ref();
+        // No SQLITE_OPEN_CREATE: this is the default open-flag set MINUS create.
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        match Connection::open_with_flags(path, flags) {
+            Ok(mut conn) => {
+                run_migrations(&mut conn)?;
+                Ok(Self { conn })
+            }
+            // Map the missing-file case to the honest absence error regardless of how it
+            // surfaced (this recheck also closes the pre-check TOCTOU: a file deleted between
+            // check and open still reports DatabaseMissing, not a bare CANTOPEN). review-10:
+            // classify with `fs::metadata`, NOT `exists()` — `exists()` collapses EVERY metadata
+            // fault (permission denied, ENOTDIR on an ancestor) to `false`, which would mislabel a
+            // real I/O fault as "database missing". Only a genuine NotFound is absence; any other
+            // stat outcome (present, or an unstattable path) keeps the true `Sqlite` fault.
+            Err(e) => match std::fs::metadata(path) {
+                Err(meta_err) if meta_err.kind() == std::io::ErrorKind::NotFound => {
+                    Err(StorageError::DatabaseMissing {
+                        path: path.display().to_string(),
+                    })
+                }
+                _ => Err(StorageError::Sqlite(e)),
+            },
+        }
     }
 
     /// Open an in-memory storage database, run all migrations,
@@ -527,6 +586,67 @@ mod tests {
             StorageError::Sqlite(_) => {} // expected
             other => panic!("expected Sqlite variant, got {:?}", other),
         }
+    }
+
+    // ── open_existing: NO-CREATE constructor (FORGET-REPO-1) ──
+
+    #[test]
+    fn open_existing_on_missing_file_errors_and_creates_nothing() {
+        // The core FORGET-REPO-1 guarantee: a serving/read open of a DB that is not
+        // there must fail honestly AND must NOT materialise the file (no read-that-
+        // writes / orphan resurrection).
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("absent.db");
+        assert!(!db_path.exists());
+
+        let err = StorageConnection::open_existing(&db_path).unwrap_err();
+        match err {
+            StorageError::DatabaseMissing { path } => {
+                assert!(path.contains("absent.db"), "path carried in error: {path}");
+            }
+            other => panic!("expected DatabaseMissing, got {other:?}"),
+        }
+        assert!(
+            !db_path.exists(),
+            "open_existing must NOT create the missing DB file"
+        );
+    }
+
+    #[test]
+    fn open_existing_maps_non_notfound_fault_to_sqlite_not_missing() {
+        // review-10: a NON-NotFound open/stat fault (here ENOTDIR — a DB path that traverses a
+        // regular file) must surface as the true `Sqlite` I/O fault, NEVER a false
+        // `DatabaseMissing`. The missing-vs-fault classification uses `fs::metadata`, not
+        // `exists()` (which collapses every metadata fault to "absent").
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = temp_dir.path().join("regular-file");
+        std::fs::write(&not_a_dir, b"x").expect("write file");
+        // A path THROUGH a regular file: both the SQLite open and `fs::metadata` fail with ENOTDIR.
+        let through_file = not_a_dir.join("inner.db");
+
+        match StorageConnection::open_existing(&through_file).unwrap_err() {
+            StorageError::Sqlite(_) => {} // expected: a real I/O fault, not absence
+            other => panic!("expected Sqlite for a non-NotFound fault, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_existing_opens_a_present_migrated_db() {
+        // A DB that exists (created by the index/create path) opens normally and is
+        // fully migrated — parity with `open` for the healthy case.
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("present.db");
+        drop(StorageConnection::open(&db_path).expect("create via the index/create path"));
+
+        let storage =
+            StorageConnection::open_existing(&db_path).expect("open_existing on present db");
+        let count: i64 = storage
+            .connection()
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 31);
     }
 
     // ── Connection accessor tests ─────────────────────────────

@@ -3996,3 +3996,12 @@ root pattern + same-named nested source dir (the coverage case), negation, and a
 full gitignore semantics + ratified root-depth-only hardcoded pruning (the review widened the
 root cause to the depth-independent prune list). The coverage crate is visible end-to-end;
 all 50 self-crates fold. See docs/slices/scanner-gitignore-1.md §6.
+
+## FORGET-REPO-1 closeout notes (2026-08-24)
+
+- **TD (pre-existing, surfaced by the slice's gates):** `repo-index::tests::integration::mixed_lang_language_isolation`
+  FAILS on clean HEAD (proven by stash-and-rerun, EXECUTED 2026-08-24; panic at integration.rs:391) — unrelated to
+  FORGET-REPO-1 (repo-index untouched). Proper solution: root-cause the fixture/language-isolation regression in its
+  own small slice. Address: before the next release cut. Status: OPEN.
+- Alias loss on a concurrent forget-race re-registration is inherent to "fresh registration" (documented inline in
+  dispatch.rs) — accepted, rare, honest. Status: ACCEPTED.

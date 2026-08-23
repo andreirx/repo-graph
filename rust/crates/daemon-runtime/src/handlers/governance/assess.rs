@@ -85,9 +85,10 @@ pub fn handle_assess(state: &DaemonState, request: &Request) -> DispatchResult {
         }
     };
 
-    // Open fresh storage connection for write (under coordination)
+    // Open fresh storage connection for write (under coordination). NO-CREATE (FORGET-REPO-1):
+    // writes an EXISTING indexed DB; a missing file fails honestly, never resurrected as an orphan.
     use repo_graph_storage::StorageConnection;
-    let storage = match StorageConnection::open(&db_path) {
+    let storage = match StorageConnection::open_existing(&db_path) {
         Ok(s) => s,
         Err(e) => {
             return DispatchResult::error(

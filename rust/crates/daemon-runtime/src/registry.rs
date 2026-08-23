@@ -251,10 +251,17 @@ impl RepoRegistry {
     ///
     /// Returns `None` if no match found.
     pub fn resolve(&self, path: &Path) -> Option<&RegistryEntry> {
-        // Canonicalize the input path
+        // Canonicalize the input path.
         let canonical = match path.canonicalize() {
             Ok(p) => p,
-            Err(_) => return None,
+            // FORGET-REPO-1: a registered repo whose path no longer exists (a dead-path / class-B
+            // entry) CANNOT be canonicalized, so it was previously unresolvable — which made the exact
+            // `rmap repo remove <path>` next action doctor/gc print for such an entry fail with "repo
+            // not found", breaking the slice's own cleanup loop (§2.2/2.3). Fall back to an EXACT match
+            // against the stored (canonical) key so a dead entry is still forgettable by the exact path
+            // shown. No ancestor match here: without canonicalization a prefix compare is unsafe (a
+            // typo'd non-existent path must not resolve to some registered ancestor and forget it).
+            Err(_) => return self.by_path.get(path),
         };
 
         // Exact match
@@ -724,6 +731,36 @@ mod tests {
 
         let entry = registry.resolve_alias("myalias").unwrap();
         assert_eq!(entry.canonical_path, repo_dir.canonicalize().unwrap());
+    }
+
+    // FORGET-REPO-1 (iteration 2): a registered repo whose directory no longer exists (a dead-path /
+    // class-B entry) must still resolve by its EXACT stored path — otherwise the `rmap repo remove
+    // <path>` next action doctor/gc print for it fails with "repo not found", breaking the cleanup
+    // loop. `canonicalize()` fails for the gone dir, so resolution falls back to the exact stored key.
+    #[test]
+    fn resolve_dead_path_entry_by_exact_stored_path() {
+        let dir = tempdir().unwrap();
+        let mut registry = test_registry(dir.path());
+
+        let repo_dir = dir.path().join("gone repo"); // a space, as on the operator's macOS system
+        fs::create_dir(&repo_dir).unwrap();
+        let stored = registry.register(&repo_dir).unwrap().canonical_path.clone();
+        fs::remove_dir(&repo_dir).unwrap(); // now a dead path
+
+        // The exact canonical path doctor/gc would print resolves the dead entry.
+        assert!(
+            !stored.exists(),
+            "precondition: the registered path is gone"
+        );
+        let entry = registry
+            .resolve(&stored)
+            .expect("a dead-path entry resolves by its exact stored path");
+        assert_eq!(entry.canonical_path, stored);
+
+        // A different, never-registered non-existent path still does NOT resolve (no false match).
+        assert!(registry
+            .resolve(Path::new("/no/such/registered/path"))
+            .is_none());
     }
 
     #[test]

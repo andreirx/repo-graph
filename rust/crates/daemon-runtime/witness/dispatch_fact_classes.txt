@@ -13,9 +13,10 @@
 # §3.3, that makes a new arm pay its integration explicitly (a new arm goes RED until
 # it is declared here; a typo'd or empty declaration goes RED too).
 #
-# The live arm count is reconciled against dispatch.rs; it is 67 today (EC-1 §3.3:
-# 10 mixed + 17 SQLite-graph + 20 non-graph + 7 registry + 13 writers; +1 SQLite-graph
-# = `reliability`, RESOLUTION-BREAKDOWN-CLI-1). The witness
+# The live arm count is reconciled against dispatch.rs; it is 68 today: EC-1 §3.3's 67
+# (10 mixed + 17 SQLite-graph + 20 non-graph + 7 registry + 13 writers; +1 SQLite-graph
+# = `reliability`, RESOLUTION-BREAKDOWN-CLI-1) + 1 operational = `maintenance_gc`
+# (FORGET-REPO-1). The witness
 # does NOT hard-code 66 — the reconciliation against the live match IS the guard.
 #
 # FACT CLASSES (EC-1 §3.2): FC0 extraction stream (pipeline input) · FC1 structure
@@ -110,3 +111,4 @@ mark_baseline          = FC8
 unmark_baseline        = FC8
 repo_alias             = FC8
 repo_remove            = FC8
+maintenance_gc         = FC8

@@ -365,6 +365,8 @@ impl Dispatcher for ServiceDispatcher {
             "storage_health" => {
                 crate::handlers::metrics::handle_storage_health(&self.state, request)
             }
+            // FORGET-REPO-1 §2.3: reclaim orphan DB files + stray sidecars, list dead-path entries.
+            "maintenance_gc" => self.handle_maintenance_gc(request),
 
             // ── Documentation ───────────────────────────────────────
             "docs_list" => self.handle_docs_list(request),
@@ -472,6 +474,10 @@ impl ServiceDispatcher {
         let registry = self.state.registry();
         let repo_count = registry.list().len() as u64;
         let db_dir = registry.db_dir().to_path_buf();
+        // FORGET-REPO-1 §2.2: snapshot the registry entries for the orphan scan (below, after the
+        // registry guard is dropped — the scan does I/O and must not hold the registry Mutex).
+        let orphan_entries: Vec<crate::registry::RegistryEntry> =
+            registry.list().into_iter().cloned().collect();
         // DAEMON-VISIBILITY-1 (D2): the most-recently-completed snapshot across all repos, for the
         // idle "idle; last snapshot <repo> @ <time>" doctor line. Sourced from the registry's
         // `last_indexed_at` (set ONLY on a successful index — `record_index` runs in `handle_index`'s
@@ -496,6 +502,11 @@ impl ServiceDispatcher {
             });
         drop(registry);
         let databases_total_bytes = crate::resource_metrics::directory_size_bytes(&db_dir);
+
+        // FORGET-REPO-1 §2.2: orphan-storage reconciliation for `rmap doctor` — the three classes
+        // (orphan DB files + bytes, dead-path registry entries, stray sidecars). Cheap directory
+        // listing; a listing failure is reported as `scan_error` (unknown, never rendered as zero).
+        let orphans = crate::reclaim::scan_orphans(&db_dir, &orphan_entries).to_json();
 
         // DAEMON-VISIBILITY-1 (D): the daemon's current activity. Lock-light (a brief Vec mutex,
         // no repo read guard) so this stays responsive DURING an index — which is exactly when
@@ -537,6 +548,9 @@ impl ServiceDispatcher {
                 // so doctor tells "queued" from the false "none yet — runs after the next index"
                 // (review-0 item 1). "idle" | "queued" | "running".
                 "enrichment_activity": self.state.enrich_coord().activity_state(),
+                // FORGET-REPO-1 §2.2: orphan-storage classes (orphan DB files + bytes, dead-path
+                // registry entries, stray sidecars) — the `rmap doctor` orphan-storage line.
+                "orphans": orphans,
             }),
         )
     }
@@ -792,23 +806,34 @@ impl ServiceDispatcher {
         )
     }
 
-    /// Remove a repo from the registry.
+    /// FORGET-REPO-1 §2.1: forget everything repo-graph created for a repo — registry entry +
+    /// in-memory state + `db_runtimes` slot + `.db`/`-wal`/`-shm` + `<repo>/.rgr/`. FORGETS by
+    /// default (operator-ratified 2026-08-23; supersedes REG-1's keep-by-default). `--keep-db`
+    /// (`keep_db: true`) leaves the DB file; the legacy `delete_db` param is accepted and ignored (it
+    /// is now the default). REFUSES (deletes nothing) while a write op is in flight.
     ///
-    /// Request: `{"method": "repo_remove", "params": {"repo": "<alias_or_path>", "delete_db": false}}`
+    /// The mechanism lives in `reclaim::forget_repo`; this handler is thin wiring. Transport shape:
+    /// - repo not found → `RepoNotFound` error.
+    /// - refused (in-flight write) → `StateUnavailable` error with the reason (no partial deletion).
+    /// - otherwise → success with the full per-artifact `removed | absent | failed` report and an
+    ///   `ok` flag; the CLI picks the exit code (non-zero on any `failed`).
+    ///
+    /// Request: `{"method": "repo_remove", "params": {"repo": "<alias_or_path>", "keep_db": false}}`
     fn handle_repo_remove(&self, request: &Request) -> DispatchResult {
         let repo_ref = match Self::get_string_param(&request.params, "repo") {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
-        let delete_db = request
+        // `--keep-db` opts out of forget-by-default. `delete_db` is accepted as a no-op (muscle
+        // memory) — deletion is the default now, so a `delete_db` request needs no handling.
+        let keep_db = request
             .params
-            .get("delete_db")
+            .get("keep_db")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        // Resolve the repo to get canonical path and db_path
-        let (canonical_path, db_path) = match self.state.resolve_alias_or_path(repo_ref) {
-            Some(entry) => (entry.canonical_path.clone(), entry.db_path.clone()),
+        let entry = match self.state.resolve_alias_or_path(repo_ref) {
+            Some(entry) => entry,
             None => {
                 return DispatchResult::error(
                     &request.id,
@@ -820,51 +845,34 @@ impl ServiceDispatcher {
             }
         };
 
-        // Remove from registry
-        let mut registry = self.state.registry_mut();
-        let entry = match registry.remove(&canonical_path) {
-            Ok(e) => e,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-
-        // Persist
-        if let Err(e) = registry.save() {
+        let report = crate::reclaim::forget_repo(&self.state, &entry, keep_db);
+        if let Some(reason) = &report.refused {
+            // No partial deletion happened — a clear error the CLI surfaces as a non-zero exit.
             return DispatchResult::error(
                 &request.id,
-                ErrorDetail::new(
-                    ErrorCode::InternalError,
-                    format!("failed to save registry: {}", e),
-                ),
+                ErrorDetail::new(ErrorCode::StateUnavailable, reason.clone()),
             );
         }
+        DispatchResult::success(&request.id, report.to_json())
+    }
 
-        // Unload if loaded
-        if let Ok(key) = crate::state::RepoKey::new(&entry.db_path, &entry.repo_uid) {
-            drop(registry); // Release borrow before unload
-            self.state.unload_repo_by_key(&key);
-        }
-
-        // Delete database file if requested
-        let db_deleted = if delete_db {
-            std::fs::remove_file(&db_path).is_ok()
-        } else {
-            false
-        };
-
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "removed": true,
-                "canonical_path": canonical_path,
-                "db_path": db_path,
-                "db_deleted": db_deleted,
-            }),
-        )
+    /// FORGET-REPO-1 §2.3: reclaim orphan DB files + stray sidecars (classes A + C), reporting bytes;
+    /// LIST dead-path registry entries (class B) with their `rmap repo remove` next action — never
+    /// auto-remove them (a path may be a temporarily-unmounted volume). `dry_run` lists without
+    /// deleting. Daemon-global (not repo-scoped): reads the registry + `databases/` dir; the
+    /// mechanism lives in `reclaim::run_gc`.
+    ///
+    /// Request: `{"method": "maintenance_gc", "params": {"dry_run": false}}`
+    fn handle_maintenance_gc(&self, request: &Request) -> DispatchResult {
+        let dry_run = request
+            .params
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // `run_gc` reads the registry + `databases/` itself and guards each unlink with the target
+        // DB's write slot + a live registry recheck (operator ruling 2), so it must own `&self.state`.
+        let outcome = crate::reclaim::run_gc(&self.state, dry_run);
+        DispatchResult::success(&request.id, outcome.to_json())
     }
 
     /// LIVEGRAPH-INTEGRATION-1B (dev-only): decode a SUPPLIED `index.scip`, ingest it, and feed the
@@ -2640,8 +2648,12 @@ impl ServiceDispatcher {
             );
         }
 
-        // Register in registry (or get existing entry)
-        let (canonical_path, db_path, repo_uid) = {
+        // Register in registry (or get existing entry). `repo_uid` is NOT captured here: it is
+        // re-captured from the live entry AFTER we hold the DB write lock (see the re-confirm block
+        // below) so a concurrent forget cannot leave us indexing under a forgotten identity
+        // (FORGET-REPO-1 review-3 #1). db_path is a deterministic hash of the path, so it is stable
+        // across a forget+re-register and is the correct key to coordinate the write lock on.
+        let (canonical_path, db_path) = {
             let mut registry = self.state.registry_mut();
             // Scope the `&RegistryEntry` borrow so it is released before `registry.save()`
             // (register* return an immutable borrow; save needs `&mut registry`).
@@ -2667,11 +2679,7 @@ impl ServiceDispatcher {
                         }
                     }
                 };
-                (
-                    entry.canonical_path.clone(),
-                    entry.db_path.clone(),
-                    entry.repo_uid.clone(),
-                )
+                (entry.canonical_path.clone(), entry.db_path.clone())
             };
             // INDEX-DISCONNECT-1 (contract item 2): persist the registration UP-FRONT, before
             // indexing. The repo must exist in the on-disk registry even if the index later fails or
@@ -2722,6 +2730,47 @@ impl ServiceDispatcher {
         // marker is stale — and must not make the pass THIS index is about to queue yield spuriously
         // (ENRICH-LIFECYCLE-1 review-1: close the acquire→register window without a self-inflicted yield).
         self.state.enrich_coord().clear_pending_yield(&db_path);
+
+        // FORGET-REPO-1 (review-3 #1): re-confirm the registration NOW THAT WE HOLD THE DB WRITE LOCK,
+        // and re-capture `repo_uid` from the live entry. The up-front register+save above
+        // (INDEX-DISCONNECT-1) runs BEFORE `acquire_write`; a concurrent `reclaim::forget_repo` holds
+        // this SAME write lock across its whole registry-entry + DB-file deletion, so while we blocked
+        // on the lock it may have removed our entry. Indexing with the `repo_uid` captured up-front
+        // would then write rows under an identity the registry no longer knows — an unregistered/orphan
+        // DB, the exact failure forget exists to prevent (the operator-ratified "late writer
+        // re-registers fresh", 2026-08-23). `register` is idempotent: in the common no-forget case it
+        // returns our surviving entry unchanged (same `repo_uid`, alias intact); if forget removed the
+        // entry it MINTS A FRESH `repo_uid` here, under the lock, before any write. We hold the write
+        // lock across this and the whole index, so no forget can race between the re-confirm and the
+        // write. (Alias note: in the rare forget-race the re-minted entry has no alias — a fresh
+        // registration by definition; the safety invariant, a registered identity, still holds.)
+        let repo_uid = {
+            let mut registry = self.state.registry_mut();
+            let uid = match registry.register(&canonical_path) {
+                Ok(e) => e.repo_uid.clone(),
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            format!(
+                                "failed to re-confirm repo registration under the write lock: {e}"
+                            ),
+                        ),
+                    );
+                }
+            };
+            if let Err(e) = registry.save() {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to persist repo re-registration before indexing: {e}"),
+                    ),
+                );
+            }
+            uid
+        };
 
         // DAEMON-VISIBILITY-1 (D): record this index as in-flight so `rmap doctor` and the
         // still-running client probe can see it (op kind, repo, started-at, live phase/counters
@@ -3004,6 +3053,28 @@ impl ServiceDispatcher {
         // Drop any stale PENDING yield marker now that we own the write lock (see handle_index): it
         // must not make the next enrichment pass yield spuriously (ENRICH-LIFECYCLE-1 review-1).
         self.state.enrich_coord().clear_pending_yield(db_path);
+
+        // FORGET-REPO-1 (review-3 #1, same defect class as handle_index): re-confirm the repo is STILL
+        // registered now that we hold the DB write lock. A concurrent `reclaim::forget_repo` holds this
+        // SAME lock across its deletion, so while we blocked on it the repo may have been forgotten.
+        // `repo_state.storage()` now opens NO-CREATE (`StorageConnection::open_existing`, operator
+        // ruling 2), so a forgotten refresh can no longer resurrect the deleted DB as an orphan — the
+        // open would fail honestly. This recheck stays as the belt-and-suspenders that turns that raw
+        // open failure into a clear "was forgotten" error: unlike an index, a forgotten refresh has no
+        // fresh-index intent to re-register under, so abort with a precise error and create NO file.
+        let still_registered = {
+            let reg = self.state.registry();
+            reg.list().iter().any(|e| e.repo_uid == repo_uid)
+        };
+        if !still_registered {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::StateUnavailable,
+                    "this repo was forgotten (`rmap repo remove`) while the refresh waited for the write lock; nothing was refreshed".to_string(),
+                ),
+            );
+        }
 
         // Then acquire repo refresh lock (blocks new readers, waits for active readers)
         let _refresh_guard = repo_state.coordinator.acquire_refresh();
@@ -3591,10 +3662,12 @@ impl ServiceDispatcher {
             config = config.with_dry_run();
         }
 
-        // Open fresh storage connection for pipeline (EnrichmentPipeline takes ownership)
-        // We acquire a separate connection since the pipeline consumes it.
-        // This is safe under the coordinator's refresh lock.
-        let storage = match StorageConnection::open(repo_state.db_path()) {
+        // Open fresh storage connection for pipeline (EnrichmentPipeline takes ownership).
+        // We acquire a separate connection since the pipeline consumes it. This is safe under
+        // the coordinator's refresh lock. NO-CREATE (FORGET-REPO-1): enrich writes an EXISTING,
+        // already-indexed DB; it must never create — a stale enrich after a forget would otherwise
+        // resurrect the removed DB as an unregistered orphan.
+        let storage = match StorageConnection::open_existing(repo_state.db_path()) {
             Ok(s) => s,
             Err(e) => {
                 return DispatchResult::error(
@@ -4956,8 +5029,11 @@ impl ServiceDispatcher {
             }
         };
 
-        // Open fresh storage connection for write (under coordination)
-        let mut storage = match StorageConnection::open(&db_path) {
+        // Open fresh storage connection for write (under coordination). NO-CREATE
+        // (FORGET-REPO-1): this replaces semantic facts on an EXISTING, already-indexed repo; it
+        // must never create the DB — a stale request after a forget would otherwise resurrect the
+        // removed DB as an unregistered orphan.
+        let mut storage = match StorageConnection::open_existing(&db_path) {
             Ok(s) => s,
             Err(e) => {
                 return DispatchResult::error(

@@ -59,7 +59,7 @@ pub fn print_usage() {
     eprintln!("  rmap repo list                         List all registered repos");
     eprintln!("  rmap repo info [repo] [--json]         Show repo details (default: cwd)");
     eprintln!("  rmap repo alias <repo> <alias>         Set or change alias");
-    eprintln!("  rmap repo remove <repo> [--delete-db]  Remove from registry");
+    eprintln!("  rmap repo remove <repo> [--keep-db]    Forget repo: registry + database + .rgr/ (destructive; --keep-db keeps the DB file)");
     eprintln!();
     eprintln!("Agent orientation (resolve repo from cwd):");
     eprintln!("  rmap orient [--focus <path>] [--budget small|medium|large] [--full]");
@@ -131,6 +131,10 @@ pub fn print_usage() {
     eprintln!("Installation management (MAC-1):");
     eprintln!("  rmap doctor [--json]");
     eprintln!("  rmap uninstall [--dry-run] [--force] [--remove-data]");
+    eprintln!();
+    eprintln!("Maintenance (daemon storage):");
+    eprintln!("  rmap maintenance prune                 Prune prunable snapshots (current repo)");
+    eprintln!("  rmap maintenance gc [--dry-run] [--json]  Reclaim orphan DB files + stray sidecars (all repos)");
     eprintln!();
     eprintln!("Host integrations (CLAUDE-1, CODEX-1):");
     eprintln!(

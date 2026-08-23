@@ -95,13 +95,21 @@ pub fn resolve_repo_root(db_path: &Path, root_path: &str) -> Result<PathBuf, Str
 ///
 /// Returns an error if the file does not exist or cannot be opened.
 pub fn open_storage(db_path: &Path) -> Result<repo_graph_storage::StorageConnection, String> {
-    if !db_path.exists() {
-        return Err(format!(
-            "database file does not exist: {}",
-            db_path.display()
-        ));
+    // NO-CREATE (FORGET-REPO-1): a client-side read must never create the DB. Only a true
+    // NotFound gets the friendly missing-db message; any other metadata fault (EACCES,
+    // ENOTDIR, ...) must NOT be collapsed into "does not exist" — fall through to
+    // `open_existing`, which reports the real I/O/SQLite fault and closes the
+    // check→open TOCTOU so even a race cannot resurrect a just-removed DB.
+    match std::fs::metadata(db_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "database file does not exist: {}",
+                db_path.display()
+            ));
+        }
+        Ok(_) | Err(_) => {}
     }
-    repo_graph_storage::StorageConnection::open(db_path)
+    repo_graph_storage::StorageConnection::open_existing(db_path)
         .map_err(|e| format!("failed to open database: {}", e))
 }
 
@@ -132,4 +140,37 @@ pub fn resolve_repo_ref(
     }
 
     Err(format!("repo not found: {}", repo_ref))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // review-11 #1: a NON-NotFound metadata fault (here ENOTDIR — a db path routed THROUGH a
+    // regular file) must NOT be collapsed into the friendly "database file does not exist" claim;
+    // it falls through to `open_existing`, which reports the real fault.
+    #[test]
+    fn open_storage_non_notfound_fault_is_not_reported_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plain-file");
+        std::fs::write(&file, b"x").unwrap();
+        let bogus = file.join("some.db"); // path THROUGH a regular file → ENOTDIR, not NotFound
+        let err = open_storage(&bogus).expect_err("must fail");
+        assert!(
+            !err.contains("does not exist"),
+            "ENOTDIR must not be rendered as a missing database: {err}"
+        );
+        assert!(
+            err.contains("failed to open database"),
+            "real fault surfaces: {err}"
+        );
+    }
+
+    // The honest common case is preserved: a genuinely-missing file gets the friendly message.
+    #[test]
+    fn open_storage_missing_file_reports_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = open_storage(&dir.path().join("nope.db")).expect_err("must fail");
+        assert!(err.contains("does not exist"), "{err}");
+    }
 }

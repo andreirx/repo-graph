@@ -90,6 +90,13 @@ pub(crate) mod reader_context;
 // snapshots (flip to terminal `failed` + log; the non-READY prune reclaims them and F12 stats name
 // them). Two callers: `load_repo` + the boot sweep.
 pub mod reconcile;
+// FORGET-REPO-1: forget a repo (registry + memory + db_runtimes slot + .db/-wal/-shm + .rgr/) and
+// detect / reclaim orphaned on-disk storage. Split from the oversized dispatch.rs per the 500-line
+// guardrail; four callers (repo_remove, doctor, gc, boot orphan log), all in this crate. Crate-internal
+// (`pub(crate)`, like `module_degradation`/`reader_context`) — NOT a public API boundary: nothing
+// outside daemon-runtime consumes it (deterministic workspace grep for `reclaim::` found only
+// `crate::reclaim::` callers). See the module ledger in reclaim.rs.
+pub(crate) mod reclaim;
 pub mod registry;
 pub mod resource_metrics;
 pub mod retention_pass;

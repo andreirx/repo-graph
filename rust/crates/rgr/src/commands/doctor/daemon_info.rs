@@ -87,6 +87,12 @@ fn unreachable_probes(authority_msg: &str, detail: String) -> Vec<ProbeResult> {
             message: "unavailable".to_string(),
             details: Some("daemon unreachable".to_string()),
         },
+        ProbeResult {
+            name: "orphan_storage".to_string(),
+            passed: true,
+            message: "unavailable".to_string(),
+            details: Some("daemon unreachable".to_string()),
+        },
     ]
 }
 
@@ -642,7 +648,119 @@ fn probes_from_response(response: &serde_json::Value) -> Vec<ProbeResult> {
     // ENRICH-LIFECYCLE-1 (D3): the enrichment lifecycle (completed / skipped / disabled / none yet).
     probes.push(enrichment_probe(response));
 
+    // FORGET-REPO-1 §2.2: the orphan-storage line (orphan DB files + bytes, dead-path registry
+    // entries, stray sidecars) with a concrete next action per class.
+    probes.push(orphan_probe(response));
+
     probes
+}
+
+/// FORGET-REPO-1 §2.2: the orphan-storage line for `rmap doctor`.
+///
+/// Renders the three orphan classes from `daemon_info.orphans` — each with a concrete next action:
+/// - orphan DB files + stray sidecars → `rmap maintenance gc`
+/// - dead-path registry entries → `rmap repo remove <path>`
+///
+/// ALWAYS passes: orphaned storage is a cleanup opportunity surfaced for discovery (VISION:
+/// discovery over enforcement), not a broken install — it must not flip the `rmap doctor` health
+/// verdict. A `scan_error` (the daemon could not list `databases/`) is reported as an honest unknown,
+/// never as "0 orphans". When the block is absent (older daemon) the line degrades to "unavailable".
+fn orphan_probe(response: &serde_json::Value) -> ProbeResult {
+    let Some(orphans) = response.get("orphans").filter(|o| o.is_object()) else {
+        return ProbeResult {
+            name: "orphan_storage".to_string(),
+            passed: true,
+            message: "unavailable".to_string(),
+            details: None,
+        };
+    };
+
+    if let Some(err) = orphans.get("scan_error").and_then(|v| v.as_str()) {
+        return ProbeResult {
+            name: "orphan_storage".to_string(),
+            passed: true,
+            message: format!("unknown — could not scan databases/: {err}"),
+            details: None,
+        };
+    }
+
+    let orphan_db_count = orphans
+        .get("orphan_db_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let orphan_db_bytes = orphans
+        .get("orphan_db_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let stray_count = orphans
+        .get("stray_sidecar_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let stray_bytes = orphans
+        .get("stray_sidecar_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let dead = orphans
+        .get("dead_path_entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let reclaimable = orphans
+        .get("reclaimable_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    if orphan_db_count == 0 && stray_count == 0 && dead.is_empty() {
+        return ProbeResult {
+            name: "orphan_storage".to_string(),
+            passed: true,
+            message: "none".to_string(),
+            details: None,
+        };
+    }
+
+    // Headline: the reclaimable total; details: one line per class with its next action.
+    let message = format!(
+        "{} reclaimable across orphaned storage",
+        format_size(reclaimable as i64)
+    );
+    let mut lines: Vec<String> = Vec::new();
+    if orphan_db_count > 0 {
+        lines.push(format!(
+            "{orphan_db_count} orphan DB file(s) ({}) — run `rmap maintenance gc`",
+            format_size(orphan_db_bytes as i64)
+        ));
+    }
+    if stray_count > 0 {
+        lines.push(format!(
+            "{stray_count} stray sidecar(s) ({}) — run `rmap maintenance gc`",
+            format_size(stray_bytes as i64)
+        ));
+    }
+    if !dead.is_empty() {
+        lines.push(format!(
+            "{} registered repo(s) at a path that no longer exists:",
+            dead.len()
+        ));
+        for d in &dead {
+            let path = d.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+            // review-1 #4: use the daemon's shell-quoted `next_action` so a path with spaces pastes as
+            // ONE argument. Fall back to the bare form only for a daemon that predates the field.
+            let action = d
+                .get("next_action")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("rmap repo remove {path}"));
+            lines.push(format!("  {path} — run `{action}`"));
+        }
+    }
+
+    ProbeResult {
+        name: "orphan_storage".to_string(),
+        passed: true,
+        message,
+        details: Some(lines.join("\n        ")),
+    }
 }
 
 #[cfg(test)]
@@ -655,6 +773,95 @@ mod tests {
             .iter()
             .find(|p| p.name == name)
             .unwrap_or_else(|| panic!("probe '{}' present", name))
+    }
+
+    // ── FORGET-REPO-1 §2.2: the orphan-storage doctor line ──────────────────────────────────────
+
+    // All three orphan classes render with a concrete next action; the probe never flips health.
+    #[test]
+    fn orphan_probe_renders_all_three_classes_with_next_actions() {
+        let response = json!({ "orphans": {
+            "orphan_db_count": 28, "orphan_db_bytes": 4_187_593_011_u64,
+            "stray_sidecar_count": 2, "stray_sidecar_bytes": 40_960_u64,
+            "reclaimable_bytes": 4_187_633_971_u64,
+            "dead_path_entries": [ {"path": "/private/tmp/test_repo", "repo": "test_repo"} ],
+            "scan_error": serde_json::Value::Null,
+        }});
+        let probe = orphan_probe(&response);
+        assert!(
+            probe.passed,
+            "orphaned storage is discovery, never flips health"
+        );
+        assert!(probe.message.contains("reclaimable"), "{}", probe.message);
+        let details = probe.details.expect("class breakdown present");
+        assert!(details.contains("28 orphan DB file(s)"), "{details}");
+        assert!(details.contains("rmap maintenance gc"), "{details}");
+        assert!(details.contains("2 stray sidecar(s)"), "{details}");
+        // Dead-path entry names the exact per-path next action.
+        assert!(
+            details.contains("rmap repo remove /private/tmp/test_repo"),
+            "{details}"
+        );
+    }
+
+    // review-1 #4: a dead-path repo whose path contains a space renders the daemon's SHELL-QUOTED
+    // next action verbatim, so it can be copy/pasted as one `rmap repo remove` argument.
+    #[test]
+    fn orphan_probe_renders_shell_quoted_next_action_for_spaced_path() {
+        let response = json!({ "orphans": {
+            "orphan_db_count": 0, "orphan_db_bytes": 0,
+            "stray_sidecar_count": 0, "stray_sidecar_bytes": 0,
+            "reclaimable_bytes": 0,
+            "dead_path_entries": [ {
+                "path": "/Users/me/My Repo/proj", "repo": "proj",
+                "next_action": "rmap repo remove '/Users/me/My Repo/proj'"
+            } ],
+            "scan_error": serde_json::Value::Null,
+        }});
+        let probe = orphan_probe(&response);
+        assert!(probe.passed);
+        let details = probe.details.expect("dead-path class present");
+        assert!(
+            details.contains("rmap repo remove '/Users/me/My Repo/proj'"),
+            "the copy-pasteable quoted command is rendered: {details}"
+        );
+    }
+
+    // No orphans → a quiet "none" (still passing).
+    #[test]
+    fn orphan_probe_none_when_clean() {
+        let response = json!({ "orphans": {
+            "orphan_db_count": 0, "orphan_db_bytes": 0,
+            "stray_sidecar_count": 0, "stray_sidecar_bytes": 0,
+            "reclaimable_bytes": 0, "dead_path_entries": [], "scan_error": serde_json::Value::Null,
+        }});
+        let probe = orphan_probe(&response);
+        assert!(probe.passed);
+        assert_eq!(probe.message, "none");
+    }
+
+    // A listing failure is an honest unknown, NOT "0 orphans".
+    #[test]
+    fn orphan_probe_scan_error_is_unknown_not_zero() {
+        let response = json!({ "orphans": {
+            "orphan_db_count": 0, "scan_error": "cannot list databases/: permission denied",
+        }});
+        let probe = orphan_probe(&response);
+        assert!(probe.passed, "a scan failure must not flip health");
+        assert!(probe.message.contains("unknown"), "{}", probe.message);
+        assert!(
+            probe.message.contains("permission denied"),
+            "{}",
+            probe.message
+        );
+    }
+
+    // Older daemon (no `orphans` block) → "unavailable", not a fabricated "none".
+    #[test]
+    fn orphan_probe_absent_block_is_unavailable() {
+        let probe = orphan_probe(&json!({}));
+        assert!(probe.passed);
+        assert_eq!(probe.message, "unavailable");
     }
 
     // DOCTOR-RESOURCE-REPORT: the doctor probe parses + formats the daemon_info

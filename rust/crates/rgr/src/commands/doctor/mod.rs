@@ -338,7 +338,12 @@ fn print_human_output(output: &DoctorOutput) {
     let storage_probes: Vec<_> = output
         .probes
         .iter()
-        .filter(|p| matches!(p.name.as_str(), "storage" | "witness_ledger"))
+        .filter(|p| {
+            matches!(
+                p.name.as_str(),
+                "storage" | "witness_ledger" | "orphan_storage"
+            )
+        })
         .collect();
 
     if !storage_probes.is_empty() {
@@ -347,6 +352,8 @@ fn print_human_output(output: &DoctorOutput) {
             let label = match probe.name.as_str() {
                 // Reader-frame label for the machine-readable probe name.
                 "witness_ledger" => "call-graph witnesses",
+                // FORGET-REPO-1: the orphaned-storage line (reclaimable via `rmap maintenance gc`).
+                "orphan_storage" => "orphaned storage",
                 other => other,
             };
             print_probe_labeled(probe, label);

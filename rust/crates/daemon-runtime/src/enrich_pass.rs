@@ -680,7 +680,8 @@ pub fn run_enrich_pass(
     // Resolve the latest READY snapshot + the repo root (the pipeline uses the same root). A fresh
     // connection scoped to this probe; the pipeline opens its own (it takes ownership).
     let (snapshot_uid, present) = {
-        let storage = StorageConnection::open(db_path).map_err(|e| e.to_string())?;
+        // NO-CREATE (FORGET-REPO-1): auto-enrich probes an EXISTING indexed DB; never create.
+        let storage = StorageConnection::open_existing(db_path).map_err(|e| e.to_string())?;
         let snapshot = storage
             .get_latest_snapshot(repo_uid)
             .map_err(|e| e.to_string())?
@@ -777,7 +778,8 @@ pub fn run_enrich_pass(
         .with_promotion()
         .with_languages(to_run.clone());
 
-    let pipeline_storage = StorageConnection::open(db_path).map_err(|e| e.to_string())?;
+    // NO-CREATE (FORGET-REPO-1): the enrich pipeline writes an EXISTING indexed DB; never create.
+    let pipeline_storage = StorageConnection::open_existing(db_path).map_err(|e| e.to_string())?;
     let mut pipeline = EnrichmentPipeline::with_registry(pipeline_storage, registry);
     let report = pipeline
         .run_cancellable(repo_uid, &snapshot_uid, &config, cancel)

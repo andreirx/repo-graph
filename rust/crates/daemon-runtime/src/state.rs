@@ -287,15 +287,26 @@ impl RepoState {
     /// Validates that the repo actually exists in the database before
     /// returning success. This prevents silent failures at query time.
     pub fn open(db_path: &Path, repo_uid: &str) -> Result<Self, String> {
-        if !db_path.exists() {
-            return Err(format!("database not found: {}", db_path.display()));
+        // review-10: classify with `fs::metadata`, NOT `exists()`. `exists()` collapses every
+        // metadata fault (permission denied, ENOTDIR on an ancestor) into `false`, which would
+        // mislabel a real I/O fault as "database not found". Only a genuine NotFound is that
+        // fast-path absence message; any other stat fault falls through to `open_existing`, which
+        // reports the true fault (`Sqlite`) rather than a false absence.
+        match std::fs::metadata(db_path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(format!("database not found: {}", db_path.display()));
+            }
+            _ => {}
         }
 
         // DAEMON-CONCURRENCY-IMPL-1 (D-S = S-A): open a connection ONLY to validate
         // the repo exists at load time; it is dropped at the end of this fn. Reads
         // open their own connection per operation (see `storage()`) — `RepoState`
         // holds NO shared `!Sync` connection, which is what makes it `Send + Sync`.
-        let validation_conn = StorageConnection::open(db_path)
+        // FORGET-REPO-1: NO-CREATE (`open_existing`) — a load must never recreate a
+        // DB removed out-of-band between the `exists()` check above and this open;
+        // only the index/create path may create.
+        let validation_conn = StorageConnection::open_existing(db_path)
             .map_err(|e| format!("failed to open database: {}", e))?;
 
         // Validate repo exists in the database
@@ -349,10 +360,20 @@ impl RepoState {
     /// `StorageConnection`. `rusqlite::Connection` is `Send` but `!Sync`, so a
     /// shared connection would make `RepoState` `!Sync` and unshareable across the
     /// concurrent connection-handler threads. Instead each read operation opens its
-    /// own connection here, via the NORMAL [`StorageConnection::open`] — which runs
-    /// the idempotent migration check (NO fast-open that could serve an unmigrated
-    /// schema, per the §14 ratification; that would be a Layer-0 honesty violation).
-    /// SQLite WAL gives true concurrent reads across these per-operation connections.
+    /// own connection here, via the NO-CREATE [`StorageConnection::open_existing`] —
+    /// which runs the idempotent migration check (NO fast-open that could serve an
+    /// unmigrated schema, per the §14 ratification; that would be a Layer-0 honesty
+    /// violation). SQLite WAL gives true concurrent reads across these per-operation
+    /// connections.
+    ///
+    /// FORGET-REPO-1 (operator ruling 2): this is the serving choke point, so it MUST
+    /// be no-create. A request holding a stale `Arc<RepoState>` from before a
+    /// `reclaim::forget_repo` could otherwise reach here after the deletion and
+    /// recreate the removed DB as an unregistered orphan (`open` passes
+    /// `SQLITE_OPEN_CREATE`). `open_existing` makes that stale read fail honestly with
+    /// [`StorageError::DatabaseMissing`] and writes nothing. Only the index/create
+    /// path (`compose::open_or_create_storage`, re-verifying registration under the
+    /// held DB write slot) may bring a DB into existence.
     ///
     /// REQUEST-LEVEL CONSISTENCY: a read handler holds its coordinator read guard
     /// (`acquire_read`) for the whole request, which — under W-A — excludes every
@@ -368,7 +389,7 @@ impl RepoState {
     /// Writers are unaffected: they already open their own connection in the compose
     /// pipeline (`index_path_with_progress`/`refresh_path_with_progress`).
     pub fn storage(&self) -> Result<StorageConnection, String> {
-        StorageConnection::open(&self.key.db_path)
+        StorageConnection::open_existing(&self.key.db_path)
             .map_err(|e| format!("failed to open storage connection: {}", e))
     }
 }
@@ -428,6 +449,30 @@ pub struct DaemonState {
     /// and the most-recent completed pass for the `rmap doctor` lifecycle line. Own interior
     /// mutability (see `EnrichCoordinator`), so it does not affect `DaemonState: Send + Sync`.
     enrich: crate::enrich_pass::EnrichCoordinator,
+}
+
+/// FORGET-REPO-1 (review-8 slot-lifecycle fix): the outcome of evicting a repo's IN-MEMORY state,
+/// carrying the `db_runtimes` keys whose coordination slot must be dropped AFTER on-disk deletion.
+///
+/// Split out of the former one-shot `evict_repo_and_runtime` because the slot must stay DISCOVERABLE
+/// to a late (re-)index for the WHOLE of forget's registry + file deletion window. If forget dropped
+/// the slot first — while still holding its write guard — a concurrent
+/// `get_or_create_db_runtime_for_new_db` for the same path would no longer find it, MINT A FRESH slot
+/// with a FRESH lock, and write past forget's held guard (review-8). So forget now:
+/// (1) [`DaemonState::evict_repo_memory`] — drop the in-memory `RepoState`, KEEP the slot;
+/// (2) delete registry + `.db`/`-wal`/`-shm` + `.rgr/`;
+/// (3) [`DaemonState::drop_db_runtime_slots`] — drop the slot LAST, still under the held guard.
+///
+/// `runtime_keys` are captured in step (1) (while the loaded `RepoState` keys are still visible) and
+/// consumed in step (3). Concrete current user: `reclaim::forget_repo` + same-module tests.
+/// `pub(crate)`, not `pub` — not a ratified external API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MemoryEviction {
+    /// An in-memory `RepoState` was present and removed.
+    pub(crate) memory_evicted: bool,
+    /// The `db_runtimes` keys to drop once on-disk deletion is complete (the evicted `RepoState`
+    /// keys, plus `canonicalize(db_path)` when the file still exists, plus the raw path).
+    pub(crate) runtime_keys: Vec<PathBuf>,
 }
 
 impl DaemonState {
@@ -705,6 +750,107 @@ impl DaemonState {
         repos.remove(key).is_some()
     }
 
+    /// FORGET-REPO-1: evict a repo's in-memory state, keyed on the registry `repo_uid` — NOT on
+    /// [`RepoKey::new`], which canonicalizes `db_path` and FAILS once the DB file is unlinked. Forget
+    /// must evict regardless of whether the file still exists (the field bug: eviction was gated on the
+    /// DB file canonicalizing, so a forget-after-delete left the in-memory state stuck). The
+    /// `db_runtimes` slot is NOT dropped here — its keys are returned for a deferred drop (review-8, see
+    /// [`MemoryEviction`]).
+    ///
+    /// Disambiguation: `repo_uid` is a globally-unique ULID minted once per registry entry, so in
+    /// production it uniquely identifies the loaded state. The identity model nonetheless permits two
+    /// DIFFERENT db files to carry the same `repo_uid` (see `different_dbs_same_repo_uid_are_separate`),
+    /// so when `db_path` still canonicalizes we require an exact db-path match to evict only the target
+    /// entry; only when the file is already gone do we fall back to a `repo_uid`-only match (the file is
+    /// unlinked, and in production the uid is unique — the shared-uid + deleted-file combination is not
+    /// a reachable production state).
+    ///
+    /// Returns a [`MemoryEviction`] carrying `memory_evicted` (the SEPARATE forget artifact, review-1
+    /// #3) and the `runtime_keys` the caller drops LAST via [`Self::drop_db_runtime_slots`] — AFTER
+    /// on-disk deletion, so the slot stays discoverable to a late (re-)index throughout forget's
+    /// deletion window (review-8). This method does NOT touch `db_runtimes`.
+    ///
+    /// `pub(crate)` — only `reclaim::forget_repo` and same-crate tests call it.
+    pub(crate) fn evict_repo_memory(&self, repo_uid: &str, db_path: &Path) -> MemoryEviction {
+        let target_canonical_db = db_path.canonicalize().ok();
+
+        // Candidate canonical db paths whose runtime slot to drop: the loaded RepoState's key
+        // (canonicalized at load), plus canonicalize(db_path) while the file may still exist, plus the
+        // raw path — covering both a loaded and an indexed-but-never-loaded repo.
+        let mut runtime_keys: Vec<PathBuf> = Vec::new();
+        let evicted = {
+            let mut repos = self.repos.write().unwrap();
+            let before = repos.len();
+            repos.retain(|k, _| {
+                if k.repo_uid != repo_uid {
+                    return true;
+                }
+                match &target_canonical_db {
+                    // File exists → evict only the entry whose canonical db_path matches.
+                    Some(c) if k.db_path != *c => true,
+                    _ => {
+                        runtime_keys.push(k.db_path.clone());
+                        false
+                    }
+                }
+            });
+            repos.len() != before
+        };
+        if let Some(c) = target_canonical_db {
+            runtime_keys.push(c);
+        }
+        runtime_keys.push(db_path.to_path_buf());
+
+        MemoryEviction {
+            memory_evicted: evicted,
+            runtime_keys,
+        }
+    }
+
+    /// FORGET-REPO-1 (review-8): drop the `db_runtimes` coordination slot(s) named by `keys`, returning
+    /// whether any slot was present and dropped (the SEPARATE `runtime-slot` forget artifact). Called
+    /// LAST by `reclaim::forget_repo`, under the still-held DB write guard, AFTER every registry + file
+    /// artifact is processed — so a late (re-)index that fetched the same slot mid-deletion blocked on
+    /// forget's guard rather than minting a fresh slot. `pub(crate)`; sole caller `reclaim::forget_repo`
+    /// (+ same-crate tests).
+    pub(crate) fn drop_db_runtime_slots(&self, keys: &[PathBuf]) -> bool {
+        let mut runtimes = self.db_runtimes.write().unwrap();
+        let before = runtimes.len();
+        runtimes.retain(|k, _| !keys.iter().any(|c| c == k));
+        runtimes.len() != before
+    }
+
+    /// FORGET-REPO-1 (review-2 atomicity): the loaded [`RepoState`] (matched by `repo_uid`, preferring
+    /// an exact db-path match) whose `RepoCoordinator` write lock `forget_repo` TRY-acquires to
+    /// serialize against active READERS (which take `coordinator.acquire_read`, NOT the DB write lock).
+    /// `None` when the repo is not loaded — an unloaded repo has no coordinator and no reader can be
+    /// mid-flight on it (reads load the repo first).
+    ///
+    /// `pub(crate)`: sole caller is `reclaim::forget_repo`.
+    pub(crate) fn loaded_repo_by_uid(
+        &self,
+        repo_uid: &str,
+        db_path: &Path,
+    ) -> Option<Arc<RepoState>> {
+        let canonical = db_path.canonicalize().ok();
+        let repos = self.repos.read().unwrap();
+        // Prefer the entry whose canonical db_path matches (disambiguates a shared uid across db
+        // files); fall back to a uid-only match when the file is already gone.
+        if let Some(c) = &canonical {
+            if let Some(st) = repos
+                .iter()
+                .find(|(k, _)| k.repo_uid == repo_uid && &k.db_path == c)
+                .map(|(_, st)| Arc::clone(st))
+            {
+                return Some(st);
+            }
+        }
+        repos
+            .iter()
+            .find(|(k, _)| k.repo_uid == repo_uid)
+            .map(|(_, st)| Arc::clone(st))
+    }
+
     // ── Registry operations ─────────────────────────────────────────────
 
     /// Access the registry.
@@ -911,6 +1057,80 @@ mod tests {
         let key = RepoKey::new(&db_path, "test-repo").unwrap();
         assert!(daemon.unload_repo_by_key(&key));
         assert!(daemon.get_repo_by_key(&key).is_none());
+    }
+
+    // FORGET-REPO-1: eviction is keyed on repo_uid, NOT on RepoKey::new (which canonicalizes and
+    // would fail once the DB file is gone). After deleting the file out-of-band, the memory eviction
+    // still removes the loaded state, and the deferred slot drop (review-8) still drops the slot.
+    #[test]
+    fn evict_repo_memory_then_drop_slot_works_after_db_file_deleted() {
+        let dir = tempdir().unwrap();
+        let db_path = create_test_db(dir.path(), "forget-repo");
+
+        let daemon = DaemonState::new();
+        daemon.load_repo(&db_path, "forget-repo").unwrap();
+        // A db_runtime slot exists (canonical key).
+        daemon.get_or_create_db_runtime(&db_path).unwrap();
+        assert_eq!(daemon.list_repos().len(), 1);
+        assert_eq!(daemon.db_runtimes.read().unwrap().len(), 1);
+
+        // Delete the DB file — RepoKey::new would now fail to canonicalize it.
+        assert!(RepoKey::new(&db_path, "forget-repo").is_err() || db_path.exists());
+        std::fs::remove_file(&db_path).unwrap();
+        assert!(RepoKey::new(&db_path, "forget-repo").is_err());
+
+        // Step 1: memory eviction works, keyed on the uid, and does NOT touch the slot (review-8).
+        let mem = daemon.evict_repo_memory("forget-repo", &db_path);
+        assert!(mem.memory_evicted, "in-memory state reported evicted");
+        assert!(daemon.list_repos().is_empty(), "in-memory state evicted");
+        assert!(
+            !daemon.db_runtimes.read().unwrap().is_empty(),
+            "the slot stays discoverable until the deferred drop"
+        );
+
+        // Step 2 (deferred): dropping the captured keys removes the slot.
+        assert!(
+            daemon.drop_db_runtime_slots(&mem.runtime_keys),
+            "db_runtimes slot reported dropped"
+        );
+        assert!(
+            daemon.db_runtimes.read().unwrap().is_empty(),
+            "db_runtimes slot dropped"
+        );
+    }
+
+    // FORGET-REPO-1: with the DB file present, eviction disambiguates by db_path — two DIFFERENT DBs
+    // sharing a repo_uid evict independently (only the targeted one is removed).
+    #[test]
+    fn evict_repo_memory_disambiguates_shared_uid_when_file_present() {
+        let dir = tempdir().unwrap();
+        let db_a = dir.path().join("a.db");
+        let db_b = dir.path().join("b.db");
+        for db in [&db_a, &db_b] {
+            let storage = StorageConnection::open(db).unwrap();
+            storage
+                .add_repo(&Repo {
+                    repo_uid: "shared".to_string(),
+                    name: "n".to_string(),
+                    root_path: ".".to_string(),
+                    default_branch: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    metadata_json: None,
+                })
+                .unwrap();
+        }
+        let daemon = DaemonState::new();
+        daemon.load_repo(&db_a, "shared").unwrap();
+        daemon.load_repo(&db_b, "shared").unwrap();
+        assert_eq!(daemon.list_repos().len(), 2);
+
+        // Evict only db_a's entry (the file exists → exact db-path match).
+        assert!(daemon.evict_repo_memory("shared", &db_a).memory_evicted);
+        assert_eq!(
+            daemon.list_repos().len(),
+            1,
+            "only the targeted DB was evicted"
+        );
     }
 
     #[test]

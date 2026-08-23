@@ -79,8 +79,11 @@ pub fn reconcile_repo(
         Some(g) => g,
         None => return Vec::new(),
     };
-    // `open` runs migrations, so an older DB is fully migrated before the flip UPDATE touches it.
-    let storage = match StorageConnection::open(db_path) {
+    // NO-CREATE (FORGET-REPO-1): `open_existing` runs migrations (an older DB is fully migrated
+    // before the flip UPDATE touches it) but never materialises a missing file — a registered repo
+    // whose DB vanished (out-of-band delete, or a forget that won the write-lock race) must not be
+    // resurrected as an empty orphan here; a missing DB simply yields nothing to reconcile.
+    let storage = match StorageConnection::open_existing(db_path) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -157,6 +160,11 @@ pub fn reconcile_all_repos(state: &DaemonState) {
             repos.len()
         );
     }
+
+    // FORGET-REPO-1 §2.2: also reconcile the `databases/` directory against the registry — log the
+    // orphan-class counts (or the listing failure) so the operator sees on every boot the storage
+    // nothing tracks. Cheap (one directory listing); the mechanism lives in `reclaim`.
+    crate::reclaim::log_orphans_at_boot(state);
 }
 
 #[cfg(test)]

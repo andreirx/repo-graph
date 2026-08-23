@@ -420,7 +420,10 @@ pub fn try_retention_attempt(
         db_path.to_path_buf(),
     );
 
-    let storage = match StorageConnection::open(db_path) {
+    // NO-CREATE (FORGET-REPO-1): retention prunes an EXISTING indexed DB; a missing file (e.g. a
+    // forget that won the write-lock race just before this pass) must fail honestly, never be
+    // resurrected as an empty orphan.
+    let storage = match StorageConnection::open_existing(db_path) {
         Ok(s) => s,
         Err(e) => return RetentionAttempt::Failed(format!("could not open storage: {e}")),
     };

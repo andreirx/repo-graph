@@ -56,6 +56,21 @@ pub enum StorageError {
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
 
+    /// The database file does not exist, and the caller opened it via the
+    /// NO-CREATE constructor [`StorageConnection::open_existing`](crate::StorageConnection::open_existing).
+    ///
+    /// This is the honest "repo not indexed / database removed" outcome for every
+    /// serving/read path and every writer on an already-registered DB. Those paths
+    /// must NEVER bring a database into existence — only the index/registration path
+    /// may create one. A read that silently created its database was a
+    /// read-that-writes: after a repo is forgotten (FORGET-REPO-1), a stale handle
+    /// reopening through the create path resurrected the deleted file as an
+    /// unregistered orphan. Distinct from [`Sqlite`](Self::Sqlite): a missing file is
+    /// a lifecycle/absence fact, not an I/O fault on a present file — so it is mapped
+    /// here rather than surfaced as a bare SQLite `CANTOPEN`.
+    #[error("database not found (repo not indexed, or its index was removed): {path}")]
+    DatabaseMissing { path: String },
+
     /// A requirement declaration's `value_json` has a structural
     /// invariant violation. Used by both migration 004 (obligation-id
     /// backfill) and runtime reads (gate command). The declaration UID
