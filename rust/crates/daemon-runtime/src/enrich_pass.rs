@@ -109,14 +109,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use enrichment::{
-    EligibilityQuery, EnrichmentConfig, EnrichmentLanguage, EnrichmentPipeline,
+    EligibilityQuery, EligibleEdge, EnrichmentConfig, EnrichmentLanguage, EnrichmentPipeline,
     EnrichmentStoragePort, PromotionFunnel, ResolverRegistry,
 };
 use jdtls_resolver::{JdtlsConfig, JdtlsResolver};
 use parking_lot::{Mutex, MutexGuard};
 use repo_graph_storage::StorageConnection;
 use rust_analyzer_resolver::RustAnalyzerResolver;
-use tsserver_resolver::TsServerResolver;
+use tsserver_resolver::{group_by_project_root, locate_tsserver, TsServerResolver};
 
 use crate::state::DaemonState;
 
@@ -231,12 +231,16 @@ fn binary_on_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|dir| dir.join(bin).is_file())
 }
 
-/// Is the resolver toolchain for `lang` present, given the repo root and the resolved `jdtls_path`?
+/// Is the resolver toolchain for `lang` present, given the repo root, the discovered TypeScript
+/// project contexts, and the resolved `jdtls_path`?
 ///
 /// Mirrors how each resolver actually locates its LSP binary (verified against the resolver crates):
 /// - **Rust:** `rust-analyzer` on `$PATH` (`RustAnalyzerSession::start` hardcodes the binary name).
-/// - **TypeScript:** `tsserver` on `$PATH` OR the repo's `node_modules/.bin/tsserver` (the two places
-///   `TsServerResolver`'s `find_tsserver` looks, minus the explicit config path the pass never sets).
+/// - **TypeScript:** tsserver is located for ANY discovered project context via the SAME shared
+///   [`tsserver_resolver::locate_tsserver`] the resolver's own per-context session loop uses — walk UP from each
+///   context to the repo root (nearest `node_modules/.bin/tsserver` wins), then config path, then
+///   `$PATH` (TSSERVER-LOCATE-1). A nested-package repo (tsserver in `frontend/web/node_modules`, not
+///   at the root) is now correctly seen as available — no second parallel heuristic.
 /// - **Java:** a `jdtls_path` is configured (jdtls has NO PATH discovery — env/flag only).
 ///
 /// This is the SINGLE source the pass uses for BOTH which resolvers to register AND which languages
@@ -244,13 +248,14 @@ fn binary_on_path(bin: &str) -> bool {
 pub fn resolver_toolchain_available(
     lang: EnrichmentLanguage,
     repo_root: &Path,
+    ts_contexts: &[PathBuf],
     jdtls_path: Option<&str>,
 ) -> bool {
     match lang {
         EnrichmentLanguage::Rust => binary_on_path("rust-analyzer"),
-        EnrichmentLanguage::TypeScript => {
-            binary_on_path("tsserver") || repo_root.join("node_modules/.bin/tsserver").is_file()
-        }
+        EnrichmentLanguage::TypeScript => ts_contexts
+            .iter()
+            .any(|ctx| locate_tsserver(ctx, repo_root, None).is_some()),
         EnrichmentLanguage::Java => jdtls_path.is_some(),
     }
 }
@@ -265,6 +270,30 @@ fn install_next_action(lang: EnrichmentLanguage) -> &'static str {
         }
         EnrichmentLanguage::Java => "set JDTLS_PATH to your jdtls launcher",
     }
+}
+
+/// Reader-frame skip reason naming the TS project contexts that have no tsserver (TSSERVER-LOCATE-1
+/// §2.2). Speaks the reader's world — *their* directories, *their* local install — not our pipeline:
+/// "no typescript in `frontend/legacy`, `serverless` — npm i -D typescript there". The per-package
+/// `npm i -D typescript` is the correct remedy for a nested layout (a global install is NOT what these
+/// packages need). Directories render repo-relative; the repo-root context renders as `.`.
+fn ts_missing_context_reason(repo_root: &Path, missing: &[&PathBuf]) -> String {
+    let dirs: Vec<String> = missing
+        .iter()
+        .map(|dir| {
+            let rel = dir.strip_prefix(repo_root).unwrap_or(dir);
+            let shown = if rel.as_os_str().is_empty() {
+                ".".to_string()
+            } else {
+                rel.display().to_string()
+            };
+            format!("`{shown}`")
+        })
+        .collect();
+    format!(
+        "no typescript in {} — npm i -D typescript there",
+        dirs.join(", ")
+    )
 }
 
 /// The stable lowercase language token used in the doctor JSON + skip lines.
@@ -673,13 +702,14 @@ impl Drop for FlightGuard {
 pub fn run_enrich_pass(
     db_path: &Path,
     repo_uid: &str,
+    repo_root: &Path,
     jdtls_path: Option<&str>,
-    available: &dyn Fn(EnrichmentLanguage) -> bool,
+    available: &dyn Fn(EnrichmentLanguage, &[PathBuf]) -> bool,
     cancel: &dyn Fn() -> bool,
 ) -> Result<EnrichPassOutcome, String> {
     // Resolve the latest READY snapshot + the repo root (the pipeline uses the same root). A fresh
     // connection scoped to this probe; the pipeline opens its own (it takes ownership).
-    let (snapshot_uid, present) = {
+    let (snapshot_uid, present, ts_contexts) = {
         // NO-CREATE (FORGET-REPO-1): auto-enrich probes an EXISTING indexed DB; never create.
         let storage = StorageConnection::open_existing(db_path).map_err(|e| e.to_string())?;
         let snapshot = storage
@@ -707,7 +737,23 @@ pub fn run_enrich_pass(
         .into_iter()
         .filter(|lang| eligible.iter().any(|e| e.language == *lang))
         .collect();
-        (snapshot.snapshot_uid, present)
+        // TS project contexts (TSSERVER-LOCATE-1 §2.1): the SAME `project.rs` directory grouping the
+        // resolver falls back on — one context per nearest tsconfig/jsconfig/package.json ancestor. The
+        // shared locator walks UP from each of these to the repo root, so the probe and the resolver
+        // agree on where tsserver is. Absolute dirs (keys of `group_by_project_root`).
+        let ts_edges: Vec<EligibleEdge> = eligible
+            .iter()
+            .filter(|e| e.language == EnrichmentLanguage::TypeScript)
+            .cloned()
+            .collect();
+        let ts_contexts: Vec<PathBuf> = if ts_edges.is_empty() {
+            Vec::new()
+        } else {
+            group_by_project_root(repo_root, &ts_edges)
+                .into_keys()
+                .collect()
+        };
+        (snapshot.snapshot_uid, present, ts_contexts)
     };
 
     // Toolchain plan (which languages RUN vs are honestly skipped) + the resolver registry. A test
@@ -715,13 +761,46 @@ pub fn run_enrich_pass(
     // resolver construction, so the daemon-level running-yield proof can drive this REAL pass with a
     // fake cancellable resolver (no live LSP). Production never installs it → real `plan_languages` +
     // real resolvers, unchanged.
+    // The injected availability predicate is context-aware for TypeScript; partially apply the
+    // discovered contexts so `plan_languages` keeps its simple `Fn(lang) -> bool` shape.
+    let avail = |lang: EnrichmentLanguage| available(lang, &ts_contexts);
     let test_registry = test_registry_builder();
-    let (to_run, skipped) = match &test_registry {
+    let (to_run, mut skipped) = match &test_registry {
         // The test provides resolvers for every eligible-present language → run them all (availability
         // is exercised separately by `plan_languages`' unit tests + the toolchain-skip proof).
         Some(_) => (present.clone(), Vec::new()),
-        None => plan_languages(&present, available),
+        None => plan_languages(&present, &avail),
     };
+
+    // TSSERVER-LOCATE-1 §2.2 — partial availability is PER CONTEXT, not all-or-nothing. Name the TS
+    // contexts that lack a tsserver in the reader's language, whether TypeScript ran (some contexts had
+    // one, some did not) or was fully skipped (none did). `ts_gate` gates the per-context locate through
+    // the SAME injected predicate that decided run/skip, so a test that forces TypeScript absent
+    // (`|_, _| false`) names every context host-independently (never depends on the host `$PATH`).
+    if present.contains(&EnrichmentLanguage::TypeScript) {
+        let ts_gate = avail(EnrichmentLanguage::TypeScript);
+        let missing: Vec<&PathBuf> = ts_contexts
+            .iter()
+            .filter(|ctx| !(ts_gate && locate_tsserver(ctx, repo_root, None).is_some()))
+            .collect();
+        if !missing.is_empty() {
+            let reason = ts_missing_context_reason(repo_root, &missing);
+            match skipped
+                .iter_mut()
+                .find(|s| s.language == language_token(EnrichmentLanguage::TypeScript))
+            {
+                // Fully skipped (no context had one): replace the generic global reason with the
+                // per-context one naming every directory.
+                Some(ts_skip) => ts_skip.reason = reason,
+                // Partially available (TypeScript is in `to_run`): add a skip naming ONLY the contexts
+                // without a tsserver — the ones that will not enrich.
+                None => skipped.push(SkippedLanguage {
+                    language: language_token(EnrichmentLanguage::TypeScript).to_string(),
+                    reason,
+                }),
+            }
+        }
+    }
 
     // Nothing runnable — either no eligible edges at all (present empty → skipped empty → a clean
     // "nothing to enrich") or every eligible language lacks a toolchain (skipped populated → the
@@ -872,10 +951,11 @@ pub fn try_enrich_attempt(
     let (_running_guard, cancel_flag) = state.enrich_coord().register_running(db_path);
     let cancel = || cancel_flag.is_cancelled();
 
-    let available = |lang: EnrichmentLanguage| {
+    let available = |lang: EnrichmentLanguage, ts_contexts: &[PathBuf]| {
         resolver_toolchain_available(
             lang,
             Path::new(repo_display),
+            ts_contexts,
             jdtls_path_from_env().as_deref(),
         )
     };
@@ -890,6 +970,7 @@ pub fn try_enrich_attempt(
     let run_result = run_enrich_pass(
         db_path,
         repo_uid,
+        Path::new(repo_display),
         jdtls_path_from_env().as_deref(),
         &available,
         &cancel,
@@ -1196,12 +1277,37 @@ mod tests {
     fn java_toolchain_gated_on_jdtls_path() {
         let root = Path::new("/nonexistent/repo");
         assert!(
-            resolver_toolchain_available(EnrichmentLanguage::Java, root, Some("/opt/jdtls")),
+            resolver_toolchain_available(EnrichmentLanguage::Java, root, &[], Some("/opt/jdtls")),
             "Java available iff a jdtls path is configured"
         );
         assert!(
-            !resolver_toolchain_available(EnrichmentLanguage::Java, root, None),
+            !resolver_toolchain_available(EnrichmentLanguage::Java, root, &[], None),
             "no jdtls path → Java skipped"
+        );
+    }
+
+    // ── resolver_toolchain_available: TypeScript uses the shared per-context locator ────────────────
+    #[test]
+    fn typescript_available_when_a_nested_context_has_tsserver() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let repo_root = tmp.path();
+        // tsserver ONLY under a nested package (the shape the repo-root-only probe used to miss).
+        let ctx = repo_root.join("frontend/web");
+        let bin = ctx.join("node_modules/.bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("tsserver"), "#!/bin/sh\n").unwrap();
+
+        assert!(
+            resolver_toolchain_available(EnrichmentLanguage::TypeScript, repo_root, &[ctx], None,),
+            "a nested-package tsserver makes TypeScript available (shared locator walks up)"
+        );
+        // No contexts at all → not available (nothing to walk up from; $PATH is the only other source,
+        // deliberately not exercised here so the assertion is host-independent).
+        let empty: [PathBuf; 0] = [];
+        assert!(
+            !resolver_toolchain_available(EnrichmentLanguage::TypeScript, repo_root, &empty, None,)
+                || binary_on_path("tsserver"),
+            "no contexts → available only if the host happens to have tsserver on $PATH"
         );
     }
 

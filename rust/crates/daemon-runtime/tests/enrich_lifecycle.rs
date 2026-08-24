@@ -54,8 +54,9 @@ use enrichment::{
 };
 use repo_graph_daemon_runtime::activity::OpKind;
 use repo_graph_daemon_runtime::enrich_pass::{
-    clear_test_registry_builder, run_auto_enrich, run_enrich_pass, set_auto_enrich_for_test,
-    set_test_registry_builder, try_enrich_attempt, EnrichAttempt,
+    clear_test_registry_builder, resolver_toolchain_available, run_auto_enrich, run_enrich_pass,
+    set_auto_enrich_for_test, set_test_registry_builder, try_enrich_attempt, EnrichAttempt,
+    EnrichmentReport,
 };
 use repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test;
 use repo_graph_daemon_runtime::{DaemonState, RepoRegistry, ServiceDispatcher};
@@ -135,6 +136,74 @@ fn write_multi_eligible(repo_dir: &Path) {
         "export function run(x): void {\n    x.doThing();\n    x.doOther();\n    x.doThird();\n}\n",
     )
     .unwrap();
+}
+
+/// TSSERVER-LOCATE-1 mixed-availability fixture: TWO TypeScript project contexts, each an owning
+/// `tsconfig.json` (explicit `include` so ownership routes the file to a tsserver session instead of
+/// failing it Unowned) plus a source file with untyped `x.method()` calls (the eligible
+/// `CallsObjMethodNeedsTypeInfo` category). Only the caller installs a nested tsserver, so one context
+/// resolves a local tsserver (walk-up locator hit) and the other resolves none.
+fn write_mixed_ts_contexts(repo_dir: &Path) {
+    for pkg in ["app", "lib"] {
+        let src = repo_dir.join("packages").join(pkg).join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        // Explicit `include` → the tsconfig has file scope, so the sibling .ts file is Owned (a bare
+        // `{}` owns nothing → the file would be Unowned → failed, defeating the "available enriches"
+        // half). `**/*` is TypeScript's own default include, scoped to the config dir.
+        std::fs::write(
+            repo_dir.join("packages").join(pkg).join("tsconfig.json"),
+            "{\"include\": [\"**/*\"]}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("main.ts"),
+            "export function run(x): void {\n    x.doThing();\n    x.doOther();\n}\n",
+        )
+        .unwrap();
+    }
+}
+
+/// Install a HERMETIC fake tsserver at `<context_dir>/node_modules/.bin/tsserver` (the exact nested
+/// location TSSERVER-LOCATE-1's walk-up locator targets). It speaks just enough of tsserver's
+/// newline-delimited JSON protocol to drive a REAL `TsServerResolver` session to a genuine success:
+/// every seq'd request gets a response (so `configure`/warm-up complete), and every `quickinfo` returns
+/// a resolvable receiver type (`FakeReceiverType`) so the pipeline records a real enrichment — no
+/// TypeScript install, deterministic. The resolver correlates by `request_seq`, so echoing the
+/// request's `seq` suffices.
+///
+/// Uses ONLY POSIX shell builtins (parameter expansion for the seq, `printf`, `case`) — NO external
+/// tools (`sed`/`dirname`). This matters because the test runs the pass under a stripped `$PATH` (to
+/// make the "missing" context genuinely tsserver-free on a host that has a global tsserver); a fake that
+/// shelled out to `sed` would break under that `$PATH`. `#!/bin/sh` is kernel-resolved (absolute), and
+/// the session spawns this fake by absolute path, so neither needs `$PATH`.
+fn install_fake_tsserver(context_dir: &Path) {
+    let bin = context_dir.join("node_modules/.bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let path = bin.join("tsserver");
+    // Extract the request's top-level numeric `seq` with pure parameter expansion: strip up to the
+    // first `"seq":`, then keep the leading digits. quickinfo carries a body whose displayString parses
+    // to a valid receiver type; every other command gets a bare ack (discarded unless awaited).
+    let script = r#"#!/bin/sh
+while IFS= read -r line; do
+  after=${line#*'"seq":'}
+  seq=${after%%[!0-9]*}
+  [ -z "$seq" ] && continue
+  case "$line" in
+    *'"command":"quickinfo"'*)
+      printf '{"type":"response","seq":0,"request_seq":%s,"command":"quickinfo","success":true,"body":{"kind":"var","kindModifiers":"","start":{"line":1,"offset":1},"end":{"line":1,"offset":2},"displayString":"(local var) receiver: FakeReceiverType","documentation":"","tags":[]}}\n' "$seq"
+      ;;
+    *)
+      printf '{"type":"response","seq":0,"request_seq":%s,"command":"ack","success":true}\n' "$seq"
+      ;;
+  esac
+done
+"#;
+    std::fs::write(&path, script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 fn request(id: &str, method: &str, params: Value) -> Request {
@@ -379,10 +448,19 @@ fn absent_toolchain_yields_an_honest_skip_not_an_error() {
         "fixture must produce >=1 TypeScript eligible edge for the skip to mean something (got {ts_eligible}) — adjust write_with_eligible if the extractor's eligibility contract changed"
     );
 
-    // Toolchain forced absent via the injected predicate → the pass SKIPS TypeScript honestly and
-    // NEVER opens a resolver (it returns at the plan step). Never an error.
-    let outcome = run_enrich_pass(Path::new(&db_path), &repo_uid, None, &|_| false, &|| false)
-        .expect("a missing toolchain is an honest skip, not a pass failure");
+    // Toolchain forced absent via the injected predicate (`|_, _| false` — host-independent: the
+    // per-context locate is gated through this same veto, so a host WITH tsserver on $PATH cannot flip
+    // the outcome) → the pass SKIPS TypeScript honestly and NEVER opens a resolver (returns at the plan
+    // step). Never an error.
+    let outcome = run_enrich_pass(
+        Path::new(&db_path),
+        &repo_uid,
+        &repo_dir,
+        None,
+        &|_, _| false,
+        &|| false,
+    )
+    .expect("a missing toolchain is an honest skip, not a pass failure");
     assert_eq!(outcome.enriched_count, 0, "nothing runs with no toolchain");
     assert!(
         outcome.skipped.iter().any(|s| s.language == "typescript"),
@@ -394,10 +472,12 @@ fn absent_toolchain_yields_an_honest_skip_not_an_error() {
         .iter()
         .find(|s| s.language == "typescript")
         .unwrap();
+    // TSSERVER-LOCATE-1 §2.2: the skip is per-context and names the directory + the per-package install
+    // next-action (`npm i -D typescript`), NOT a global install.
     assert!(
-        ts_skip.reason.contains("tsserver not found")
-            && ts_skip.reason.contains("npm i -g typescript"),
-        "the skip reason is reader-frame with the install next-action: {}",
+        ts_skip.reason.contains("no typescript in")
+            && ts_skip.reason.contains("npm i -D typescript"),
+        "the skip reason names the context directory with the per-package install next-action: {}",
         ts_skip.reason
     );
     assert_eq!(
@@ -838,5 +918,185 @@ fn manual_enrich_command_logs_start_and_completed_outcome() {
     assert!(
         lines.iter().any(|l| l.contains("op enrich completed")),
         "the manual enrich command logs a terminal completed OUTCOME closing the start: {lines:?}"
+    );
+}
+
+// ── TSSERVER-LOCATE-1 §2.2 (operator ruling 2026-08-24; review-1) — MIXED per-context availability ──
+//
+// The operator-mandated end-to-end proof, in ONE real `run_enrich_pass`: TWO discovered TypeScript
+// contexts, one with a NESTED local tsserver (`packages/app/node_modules/.bin/tsserver`) and one with
+// NONE (`packages/lib`). The prior `resolve_groups`-only proof used a bogus command for the "available"
+// context (spawn failure as a proxy for entry) and never touched the pass's skip/doctor payload —
+// review-1's blocking gap. This drives the REAL resolver (no `set_test_registry_builder`, so per-context
+// skip is ENFORCED by the shipped path, not a fake), a REAL enrichment via a hermetic fake tsserver, and
+// the REAL `EnrichPassOutcome` + doctor JSON, proving all four review-1 assertions in the SAME pass:
+//   (a) the available context ENRICHES (a real success from the nested-located tsserver);
+//   (b) the missing context starts NO session and produces NO fabricated failed result — proven by the
+//       edge staying ELIGIBLE after the pass (a failed attempt sets the enrichment marker and would be
+//       excluded from re-eligibility; a genuine skip leaves it untouched — storage semantics OBSERVED in
+//       `enrichment_impl::query_eligible_edges`);
+//   (c) `EnrichPassOutcome.skipped` carries the repo-relative reader-language reason naming the missing
+//       directory with the per-package `npm i -D typescript` remedy;
+//   (d) the doctor-facing JSON (`EnrichmentReport::to_json`) preserves that reason.
+//
+// Hermetic + host-independent: the only live process is the fake tsserver script (deterministic, no real
+// toolchain, no `$PATH`). Auto-enrich is OFF so no background pass races this direct-driven pass.
+#[test]
+fn mixed_context_available_enriches_missing_is_skipped_and_named() {
+    let _serial = serial_guard();
+    set_overrides(false); // drive the ONE pass directly; no background auto pass competes
+
+    let (dispatcher, _state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_mixed_ts_contexts(&repo_dir);
+    let indexed = index(&dispatcher, "idx", &repo_dir);
+    // Absolute db_path: the pass runs under a changed CWD (below), so every path that reaches the
+    // filesystem must be absolute (a relative db_path would resolve against the new CWD).
+    let db_path = Path::new(indexed["db_path"].as_str().unwrap())
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+
+    // Install the nested fake tsserver in the "app" context only — AFTER indexing, so it never enters
+    // the source graph. "lib" gets none.
+    install_fake_tsserver(&repo_dir.join("packages/app"));
+
+    // Precondition: indexing produced eligible TS edges in BOTH contexts (else the proof is vacuous).
+    let eligible_before = |ctx_prefix: &str| -> usize {
+        let storage = StorageConnection::open(&db_path).unwrap();
+        let snap = storage.get_latest_snapshot(&repo_uid).unwrap().unwrap();
+        storage
+            .query_eligible_edges(&EligibilityQuery::new(&snap.snapshot_uid))
+            .unwrap()
+            .into_iter()
+            .filter(|e| {
+                e.language == EnrichmentLanguage::TypeScript
+                    && e.source_file_path.starts_with(ctx_prefix)
+            })
+            .count()
+    };
+    let app_before = eligible_before("packages/app");
+    let lib_before = eligible_before("packages/lib");
+    assert!(
+        app_before > 0 && lib_before > 0,
+        "fixture must yield >=1 eligible TS edge per context (app={app_before}, lib={lib_before}) — \
+         adjust write_mixed_ts_contexts if the extractor's eligibility contract changed"
+    );
+
+    // The REAL production availability predicate: TypeScript is available iff ANY discovered context
+    // resolves a tsserver (the "app" context does). Proves the probe path, not a hand-forced bool.
+    let available = |lang: EnrichmentLanguage, ctxs: &[std::path::PathBuf]| {
+        resolver_toolchain_available(lang, &repo_dir, ctxs, None)
+    };
+
+    // Two host-normalizations for the pass, applied together under the serial lock (main thread only,
+    // synchronous pass, auto-enrich OFF → no concurrent getenv/getcwd; restored on scope exit):
+    //
+    //  1. **Strip `$PATH`** so the "lib" context is GENUINELY tsserver-free. `locate_tsserver`'s final
+    //     fallback is `$PATH`; a host with a global tsserver (glamCRM's dev box — the very machine this
+    //     reproduces) would otherwise resolve one for `lib`, collapsing the mixed scenario. The fake is
+    //     spawned by ABSOLUTE path and uses only shell builtins, so it is unaffected.
+    //  2. **Set CWD to the DB directory.** The pipeline resolves the repo root from storage, where it is
+    //     stored RELATIVE to the DB dir (`compute_storage_root_path` — portable, cwd-independent by
+    //     contract); the TS resolver `canonicalize`s that relative root, which resolves against CWD. So
+    //     the DB dir is the correct base — set it here to reproduce the daemon's resolution faithfully.
+    //     (The §2.2 naming + availability use the absolute `repo_dir` arg, so they are unaffected by CWD.)
+    struct HostGuard {
+        path: Option<std::ffi::OsString>,
+        cwd: std::path::PathBuf,
+    }
+    impl Drop for HostGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.cwd);
+            match self.path.take() {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+    let empty_path = tempdir().unwrap();
+    let db_dir = Path::new(&db_path).parent().unwrap().to_path_buf();
+    let outcome = {
+        let _host_guard = HostGuard {
+            path: std::env::var_os("PATH"),
+            cwd: std::env::current_dir().unwrap(),
+        };
+        std::env::set_var("PATH", empty_path.path());
+        std::env::set_current_dir(&db_dir).unwrap();
+        run_enrich_pass(
+            Path::new(&db_path),
+            &repo_uid,
+            &repo_dir,
+            None,
+            &available,
+            &|| false,
+        )
+        .expect("a mixed-availability pass is not an error")
+        // _host_guard restores CWD + $PATH here.
+    };
+
+    // (a) The available "app" context ENRICHED via the nested-located fake tsserver.
+    assert!(
+        outcome.enriched_count >= 1,
+        "the context with a nested tsserver must actually enrich (enriched_count={}, eligible={})",
+        outcome.enriched_count,
+        outcome.eligible_count
+    );
+    assert_eq!(
+        outcome.lifecycle_state(),
+        "completed",
+        "at least one context ran → the pass is `completed`, not `skipped`"
+    );
+
+    // (c) The skip is per-context and NAMES the missing directory (repo-relative) with the per-package
+    // remedy — and does NOT name the available one.
+    let ts_skip = outcome
+        .skipped
+        .iter()
+        .find(|s| s.language == "typescript")
+        .unwrap_or_else(|| {
+            panic!(
+                "the missing context must be surfaced as a per-context TypeScript skip: {:?}",
+                outcome.skipped
+            )
+        });
+    assert!(
+        ts_skip.reason.contains("`packages/lib`")
+            && ts_skip.reason.contains("npm i -D typescript")
+            && !ts_skip.reason.contains("packages/app"),
+        "the skip reason names the missing context repo-relative with `npm i -D typescript`, not the \
+         available one: {}",
+        ts_skip.reason
+    );
+
+    // (d) The doctor-facing JSON preserves that exact reason (the shape `rmap doctor` reads).
+    let doctor_json = EnrichmentReport::new("repo-display".to_string(), outcome.clone()).to_json();
+    let skipped_json = doctor_json["skipped"].as_array().unwrap();
+    assert!(
+        skipped_json.iter().any(|s| {
+            s["language"] == "typescript"
+                && s["reason"].as_str().is_some_and(|r| {
+                    r.contains("`packages/lib`") && r.contains("npm i -D typescript")
+                })
+        }),
+        "the doctor JSON preserves the per-context skip reason: {doctor_json}"
+    );
+
+    // (b) The missing "lib" context started no session and produced NO fabricated failed result: its
+    // edges remain ELIGIBLE (a failed attempt would set the enrichment marker and exclude them). The
+    // available "app" edges are now enriched (marker set) → no longer eligible.
+    let lib_after = eligible_before("packages/lib");
+    let app_after = eligible_before("packages/app");
+    assert_eq!(
+        lib_after, lib_before,
+        "the skipped context's edges must be untouched (still eligible: {lib_after} == {lib_before}) — \
+         a fabricated `tsserver failed to start` result would have excluded them"
+    );
+    assert_eq!(
+        app_after, 0,
+        "the enriched context's edges carry the enrichment marker now → no longer eligible (was {app_before})"
     );
 }

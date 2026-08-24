@@ -44,6 +44,7 @@ use enrichment::{
     ResolverError, ResolverProgress, UnresolvedCategory,
 };
 
+use crate::locate::locate_tsserver;
 use crate::project::group_by_project_root;
 use crate::protocol::{
     commands, CloseArgs, ConfigureArgs, OpenArgs, QuickInfoArgs, QuickInfoBody, Request,
@@ -198,9 +199,71 @@ impl ReceiverTypeResolver for TsServerResolver {
             (legacy_groups, Vec::new())
         };
 
-        let mut all_results: Vec<ReceiverTypeResult> = ownership_failures;
         let total = edges.len();
-        let mut processed = all_results.len();
+        let processed = ownership_failures.len();
+        let mut all_results: Vec<ReceiverTypeResult> = ownership_failures;
+
+        // The ONE shared tsserver locator (TSSERVER-LOCATE-1 §2.1): the resolver and the enrich-pass
+        // probe resolve tsserver identically, so the "skipped" verdict and the session start can never
+        // disagree about where it is. Per-context — walks UP from each project context to `repo_root`
+        // (nearest `node_modules/.bin/tsserver` wins), then config path, then `$PATH`.
+        let cfg_path = self.config.tsserver_path.clone();
+        let locate = |ctx: &Path| locate_tsserver(ctx, repo_root, cfg_path.as_deref());
+
+        let group_results = self.resolve_groups(
+            repo_root, groups, &locate, total, processed, progress, cancel,
+        );
+        all_results.extend(group_results);
+
+        // Report completion
+        if let Some(p) = progress {
+            p.report(enrichment::Progress {
+                phase: enrichment::ProgressPhase::Done,
+                current: total,
+                total,
+            });
+        }
+
+        all_results
+    }
+
+    fn shutdown(&mut self) {
+        // Sessions are created and destroyed per-batch, so nothing to do here.
+        // Each session's Drop impl handles graceful shutdown.
+    }
+}
+
+impl TsServerResolver {
+    /// Resolve per-project-context edge groups, one tsserver session per context.
+    ///
+    /// `locate` is the injected tsserver locator: production passes the ONE shared [`locate_tsserver`]
+    /// (partially applied over `repo_root` + the config path); the mixed-availability unit test injects a
+    /// deterministic per-context locator. A context whose `locate` returns `None` is SKIPPED — no session
+    /// starts and its edges get NO result (TSSERVER-LOCATE-1 §2.2: honest "not attempted", byte-identical
+    /// to the historical whole-pass skip, never the fabricated `tsserver failed to start` failure it used
+    /// to record). This is the ENFORCEMENT of the per-context availability the enrich-pass probe NAMES
+    /// with the same locator; the two can never disagree because they share the locator.
+    ///
+    /// Abstraction ledger — **What:** the per-context session loop with the tsserver locator injected as
+    /// a closure. **Concrete current users:** [`resolve_batch`](TsServerResolver::resolve_batch)
+    /// (production; injects the real `locate_tsserver`) + the `mixed_availability_*` unit test (injects a
+    /// deterministic per-context locator). **Axis:** per-context tsserver presence — real filesystem/`$PATH`
+    /// in production, controlled in the operator-mandated mixed-availability proof. **Rejected simpler
+    /// alternative:** call `locate_tsserver` inline in `resolve_batch`'s loop — then the mandated mixed
+    /// test cannot be hermetic (a host with tsserver on `$PATH` flips the "skipped" context to available)
+    /// and cannot distinguish enter-vs-skip without a live LSP. (Same seam pattern as `locate_tsserver_with`.)
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_groups(
+        &self,
+        repo_root: &Path,
+        groups: HashMap<PathBuf, Vec<EligibleEdge>>,
+        locate: &dyn Fn(&Path) -> Option<String>,
+        total: usize,
+        mut processed: usize,
+        progress: Option<&dyn ResolverProgress>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Vec<ReceiverTypeResult> {
+        let mut results: Vec<ReceiverTypeResult> = Vec::new();
 
         'groups: for (project_root, group_edges) in groups {
             // ENRICH-LIFECYCLE-1 batch boundary: yield to an explicit index/refresh BEFORE
@@ -209,6 +272,21 @@ impl ReceiverTypeResolver for TsServerResolver {
             if cancel.is_some_and(|c| c()) {
                 break 'groups;
             }
+
+            // TSSERVER-LOCATE-1 §2.2 — per-context ENFORCEMENT. A context with no tsserver is SKIPPED
+            // here (the enrich-pass probe already NAMED it via this same locator): no session starts and
+            // the group's edges get NO result — honest "not attempted", never the `tsserver failed to
+            // start` failure this path used to record. Placed before the progress report so a skipped
+            // context emits no spurious "Initializing".
+            let Some(tsserver_cmd) = locate(&project_root) else {
+                debug!(
+                    project_root = %project_root.display(),
+                    "no tsserver for this project context — skipping (not failing)"
+                );
+                processed += group_edges.len();
+                continue;
+            };
+
             // Report progress: starting session
             if let Some(p) = progress {
                 p.report(enrichment::Progress {
@@ -218,8 +296,8 @@ impl ReceiverTypeResolver for TsServerResolver {
                 });
             }
 
-            // Start tsserver session for this project context
-            let session_result = TsServerSession::start(&project_root, repo_root, &self.config);
+            // Start tsserver session for this project context (with the located command).
+            let session_result = TsServerSession::start(&project_root, &self.config, &tsserver_cmd);
 
             let mut session = match session_result {
                 Ok(s) => s,
@@ -231,7 +309,7 @@ impl ReceiverTypeResolver for TsServerResolver {
                         "tsserver failed to start"
                     );
                     for edge in &group_edges {
-                        all_results.push(ReceiverTypeResult::failed(
+                        results.push(ReceiverTypeResult::failed(
                             edge.edge_uid.clone(),
                             format!("tsserver failed to start: {}", e),
                         ));
@@ -262,7 +340,7 @@ impl ReceiverTypeResolver for TsServerResolver {
                 );
                 session.stop();
                 for edge in &group_edges {
-                    all_results.push(ReceiverTypeResult::failed(
+                    results.push(ReceiverTypeResult::failed(
                         edge.edge_uid.clone(),
                         "tsserver did not respond after loading timeout",
                     ));
@@ -299,7 +377,7 @@ impl ReceiverTypeResolver for TsServerResolver {
                         &edge.edge_uid,
                         &edge.source_file_path,
                     );
-                    all_results.push(result);
+                    results.push(result);
                     processed += 1;
                     continue;
                 }
@@ -310,7 +388,7 @@ impl ReceiverTypeResolver for TsServerResolver {
                     edge.col_start,
                     &edge.edge_uid,
                 );
-                all_results.push(result);
+                results.push(result);
                 processed += 1;
             }
 
@@ -318,21 +396,7 @@ impl ReceiverTypeResolver for TsServerResolver {
             session.stop();
         }
 
-        // Report completion
-        if let Some(p) = progress {
-            p.report(enrichment::Progress {
-                phase: enrichment::ProgressPhase::Done,
-                current: total,
-                total,
-            });
-        }
-
-        all_results
-    }
-
-    fn shutdown(&mut self) {
-        // Sessions are created and destroyed per-batch, so nothing to do here.
-        // Each session's Drop impl handles graceful shutdown.
+        results
     }
 }
 
@@ -351,18 +415,20 @@ struct TsServerSession {
 }
 
 impl TsServerSession {
-    /// Start a tsserver session for the given project root.
+    /// Start a tsserver session for the given project context.
+    ///
+    /// `tsserver_cmd` was resolved by the caller via the ONE shared [`locate_tsserver`] (TSSERVER-LOCATE-1
+    /// §2.1) — the resolver and the enrich-pass probe agree on where tsserver is. A context with no
+    /// tsserver is SKIPPED by the caller (`resolve_groups`, §2.2) BEFORE this is reached, so `start` is
+    /// only ever called with a located command.
     fn start(
         project_root: &Path,
-        repo_root: &Path,
         config: &TsServerConfig,
+        tsserver_cmd: &str,
     ) -> Result<Self, ResolverError> {
-        // Find tsserver executable
-        let tsserver_cmd = find_tsserver(config, repo_root)?;
-
         // Spawn tsserver
         // Note: tsserver wants to be run from the project root to find tsconfig.json
-        let mut command = Command::new(&tsserver_cmd);
+        let mut command = Command::new(tsserver_cmd);
         command
             .current_dir(project_root)
             .stdin(Stdio::piped())
@@ -1063,55 +1129,96 @@ fn is_js_family(path: &str) -> bool {
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Find the tsserver executable.
-///
-/// Search order:
-/// 1. Config-specified path
-/// 2. node_modules/.bin/tsserver (project-local)
-/// 3. `tsserver` in PATH
-/// 4. `npx tsserver` as fallback
-fn find_tsserver(config: &TsServerConfig, repo_root: &Path) -> Result<String, ResolverError> {
-    // 1. Config-specified
-    if let Some(path) = &config.tsserver_path {
-        if Path::new(path).exists() {
-            return Ok(path.clone());
-        }
-        // Try as command name
-        return Ok(path.clone());
-    }
-
-    // 2. Project-local node_modules
-    let local_tsserver = repo_root.join("node_modules/.bin/tsserver");
-    if local_tsserver.exists() {
-        return Ok(local_tsserver.to_string_lossy().to_string());
-    }
-
-    // 3. Check PATH
-    if which_tsserver() {
-        return Ok("tsserver".to_string());
-    }
-
-    // 4. Fallback to npx (assumes npm/npx is installed)
-    // npx will download typescript if needed
-    Err(ResolverError::ToolNotAvailable {
-        tool: "tsserver not found in node_modules or PATH".to_string(),
-    })
-}
-
-/// Check if tsserver is available in PATH.
-fn which_tsserver() -> bool {
-    Command::new("which")
-        .arg("tsserver")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
+// tsserver location lives in `locate.rs` (`locate_tsserver`), the ONE locator shared with the
+// enrich-pass probe (TSSERVER-LOCATE-1). `resolve_batch` applies it per project context and SKIPS a
+// context with none (§2.2) — so the resolver no longer has a `find_tsserver` that erroring-out marked a
+// whole group failed; a missing tsserver is a skip, decided by the caller before `TsServerSession::start`.
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TSSERVER-LOCATE-1 §2.2 (operator ruling 2026-08-24, review-0 #2/#3) — per-context availability is
+    /// ENFORCED, not only rendered. Two project contexts: one whose locator resolves a tsserver and one
+    /// whose locator returns `None`. The available context is ENTERED (a session start is attempted); the
+    /// missing context is SKIPPED — it produces NO result at all, NOT a `tsserver failed to start`
+    /// failure. This is the enforcement the resolver previously lacked (it started a session for every
+    /// group and failed the ones with no tsserver).
+    ///
+    /// Hermetic: the locator is injected (no host `$PATH` dependence, no live LSP). The "available"
+    /// context's command is a binary that does not exist, so entering it fails at spawn — that FAILED
+    /// result is precisely the proof the context WAS entered. (The live "an available context actually
+    /// enriches" half is the glamCRM live-lift in the slice's §4, which needs a real tsserver.)
+    #[test]
+    fn mixed_availability_enters_the_available_context_and_skips_the_missing_one() {
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+
+        fn edge(uid: &str, file: &str) -> EligibleEdge {
+            EligibleEdge {
+                edge_uid: uid.to_string(),
+                snapshot_uid: "snap".to_string(),
+                repo_uid: "repo".to_string(),
+                source_node_uid: "node".to_string(),
+                target_key: "obj.method".to_string(),
+                source_file_path: file.to_string(),
+                line_start: 1,
+                col_start: 1,
+                category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+                language: EnrichmentLanguage::TypeScript,
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path();
+        let pkg_avail = repo_root.join("pkg_avail");
+        let pkg_missing = repo_root.join("pkg_missing");
+        std::fs::create_dir_all(&pkg_avail).unwrap();
+        std::fs::create_dir_all(&pkg_missing).unwrap();
+
+        let mut groups: HashMap<PathBuf, Vec<EligibleEdge>> = HashMap::new();
+        groups.insert(
+            pkg_avail.clone(),
+            vec![edge("edge-avail", "pkg_avail/a.ts")],
+        );
+        groups.insert(
+            pkg_missing.clone(),
+            vec![edge("edge-missing", "pkg_missing/b.ts")],
+        );
+
+        // Injected locator: the missing context → None (→ skip); the available one → a command that
+        // does not exist (→ entered, then spawn fails, which is what proves it was entered).
+        let bogus = "rmap-tsserver-does-not-exist-xyz";
+        let locate = |ctx: &Path| {
+            if ctx == pkg_missing.as_path() {
+                None
+            } else {
+                Some(bogus.to_string())
+            }
+        };
+
+        let resolver = TsServerResolver::new();
+        let results =
+            resolver.resolve_groups(repo_root, groups, &locate, 2, 0, None, Some(&|| false));
+
+        // The missing context is SKIPPED — no result of any kind for its edge.
+        assert!(
+            !results.iter().any(|r| r.edge_uid == "edge-missing"),
+            "the context whose locator returned None must be SKIPPED — no result, not a failure: {:?}",
+            results.iter().map(|r| &r.edge_uid).collect::<Vec<_>>()
+        );
+        // The available context WAS entered — its edge has a result (a failed one here, because the
+        // injected command does not exist; the presence of the result is the proof of entry).
+        let avail = results.iter().find(|r| r.edge_uid == "edge-avail");
+        assert!(
+            avail.is_some(),
+            "the context whose locator resolved a tsserver must be ENTERED (a session start attempted)"
+        );
+        assert!(
+            !avail.unwrap().is_success(),
+            "with a non-existent injected tsserver the entered context fails at spawn (hermetic proxy for entry)"
+        );
+    }
 
     #[test]
     fn test_extract_type_from_display_string_local_var() {

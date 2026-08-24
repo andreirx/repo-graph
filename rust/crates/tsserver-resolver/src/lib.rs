@@ -62,10 +62,13 @@ pub mod ownership;
 pub mod receiver_locator;
 
 mod client;
+mod locate;
 mod project;
 mod protocol;
 mod transport;
 
 pub use client::TsServerResolver;
+pub use locate::locate_tsserver;
 pub use ownership::{OwnershipError, ProjectOwnership, TsProjectOwnershipResolver};
+pub use project::group_by_project_root;
 pub use receiver_locator::{ReceiverLocation, ReceiverLocator};
