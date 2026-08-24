@@ -72,6 +72,13 @@ hypotheses until that run speaks.
    F14 (extractor deep-file guard), GRADLE-DEP-READER-1 (Java attribution prereq),
    ENRICH-YIELD residuals (dependency-version capture; caller-level version resolution).
 
+## Semantic seeding — ratified track (2026-08-24)
+
+Operator-ratified (VISION § Semantic Seeding; spike evidence
+`docs/spikes/2026-08-23-embed-seed-spike-1.md`). Queue: **EMBED-SEED-1** (SPEC via relay,
+decision-review) → IMPL. Layer-3, opt-in verb, local model, pinned vectors, fixed-formula
+ranking — the bounds are in the VISION section and are not re-litigated per slice.
+
 ## Product-surface honesty — track ledger (largely DELIVERED)
 
 The branch proved the gaps are on the agent-facing surface and that they pass CI.

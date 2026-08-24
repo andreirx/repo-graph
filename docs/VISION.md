@@ -141,6 +141,27 @@ Every persisted artifact family has an explicit contract (truth class, refresh
 policy, identity, degradation, provenance), enforced in code via the artifact
 contract registry. See `docs/architecture/artifact-contract-model.md`.
 
+## Semantic Seeding (ratified 2026-08-24)
+
+An agent arrives with a *task*, not a symbol name; exact focus resolution and grep are the
+only bridges today. **Embedding-based seeding is ratified as a Layer-3 capability** under
+the certainty model, on the strength of EMBED-SEED-SPIKE-1
+(`docs/spikes/2026-08-23-embed-seed-spike-1.md`: local 84 MB model, right neighbourhood in
+top-5 on 14/16 real glamCRM tasks vs 8/16 lexical). Bounds that keep it inside this VISION:
+
+- **Candidate generator, never answer.** A separate opt-in verb returns ≤5 seed candidates,
+  each rendered with its deterministic neighbourhood (module, imports, callers) — the map
+  (`orient`, `map`, `modules`) never contains embedding-derived facts.
+- **Evidence-backed hint, labeled.** Every seed carries score + provenance
+  (`source: embedding`, model id); ranking is a fixed formula — no LLM in the loop.
+- **Deterministic given its pins.** Every vector is pinned `(model_id, dim, content_sha)`;
+  mismatch is a hard error, staleness recomputes from content hash at index/refresh.
+- **Local and optional.** Local model only, no API key, no network; absence degrades to
+  "no hints", never to degraded orientation.
+
+Scope beyond these bounds (semantic search as an answer surface, cross-repo embeddings,
+model management) stays in `docs/FUTURE-ITERATIONS.md` unless separately ratified.
+
 ## Honesty Rules
 
 - **Unknown is never zero.** `null`/`unknown` means not measured; `0` means

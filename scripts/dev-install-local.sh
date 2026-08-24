@@ -294,9 +294,13 @@ sign_binaries() {
 
     # `--force` replaces the linker's ad-hoc signature. No hardened runtime (it needs entitlements and can break
     # a local dev daemon). First run may prompt for keychain access to the signing key -> click "Always Allow".
+    # --identifier: `codesign --force` PRESERVES the linker's identifier, which is content-hash
+    # based (e.g. rmapd-af95f2b9...) and changes every build — TCC keys on (identifier, cert), so
+    # without a STABLE identifier the Documents/Full-Disk grant dies on every reinstall even with a
+    # stable cert (bitten 2026-08-24: launchd rmapd lost ~/Documents after dev-install).
     local b
     for b in rmap rmapd rgistr; do
-        if codesign --force --sign "${CODESIGN_IDENTITY}" "${INSTALL_DIR}/${b}" 2>/dev/null; then
+        if codesign --force --sign "${CODESIGN_IDENTITY}" --identifier "com.repo-graph.${b}" "${INSTALL_DIR}/${b}" 2>/dev/null; then
             info "  Signed ${b} (${CODESIGN_IDENTITY})"
         else
             warn "  codesign ${b} failed — left ad-hoc signed"
