@@ -35,7 +35,7 @@ imports                = FC1, FC2b
 cycles                 = FC1, FC2b
 stats                  = FC1, FC2a-agg, FC2b, FC3, FC4, FC5
 orient                 = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
-explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5
+explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
 trust                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
 cycle_completeness_audit = FC1, FC2b
 

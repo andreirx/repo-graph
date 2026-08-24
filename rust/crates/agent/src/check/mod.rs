@@ -53,7 +53,10 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
     repo_uid: &str,
     now: &str,
 ) -> Result<OrientResult, CheckError> {
-    run_check_cancellable(storage, repo_uid, now, &mut || {
+    // Simple entry: no working-tree drift available (no repo path / git access at
+    // this layer). The `INDEX_DRIFT` condition is omitted, not fabricated. The
+    // daemon uses `run_check_cancellable` with a computed `IndexDrift`.
+    run_check_cancellable(storage, repo_uid, now, None, &mut || {
         std::ops::ControlFlow::Continue(())
     })
 }
@@ -74,6 +77,7 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
     now: &str,
+    index_drift: Option<crate::dto::index_drift::IndexDrift>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, CheckError> {
     // ── Phase 1: Gather ─────────────────────────────────────────
@@ -105,6 +109,8 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 external_targets: Vec::new(),
                 enrichment_state: None,
                 gate_outcome: None,
+                // No snapshot → conditions 2+ (incl. INDEX_DRIFT) are not evaluated.
+                index_drift: None,
             };
             (input, String::new(), Confidence::Low)
         }
@@ -142,6 +148,10 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 external_targets: trust.external_targets.clone(),
                 enrichment_state: Some(trust.enrichment_state),
                 gate_outcome: Some(gate_outcome),
+                // INDEX-BASIS-1: the daemon-computed working-tree drift (git +
+                // storage), passed through as pre-fetched data. `None` only on the
+                // simple `run_check` entry / tests, where the condition is omitted.
+                index_drift: index_drift.clone(),
             };
 
             (input, snap_uid, conf)

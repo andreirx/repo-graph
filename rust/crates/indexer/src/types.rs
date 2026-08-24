@@ -493,6 +493,19 @@ pub struct IndexOptions<'a> {
     pub include: Vec<String>,
     /// Git commit SHA to record as the snapshot basis.
     pub basis_commit: Option<String>,
+    /// INDEX-BASIS-1 (operator RULING 4): a RAW JSON diagnostics fragment merged into
+    /// the snapshot's `extraction_diagnostics_json` blob at Phase-5 finalize, BEFORE the
+    /// `Ready` transition — the crash-safe home for the index-basis outcome. Plain data
+    /// (a JSON object) crossing the compose→indexer boundary: the daemon owns the git
+    /// probe, compose serializes the write-time outcome (currently
+    /// `{"index_basis": {"outcome": ...}}`) and the orchestrator merges its entries beside
+    /// `files_read_failed`/`files_skipped_oversized`, so a servable (`Ready`) snapshot
+    /// ALWAYS carries its basis record — a hard crash can never leave a post-slice
+    /// `basis_commit=NULL` snapshot without its explanatory outcome. `None` for callers
+    /// that record nothing (a read HEAD, whose sha rides `basis_commit`; a caller that did
+    /// not probe git). `BasisOutcome` itself cannot cross here — `repo-index` depends on
+    /// this crate, so the typed enum stays in compose and only its serialized JSON crosses.
+    pub basis_diagnostic: Option<serde_json::Value>,
     /// Batch size for edge resolution (default 10,000).
     pub edge_batch_size: Option<usize>,
     /// Optional progress callback. Called for each phase transition.

@@ -72,6 +72,10 @@ mod tests {
             external_targets: Vec::new(),
             enrichment_state: Some(EnrichmentState::Ran),
             gate_outcome: Some(GateOutcomeForCheck::Pass),
+            // INDEX-BASIS-1: clean drift → INDEX_DRIFT Pass, so "all pass" holds.
+            index_drift: Some(crate::dto::index_drift::IndexDrift::Clean {
+                basis: "abcdef0123456789".to_string(),
+            }),
         }
     }
 
@@ -305,6 +309,7 @@ mod tests {
             external_targets: Vec::new(),
             enrichment_state: None,
             gate_outcome: None,
+            index_drift: None,
         };
         let result = check(&input);
         assert_eq!(result.verdict, CheckVerdict::Incomplete);
@@ -496,6 +501,7 @@ mod tests {
             external_targets: Vec::new(),
             enrichment_state: None,
             gate_outcome: None,
+            index_drift: None,
         };
         let result = check(&input);
         assert_eq!(result.conditions.len(), 1);
@@ -507,11 +513,13 @@ mod tests {
 
     #[test]
     fn all_conditions_present_when_snapshot_exists() {
+        // INDEX-BASIS-1: 8 conditions when snapshot exists AND drift is supplied —
+        // UNPARSED_FILES (new) + STALE_FILES (deprecated alias) + INDEX_DRIFT added.
         let result = check(&all_pass_input());
         assert_eq!(
             result.conditions.len(),
-            6,
-            "Expected 6 conditions when snapshot exists, got {}",
+            8,
+            "Expected 8 conditions when snapshot exists, got {}",
             result.conditions.len(),
         );
         let codes: Vec<ConditionCode> = result.conditions.iter().map(|c| c.code).collect();
@@ -520,11 +528,143 @@ mod tests {
             vec![
                 ConditionCode::SnapshotExists,
                 ConditionCode::IndexNotEmpty,
+                ConditionCode::UnparsedFiles,
                 ConditionCode::StaleFiles,
+                ConditionCode::IndexDrift,
                 ConditionCode::CallGraphReliability,
                 ConditionCode::EnrichmentState,
                 ConditionCode::GateStatus,
             ],
         );
+    }
+
+    // ── INDEX-BASIS-1: parse-status rename + drift condition ─────
+
+    #[test]
+    fn unparsed_files_replaces_stale_and_keeps_deprecated_alias() {
+        // The honest name UNPARSED_FILES carries the parse status; STALE_FILES is
+        // emitted alongside (same status) with a deprecation note, for one release.
+        let mut input = all_pass_input();
+        input.stale_file_count = 3;
+        let result = check(&input);
+        let unparsed = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::UnparsedFiles)
+            .expect("UNPARSED_FILES present");
+        assert_eq!(unparsed.status, ConditionStatus::Fail);
+        assert_eq!(unparsed.summary, "3 files could not be parsed.");
+
+        let stale = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::StaleFiles)
+            .expect("deprecated STALE_FILES still emitted");
+        assert_eq!(
+            stale.status,
+            ConditionStatus::Fail,
+            "same status as canonical"
+        );
+        assert!(
+            stale
+                .summary
+                .starts_with("[deprecated: renamed UNPARSED_FILES]"),
+            "carries deprecation note: {}",
+            stale.summary
+        );
+        // Duplicate condition does not change the verdict (both Fail → still Fail).
+        assert_eq!(result.verdict, CheckVerdict::Fail);
+    }
+
+    #[test]
+    fn index_drift_incomplete_when_drifted() {
+        use crate::dto::index_drift::IndexDrift;
+        let mut input = all_pass_input();
+        input.index_drift = Some(IndexDrift::Drifted {
+            basis: "abcdef0123456789".to_string(),
+            commits_ahead: 1,
+            files_changed: 3,
+            indexed_changed: 3,
+            modules: vec!["src".to_string()],
+        });
+        let result = check(&input);
+        let drift = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::IndexDrift)
+            .expect("INDEX_DRIFT present");
+        assert_eq!(drift.status, ConditionStatus::Incomplete);
+        assert!(
+            drift.summary.contains("1 commit ahead"),
+            "{}",
+            drift.summary
+        );
+        // Incomplete drift makes the whole verdict Incomplete (never Fail alone).
+        assert_eq!(result.verdict, CheckVerdict::Incomplete);
+    }
+
+    #[test]
+    fn index_drift_pass_when_clean() {
+        let result = check(&all_pass_input()); // all_pass_input carries Clean drift
+        let drift = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::IndexDrift)
+            .expect("INDEX_DRIFT present");
+        assert_eq!(drift.status, ConditionStatus::Pass);
+        assert_eq!(result.verdict, CheckVerdict::Pass);
+    }
+
+    #[test]
+    fn index_drift_incomplete_when_basis_unknown() {
+        use crate::dto::index_drift::IndexDrift;
+        let mut input = all_pass_input();
+        input.index_drift = Some(IndexDrift::BasisUnknown);
+        let result = check(&input);
+        let drift = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::IndexDrift)
+            .unwrap();
+        assert_eq!(drift.status, ConditionStatus::Incomplete);
+        assert!(drift.summary.contains("indexed before basis tracking"));
+        assert_eq!(result.verdict, CheckVerdict::Incomplete);
+    }
+
+    #[test]
+    fn index_drift_pass_when_not_git() {
+        use crate::dto::index_drift::IndexDrift;
+        let mut input = all_pass_input();
+        input.index_drift = Some(IndexDrift::NotGit);
+        let result = check(&input);
+        let drift = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::IndexDrift)
+            .unwrap();
+        assert_eq!(
+            drift.status,
+            ConditionStatus::Pass,
+            "not-a-git-repo is not-applicable → Pass, not a degradation"
+        );
+        assert_eq!(result.verdict, CheckVerdict::Pass);
+    }
+
+    #[test]
+    fn index_drift_omitted_when_not_supplied() {
+        // The simple `run_check` path supplies no drift → the condition is omitted,
+        // not fabricated as a false "unknown". (7 conditions: no INDEX_DRIFT.)
+        let mut input = all_pass_input();
+        input.index_drift = None;
+        let result = check(&input);
+        assert!(
+            !result
+                .conditions
+                .iter()
+                .any(|c| c.code == ConditionCode::IndexDrift),
+            "INDEX_DRIFT omitted when drift not supplied"
+        );
+        assert_eq!(result.conditions.len(), 7);
+        assert_eq!(result.verdict, CheckVerdict::Pass);
     }
 }

@@ -287,6 +287,7 @@ pub fn index_repo<
         hook,
         &empty_resource_keys,
         &options.c_include_roots,
+        options.basis_diagnostic.as_ref(),
     ) {
         Ok(mut result) => {
             // ══════════════════════════════════════════════════════════════
@@ -472,6 +473,7 @@ fn run_pipeline<S: IndexerStoragePort>(
     mut hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
     copied_resource_keys: &HashMap<String, crate::storage_port::CopiedResourceNodeKey>,
     c_include_roots: &[String],
+    basis_diagnostic: Option<&serde_json::Value>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
     let now_iso = created_at.to_string();
     let total_files = files.len() as u64;
@@ -1100,13 +1102,28 @@ fn run_pipeline<S: IndexerStoragePort>(
         .collect();
     storage.persist_resolved_call_file_pairs(snap_uid, &pair_rows)?;
 
-    let diagnostics = build_extraction_diagnostics(
+    let mut diagnostics = build_extraction_diagnostics(
         resolved_total + module_edges_count,
         unresolved_count,
         &unresolved_breakdown,
         skipped_oversized,
         files_read_failed,
     );
+    // INDEX-BASIS-1 (RULING 4): merge the raw index-basis fragment into the SAME
+    // diagnostics blob we write below, BEFORE the `Ready` flip — so a servable snapshot
+    // can never lack its basis outcome across a crash. The producer (compose) hands us a
+    // pre-keyed JSON object (`{"index_basis": {...}}`); we merge its entries verbatim,
+    // staying ignorant of the specific key (it lives in compose). `build_extraction_diagnostics`
+    // returns a JSON object and compose builds an object, so both `as_*` are `Some` on the
+    // real path; a non-object fragment (an internal producer bug) is skipped rather than
+    // clobbering the diagnostics blob.
+    if let Some(extra) = basis_diagnostic {
+        if let (Some(obj), Some(extra_obj)) = (diagnostics.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra_obj {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
     storage.update_snapshot_extraction_diagnostics(
         snap_uid,
         &serde_json::to_string(&diagnostics).unwrap_or_default(),
@@ -1755,6 +1772,7 @@ pub fn refresh_repo<
         hook,
         &copied_resource_keys,
         &options.c_include_roots,
+        options.basis_diagnostic.as_ref(),
     ) {
         Ok(mut result) => {
             // Adjust node count to include copied nodes (which
@@ -1951,6 +1969,15 @@ mod tests {
 
     // ── Mock storage ─────────────────────────────────────────
 
+    /// INDEX-BASIS-1 (RULING 4): a finalize-phase storage write, captured in call order so
+    /// a test can assert the basis-carrying diagnostics blob is written BEFORE the snapshot
+    /// becomes servable (`Ready`).
+    #[derive(Debug, Clone, PartialEq)]
+    enum FinalizeWrite {
+        Diagnostics(String),
+        Ready,
+    }
+
     /// Minimal mock storage that stores data in memory.
     #[derive(Default)]
     struct MockStorage {
@@ -1980,6 +2007,10 @@ mod tests {
         /// drops the resolved CALLS edge with this uid (storage-layer
         /// filtering — the resolver output is untouched).
         drop_calls_with_uid: Option<String>,
+        /// INDEX-BASIS-1 (RULING 4): ordered log of finalize writes (each diagnostics blob
+        /// and the `Ready` flip) so a test can assert the crash-safe ordering — the basis
+        /// record is persisted BEFORE the snapshot becomes servable.
+        finalize_log: Vec<FinalizeWrite>,
     }
 
     impl SnapshotLifecyclePort for MockStorage {
@@ -2020,6 +2051,9 @@ mod tests {
             &mut self,
             input: &UpdateSnapshotStatusInput,
         ) -> Result<(), String> {
+            if input.status == SnapshotStatus::Ready {
+                self.finalize_log.push(FinalizeWrite::Ready);
+            }
             if let Some(s) = self
                 .snapshots
                 .iter_mut()
@@ -2058,8 +2092,10 @@ mod tests {
         fn update_snapshot_extraction_diagnostics(
             &mut self,
             _: &str,
-            _: &str,
+            diagnostics: &str,
         ) -> Result<(), String> {
+            self.finalize_log
+                .push(FinalizeWrite::Diagnostics(diagnostics.to_string()));
             Ok(())
         }
     }
@@ -2478,6 +2514,72 @@ mod tests {
         // Snapshot should be READY.
         let snap = storage.snapshots.last().unwrap();
         assert_eq!(snap.status, SnapshotStatus::Ready);
+    }
+
+    #[test]
+    fn ready_snapshot_always_carries_its_basis_record() {
+        // INDEX-BASIS-1 (RULING 4) crash-safe invariant, asserted at the write site: the
+        // basis outcome rides `IndexOptions.basis_diagnostic` and the orchestrator MERGES it
+        // into the diagnostics blob it writes BEFORE flipping the snapshot `Ready`. So a
+        // servable (READY) snapshot can NEVER lack its record — a crash after READY has both
+        // writes done; a crash before READY leaves the snapshot non-servable (still BUILDING).
+        // This is the regression review-6/7 demanded, replacing the old post-compose (post-
+        // READY) postpass whose lost write could make a NULL basis impersonate pre-slice
+        // history. We assert (a) the persisted diagnostics blob carries the merged record and
+        // (b) that write strictly precedes the READY flip in call order.
+        let mut storage = MockStorage::default();
+        let mut ext = MockExtractor::new(vec!["typescript".into()]);
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+        let files = vec![FileInput {
+            rel_path: "src/index.ts".into(),
+            content: "export const x = 1;".into(),
+            content_hash: "hash1".into(),
+            size_bytes: 20,
+            line_count: 1,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }];
+
+        // A raw NULL-basis fragment exactly as compose serializes it (a non-git index here).
+        let mut opts = IndexOptions {
+            basis_diagnostic: Some(serde_json::json!({ "index_basis": { "outcome": "non_git" } })),
+            ..IndexOptions::default()
+        };
+
+        index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &files,
+            &[],
+            &mut opts,
+            None,
+        )
+        .unwrap();
+
+        // (a) the merge landed: a diagnostics blob carrying the basis record was written, and
+        //     it also preserved the pipeline's own finalize keys (files_read_failed).
+        let basis_write = storage
+            .finalize_log
+            .iter()
+            .position(|e| {
+                matches!(e, FinalizeWrite::Diagnostics(d)
+                    if d.contains("index_basis") && d.contains("non_git") && d.contains("files_read_failed"))
+            })
+            .expect("finalize wrote a diagnostics blob carrying the merged index_basis record");
+
+        // (b) crash-safe ordering: the record precedes the snapshot becoming servable.
+        let ready_write = storage
+            .finalize_log
+            .iter()
+            .position(|e| matches!(e, FinalizeWrite::Ready))
+            .expect("finalize flipped the snapshot READY");
+        assert!(
+            basis_write < ready_write,
+            "the basis record must be persisted BEFORE the snapshot becomes servable (READY): {:?}",
+            storage.finalize_log
+        );
     }
 
     /// Extractor emitting two function symbols and two CALLS edges whose

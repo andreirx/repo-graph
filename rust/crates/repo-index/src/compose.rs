@@ -28,6 +28,8 @@ macro_rules! perf_log {
     };
 }
 
+use serde::{Deserialize, Serialize};
+
 use repo_graph_boundary_interaction::table::Language as BiLanguage;
 use repo_graph_boundary_interaction::ChannelKind;
 use repo_graph_boundary_interaction_extractor::emit::{
@@ -116,10 +118,74 @@ impl std::fmt::Display for ComposeError {
     }
 }
 
+/// Additive top-level key under which the index-basis OUTCOME is recorded in a
+/// snapshot's `extraction_diagnostics_json` blob (INDEX-BASIS-1, operator RULING 3).
+/// The blob is the EXISTING free-form honest-degradation channel (the same one the
+/// orchestrator builds at finalize and the RED floor extends) — merging a key needs NO
+/// schema change, and the typed `ExtractionDiagnostics` reader ignores unknown keys, so
+/// trust computation is UNAFFECTED (trust stays frozen). Present for a NULL-basis
+/// snapshot indexed by THIS slice (non-git, or a git repo whose HEAD was unreadable at
+/// index time); ABSENT for a stamped basis (`basis_commit` carries the sha) and for a
+/// snapshot indexed BEFORE this slice (a NULL basis with NO key = pre-slice history).
+pub const INDEX_BASIS_DIAG_KEY: &str = "index_basis";
+
+/// The outcome of reading git HEAD at index/refresh WRITE time — the fact that makes a
+/// NULL `basis_commit` self-describing (INDEX-BASIS-1, operator RULING 3).
+///
+/// Encoded as an explicit three-variant sum type (NOT a boolean + nullable fields — the
+/// defect-shaped type the honesty rules forbid), carried on [`ComposeOptions`] from the
+/// daemon (the composition root that owns the git probe) into compose, which serializes it
+/// (via [`basis_outcome_diagnostic`]) onto `IndexOptions.basis_diagnostic`; the orchestrator
+/// then persists it under [`INDEX_BASIS_DIAG_KEY`] in the SAME finalize blob it writes
+/// BEFORE flipping the snapshot READY (RULING 4's crash-safe home). That is what makes a
+/// NULL basis DETERMINISTICALLY distinguishable at query time — non-git / HEAD-unreadable /
+/// pre-slice — a READY snapshot always carries its record, so a lost write can never make
+/// it impersonate pre-slice history (the review-5/6/7 hole RULING 3/4 close; the best-effort
+/// post-compose daemon write, and later the post-READY compose postpass, are both deleted).
+///
+/// Serialized as `{ "outcome": "basis"|"non_git"|"failure", … }`. `Basis` is NOT written
+/// to the diagnostics blob (the `basis_commit` column carries the sha); only the two
+/// NULL-basis outcomes are recorded, so `NULL basis + no record` is unambiguously
+/// pre-slice history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum BasisOutcome {
+    /// git HEAD was read; `commit` is the basis sha (also stamped in `basis_commit`).
+    Basis { commit: String },
+    /// The indexed path is NOT a git repo — a real, known "no basis exists" state.
+    NonGit,
+    /// The path IS a git repo but HEAD was unreadable at index time (a repo with zero
+    /// commits, or another git failure). `reason` is the already-formatted,
+    /// directly-renderable human reason — unborn → "repository has no commits yet";
+    /// otherwise → "git HEAD unreadable at index time (<stderr>)". Classified from git's
+    /// own error at WRITE time (the freshest evidence) and surfaced VERBATIM at query
+    /// time, so the read path never re-derives the unborn-vs-generic distinction live.
+    Failure { reason: String },
+}
+
+impl BasisOutcome {
+    /// The basis sha to stamp into `snapshots.basis_commit`: `Some` only for a read HEAD,
+    /// `None` for the two NULL-basis outcomes (the reserved "no basis" column state).
+    pub fn basis_commit(&self) -> Option<String> {
+        match self {
+            BasisOutcome::Basis { commit } => Some(commit.clone()),
+            BasisOutcome::NonGit | BasisOutcome::Failure { .. } => None,
+        }
+    }
+}
+
 /// Options for the composition layer.
 #[derive(Default)]
 pub struct ComposeOptions {
     pub basis_commit: Option<String>,
+    /// INDEX-BASIS-1 (RULING 3/4): the write-time git-HEAD outcome behind `basis_commit`.
+    /// `Some` when the caller probed git (the daemon index/refresh arms); `None` for
+    /// callers that do not (tests via `ComposeOptions::default()`), which then write no
+    /// index-basis diagnostic. Compose serializes this via [`basis_outcome_diagnostic`]
+    /// onto `IndexOptions.basis_diagnostic`; the orchestrator persists it into the snapshot's
+    /// extraction diagnostics at finalize, BEFORE the READY flip (the crash-safe home —
+    /// RULING 4 relocated the write there from the old post-compose postpass).
+    pub basis_outcome: Option<BasisOutcome>,
     pub edge_batch_size: Option<usize>,
     /// C/C++ include roots (configured via `--include-root`).
     /// Searched in order before conventional roots.
@@ -1586,6 +1652,44 @@ fn merge_extraction_diagnostics(
         &serialized,
     )
     .map_err(ComposeError::Storage)
+}
+
+/// INDEX-BASIS-1 (RULING 4): build the RAW JSON diagnostics fragment that carries the
+/// index-basis OUTCOME across the compose→indexer boundary, to be merged into the
+/// snapshot's `extraction_diagnostics_json` blob at the orchestrator's Phase-5 finalize —
+/// BEFORE the `Ready` flip, the crash-safe home ([`IndexOptions::basis_diagnostic`]).
+///
+/// This REPLACES the former post-compose `record_basis_outcome` postpass: the snapshot was
+/// already `Ready`/servable by the time compose regained control (the orchestrator flips
+/// `Ready` inside `run_pipeline`), so a crash between that flip and the postpass could leave
+/// a post-slice `basis_commit=NULL` snapshot with NO record — which the query path would
+/// then MIS-render as pre-slice history (review-6/7's confirmed hole). Merging the fragment
+/// into the same blob the orchestrator writes before `Ready` closes that window: `Ready`
+/// now implies the record is present.
+///
+/// A read HEAD lives in the `basis_commit` column and a caller that did not probe git
+/// (`None`) records nothing — both return `Ok(None)`; only the two NULL-basis outcomes
+/// (`NonGit` / `Failure`) produce a `{ "index_basis": <outcome> }` fragment under
+/// [`INDEX_BASIS_DIAG_KEY`]. That record is what lets the query path tell a THIS-slice NULL
+/// basis (non-git / HEAD-unreadable, WITH a record) apart from a PRE-slice NULL basis (NO
+/// record → "indexed before basis tracking"). `Basis`/`None` returning `Ok(None)` keeps a
+/// normal git (or non-probing test) index's diagnostics blob byte-for-byte unchanged.
+///
+/// FALLIBLE — a serialize error PROPAGATES via `?` (the outcome is the only thing keeping a
+/// NULL basis honest, so it is never silently dropped); the caller wires the result onto
+/// `IndexOptions.basis_diagnostic` before the index runs.
+fn basis_outcome_diagnostic(
+    outcome: Option<&BasisOutcome>,
+) -> Result<Option<serde_json::Value>, ComposeError> {
+    let Some(outcome) = outcome else {
+        return Ok(None);
+    };
+    if let BasisOutcome::Basis { .. } = outcome {
+        return Ok(None);
+    }
+    let value = serde_json::to_value(outcome)
+        .map_err(|e| ComposeError::Index(format!("serialize index-basis outcome: {e}")))?;
+    Ok(Some(serde_json::json!({ INDEX_BASIS_DIAG_KEY: value })))
 }
 
 /// Record that `count` files were skipped by a postpass because their AST
@@ -3132,6 +3236,11 @@ pub fn index_into_storage_with_progress(
 
         let mut idx_options = IndexOptions {
             basis_commit: options.basis_commit.clone(),
+            // INDEX-BASIS-1 (RULING 4): forward the write-time basis OUTCOME as a raw JSON
+            // fragment so the orchestrator persists it in the SAME finalize blob it writes
+            // before flipping the snapshot READY — crash-safe, replacing the old
+            // post-compose (post-READY) `record_basis_outcome` postpass.
+            basis_diagnostic: basis_outcome_diagnostic(options.basis_outcome.as_ref())?,
             edge_batch_size: options.edge_batch_size,
             c_include_roots: options.c_include_roots.clone(),
             on_progress: Some(&mut indexer_progress_callback),
@@ -3158,6 +3267,13 @@ pub fn index_into_storage_with_progress(
 
     perf_log!("[PERF] index {}: > postpass", repo_uid);
     let postpass_start = Instant::now();
+
+    // INDEX-BASIS-1 (RULING 4): the index-basis OUTCOME is no longer recorded here as a
+    // post-compose postpass — it now rides `IndexOptions.basis_diagnostic` and is merged
+    // into the orchestrator's finalize blob BEFORE the READY flip (the crash-safe home).
+    // A post-READY write here could be lost to a crash, leaving a servable NULL-basis
+    // snapshot with no record that the query path mis-renders as pre-slice history.
+
     emit_progress(&mut progress, "persisting", 0, 8)?; // about to persist read failures
     persist_read_failures(
         storage,
@@ -3543,6 +3659,10 @@ pub fn refresh_into_storage_with_progress(
 
     let mut idx_options = IndexOptions {
         basis_commit: options.basis_commit.clone(),
+        // INDEX-BASIS-1 (RULING 4): symmetric with the index path — forward the
+        // refresh-start basis OUTCOME so the orchestrator persists it crash-safely at
+        // finalize (before READY), replacing the old post-compose postpass.
+        basis_diagnostic: basis_outcome_diagnostic(options.basis_outcome.as_ref())?,
         edge_batch_size: options.edge_batch_size,
         c_include_roots: options.c_include_roots.clone(),
         on_progress: Some(&mut indexer_progress_callback),
@@ -3582,6 +3702,10 @@ pub fn refresh_into_storage_with_progress(
     };
     let refresh_core_ms = refresh_core_start.elapsed().as_millis();
     perf_log!("[PERF] refresh: core_refresh={}ms", refresh_core_ms);
+
+    // INDEX-BASIS-1 (RULING 4): the refresh-start basis OUTCOME is recorded crash-safely by
+    // the orchestrator at finalize (via `IndexOptions.basis_diagnostic`), before READY — no
+    // post-compose postpass here, mirroring the index path.
 
     // RMAPD-PERF-2: Time copy-forward phase
     let copy_forward_start = Instant::now();

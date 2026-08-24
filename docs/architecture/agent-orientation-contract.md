@@ -291,6 +291,127 @@ Same as repo, but scoped to the focus module:
 - Dead symbol count → `DEAD_CODE` (count only, no details)
 - Boundary violation count → `BOUNDARY_VIOLATIONS` (count only)
 
+## Index basis and working-tree drift (INDEX-BASIS-1)
+
+Repo-graph owns the structure of the **last indexed commit**; git owns the delta.
+Every agent surface states which commit its facts describe and how far the working
+tree has moved past it — so an agent that has edited files since the index is never
+told the state is "fresh".
+
+- **Write path.** Every index/refresh reads `git rev-parse HEAD` of the repo at the
+  start of the operation and classifies it into a **`BasisOutcome`** — an explicit
+  three-variant sum type (never a boolean + nullable) the daemon (the composition root
+  that owns the git probe) hands to the compose layer on `ComposeOptions`:
+  - `Basis{commit}` — a git repo with a HEAD: `snapshots.basis_commit` is stamped with
+    the sha, and **no** diagnostic is written (the column carries it).
+  - `NonGit` — not a git repo: `basis_commit` is `None` (the reserved "no basis exists"
+    column state).
+  - `Failure{reason}` — a git repo whose HEAD is **unreadable** (zero commits, or a git
+    error): `basis_commit` is `None` (the schema is frozen to one nullable column), and
+    the reason is the **already-rendered** human text, classified **at write time** (the
+    freshest evidence). The unborn-vs-generic decision is made by a **positive** probe —
+    `git rev-list -n 1 --all` (via `repo_graph_git::is_unborn_head`): an EMPTY commit graph
+    positively establishes "repository has no commits yet"; ANY other result (the repo has
+    a commit, or the probe itself fails) → "git HEAD unreadable at index time (`<stderr>`)".
+    We do **not** classify unborn from `rev-parse HEAD`'s stderr, because a committed repo
+    with a broken HEAD emits the identical `ambiguous argument 'HEAD': unknown revision`
+    text an unborn repo does — so unborn is asserted only when positively established.
+
+  For the two NULL-basis outcomes (`NonGit`, `Failure`), the outcome is **recorded**
+  under an additive `index_basis` key in the snapshot's existing
+  `extraction_diagnostics_json` blob (`{ "outcome": "non_git" }` or
+  `{ "outcome": "failure", "reason": <text> }`). Compose serializes the outcome into a
+  raw JSON fragment and forwards it on `IndexOptions.basis_diagnostic`; the **indexer
+  orchestrator merges it into the extraction-diagnostics blob it writes at Phase-5
+  finalize, BEFORE it transitions the snapshot to `Ready`** — the crash-safe home, the
+  same finalization sequence and same blob as `files_read_failed`/`files_skipped_oversized`.
+  This needs **no schema change** (the blob is the existing free-form honest-degradation
+  channel; the typed `ExtractionDiagnostics` reader ignores unknown keys, so **trust is
+  unaffected** — the trust surface stays frozen). A serialize failure **propagates**
+  (`basis_outcome_diagnostic` is fallible and wired before the index runs), and the merge
+  itself is part of the pre-`Ready` diagnostics write that already propagates on failure.
+  Because a snapshot only becomes **servable** (`get_latest_snapshot` = latest
+  `status='ready'`) *after* that write, **`Ready` implies the record is present**: a hard
+  crash either lands before `Ready` (the snapshot is not servable) or after both writes
+  (the record is there). So a post-slice write **always** records an outcome for a NULL
+  basis, and `basis_commit=None` **with no `index_basis` record** is
+  **deterministically** "indexed before this slice" (pre-slice history) — closing the
+  review-6/7 hole where the earlier *post-compose* (post-`Ready`) write could be lost to a
+  crash and then impersonate pre-slice history (operator **RULING 4**, 2026-08-24,
+  relocating the write from the compose postpass of RULING 3 into the orchestrator's
+  pre-`Ready` finalize; `ComposeOptions.basis_outcome` stays the daemon→compose carrier),
+  the review-5 hole where a best-effort daemon write could be lost, and the review-4 hole
+  where an **unborn repo that later gained a commit** was mis-rendered as pre-slice by a
+  live re-probe (RULING 3, superseding the best-effort daemon write of RULING 2). Indexing
+  is never hostage to a git edge case (it proceeds and records the failure); it is only
+  hostage to a broken diagnostics column, which already fails the index via the sibling
+  writers.
+- **Query path.** orient / check / explain compute drift at query time from git:
+  `git rev-list --count <basis>..HEAD` (commits ahead) and the union of
+  `git diff -z --name-only <basis>` + `git status --porcelain -z --untracked-files=all`
+  (M changed files). `--untracked-files=all` is required so a wholly-untracked
+  directory is expanded into its individual nested files (git's default `normal`
+  mode collapses it to a single `?? dir/` placeholder, which would miscount one
+  directory as one changed file, undercount the nested files, and be
+  un-intersectable with the per-file indexed set). Both reads use git's
+  **NUL-delimited (`-z`) machine format** so paths arrive verbatim (no C-quoting); a
+  path that is not valid UTF-8 makes drift `unknown` with a reason rather than being
+  lossily mangled. The daemon intersects M with the
+  indexed file set (K ≤ M) and names the modules those K files belong to. This is a
+  query-time serving fact (`IndexDrift`), attached to the response
+  `value.index_drift`. When a snapshot carries NO recorded basis on a git repo, the
+  query path does **not** re-probe HEAD live; it resolves the state from the WRITE-time
+  `index_basis` record (above), so a fact captured at index time — not a live guess —
+  decides the rendering:
+  - recorded `non_git` → `not_git` (the recorded truth; the query need not re-probe);
+  - recorded `failure` → `unknown`, surfacing the recorded reason **verbatim** (unborn →
+    "repository has no commits yet"; otherwise → "git HEAD unreadable at index time
+    (`<stderr>`)" — never the empty-repo wording for a generic failure);
+  - **no** `index_basis` record on a git repo → `basis_unknown` (the snapshot predates
+    this slice's basis tracking; `rmap refresh` will stamp it) — now deterministic, since
+    every post-slice write records an outcome;
+  - the diagnostic blob **unreadable** at query time → `unknown` with that read failure
+    as the reason (never a false `basis_unknown`/`clean` — honesty rule #1).
+  A path that is not a git repo **now** (the live `is_git_repo` probe returns false) is
+  `not_git` regardless; a probe that FAILS (git absent/unrunnable) is `unknown`, never
+  `not_git`.
+- **`IndexDrift` states** (a sum type — mutually exclusive; unknown is never
+  rendered as clean): `not_git` (drift not tracked → Pass), `basis_unknown`
+  (snapshot predates basis tracking — no `index_basis` diagnostic recorded on a git
+  repo → Incomplete; `rmap refresh` stamps it), `unknown{reason}` (git could not
+  compute drift, git could not be probed, an unborn HEAD or another HEAD-unreadable at
+  index time, or the diagnostic blob was unreadable → Incomplete, reason surfaced
+  honestly),
+  `clean` (Pass), and
+  `drifted{commits_ahead, files_changed, indexed_changed, modules}` (Incomplete).
+  The `unknown` reason attributes the failure to a **rewritten/pruned history**
+  ("basis commit not found in git history") ONLY when git reports a missing
+  revision/object for the recorded basis; a drift-compute failure git reports for any
+  other cause (a `git status`/`git diff` failure unrelated to the basis) surfaces its
+  own truthful message, never a rewritten-basis claim.
+- **Rendering.**
+  - orient/explain: a serving-footer line, e.g. `index basis: <sha7>; HEAD is 1
+    commit ahead, 3 files changed in the working tree (3 indexed, modules src) —
+    run \`rmap refresh\` to re-anchor`. The orient footer additionally carries a
+    `parse: ok|N unparsed|unknown (reason)` clause — a SEPARATE honest axis computed
+    from the same `get_stale_files` read that drives check's `UNPARSED_FILES`
+    condition (a failed read renders `unknown`, never `ok`). The coherence-envelope
+    `freshness` MEET keeps its own name (`freshness <state>`) and is NOT relabeled
+    `parse` — the two are distinct axes. The word *fresh*/drift belongs ONLY to the
+    basis/drift line.
+  - check: two conditions — `INDEX_DRIFT` (Pass when clean/not-git, Incomplete when
+    drifted/unknown, **never Fail by itself**; exit codes unchanged) carrying the
+    same basis/drift text, and the parse-status rename below.
+- **Parse-status rename.** The parse-status condition is renamed `STALE_FILES` →
+  `UNPARSED_FILES` ("N files could not be parsed") — the old name implied
+  working-tree staleness it never measured. For one release the deprecated
+  `STALE_FILES` condition is **still emitted** in the check JSON (same status/data,
+  summary prefixed `[deprecated: renamed UNPARSED_FILES]`) so any consumer keyed on
+  the old code keeps working; it is suppressed from human output. This is an
+  ADDITIVE JSON change (new `UNPARSED_FILES`/`INDEX_DRIFT` conditions), per the
+  versioning model. `gate-contract.txt` does not name `STALE_FILES`; no gate CI
+  consumer depends on it.
+
 ## What explain Aggregates
 
 Everything orient returns for the target's focus kind, plus:
@@ -543,8 +664,11 @@ TS-side rename entirely.
 - **Verdict evidence carries structured condition entries.**
   Each condition has `code`, `status` (pass/fail/incomplete),
   and `summary`. Conditions evaluated: `SNAPSHOT_EXISTS`,
-  `INDEX_NOT_EMPTY`, `STALE_FILES`, `CALL_GRAPH_RELIABILITY`,
-  `DEAD_CODE_RELIABILITY`, `ENRICHMENT_STATE`, `GATE_STATUS`.
+  `INDEX_NOT_EMPTY`, `UNPARSED_FILES`, `STALE_FILES` (deprecated
+  alias — see INDEX-BASIS-1 below), `INDEX_DRIFT`,
+  `CALL_GRAPH_RELIABILITY`, `ENRICHMENT_STATE`, `GATE_STATUS`.
+  (`DEAD_CODE_RELIABILITY` is not a check condition; it is a trust
+  axis consumed by orient's dead-code gate.)
 - **Exit codes map to verdict:** 0 = CHECK_PASS, 1 = CHECK_FAIL,
   2 = CHECK_INCOMPLETE. Missing repo or storage failure also
   exits 2 (runtime error).

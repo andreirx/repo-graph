@@ -52,6 +52,7 @@
 //!   - your code's calls 95% resolved (HIGH)
 //! ```
 
+use repo_graph_agent::dto::IndexDrift;
 use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
@@ -92,6 +93,12 @@ pub struct ExplainResponse {
     /// non-symbol / no-hint answers (absent on the wire); rendered by the shared witness projection.
     #[serde(default)]
     pub layer2_resolution: Option<serde_json::Value>,
+    /// INDEX-BASIS-1: the query-time working-tree drift the daemon attached onto
+    /// `value` (git basis + how far the tree has moved). Rendered as explain's
+    /// "index basis / drift" footer line. Absent on the wire only from an older
+    /// daemon; then no drift line is shown.
+    #[serde(default)]
+    pub index_drift: Option<IndexDrift>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,6 +183,15 @@ impl ExplainResponse {
         );
         if !layer2.is_empty() {
             out.push_str(&layer2);
+            out.push('\n');
+        }
+
+        // ── INDEX-BASIS-1: index basis / working-tree drift footer ──
+        // The load-bearing "which commit do these facts describe, and how far has
+        // the tree moved" line — the same wording orient/check render (one home,
+        // `IndexDrift::describe`). Absent only from an older daemon.
+        if let Some(drift) = &self.index_drift {
+            out.push_str(&drift.describe());
             out.push('\n');
         }
 
@@ -307,6 +323,7 @@ mod tests {
             signals: vec![],
             truncated: false,
             layer2_resolution: None,
+            index_drift: None,
         }
     }
 

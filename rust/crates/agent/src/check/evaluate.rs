@@ -94,21 +94,58 @@ pub fn evaluate_conditions(input: &CheckInput) -> Vec<ConditionResult> {
         });
     }
 
-    // ── 3. STALE_FILES ──────────────────────────────────────
-    if input.stale_file_count == 0 {
-        results.push(ConditionResult {
-            code: ConditionCode::StaleFiles,
-            status: ConditionStatus::Pass,
-            summary: "No stale files.".to_string(),
-        });
+    // ── 3. UNPARSED_FILES (+ deprecated STALE_FILES alias) ───
+    //
+    // INDEX-BASIS-1: this condition measures PARSE status — files whose recorded
+    // parse state is behind the stored file version (`get_stale_files`). It is NOT
+    // working-tree drift (that is INDEX_DRIFT below). The old name `STALE_FILES`
+    // implied "the tree has moved", which it never measured — a name/semantics
+    // mismatch. The honest name is `UNPARSED_FILES`.
+    //
+    // The deprecated `STALE_FILES` condition is emitted alongside for one release
+    // (same status + count) so any consumer keyed on the old code keeps working;
+    // human output suppresses it (rgr). Both carry the SAME status, so the verdict
+    // is unchanged by the duplication.
+    let (parse_status, unparsed_summary) = if input.stale_file_count == 0 {
+        (
+            ConditionStatus::Pass,
+            "No files failed to parse.".to_string(),
+        )
     } else {
+        (
+            ConditionStatus::Fail,
+            format!("{} files could not be parsed.", input.stale_file_count),
+        )
+    };
+    results.push(ConditionResult {
+        code: ConditionCode::UnparsedFiles,
+        status: parse_status,
+        summary: unparsed_summary.clone(),
+    });
+    results.push(ConditionResult {
+        code: ConditionCode::StaleFiles,
+        status: parse_status,
+        summary: format!("[deprecated: renamed UNPARSED_FILES] {}", unparsed_summary),
+    });
+
+    // ── 3b. INDEX_DRIFT ─────────────────────────────────────
+    //
+    // INDEX-BASIS-1 §2.4: working-tree drift since the index basis commit.
+    // Informational — `Incomplete` when the tree has moved (or the basis/drift is
+    // unknown), `Pass` when clean or not-a-git-repo, NEVER `Fail` by itself. The
+    // drift is computed by the daemon (git + storage) and handed in via
+    // `input.index_drift`; when absent (the simple `run_check` entry), the
+    // condition is OMITTED rather than fabricated as a false "unknown".
+    if let Some(drift) = &input.index_drift {
+        let status = if drift.makes_check_incomplete() {
+            ConditionStatus::Incomplete
+        } else {
+            ConditionStatus::Pass
+        };
         results.push(ConditionResult {
-            code: ConditionCode::StaleFiles,
-            status: ConditionStatus::Fail,
-            summary: format!(
-                "{} stale files recorded in storage.",
-                input.stale_file_count
-            ),
+            code: ConditionCode::IndexDrift,
+            status,
+            summary: drift.describe(),
         });
     }
 

@@ -32,6 +32,8 @@ fn minimal_response() -> OrientResponse {
         relationship_next_action: None,
         measurement_coverage: None,
         witnesses: None,
+        index_drift: None,
+        parse_status: None,
     }
 }
 
@@ -854,7 +856,14 @@ fn wrapper_full_renders_dense_body_serving_block_and_degradation() {
     );
     assert!(out.contains("answer basis partial"), "{out}");
     assert!(out.contains("some required inputs incomplete"), "{out}");
+    // INDEX-BASIS-1 (review-0 fix #2): the coherence envelope freshness MEET keeps
+    // its own name — it is NOT relabeled `parse`. This fixture attaches no
+    // `parse_status`, so no `parse` clause appears (parse is a SEPARATE axis).
     assert!(out.contains("freshness precisionpending"), "{out}");
+    assert!(
+        !out.contains("parse "),
+        "no parse clause without parse_status: {out}"
+    );
     assert!(out.contains("sources: livegraph, sqlite"), "{out}");
 }
 
@@ -885,11 +894,115 @@ fn wrapper_small_has_compressed_serving_no_degradation() {
     assert!(!out.contains("Degradation"));
     // HONEST-DEGRADATION-IMPL-2 (D3): compressed one-line Serving posture — scoped answer-basis, NOT a
     // bare global "exact" under "Certainty".
+    // INDEX-BASIS-1 (review-0 fix #2): the envelope freshness keeps its own name;
+    // no `parse_status` attached here → the pre-slice compressed footer, unchanged.
+    // No `index_drift` in this fixture → no basis/drift line.
     assert!(
         out.contains("Serving: answer basis exact, freshness fresh · sources: sqlite"),
         "{out}"
     );
+    assert!(
+        !out.contains("parse "),
+        "no parse clause without parse_status: {out}"
+    );
     assert!(!out.contains("Certainty"), "{out}");
+}
+
+// ── INDEX-BASIS-1 — the index basis / working-tree drift footer line ───────────────────────────────
+
+#[test]
+fn wrapper_renders_index_basis_and_drift_line() {
+    // When the daemon attaches `value.index_drift`, the footer carries the honest
+    // basis + drift line (from `IndexDrift::describe`, the one wording home).
+    let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1",
+                "command": "orient",
+                "repo": "moved-app",
+                "snapshot": "snap-1",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "high",
+                "signals": [], "limits": [], "next": [], "truncated": false,
+                "index_drift": {
+                    "state": "drifted",
+                    "basis": "abcdef0123456789",
+                    "commits_ahead": 1,
+                    "files_changed": 3,
+                    "indexed_changed": 3,
+                    "modules": ["src"]
+                }
+            },
+            "provenance": { "source": ["sqlite"] },
+            "trust": { "class": "Exact", "completeness": "Complete" },
+            "freshness": "Fresh"
+        }"#;
+    let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+    let out = render_orient_envelope(&env, OrientDepth::Small);
+    assert!(out.contains("index basis: abcdef0"), "sha7 basis: {out}");
+    assert!(out.contains("1 commit ahead"), "{out}");
+    assert!(out.contains("3 files changed"), "{out}");
+    assert!(out.contains("(3 indexed, modules src)"), "{out}");
+    assert!(out.contains("rmap refresh"), "next action: {out}");
+}
+
+#[test]
+fn wrapper_renders_basis_unknown_for_pre_slice_snapshot() {
+    // A snapshot indexed before basis tracking → honest "unknown, run refresh".
+    let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1", "command": "orient", "repo": "old-app",
+                "snapshot": "snap-1",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "high",
+                "signals": [], "limits": [], "next": [], "truncated": false,
+                "index_drift": { "state": "basis_unknown" }
+            },
+            "provenance": { "source": ["sqlite"] },
+            "trust": { "class": "Exact", "completeness": "Complete" },
+            "freshness": "Fresh"
+        }"#;
+    let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+    let out = render_orient_envelope(&env, OrientDepth::Small);
+    assert!(
+        out.contains("index basis: unknown (indexed before basis tracking)"),
+        "{out}"
+    );
+    assert!(out.contains("rmap refresh"), "{out}");
+}
+
+#[test]
+fn wrapper_renders_parse_status_beside_freshness() {
+    // review-0 fix #2: the honest `parse` axis (from value.parse_status) renders
+    // BESIDE the coherence envelope `freshness` (which keeps its own name) — the two
+    // are distinct axes, never conflated. Here freshness=fresh, parse=2 unparsed.
+    let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1", "command": "orient", "repo": "app",
+                "snapshot": "snap-1",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "high",
+                "signals": [], "limits": [], "next": [], "truncated": false,
+                "parse_status": { "state": "unparsed", "count": 2 }
+            },
+            "provenance": { "source": ["sqlite"] },
+            "trust": { "class": "Exact", "completeness": "Complete" },
+            "freshness": "Fresh"
+        }"#;
+    let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+    let out = render_orient_envelope(&env, OrientDepth::Small);
+    assert!(
+        out.contains("Serving: answer basis exact, freshness fresh, parse: 2 unparsed"),
+        "freshness kept its name; parse is its own honest value with the ratified `parse:` label: {out}"
+    );
+
+    // parse: ok when nothing failed to parse.
+    let json_ok = json.replace(
+        r#"{ "state": "unparsed", "count": 2 }"#,
+        r#"{ "state": "ok" }"#,
+    );
+    let env_ok: CoherenceEnvelope<OrientResponse> = serde_json::from_str(&json_ok).unwrap();
+    let out_ok = render_orient_envelope(&env_ok, OrientDepth::Small);
+    assert!(out_ok.contains("freshness fresh, parse: ok"), "{out_ok}");
 }
 
 // ── HONEST-DEGRADATION-IMPL-2 (D5) — toolchain-aware next-action line renders ──────────────────────
@@ -1235,6 +1348,7 @@ fn one_shared_projection_reaches_orient_trust_and_check() {
         ],
         enrichment_state: Some(EnrichmentState::Ran),
         gate_outcome: None,
+        index_drift: None,
     })
     .into_iter()
     .find(|c| c.code == ConditionCode::CallGraphReliability)

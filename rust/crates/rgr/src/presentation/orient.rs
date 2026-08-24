@@ -45,6 +45,7 @@
 //!   - rmap explain src/core/auth/session.ts
 //! ```
 
+use repo_graph_agent::dto::{IndexDrift, ParseStatus};
 use repo_graph_classification::measurement_coverage::MeasurementCoverageBlock;
 use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
@@ -212,19 +213,28 @@ pub fn render_orient_envelope(
     // for `Exact` (`repo-graph-trust-model`), i.e. the answer's INPUT BASIS + freshness, NOT the
     // call/import reliability (which rides the separate Degradation/Reliability sections). Heading +
     // scoped "answer basis {class}" so it never reads as a bare global "exact".
+    // INDEX-BASIS-1 (review-0 fix #2): the envelope `freshness` axis is the coherence
+    // serving MEET (it can be `precisionpending` mid-refresh) — it KEEPS its own name.
+    // The `parse` axis is a SEPARATE honest value (`value.parse_status`, from
+    // `get_stale_files`), rendered only when the daemon attached it. The word
+    // "fresh"/drift belongs ONLY to the basis/drift line below (from `IndexDrift`).
+    let parse_clause = env.value.parse_status.as_ref().map(|p| p.footer_clause());
     let phrase = answer_class_phrase(&class);
     if depth.shows_full_detail() {
         // Full serving/provenance block (large / --full).
         out.push_str("\n\n");
         out.push_str(&heading("Serving"));
-        if phrase.is_empty() {
-            out.push_str(&bullet(&format!(
-                "answer basis {class}; freshness {freshness}"
-            )));
+        let mut posture = if phrase.is_empty() {
+            format!("answer basis {class}; freshness {freshness}")
         } else {
-            out.push_str(&bullet(&format!(
-                "answer basis {class} ({phrase}); freshness {freshness}"
-            )));
+            format!("answer basis {class} ({phrase}); freshness {freshness}")
+        };
+        if let Some(parse) = &parse_clause {
+            posture.push_str(&format!("; parse: {parse}"));
+        }
+        out.push_str(&bullet(&posture));
+        if let Some(drift) = &env.value.index_drift {
+            out.push_str(&bullet(&drift.describe()));
         }
         if !sources.is_empty() {
             out.push_str(&bullet(&format!("sources: {}", sources.join(", "))));
@@ -239,9 +249,22 @@ pub fn render_orient_envelope(
         } else {
             format!(" · sources: {}", sources.join(", "))
         };
+        // `None` here = the daemon attached NO `parse_status` (old daemon) → no
+        // parse clause. A parse READ FAILURE is never None: it is
+        // `ParseStatus::Unknown` and renders `parse: unknown (reason)`.
+        let parse_seg = match &parse_clause {
+            Some(p) => format!(", parse: {p}"),
+            None => String::new(),
+        };
         out.push_str(&format!(
-            "\n\nServing: answer basis {class}, freshness {freshness}{src}"
+            "\n\nServing: answer basis {class}, freshness {freshness}{parse_seg}{src}"
         ));
+        // The basis/drift line always rides its OWN line — it is the load-bearing
+        // "which commit do these facts describe, and how far have you moved" fact.
+        if let Some(drift) = &env.value.index_drift {
+            out.push('\n');
+            out.push_str(&drift.describe());
+        }
     }
     out.trim_end().to_string()
 }
@@ -303,6 +326,19 @@ pub struct OrientResponse {
     /// W-BOTH with a current measured ledger; absent on the wire otherwise (R-0).
     #[serde(default)]
     pub witnesses: Option<serde_json::Value>,
+    /// INDEX-BASIS-1: the query-time working-tree drift the daemon attached onto
+    /// `value` (git basis + how far the tree has moved). Rendered as the honest
+    /// "index basis / drift" footer line. Absent on the wire only from an older
+    /// daemon; then no drift line is shown.
+    #[serde(default)]
+    pub index_drift: Option<IndexDrift>,
+    /// INDEX-BASIS-1 (review-0 fix #2): the honest parse axis (from
+    /// `get_stale_files`), attached by the daemon. Rendered as the footer
+    /// `parse: ok|N unparsed|unknown (reason)` — DISTINCT from the coherence
+    /// envelope `freshness` meet. Absent on the wire only from an older daemon; then
+    /// no parse clause is shown.
+    #[serde(default)]
+    pub parse_status: Option<ParseStatus>,
 }
 
 #[derive(Debug, Deserialize)]

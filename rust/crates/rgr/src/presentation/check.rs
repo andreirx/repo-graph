@@ -80,6 +80,17 @@ pub struct ConditionEvidence {
     pub summary: String,
 }
 
+/// INDEX-BASIS-1: condition codes emitted for one-release JSON/CI compatibility but
+/// SUPPRESSED from human output (a duplicate would only add noise). `STALE_FILES` is
+/// the deprecated alias of the honestly-named `UNPARSED_FILES`; both carry the same
+/// status/data, so hiding the alias never hides a distinct verdict.
+const HUMAN_SUPPRESSED_CONDITION_CODES: &[&str] = &["STALE_FILES"];
+
+/// Whether a condition should appear in human output (false for deprecated aliases).
+fn shown_in_human(c: &ConditionEvidence) -> bool {
+    !HUMAN_SUPPRESSED_CONDITION_CODES.contains(&c.code.as_str())
+}
+
 // ── Human Rendering ──────────────────────────────────────────────────────────
 
 /// Render check's coherence-wrapped daemon response (CHECK-LIVEGRAPH-IMPL).
@@ -194,18 +205,26 @@ impl CheckResponse {
         };
 
         // Incomplete conditions (if any)
-        if !evidence.incomplete_conditions.is_empty() {
+        if evidence.incomplete_conditions.iter().any(shown_in_human) {
             out.push_str(&heading("Incomplete conditions"));
-            for c in &evidence.incomplete_conditions {
+            for c in evidence
+                .incomplete_conditions
+                .iter()
+                .filter(|c| shown_in_human(c))
+            {
                 out.push_str(&bullet(&format!("{}: {}", c.code, c.summary)));
             }
             out.push('\n');
         }
 
         // Failing conditions (if any)
-        if !evidence.fail_conditions.is_empty() {
+        if evidence.fail_conditions.iter().any(shown_in_human) {
             out.push_str(&heading("Failing conditions"));
-            for c in &evidence.fail_conditions {
+            for c in evidence
+                .fail_conditions
+                .iter()
+                .filter(|c| shown_in_human(c))
+            {
                 out.push_str(&bullet(&format!("{}: {}", c.code, c.summary)));
             }
             out.push('\n');
@@ -219,9 +238,9 @@ impl CheckResponse {
             &evidence.passing
         };
 
-        if !passing.is_empty() {
+        if passing.iter().any(shown_in_human) {
             out.push_str(&heading("Passing conditions"));
-            for c in passing {
+            for c in passing.iter().filter(|c| shown_in_human(c)) {
                 out.push_str(&bullet(&format!("{}: {}", c.code, c.summary)));
             }
         }

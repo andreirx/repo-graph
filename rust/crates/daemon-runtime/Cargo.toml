@@ -103,6 +103,9 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 # DAEMON-CANCEL-3 (tests/fixtures only): inject `unresolved_edges` so the trust/check
-# in-flight cancellation tests exercise the real 100k-sample chokepoint. Dev-only edge
-# (no production dependency, no cycle — indexer does not depend on daemon-runtime).
+# in-flight cancellation tests exercise the real 100k-sample chokepoint. INDEX-BASIS-1
+# (RULING 3) also uses its `SnapshotLifecyclePort` write trait in `tests/index_basis.rs`
+# to persist a synthetic `index_basis` diagnostic for the head-unreadable/pre-slice render
+# proofs. Dev-only edge (no production dependency, no cycle — indexer does not depend on
+# daemon-runtime).
 repo-graph-indexer = { path = "../indexer" }

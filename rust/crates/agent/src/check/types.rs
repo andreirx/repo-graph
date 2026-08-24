@@ -10,6 +10,7 @@
 //! The use-case layer (step 3) adds Serialize when the envelope
 //! shape is finalized.
 
+use crate::dto::index_drift::IndexDrift;
 use crate::storage_port::{AgentReliabilityLevel, EnrichmentState};
 
 // ── Verdicts ────────────────────────────────────────────────────
@@ -39,7 +40,17 @@ pub enum ConditionStatus {
 pub enum ConditionCode {
     SnapshotExists,
     IndexNotEmpty,
+    /// INDEX-BASIS-1: parse-status condition, honestly named — "N files could not
+    /// be parsed". Replaces the misleading `StaleFiles` (which measured parse
+    /// status, never working-tree drift).
+    UnparsedFiles,
+    /// INDEX-BASIS-1: DEPRECATED alias of `UnparsedFiles`, kept emitted for one
+    /// release so any consumer keyed on the old `STALE_FILES` code keeps working.
+    /// Same status/data as `UnparsedFiles`; suppressed from human output.
     StaleFiles,
+    /// INDEX-BASIS-1: working-tree drift since the index basis commit. Informational
+    /// → `Incomplete` when drifted/unknown, never `Fail` by itself.
+    IndexDrift,
     CallGraphReliability,
     EnrichmentState,
     GateStatus,
@@ -50,7 +61,9 @@ impl ConditionCode {
         match self {
             Self::SnapshotExists => "SNAPSHOT_EXISTS",
             Self::IndexNotEmpty => "INDEX_NOT_EMPTY",
+            Self::UnparsedFiles => "UNPARSED_FILES",
             Self::StaleFiles => "STALE_FILES",
+            Self::IndexDrift => "INDEX_DRIFT",
             Self::CallGraphReliability => "CALL_GRAPH_RELIABILITY",
             Self::EnrichmentState => "ENRICHMENT_STATE",
             Self::GateStatus => "GATE_STATUS",
@@ -109,6 +122,13 @@ pub struct CheckInput {
     /// Gate outcome projection. None if no snapshot or gate not
     /// evaluated.
     pub gate_outcome: Option<GateOutcomeForCheck>,
+    /// INDEX-BASIS-1: query-time working-tree drift since the index basis commit,
+    /// computed by the daemon (git + storage) and handed in as pre-fetched data —
+    /// the pure reducer performs no I/O. `None` when the caller did not compute
+    /// drift (e.g. the simple `run_check` entry / unit tests); the `INDEX_DRIFT`
+    /// condition is then OMITTED rather than fabricated. The daemon always supplies
+    /// `Some`, so production `check` always evaluates it.
+    pub index_drift: Option<IndexDrift>,
 }
 
 // ── Gate outcome projection ─────────────────────────────────────

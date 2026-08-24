@@ -267,11 +267,19 @@ Verdict: PASS@Fresh
 Passing conditions
   - SNAPSHOT_EXISTS: READY snapshot available.
   - INDEX_NOT_EMPTY: 2 files indexed.
-  - STALE_FILES: No stale files.
+  - UNPARSED_FILES: No files failed to parse.
+  - INDEX_DRIFT: index basis: not a git repo — working-tree drift not tracked
   - CALL_GRAPH_RELIABILITY: Call graph reliability is HIGH.
   - ENRICHMENT_STATE: No eligible edges for enrichment.
   - GATE_STATUS: No gate policy configured.
 ```
+
+> INDEX-BASIS-1 renamed the parse condition `STALE_FILES` → `UNPARSED_FILES` (it always
+> measured parse status, never working-tree staleness) and added `INDEX_DRIFT` (basis commit +
+> query-time git drift). The dogfood fixture is not a git repo, so `INDEX_DRIFT` is `Pass`
+> ("drift not tracked"). The deprecated `STALE_FILES` code is still emitted in the check JSON
+> (one release, `[deprecated: renamed UNPARSED_FILES] …`) for CI consumers but is suppressed
+> from this human output.
 
 **`out/repo-list-isolated.txt`** (isolated registry — the fixture, and nothing else):
 ```text

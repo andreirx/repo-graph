@@ -7,7 +7,9 @@
 pub mod budget;
 pub mod coherent;
 pub mod envelope;
+pub mod index_drift;
 pub mod limit;
+pub mod parse_status;
 pub mod signal;
 pub mod source;
 
@@ -16,7 +18,9 @@ pub use envelope::{
     Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction, NextKind, OrientResult,
     ResolvedKind, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
+pub use index_drift::IndexDrift;
 pub use limit::{Limit, LimitCode};
+pub use parse_status::ParseStatus;
 pub use signal::{
     BoundaryViolationEvidence,
     BoundaryViolationsEvidence,

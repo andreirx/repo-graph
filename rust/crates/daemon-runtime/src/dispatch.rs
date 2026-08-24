@@ -39,6 +39,54 @@ use crate::handlers::inventory::classify_retention_only;
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
+/// INDEX-BASIS-1: attach a computed serving fact (`index_drift`, `parse_status`)
+/// onto the serialized envelope's `value` object, so rgr's response structs capture
+/// it via one `#[serde(default)]` field. Additive: if `value` is somehow not an
+/// object, or serialization fails, the field is simply absent (logged) — the rest of
+/// the response is untouched. Two concrete callers: `index_drift` (orient + explain)
+/// and `parse_status` (orient); axis = per-field additive `value` enrichment; the
+/// rejected simpler alternative (one bespoke fn per field) duplicated this
+/// object-get/insert/log logic.
+fn inject_value_field<T: serde::Serialize>(
+    output: &mut serde_json::Value,
+    key: &str,
+    value: &T,
+    repo_uid: &str,
+) {
+    match serde_json::to_value(value) {
+        Ok(v) => {
+            if let Some(value_obj) = output.get_mut("value").and_then(|v| v.as_object_mut()) {
+                value_obj.insert(key.to_string(), v);
+            } else {
+                eprintln!(
+                    "warning: {key} not attached (envelope `value` missing/not object) for {repo_uid}"
+                );
+            }
+        }
+        Err(e) => eprintln!("warning: could not serialize {key} for {repo_uid}: {e}"),
+    }
+}
+
+/// INDEX-BASIS-1 (review-0 fix #2): the honest `parse` footer axis for orient,
+/// computed from the SAME `get_stale_files` read that drives `check`'s
+/// `UNPARSED_FILES` condition. A FAILED read is `Unknown` WITH the reason — never
+/// `Ok`/zero (standing honesty rule: a rendered fallible read is unknown, not zero).
+fn compute_parse_status(
+    storage: &StorageConnection,
+    snapshot_uid: &str,
+) -> repo_graph_agent::dto::parse_status::ParseStatus {
+    use repo_graph_agent::dto::parse_status::ParseStatus;
+    match repo_graph_agent::AgentStorageRead::get_stale_files(storage, snapshot_uid) {
+        Ok(files) if files.is_empty() => ParseStatus::Ok,
+        Ok(files) => ParseStatus::Unparsed {
+            count: files.len() as u64,
+        },
+        Err(e) => ParseStatus::Unknown {
+            reason: e.to_string(),
+        },
+    }
+}
+
 /// RMAPD-PERF-1 / PERF-INSTRUMENTATION-1: performance tracing macro.
 ///
 /// Emits to stderr (the daemon log) when EITHER the compile-time `perf-trace`
@@ -2807,9 +2855,35 @@ impl ServiceDispatcher {
             })
             .unwrap_or_default();
 
+        // INDEX-BASIS-1 (operator RULING 3): classify the git HEAD this index is being
+        // built FROM into a `BasisOutcome`, and hand it to compose on `ComposeOptions`.
+        // The daemon is the composition root that owns the git probe; compose PERSISTS the
+        // outcome (the `basis_commit` column for a read HEAD, plus a self-describing
+        // `index_basis` diagnostic for the two NULL-basis outcomes) IN THE SAME WRITE FLOW
+        // that writes the snapshot row — deterministic, propagates on failure. This replaces
+        // the deleted best-effort post-compose daemon write whose loss could impersonate
+        // pre-slice history (review-5). Three outcomes: Ok(Some)→Basis (stamp the sha);
+        // Ok(None)→NonGit (recorded NULL, so a THIS-slice non-git is distinct from pre-slice);
+        // Err→Failure (git repo, HEAD unreadable — unborn or generic, classified from git's
+        // own error here at write time, the freshest evidence).
+        let basis_probe = crate::index_drift::basis_at_index(&canonical_path);
+        if let Err(e) = &basis_probe {
+            eprintln!(
+                "warning: could not read git HEAD to stamp index basis for {}: {e}",
+                canonical_path.display()
+            );
+        }
+        // Pass the repo path so a HEAD-read failure can be classified via the POSITIVE
+        // unborn probe (`git rev-list -n 1 --all`), never from stderr text (review-9 #1).
+        let basis_outcome =
+            crate::index_drift::basis_outcome_from_probe(&canonical_path, basis_probe);
+        let basis_commit = basis_outcome.basis_commit();
+
         let options = ComposeOptions {
             c_include_roots,
             storage_root_path,
+            basis_commit,
+            basis_outcome: Some(basis_outcome),
             ..ComposeOptions::default()
         };
 
@@ -2882,6 +2956,9 @@ impl ServiceDispatcher {
                     Some(&result.snapshot_uid),
                     "completed",
                 );
+                // INDEX-BASIS-1 (operator RULING 3): the index-basis outcome is now recorded
+                // BY COMPOSE, in the same write flow that wrote the snapshot row (see
+                // `ComposeOptions.basis_outcome` above) — no best-effort post-compose write.
                 // Update registry with index timestamp
                 let now = crate::util::utc_now_iso8601();
                 {
@@ -3164,9 +3241,28 @@ impl ServiceDispatcher {
             }
         };
 
+        // INDEX-BASIS-1 (operator RULING 3): re-classify the git basis at refresh start (an
+        // explicit refresh re-anchors the facts to the current HEAD). `repo_path` is the
+        // on-disk repo root resolved above. Same outcome policy as the index arm — compose
+        // persists the `BasisOutcome` (column sha for a read HEAD; self-describing
+        // `index_basis` diagnostic for the NULL-basis outcomes) in the refresh write flow.
+        let basis_probe = crate::index_drift::basis_at_index(&repo_path);
+        if let Err(e) = &basis_probe {
+            eprintln!(
+                "warning: could not read git HEAD to stamp index basis for {}: {e}",
+                repo_path.display()
+            );
+        }
+        // Pass the repo path so a HEAD-read failure can be classified via the POSITIVE
+        // unborn probe (`git rev-list -n 1 --all`), never from stderr text (review-9 #1).
+        let basis_outcome = crate::index_drift::basis_outcome_from_probe(&repo_path, basis_probe);
+        let basis_commit = basis_outcome.basis_commit();
+
         let options = ComposeOptions {
             c_include_roots,
             storage_root_path,
+            basis_commit,
+            basis_outcome: Some(basis_outcome),
             ..ComposeOptions::default()
         };
 
@@ -3230,6 +3326,9 @@ impl ServiceDispatcher {
                     Some(&result.snapshot_uid),
                     "completed",
                 );
+                // INDEX-BASIS-1 (operator RULING 3): the refresh-start basis outcome is
+                // recorded BY COMPOSE in the refresh write flow (see
+                // `ComposeOptions.basis_outcome` above) — no best-effort post-compose write.
                 // Build response with all summary data for CLI parity
                 let mut response = serde_json::json!({
                     "snapshot_uid": result.snapshot_uid,
@@ -3813,6 +3912,61 @@ impl ServiceDispatcher {
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
     #[allow(unused_variables)] // Timing variables used only with perf-trace feature
+    /// INDEX-BASIS-1: compute working-tree drift for a query handler
+    /// (orient/check/explain). Resolves the on-disk repo root (the same
+    /// `resolve_root_path` pattern the churn/hotspots/risk handlers use to reach
+    /// git) and hands git + the indexed-file/module facts to
+    /// [`crate::index_drift::compute_index_drift`]. A failure to resolve the repo
+    /// path is rendered as an honest `Unknown`/`BasisUnknown`, never a false
+    /// "clean".
+    fn compute_query_drift(
+        &self,
+        storage: &StorageConnection,
+        repo_state: &crate::state::RepoState,
+        repo_uid: &str,
+        snapshot: &repo_graph_agent::storage_port::AgentSnapshot,
+    ) -> repo_graph_agent::dto::index_drift::IndexDrift {
+        let repo_path = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
+            Ok(Some(r)) => crate::handlers::quality::support::resolve_root_path(
+                repo_state.db_path(),
+                &r.root_path,
+            ),
+            // A storage MISS or READ ERROR means git was never reached → drift is
+            // genuinely UNKNOWN (never `BasisUnknown`, which would falsely claim the
+            // snapshot "predates basis tracking"; never a false clean). `Err` preserves
+            // the actual `StorageError` in the reason instead of discarding it.
+            Ok(None) => {
+                return crate::index_drift::unresolved_repo_drift(
+                    snapshot.basis_commit.clone(),
+                    "repo metadata not found in storage; cannot resolve repo path to compute \
+                     drift"
+                        .to_string(),
+                );
+            }
+            Err(e) => {
+                return crate::index_drift::unresolved_repo_drift(
+                    snapshot.basis_commit.clone(),
+                    format!("repo metadata could not be read from storage to compute drift ({e})"),
+                );
+            }
+        };
+        // INDEX-BASIS-1 (operator RULING 3): read the WRITE-time `index_basis` outcome
+        // record (if any) so a no-basis snapshot renders the TRUE state (non-git / unborn /
+        // HEAD-unreadable / pre-slice) from a recorded fact, never a live HEAD re-probe.
+        // `storage` is a concrete `StorageConnection` (`TrustStorageRead`), which the narrow
+        // agent port lacks — so the read lives here and the outcome is passed into the generic
+        // computation. A read/parse failure is carried as `Err` → rendered Unknown-with-reason,
+        // never a false BasisUnknown (honesty rule #1). Consulted only on the no-basis branch.
+        let basis_outcome = crate::index_drift::read_basis_outcome(storage, &snapshot.snapshot_uid);
+        crate::index_drift::compute_index_drift(
+            storage,
+            &repo_path,
+            &snapshot.snapshot_uid,
+            snapshot.basis_commit.as_deref(),
+            basis_outcome,
+        )
+    }
+
     fn handle_orient(
         &self,
         request: &Request,
@@ -4070,7 +4224,7 @@ impl ServiceDispatcher {
             serve_witness.m2.module_summary
                 && crate::orient_serve::epoch_still_resident(&repo_state.livegraph, &epoch),
         );
-        let output = match serde_json::to_value(&envelope) {
+        let mut output = match serde_json::to_value(&envelope) {
             Ok(v) => v,
             Err(e) => {
                 return DispatchResult::error(
@@ -4079,6 +4233,24 @@ impl ServiceDispatcher {
                 );
             }
         };
+
+        // INDEX-BASIS-1: inject the query-time working-tree drift as an ADDITIVE
+        // field on the envelope's `value` (the same post-serialize enrichment
+        // explain uses for its witness projections). It rides `value` so rgr's
+        // `OrientResponse` captures it with one `#[serde(default)]` field; the pure
+        // agent envelope is untouched. `epoch.snapshot` carries the recorded basis
+        // for the pinned request epoch. rgr renders it as the "index basis / drift"
+        // footer line.
+        let index_drift =
+            self.compute_query_drift(&storage, &repo_state, &repo_uid, &epoch.snapshot);
+        inject_value_field(&mut output, "index_drift", &index_drift, &repo_uid);
+
+        // INDEX-BASIS-1 (review-0 fix #2): the parse axis is its OWN honest value
+        // (from get_stale_files), NOT the coherence-envelope freshness meet (which
+        // keeps its own name). rgr renders it as the footer `parse: ok|N unparsed`.
+        let parse_status = compute_parse_status(&storage, &epoch.snapshot.snapshot_uid);
+        inject_value_field(&mut output, "parse_status", &parse_status, &repo_uid);
+
         let envelope_ms = envelope_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -4148,6 +4320,25 @@ impl ServiceDispatcher {
         // — threaded via `run_check_cancellable` → `get_trust_summary_cancellable` —
         // breaks the pure trust sample loop. So fixing #2 (complexity, SQL-interrupted)
         // + #3 (trust) and routing check through them gives check in-flight cancel too.
+        // INDEX-BASIS-1: compute working-tree drift (git + storage) BEFORE `storage`
+        // is moved into the worker below. Drift becomes check's `INDEX_DRIFT`
+        // condition (Incomplete when the tree has moved past the basis; Pass when
+        // clean / not-a-git-repo). `None` only when there is no snapshot to anchor
+        // to — the reducer then omits the condition rather than fabricate it.
+        let index_drift =
+            match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
+                Ok(Some(snap)) => {
+                    Some(self.compute_query_drift(&storage, &repo_state, &repo_uid, &snap))
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    // Snapshot read failed here; the check reducer re-reads it and will
+                    // surface the failure. Omit the drift condition (never a false value).
+                    eprintln!("warning: index-drift snapshot read failed for {repo_uid}: {e}");
+                    None
+                }
+            };
+
         let check_start = Instant::now();
         let mut check_result = {
             // Hoist the interrupt handle BEFORE moving the connection into the worker
@@ -4155,6 +4346,7 @@ impl ServiceDispatcher {
             let interrupt = storage.interrupt_handle();
             let repo_uid_w = repo_uid.clone();
             let now_w = now.clone();
+            let drift_w = index_drift.clone();
             match crate::cancel::run_interruptible(
                 emitter,
                 "running_check",
@@ -4165,6 +4357,7 @@ impl ServiceDispatcher {
                         &storage,
                         &repo_uid_w,
                         &now_w,
+                        drift_w.clone(),
                         &mut checkpoint,
                     )
                     .map_err(|e| e.to_string())
@@ -4491,6 +4684,13 @@ impl ServiceDispatcher {
                         &layer2_sites,
                         &mut v,
                     );
+
+                    // INDEX-BASIS-1: additive working-tree drift on `value`, same
+                    // pattern as orient. rgr renders it as explain's "index basis /
+                    // drift" footer line.
+                    let index_drift =
+                        self.compute_query_drift(&storage, &repo_state, &repo_uid, &epoch.snapshot);
+                    inject_value_field(&mut v, "index_drift", &index_drift, &repo_uid);
                 }
                 DispatchResult::success(&request.id, v)
             }

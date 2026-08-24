@@ -65,6 +65,10 @@ pub mod explain_lg_serve;
 pub mod focus_resolution_cert;
 pub mod handlers;
 mod http_boundary_read; // HTTP-BOUNDARY-1: read-time HTTP boundary render helpers (crate-private)
+                        // INDEX-BASIS-1: stamp the git basis at index/refresh; compute working-tree drift at
+                        // query time. Crate-internal glue between repo-graph-git and the agent IndexDrift DTO;
+                        // the five callers (index/refresh/orient/check/explain handlers) are all in this crate.
+pub(crate) mod index_drift;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;

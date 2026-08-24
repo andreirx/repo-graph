@@ -34,8 +34,10 @@
 //! }
 //! ```
 
+mod basis;
 mod churn;
 mod error;
 
+pub use basis::{head_commit, is_git_repo, is_unborn_head, working_tree_drift, WorkingTreeDrift};
 pub use churn::{get_file_churn, ChurnWindow, FileChurnEntry};
 pub use error::GitError;
