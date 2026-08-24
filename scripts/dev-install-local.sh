@@ -47,7 +47,41 @@ readonly LOG_FILE="${HOME}/Library/Logs/repo-graph/daemon.log"
 #   export RMAP_CODESIGN_IDENTITY=<hash-or-name>
 # Default is a self-signed identity you create ONCE (see install_binaries). Personal identities are NOT
 # hardcoded here — this script is shared.
-readonly CODESIGN_IDENTITY="${RMAP_CODESIGN_IDENTITY:-rmapd-dev}"
+# Resolution order (LOUD, never silent — operator directive 2026-08-24):
+#   1. $RMAP_CODESIGN_IDENTITY if set
+#   2. the 'rmapd-dev' self-signed identity if present
+#   3. the FIRST valid codesigning identity in the keychain (named in the output)
+#   4. NOTHING found -> the install FAILS (signing is load-bearing: an ad-hoc binary loses
+#      its TCC Documents/Full-Disk grant on every rebuild and every index dies at scan).
+resolve_codesign_identity() {
+    if [[ -n "${RMAP_CODESIGN_IDENTITY:-}" ]]; then
+        printf '%s' "${RMAP_CODESIGN_IDENTITY}"
+        return 0
+    fi
+    local ids
+    ids="$(security find-identity -v -p codesigning 2>/dev/null)"
+    if grep -q "rmapd-dev" <<<"${ids}"; then
+        printf '%s' "rmapd-dev"
+        return 0
+    fi
+    # first valid identity line: `  1) <SHA1> "Name"` -> take the SHA1
+    local first
+    first="$(awk '/^[[:space:]]*[0-9]+\)/ {print $2; exit}' <<<"${ids}")"
+    if [[ -n "${first}" ]]; then
+        printf '%s' "${first}"
+        return 0
+    fi
+    return 1
+}
+if ! CODESIGN_IDENTITY="$(resolve_codesign_identity)"; then
+    echo "ERROR: no codesigning identity available and RMAP_CODESIGN_IDENTITY is unset." >&2
+    echo "  Signing is REQUIRED: an ad-hoc rmapd loses its macOS TCC grant on every rebuild" >&2
+    echo "  (bitten 2026-08-24: every index under ~/Documents failed at scan)." >&2
+    echo "  Fix: security find-identity -v -p codesigning  ->  export RMAP_CODESIGN_IDENTITY=<hash>" >&2
+    echo "  or create the 'rmapd-dev' self-signed identity (Keychain Access -> Certificate Assistant)." >&2
+    exit 1
+fi
+readonly CODESIGN_IDENTITY
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -283,14 +317,10 @@ sign_binaries() {
     [[ "$(uname -s)" == "Darwin" ]] || return 0
 
     if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "${CODESIGN_IDENTITY}"; then
-        warn "  Code-signing identity '${CODESIGN_IDENTITY}' not found — binaries left ad-hoc signed."
-        warn "  macOS will keep re-prompting on each install. Fix it ONE of two ways:"
-        warn "    (a) reuse an existing identity: security find-identity -v -p codesigning"
-        warn "        then: export RMAP_CODESIGN_IDENTITY=<hash>   (e.g. in your shell profile)"
-        warn "    (b) create a self-signed one: Keychain Access -> Certificate Assistant ->"
-        warn "        Create a Certificate... | Name: ${CODESIGN_IDENTITY} | Self Signed Root | Code Signing"
-        return 0
+        echo "ERROR: code-signing identity '${CODESIGN_IDENTITY}' vanished from the keychain — refusing to install ad-hoc binaries (TCC grant would die)." >&2
+        exit 1
     fi
+    info "  Signing with identity: ${CODESIGN_IDENTITY}"
 
     # `--force` replaces the linker's ad-hoc signature. No hardened runtime (it needs entitlements and can break
     # a local dev daemon). First run may prompt for keychain access to the signing key -> click "Always Allow".
@@ -300,10 +330,11 @@ sign_binaries() {
     # stable cert (bitten 2026-08-24: launchd rmapd lost ~/Documents after dev-install).
     local b
     for b in rmap rmapd rgistr; do
-        if codesign --force --sign "${CODESIGN_IDENTITY}" --identifier "com.repo-graph.${b}" "${INSTALL_DIR}/${b}" 2>/dev/null; then
-            info "  Signed ${b} (${CODESIGN_IDENTITY})"
+        if codesign --force --sign "${CODESIGN_IDENTITY}" --identifier "com.repo-graph.${b}" "${INSTALL_DIR}/${b}"; then
+            info "  Signed ${b} (${CODESIGN_IDENTITY}, identifier com.repo-graph.${b})"
         else
-            warn "  codesign ${b} failed — left ad-hoc signed"
+            echo "ERROR: codesign ${b} FAILED — refusing to leave an ad-hoc binary (TCC grant would die)." >&2
+            exit 1
         fi
     done
 }
