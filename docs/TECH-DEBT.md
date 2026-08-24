@@ -4005,3 +4005,17 @@ all 50 self-crates fold. See docs/slices/scanner-gitignore-1.md §6.
   own small slice. Address: before the next release cut. Status: OPEN.
 - Alias loss on a concurrent forget-race re-registration is inherent to "fresh registration" (documented inline in
   dispatch.rs) — accepted, rare, honest. Status: ACCEPTED.
+
+## Operational finding — launchd daemon lost ~/Documents access (2026-08-24)
+
+After `dev-install-local.sh` replaced the binaries and restarted the service, the launchd
+`rmapd` can no longer walk repos under `~/Documents` — every index fails at scan with
+"Operation not permitted" (macOS TCC: the new binary hash lost the folder grant;
+daemon.log shows `fatal: Unable to read current working directory` from git as well).
+Read-only serving from existing DBs still works. EXECUTED evidence: `rmap index` on
+repo-graph 2026-08-24; an isolated shell-spawned daemon (inheriting the terminal's
+grant) indexes the same path fine. Proper solution: grant Full Disk Access (or the
+Documents grant) to `~/.local/bin/rmapd` in System Settings → Privacy & Security, and
+re-grant after binary-replacing installs — OR make the installer surface this
+(INSTALL-ROBUSTNESS class). Address: before the next real index on this machine.
+Status: OPEN (human action or installer slice).
