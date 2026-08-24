@@ -6580,12 +6580,31 @@ impl ServiceDispatcher {
 
         let count = results.len();
 
+        // HTTP-BOUNDARY-1 (review-0 item 2): render the HTTP/REST provider &
+        // consumer map here too. HTTP surfaces live in the boundary-interaction
+        // store (channel_kind='http'), not `project_surfaces`, so we read them as
+        // a separate, honestly-labelled section — never mixed into the project
+        // surface rows. `route: null` for a dynamic URL is preserved. See the
+        // crate-private `http_boundary_read` module (off this 8.9k-line file).
+        // A failed read is UNKNOWN, never an empty REST map (review-4 item 2):
+        // `Err` degrades to an empty list PLUS a labelled degradation field the
+        // renderer prints — it must NOT render as "no recognized patterns".
+        let (http_boundary_surfaces, http_boundary_surfaces_degraded) =
+            match crate::http_boundary_read::http_boundary_surfaces_json(
+                &storage,
+                &snapshot.snapshot_uid,
+            ) {
+                Ok(list) => (list, None),
+                Err(reason) => (Vec::new(), Some(reason)),
+            };
+
         let mut response = serde_json::json!({
             "command": "surfaces list",
             "repo": repo_uid,
             "snapshot": snapshot.snapshot_uid,
             "results": results,
             "count": count,
+            "http_boundary_surfaces": http_boundary_surfaces,
         });
 
         // Add filter info
@@ -6609,6 +6628,15 @@ impl ServiceDispatcher {
                 map.insert(
                     "filter_module".to_string(),
                     serde_json::json!(filter.module),
+                );
+            }
+
+            // HTTP-BOUNDARY-1 (review-4 item 2): a failed HTTP-surface read is
+            // surfaced as a labelled degradation, never a silent empty map.
+            if let Some(reason) = &http_boundary_surfaces_degraded {
+                map.insert(
+                    "http_boundary_surfaces_degraded".to_string(),
+                    serde_json::json!(reason),
                 );
             }
 
@@ -7116,6 +7144,17 @@ impl ServiceDispatcher {
 
         let count = items.len();
 
+        // HTTP-BOUNDARY-1 (review-0 item 4): surface the per-consumer UNLINKED
+        // reasons (ambiguous / unmatched / dynamic). These are recomputed
+        // honestly at read time from the persisted `channel_kind='http'`
+        // surfaces — via the SAME pure matcher `run_http_link_detection` applies
+        // at index time (now in the boundary-interaction policy crate) — so no
+        // extra storage write is needed and no `daemon-runtime -> indexer` edge.
+        // A consumer whose route matched >1 provider or none is UNLINKED WITH a
+        // reason, never guessed. See the crate-private `http_boundary_read`.
+        let http_unlinked =
+            crate::http_boundary_read::http_unlinked_json(&storage, &snapshot.snapshot_uid);
+
         let mut response = serde_json::json!({
             "command": "boundaries links",
             "repo": repo_uid,
@@ -7128,6 +7167,20 @@ impl ServiceDispatcher {
         if let serde_json::Value::Object(ref mut map) = response {
             if let Some(ref s) = filter.contract_name {
                 map.insert("filter_service".to_string(), serde_json::json!(s));
+            }
+            // A failed HTTP-surface read is UNKNOWN, never a silent (absent)
+            // footer (review-4 item 2): `Err` emits a labelled degradation the
+            // renderer prints instead of "0 unlinked".
+            match http_unlinked {
+                Ok(unlinked) => {
+                    map.insert("httpUnlinked".to_string(), unlinked);
+                }
+                Err(reason) => {
+                    map.insert(
+                        "httpUnlinkedDegraded".to_string(),
+                        serde_json::json!(reason),
+                    );
+                }
             }
         }
 
@@ -8377,8 +8430,26 @@ impl ServiceDispatcher {
             }
         }
 
+        // HTTP-BOUNDARY-1 (review-0 item 2): count persisted HTTP provider↔consumer
+        // links so the presentation does not claim "boundaries may not be
+        // meaningful" when modules demonstrably talk over HTTP/REST. Import-graph
+        // silence (intra-module imports only) is not the same as boundary
+        // silence: cross-subsystem calls travel over HTTP, not imports.
+        // A failed link-count read is UNKNOWN, never 0 (review-4 item 2): 0 would
+        // restore the "boundaries may not be meaningful" claim off a read error.
+        // `Err` → `null` count PLUS a labelled degradation the renderer reads to
+        // suppress that claim.
+        let (http_boundary_link_count, http_boundary_link_degraded) =
+            match crate::http_boundary_read::http_boundary_link_count(
+                &storage,
+                &snapshot.snapshot_uid,
+            ) {
+                Ok(n) => (Some(n), None::<String>),
+                Err(reason) => (None, Some(reason)),
+            };
+
         // Build response
-        let response = serde_json::json!({
+        let mut response = serde_json::json!({
             "command": "modules list",
             "repo": repo_uid,
             "snapshot": snapshot.snapshot_uid,
@@ -8387,7 +8458,16 @@ impl ServiceDispatcher {
             "rollups_degraded": !violations_available,
             "sanity_metrics": sanity_metrics,
             "warnings": warnings,
+            "http_boundary_link_count": http_boundary_link_count,
         });
+        if let (serde_json::Value::Object(ref mut map), Some(reason)) =
+            (&mut response, &http_boundary_link_degraded)
+        {
+            map.insert(
+                "http_boundary_link_degraded".to_string(),
+                serde_json::json!(reason),
+            );
+        }
 
         DispatchResult::success(&request.id, response)
     }
@@ -8736,6 +8816,10 @@ fn parse_channel_kind(s: &str) -> Option<repo_graph_boundary_interaction::Channe
         "inter_core_channel" | "intercorechannel" | "inter_core" => {
             Some(ChannelKind::InterCoreChannel)
         }
+        // HTTP-BOUNDARY-1 review-2 item 2: without this arm `--kind http`
+        // parsed to None and silently CLEARED the filter (returning all
+        // surfaces) instead of restricting to HTTP.
+        "http" | "rest" => Some(ChannelKind::Http),
         _ => None,
     }
 }
@@ -8776,6 +8860,9 @@ fn parse_protocol_family(s: &str) -> Option<repo_graph_boundary_interaction::Pro
         "message_broker" | "messagebroker" | "broker" => Some(ProtocolFamily::MessageBroker),
         "usb" => Some(ProtocolFamily::Usb),
         "bluetooth" | "bt" | "ble" => Some(ProtocolFamily::Bluetooth),
+        // HTTP-BOUNDARY-1 review-2 item 2: mirror the channel-kind arm so
+        // `--family http` restricts to HTTP instead of silently clearing.
+        "http" | "rest" => Some(ProtocolFamily::Http),
         "custom" => Some(ProtocolFamily::Custom),
         _ => None,
     }
@@ -8857,3 +8944,36 @@ pub(crate) use crate::reader_context::{
     deps_reader_context_note, detect_deps_ecosystem, relationship_next_action_line,
     relationship_reliability_is_low,
 };
+
+#[cfg(test)]
+mod http_boundary_filter_tests {
+    //! HTTP-BOUNDARY-1 review-2 item 2: prove the `boundaries list` filters
+    //! recognize HTTP. Before this arm existed, `parse_channel_kind("http")`
+    //! and `parse_protocol_family("http")` returned `None`, which
+    //! `handle_boundaries_list` assigns to the OPTIONAL filter — silently
+    //! clearing it and returning ALL surfaces instead of HTTP-only.
+    use super::{parse_channel_kind, parse_protocol_family};
+    use repo_graph_boundary_interaction::{ChannelKind, ProtocolFamily};
+
+    #[test]
+    fn channel_kind_http_parses() {
+        assert_eq!(parse_channel_kind("http"), Some(ChannelKind::Http));
+        assert_eq!(parse_channel_kind("HTTP"), Some(ChannelKind::Http));
+        assert_eq!(parse_channel_kind("rest"), Some(ChannelKind::Http));
+    }
+
+    #[test]
+    fn protocol_family_http_parses() {
+        assert_eq!(parse_protocol_family("http"), Some(ProtocolFamily::Http));
+        assert_eq!(parse_protocol_family("HTTP"), Some(ProtocolFamily::Http));
+        assert_eq!(parse_protocol_family("rest"), Some(ProtocolFamily::Http));
+    }
+
+    /// The filter must be SET (Some) for http — a `None` here is the exact bug
+    /// that made `--kind http` / `--family http` return every surface.
+    #[test]
+    fn http_filters_are_not_silently_cleared() {
+        assert!(parse_channel_kind("http").is_some());
+        assert!(parse_protocol_family("http").is_some());
+    }
+}

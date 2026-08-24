@@ -562,6 +562,12 @@ pub struct BoundaryInteractionLinkListItem {
     /// Consumer symbol stable key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumer_symbol: Option<String>,
+
+    /// Link evidence JSON. For HTTP-BOUNDARY-1 route links this carries
+    /// `httpMethod` / `providerRoute` / `consumerRoute`; for gRPC it carries
+    /// the contract full name. Lets the renderer show the concrete API edge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_json: Option<String>,
 }
 
 /// Filter for boundary interaction link queries.
@@ -648,6 +654,23 @@ pub trait BoundaryInteractionReadPort {
         snapshot_uid: &str,
         filter: &BoundaryInteractionLinkFilter,
     ) -> Result<Vec<BoundaryInteractionLinkListItem>, BoundaryInteractionReadError>;
+
+    /// Query all `channel_kind = 'http'` surfaces for a snapshot, with their
+    /// method + route parsed from `evidence_json` (HTTP-BOUNDARY-1).
+    ///
+    /// Distinct from [`Self::list_boundary_interactions`]: HTTP surfaces have no
+    /// proto `boundary_contracts` association to join on — their (method, route)
+    /// ride in `evidence_json`, so the storage adapter parses them into the raw
+    /// [`crate::http_link::HttpSurfaceRow`] the pure matcher
+    /// ([`crate::http_link::find_http_links`]) consumes. A missing/null `route`
+    /// (dynamic URL) stays `None` — never fabricated.
+    ///
+    /// The single read path used by BOTH the index-time linker and the read-time
+    /// unlinked-counts renderer, so the two never drift.
+    fn query_http_surfaces(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<crate::http_link::HttpSurfaceRow>, BoundaryInteractionReadError>;
 }
 
 // ── Error type ───────────────────────────────────────────────────────

@@ -20,6 +20,7 @@
 
 use serde::Deserialize;
 
+use super::http_boundary::{self, HttpBoundarySurfaceEntry};
 use super::module_shared::format_count;
 
 // =============================================================================
@@ -83,6 +84,15 @@ pub struct SurfacesListResponse {
     pub results: Vec<SurfaceListEntry>,
     #[serde(default)]
     pub count: u64,
+    /// HTTP-BOUNDARY-1: the REST API map (providers + consumers).
+    #[serde(default)]
+    pub(crate) http_boundary_surfaces: Vec<HttpBoundarySurfaceEntry>,
+    /// HTTP-BOUNDARY-1 (review-4 item 2): reader-framed degradation when the
+    /// HTTP-surface read FAILED. Present = UNKNOWN, not "no surfaces": the empty
+    /// section and the "no recognized patterns" hint are both suppressed and this
+    /// message is shown instead.
+    #[serde(default)]
+    pub http_boundary_surfaces_degraded: Option<String>,
     #[serde(default)]
     pub filter_kind: Option<String>,
     #[serde(default)]
@@ -136,45 +146,61 @@ impl SurfacesListResponse {
         }
 
         // -- Empty case --
-        if self.results.is_empty() {
+        // Only truly empty when BOTH project surfaces AND HTTP boundary surfaces
+        // are absent (HTTP-BOUNDARY-1: HTTP surfaces render even with 0 project
+        // surfaces). A DEGRADED HTTP read is NOT empty — it is unknown, so the
+        // "no recognized patterns" hint must not fire (review-4 item 2).
+        if self.results.is_empty()
+            && self.http_boundary_surfaces.is_empty()
+            && self.http_boundary_surfaces_degraded.is_none()
+        {
             out.push_str("\nhint: surfaces are extracted from code patterns (HTTP routes, CLI handlers, etc.).\n");
             out.push_str("      No recognized patterns found in this codebase.\n");
             return out;
         }
 
-        out.push('\n');
+        // -- Project surface rows (deterministic order) --
+        if !self.results.is_empty() {
+            out.push('\n');
+            let mut entries = self.results.clone();
+            entries.sort_by(|a, b| {
+                (&a.surface_kind, &a.display_name, &a.project_surface_uid).cmp(&(
+                    &b.surface_kind,
+                    &b.display_name,
+                    &b.project_surface_uid,
+                ))
+            });
 
-        // -- Surface rows (deterministic order) --
-        let mut entries = self.results.clone();
-        entries.sort_by(|a, b| {
-            (&a.surface_kind, &a.display_name, &a.project_surface_uid).cmp(&(
-                &b.surface_kind,
-                &b.display_name,
-                &b.project_surface_uid,
-            ))
-        });
+            // Full output, no truncation
+            for entry in &entries {
+                let name = entry
+                    .display_name
+                    .as_deref()
+                    .or(entry.root_path.as_deref())
+                    .unwrap_or(&entry.project_surface_uid);
 
-        // Full output, no truncation
-        for entry in &entries {
-            let name = entry
-                .display_name
-                .as_deref()
-                .or(entry.root_path.as_deref())
-                .unwrap_or(&entry.project_surface_uid);
+                let runtime = entry.runtime_kind.as_deref().unwrap_or("-");
+                let module = entry
+                    .module_display_name
+                    .as_deref()
+                    .or(entry.module_root_path.as_deref())
+                    .unwrap_or("-");
 
-            let runtime = entry.runtime_kind.as_deref().unwrap_or("-");
-            let module = entry
-                .module_display_name
-                .as_deref()
-                .or(entry.module_root_path.as_deref())
-                .unwrap_or("-");
-
-            out.push_str(&format!(
-                "  {}  {}  {}  {}\n",
-                entry.surface_kind, name, runtime, module
-            ));
+                out.push_str(&format!(
+                    "  {}  {}  {}  {}\n",
+                    entry.surface_kind, name, runtime, module
+                ));
+            }
         }
 
+        // HTTP-BOUNDARY-1: the HTTP/REST section + degraded messaging live in the
+        // crate-private `http_boundary` presenter (kept off this file).
+        out.push_str(&http_boundary::render_surfaces(
+            &self.http_boundary_surfaces,
+        ));
+        if let Some(reason) = &self.http_boundary_surfaces_degraded {
+            out.push_str(&http_boundary::render_surfaces_degraded(reason));
+        }
         out
     }
 }
@@ -398,6 +424,8 @@ mod tests {
                 },
             ],
             count: 2,
+            http_boundary_surfaces: vec![],
+            http_boundary_surfaces_degraded: None,
             filter_kind: None,
             filter_runtime: None,
             filter_source: None,
@@ -413,6 +441,8 @@ mod tests {
             snapshot: "snap_456".to_string(),
             results: vec![],
             count: 0,
+            http_boundary_surfaces: vec![],
+            http_boundary_surfaces_degraded: None,
             filter_kind: None,
             filter_runtime: None,
             filter_source: None,
@@ -456,6 +486,52 @@ mod tests {
         let output = resp.render_human();
         assert!(output.contains("node"));
         assert!(output.contains("rust"));
+    }
+
+    // The pure HTTP-surface section rendering (providers/consumers/dynamic) is
+    // unit-tested in `presentation::http_boundary`. The two tests below exercise
+    // surfaces.rs's OWN concern: the empty/degraded interaction with the section.
+
+    /// HTTP surfaces render even when there are ZERO project surfaces (the empty
+    /// hint must not swallow them).
+    #[test]
+    fn list_render_http_surfaces_with_no_project_surfaces() {
+        let mut resp = sample_empty_list_response();
+        resp.degradation = None;
+        resp.http_boundary_surfaces = vec![HttpBoundarySurfaceEntry {
+            direction: "provider".to_string(),
+            http_method: "POST".to_string(),
+            route: Some("/api/v2/etape".to_string()),
+            source_file: "serverless/api.ts".to_string(),
+        }];
+        let output = resp.render_human();
+        assert!(output.contains("HTTP/REST API surfaces"), "{output}");
+        assert!(output.contains("POST"), "{output}");
+        assert!(
+            !output.contains("No recognized patterns"),
+            "empty-hint must not fire when HTTP surfaces exist:\n{output}"
+        );
+    }
+
+    /// review-4 item 2: a FAILED HTTP-surface read renders as UNKNOWN — the
+    /// "no recognized patterns" empty hint must NOT fire, and a degradation must
+    /// be shown (never an empty REST map presented as fact).
+    #[test]
+    fn list_render_http_read_degraded_is_unknown_not_empty() {
+        let mut resp = sample_empty_list_response();
+        resp.degradation = None;
+        resp.http_boundary_surfaces = vec![];
+        resp.http_boundary_surfaces_degraded =
+            Some("HTTP boundary surfaces read failed (degraded): db locked".to_string());
+        let output = resp.render_human();
+        assert!(
+            output.contains("HTTP/REST API surfaces: unknown"),
+            "degraded read shown as unknown:\n{output}"
+        );
+        assert!(
+            !output.contains("No recognized patterns"),
+            "empty-hint must not fire on a degraded read:\n{output}"
+        );
     }
 
     #[test]

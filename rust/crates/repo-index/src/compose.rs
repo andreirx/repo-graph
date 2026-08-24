@@ -3261,6 +3261,30 @@ pub fn index_into_storage_with_progress(
         },
     )?;
 
+    // HTTP-BOUNDARY-1: Spring/CDK provider + axios/fetch consumer HTTP surfaces.
+    // A re-parse/annotation postpass failure never aborts the index (isolated).
+    let http_boundary_outcome = crate::http_boundary::persist_http_boundary_interactions(
+        storage,
+        repo_uid,
+        &result.snapshot_uid,
+        &prepared.file_inputs,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "http-boundary-interaction",
+        "http_boundary_facts_postpass_error",
+        http_boundary_outcome,
+        |s| {
+            s.delete_boundary_facts_by_extractor(
+                &result.snapshot_uid,
+                crate::http_boundary::HTTP_EXTRACTOR,
+            )
+            .map(|_| ())
+            .map_err(ComposeError::Storage)
+        },
+    )?;
+
     emit_progress(&mut progress, "persisting", 7, 9)?; // about to persist Cargo modules
                                                        // rust-module-parity Phase 1.5: Persist Cargo.toml-derived module candidates and file ownership.
     persist_cargo_modules(
@@ -3928,6 +3952,32 @@ pub fn refresh_into_storage_with_progress(
             s.delete_boundary_facts_by_extractor(&result.snapshot_uid, TS_BOUNDARY_EXTRACTOR)
                 .map(|_| ())
                 .map_err(ComposeError::Storage)
+        },
+    )?;
+
+    // HTTP-BOUNDARY-1 (refresh): full recompute over the whole snapshot. HTTP
+    // surfaces are a new fact family with no copy-forward path, so every
+    // snapshot recomputes them from all current nodes + all TS files (durable,
+    // like persist_express below). The isolated postpass never aborts the index.
+    let http_boundary_outcome = crate::http_boundary::persist_http_boundary_interactions(
+        storage,
+        repo_uid,
+        &result.snapshot_uid,
+        &prepared.file_inputs,
+    );
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "http-boundary-interaction",
+        "http_boundary_facts_postpass_error",
+        http_boundary_outcome,
+        |s| {
+            s.delete_boundary_facts_by_extractor(
+                &result.snapshot_uid,
+                crate::http_boundary::HTTP_EXTRACTOR,
+            )
+            .map(|_| ())
+            .map_err(ComposeError::Storage)
         },
     )?;
 

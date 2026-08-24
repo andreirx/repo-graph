@@ -276,6 +276,16 @@ pub enum ChannelKind {
     /// Transport class: schema_rpc.
     ErpcChannel,
 
+    // ── HTTP-BOUNDARY-1: HTTP/REST ────────────────────────────────
+    /// HTTP/REST endpoint (request/response over HTTP).
+    /// The most common inter-module API mechanism. Unlike gRPC it is NOT
+    /// schema-backed by default (no proto/OpenAPI contract required), so its
+    /// transport class is `custom_protocol`, not `schema_rpc`. Provider/consumer
+    /// surfaces carry (HTTP method, route) in `evidence_json`; linking is by
+    /// route-template match, not a shared contract element.
+    /// Scope: unknown by default (localhost vs remote is not statically decidable).
+    Http,
+
     // ── Slice 2: Serial/CAN (deferred) ────────────────────────────
     /// Serial port (/dev/tty*, COM*).
     SerialPort,
@@ -355,6 +365,7 @@ impl ChannelKind {
             ChannelKind::GrpcChannel => "grpc_channel",
             ChannelKind::ProtobufStream => "protobuf_stream",
             ChannelKind::ErpcChannel => "erpc_channel",
+            ChannelKind::Http => "http",
             ChannelKind::AmqpQueue => "amqp_queue",
             ChannelKind::KafkaTopic => "kafka_topic",
             ChannelKind::NatsSubject => "nats_subject",
@@ -410,6 +421,11 @@ impl ChannelKind {
         matches!(self, ChannelKind::SharedArrayBuffer)
     }
 
+    /// Whether this channel kind is HTTP/REST (HTTP-BOUNDARY-1).
+    pub const fn is_http(self) -> bool {
+        matches!(self, ChannelKind::Http)
+    }
+
     /// Whether this channel kind is schema-backed RPC (Track B).
     pub const fn is_schema_backed(self) -> bool {
         matches!(
@@ -463,8 +479,10 @@ impl ChannelKind {
             | ChannelKind::DbusInterface
             | ChannelKind::ZeromqSocket => TransportClass::MessageBroker,
 
-            // Custom/other
-            ChannelKind::SerialPort
+            // Custom/other — HTTP/REST is application-protocol framing, not
+            // schema-backed RPC (no proto contract), so it is custom_protocol.
+            ChannelKind::Http
+            | ChannelKind::SerialPort
             | ChannelKind::CanMessage
             | ChannelKind::I2cDevice
             | ChannelKind::SpiDevice
@@ -508,6 +526,10 @@ pub enum ProtocolFamily {
     /// Schema-backed RPC (gRPC, protobuf, eRPC).
     Rpc,
 
+    /// HTTP/REST (request/response over HTTP). Distinct from `Rpc`: not
+    /// schema-backed by default. Added by HTTP-BOUNDARY-1.
+    Http,
+
     /// Serial communication.
     Serial,
 
@@ -539,6 +561,7 @@ impl ProtocolFamily {
             ProtocolFamily::Semaphore => "semaphore",
             ProtocolFamily::InterCore => "inter_core",
             ProtocolFamily::Rpc => "rpc",
+            ProtocolFamily::Http => "http",
             ProtocolFamily::Serial => "serial",
             ProtocolFamily::Bus => "bus",
             ProtocolFamily::MessageBroker => "message_broker",
@@ -566,6 +589,7 @@ impl From<ChannelKind> for ProtocolFamily {
             ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel => {
                 ProtocolFamily::Rpc
             }
+            ChannelKind::Http => ProtocolFamily::Http,
             ChannelKind::SerialPort => ProtocolFamily::Serial,
             ChannelKind::CanMessage | ChannelKind::I2cDevice | ChannelKind::SpiDevice => {
                 ProtocolFamily::Bus
@@ -778,6 +802,30 @@ mod tests {
         assert_eq!(
             ChannelKind::MqttTopic.default_transport_class(),
             TransportClass::MessageBroker
+        );
+    }
+
+    #[test]
+    fn http_channel_kind_taxonomy() {
+        // HTTP-BOUNDARY-1: HTTP/REST is a first-class channel kind, additive.
+        assert_eq!(ChannelKind::Http.as_str(), "http");
+        assert!(ChannelKind::Http.is_http());
+        assert!(!ChannelKind::GrpcChannel.is_http());
+        // Not schema-backed (no proto contract) — distinct from gRPC.
+        assert!(!ChannelKind::Http.is_schema_backed());
+        assert_eq!(
+            ChannelKind::Http.default_transport_class(),
+            TransportClass::CustomProtocol
+        );
+        assert_eq!(
+            ProtocolFamily::from(ChannelKind::Http),
+            ProtocolFamily::Http
+        );
+        assert_eq!(ProtocolFamily::Http.as_str(), "http");
+        // Round-trips through serde snake_case.
+        assert_eq!(
+            serde_json::to_string(&ChannelKind::Http).unwrap(),
+            "\"http\""
         );
     }
 

@@ -97,6 +97,7 @@ pub mod grpc_impl_hint;
 pub mod grpc_link;
 pub mod grpc_registration_proof;
 pub mod hook;
+pub mod http_link;
 pub mod include_resolver;
 pub mod index_timing;
 pub mod inferred_modules;

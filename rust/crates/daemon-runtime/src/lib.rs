@@ -64,6 +64,7 @@ pub mod explain_lg_identity;
 pub mod explain_lg_serve;
 pub mod focus_resolution_cert;
 pub mod handlers;
+mod http_boundary_read; // HTTP-BOUNDARY-1: read-time HTTP boundary render helpers (crate-private)
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;

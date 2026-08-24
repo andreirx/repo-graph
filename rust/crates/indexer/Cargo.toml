@@ -53,6 +53,13 @@ artifact-contracts = { path = "../artifact-contracts" }
 # UnresolvedEdgeCategory, classifier functions. Policy → policy.
 repo-graph-classification = { path = "../classification" }
 
+# Boundary-interaction policy crate (zero workspace deps) — HTTP-BOUNDARY-1:
+# the pure route-template matcher (`http_link::find_http_links`) + its raw DTOs
+# live in the domain crate so the index-time linker here and the read-time
+# renderer in daemon-runtime call ONE matcher. Policy → policy; acyclic
+# (boundary-interaction depends on nothing).
+repo-graph-boundary-interaction = { path = "../boundary-interaction" }
+
 # Contract schema crate — domain types for proto parsing (ProtoMessage,
 # ProtoSyntax, etc.). Policy → policy.
 contract-schema = { path = "../contract-schema" }

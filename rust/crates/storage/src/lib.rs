@@ -179,6 +179,7 @@ mod generated_code_mapping_impl; // GeneratedCodeMappingStorePort impl (CS-2A)
 mod generated_code_mapping_read_impl; // GeneratedCodeMappingReadPort impl (CS-2A)
 pub mod grpc_impl_hint_impl; // gRPC implementation hint queries (GR-1A)
 mod grpc_impl_hint_port_impl; // GrpcImplHintReadPort/StorePort impl (GR-1A)
+mod http_surface_read; // HTTP-BOUNDARY-1: query_http_surfaces helper (crate-private)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
 pub mod metrics; // PERF-OBS-1: Storage metrics for performance observability
 pub mod migrations;

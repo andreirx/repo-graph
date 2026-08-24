@@ -806,6 +806,9 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::GrpcChannel => "grpc",
         ChannelKind::ProtobufStream => "protobuf",
         ChannelKind::ErpcChannel => "erpc",
+        // HTTP is not emitted through this binding-table (Track A) emitter; the
+        // HTTP boundary detectors set their own protocol string. Kept exhaustive.
+        ChannelKind::Http => "http",
         ChannelKind::SerialPort => "serial",
         ChannelKind::CanMessage => "can",
         ChannelKind::InterCoreChannel => "inter_core",

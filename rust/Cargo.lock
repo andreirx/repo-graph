@@ -1248,6 +1248,7 @@ dependencies = [
  "artifact-contracts",
  "contract-schema",
  "regex",
+ "repo-graph-boundary-interaction",
  "repo-graph-classification",
  "repo-graph-proto-parser",
  "serde",
@@ -1400,6 +1401,7 @@ dependencies = [
  "tempfile",
  "tree-sitter",
  "tree-sitter-c",
+ "tree-sitter-java",
  "tree-sitter-typescript",
  "uuid",
 ]

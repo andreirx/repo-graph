@@ -581,13 +581,22 @@ impl repo_graph_indexer::storage_port::GrpcLinkStorePort for StorageConnection {
                 None => (None, "unknown", None),
             };
 
+            // HTTP-BOUNDARY-1: HTTP route links have no contract element. An
+            // empty string would violate the contract_elements FK, so map
+            // empty -> SQL NULL. gRPC always passes a non-empty UID (unaffected).
+            let contract_element_uid: Option<&str> = if link.contract_element_uid.is_empty() {
+                None
+            } else {
+                Some(link.contract_element_uid.as_str())
+            };
+
             let result = stmt.execute(rusqlite::params![
                 link.link_uid,
                 link.snapshot_uid,
                 link.provider_surface_uid,
                 link.consumer_surface_uid,
                 link.link_kind,
-                link.contract_element_uid,
+                contract_element_uid,
                 link.match_basis,
                 link.confidence,
                 link.evidence_json,
@@ -601,6 +610,14 @@ impl repo_graph_indexer::storage_port::GrpcLinkStorePort for StorageConnection {
         Ok(inserted)
     }
 }
+
+// HTTP-BOUNDARY-1: the `query_http_surfaces` read now lives on
+// `BoundaryInteractionReadPort` (impl in `boundary_interaction_read_impl.rs`,
+// backed by the crate-private `http_surface_read` module), so the read-time
+// renderer in `daemon-runtime` reaches it without depending on `indexer`. The
+// gRPC link WRITE path below is unchanged, other than mapping an empty
+// `contract_element_uid` to SQL NULL for HTTP route links (which carry no
+// contract element).
 
 #[cfg(test)]
 mod tests {
@@ -626,6 +643,12 @@ mod tests {
 
         conn
     }
+
+    // HTTP-BOUNDARY-1 (review-5 item 4): the http-surface round-trip + NULL
+    // contract-element assertion moved to the crate-private `http_surface_read`
+    // test module (the cohesive HTTP storage concern), off this 500+-line file.
+    // The empty→NULL `contract_element_uid` WRITE path is still exercised there
+    // via the public `GrpcLinkStorePort` trait.
 
     fn setup_test_db_with_mapping() -> StorageConnection {
         let mut conn = setup_test_db();

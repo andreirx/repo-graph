@@ -59,6 +59,10 @@ pub mod trust;
 /// trust/orient/stats — one client-side projection, no per-surface phrasing drift.
 pub mod witnesses;
 
+// HTTP-BOUNDARY-1: HTTP/REST boundary-map DTO + rendering shared by the
+// `surfaces list` and `modules list` presenters (kept off those 500+-line files).
+pub(crate) mod http_boundary;
+
 // Group 5: Boundaries (CLI-OUT-4)
 pub mod boundaries_list;
 pub mod boundaries_show;

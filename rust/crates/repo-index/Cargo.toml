@@ -99,6 +99,9 @@ tree-sitter = "0.24"
 tree-sitter-c = "0.23"
 # Tree-sitter for BI-1C SharedArrayBuffer/Worker boundary detection (TEMPORARY).
 tree-sitter-typescript = "0.23"
+# Tree-sitter for HTTP-BOUNDARY-1 Java HTTP-client (RestTemplate/WebClient/HttpClient)
+# consumer re-parse postpass. Same grammar version java-extractor uses.
+tree-sitter-java = "0.23"
 
 [features]
 default = []

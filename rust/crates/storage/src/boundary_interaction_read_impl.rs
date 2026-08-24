@@ -17,8 +17,8 @@ use repo_graph_boundary_interaction::{
     BoundaryInteractionFilter, BoundaryInteractionLinkFilter, BoundaryInteractionLinkListItem,
     BoundaryInteractionListItem, BoundaryInteractionReadError, BoundaryInteractionReadPort,
     BoundaryInteractionSummary, BoundaryScope, ChannelKind, Direction, DirectionCount,
-    EndpointLocality, FamilyCount, InteractionBasis, InteractionPattern, KindCount, ProtocolFamily,
-    ScopeCount, TransportClass,
+    EndpointLocality, FamilyCount, HttpSurfaceRow, InteractionBasis, InteractionPattern, KindCount,
+    ProtocolFamily, ScopeCount, TransportClass,
 };
 
 impl BoundaryInteractionReadPort for StorageConnection {
@@ -585,7 +585,8 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 bil.consumer_surface_uid,
                 c_surf.source_file as consumer_file,
                 c_surf.line_start as consumer_line,
-                c_surf.symbol_stable_key as consumer_symbol
+                c_surf.symbol_stable_key as consumer_symbol,
+                bil.evidence_json
             FROM boundary_interaction_links bil
             LEFT JOIN contract_elements ce ON bil.contract_element_uid = ce.element_uid
             LEFT JOIN boundary_interaction_surfaces p_surf ON bil.provider_surface_uid = p_surf.surface_uid
@@ -632,6 +633,7 @@ impl BoundaryInteractionReadPort for StorageConnection {
                     consumer_file: row.get(11)?,
                     consumer_line: row.get(12)?,
                     consumer_symbol: row.get(13)?,
+                    evidence_json: row.get(14)?,
                 })
             })
             .map_err(map_storage_error)?;
@@ -654,10 +656,22 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 consumer_file: raw.consumer_file.unwrap_or_default(),
                 consumer_line: raw.consumer_line.unwrap_or(0),
                 consumer_symbol: raw.consumer_symbol,
+                evidence_json: raw.evidence_json,
             });
         }
 
         Ok(results)
+    }
+
+    fn query_http_surfaces(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<HttpSurfaceRow>, BoundaryInteractionReadError> {
+        // HTTP-BOUNDARY-1: delegate to the crate-private helper (keeps the SQL +
+        // evidence_json parsing off this already-over-500-line file). Maps the
+        // rusqlite error into the port's concrete error, like every method here.
+        crate::http_surface_read::query_http_surfaces(self.connection(), snapshot_uid)
+            .map_err(map_storage_error)
     }
 }
 
@@ -765,6 +779,7 @@ struct RawLinkRow {
     consumer_file: Option<String>,
     consumer_line: Option<u32>,
     consumer_symbol: Option<String>,
+    evidence_json: Option<String>,
 }
 
 // ── Parse helpers ────────────────────────────────────────────────────
@@ -792,6 +807,7 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadErr
         "grpc_channel" => Ok(ChannelKind::GrpcChannel),
         "protobuf_stream" => Ok(ChannelKind::ProtobufStream),
         "erpc_channel" => Ok(ChannelKind::ErpcChannel),
+        "http" => Ok(ChannelKind::Http),
         "serial_port" => Ok(ChannelKind::SerialPort),
         "can_message" => Ok(ChannelKind::CanMessage),
         "inter_core_channel" => Ok(ChannelKind::InterCoreChannel),
@@ -846,6 +862,7 @@ fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, BoundaryInteractionR
         "semaphore" => Ok(ProtocolFamily::Semaphore),
         "inter_core" => Ok(ProtocolFamily::InterCore),
         "rpc" => Ok(ProtocolFamily::Rpc),
+        "http" => Ok(ProtocolFamily::Http),
         "serial" => Ok(ProtocolFamily::Serial),
         "bus" => Ok(ProtocolFamily::Bus),
         "message_broker" => Ok(ProtocolFamily::MessageBroker),

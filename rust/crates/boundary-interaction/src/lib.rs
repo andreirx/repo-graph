@@ -52,6 +52,7 @@
 #![warn(missing_docs)]
 
 pub mod channel;
+pub mod http_link;
 pub mod query;
 pub mod surface;
 pub mod table;
@@ -59,6 +60,7 @@ pub mod types;
 
 // Re-export the most commonly used types at the crate root.
 pub use channel::ChannelDetail;
+pub use http_link::{find_http_links, route_matches, HttpLink, HttpSurfaceRow, UnlinkedCounts};
 pub use query::{
     BasisCount, BoundaryContractView, BoundaryInteractionChannelView, BoundaryInteractionDetail,
     BoundaryInteractionFilter, BoundaryInteractionLinkFilter, BoundaryInteractionLinkListItem,

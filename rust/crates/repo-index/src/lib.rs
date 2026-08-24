@@ -52,6 +52,7 @@
 pub mod compose;
 pub mod config;
 pub mod express_detector;
+pub(crate) mod http_boundary;
 pub mod impact_propagation;
 // PERF-INSTRUMENTATION-1: runtime perf-trace gate (RMAP_PERF). Shared by this
 // crate's `perf_log!` and daemon-runtime's `perf_trace!` (which reaches it via

@@ -70,6 +70,18 @@ pub struct ModulesListResponse {
     pub snapshot: String,
     #[serde(default)]
     pub results: Vec<ModuleListEntry>,
+    /// HTTP-BOUNDARY-1 (review-0 item 2): count of persisted HTTP provider↔consumer
+    /// links. `Some(n)` nonzero means modules talk over HTTP/REST even when the
+    /// import graph is intra-module — so the "boundaries may not be meaningful"
+    /// hint is wrong. `None` = the link read FAILED (unknown), never 0
+    /// (review-4 item 2): a read error must not restore that claim.
+    #[serde(default)]
+    pub http_boundary_link_count: Option<usize>,
+    /// HTTP-BOUNDARY-1 (review-4 item 2): reader-framed degradation when the HTTP
+    /// link read failed. Present → the boundary-meaningfulness hint is suppressed
+    /// (unknown, not "meaningless") and this is shown instead.
+    #[serde(default)]
+    pub http_boundary_link_degraded: Option<String>,
 }
 
 impl ModulesListResponse {
@@ -190,9 +202,13 @@ impl ModulesListResponse {
         if total_outbound == 0 && total_inbound == 0 {
             out.push_str("No cross-module dependencies detected.\n");
             if self.results.len() > 1 {
-                out.push_str(
-                    "\nhint: all imports are intra-module. Module boundaries may not be meaningful yet.\n",
-                );
+                // HTTP-BOUNDARY-1: the Layer-3 boundary note (heuristic-HTTP-link
+                // vs meaningless-boundaries vs failed-read-unknown) is decided in
+                // the crate-private `http_boundary` presenter — kept off this file.
+                out.push_str(&super::http_boundary::render_modules_note(
+                    self.http_boundary_link_count,
+                    self.http_boundary_link_degraded.as_deref(),
+                ));
             }
         } else {
             let dep_count = total_outbound.max(total_inbound) / 2; // rough dedup
@@ -253,6 +269,8 @@ mod tests {
                     dead_test_symbol_count: 0,
                 },
             ],
+            http_boundary_link_count: Some(0),
+            http_boundary_link_degraded: None,
         }
     }
 
@@ -262,7 +280,81 @@ mod tests {
             repo: "repo_123".to_string(),
             snapshot: "snap_456".to_string(),
             results: vec![],
+            http_boundary_link_count: Some(0),
+            http_boundary_link_degraded: None,
         }
+    }
+
+    /// review-0 item 2: two modules, zero cross-module IMPORTS, but HTTP links
+    /// exist → the "boundaries may not be meaningful" hint MUST be suppressed and
+    /// replaced with an honest pointer to `rmap boundaries links`.
+    #[test]
+    fn list_render_http_links_suppress_meaningless_hint() {
+        let mut resp = sample_list_response();
+        // Zero the import-derived cross-module deps on both rows.
+        resp.results[0].outbound_dependency_count = 0;
+        resp.results[0].inbound_dependency_count = 0;
+        resp.results[1].outbound_dependency_count = 0;
+        resp.results[1].inbound_dependency_count = 0;
+        resp.http_boundary_link_count = Some(3);
+        let output = resp.render_human();
+        assert!(
+            !output.contains("Module boundaries may not be meaningful"),
+            "misleading hint must be gone when HTTP links exist:\n{output}"
+        );
+        // Layer-3 honesty (review-1): a heuristic route-match discovery, NOT a
+        // runtime-proven connection. The wording must not overstate.
+        assert!(
+            output.contains("likely connected via HTTP route match")
+                && output.contains("heuristic, 3 links")
+                && output.contains("not runtime-proven")
+                && output.contains("rmap boundaries links"),
+            "honest Layer-3 pointer present:\n{output}"
+        );
+        assert!(
+            !output.contains("at runtime") && !output.contains("ARE meaningful"),
+            "must not claim runtime connection or assert meaningfulness:\n{output}"
+        );
+    }
+
+    /// The misleading hint STILL fires when there are no HTTP links (no regression).
+    #[test]
+    fn list_render_no_http_links_keeps_meaningless_hint() {
+        let mut resp = sample_list_response();
+        resp.results[0].outbound_dependency_count = 0;
+        resp.results[0].inbound_dependency_count = 0;
+        resp.results[1].outbound_dependency_count = 0;
+        resp.results[1].inbound_dependency_count = 0;
+        resp.http_boundary_link_count = Some(0);
+        let output = resp.render_human();
+        assert!(
+            output.contains("Module boundaries may not be meaningful"),
+            "hint fires when there are genuinely no boundaries:\n{output}"
+        );
+    }
+
+    /// review-4 item 2: a FAILED HTTP-link read is UNKNOWN — the "boundaries may
+    /// not be meaningful" claim must be SUPPRESSED (a read error must not render
+    /// as a zero fact), replaced with an honest unknown/degraded note.
+    #[test]
+    fn list_render_http_link_read_degraded_suppresses_meaningless_hint() {
+        let mut resp = sample_list_response();
+        resp.results[0].outbound_dependency_count = 0;
+        resp.results[0].inbound_dependency_count = 0;
+        resp.results[1].outbound_dependency_count = 0;
+        resp.results[1].inbound_dependency_count = 0;
+        resp.http_boundary_link_count = None;
+        resp.http_boundary_link_degraded =
+            Some("HTTP boundary link count read failed (degraded): db locked".to_string());
+        let output = resp.render_human();
+        assert!(
+            !output.contains("Module boundaries may not be meaningful"),
+            "a degraded read must NOT restore the meaningless claim:\n{output}"
+        );
+        assert!(
+            output.contains("UNKNOWN") && output.contains("degraded"),
+            "degraded read shown honestly as unknown:\n{output}"
+        );
     }
 
     #[test]

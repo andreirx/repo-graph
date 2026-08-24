@@ -129,18 +129,57 @@ pub struct SpringLivenessInference {
     pub basis_json: String,
 }
 
-/// Internal structure for parsing annotations from metadata_json.
-#[derive(Debug, Deserialize)]
-struct MetadataWithAnnotations {
-    #[serde(default)]
-    annotations: Vec<Annotation>,
+// ── Raw annotation parser (shared) ───────────────────────────────────
+
+/// One parsed Java annotation from a node's `metadata_json`: its simple
+/// (unqualified) name plus the raw argument text, if any.
+///
+/// The RAW annotation projection — no Spring semantics. Consumers pick what
+/// they need: this classifier reads only `simple_name`; HTTP-BOUNDARY-1's
+/// Spring provider detection also reads `args_raw` (the `("/route")` text).
+/// One parser, no drift (operator ruling 2026-08-24, Option A).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedAnnotation {
+    /// Simple annotation name (`GetMapping`, not `org.spring…GetMapping`).
+    pub simple_name: String,
+    /// Raw argument text exactly as stored (e.g. `("/api/v2/clients")` or
+    /// `(value = "/x", method = RequestMethod.GET)`), or `None` when the
+    /// annotation carries no arguments.
+    pub args_raw: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Annotation {
-    name: String,
-    #[allow(dead_code)]
-    arguments: Option<serde_json::Value>,
+/// Parse the `annotations` array out of a node's `metadata_json`.
+///
+/// Expected shape: `{"annotations":[{"name":"..","arguments":".."}]}` (the
+/// shape the java-extractor writes). Names are reduced to their simple form.
+/// A missing/malformed/annotation-less `metadata_json` yields an empty vec —
+/// honest absence, never an error. Pure: no I/O, no state.
+pub fn parse_node_annotations(metadata_json: Option<&str>) -> Vec<ParsedAnnotation> {
+    let raw = match metadata_json {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match value.get("annotations").and_then(|a| a.as_array()) {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    arr.iter()
+        .filter_map(|a| {
+            let name = a.get("name").and_then(|n| n.as_str())?;
+            let args_raw = a
+                .get("arguments")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
+            Some(ParsedAnnotation {
+                simple_name: extract_simple_name(name).to_string(),
+                args_raw,
+            })
+        })
+        .collect()
 }
 
 // ── Public interface ─────────────────────────────────────────────────
@@ -171,15 +210,13 @@ pub fn classify_spring_liveness(nodes: &[SpringNodeInput]) -> Vec<SpringLiveness
             continue;
         }
 
-        // Parse metadata_json for annotations
-        let Some(metadata_str) = &node.metadata_json else {
+        // Parse metadata_json for annotations via the shared raw parser
+        // (one parser, no drift — operator ruling 2026-08-24, Option A). An
+        // absent/malformed `metadata_json` yields an empty vec → no inference.
+        let annotations = parse_node_annotations(node.metadata_json.as_deref());
+        if annotations.is_empty() {
             continue;
-        };
-
-        let metadata: MetadataWithAnnotations = match serde_json::from_str(metadata_str) {
-            Ok(m) => m,
-            Err(_) => continue, // Malformed JSON, skip
-        };
+        }
 
         // Check annotations based on node subtype
         // Note: INTERFACE is NOT included — Spring stereotype annotations
@@ -188,8 +225,8 @@ pub fn classify_spring_liveness(nodes: &[SpringNodeInput]) -> Vec<SpringLiveness
         match node.subtype.as_deref() {
             Some("CLASS") => {
                 // Check class-level stereotypes
-                for ann in &metadata.annotations {
-                    let simple_name = extract_simple_name(&ann.name);
+                for ann in &annotations {
+                    let simple_name = ann.simple_name.as_str();
                     if let Some((_, convention, reason)) = SPRING_CLASS_STEREOTYPES
                         .iter()
                         .find(|(name, _, _)| *name == simple_name)
@@ -216,8 +253,8 @@ pub fn classify_spring_liveness(nodes: &[SpringNodeInput]) -> Vec<SpringLiveness
             }
             Some("METHOD") => {
                 // Check @Bean annotation
-                for ann in &metadata.annotations {
-                    let simple_name = extract_simple_name(&ann.name);
+                for ann in &annotations {
+                    let simple_name = ann.simple_name.as_str();
                     if simple_name == SPRING_BEAN_ANNOTATION.0 {
                         let (_, convention, reason) = SPRING_BEAN_ANNOTATION;
                         results.push(SpringLivenessInference {
@@ -553,6 +590,33 @@ mod tests {
         assert!(results[0]
             .value_json
             .contains(r#""convention":"spring_bean_factory""#));
+    }
+
+    // ── Shared raw annotation parser ──────────────────────────────
+
+    #[test]
+    fn parse_node_annotations_captures_simple_name_and_raw_args() {
+        // The HTTP provider detection depends on args_raw being the exact
+        // argument text; the classifier depends on the simple name.
+        let anns = parse_node_annotations(Some(
+            r#"{"annotations":[{"name":"org.springframework.web.bind.annotation.GetMapping","arguments":"(\"/api/v2/clients/{id}\")"},{"name":"RestController"}]}"#,
+        ));
+        assert_eq!(anns.len(), 2);
+        assert_eq!(anns[0].simple_name, "GetMapping");
+        assert_eq!(
+            anns[0].args_raw.as_deref(),
+            Some("(\"/api/v2/clients/{id}\")")
+        );
+        assert_eq!(anns[1].simple_name, "RestController");
+        assert_eq!(anns[1].args_raw, None);
+    }
+
+    #[test]
+    fn parse_node_annotations_degrades_honestly() {
+        assert!(parse_node_annotations(None).is_empty());
+        assert!(parse_node_annotations(Some("not json")).is_empty());
+        assert!(parse_node_annotations(Some(r#"{"annotations":[]}"#)).is_empty());
+        assert!(parse_node_annotations(Some(r#"{"other":1}"#)).is_empty());
     }
 
     #[test]

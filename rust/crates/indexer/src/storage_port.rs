@@ -1037,6 +1037,17 @@ pub struct SurfaceWithContract {
     pub contract_schema_file: String,
 }
 
+// ── HTTP-BOUNDARY-1: route-based provider/consumer linking ───────────────────
+//
+// The HTTP surface READ port + its `HttpSurfaceRow` input DTO moved to the
+// `repo-graph-boundary-interaction` policy crate
+// (`BoundaryInteractionReadPort::query_http_surfaces`,
+// `http_link::HttpSurfaceRow`), so the read-time renderer in `daemon-runtime`
+// reaches the same read path + pure matcher WITHOUT depending on `indexer`
+// (operator ruling 2026-08-24). Only the link WRITE input stays here — it is
+// the arg to `GrpcLinkStorePort::insert_boundary_interaction_links`, owned by
+// the indexer policy layer.
+
 /// Input for inserting a boundary interaction link.
 #[derive(Debug, Clone)]
 pub struct BoundaryInteractionLinkInput {
@@ -1048,11 +1059,14 @@ pub struct BoundaryInteractionLinkInput {
     pub provider_surface_uid: String,
     /// Consumer surface UID
     pub consumer_surface_uid: String,
-    /// Link kind ("contract_match_only" for GR-3A)
+    /// Link kind ("contract_match_only" for GR-3A, "http_route_match" for
+    /// HTTP-BOUNDARY-1)
     pub link_kind: String,
-    /// Contract element UID (proto service)
+    /// Contract element UID (proto service). EMPTY STRING for HTTP route links
+    /// (no contract element) — the storage impl writes SQL NULL for empty, so
+    /// the `contract_elements` FK is satisfied.
     pub contract_element_uid: String,
-    /// Match basis ("contract" for GR-3A)
+    /// Match basis ("contract" for GR-3A, "route_and_method" for HTTP)
     pub match_basis: String,
     /// Confidence score (0.80 for contract-only match)
     pub confidence: f64,
