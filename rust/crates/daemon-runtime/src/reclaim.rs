@@ -1542,7 +1542,10 @@ mod tests {
             .find(|a| a.kind == "database")
             .expect("database artifact present");
         assert_eq!(db.status, ArtifactStatus::Retained, "{:?}", db);
-        assert!(db.bytes > Some(0), "retained DB reports its byte size: {db:?}");
+        assert!(
+            db.bytes > Some(0),
+            "retained DB reports its byte size: {db:?}"
+        );
         // review-3 #2: the sidecars are reported on their OWN lines — the present -wal as `retained`
         // (with bytes), the missing -shm as `absent`. Neither is silently left unreported.
         let wal = report
