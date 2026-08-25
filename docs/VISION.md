@@ -157,8 +157,11 @@ top-5 on 14/16 real glamCRM tasks vs 8/16 lexical). Bounds that keep it inside t
   every deterministic tier produced nothing. Deterministic tiers are never reordered or
   diluted; the map (`orient`'s facts, `map`, `modules`) never contains embedding-derived
   facts. Each semantic candidate carries score + provenance + its module/path, and names the
-  deterministic command that yields its full neighbourhood (module, imports, callers) —
-  ≤5 candidates.
+  deterministic follow-up (`explain <candidate>`) from which the full neighbourhood is
+  reachable — module and imports directly; callers one further `explain` away on any symbol
+  it lists (amended 2026-08-25: a single command yielding file-level callers does not exist,
+  and widening resolved `explain` for everyone to satisfy this wording would break its
+  byte-stable deterministic output) — ≤5 candidates.
 - **Evidence-backed hint, labeled.** Every seed carries score + provenance
   (`source: embedding`, model id); ranking is a fixed formula — no LLM in the loop.
 - **Deterministic given its pins.** Every vector is pinned `(model_id, dim, content_sha)`;
