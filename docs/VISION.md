@@ -149,9 +149,16 @@ the certainty model, on the strength of EMBED-SEED-SPIKE-1
 (`docs/spikes/2026-08-23-embed-seed-spike-1.md`: local 84 MB model, right neighbourhood in
 top-5 on 14/16 real glamCRM tasks vs 8/16 lexical). Bounds that keep it inside this VISION:
 
-- **Candidate generator, never answer.** A separate opt-in verb returns ≤5 seed candidates,
-  each rendered with its deterministic neighbourhood (module, imports, callers) — the map
-  (`orient`, `map`, `modules`) never contains embedding-derived facts.
+- **Candidate generator, never answer — integrated, not a separate verb** (human directive
+  2026-08-25, superseding the original separate-verb bound): semantic candidates surface ONLY
+  through the EXISTING resolution seams — the places whose contract already returns a
+  `candidates` array or a no-match (focus resolution in `orient`/`explain`; symbol lookup in
+  `callers`/`callees`/`path`) — as an additive, labeled fallback tier that runs only after
+  every deterministic tier produced nothing. Deterministic tiers are never reordered or
+  diluted; the map (`orient`'s facts, `map`, `modules`) never contains embedding-derived
+  facts. Each semantic candidate carries score + provenance + its module/path, and names the
+  deterministic command that yields its full neighbourhood (module, imports, callers) —
+  ≤5 candidates.
 - **Evidence-backed hint, labeled.** Every seed carries score + provenance
   (`source: embedding`, model id); ranking is a fixed formula — no LLM in the loop.
 - **Deterministic given its pins.** Every vector is pinned `(model_id, dim, content_sha)`;
