@@ -373,12 +373,16 @@ fn mixed_lang_language_isolation() {
         panic!("expected package_dependencies_json for engine.rs (from Cargo.toml)");
     }
 
-    // ── App.java: empty signals (no Java manifest reader) ────────
-    // Java files fall into the wildcard arm of the language dispatch
-    // match, which returns empty PackageDependencySet and empty
-    // TsconfigAliases. Since the empty set is converted to None in
-    // FileInput, package_dependencies_json on the file signal must be
-    // None — no contamination from either package.json or Cargo.toml.
+    // ── App.java: Gradle-declared deps ONLY (GRADLE-DEP-READER-1) ─
+    // Since GRADLE-DEP-READER-1 (78053eb, 2026-07-20) Java files DO
+    // have a manifest reader: the fixture's build.gradle declares
+    // org.springframework.boot, and App.java must receive exactly the
+    // Gradle-declared set. The isolation invariant this test guards is
+    // unchanged: no cross-language contamination — npm (express) and
+    // Cargo (serde/wgpu) deps must never bleed into a Java file.
+    // (This assertion previously encoded the pre-reader state — "Java
+    // has no manifest reader yet" — and went red the day the reader
+    // shipped; fixed 2026-08-25, see docs/TECH-DEBT.md closeout note.)
     let java_signals = FileSignalPort::query_file_signals_batch(
         &storage,
         &result.snapshot_uid,
@@ -386,17 +390,34 @@ fn mixed_lang_language_isolation() {
     )
     .unwrap();
 
-    if !java_signals.is_empty() {
-        let java_sig = &java_signals[0];
-        assert!(
-            java_sig.package_dependencies_json.is_none(),
-            "App.java must NOT receive any dependency signals; \
-			 Java has no manifest reader yet. Got: {:?}",
-            java_sig.package_dependencies_json
-        );
-    }
-    // If java_signals is empty: no signal row exists for App.java,
-    // which is also correct — no signals at all is still isolation.
+    assert!(
+        !java_signals.is_empty(),
+        "expected file signals for src/App.java (Gradle reader shipped)"
+    );
+    let java_sig = &java_signals[0];
+    let deps_json = java_sig
+        .package_dependencies_json
+        .as_ref()
+        .expect("App.java must receive Gradle-declared dependency signals (build.gradle)");
+    let deps: serde_json::Value = serde_json::from_str(deps_json).unwrap();
+    let names = deps["names"].as_array().unwrap();
+    let dep_names: Vec<&str> = names.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        dep_names.contains(&"org.springframework.boot"),
+        "App.java must receive org.springframework.boot from build.gradle, got: {:?}",
+        dep_names
+    );
+    // Cross-language contamination is still forbidden.
+    assert!(
+        !dep_names.contains(&"express"),
+        "App.java must NOT receive package.json deps (express), got: {:?}",
+        dep_names
+    );
+    assert!(
+        !dep_names.contains(&"serde") && !dep_names.contains(&"wgpu"),
+        "App.java must NOT receive Cargo.toml deps (serde/wgpu), got: {:?}",
+        dep_names
+    );
 }
 
 // ── Rust extraction ──────────────────────────────────────────────

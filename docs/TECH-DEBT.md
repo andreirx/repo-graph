@@ -4001,8 +4001,10 @@ all 50 self-crates fold. See docs/slices/scanner-gitignore-1.md §6.
 
 - **TD (pre-existing, surfaced by the slice's gates):** `repo-index::tests::integration::mixed_lang_language_isolation`
   FAILS on clean HEAD (proven by stash-and-rerun, EXECUTED 2026-08-24; panic at integration.rs:391) — unrelated to
-  FORGET-REPO-1 (repo-index untouched). Proper solution: root-cause the fixture/language-isolation regression in its
-  own small slice. Address: before the next release cut. Status: OPEN.
+  FORGET-REPO-1 (repo-index untouched). ROOT-CAUSED + FIXED 2026-08-25: the test encoded the pre-GRADLE-DEP-READER-1
+  premise ("Java has no manifest reader yet") and went red the day the reader shipped (78053eb, 2026-07-20 — committed
+  without this cross-suite test being re-run). The CODE was correct; the assertion now checks the true invariant
+  (App.java gets exactly the Gradle-declared deps; npm/Cargo deps never bleed in). Status: CLOSED.
 - Alias loss on a concurrent forget-race re-registration is inherent to "fresh registration" (documented inline in
   dispatch.rs) — accepted, rare, honest. Status: ACCEPTED.
 
