@@ -72,6 +72,29 @@ hypotheses until that run speaks.
    F14 (extractor deep-file guard), GRADLE-DEP-READER-1 (Java attribution prereq),
    ENRICH-YIELD residuals (dependency-version capture; caller-level version resolution).
 
+## Usefulness audit v0.9.0 — the fix queue (2026-08-26)
+
+Per-command QUALITY+QUANTITY audit across six repos (protocol run
+`smoke-runs/2026-08-25T22-41-37Z`; full report `docs/audits/2026-08-26-per-command-usefulness-v0.9.0.md`,
+local). Verdict: facts mostly true and honestly labeled where the honesty machinery exists
+(trust/check/doctor/orient); failures cluster in dumps-not-presentations (4 commands ≈ 90% of all
+output lines), detectors blaming the codebase for their own absence, SELF-POLLUTION (rmap's own
+`*_MAP.md` counted by drift/docs/corpus — django check goes INCOMPLETE on 3,721 of its own
+sidecars), and cross-command contradictions. Ranked queue (operator, pending human reorder):
+
+1. **SELF-POLLUTION-1** — exclude self-generated artifacts from INDEX_DRIFT/docs/corpus; K=0
+   drift severity → Pass. 2. **DEPS-LIST-REWRITE-1** — specifier-only undeclared bucket, manifest
+   by dominant language, loud unattributed failure, ≤20-line table. 3. **HTTP-SURFACE-COHERENCE-1**
+   — Spring `@Controller` + Next.js App Router providers, footer/headline contradictions, merge
+   `boundaries list` into `surfaces list`, dual-implementation annotation. 4. **INFERENCES-SURFACE-1**
+   — grouped default, `--limit`+truncated flag (silent 752 cap = honesty violation). 5.
+   **ORIENT-SEGMENT-2** — promote directory groups when package topology collapses (django `.`);
+   budget never changes facts; `--full` false promise; REST count in headline; no `.env` in Docs.
+   6. **CONTRADICTION-SWEEP-1** — doctor-vs-check, UNPARSED-vs-map, trust-vs-stats, enrich-CTA on
+   Python. 7. cycles fake paths / type-only / test-only. 8. dead's static causes. 9. governance
+   quartet collapse. 10. churn sort + budgets, stats de-dup. Seeding corpus levers (boilerplate
+   skip, symbol names, config/test exclusion) fold into the symbol-granularity milestone.
+
 ## Semantic seeding — ratified track (2026-08-24)
 
 Operator-ratified (VISION § Semantic Seeding; spike evidence
