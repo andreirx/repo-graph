@@ -41,7 +41,31 @@ this doc follows.)
 >
 > ---
 
-Revision: **iteration 9** — closes `.agent-manager/slices/EMBED-SEED-1/review-8.json`: one blocking
+Revision: **iteration 11** — closes `.agent-manager/slices/EMBED-SEED-1/review-10.json` (two internal-contract
+reconciliations, no scope change): (1) §12's `find` degraded-state acceptance criterion now requires the
+**always-present `candidates: []` + labeled `summary`** (was: `candidates` key *omitted* — which contradicted
+the ratified §8B.2/§8B.3/D-ES-11 contract); (2) §8B.1/§8B.2/§8B.3 reworded to state precisely that `find`
+shares the §8 **substrate and degradation *causes/state taxonomy*** while its **DTO/rendering is intentionally
+distinct** (own DTO, always-present `[]` + `summary`) — the earlier "identical/shared verbatim" and "only
+cap/header differs" wording is corrected. Change log: **§27**.
+Prior revision: **iteration 10** — **HUMAN DIRECTIVE 2 + SCOPE EXPANSION** (2026-08-25, VISION amended
+`8adabca`, binding): the semantic substrate now serves **three** ratified uses, not just the §8
+fallback tier. This iteration is **purely additive** (the §8 fallback contract is unchanged): it adds
+**§8B — the `rmap find "<concept>"` affirmative concept-search verb** (use (ii), human-named, sharing
+the ENTIRE §8 substrate — only the verb + envelope + one CLI/daemon/witness line are new), records
+**D-ES-11** (the `find` contract) and D-ES-1's **second** human supersession (the human overrode its
+rejection of a search-named verb — honesty mitigation is the *output*), adds the **§3.3 SQL/DDL
+corpus-coverage limitation** (spike addendum), folds `find` into the **IMPL-1 milestone** (VISION:
+uses (i)+(ii) ship together), and adds **use (iii)** — cross-module concern hints — as a **named
+follow-on milestone `EMBED-CONCERN-1`** (§11, rendering-surface decisions deferred to its own slice).
+Per TD-015 the decision-review rerun challenges **only** D-ES-11 + the use-(iii) milestone cut. Full
+change log: **§25**. This iteration-10 pass additionally **closes `review-9.json`** (two code-truth
+reconciliations, no scope change): the `find` verb now specifies its **own** response DTO carrying the
+§8.2 candidate *fields* (not `FocusCandidate`) with an **always-present `candidates: []`** (§8B.2/§8B.3,
+D-ES-11), and the §11 concern-hint milestone no longer claims the §7.2 query→file ranking is reused —
+concern discovery has no query and ranks clusters, so its K-means/span/cohesion is spike evidence with
+its ranking contract deferred to `EMBED-CONCERN-1`. Change log: **§26**.
+Prior revision **iteration 9** — closed `.agent-manager/slices/EMBED-SEED-1/review-8.json`: one blocking
 code-truth fix — the follow-up **second hop keys by NAME, not stable key** (hop 1's serialized
 `ExplainSymbolItem` exposes `{ name, subtype, line_start }` only, no `stable_key`), so `explain
 <symbol-name>` returns callers only when the name resolves uniquely, else the existing ambiguity
@@ -259,6 +283,18 @@ So the IMPL-1 corpus population = `SELECT file_uid, path FROM files WHERE repo_u
 AND is_generated=0 AND is_excluded=0`, joined to `file_versions.content_hash` for the READY
 snapshot. This is a **contract decision** (D-ES-6) only because "should generated files be
 seedable?" is a product call, not because the mechanism is unclear.
+
+> **Recorded corpus-coverage limitation — SQL/DDL files (spike addendum, 2026-08-25).** The concept
+> search in the EMBED-CONCERN-SPIKE addendum OBSERVED an honest miss: the query *"database table
+> schema definitions"* returned zod schemas, **not** the SQL DDL files —
+> *"the SQL DDL files are outside the indexed corpus"* (`docs/spikes/2026-08-23-embed-seed-spike-1.md:58-59`).
+> The corpus is exactly whatever `files` already holds (the `WHERE` above), so any file kind the
+> upstream scanner does not record in `files` is unreachable to **both** the fallback tier (§8) and
+> `rmap find` (§8B). Whether `.sql`/DDL absence is scanner language-coverage or an exclusion flag is
+> **not resolved in this SPEC** (INFERRED — not read from code here); it is recorded as a **named
+> coverage limitation of the semantic surfaces**, not silently glossed. Widening the corpus to SQL/DDL
+> is a **separate, evidence-gated change** to the upstream scan (out of this slice's scope); the
+> honest posture until then is that semantic hints cannot point at schema-DDL files.
 
 ### 3.4 Artifact-family contract + cross-crate registration (resolves review-0 item 2, review-1 item 3)
 
@@ -1089,6 +1125,170 @@ visible omission `limit` rather than silently truncating. The candidate cap (≤
 
 ---
 
+## 8B. `rmap find "<concept>"` — the affirmative concept-search verb (VISION use (ii); DECISION D-ES-11)
+
+**Scope note (HUMAN DIRECTIVE 2, 2026-08-25).** The fallback tier (§8) is not the ceiling. VISION
+§ Semantic Seeding now ratifies **three** uses of the same substrate (commit `8adabca`, binding;
+measured in the spike addendum): (i) the §8 fallback tier; (ii) **`rmap find`**, this section; (iii)
+cross-module concern hints, a named follow-on (§11). This section specs **only (ii)**. It is
+**additive** — it does not touch §8, and §8's contract is unchanged.
+
+**`find` is human-named and human-ratified**, and it **supersedes D-ES-1's rejection of a
+search-named verb** (D-ES-1 rejected `find`/`search` as reading like an answer engine → I1 risk;
+the human overrode that directly, VISION amended `8adabca` — recorded at D-ES-1 STATUS + D-ES-11).
+The honesty mitigation is **not a rename** but **the output itself**: `find` never claims
+completeness and always labels its results as Layer-3 hints to open, not answers (below). It is the
+**one deliberately search-named verb**, honest because its rendered output says *hints, open the files*.
+
+### 8B.1 What `find` is, and how it differs from the §8 fallback tier
+
+| | §8 fallback tier | §8B `rmap find` |
+|---|---|---|
+| Trigger | **only** after every deterministic tier yields zero matches (§8.1) — never user-invoked directly | **user-invoked affirmatively**: `rmap find "<concept>"` always consults the store |
+| Carrier | the existing seam's `Focus.candidates` / error `data` (no new verb) | **a new verb + its own envelope** (the only new surface) |
+| Cap | ≤5 candidates (VISION bound) | **≤10** candidates (human-directed bound, HUMAN DIRECTIVE 2, 2026-08-25 — VISION `8adabca` ratifies the verb + honesty posture; the numeric cap is the operator's directive, not VISION prose) |
+| Substrate (store §4 · pins §7.1 · corpus §3 · ranking §7.2 · degradation *causes/state taxonomy* §8.3) | — | **shared** with §8 |
+| Degradation *output shape* | `Focus.candidates` omitted-when-empty + a `Limit` line (§8.3) | **intentionally distinct**: own DTO — always-present `candidates: []` + a `summary` line (§8B.2/§8B.3) |
+
+`find` reuses the same underlying **substrate**: the same per-repo sidecar store (§4), the same pinned
+`(model_id, dim, content_hash)` hard-fail (§7.1), the same corpus (§3, incl. the SQL/DDL
+coverage limitation §3.3), the same cosine + path-order tie ranking (§7.2), and the same **degradation
+state taxonomy / error causes** (§8.3) — i.e. the *same set of unavailable/pin-mismatch/known-zero
+conditions*, detected by the **same** `Embedder`/store error variants. What `find` does **not** share
+is the *rendered degradation output*: the §8 tier fills `Focus.candidates` (omitted-when-empty) plus a
+`Limit` line, whereas `find` renders its **own** DTO (§8B.2) — an always-present `candidates: []` under
+a `summary` header. The genuinely new surface is the verb, its envelope, and that distinct empty/degraded
+rendering — there is **no** new store, pin, ranking, or degradation-*detection* logic.
+
+### 8B.2 The envelope (`--json`) — its own DTO carrying the §8.2 candidate FIELDS
+
+`find` is a **new verb with its own top-level response DTO** — it does **NOT** reuse Group A's
+`FocusCandidate` (which is pinned to stay byte-compatible with the existing deterministic `Focus`
+envelope, so it carries `file: Option<String>` and derives `Eq`,
+`rust/crates/agent/src/dto/envelope.rs:54-59`). `find` has no such constraint, so it defines a fresh
+struct that carries the **same semantic FIELDS** the fallback tier surfaces — but names its locator
+field `path` (a plain `String`, not `FocusCandidate.file: Option<String>`) and its score `f64`
+(so the DTO does **not** derive `Eq`). This resolves the review-9 §8B contract gap: "reuse §8.2
+verbatim" was wrong — §8.2's Group-A object is `FocusCandidate` (field `file`), while `find`'s
+example renders `path`; the honest statement is that `find` shares the fallback tier's *fields and
+semantics*, not its *struct*. The exact `find` DTO (IMPL work, D-ES-11):
+
+```rust
+// NEW DTOs owned by the `find` handler — NOT FocusCandidate. `candidates` is a plain Vec
+// (default serde) → serialized ALWAYS-PRESENT as `[]` when empty; NO `skip_serializing_if`
+// (that attribute belongs to Focus.candidates, envelope.rs:110-112, and is NOT inherited here).
+struct FindResponse {
+    schema: String, command: String, repo: String, snapshot: String,
+    query: String,
+    summary: String,                 // ALWAYS present — the Layer-3 honesty header (I1/I2)
+    candidates: Vec<FindCandidate>,  // plain Vec → `[]` when empty (§8B.3), never omitted
+}
+struct FindCandidate {
+    stable_key: String,
+    path: String,                    // repo-relative path — a plain String, NOT `file: Option<String>`
+    score: f64,                      // cosine (§7.2); a float → this DTO does NOT derive Eq
+    source: String,                  // always "embedding" (I2)
+    model_id: String,                // the pin (§7.1)
+    module: String,                  // owning module, carried directly (§8.2a)
+    next: NextCommand,               // the `explain <stable_key>` first hop (§8.2a)
+}
+```
+
+The store, pins, corpus, ranking, and the *degradation state taxonomy / error causes* are shared with
+the §8 tier (§8B.1); what differs is deliberate and confined to **rendering**: the **≤10 cap**, this
+**own DTO** in place of `Focus.candidates`, the **always-present top-level `summary` honesty header**,
+and the **always-present `candidates: []`** empty serialization (vs §8's omitted-when-empty). Human
+mode leads with the labeled line; `--json` emits this DTO via each seam's existing
+`serde_json::to_string_pretty` idiom (`rust/crates/rgr/src/commands/orient.rs:199-203`).
+
+```jsonc
+// rmap find "exchange rate conversion" --json
+{
+  "schema": "rgr.agent.v1",
+  "command": "find",
+  "repo": "glamCRM",
+  "snapshot": "…",
+  "query": "exchange rate conversion",
+  // Layer-3 header — the honesty mitigation, ALWAYS present, NEVER a completeness claim:
+  "summary": "likely areas for \"exchange rate conversion\" (semantic hints — open the files)",
+  "candidates": [                              // ≤10, ranked by cosine then path order (§7.2)
+    {
+      "stable_key": "glamCRM:serverless/.../bnr-service.ts:FILE",
+      "path": "serverless/packages/backend/src/services/bnr-service.ts",
+      "source": "embedding",
+      "model_id": "text-embedding-nomic-embed-text-v1.5",
+      "score": 0.71,
+      "module": "backend/services",
+      "next": { "cmd": "explain", "args": ["glamCRM:serverless/.../bnr-service.ts:FILE"], "cwd": "<repo_root_abs>" }
+    }
+    // … up to 10
+  ]
+}
+```
+
+- **`summary` is the honesty contract (I1/I2).** It reads *"likely areas for `<concept>` (semantic
+  hints — open the files)"* — hints, not an answer; it **never** states or implies completeness
+  ("here is everything about X"). Human mode prints this line first; each candidate then shows
+  `path` + `score` + `model_id` + its `next` follow-up. This is why a search-named verb does **not**
+  violate I1: the surface itself declares its Layer-3 status and points the reader at the files.
+- **≤10 candidates** (human-directed bound, HUMAN DIRECTIVE 2 — VISION `8adabca` ratifies the verb +
+  honesty; the ≤10 cap is the operator's directive), ranked cosine-desc then **path order** on ties (§7.2,
+  reused). `source:"embedding"` + `model_id` on every candidate (I2). The `next` follow-up is the
+  same deterministic `explain <stable_key>` → imports+symbols, then `explain <symbol-name>` →
+  callers-on-a-unique-name sequence as §8.2a (reused verbatim; no new neighbourhood logic).
+- A candidate whose stored path no longer resolves against the current snapshot (a stale vector) is
+  **dropped** — the same `resolve_path_focus` admission check the fallback tier uses (§8.2).
+
+### 8B.3 Degraded states — same causes/taxonomy as §8.3, distinct rendering for an affirmative verb
+
+`find` has **nothing deterministic to fall back to** (unlike §8, which sits behind a resolved/no-match
+tier), so when the substrate is unavailable it returns **zero candidates + one labeled line stating
+why** — never an error, never a fabricated "0 results as if measured":
+
+| Situation | `find` output |
+|---|---|
+| No vector store yet (never indexed / just built) | `candidates: []`; `summary:"semantic index not built yet — hints will be available after indexing"` |
+| Model unavailable (endpoint down / no local model) | `candidates: []`; `summary:"no local embedding model reachable — semantic hints unavailable (find is optional)"` |
+| Pins mismatch (model/dim/schema changed) | `candidates: []`; `summary:"semantic index was built with a different model — rebuild on next index"`, store discarded (§7.1) |
+| Query embeds but nothing scores | `candidates: []`; `summary:"no area scored above zero for \"<concept>\""` (genuine known-zero) |
+
+Each maps to the **same** `Embedder`/store error variant as §8.3 (same causes — no new degradation
+*detection* code); only the **rendering** above is `find`'s own (always-present `[]` + `summary`).
+
+> **Code-truth note (empty-array serialization — resolves review-9 item 1).** `find`'s
+> `candidates` is a field on its **own** DTO (§8B.2), so its empty-state serialization is a fresh
+> IMPL choice, **not** inherited from `Focus.candidates`. §8.3's *omit-when-empty* behaviour is a
+> property of the `#[serde(skip_serializing_if = "Vec::is_empty")]` attribute on **`Focus.candidates`**
+> (`rust/crates/agent/src/dto/envelope.rs:110-112`) — it exists only to keep the existing `Focus`
+> byte-output unperturbed, and a new DTO does **not** and **need not** inherit it. For `find` the
+> smaller, honest choice is a **plain `Vec` with NO `skip_serializing_if`**: `candidates` is
+> **always present**, serialized as `[]` when empty (default serde `Vec` behaviour — no bespoke
+> serializer override). So an affirmative `find` always returns a well-formed object whose empty
+> `[]` **and** whose `summary` line together carry the honest signal; a consumer never has to
+> distinguish "key absent" from "empty". This divergence from Group A is intentional and named as
+> IMPL work under D-ES-11 (Group A must not perturb `Focus`; `find`, a new surface, is free to be
+> always-present).
+
+### 8B.4 The new surface — CLI verb + dispatch arm + witness-manifest line (IMPL work)
+
+Adding `find` is a **new read-only verb** under the **standing Protocol Surface Standard**
+pre-ratification (naming is human-fixed; the verb reads as read-only, matching the standard). The
+IMPL enumerates exactly these additive touch-points against code — no substrate change:
+
+| Site | What IMPL-1 adds | Anchor (OBSERVED) |
+|---|---|---|
+| CLI dispatch arm | one arm `"find" => run_find(&args[2..])` in the hand-rolled `match args[1].as_str()` (there is **no** clap enum) + one `use` in the handler import block | `rust/crates/rgr/src/main.rs:84` (match), `:96`/`:104` (`orient`/`explain` arms), imports `:54-58`; re-export `rust/crates/rgr/src/commands/mod.rs:67` |
+| CLI handler `run_find` | mirrors `run_orient`'s shape verbatim: parse `--json` → `json_mode`, resolve repo from cwd (`current_dir` → `canonicalize`), build params, `client.request("find", …)`, emit `to_string_pretty` when `--json` else human render | `rust/crates/rgr/src/commands/orient.rs:50` (`run_orient`), `--json` `:61-62`, cwd `:161`/`:169`, request `:197`, emit `:199-203` |
+| Daemon dispatch arm | one arm `"find" => self.handle_find(request, emitter)` in the canonical method router + a `handle_find` method (peer of `handle_orient`) | `rust/crates/daemon-runtime/src/dispatch.rs:330` (`match request.method.as_str()`), `"orient"` arm `:365`, `"explain"` `:367` |
+| Witness manifest line | **one line** `find = FC1, …` in the completeness registry — a new dispatch arm goes **RED** in the guard test until declared | `rust/crates/daemon-runtime/witness/dispatch_fact_classes.txt:37-38` (`orient`/`explain` lines; 68 arms today `:16`), enforced by `rust/crates/daemon-runtime/tests/consolidation_witness.rs:35-43` |
+
+All four are **mechanical additive edits** the IMPL performs under D-ES-11 + the standing verb-naming
+pre-ratification; none touches the store, pins, ranking, corpus, or degradation contracts (those are
+§3–§8, unchanged). `find`'s query path is one query embedding + brute-force cosine over the store →
+sort → top-10 (§8.4 query-path row, cap 10 instead of 5).
+
+---
+
 ## 9. CERTAINTY + HONESTY (resolves packet item 5)
 
 - **Layer-3 labels in the reader's language (VISION § Labels).** On a seam's no-match fallback the
@@ -1256,7 +1456,10 @@ and the ratified (a) `Embedder` implementation:
   registration (§3.4), the `Embedder` **port** (§10, the seam — not any impl), the background pass,
   the **Group-A seam integration** (the `orient`/`explain` focus-resolution no-match fallback that
   fills `Focus.candidates` with labeled semantic candidates + `next`, §8) on each seam's existing
-  `--json`, the doctor block, and the degraded states. **No new verb, no new dispatch arm.**
+  `--json`, the doctor block, the degraded states, **and — per VISION `8adabca` (uses (i)+(ii) ship in
+  the first IMPL) — the `rmap find` verb (use (ii), §8B)**. **The fallback tier (use (i)) adds no new
+  verb; `rmap find` is the one new verb + one CLI arm + one daemon arm + one witness-manifest line
+  (§8B.4), reusing the shared substrate — no new store/pin/ranking/degradation code.**
   **Manifest impact — decided by D-ES-8:** if D-ES-8 ratifies the **new crate `repo-graph-seed`**,
   IMPL-1 adds one workspace-member line to `rust/Cargo.toml` (`members = [ … "crates/repo-graph-seed" ]`
   — the workspace currently lists 49 crate members with **no** `seed` entry, OBSERVED at
@@ -1316,6 +1519,11 @@ and the ratified (a) `Embedder` implementation:
   embed the focus/target string and fill `Focus.candidates` (additive fields on `FocusCandidate`)
   with ≤5 labeled candidates + `module` locator + `next` follow-up + the labeled `SemanticFallback`
   `Limit` (new `LimitCode` variant, §8.2/§8.3) →
+  **the `rmap find` verb (use (ii), §8B):** one CLI arm `"find" => run_find` (`main.rs:84`) +
+  `run_find` mirroring `run_orient` (`orient.rs:50`) + one daemon arm `"find" => handle_find`
+  (`dispatch.rs:330`) + one witness-manifest line (`dispatch_fact_classes.txt`), returning ≤10 labeled
+  `source:"embedding"` candidates under the honesty header over the SAME store/ranking (no new
+  substrate) →
   doctor "Semantic seeding" block → the honest degraded states.
   **Done when:** on the glamCRM smoke fixture, isolated
   `rmap orient "where does the backend fetch BNR exchange rates?"` (a phrase with **no** deterministic
@@ -1323,7 +1531,10 @@ and the ratified (a) `Embedder` implementation:
   candidate with its `module` + `next: explain <key>` in ≤5 (reproducing the spike's 14/16-class
   result on the ratified tasks); running that `next` yields the file's deterministic imports +
   symbols, and one further `explain <symbol-name>` on a listed symbol yields its callers **when that
-  name resolves uniquely** (else the existing ambiguity result — hop 2 keys by name, §8.2a); and
+  name resolves uniquely** (else the existing ambiguity result — hop 2 keys by name, §8.2a);
+  **and (use (ii)) isolated `rmap find "exchange rate conversion" --json` returns the bnr-service file
+  among ≤10 labeled `source:"embedding"` candidates under the `summary:"likely areas … open the files"`
+  header, each with its `module` + `next` (§8B);** and
   every **resolved** or **ambiguous** `orient`/`explain`/`callers`/`callees`/`path`
   result, plus `trust`/`doctor`(existing lines), is byte-unchanged (I1/I4 regression check).
 
@@ -1337,6 +1548,28 @@ and the ratified (a) `Embedder` implementation:
   daemon error `data` (a different carrier than Group A's `Focus.candidates`), and a file-level store
   answers a *symbol* query only with *files* — a weaker fit that is honest but lower-value. Built as a
   follow-up cut once Group A is proven; the core, ports, and store are reused verbatim.
+- **Cross-module concern hints (VISION § Semantic Seeding use (iii)) — NAMED FOLLOW-ON milestone
+  `EMBED-CONCERN-1`, NOT built in IMPL-1.** *Direction (not deep-designed here):* cluster the same
+  file vectors IMPL-1 already stores (§4) — cosine K-means over the store — and surface the clusters
+  that span **≥2 deployable modules** on the existing **module / boundary discovery surfaces** as
+  **labeled Layer-3 seam/concern candidates**, complementary to (never overriding) the deterministic
+  HTTP boundary links. *Evidence (measured, spike addendum):* K=24 cosine clustering over glamCRM's
+  file vectors surfaced its real vertical concerns — sales-targets (frontend↔serverless, cohesion .93),
+  tenant-config/brand (.92, 15 files), exchange-rate (.90), auth/Cognito (.89, 21 files) — concerns
+  **invisible to import analysis** because the subsystems touch only over HTTP
+  (`docs/spikes/2026-08-23-embed-seed-spike-1.md:61-68`, EXECUTED). *Shares only the store and pins,
+  NOT the query→file ranking:* concern hints reuse IMPL-1's per-file vector **store** (§4), its
+  `(model_id, dim, content_hash)` **pins** (§7.1), and the **degraded states** (§8.3) verbatim — but
+  they do **not** reuse the §7.2 ranking. §7.2 ranks *query→file* cosine with a path tie-break; concern
+  discovery **has no query** and ranks **clusters**, not files, so the fallback/`find` ranking cannot
+  apply. The **K=24 cosine K-means + rank-clusters-by-span/cohesion** shown above is **spike evidence**
+  (measured in the addendum, `:61-68`), *not* a specified production contract: the clustering algorithm,
+  its `K`, and the cluster-ranking function are **deferred to the `EMBED-CONCERN-1` slice's own
+  DECISIONS** — this SPEC neither ratifies them nor claims §7 covers them. The **only new work** is
+  therefore that clustering/cluster-ranking pass **plus** the **rendering-surface decision** — which
+  module/boundary command renders the hints, in what envelope, under what caps/labels — both deferred
+  to `EMBED-CONCERN-1` (this SPEC does not deep-design use (iii) beyond this milestone cut). Ships after
+  IMPL-1 proves the store + query→file ranking on the fallback tier and `find`.
 - **Inlined neighbourhood in the candidate (the pre-rework caller fold)** — **removed, not deferred**:
   the amended VISION replaces it with the named `next` follow-up **sequence**, so the full
   `(module, imports, callers)` is reached by running `explain <file>` (imports + symbols) then
@@ -1373,11 +1606,17 @@ and the ratified (a) `Embedder` implementation:
   `Focus.candidates` with `source:"embedding"` candidates + `next`; (ii) a resolved focus and (iii)
   an ambiguous focus are byte-identical to the pre-seed baseline (the tier does NOT fire); (iv) each
   degraded state (no store / model down / pins mismatch) returns the baseline no-match plus one
-  labeled `limits` line** — no caller-fold test (deleted); the `artifact-contracts`
+  labeled `limits` line; (v) `rmap find "<concept>"` returns ≤10 labeled `source:"embedding"`
+  candidates under the `summary` honesty header, and (vi) each of find's degraded states returns the
+  **always-present `candidates: []`** under the labeled `summary` honesty header (no error, no omitted
+  key — matches §8B.2/§8B.3 and D-ES-11); and the `find` dispatch arm is
+  declared in `witness/dispatch_fact_classes.txt` (else `consolidation_witness.rs` goes RED)** —
+  no caller-fold test (deleted); the `artifact-contracts`
   registry-completeness + policy-coherence tests still pass with the new family
   (`rust/crates/artifact-contracts/src/registry.rs:458-465`); the isolated live dogfood
   (`./scripts/dogfood-isolated.sh`, never the operator's registry) running `rmap orient`/`explain`
-  with a no-match phrase on the fixture and observing the labeled semantic candidates; a regression
+  with a no-match phrase **and `rmap find` with a concept phrase** on the fixture and observing the
+  labeled semantic candidates; a regression
   capture proving every **resolved**/**ambiguous** `orient`/`explain`/`callers`/`callees`/`path`
   result plus `trust`/`doctor`(existing lines) byte-unchanged; and the degraded states each exercised.
 
@@ -1396,14 +1635,29 @@ output-shape cells are UPDATED**; per TD-015 the decision-review rerun challenge
 (supersession), D-ES-7 (update), and D-ES-10 (new) — D-ES-2,3,5,6,8,9 and ratified D-ES-4 carry over
 UNCHANGED and are not re-litigated.
 
+**Scope-expansion note (HUMAN DIRECTIVE 2, 2026-08-25, VISION `8adabca`):** the substrate now serves
+**three** ratified uses (§8B scope note). This adds **D-ES-11** (the `rmap find` contract — NEW; verb
+human-ratified, contract challengeable) and the **use-(iii) cross-module concern-hint milestone cut**
+(§11, follow-on `EMBED-CONCERN-1`). Per TD-015 the decision-review rerun for this cycle challenges
+**only** these two new/changed items — D-ES-11 and the use-(iii) milestone cut. D-ES-1's STATUS is
+extended (second human supersession, recorded, not a re-litigation). **All other cells (D-ES-2..10)
+carry over UNCHANGED** and are not re-opened.
+
 DECISION_REQUIRED:
-- ID: D-ES-1  *(SUPERSEDED-BY-HUMAN 2026-08-25 — recorded, not silently removed)*
-  STATUS: **SUPERSEDED.** The human directive (VISION amended, commit `a3a90ce`,
-    `docs/VISION.md:149-160`) **rejected a separate verb entirely**: semantic candidates must
-    integrate into the EXISTING resolution seams. There is therefore **no verb to name**. This
-    cell's ratification role is taken over by **D-ES-10** (seam enumeration + fire condition +
-    integrated envelope). The original question/options are retained below for the audit trail only;
-    they are **not a live decision** and the decision-review rerun does NOT re-open them (TD-015).
+- ID: D-ES-1  *(SUPERSEDED-BY-HUMAN 2026-08-25 — twice; recorded, not silently removed)*
+  STATUS: **SUPERSEDED (two human directives).** (1) The first directive (VISION amended, commit
+    `a3a90ce`, `docs/VISION.md:149-160`) **rejected a separate *fallback* verb entirely**: semantic
+    candidates must integrate into the EXISTING resolution seams (that ratification role is taken over
+    by **D-ES-10**). (2) HUMAN DIRECTIVE 2 (VISION amended, commit `8adabca`, binding) then **directly
+    named an affirmative verb `rmap find`** for concept search (VISION use (ii)), **overriding this
+    cell's rejection of `find`/`search`-named verbs** — the human ruled that the honesty mitigation is
+    **the output itself** (`find` labels its results *hints — open the files*, never a completeness
+    claim), so a search-named verb no longer violates I1. The `find` contract is **D-ES-11** (new); its
+    verb+name are human-ratified, only the contract is decision-review-challengeable. This cell's own
+    original question ("what to *name* the seeding verb") is thus doubly moot: neither a fallback verb
+    (there is none) nor the affirmative verb (human-named `find`) is a builder naming choice. The
+    original question/options are retained below for the audit trail only; they are **not a live
+    decision** and the decision-review rerun does NOT re-open them (TD-015).
   QUESTION (obsolete): The verb name for the semantic-seeding candidate generator.
   OPTIONS (obsolete):
   - `seed` (was RECOMMENDED): reads as safe/read-only, "plant a starting point"; sibling to
@@ -1724,6 +1978,50 @@ DECISION_REQUIRED:
     behavior of five existing commands' no-match branches and extends a boundary DTO
     (`FocusCandidate`). It replaces D-ES-1's ratification role and must be ratified before IMPL.
 
+- ID: D-ES-11  *(NEW 2026-08-25 — HUMAN DIRECTIVE 2; the `rmap find` affirmative concept-search verb, VISION use (ii))*
+  STATUS: **The verb and its name are HUMAN-RATIFIED** (VISION amended, commit `8adabca`, binding);
+    the human directly named `find` and overrode D-ES-1's rejection of a search-named verb. What is
+    **decision-review-challengeable here** is the *contract*: the envelope shape, the ≤10 cap, the
+    honesty mitigation, the degraded states, and the additive dispatch/witness surface (§8B). The verb
+    **shares the §8 substrate** (store §4, pins §7.1, corpus §3, ranking §7.2) and the §8 degradation
+    **causes/state taxonomy** (§8.3) — this cell adds **no** new store/pin/ranking/degradation-*detection*
+    decision; only the degraded *rendering* is `find`'s own (§8B.2/§8B.3).
+  QUESTION: What is the `rmap find "<concept>"` output contract, and how does its honesty hold under
+    I1 (candidate-generator-never-answer) given that it is a deliberately search-named verb?
+  OPTIONS:
+  - (RECOMMENDED) `find` defines its **own** response DTO carrying the §8.2 candidate FIELDS —
+    `stable_key, path (a plain String, not FocusCandidate.file), score (f64, no Eq),
+    source:"embedding", model_id, module, next` (the exact struct in §8B.2) with an
+    **always-present `candidates: []`** (plain `Vec`, no `skip_serializing_if` — §8B.3) — cap **≤10**
+    (human-directed bound, HUMAN DIRECTIVE 2), and lead with a
+    Layer-3 honesty header `summary:"likely areas for \"<concept>\" (semantic hints — open the files)"`
+    that **never** claims completeness; degraded states share §8.3's causes/taxonomy but render `find`'s
+    own always-present `[]` + `summary` (§8B.3); the only new surface is the
+    verb + one CLI arm + one daemon arm + one witness-manifest line (§8B.4). REWARD — the honesty
+    mitigation is **the output itself** (I1 held by the surface declaring its own Layer-3 status +
+    pointing at files, per the human directive), zero new substrate, smallest possible new surface for
+    a human-ratified verb, and full reuse of the ranking/store/pins/degradation the fallback tier
+    already proves. RISK — a search-named verb is inherently more prone to being *read* as an answer
+    engine than `orient`/`explain`; mitigated (not removed) by the mandatory header + per-candidate
+    provenance + `next` follow-up — the residual is that a caller can still ignore the label (the same
+    residual every Layer-3 surface carries).
+  - Richer/answer-shaped envelope (inline snippets, ranked "best match", a single top answer): REWARD —
+    denser first-screen. RISK — **violates I1** (presents a Layer-3 hint as an answer), and builds new
+    inline aggregation the substrate does not have; rejected.
+  - Different cap (≤5 like the fallback tier, or unbounded): REWARD — symmetry with §8 / more hits.
+    RISK — ≤5 under-serves an affirmative "show me the areas" query (the human bound is use-(ii)'s ≤10);
+    unbounded violates the no-silent-caps + bounded-output discipline. Rejected — ≤10 is the human-directed bound.
+  RECOMMENDED: `find`'s own DTO carrying the §8.2 candidate FIELDS (`path` locator, `f64` score,
+    always-present `candidates: []`, §8B.2/§8B.3) + mandatory Layer-3 header + ≤10 cap + §8.3-shaped
+    degraded states; add the verb via the one CLI arm / one daemon arm / one witness-manifest line
+    enumerated in §8B.4, under the standing Protocol Surface Standard verb-naming pre-ratification.
+  BLOCKING_REASON: The verb existence/name is already human-ratified, but its **output contract** sets
+    a new public surface (a new verb + its envelope) and is the I1-honesty-bearing decision — so it is
+    recorded here for the decision-review rerun (which challenges **only** the new/changed cells:
+    D-ES-11 + the use-(iii) milestone cut, §11). The substrate cells (D-ES-2..10) are **not**
+    re-litigated (TD-015). Use (iii)'s rendering-surface decisions are **not** taken here — they are a
+    named follow-on milestone `EMBED-CONCERN-1` (§11) with its own DECISIONS.
+
 ---
 
 ## 13. Stop-condition assessment (packet)
@@ -1759,12 +2057,14 @@ DECISION_REQUIRED:
 ## 14. Definition of done (this SPEC)
 
 `docs/slices/embed-seed-1.md` exists, buildable, self-contained, with real `file:line` anchors and
-the `## DECISIONS` section (D-ES-1 **superseded**, D-ES-2,3,5,6,8,9 carried, D-ES-4 **ratified**,
-D-ES-7 **updated**, D-ES-10 **new** — each live cell with risk/reward). review-impl approves →
-decision-review reruns **only the changed/new cells** (D-ES-1/7/10, TD-015) → produces the
+the `## DECISIONS` section (D-ES-1 **superseded** (twice), D-ES-2,3,5,6,8,9 carried, D-ES-4
+**ratified**, D-ES-7 **updated**, D-ES-10 **new**, **D-ES-11 new** (the `rmap find` contract, §8B) —
+each live cell with risk/reward), plus the **use-(iii) cross-module concern-hint follow-on milestone**
+(`EMBED-CONCERN-1`, §11). review-impl approves → decision-review reruns **only the changed/new cells**
+(this cycle: D-ES-11 + the use-(iii) milestone cut; prior cycle: D-ES-1/7/10 — TD-015) → produces the
 ratification packet → **halt at awaiting-ratification for the human.** The IMPL slice
-(EMBED-SEED-IMPL-1, §11) runs only after D-ES-7 + D-ES-10 (and the carried D-ES-2,3,5,6,8,9) are
-ratified.
+(EMBED-SEED-IMPL-1, §11) ships uses (i) the §8 fallback tier **and** (ii) the §8B `rmap find` verb, and
+runs only after D-ES-7 + D-ES-10 + D-ES-11 (and the carried D-ES-2,3,5,6,8,9) are ratified.
 
 ---
 
@@ -2228,4 +2528,126 @@ only; healthy sections untouched. Each fact OBSERVED against the tree at fix tim
 
 No decision cells changed substance (D-ES-7's wording is refined to match code, not re-litigated); the
 decision-review scope from iteration 8 is unchanged.
+
+---
+
+## 25. Change log — iteration 10 (HUMAN DIRECTIVE 2 + SCOPE EXPANSION, 2026-08-25)
+
+Iteration 9 was **approved** (`review-9.json`). This iteration is a **human-directed scope
+expansion**, not a review fix: VISION § Semantic Seeding now ratifies **three** uses of the semantic
+substrate (commit `8adabca`, binding; measured in the spike addendum). The change is **purely
+additive** — the §8 fallback-tier contract, all substrate cells (D-ES-2..10), and every ratified
+mechanic are **unchanged**. Each edit below cites the packet item it closes; facts OBSERVED against
+the tree at edit time.
+
+1. **§8B added — the `rmap find "<concept>"` affirmative concept-search verb (use (ii)).** A new
+   section specs the human-named verb: it **shares the ENTIRE §8 substrate** (store §4, pins §7.1,
+   corpus §3, cosine+path-tie ranking §7.2, degraded states §8.3) and carries the §8.2 candidate
+   **fields** in its **own** response DTO (§8B.2 — `path` locator, `f64` score, always-present
+   `candidates: []`; not `FocusCandidate`); the **only** new surface is the verb + its envelope. Contract: ≤10 candidates (human-directed
+   bound, HUMAN DIRECTIVE 2 — VISION `8adabca` ratifies the verb + honesty, not the numeric cap), a
+   mandatory Layer-3 honesty header `summary:"likely areas for \"<concept>\"
+   (semantic hints — open the files)"` that **never** claims completeness, the same `next`
+   `explain`-sequence follow-up, and §8.3-identical degraded states phrased for an affirmative verb.
+   §8B.4 enumerates the new surface against code as IMPL work under the standing Protocol Surface
+   Standard verb-naming pre-ratification: one CLI arm in the hand-rolled `match`
+   (`rust/crates/rgr/src/main.rs:84`, `orient`/`explain` arms `:96`/`:104`, imports `:54-58`), a
+   `run_find` mirroring `run_orient` (`rust/crates/rgr/src/commands/orient.rs:50`), one daemon arm
+   (`rust/crates/daemon-runtime/src/dispatch.rs:330`, `"orient"` `:365`), and **one witness-manifest
+   line** in `rust/crates/daemon-runtime/witness/dispatch_fact_classes.txt` (enforced by
+   `rust/crates/daemon-runtime/tests/consolidation_witness.rs:35-43` — a new arm goes RED until
+   declared). All OBSERVED.
+2. **D-ES-11 recorded (NEW) — the `find` contract.** The verb + name are **human-ratified**; only the
+   output contract (envelope, ≤10 cap, honesty header, degraded states, additive surface) is
+   decision-review-challengeable, with I1-honesty as the load-bearing point.
+3. **D-ES-1 given its SECOND human supersession.** The first directive rejected a *fallback* verb
+   (→ D-ES-10); HUMAN DIRECTIVE 2 then **directly named `find`**, overriding this cell's original
+   rejection of `find`/`search`-named verbs — the human ruled the honesty mitigation is the *output*
+   itself. STATUS updated; obsolete options retained for audit (not re-litigated).
+4. **§3.3 corpus-coverage limitation recorded — SQL/DDL files.** Per the spike addendum
+   (`docs/spikes/2026-08-23-embed-seed-spike-1.md:58-59`, OBSERVED), the "database table schema
+   definitions" query missed the SQL DDL files — they are outside the indexed corpus. Recorded as a
+   named coverage limitation of **both** semantic surfaces (the corpus is exactly what `files` holds);
+   the exact cause (scanner coverage vs. exclusion flag) is marked **INFERRED** and its fix scoped out.
+5. **`find` folded into the IMPL-1 milestone (§11); use (iii) added as a follow-on.** Per VISION
+   `8adabca` "uses (i)+(ii) ship in the first IMPL", the runtime-agnostic-core + EMBED-SEED-IMPL-1
+   milestone now build the `find` verb alongside the fallback tier (the stale "No new verb, no new
+   dispatch arm" line is corrected — it held for the fallback tier only). **Use (iii)** —
+   cross-module concern hints — is added as a **named follow-on milestone `EMBED-CONCERN-1`** with its
+   direction + measured evidence (spike addendum clusters `:61-68`); its **rendering-surface
+   decisions are explicitly deferred** to that slice's own DECISIONS, not taken here.
+6. **§12 validation, §14 DoD, DECISIONS preamble, and the revision header updated** to the
+   three-use scope. Per TD-015 the decision-review rerun for this cycle challenges **only** D-ES-11 and
+   the use-(iii) milestone cut; D-ES-2..10 and ratified D-ES-4 carry over unchanged.
+
+---
+
+## 26. Change log — iteration 10 (closes review-9.json, 2026-08-25)
+
+Two code-truth reconciliations of the iteration-10 additions (§8B `find`, §11 use-(iii)). **No scope
+change**: the §8 fallback contract, all substrate cells (D-ES-2..10), and every ratified mechanic are
+untouched; this pass only makes the two new/changed cells match code. Both items OBSERVED against the
+tree at edit time.
+
+1. **`find`'s candidate/empty-array contract made exact — its OWN DTO, not a `FocusCandidate` reuse
+   (review-9 item 1).** §8B.2 previously said `find` "reuses the §8.2 candidate shape verbatim" while
+   its example rendered `path`; but §8.2's Group-A object is `FocusCandidate`
+   (`{ stable_key, file: Option<String>, kind }`, `rust/crates/agent/src/dto/envelope.rs:54-59`,
+   deriving `Eq`), which uses `file`, not `path`. And §8B.3 claimed `find`'s new top-level `candidates`
+   inherits §8.3's omit-when-empty behaviour — but that behaviour is the
+   `#[serde(skip_serializing_if = "Vec::is_empty")]` attribute on **`Focus.candidates`**
+   (`…/envelope.rs:110-112`), which a **new** `find` DTO does not inherit. Fixed by specifying **one
+   exact `find` DTO** (§8B.2): a fresh `FindResponse { …, query, summary, candidates: Vec<FindCandidate> }`
+   with `FindCandidate { stable_key, path: String, score: f64, source, model_id, module, next }` — it
+   carries the §8.2 candidate *fields/semantics* but as its **own** struct, uses `path` (a plain
+   `String`, not `file: Option<String>`), a `f64` score (so it does **not** derive `Eq`), and an
+   **always-present `candidates: []`** (plain `Vec`, **no** `skip_serializing_if` — the smaller, honest
+   design for a fresh surface; named as IMPL work under D-ES-11). §8B.3's degraded rows and closing note,
+   and D-ES-11's OPTIONS/RECOMMENDED, are updated to the always-present-`[]` shape; §25 item 1's wording
+   corrected to match. The Group-A tier is unchanged: it still reuses `FocusCandidate` with the
+   omit-when-empty attribute precisely because it must not perturb the existing `Focus` byte-output.
+
+2. **Concern-hint milestone no longer claims §7.2 ranking is reused (review-9 item 2).** §11's use-(iii)
+   bullet said concern hints share "store, pins, ranking, and degraded states … verbatim (§4/§7/§8.3)"
+   while also describing K=24 cosine K-means ranked by span/cohesion — incompatible: §7.2 ranks
+   *query→file* cosine with a path tie-break, whereas concern discovery **has no query** and ranks
+   **clusters**, not files. Fixed: the bullet now states concern hints reuse only the **store** (§4),
+   **pins** (§7.1), and **degraded states** (§8.3) verbatim — **not** the §7.2 ranking — and marks the
+   K-means/K/span/cohesion as **spike evidence** (`docs/spikes/2026-08-23-embed-seed-spike-1.md:61-68`,
+   EXECUTED), with the clustering + cluster-ranking **contract deferred to `EMBED-CONCERN-1`'s own
+   DECISIONS**. The requested direction + measured evidence are kept; the incorrect reuse claim is
+   removed.
+
+---
+
+## 27. Change log — iteration 11 (closes review-10.json, 2026-08-25)
+
+Two **internal-contract reconciliations** — both entirely within the iteration-10 `find` scope; **no
+scope change**, no new decisions, no code-truth claim added (the anchors were already OBSERVED). The
+issue was an internal *self-contradiction*: §12's acceptance test asked for the opposite of the ratified
+§8B DTO contract, and §8B's "shared verbatim" wording over-claimed against its own deliberately-distinct
+rendering. Both fixed by aligning to §8B.2/§8B.3/D-ES-11 (already the intended contract).
+
+1. **§12 `find` degraded-state acceptance criterion corrected (review-10 item 1).** §12 item (vi)
+   previously required each degraded `find` state to return "the honesty header with the `candidates`
+   key **omitted**" — the exact opposite of the ratified §8B.2/§8B.3/D-ES-11 contract, which specifies an
+   **always-present `candidates: []`** (plain `Vec`, no `skip_serializing_if`). A test written to the old
+   criterion would have validated the wrong public JSON. Item (vi) now requires the **always-present
+   `candidates: []` under the labeled `summary` honesty header (no error, no omitted key)**, matching
+   §8B.2/§8B.3 and D-ES-11.
+
+2. **§8B.1/§8B.2/§8B.3 "shared verbatim" degradation wording corrected (review-10 item 2).** The prose
+   called `find`'s degradation "identical / shared verbatim" with §8 and said the only differences were
+   "cap/header" — but `find`'s degraded output is deliberately a **different DTO/rendering**: its own
+   `FindResponse` with a `summary` carrier and an always-present `[]`, versus §8's `Focus.candidates`
+   (omitted-when-empty) plus a `Limit` line. Reworded to state precisely that `find` shares the §8
+   **substrate** — store (§4), pins (§7.1), corpus (§3), ranking (§7.2) — and the **degradation
+   *causes / state taxonomy*** (§8.3): the *same* unavailable/pin-mismatch/known-zero conditions detected
+   by the *same* `Embedder`/store error variants, i.e. no new degradation-*detection* logic. What `find`
+   does **not** share is the *rendered* degradation output — that is intentionally its own (§8B.2/§8B.3).
+   Edits: the §8B.1 substrate table split into a "Substrate … shared" row + a "Degradation *output shape*
+   … intentionally distinct" row and the following paragraph rewritten; §8B.2's "shared verbatim" sentence
+   rewritten to confine the differences to rendering; §8B.3's header changed from "identical to §8.3" to
+   "same causes/taxonomy as §8.3, distinct rendering"; §8B.3's closing line tightened to "same causes — no
+   new degradation *detection* code; only the rendering is `find`'s own".
 
