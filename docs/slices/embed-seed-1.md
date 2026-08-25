@@ -10,7 +10,51 @@ convention is the DECISION_REQUIRED-matrix + terminal DECISIONS section used by
 `docs/slices/module-model-1.md` §7/§12 and `docs/slices/engine-consolidation-1.md` §6/§8, which
 this doc follows.)
 
-Revision: **iteration 7** — this revision closes `.agent-manager/slices/EMBED-SEED-1/review-6.json`.
+> ## REWORK BANNER — iteration 7 (2026-08-25): integrate into existing seams, delete the verb
+>
+> **The human ratified the MECHANICS and REJECTED the separate verb** (VISION amended, commit
+> `a3a90ce`, `docs/VISION.md:149-160` — the binding bound now). Ratified: corpus (§3), state-root
+> sidecar + pins (§4), background recompute with its own coordinator (§5), **D-ES-4 = option (a)
+> local endpoint**. Rejected: the separate `rmap seed` verb — semantic candidates MUST surface as a
+> **labeled fallback tier inside the EXISTING resolution seams** whose contract already returns a
+> `candidates` array or a no-match. This rework:
+> 1. **DELETES the `rmap seed` verb.** D-ES-1 → **SUPERSEDED-BY-HUMAN** (recorded, §DECISIONS, not
+>    silently removed). §8 is rewritten as the **integration contract** (§8.0–§8.4): the tier fires
+>    **only after every deterministic tier yields zero matches** (never reordering/diluting the
+>    deterministic tiers; **ambiguous-with-exact-matches does NOT fire it**), enumerated per seam
+>    against code.
+> 2. **New decision cell D-ES-10** (seam enumeration + fire condition + integrated envelope) takes
+>    over D-ES-1's ratification role; **D-ES-7's output-shape cells** are updated to the integrated
+>    envelope. All other decisions (D-ES-2,3,5,6,8,9 + ratified D-ES-4) carry over UNCHANGED and are
+>    **not re-litigated** (TD-015: the decision-review rerun challenges ONLY the changed/new cells).
+> 3. **§9 doctor / §8.3 degradation** reference the seam integration, not the verb; §2 invariants
+>    I1/I4 are refined for the integrated (no-match-only, additive-labeled) contract.
+> 4. **The candidate no longer inlines its neighbourhood.** Amended VISION (as re-worded by OPERATOR
+>    RULING 5, `docs/VISION.md:159-164`): each candidate carries *score + provenance + module/path*
+>    directly and **names the deterministic follow-up SEQUENCE** — `explain <candidate>` for imports +
+>    symbols, then one further `explain` on a listed symbol for callers (no single command yields
+>    file-level callers) — so the old §8.2 inline caller-fold is **SUPERSEDED** (smaller design; the
+>    neighbourhood is what the named sequence yields). §10/§11/§12 updated to match.
+>
+> Everything below the banner that a `⟨SUPERSEDED …⟩` marker does not touch is the ratified,
+> unchanged mechanics. Change log for this rework: **§22**.
+>
+> ---
+
+Revision: **iteration 9** — closes `.agent-manager/slices/EMBED-SEED-1/review-8.json`: one blocking
+code-truth fix — the follow-up **second hop keys by NAME, not stable key** (hop 1's serialized
+`ExplainSymbolItem` exposes `{ name, subtype, line_start }` only, no `stable_key`), so `explain
+<symbol-name>` returns callers only when the name resolves uniquely, else the existing ambiguity
+result; recorded as an accepted existing-surface limitation, not an `explain <file>` extension. Full
+change log: **§24**. Iteration-8 change log at **§23**.
+Prior revision **iteration 8** — closed `.agent-manager/slices/EMBED-SEED-1/review-7.json` (escalation) +
+**OPERATOR RULING 5** (VISION amended `bf555ee`): the candidate names the deterministic follow-up
+**sequence** (`explain <file>` → imports+symbols; a further `explain <symbol-name>` → callers), and the
+four code-truth mismatches (empty `candidates` omitted; `limits` is `Vec<Limit>`; Group-B not-found is
+`InvalidRequest`; §11 reconciled with ratified D-ES-4=(a)) are fixed to match code. History below is
+retained verbatim.
+
+Revision: **iteration 7 (pre-rework close, now historical)** — this revision closed `.agent-manager/slices/EMBED-SEED-1/review-6.json`.
 Its four substantive items were applied **inline** (by the operator, per the packet OPERATOR NOTE):
 (#1) the D-ES-9 A2 response contract now correlates vectors by `index` (unique permutation of `0..n`,
 cardinality-checked) and rejects non-finite / zero-norm vectors (§ D-ES-9 A2 contract); (#2) the
@@ -76,9 +120,19 @@ So the agent that does not already know the symbol name must guess grep terms. T
 puts the right *neighbourhood* in top-5 on **14/16** tasks — the missing bridge.
 
 **What EMBED-SEED-1 is not.** It is not semantic search as an answer, not a reranker, not a new
-map layer. Per VISION § Semantic Seeding it is a **candidate generator**: a separate opt-in verb
-returns ≤5 seed candidates, each handed off to the *existing deterministic* orient/explain
-surfaces. The embedding never enters `orient`/`map`/`modules`.
+map layer. Per VISION § Semantic Seeding (as amended 2026-08-25, `docs/VISION.md:149-160`) it is a
+**candidate generator integrated into the existing resolution seams** — **not a separate verb**
+(⟨SUPERSEDED: the original separate-`rmap seed`-verb framing is removed by the human directive⟩).
+Semantic candidates surface **only** through the places whose contract already returns a
+`candidates` array or a no-match — focus resolution in `orient`/`explain`; symbol lookup in
+`callers`/`callees`/`path` — as an **additive, labeled fallback tier that runs only after every
+deterministic tier produced nothing** (§8). Each candidate carries `score` + provenance + its
+**module/path directly** and names the deterministic follow-up **sequence** on the existing
+surfaces — `explain <candidate>` yields the file's imports + symbols; **callers are one further
+`explain` on any symbol that command lists** (VISION amended 2026-08-25, `docs/VISION.md:159-164`:
+a single command yielding file-level callers does not exist, and widening resolved `explain` for
+everyone would break its byte-stable output). The embedding never enters `orient`'s
+facts/signals, `map`, or `modules`.
 
 ---
 
@@ -87,9 +141,22 @@ surfaces. The embedding never enters `orient`/`map`/`modules`.
 Ratified in VISION § Semantic Seeding; repeated here as the invariants every decision below is
 measured against:
 
-- **I1 — Candidate generator, never answer.** `seed` returns ≤5 candidates + each candidate's
-  *deterministic* neighbourhood obtained from the existing orient/explain surfaces. No
-  embedding-derived fact appears in `orient`/`map`/`modules`.
+- **I1 — Candidate generator, never answer (integrated).** The semantic tier returns ≤5 candidates
+  as an **additive, labeled fallback inside the existing resolution seams** (§8), each candidate
+  carrying `score` + provenance + module/path **directly** and **naming the deterministic follow-up
+  sequence** that reaches its full `(module, imports, callers)` neighbourhood on the existing
+  surfaces: the candidate already carries the owning **module**; `explain <candidate>` yields the
+  file's **imports + symbols**; **callers are one further `explain <symbol-name>` on any symbol that
+  command lists**, which returns callers only when that name resolves uniquely, else the existing
+  ambiguity result — the follow-up keys by **name** (hop-1 output exposes no stable keys), an accepted
+  existing-surface limitation, §8.2a (`docs/VISION.md:159-164`, amended 2026-08-25 — no single command
+  yields file-level callers, and widening resolved `explain` would break its byte-stable output). The
+  neighbourhood is obtained by running that sequence, never inlined. **No embedding-derived fact appears in `orient`'s
+  resolved facts/signals, `map`, or `modules`** (`docs/VISION.md:156-158`): embedding candidates live
+  **only** in the previously-empty no-match `candidates` list / symbol-not-found error `data`, never
+  in a resolved result. (⟨SUPERSEDED: the iteration-≤7 "each candidate's inlined deterministic
+  neighbourhood" is replaced by the amended VISION's named follow-up **sequence** — `explain` on the
+  file for imports+symbols, then `explain` on a listed symbol for callers.⟩)
 - **I2 — Evidence-backed hint, Layer-3, labelled.** Every candidate carries `score`,
   `source: "embedding"`, and `model_id`. Ranking is a fixed formula (cosine + deterministic
   tie-break); no LLM in the loop. The output speaks the reader's language (VISION § Labels), not
@@ -97,10 +164,16 @@ measured against:
 - **I3 — Deterministic given its pins.** Every vector is pinned `(model_id, dim, content_sha)`;
   any mismatch is a **hard fail → degrade to "no hints"**, never a silent stale answer. Staleness
   recomputes from the content hash.
-- **I4 — Local and optional.** Local model only; no API key, no network egress to a third party.
-  Absence of the model, or an empty/stale vector store, degrades to **"no hints"** — never to
-  degraded orientation. `orient`/`explain`/every other verb are byte-unchanged whether or not
-  seeding exists.
+- **I4 — Local, optional, deterministic tiers never disturbed.** Local model only; no API key, no
+  network egress to a third party. Absence of the model, or an empty/stale vector store, degrades to
+  **"no hints"** — never to degraded orientation. **The deterministic resolution tiers are
+  byte-unchanged** whether or not seeding exists: every *resolved* result, and every
+  *ambiguous-with-exact-matches* result, is identical to today. Only the **previously-empty no-match
+  `candidates` list (orient/explain) and the symbol-not-found error `data` (callers/callees/path)**
+  gain a labeled additive fallback — and when seeding is unavailable those degrade to **exactly
+  today's output plus one labeled line stating the fallback was unavailable and why** (§8.3). (⟨REFINED
+  from the pre-rework "byte-unchanged" claim, now that the tier lives inside these seams: the
+  *deterministic* tiers are byte-unchanged; the *no-match* branch gains a labeled, degradable addition.⟩)
 
 ---
 
@@ -395,8 +468,8 @@ Format modeled on the ratified warm-cache envelope (pure crate `repo-graph-warm-
   `schema_version` and older stores are discarded, never migrated). The body is serialized to bytes
   once; `content_length` = that byte count and `checksum` = SHA-256(those bytes), so integrity is
   byte-exact. **Store limits (rejection, not truncation):** header ≤ **64 KiB**; body ≤ **1 GiB**
-  (a 160k-file monorepo at 768-dim ≈ 0.5 GiB — beyond the cap the load is rejected and `seed`
-  degrades to "vector store exceeds the seed budget — seeding declined", never a partial read).
+  (a 160k-file monorepo at 768-dim ≈ 0.5 GiB — beyond the cap the load is rejected and the semantic
+  fallback degrades to "vector store exceeds the seed budget — seeding declined", never a partial read).
 - **Validation before use** (the exact order of `validate_manifest`, `rust/crates/repo-graph-warm-cache/src/lib.rs:891-915`): `magic` →
   `schema_version` → `key` (`model_id`/`dim`/`repo_graph_version`) → **`content_length`** (payload
   byte count matches) → **`checksum`** (recomputed hex SHA-256 of the payload equals the stored
@@ -417,7 +490,9 @@ seam is the `Embedder` port (§10). See §10 for the abstraction ledger.
 ## 5. REFRESH — when vectors are (re)computed (resolves packet item 2b; DECISION D-ES-3)
 
 **Recommendation: recompute-on-content-change as a background, cancellable pass after every
-index/refresh — the exact ENRICH-LIFECYCLE-1 shape.** Not on-demand at first `seed`.
+index/refresh — the exact ENRICH-LIFECYCLE-1 shape.** Not on-demand at the first semantic-fallback
+query. (⟨rework: "first `seed`" now means "the first no-match query that triggers the fallback tier";
+there is no verb — the refresh mechanics are otherwise carried unchanged, D-ES-3.⟩)
 
 ### 5.1 The precedent to mirror (OBSERVED)
 
@@ -436,13 +511,13 @@ and returns **without publishing** (§4.3) — a newer index's pass wins and the
 valid. This reuses the `EnrichCoordinator` generation mechanism (`rust/crates/daemon-runtime/src/enrich_pass.rs:492-493`); it does
 **not** invent a second cancellation path.
 
-### 5.2 Why background-at-refresh over on-demand-at-first-seed
+### 5.2 Why background-at-refresh over on-demand-at-first-fallback
 
-| | background at index/refresh (RECOMMENDED) | on-demand at first `seed` |
+| | background at index/refresh (RECOMMENDED) | on-demand at first fallback query |
 |---|---|---|
-| First `seed` latency | ~ms (store already warm) — the token/wall-clock win the VISION monetizes | first call pays the whole embed cost (spike: ~72 s cold on glamCRM) synchronously — a "safe read-only" verb that blocks a minute fails the Protocol-Surface promise its name makes |
+| First-fallback latency | ~ms (store already warm) — the token/wall-clock win the VISION monetizes | the first no-match query pays the whole embed cost (spike: ~72 s cold on glamCRM) synchronously — a no-match branch on `orient`/`explain` that blocks a minute fails the Protocol-Surface promise those commands make |
 | Cancellation / write-safety | reuses `EnrichCoordinator` supersede + batch-boundary cancel; an incoming index preempts it | must build its own cancellation; a long synchronous embed on a read path contends with writers |
-| Staleness | recompute-on-`content_hash`-change: only changed files re-embed; unchanged copy-forward by `content_hash` match | store can be arbitrarily stale until someone calls `seed`; degrades I3 to "recompute lazily" |
+| Staleness | recompute-on-`content_hash`-change: only changed files re-embed; unchanged copy-forward by `content_hash` match | store can be arbitrarily stale until a no-match query triggers it; degrades I3 to "recompute lazily" |
 | Cost when unused | one background pass per index; opt-out via an env flag like `RMAP_AUTO_ENRICH` | zero until first use — the one genuine advantage |
 
 **Refresh unit:** the changed-file set. `file_versions.content_hash` deltas between the parent and
@@ -655,158 +730,340 @@ differ between machines or re-embeds, full stop. What ships instead:
 
 ---
 
-## 8. CLI CONTRACT (resolves packet item 4, review-0 items 3–4, review-1 items 1–2; DECISIONS D-ES-1, D-ES-7)
+## 8. INTEGRATION CONTRACT — the semantic fallback tier inside the existing seams (resolves packet item 4; DECISIONS D-ES-10, D-ES-7)
 
-### 8.1 The verb — `rmap seed "<task>" [--repo <path>] [--json]`
+> ⟨SUPERSEDED: the entire pre-rework §8 "CLI CONTRACT" for a standalone `rmap seed` verb — its verb
+> dispatch (`main.rs`/`dispatch.rs` `"seed"` arm), its dedicated envelope, and its inlined
+> neighbourhood/caller-fold — is removed by the 2026-08-25 human directive. No new verb, no new
+> dispatch arm, no `commands/seed.rs`. The tier is wired into the seams enumerated below.⟩
 
-Name per the Protocol-Surface Standard (the name must imply the workflow role). `seed` reads as
-safe/read-only, sibling to `orient`/`explain` — it plants a starting point, it does not change
-state. (Alternatives `find`/`search` overclaim answer-ness; `locate` is acceptable — D-ES-1.)
-Dispatch is added to the hand-rolled match, **not** a clap enum (there is none):
+### 8.0 The integration model (D-ES-10)
 
-- `rust/crates/rgr/src/main.rs:84` `match args[1].as_str()` — add `"seed" => run_seed(&args[2..]),`
-  beside `"orient"` (:96) / `"explain"` (:104); import the handler at `rust/crates/rgr/src/main.rs:53-56`; new module
-  `rust/crates/rgr/src/commands/seed.rs`. Unknown-verb fallthrough is `rust/crates/rgr/src/main.rs:145`.
-- Daemon side: `rust/crates/daemon-runtime/src/dispatch.rs:365` `"orient" => self.handle_orient(...)`
-  — add `"seed" => self.handle_seed(...)` (string-keyed request `command`, same as every verb).
+The semantic tier is a **fifth, non-deterministic fallback** appended to the existing deterministic
+resolution ladder. It obeys three hard rules, all measured against I1/I4 (§2):
 
-### 8.2 Output — ≤5 candidates, each with its deterministic neighbourhood
+- **Fires last, only on total deterministic failure.** It runs **iff every deterministic tier
+  produced zero matches** — i.e. the seam's `no-match` branch (Group A) / the
+  `SymbolResolveError::NotFound` branch (Group B, surfaced **today** as an `InvalidRequest` error,
+  §8.1). It **never**
+  reorders, replaces, or dilutes a deterministic tier, and **never fires on ambiguity**: an
+  ambiguous result already *has* exact matches, so the deterministic `candidates`/`AmbiguousSymbol`
+  path is returned unchanged and the embedding is not consulted.
+- **Additive and self-labeling.** It only ever *populates a field that was empty on no-match* — it
+  adds nothing to a resolved or ambiguous result. Every semantic candidate carries
+  `source: "embedding"` + `model_id` (I2), so no consumer can mistake it for a deterministic match.
+- **Degrades to exactly today's output.** No vectors / model down / pins mismatch ⇒ the seam returns
+  **byte-identical to today** plus **one labeled line** stating the fallback was unavailable and why
+  (§8.3). Seeding is never on the critical path of a deterministic answer.
 
-The JSON is the product. Shape (additive to the `rgr.agent.v1` envelope family,
-`rust/crates/agent/src/dto/envelope.rs`):
+The query string embedded is **the seam's own resolution input** (the `focus`/`target`/`symbol`
+argument the agent already typed) — no new argument, no new verb. It is embedded with the
+`search_query:` role prefix (§3.2) and scored by brute-force cosine over the store (§7.2), top-5.
+(Honest note: that input is often a symbol/path *guess* rather than a full NL task; the spike's
+queries were likewise short phrases (`tools/embed-seed-spike/spike.py:120-146`), so a guess is still
+a usable query — but the candidates are labeled Layer-3 hints, never asserted answers.)
 
-```json
+### 8.1 The seams, enumerated against code (D-ES-10)
+
+Two seam-groups already return the two contract shapes the VISION names — a `candidates` array
+(orient/explain) and a no-match/not-found (all five). Each row gives the **fire point** (the exact
+deterministic-zero branch), the **do-NOT-fire point** (the ambiguous branch, left untouched), and
+the **carrier** the tier additively populates.
+
+**Group A — `orient` / `explain` focus resolution (structured `Focus` envelope; the tier populates
+the previously-empty `candidates`).** Contract: `docs/architecture/agent-orientation-contract.md:62-86`
+(precedence: exact path → stable key → symbol name → `resolved:false`/`no_match`; ambiguous ⇒
+bounded `candidates` ≤5). DTO: `Focus` + `FocusCandidate` at `rust/crates/agent/src/dto/envelope.rs:55-121,174-210`.
+
+| Seam | Fire the tier at (deterministic-zero) | Do NOT fire (ambiguous — exact matches exist) | Carrier populated |
+|---|---|---|---|
+| `orient <focus>` | `rust/crates/agent/src/orient/mod.rs:251-256` (`resolve_symbol_name` len `0 =>`), + the defensive no-context `no_match`s `:214`,`:273`; all route through `build_no_match_result` `:369` (`Focus::no_match`, empty `candidates`) | `rust/crates/agent/src/orient/mod.rs:278-287` `build_ambiguous_result` (`:321`; multiple exact SYMBOL matches → `Focus::ambiguous`) | `Focus.candidates` (was `[]` on `no_match`) + a labeled `limits` line |
+| `explain <target>` | `rust/crates/agent/src/explain/mod.rs:187` (`0 =>`), + `:154`,`:204`; all route through `build_no_match` `:259` (`Focus::no_match`) | `rust/crates/agent/src/explain/mod.rs:208-223` (`Focus::ambiguous`, `:223`) | `Focus.candidates` + a labeled `limits` line |
+
+**Group B — `callers` / `callees` / `path` symbol lookup (JSON-RPC *error*, NOT a `candidates`
+envelope; the tier rides the not-found error's additive `data`).** The symbol resolver is a sum type
+`SymbolResolveError { NotFound, Ambiguous(keys), Storage }` (`rust/crates/storage/src/queries.rs:568`;
+method `resolve_symbol` `:628`). The daemon turns `NotFound` into an `invalid_request("symbol not
+found: …")` error and `Ambiguous` into an `ambiguous_symbol` error carrying `matches` `data`; the CLI
+renders both in `handle_daemon_error` (`rust/crates/rgr/src/commands/graph.rs:98-139`: `RepoNotFound`
+`:106`, `AmbiguousSymbol` `:109-128`, generic `else` `:129-131`).
+
+| Seam | Fire the tier at (`NotFound`) | Do NOT fire (`Ambiguous`) | Carrier populated |
+|---|---|---|---|
+| `callers <symbol>` | `rust/crates/daemon-runtime/src/dispatch.rs:1268-1272` (`SymbolResolveError::NotFound → invalid_request("symbol not found")`) | `:1274-1279` (`ambiguous_symbol`) | the not-found `ErrorDetail`'s `data` gains `semantic_candidates` + a labeled hint |
+| `callees <symbol>` | `rust/crates/daemon-runtime/src/dispatch.rs:1438` (`NotFound`) | `:1445` (`ambiguous_symbol`) | same |
+| `path <from> <to>` | `rust/crates/daemon-runtime/src/dispatch.rs:2479-2483` (`from` NotFound) / `:2502-2506` (`to` NotFound) | `:2485-2490` / `:2508-2513` (`ambiguous_symbol`) | same, on whichever endpoint failed |
+
+**Why Group A and Group B carry the tier differently — and why that is honest, not two contracts.**
+Group A's contract *already is* "a `candidates` array on no-match", so the tier simply fills it
+(additive fields, below). Group B's contract *already is* "an error on not-found" (no `candidates`
+array exists to reuse); reusing it means the semantic candidates ride the **error's `data`** — the
+same additive-`data` mechanism `ambiguous_symbol` already uses for its `matches`
+(`rust/crates/daemon-runtime/src/dispatch.rs:151` `parse_ambiguous_matches` → `ErrorDetail`). In both
+groups the rule is identical: *the deterministic outcome is unchanged; a labeled additive field is
+attached.* A Group-B `callers` query asks about a **symbol**, but the file-level store (D-ES-5) can
+only answer with **files** — so the Group-B hint is explicitly *"no such symbol; here are files
+semantically near your query — open one and re-run"*, never *"here are the callers"*. That weaker
+fit is why Group B is a **named, deferred cut** in the milestone (§11 / D-ES-10), with Group A the
+smallest deep-vertical.
+
+### 8.2 The integrated candidate envelope (D-ES-7, updated for the seam integration)
+
+Each semantic candidate carries **score + provenance + module/path + a named deterministic
+follow-up command** — and **not** an inlined neighbourhood. This is the amended VISION bound
+(`docs/VISION.md:159-164`): *"Each semantic candidate carries score + provenance + its module/path,
+and names the deterministic follow-up (`explain <candidate>`) from which the full neighbourhood is
+reachable — module and imports directly; callers one further `explain` away on any symbol it
+lists."* Concretely, against code (verified below): the candidate **directly** carries the owning
+`module` (+ `path`); running its `next` = `explain <file-stable-key>` yields the file's **imports +
+symbols list** (`explain_file`, `rust/crates/agent/src/explain/mod.rs:543-589`); and the **callers**
+are one further `explain <symbol-name>` on any symbol that list names. The hop-1 output exposes
+symbol **names only, not stable keys** — `ExplainSymbolItem` carries `{ name, subtype, line_start }`
+(`rust/crates/agent/src/dto/signal.rs:783-787`), built with exactly those three fields at
+`rust/crates/agent/src/explain/mod.rs:574-581` — so hop 2 keys the follow-up **by name** and resolves
+through the existing symbol-name path (`resolve_symbol_name`,
+`rust/crates/storage/src/agent_impl.rs:938`; `explain_symbol` → `find_symbol_callers`,
+`rust/crates/agent/src/explain/mod.rs:324`). That name resolution is **not guaranteed unique**:
+`resolve_symbol_name` returns `Vec<AgentFocusCandidate>` (`:942`, `LIMIT 5`), so hop 2 yields callers
+**only when the name resolves to exactly one symbol**; a name shared by several symbols returns the
+existing **ambiguity** result (a `candidates` list), identical to `explain <name>` today
+(precedence + ambiguous ⇒ candidates: `docs/architecture/agent-orientation-contract.md:62-86`). This
+is an **existing-surface limitation** of the follow-up sequence, recorded as-is — the tier does **not**
+extend or widen resolved `explain <file>` to close it (I4, byte-stable output inviolate). The full
+`(module, imports, callers)` neighbourhood is thus obtained by **running that sequence** (with hop 2's
+name-resolution honesty above) — the tier stays a pure candidate generator and inlines no
+embedding-adjacent aggregation.
+
+> **Code-truth note (name-vs-semantics — resolves review-7 blocking item).** No single existing
+> command yields file-level callers: `explain_file` emits identity + imports + symbols with
+> `module_path: None` and **no** callers (`rust/crates/agent/src/explain/mod.rs:527-589`); callers
+> exist only per-symbol via `explain_symbol` (`:324`). So the amended VISION's "full neighbourhood"
+> is a **two-hop sequence**, not one command; the candidate's own `module` field covers "module
+> directly" (the owning module is NOT re-derivable from `explain <file>`). Widening resolved
+> `explain <file>` to aggregate callers was explicitly rejected by the operator (it would break the
+> byte-stable deterministic `explain` output — I4).
+>
+> **Code-truth note (hop-2 keying — resolves review-8 blocking item).** Hop 1's serialized symbol
+> list exposes **names, not stable keys**: `ExplainSymbolItem` is `{ name, subtype, line_start }`
+> (`rust/crates/agent/src/dto/signal.rs:783-787`), constructed with only those fields
+> (`rust/crates/agent/src/explain/mod.rs:574-581`). So hop 2 can only be `explain <symbol-name>`, and
+> `resolve_symbol_name` (`rust/crates/storage/src/agent_impl.rs:938-970`) returns a `Vec` — a name
+> may match several symbols. Hop 2 therefore returns callers **only on a unique name**; otherwise it
+> returns the existing deterministic **ambiguity** result. The spec does not claim full deterministic
+> caller reachability from a file explain; this is an accepted existing-surface limitation of the
+> follow-up sequence, not a defect to be fixed by widening resolved `explain <file>` (I4).
+
+**Group A (`orient`/`explain`) — the tier fills the previously-empty `Focus.candidates`.** The
+existing `FocusCandidate` shape (`{ stable_key, file, kind }`,
+`rust/crates/agent/src/dto/envelope.rs:54-59`) is **reused with additive optional fields**, populated
+**only** for a semantic fallback candidate and `skip_serializing_if` absent otherwise (so a
+deterministic *ambiguous* candidate is byte-identical to today).
+
+> **Two code-truth constraints the IMPL must satisfy (named IMPL work, not "unchanged code").**
+> (1) `FocusCandidate` currently derives `PartialEq, Eq` (`rust/crates/agent/src/dto/envelope.rs:54`);
+> a `score` field is a float, which **cannot** satisfy `Eq`. Adding it forces the IMPL to drop the
+> `Eq` (and adjust `PartialEq`) derive on `FocusCandidate`, or carry the score as a non-float (e.g.
+> fixed-point) — a small, real edit to the boundary DTO, recorded in D-ES-7/D-ES-10.
+> (2) The `limits` entry needs a **new `LimitCode` variant** — the enum is closed and exhaustively
+> matched with a fixed `summary()` (`rust/crates/agent/src/dto/limit.rs:35-187`), and no
+> semantic-fallback code exists today. IMPL adds `SemanticFallback` (candidates present) and
+> `SemanticFallbackUnavailable` (degraded, §8.3) — new variants + `as_str`/`summary` arms; the exact
+> count/names are a local mechanism decision bounded by D-ES-7. The reader-facing per-situation text
+> rides `reasons: Vec<String>`; `summary` stays the fixed contract string.
+
+```jsonc
 {
   "schema": "rgr.agent.v1",
-  "command": "seed",
+  "command": "orient",                 // or "explain" — the SEAM's command, not a new verb
   "repo": "glamCRM",
   "snapshot": "…",
-  "task": "where does the backend fetch BNR exchange rates?",
-  "source": "embedding",
-  "model_id": "text-embedding-nomic-embed-text-v1.5",
-  "candidates": [
+  "focus": {
+    "input": "where does the backend fetch BNR exchange rates?",
+    "resolved": false,
+    "reason": "no_match",              // UNCHANGED: still a deterministic no-match
+    "candidates": [                    // was [] on no_match; now the labeled semantic fallback
+      {
+        "stable_key": "glamCRM:serverless/.../bnr-service.ts:FILE",
+        "file": "serverless/packages/backend/src/services/bnr-service.ts",
+        "kind": "FILE",
+        // ── additive, semantic-only fields (absent on deterministic ambiguous candidates) ──
+        "source": "embedding",
+        "model_id": "text-embedding-nomic-embed-text-v1.5",
+        "score": 0.71,
+        "module": "backend/services",  // owning module — carried DIRECTLY (lightweight locator, aggregate_file)
+        "next": { "cmd": "explain", "args": ["<stable_key>"], "cwd": "<repo_root_abs>" }
+      }
+    ]
+  },
+  // `limits` is Vec<Limit> (envelope.rs:326) — objects, NOT strings. `summary` is a fixed lookup
+  // from `code` (limit.rs:136-186); the per-query detail rides `reasons`. This entry needs a NEW
+  // `LimitCode` variant (see the IMPL-work note below).
+  "limits": [
     {
-      "stable_key": "glamCRM:serverless/.../bnr-service.ts:FILE",
-      "path": "serverless/packages/backend/src/services/bnr-service.ts",
-      "score": 0.71,
-      "source": "embedding",
-      "model_id": "text-embedding-nomic-embed-text-v1.5",
-      "neighbourhood": {
-        "module": "…",       // owning module (module_summary aggregate_file)
-        "imports": [ … ],    // ≤8 target files (find_file_imports, sorted)
-        "symbols": [ … ],    // ≤8 in-file symbols (list_symbols_in_file, line order)
-        "callers": {         // ≤8 aggregated callers over the file's symbols (see step 5)
-          "items": [ … ],           // ranked, deduped caller symbols
-          "count": 12,              // distinct callers found before the ≤8 cap
-          "symbols_scanned": 8,     // in-file SYMBOL nodes fanned out over
-          "applicable": true        // false ⇒ file has no SYMBOL nodes → callers not measurable
-        }
-      },
-      "next": [
-        { "cmd": "explain", "args": ["<stable_key>"],            "cwd": "<repo_root_abs>" },
-        { "cmd": "orient",  "args": ["--focus", "<stable_key>"], "cwd": "<repo_root_abs>" }
+      "code": "SEMANTIC_FALLBACK",
+      "summary": "No exact match. The candidates below are Layer-3 embedding hints, not resolved facts; open one and re-run.",
+      "reasons": [
+        "5 candidates (model text-embedding-nomic-embed-text-v1.5); run each candidate's `next` (explain <key>) for its imports + symbols, then explain a listed symbol for callers"
       ]
     }
-  ],
-  "limits": [ … ]
+  ]
 }
 ```
 
 - `candidates` capped at **≤5** (VISION bound). `score` is the cosine; `source`/`model_id` on every
-  candidate (I2). Ties → path order (§7.2).
+  semantic candidate (I2). Ties → path order (§7.2). `reason` stays `no_match` — the candidates are
+  explicitly labeled Layer-3 hints, not a resolution; the `limits` line and each candidate's
+  `source:"embedding"` are the discriminators from a deterministic result.
+- A candidate whose stored path no longer resolves against the current snapshot (a stale vector) is
+  **dropped** from the list (honest — same admission check as the follow-up would apply), via
+  `resolve_path_focus` (`rust/crates/storage/src/agent_impl.rs:448`, declared
+  `rust/crates/agent/src/storage_port.rs:632`), the same resolver the seams already use.
 
-**Composition of the neighbourhood (D-ES-7) — module + imports + callers, the ratified VISION set
-(review-1 item 1; corrected against the real surfaces, review-0 item 3).** `docs/VISION.md:152-154`
-ratifies the seed neighbourhood as **`(module, imports, callers)`** — a higher-priority bound than
-any builder simplicity preference (Decision Hierarchy #1). Iteration 1 wrongly *deferred* callers to
-a `next`-referral; this revision **inlines callers deterministically**. Iteration 0's separate error
-(claiming `orient_file` yields imports+callers) is also corrected: `orient_file`
-(`rust/crates/agent/src/orient/file.rs:37-92`) aggregates only snapshot, trust, dead-code and
-module-summary — imports live on the *file explain* path, callers on the *symbol* explain path. The
-executable composition uses exactly the existing functions:
+**The `next` follow-up is a single structured, executable command (not a rendered string).** It uses
+the **real** CLI syntax — `explain <stable_key>` (one positional, `rust/crates/rgr/src/commands/orient.rs:440-451`),
+or `orient --focus <stable_key>` (`:95-118`) — with an explicit `cwd` = the absolute repo root the
+seam resolved, because both `explain` and `orient` resolve the repo from the current working
+directory (`orient` `:160-172`, `explain` `:488`), not from an argument. Running it yields the
+file's deterministic **imports + symbols** on the existing surface; the **callers** are one further
+`explain <symbol-name>` on any symbol that output lists (the follow-up **sequence**, §8.2a
+below — `next` names and pre-structures only the first hop; the second hop can carry only a symbol
+**name** (hop-1 output exposes no stable keys, `signal.rs:783-787`) and is discovered after hop 1
+runs, so it is not pre-structured). Because hop 2 keys by name, it returns callers only when that
+name resolves uniquely, else the existing ambiguity result (§8.2 hop-2 code-truth note). The
+candidate already carries the owning `module` directly.
+Human mode renders `next` as `(cd <repo_root> && rmap explain <key>)`.
 
-1. Resolve each candidate path → focus via `resolve_path_focus`
-   (`rust/crates/storage/src/agent_impl.rs:448`, declared `rust/crates/agent/src/storage_port.rs:632`), the same resolver orient uses
-   (`rust/crates/agent/src/orient/mod.rs:156`). A file that no longer resolves is dropped from the candidate list
-   (honest: the vector is stale relative to the snapshot).
-2. **`module`** — the owning module, from the same `aggregators::module_summary::aggregate_file`
-   that `orient_file` calls (`rust/crates/agent/src/orient/file.rs:72`). Deterministic, single value.
-3. **`imports`** — `find_file_imports(snapshot_uid, path)` → distinct target files
-   (`rust/crates/agent/src/storage_port.rs:794`), ordered `target_file` ascending exactly as `explain_file` orders them
-   (`rust/crates/agent/src/explain/mod.rs:544-548`, `ordering::sort_explain_imports`), **capped at 8** (§8.4).
-4. **`symbols`** — `list_symbols_in_file(snapshot_uid, path)` → in-file SYMBOL nodes
-   (`rust/crates/agent/src/storage_port.rs:777`), ordered **`line_start` ASC, then `name`, then `stable_key`** exactly as
-   `explain_file` orders them (`rust/crates/agent/src/explain/mod.rs:570-572`; the sort is `ordering::sort_explain_symbols`,
-   `rust/crates/agent/src/ordering.rs:148-155`, whose comparator is
-   `line_key(line_start).then(name).then(stable_key)` — a **total** order, `stable_key` being the
-   unique final tiebreak). **Capped at 8** (§8.4). Each item carries `name`, `subtype`, `line_start`
-   (the `ExplainSymbolItem` shape, `rust/crates/agent/src/explain/mod.rs:574-581`).
-5. **`callers`** — a **deterministic file-level aggregation** of the existing symbol-caller surface,
-   not a new fact. Callers are symbol-granularity (`find_symbol_callers(snapshot_uid,
-   symbol_stable_key)` → `Vec<AgentCallerRow>`, `rust/crates/agent/src/storage_port.rs:737/461-467`; the exact call
-   `explain_symbol` makes at `rust/crates/agent/src/explain/mod.rs:324`). A file has many symbols, so the file-level set is
-   defined by a **fixed fold** with no order jitter:
-   - **Fan-out set.** The **same ≤8 in-file symbols** from step 4 (`line_start`, then `name`, then
-     `stable_key` order — the total order of step 4). Fanning out over the already-capped,
-     already-ordered symbol list bounds cost to ≤8 `find_symbol_callers` lookups per candidate (≤40
-     across the ≤5 candidates) and makes the fold input deterministic.
-   - **Per-symbol rank.** Each symbol's caller rows are ranked by the *same* total order
-     `explain_symbol` uses — `call_ranking::rank_caller_rows` (concentration DESC, `module_path` ASC,
-     `name` ASC, `stable_key` ASC; `rust/crates/agent/src/explain/call_ranking.rs:15-17,56-84`). This is a total order over
-     distinct callers, so the ranked list is jitter-free.
-   - **Union + dedup.** Iterate the symbols in their (`line_start`, `name`, `stable_key`) order; within each symbol,
-     append callers in ranked order; **the first occurrence of a caller `stable_key` fixes its
-     position**, later duplicates (a caller that calls several in-file symbols) are skipped. The
-     result is a stable, total order over distinct callers. **Cap at ≤8** (§8.4); `count` reports the
-     distinct total before the cap so truncation is visible (no-silent-caps).
-   - **Empty vs not-applicable (Honesty Rule — unknown ≠ zero).** `symbols_scanned = 0` (the file has
-     no SYMBOL nodes — e.g. a config/asset/markup file) ⇒ `applicable: false`, `items: []`: callers
-     are **not measurable** for this anchor, distinct from a measured zero. `symbols_scanned > 0` with
-     no callers ⇒ `applicable: true`, `count: 0`, `items: []`: a **measured** "0 callers", which
-     `explain_symbol` itself treats as meaningful positive information (`rust/crates/agent/src/explain/mod.rs:322-323`).
+**Group B (`callers`/`callees`/`path`) — the tier rides the not-found error's additive `data`.** No
+`candidates` array exists on this seam, so the same candidate objects (minus `kind`, which is
+FILE by construction) are attached under `data.semantic_candidates`, alongside a labeled
+`data.hint`, on the **existing** `symbol not found` error — the error, exit code, and message are
+otherwise unchanged:
 
-Each caller `item` carries `stable_key`, `name`, `module` (the `ExplainCallerItem` fields,
-`rust/crates/agent/src/explain/mod.rs:334-338`). This inlines the file-native `(module, imports, callers)` VISION set in a
-single round-trip with **zero new storage surface** — every field is a fold over functions that
-already exist. The `next` referral (below) remains, as an *addition* for the agent that wants
-per-symbol callees or the full untruncated caller set, not as a substitute for the inlined callers.
+```jsonc
+// error response for: rmap callers fetchBnrRates   (symbol not found)
+{
+  "error": {
+    "code": "InvalidRequest",                       // ACTUAL current code (see note) — deterministic outcome UNCHANGED
+    "message": "symbol not found: fetchBnrRates",
+    "data": {
+      "semantic_candidates": [                        // additive, labeled Layer-3
+        { "stable_key": "glamCRM:…/bnr-service.ts:FILE",
+          "file": "serverless/.../bnr-service.ts", "score": 0.71,
+          "source": "embedding", "model_id": "text-embedding-nomic-embed-text-v1.5",
+          "module": "backend/services",
+          "next": { "cmd": "explain", "args": ["glamCRM:…/bnr-service.ts:FILE"], "cwd": "<repo_root_abs>" } }
+      ],
+      "hint": "no such symbol; these files are semantically near your query — open one, then re-run callers on a symbol inside it"
+    }
+  }
+}
+```
 
-**The `next` commands are structured and executable (review-1 item 2).** Iteration 1 emitted the
-strings `"explain glamCRM <stable_key>"` / `"orient glamCRM <stable_key>"`; both are **invalid
-against the real CLI**: `run_explain_cmd` accepts exactly **one** positional target and no repo
-argument (`rust/crates/rgr/src/commands/orient.rs:440-451`), `orient` accepts **no positionals at all** — focus
-is `--focus <value>` (`rust/crates/rgr/src/commands/orient.rs:95-118`, the `other =>` arm errors on any positional at `:124-125`)
-— and **both resolve the repo from the current working directory**, not from an argument (`orient`
-at `rust/crates/rgr/src/commands/orient.rs:160-172`, `explain` at `:488`, via `std::env::current_dir().canonicalize()`). A
-two-positional `explain glamCRM
-<key>` errors; a positional `orient glamCRM <key>` errors; and neither can target a `seed --repo`
-repo that differs from the shell's cwd. `next` is therefore emitted as **structured commands** —
-`{cmd, args, cwd}` — with the **actual** syntax (`explain <key>`; `orient --focus <key>`) and an
-explicit **`cwd` = the absolute repo root that `seed` resolved** (so the follow-up resolves the same
-repo the seed candidate came from, regardless of the shell's cwd). The structured shape is honest
-(no rendered string that would fail if pasted) and self-contained (the agent has everything to run
-it). Human mode renders it as, e.g., `(cd <repo_root> && rmap explain <key>)`.
+> **Code-truth note (error class — resolves review-7 observed item 3).** The `symbol not found`
+> response uses **`ErrorCode::InvalidRequest`** *today*, not a `SymbolNotFound` code:
+> `dispatch.rs:1268-1272` calls `ErrorDetail::invalid_request(…)`
+> (`rust/crates/daemon-transport/src/envelope.rs:204-205`), which sets `ErrorCode::InvalidRequest`
+> (`:113`), serialized `"InvalidRequest"` (`:164`) — there is **no** `SymbolNotFound` variant in the
+> enum (`:108-174`). The semantic tier rides the **existing** error's additive `data` — code,
+> `message`, and exit unchanged — so no error-code change is required to ship it. Introducing a
+> dedicated `SymbolNotFound` code (arguably the honest class) is a **separate, optional IMPL edit**
+> (new `ErrorCode` variant + `as_str` arm, exhaustively matched) named as such — **not** "unchanged
+> code" — and is out of scope for the Group-A deep-vertical (Group B is deferred, §11).
 
-- **Human mode** mirrors orient's density; **`--json`** via the shipped idiom
-  (`rust/crates/rgr/src/commands/orient.rs:61` `"--json"`, emit `:201`
-  `serde_json::to_string_pretty`). The candidate DTO reuses `FocusCandidate`
-  (`rust/crates/agent/src/dto/envelope.rs:55`: `stable_key`, `file`, `kind`) as the shape precedent.
+The Group-B hint is explicitly *file-level and does not name callers* (§8.1): the file-level store
+cannot answer a symbol-granularity query directly. Group B is the **deferred cut** (§11); Group A is
+the smallest deep-vertical.
+
+#### 8.2a What the `next` command yields — the deterministic neighbourhood surfaces (reference)
+
+> ⟨SUPERSEDED as an *inline* candidate field; RETAINED as the definition of what a candidate's
+> `next` follow-up command deterministically returns.⟩ The pre-rework §8.2 inlined this
+> `(module, imports, symbols, callers)` fold into every candidate (including the "deterministic
+> file-level caller fold", §8.2 old step 5). The amended VISION replaces the inline object with the
+> named `next` command; the fold is **no longer built** (its removal is the main simplification of
+> this rework — see §10/§11). The surfaces below are what `rmap explain <stable_key>` /
+> `rmap orient --focus <stable_key>` already return today, unchanged by this slice:
+
+The full neighbourhood is a **two-hop deterministic sequence**, all surfaces **today, unchanged by
+this slice** — the candidate carries `module` directly, hop 1 (`next`) yields imports + symbols, hop
+2 yields callers:
+
+- **`module`** (on the candidate, directly — NOT from `explain <file>`) — owning module,
+  `aggregators::module_summary::aggregate_file` (`rust/crates/agent/src/orient/file.rs:72`), computed
+  at candidate-render time. `explain_file` itself sets `module_path: None`
+  (`rust/crates/agent/src/explain/mod.rs:538`), so the owning module is not re-derivable from hop 1 —
+  it must be carried on the candidate.
+- **`imports`** (hop 1 = `next` = `explain <file-stable-key>`) — `find_file_imports(snapshot_uid,
+  path)` → distinct target files (`rust/crates/agent/src/storage_port.rs:794`), ordered as
+  `explain_file` orders them (`rust/crates/agent/src/explain/mod.rs:544-548`,
+  `ordering::sort_explain_imports`).
+- **`symbols`** (hop 1, same command) — `list_symbols_in_file`
+  (`rust/crates/agent/src/storage_port.rs:777`), ordered `line_start` ASC → `name` → `stable_key`
+  (`rust/crates/agent/src/ordering.rs:148-155`; `rust/crates/agent/src/explain/mod.rs:570-572`). The
+  `stable_key` term is an **internal ordering tiebreak only** — it is **not serialized**: the emitted
+  `ExplainSymbolItem` carries `{ name, subtype, line_start }` (`rust/crates/agent/src/dto/signal.rs:783-787`),
+  so this list supplies symbol **names** for hop 2, never stable keys.
+- **`callers`** (hop 2 = `explain <symbol-name>` on a symbol hop 1 listed) — per-symbol
+  `find_symbol_callers` (`rust/crates/agent/src/storage_port.rs:737`; `explain_symbol`'s call at
+  `rust/crates/agent/src/explain/mod.rs:324`), ranked by `call_ranking::rank_caller_rows`
+  (`rust/crates/agent/src/explain/call_ranking.rs:15-17,56-84`). Hop 2 resolves the name via
+  `resolve_symbol_name` (`rust/crates/storage/src/agent_impl.rs:938-970`, returns a `Vec`), so it
+  yields callers **only on a unique name**; a non-unique name returns the existing deterministic
+  **ambiguity** result instead. There is **no** file-level caller surface — callers are per-symbol
+  only, which is exactly why the neighbourhood is a sequence (and why hop 2 inherits name-resolution
+  ambiguity as an accepted existing-surface limitation).
+
+> **DELETED by this rework — the inline deterministic file-level caller fold.** The pre-rework §8.2
+> step 5 built a *new* file-level aggregation (fan-out over ≤8 in-file symbols → `rank_caller_rows` →
+> union → first-occurrence dedup → cap 8 → `symbols_scanned` unknown-vs-zero) inside the pre-rework
+> `seed` handler. Under the amended VISION the candidate names the `explain`/`orient` follow-up instead of
+> inlining a neighbourhood, so **that fold is not built** — the one piece of genuinely-new domain
+> logic the pre-rework design carried is removed. This is the rework's principal simplification
+> (§10 abstraction ledger, §11 milestone, §12 validation are updated accordingly).
+
+- **`--json`** rides each seam's existing `--json` idiom unchanged
+  (`rust/crates/rgr/src/commands/orient.rs:61` `"--json"`, emit `:201` `serde_json::to_string_pretty`);
+  the semantic-only fields are additive on the existing `FocusCandidate` / error-`data` shapes. Human
+  mode mirrors each seam's existing density.
 
 ### 8.3 Honest empty / degraded states (I4; architecture.md Honest Degradation Rule)
 
 Each is a distinct, reader-facing state — `null`/absent ≠ known-zero, and none narrates our
-pipeline:
+pipeline. **In every degraded state the seam's deterministic outcome is byte-identical to today**
+plus **one labeled `Limit`** stating the fallback was unavailable and why.
 
-| Situation | Output | Never |
+> **Code-truth note (empty candidates — resolves review-7 observed item 1).** `Focus.candidates`
+> carries `#[serde(skip_serializing_if = "Vec::is_empty")]` (`rust/crates/agent/src/dto/envelope.rs:111-112`),
+> so an **empty candidates list is OMITTED from JSON, never emitted as `[]`**. The examples below
+> therefore show the `candidates` key **absent** in every zero-candidate state; the signal that the
+> fallback fired-but-produced-nothing (or was unavailable) is carried **entirely** by the always-present
+> labeled `Limit` — never by an empty array. This matches code with **no serializer change** (the
+> smallest design; an always-present `[]` would need a bespoke serialization override, which this
+> slice does NOT take). Group A's degraded shape is thus exactly today's no-match
+> (`resolved:false, reason:no_match`, `candidates` omitted) + the `Limit`; Group B is the plain
+> `symbol not found` error (`InvalidRequest`, §8.2) + `data.hint` (and `data.semantic_candidates`
+> omitted when empty, same discipline).
+
+The `Output` column below is written for **Group A** (`limits: Vec<Limit>`, §8.2 — objects with a
+code-derived `summary` + per-situation `reasons`, **not** strings); for **Group B** the identical
+information rides the not-found error's `data.hint` / one appended message line (§8.2). All degraded
+rows use the `SemanticFallbackUnavailable` code (new `LimitCode` variant, IMPL work per §8.2); the
+stale-subset and nothing-scored rows use `SemanticFallback` (candidates may still be present). `<…>`
+is the per-situation `reasons[0]`:
+
+| Situation | Output (Group A shown; `candidates` OMITTED when empty) | Never |
 |---|---|---|
-| No vector store yet (never indexed / just built) | `candidates: []`, `limits: ["no seed vectors yet — embeddings build in the background after indexing"]` | not an error; not "0 matches" as if measured |
-| Model unavailable (endpoint down / no local model) | `candidates: []`, `limits: ["semantic seeding unavailable — no local embedding model reachable; seeding is optional, orientation is unaffected"]` | never blocks; never degrades `orient` |
-| Pins mismatch (model/dim/schema changed) | `candidates: []`, `limits: ["seed vectors were built with a different model — rebuild on next index"]`, store discarded | never rank across a pin mismatch |
-| Some files stale (content changed since embed) | ranked over the fresh subset; `limits: ["N files changed since last embed — not yet re-seeded"]` | never silently rank a stale vector as current |
-| Query embeds but nothing scores | `candidates: []` (genuine known-zero) | — |
+| No vector store yet (never indexed / just built) | `candidates` absent; `limits: [{code:"SEMANTIC_FALLBACK_UNAVAILABLE", summary:<fixed>, reasons:["no seed vectors yet; they build in the background after indexing"]}]` | not an error; not "0 matches" as if measured |
+| Model unavailable (endpoint down / no local model) | `candidates` absent; `limits: [{code:"SEMANTIC_FALLBACK_UNAVAILABLE", …, reasons:["no local embedding model reachable; seeding is optional, resolution is unaffected"]}]` | never blocks; never degrades the deterministic tiers |
+| Pins mismatch (model/dim/schema changed) | `candidates` absent; `limits: [{code:"SEMANTIC_FALLBACK_UNAVAILABLE", …, reasons:["seed vectors were built with a different model; rebuild on next index"]}]`, store discarded | never rank across a pin mismatch |
+| Some files stale (content changed since embed) | ranked over the fresh subset; `limits: [{code:"SEMANTIC_FALLBACK", …, reasons:["N files changed since last embed — not yet re-seeded"]}]` | never silently rank a stale vector as current |
+| Query embeds but nothing scores | `candidates` absent; `limits: [{code:"SEMANTIC_FALLBACK", …, reasons:["no candidate scored above zero"]}]` (genuine known-zero) | — |
 
 Each degraded state maps to an `Embedder`/store error variant (§10) or an empty/mismatched store —
 no state collapses into another (Honest Degradation Rule, `docs/architecture/artifact-contract-model.md:417-429`).
+Crucially, none of these is ever reached on a **resolved** or **ambiguous** seam result — the tier
+is consulted only on the deterministic-zero branch (§8.1), so a working deterministic answer never
+pays for, waits on, or is altered by seeding.
 
 ### 8.4 Budget caps (exact — review-0 item 4)
 
@@ -817,26 +1074,29 @@ Every numeric limit is fixed here so the IMPL builds against a contract, not a g
 | Embed input per document | **6 000 chars** (char-boundary) | corpus build (§3.2) | no — spike mechanism constant (`tools/embed-seed-spike/spike.py:101`) |
 | Embed batch size | **32** documents/request | embed pass (`tools/embed-seed-spike/spike.py:98`) | no |
 | Corpus admission cap | **50 000 files** (default); above it, embed the first 50 000 by `path` order and emit an honest omission `limit` (MODULE-MODEL-2 D7 bounded-output discipline) | corpus build | no — a tunable safety bound for the 160k-file monorepo target; **INFERRED default**, adjustable |
-| Candidate count | **≤ 5** | ranking output | **yes — VISION bound** |
-| `imports` per candidate | **≤ 8** | neighbourhood build (§8.2) | no — local presentation cap |
-| `symbols` per candidate | **≤ 8** | neighbourhood build (§8.2) | no — local presentation cap |
-| Caller fan-out symbols per candidate | **≤ 8** (the same capped `symbols` set) | neighbourhood build (§8.2 step 5) | no — bounds `find_symbol_callers` calls to ≤8/candidate |
-| `callers` per candidate (after union+dedup) | **≤ 8** (`count` reports pre-cap distinct total) | neighbourhood build (§8.2 step 5) | no — local presentation cap |
-| Query path | one query embedding + brute-force cosine over the store (spike: "trivially fast" over ~4k vectors) → sort → top-5. No pagination. | `seed` handler | — |
+| Candidate count | **≤ 5** | ranking output (the seam's `candidates` / error `data`) | **yes — VISION bound** |
+| Per-candidate `module` locator | 1 `aggregate_file` + 1 `resolve_path_focus` per candidate (≤10 lookups across ≤5) | candidate render (§8.2) | no — bounded by the ≤5 cap |
+| Query path | one query embedding of the seam's resolution input + brute-force cosine over the store (spike: "trivially fast" over ~4k vectors) → sort → top-5. No pagination. | the seam's no-match branch (§8.1) | — |
+
+> ⟨SUPERSEDED caps: the per-candidate `imports ≤ 8`, `symbols ≤ 8`, caller-fan-out `≤ 8`, and
+> `callers ≤ 8` caps are removed — the candidate no longer inlines a neighbourhood (§8.2), so there
+> is nothing to cap. Whatever the `next` follow-up (`explain`/`orient`) inlines is bounded by *those
+> commands'* own existing caps, unchanged by this slice.⟩
 
 The corpus-size cap is the only cap that bounds *coverage*; per the no-silent-caps rule it emits a
-visible omission `limit` rather than silently truncating. All other caps bound *presentation* and
-are recorded in the output envelope when they truncate.
+visible omission `limit` rather than silently truncating. The candidate cap (≤5) bounds
+*presentation* and is recorded on the seam's envelope when it truncates.
 
 ---
 
 ## 9. CERTAINTY + HONESTY (resolves packet item 5)
 
-- **Layer-3 labels in the reader's language (VISION § Labels).** The seed result reads *"likely
-  starting point (semantic match, model `text-embedding-nomic-embed-text-v1.5`) — open the file"*, never
-  *"embedding cosine 0.71, vector store fresh"* (that is our pipeline state; keep it to `--json`
-  fields + doctor). `source: "embedding"` + `model_id` are the machine-readable provenance; the
-  human line names *their* code and *why* it surfaced, not our processing.
+- **Layer-3 labels in the reader's language (VISION § Labels).** On a seam's no-match fallback the
+  labeled line reads *"no exact match — likely starting point (semantic match, model
+  `text-embedding-nomic-embed-text-v1.5`): open the file and re-run"*, never *"embedding cosine 0.71,
+  vector store fresh"* (that is our pipeline state; keep it to `--json` fields + doctor).
+  `source: "embedding"` + `model_id` are the machine-readable provenance; the human line names
+  *their* code and *why* it surfaced, and states plainly it is a fallback, not a resolution.
 - **Doctor** (`rust/crates/rgr/src/commands/doctor/mod.rs:65` `run_doctor`) gains a **"Semantic
   seeding"** block beside the existing `Storage:` (:350) / enrichment (`:274-276`) sections,
   showing three honest facts: **vector store state** (present / absent / building), the **model
@@ -856,22 +1116,28 @@ are recorded in the output envelope when they truncate.
 
 ## 10. Smallest-design statement & abstraction ledger (resolves review-0 item 7)
 
-Recommended path (D-ES-1 `seed`, D-ES-2 state-root sidecar, D-ES-3 background-at-refresh, D-ES-5
-file-level, D-ES-6 exclude test/generated/vendored, D-ES-7 inline module+imports+symbols+aggregated
-callers) introduces **no SQL schema change and no new DB table**, and reuses: the
+Recommended path (D-ES-10 seam integration, D-ES-2 state-root sidecar, D-ES-3 background-at-refresh,
+D-ES-5 file-level, D-ES-6 exclude test/generated/vendored, D-ES-7 lightweight candidate envelope +
+named `next`) introduces **no SQL schema change and no new DB table**, and reuses: the
 `files`/`file_versions` reads the spike proved; the warm-cache envelope + `atomic_write`; the
-ENRICH-LIFECYCLE-1 background/cancel lifecycle; the existing focus-resolution + `find_file_imports` /
-`list_symbols_in_file` / `find_symbol_callers` + `call_ranking::rank_caller_rows` neighbourhood
-surfaces; the `--json` idiom. New code is one support unit + **two ports** (`Embedder` +
-`SeedCorpusRead`, the corpus-read seam — §10 ledger) + one background pass + one verb + one doctor
-block + the cross-crate `artifact-contracts`/`repo-index` family registration (§3.4). The only
-genuinely new domain logic is (i) the vector envelope + cosine ranking and (ii) the deterministic
-file-level caller fold (§8.2 step 5) — both pure and headless-testable.
+ENRICH-LIFECYCLE-1 background/cancel lifecycle; the existing focus-resolution surface (to render each
+candidate's `stable_key`/`module` locator and to power the `next` follow-up); each seam's existing
+`--json` idiom and `Focus`/`error-data` envelope. New code is one support unit + **two ports**
+(`Embedder` + `SeedCorpusRead`, the corpus-read seam — §10 ledger) + one background pass + **the
+seam-integration wiring (no new verb, no new dispatch arm)** + one doctor block + the cross-crate
+`artifact-contracts`/`repo-index` family registration (§3.4). The **only** genuinely new domain
+logic is the vector envelope + cosine ranking — pure and headless-testable. (⟨SUPERSEDED: the
+pre-rework "one verb" and the "deterministic file-level caller fold (§8.2 step 5)" as new domain
+logic are both **deleted** — the tier integrates into existing seams and names a follow-up command
+instead of folding a neighbourhood, so the caller-fold surfaces `find_file_imports` /
+`list_symbols_in_file` / `find_symbol_callers` / `call_ranking` are no longer called by seed code;
+they run inside the existing `explain`/`orient` the candidate points at.⟩)
 
 **Abstraction ledger** (one line each; a line that cannot be filled ⇒ the abstraction is removed):
 
 - **`repo-graph-seed` support unit** — *what:* pure corpus-build + vector envelope + cosine ranking.
-  *Concrete current users:* the `seed` verb handler + the background embed pass (two callers).
+  *Concrete current users:* the seam no-match fallback (the `orient`/`explain` focus-resolution path
+  that queries the store) + the background embed pass (two callers).
   *Dispatch axis:* operations-fixed / no variant growth → plain functions, no trait. *Why it exists
   at all:* the architecture's support-module-first build order + a headless test seam (rank/envelope
   unit-tested with a faked `Embedder` **and a faked `SeedCorpusRead`**, no model, no daemon, no DB).
@@ -974,18 +1240,23 @@ file-level caller fold (§8.2 step 5) — both pure and headless-testable.
 
 Smallest deep-vertical IMPL cut = **capability wired to a visible output surface in one slice**.
 
-**This plan is CONDITIONAL on three ratification cells and preselects none of them (review-4 items
-1–2):** D-ES-4 (model runtime), D-ES-8 (crate-vs-module home for the pure seed logic), and D-ES-9
-(option-(a) HTTP transport). The milestone is binding **only under D-ES-4 option (a)**. Its manifest
-footprint is **light but NOT zero**, and its exact shape depends on D-ES-8 and D-ES-9 — stated
-honestly here (iterations 1–4 wrongly claimed the plan touches "no `Cargo.toml`"; corrected). IMPL-1
-splits into a runtime-agnostic core and the `Embedder` implementation:
+**Model runtime is settled: D-ES-4 is RATIFIED as option (a), the OpenAI-compatible local endpoint
+(2026-08-25, human).** So this is the **binding IMPL-1 plan** — not a conditional one — and the
+embedded-ONNX path (b) is a **superseded alternative** (an unbuilt, separately-ratifiable future
+runtime, §11 deferred list), **not** a live branch of this milestone. **Two cells remain open** and
+shape only the manifest footprint (not whether IMPL-1 runs): **D-ES-8** (crate-vs-module home for the
+pure seed logic) and **D-ES-9** (the option-(a) HTTP transport). The footprint is **light but NOT
+zero**, and its exact shape depends on D-ES-8/D-ES-9 — stated honestly here (iterations 1–4 wrongly
+claimed the plan touches "no `Cargo.toml`"; corrected). IMPL-1 splits into a runtime-agnostic core
+and the ratified (a) `Embedder` implementation:
 
 - **Runtime-agnostic core (built in the SAME slice as the first ratified `Embedder` — never
   dormant; review-6 #4):** the pure seed logic (corpus build, envelope,
-  cosine+tie ranking, caller fold), the cross-crate `SeedVectors` family registration (§3.4), the
-  `Embedder` **port** (§10, the seam — not any impl), the background pass, the `rmap seed` verb +
-  neighbourhood + `--json`, the doctor block, and the five degraded states.
+  cosine+tie ranking — **no caller fold; deleted this rework**), the cross-crate `SeedVectors` family
+  registration (§3.4), the `Embedder` **port** (§10, the seam — not any impl), the background pass,
+  the **Group-A seam integration** (the `orient`/`explain` focus-resolution no-match fallback that
+  fills `Focus.candidates` with labeled semantic candidates + `next`, §8) on each seam's existing
+  `--json`, the doctor block, and the degraded states. **No new verb, no new dispatch arm.**
   **Manifest impact — decided by D-ES-8:** if D-ES-8 ratifies the **new crate `repo-graph-seed`**,
   IMPL-1 adds one workspace-member line to `rust/Cargo.toml` (`members = [ … "crates/repo-graph-seed" ]`
   — the workspace currently lists 49 crate members with **no** `seed` entry, OBSERVED at
@@ -1006,23 +1277,21 @@ splits into a runtime-agnostic core and the `Embedder` implementation:
   workspace member**; `repo-graph-storage` still gains the port-impl edge on whichever crate hosts
   the port. Either way the family-registration edits
   (`artifact-contracts`, `repo-index`) are Rust source, not manifest.
-- **The `Embedder` implementation (chosen by D-ES-4):**
-  - **If the operator ratifies (a):** IMPL-1 ships the endpoint impl (env config + loopback enforcement,
-    §6.1) and is complete as one slice. **Manifest impact — decided by D-ES-9:** under the recommended
-    std-library transport (a2) the impl adds **no dependency** (raw `std::net::TcpStream` + hand-framed
-    HTTP/1.1, http-loopback only; JSON via the already-present `serde_json`); under a client crate (a1)
-    it adds **one** HTTP(/TLS) dependency edge to the home crate's manifest. So (a)'s total manifest cost
-    ranges from *one workspace-member line* (a2 + new crate) to *a member line plus one dependency edge*
-    (a1 + new crate) — light either way, and categorically unlike (b)'s heavyweight ONNX + model
-    distribution burden.
-  - **If the operator ratifies (b):** THIS IMPL-1 does **not** run (review-6 #4 — shipping the
-    core with no working `Embedder` would be dormant infrastructure behind a permanently degraded
-    verb, violating the deep-vertical rule). Instead the (b) path gets its **own complete vertical**:
-    a post-ratification distribution slice (spec + its own ratification) that ships the
-    runtime-agnostic core above **and** the embedded-ONNX `Embedder` (heavyweight dependency,
-    bundled/versioned/notarized model, the larger `Cargo.toml` edits) **in the same arc**, so the
-    verb works the day the capability exists. The core's design (this §11) is reused verbatim there;
-    only the impl behind the port differs.
+- **The ratified (a) `Embedder` implementation.** IMPL-1 ships the endpoint impl (env config +
+    loopback enforcement, §6.1) and is complete as one slice. **Manifest impact — decided by D-ES-9:**
+    under the recommended std-library transport (a2) the impl adds **no dependency** (raw
+    `std::net::TcpStream` + hand-framed HTTP/1.1, http-loopback only; JSON via the already-present
+    `serde_json`); under a client crate (a1) it adds **one** HTTP(/TLS) dependency edge to the home
+    crate's manifest. So (a)'s total manifest cost ranges from *one workspace-member line* (a2 + new
+    crate) to *a member line plus one dependency edge* (a1 + new crate) — light either way.
+  - **Superseded alternative — embedded-ONNX (b).** D-ES-4 ratified (a), so (b) is **not** a branch of
+    this IMPL-1; it is a named, unbuilt future runtime. Were it ever separately ratified, it would get
+    its **own complete vertical** — a post-ratification distribution slice (spec + its own ratification)
+    shipping the runtime-agnostic core above **and** the embedded-ONNX `Embedder` (heavyweight
+    dependency, bundled/versioned/notarized model, the larger `Cargo.toml` edits) **in the same arc**,
+    so the fallback tier would work the day that capability exists (never a dormant core, review-6 #4).
+    The core's design (this §11) would be reused verbatim; only the impl behind the port differs. This
+    is recorded for completeness — it is not part of the current binding plan.
 
 > The no-`Cargo.toml` / no-production-code STOP_CONDITIONS bind **this SPEC only** — they forbid the
 > *spec* from editing manifests, not the future IMPL. **EMBED-SEED-IMPL-1 operates under its own packet
@@ -1036,37 +1305,52 @@ splits into a runtime-agnostic core and the `Embedder` implementation:
   + at most one dependency line) — corpus build from
   `files`+`file_versions`, file-level docs with the §3.2 exact format + 6 000-char cap, the
   source/snapshot-race hash re-verification §3.5, warm-cache envelope with `atomic_write`,
-  cosine+path-tie ranking, **the deterministic file-level caller fold §8.2 step 5**, headless tests
+  cosine+path-tie ranking (**no caller fold**), headless tests
   → the **cross-crate `SeedVectors` family registration** (§3.4: `artifact-contracts` enum/`table_name`/
   `all`/`get_contract` + its coherence test, and `repo-index` `family_to_table` + the two refresh-array
   exemptions) → one `Embedder` port with the (a) endpoint impl incl. the §6.1 env config + loopback
   enforcement + the **D-ES-9-ratified transport** (a2 std-library `TcpStream` with no new dep, or a1
   client dependency) → background embed pass after index/refresh reusing
-  `spawn_auto_enrich`'s shape + `EnrichCoordinator` cancel → `rmap seed "<task>"` verb returning ≤5
-  candidates with the inlined `(module, imports, symbols, callers)` neighbourhood (§8.2) + structured
-  `next` + `--json` → doctor "Semantic seeding" block → the five honest empty/degraded states.
-  **Done when:** on the glamCRM smoke fixture, isolated `rmap seed "where does the backend fetch BNR
-  exchange rates?"` returns the bnr-service/exchange-rates neighbourhood (module + imports + inlined
-  callers) in ≤5 (reproducing the spike's 14/16-class result on the ratified tasks), and
-  `orient`/`explain`/`trust`/`doctor`(existing lines) are byte-unchanged (I1/I4 regression check).
+  `spawn_auto_enrich`'s shape + `EnrichCoordinator` cancel → **the Group-A seam integration** (§8):
+  wire the `orient`/`explain` no-match branch (`orient/mod.rs:251-256`, `explain/mod.rs:187`) to
+  embed the focus/target string and fill `Focus.candidates` (additive fields on `FocusCandidate`)
+  with ≤5 labeled candidates + `module` locator + `next` follow-up + the labeled `SemanticFallback`
+  `Limit` (new `LimitCode` variant, §8.2/§8.3) →
+  doctor "Semantic seeding" block → the honest degraded states.
+  **Done when:** on the glamCRM smoke fixture, isolated
+  `rmap orient "where does the backend fetch BNR exchange rates?"` (a phrase with **no** deterministic
+  match) returns, in its `focus.candidates`, the bnr-service file as a labeled `source:"embedding"`
+  candidate with its `module` + `next: explain <key>` in ≤5 (reproducing the spike's 14/16-class
+  result on the ratified tasks); running that `next` yields the file's deterministic imports +
+  symbols, and one further `explain <symbol-name>` on a listed symbol yields its callers **when that
+  name resolves uniquely** (else the existing ambiguity result — hop 2 keys by name, §8.2a); and
+  every **resolved** or **ambiguous** `orient`/`explain`/`callers`/`callees`/`path`
+  result, plus `trust`/`doctor`(existing lines), is byte-unchanged (I1/I4 regression check).
 
 **Explicitly deferred (named extension points, not built):**
 
 - **Symbol-level corpus (D-ES-5)** — the (S) format; wins UI-phrasing misses at 5.6× store size.
-- **Untruncated / per-symbol callers & callees in the neighbourhood** — the inline caller fold caps
-  at ≤8 aggregated callers (§8.2 step 5); the full per-symbol caller/callee set is covered by the
-  structured `next` `explain <key>` referral, not inlined. (Note: inline *aggregated* callers are
-  **built** in IMPL-1 per the VISION `(module, imports, callers)` bound — only the untruncated tail
-  is deferred.)
-- **Embedded-ONNX runtime (D-ES-4 (b))** — the alternative `Embedder` impl. **Not deferred by a
-  builder preference** — its inclusion is exactly what D-ES-4 decides. Out of *this SPEC's* scope
-  because it needs a heavyweight dependency + bundled model + `Cargo.toml` (this SPEC's
-  STOP_CONDITION). **If the operator ratifies (b)**, this option-(a) IMPL-1 does **not** run; instead
-  the (b) path is its own complete post-ratification distribution slice (spec + ratification) that
-  ships the runtime-agnostic core (this §11) **and** the embedded-ONNX `Embedder` in the same arc, so
-  the verb works the day the capability exists — never a dormant core behind a degraded verb (review-6
-  #4). The core's design (this §11) is reused verbatim; only the impl behind the `Embedder` port
-  differs.
+- **Group-B seam integration — `callers`/`callees`/`path` (D-ES-10, deferred cut).** The tier is
+  **specified** for these seams (§8.1/§8.2: fire on `SymbolResolveError::NotFound`,
+  `dispatch.rs:1268/1438/2479/2502`; attach `data.semantic_candidates` + `data.hint` to the existing
+  `symbol not found` error) but **not built in IMPL-1**. Reason: the integration surface is the
+  daemon error `data` (a different carrier than Group A's `Focus.candidates`), and a file-level store
+  answers a *symbol* query only with *files* — a weaker fit that is honest but lower-value. Built as a
+  follow-up cut once Group A is proven; the core, ports, and store are reused verbatim.
+- **Inlined neighbourhood in the candidate (the pre-rework caller fold)** — **removed, not deferred**:
+  the amended VISION replaces it with the named `next` follow-up **sequence**, so the full
+  `(module, imports, callers)` is reached by running `explain <file>` (imports + symbols) then
+  `explain <symbol-name>` on a listed symbol (callers on a unique name, else the existing ambiguity
+  result — hop 2 keys by name, §8.2a), never folded into the candidate (§8.2/§8.2a).
+- **Embedded-ONNX runtime (D-ES-4 (b)) — SUPERSEDED ALTERNATIVE, not a live branch.** D-ES-4 is
+  RATIFIED as (a), so (b) is **not** decided by this milestone; it is a named, unbuilt future runtime.
+  It is out of *this SPEC's* scope regardless (it needs a heavyweight dependency + bundled model +
+  `Cargo.toml`, this SPEC's STOP_CONDITION). Were (b) ever separately ratified, it would ship in its
+  own complete post-ratification distribution slice (spec + ratification) that ships the
+  runtime-agnostic core (this §11) **and** the embedded-ONNX `Embedder` in the same arc, so the
+  fallback tier would work the day that capability exists — never a dormant core behind a degraded
+  fallback (review-6 #4). The core's design (this §11) is reused verbatim; only the impl behind the
+  `Embedder` port differs. Recorded for completeness — not part of the current binding plan.
 - **Cross-repo / model-management / semantic-search-as-answer** — VISION § Semantic Seeding parks
   these in FUTURE-ITERATIONS unless separately ratified.
 - **DB-backed vector store (D-ES-2 (b))** — only if a ratified requirement needs snapshot-scoped
@@ -1085,38 +1369,49 @@ splits into a runtime-agnostic core and the `Embedder` implementation:
   unit tests for envelope round-trip, pin-mismatch discard, `content_hash` staleness exclusion, the
   source/snapshot-race re-hash omission (§3.5), atomic-publish-on-cancel (a cancelled pass leaves
   the prior store intact, §4.3/§5.1), and cosine+tie ranking (no model needed — the `Embedder` port
-  is faked); the `artifact-contracts` registry-completeness + policy-coherence tests still pass with
-  the new family (`rust/crates/artifact-contracts/src/registry.rs:458-465`); the isolated live dogfood
-  (`./scripts/dogfood-isolated.sh`, never the operator's registry) running `rmap seed` on the
-  fixture; a regression capture proving `orient`/`explain`/`trust`/`doctor`(existing lines)
-  byte-unchanged; and the five degraded states each exercised.
+  is faked); **the seam-integration tests: (i) a no-match focus fires the tier and fills
+  `Focus.candidates` with `source:"embedding"` candidates + `next`; (ii) a resolved focus and (iii)
+  an ambiguous focus are byte-identical to the pre-seed baseline (the tier does NOT fire); (iv) each
+  degraded state (no store / model down / pins mismatch) returns the baseline no-match plus one
+  labeled `limits` line** — no caller-fold test (deleted); the `artifact-contracts`
+  registry-completeness + policy-coherence tests still pass with the new family
+  (`rust/crates/artifact-contracts/src/registry.rs:458-465`); the isolated live dogfood
+  (`./scripts/dogfood-isolated.sh`, never the operator's registry) running `rmap orient`/`explain`
+  with a no-match phrase on the fixture and observing the labeled semantic candidates; a regression
+  capture proving every **resolved**/**ambiguous** `orient`/`explain`/`callers`/`callees`/`path`
+  result plus `trust`/`doctor`(existing lines) byte-unchanged; and the degraded states each exercised.
 
 ---
 
 ## DECISIONS (ratification-class — decision-review + operator ratify; the IMPL does NOT re-decide)
 
 Status: **AWAITING RATIFICATION.** Each is an exhaustive matrix; RECOMMENDED is the builder's
-defensible pick except D-ES-4 (distribution-level — deliberately not decided). Two cells carry an
+defensible pick except D-ES-4 (distribution-level — **RATIFIED (a) 2026-08-25**). Three cells carry an
 architecture-boundary blast radius and so are ratification-class even though they name a
-RECOMMENDED: **D-ES-8** (new crate vs module — a component-graph node) and **D-ES-9** (option-(a)
-HTTP transport — a dependency-graph edge); the builder recommends but does not bind either.
+RECOMMENDED: **D-ES-8** (new crate vs module — a component-graph node), **D-ES-9** (option-(a)
+HTTP transport — a dependency-graph edge), and **D-ES-10** (the seam-integration contract — extends a
+boundary DTO and changes five commands' no-match branches); the builder recommends but does not bind.
+**Rework note (2026-08-25):** **D-ES-1 is SUPERSEDED-BY-HUMAN**; **D-ES-10 is NEW** and **D-ES-7's
+output-shape cells are UPDATED**; per TD-015 the decision-review rerun challenges **only** D-ES-1
+(supersession), D-ES-7 (update), and D-ES-10 (new) — D-ES-2,3,5,6,8,9 and ratified D-ES-4 carry over
+UNCHANGED and are not re-litigated.
 
 DECISION_REQUIRED:
-- ID: D-ES-1
-  QUESTION: The verb name for the semantic-seeding candidate generator.
-  OPTIONS:
-  - `seed` (RECOMMENDED): reads as safe/read-only, "plant a starting point"; sibling to
-    orient/explain; matches VISION § Protocol Surface Standard. REWARD — the name itself signals a
-    safe, read-only candidate generator (I1), so the protocol surface is honest before the agent
-    reads a word of output. RISK — slightly less self-evident to a first-time reader than a search
-    verb (mitigated: the human line names the workflow role, §9).
-  - `locate`: REWARD — also safe-sounding and acceptable. RISK — slightly implies an exactness the
-    Layer-3 hint does not have (a near-miss with I2's evidence-backed-hint framing).
-  - `find` / `search`: REWARD — most familiar to users. RISK — reads as an answer engine → violates
-    I1 (candidate generator, never answer). Rejected.
-  RECOMMENDED: `seed`.
-  BLOCKING_REASON: The verb name is the primary protocol-surface signal (VISION); it is a public
-    CLI contract cell the IMPL cannot pick unilaterally.
+- ID: D-ES-1  *(SUPERSEDED-BY-HUMAN 2026-08-25 — recorded, not silently removed)*
+  STATUS: **SUPERSEDED.** The human directive (VISION amended, commit `a3a90ce`,
+    `docs/VISION.md:149-160`) **rejected a separate verb entirely**: semantic candidates must
+    integrate into the EXISTING resolution seams. There is therefore **no verb to name**. This
+    cell's ratification role is taken over by **D-ES-10** (seam enumeration + fire condition +
+    integrated envelope). The original question/options are retained below for the audit trail only;
+    they are **not a live decision** and the decision-review rerun does NOT re-open them (TD-015).
+  QUESTION (obsolete): The verb name for the semantic-seeding candidate generator.
+  OPTIONS (obsolete):
+  - `seed` (was RECOMMENDED): reads as safe/read-only, "plant a starting point"; sibling to
+    orient/explain; matched VISION § Protocol Surface Standard.
+  - `locate`: also safe-sounding; slightly implies an exactness the Layer-3 hint does not have.
+  - `find` / `search`: reads as an answer engine → would have violated I1. Rejected.
+  RECOMMENDED (obsolete): `seed` — moot; no verb exists under the integrated design.
+  BLOCKING_REASON: none — superseded; see D-ES-10.
 
 - ID: D-ES-2
   QUESTION: Where do vectors live — a state-root sidecar or snapshot-DB rows?
@@ -1140,17 +1435,17 @@ DECISION_REQUIRED:
   NOTE: Either option requires an `artifact-contracts` family contract (§3.4) — the family, not the
     table, is the architectural unit. That registration is mandatory, not a decision.
 
-- ID: D-ES-3
-  QUESTION: Refresh policy — background recompute-on-change at index/refresh, or on-demand at first
-    `seed`? And the opt-out default.
+- ID: D-ES-3  *(carried unchanged; "first `seed`" reads as "first no-match fallback query" post-rework)*
+  QUESTION: Refresh policy — background recompute-on-change at index/refresh, or on-demand at the
+    first no-match fallback query? And the opt-out default.
   OPTIONS:
   - Background at index/refresh, recompute changed files by `content_hash`, default ON, env opt-out
-    `RMAP_SEED_VECTORS` (RECOMMENDED): reuses ENRICH-LIFECYCLE-1 (spawn/cancel/detached); first
-    `seed` is fast; honest skip when no model (like enrich's no-resolver skip). REWARD — fast read,
-    proven lifecycle. RISK — one background pass per index even if `seed` is never used (opt-out
-    mitigates).
-  - On-demand at first `seed`: REWARD — zero cost until used. RISK — first call blocks ~minute
-    (spike cold cost) on a "safe read" verb; bespoke cancellation; unbounded staleness. Rejected.
+    `RMAP_SEED_VECTORS` (RECOMMENDED): reuses ENRICH-LIFECYCLE-1 (spawn/cancel/detached); the first
+    fallback query is fast; honest skip when no model (like enrich's no-resolver skip). REWARD — fast
+    read, proven lifecycle. RISK — one background pass per index even if the fallback is never hit
+    (opt-out mitigates).
+  - On-demand at first fallback query: REWARD — zero cost until used. RISK — the first no-match query
+    blocks ~minute (spike cold cost) on a read path; bespoke cancellation; unbounded staleness. Rejected.
   RECOMMENDED: Background at index/refresh, default ON, `RMAP_SEED_VECTORS` opt-out.
   BLOCKING_REASON: Refresh behavior is a persistence-completeness + daemon-lifecycle decision; the
     default-ON posture commits background compute on every index (blast radius beyond one command).
@@ -1197,9 +1492,9 @@ DECISION_REQUIRED:
     defines one internal `Embedder` port (§10, §11) so the choice is a **reversible seam** — the same
     core + port design serves either impl. Under (a) the endpoint impl and the core ship together and
     complete IMPL-1 as one slice; under (b) this option-(a) IMPL-1 does **not** run and the core ships
-    **inside** the (b) distribution slice alongside the embedded impl (§11, review-6 #4), so the verb
-    is deep-vertical under either outcome — never a dormant core. Neither option is preselected; the
-    builder does not bind the default.
+    **inside** the (b) distribution slice alongside the embedded impl (§11, review-6 #4), so the
+    fallback tier is deep-vertical under either outcome — never a dormant core. Neither option is
+    preselected; the builder does not bind the default.
   BLOCKING_REASON: New heavyweight binary dependency + model distribution/signing is a foundational,
     hard-to-reverse distribution decision (VISION § Distribution; CLAUDE.md § Decision Autonomy →
     stop and ask).
@@ -1230,34 +1525,40 @@ DECISION_REQUIRED:
   BLOCKING_REASON: A product decision about what the agent should be pointed at; cheap to unwind but
     sets the corpus contract.
 
-- ID: D-ES-7
-  QUESTION: Neighbourhood composition in the `seed` output. (The VISION-ratified set
-    `(module, imports, callers)`, `docs/VISION.md:152-154`, is a **bound**, not an open choice; what
-    remains decidable is the deterministic *aggregation* of the symbol-granularity caller fact to
-    file granularity, and its caps.)
+- ID: D-ES-7  *(output-shape cells UPDATED 2026-08-25 for the seam integration; follow-up re-worded to the ratified SEQUENCE — OPERATOR RULING 5, `docs/VISION.md:159-164`)*
+  QUESTION: The per-candidate output shape. (The amended VISION, `docs/VISION.md:159-164`, fixes the
+    shape as a **bound**: each candidate carries *score + provenance + module/path* directly, and
+    names the deterministic follow-up *sequence* — `explain <candidate>` for imports + symbols, then
+    one further `explain` on a listed symbol for callers (no single command yields file-level
+    callers, §8.2 code-truth note). What remains recordable is the concrete field set and the reuse of
+    each seam's existing carrier.)
   OPTIONS:
-  - Inline module + ≤8 imports + ≤8 symbols + ≤8 **deterministically-aggregated callers**, plus a
-    `next` referral for the untruncated/per-symbol set (RECOMMENDED): `seed` reuses
-    `resolve_path_focus` + `module_summary::aggregate_file` + `find_file_imports` +
-    `list_symbols_in_file` + `find_symbol_callers`; callers are the fixed fold over the ≤8 in-file
-    symbols (per-symbol `rank_caller_rows`, union, first-occurrence dedup by `stable_key`, cap 8,
-    unknown-vs-zero via `symbols_scanned`) specified in §8.2 step 5. REWARD — satisfies the ratified
-    `(module, imports, callers)` set in a single round-trip; every field is a fold over an existing
-    function; deterministic (total orders throughout); bounded cost (≤8 caller lookups/candidate).
-    RISK — the caller fold is genuine new (small, pure, unit-tested) aggregation logic, and inline
-    callers are capped/deduped so an agent needing the full set follows `next`.
-  - Referral-only (callers, or all, via `next`): REWARD — thinnest handler. RISK — **contradicts the
-    ratified VISION neighbourhood set** (iteration 1's error); costs a round-trip for a bound the
-    VISION says must be inline. Rejected.
-  - Inline callers with a *larger*/uncapped fan-out (all in-file symbols, higher cap): REWARD —
-    more complete callers. RISK — unbounded `find_symbol_callers` fan-out per candidate; against the
-    ≤5-candidate/bounded-output discipline. Rejected for IMPL-1; the ≤8 cap + `next` covers the tail.
-  RECOMMENDED: Inline module + ≤8 imports + ≤8 symbols + ≤8 aggregated callers (§8.2 step 5) + a
-    `next` referral for the untruncated/per-symbol caller & callee set.
-  BLOCKING_REASON: Sets the `seed` JSON output contract (the agent-consumed product surface), the
-    caller-aggregation semantics, and which existing surfaces the handler composes. (The *set*
-    `(module, imports, callers)` is not itself decidable — it is the VISION bound; only the
-    aggregation/caps are.)
+  - Lightweight candidate + named `next` follow-up **sequence** (RECOMMENDED — the amended-VISION shape):
+    each candidate = `{ stable_key, file/path, score, source:"embedding", model_id, module,
+    next:{cmd,args,cwd} }`, additive on the existing `FocusCandidate` (Group A) / error-`data`
+    (Group B); `module` from `module_summary::aggregate_file`, `stable_key` from `resolve_path_focus`,
+    `next` = the first hop `explain <key>` / `orient --focus <key>` (real syntax + explicit `cwd`,
+    §8.2). Hop 1 (`next`) yields imports + symbols; **callers are hop 2** — one further
+    `explain <symbol-name>` on a symbol hop 1 lists (hop-1 output exposes names, not stable keys,
+    `signal.rs:783-787`; hop 2 returns callers only on a unique name, else the existing ambiguity
+    result, §8.2a). REWARD — matches the amended VISION exactly;
+    **no new domain logic** (no caller fold); ≤10 lookups across ≤5 candidates; every field is either
+    stored or a single existing call; reuses each seam's carrier so the deterministic path is
+    byte-unchanged. RISK — (i) the neighbourhood costs a follow-up **sequence** (two hops, the amended
+    VISION's explicit choice; the candidate stays a pure generator); (ii) two **code-truth IMPL edits**
+    the additive-field claim entails (§8.2 note): `FocusCandidate` must drop its `Eq`/`PartialEq` derive
+    (envelope.rs:54) to carry a float `score`, and a new `LimitCode` variant set (`SemanticFallback` /
+    `SemanticFallbackUnavailable`) must be added (limit.rs:35-187) for the labeled `Limit` — named IMPL
+    work, not "unchanged code".
+  - ⟨SUPERSEDED — Inline module + ≤8 imports + ≤8 symbols + ≤8 aggregated callers (the pre-rework
+    caller fold, §8.2 old step 5)⟩: the amended VISION replaced inlining with the named command, so
+    this is **removed, not chosen** — it built genuinely-new file-level aggregation logic the
+    integrated design does not need.
+  RECOMMENDED: Lightweight candidate (score + provenance + module/path) + named `next` follow-up,
+    reusing each seam's existing carrier (`Focus.candidates` for Group A; error `data` for Group B).
+  BLOCKING_REASON: Sets the agent-consumed candidate contract inside the existing seams. (The field
+    *set* is the amended-VISION bound; what is recorded here is the concrete shape + carrier reuse.
+    Tightly coupled to D-ES-10, which fixes when/where the tier fires.)
 
 - ID: D-ES-8  *(component-graph boundary — new release unit)*
   QUESTION: Does the pure seed logic (corpus build + envelope + cosine ranking) live in a new crate
@@ -1359,6 +1660,11 @@ DECISION_REQUIRED:
     response and treats **every** deviation (chunked, TLS, non-200, oversize, timeout, malformed) as
     "model unavailable" — the candidate generator declines rather than guesses. (a1)'s value is exactly
     that it removes these limits by using a real HTTP client.
+  PROBE (EXECUTED 2026-08-25, the tiebreaker both agents asked for): `curl -v` against the
+    operator's real LM Studio `/v1/embeddings` → `HTTP/1.1 200`, `Content-Length: 23333`,
+    no `Transfer-Encoding: chunked`, plain `http` — the exact subset a2 accepts. a2's framing
+    assumption is now MEASURED for the demonstrated endpoint; (a1) remains the named fallback
+    the day a chunked/TLS endpoint is a real requirement.
   RECOMMENDED: **(a2) std-library transport** — the smallest design that satisfies the demonstrated need
     (plain-`http` loopback, proven in the spike) with **no** dependency-graph edge, given that a2 states
     its compatibility limits explicitly and degrades honestly outside them. (a1) is the named,
@@ -1369,6 +1675,54 @@ DECISION_REQUIRED:
     Distribution). It also fixes the §6.1 scheme set (http-only vs http+https) AND a2's accepted-response
     contract above (which real endpoints it can and cannot talk to), so it must be ratified before the
     (a) impl is built. Applies **only under D-ES-4 option (a)**; moot under (b).
+
+- ID: D-ES-10  *(NEW 2026-08-25 — takes over D-ES-1's ratification role; seam enumeration + fire condition + integrated envelope)*
+  QUESTION: Now that the human directive requires integration into the EXISTING resolution seams
+    (no verb, `docs/VISION.md:149-160`): **which seams carry the semantic fallback tier, exactly when
+    does it fire, and in which existing carrier?**
+  CONSTRAINTS (from the human directive — these are bounds, not open sub-choices):
+  - The tier fires **only after every deterministic tier yields zero matches** (Group A's no-match
+    branch / Group B's `SymbolResolveError::NotFound` branch, surfaced today as `InvalidRequest`,
+    §8.2) — it **never reorders or dilutes** the deterministic tiers, and
+    **ambiguous-with-exact-matches does NOT fire it** (ambiguity already has exact matches).
+  - Additive + labeled: each candidate carries `source:"embedding"` + `model_id`; caps ≤5; degraded
+    (no vectors / model down / pins mismatch) ⇒ the seam behaves **exactly as today** plus one
+    labeled line stating the fallback was unavailable and why.
+  OPTIONS:
+  - (RECOMMENDED) Wire the tier into **both** enumerated seam-groups (§8.1), building **Group A now**
+    and **Group B as a deferred cut** (§11):
+    - **Group A — `orient`/`explain` focus resolution.** Fire at the deterministic-zero no-match:
+      `orient` `rust/crates/agent/src/orient/mod.rs:251-256` (+ defensive `:214`,`:273`, via
+      `build_no_match_result` `:369`); `explain` `rust/crates/agent/src/explain/mod.rs:187` (+ `:154`,
+      `:204`, via `build_no_match` `:259`). Do NOT fire on ambiguous (`orient` `:278-287`
+      `build_ambiguous_result`; `explain` `:208-223`). Carrier: the previously-empty
+      `Focus.candidates` (`rust/crates/agent/src/dto/envelope.rs:55-121,174-210`), additive
+      semantic-only fields (`skip_serializing_if` absent on deterministic candidates) + a labeled
+      `limits` line. REWARD — the seam's contract *already is* a `candidates` array; one integration
+      point (the shared `Focus`/`FocusCandidate` DTO) serves both verbs; deterministic path
+      byte-unchanged. RISK — extends a boundary DTO (`FocusCandidate`) with optional fields (directed
+      by the human; additive, so no consumer breaks).
+    - **Group B — `callers`/`callees`/`path` symbol lookup (deferred).** Fire on
+      `SymbolResolveError::NotFound` only (`rust/crates/daemon-runtime/src/dispatch.rs:1268`,`:1438`,
+      `:2479`,`:2502`; sum type `rust/crates/storage/src/queries.rs:568`); do NOT fire on
+      `Ambiguous` (`:1274`,`:1445`,`:2485`,`:2508`). Carrier: the existing `symbol not found`
+      error's additive `data.semantic_candidates` + `data.hint` (the same `ErrorDetail.data`
+      mechanism `ambiguous_symbol` uses, `dispatch.rs:151`). REWARD — reuses the not-found error as
+      the no-match contract. RISK — a file-level store answers a *symbol* query only with *files*
+      (weaker fit) and the carrier differs from Group A → **deferred to a follow-up cut**, specified
+      but not built in IMPL-1.
+  - Group A only, never Group B: REWARD — smallest surface. RISK — leaves the VISION-named
+    `callers`/`callees`/`path` no-match seams without the tier permanently; rejected — specify all,
+    defer the build.
+  - Fire the tier on ambiguity too (populate alongside exact matches): REWARD — more hints. RISK —
+    **violates the human directive** (dilutes a deterministic tier that already has exact matches);
+    rejected.
+  RECOMMENDED: Wire both seam-groups per §8.1; **build Group A in IMPL-1** (the smallest
+    deep-vertical — one `Focus`/`FocusCandidate` integration point across `orient`+`explain`),
+    **defer Group B** (§11) as a specified follow-up cut.
+  BLOCKING_REASON: This is the load-bearing contract cell of the reworked slice — it fixes the public
+    behavior of five existing commands' no-match branches and extends a boundary DTO
+    (`FocusCandidate`). It replaces D-ES-1's ratification role and must be ratified before IMPL.
 
 ---
 
@@ -1385,10 +1739,11 @@ DECISION_REQUIRED:
   / D-ES-9.
 - **Existing-code claims verified by reading** — all `file:line` anchors are OBSERVED (§0); the
   claims the packet/VISION named but that diverge from code are corrected in-line (`content_sha` →
-  `file_versions.content_hash`; `files` has no `snapshot_uid`; `orient_file` returns no
-  imports/callers — the neighbourhood composition is built from the real surfaces in §8.2; the
-  `ArtifactFamily` match is **not** single-crate — a second exhaustive match lives in `repo-index`,
-  §3.4; the state root is **not** structurally "never synced" — `RMAP_STATE_ROOT` is arbitrary, §4.2).
+  `file_versions.content_hash`; `files` has no `snapshot_uid`; the neighbourhood is yielded by the
+  candidate's named `explain`/`orient` follow-up, not inlined (§8.2); the two seam-groups' fire
+  points and carriers are enumerated against code in §8.1/D-ES-10; the `ArtifactFamily` match is
+  **not** single-crate — a second exhaustive match lives in `repo-index`, §3.4; the state root is
+  **not** structurally "never synced" — `RMAP_STATE_ROOT` is arbitrary, §4.2).
 - **No false trust/certainty claim** — §9: seeding is Layer-3, contributes nothing to trust or
   reliability; §7.3 makes only the honest claim — ranking is **exactly reproducible within one
   store** and **not guaranteed at any margin across machines / re-embeds** (ε=1e-5 is a
@@ -1404,9 +1759,12 @@ DECISION_REQUIRED:
 ## 14. Definition of done (this SPEC)
 
 `docs/slices/embed-seed-1.md` exists, buildable, self-contained, with real `file:line` anchors and
-the `## DECISIONS` section (D-ES-1..9, each risk/reward). review-impl approves → decision-review
-produces the ratification packet → **halt at awaiting-ratification for the human.** The IMPL slice
-(EMBED-SEED-IMPL-1, §11) runs only after D-ES-1..9 are ratified.
+the `## DECISIONS` section (D-ES-1 **superseded**, D-ES-2,3,5,6,8,9 carried, D-ES-4 **ratified**,
+D-ES-7 **updated**, D-ES-10 **new** — each live cell with risk/reward). review-impl approves →
+decision-review reruns **only the changed/new cells** (D-ES-1/7/10, TD-015) → produces the
+ratification packet → **halt at awaiting-ratification for the human.** The IMPL slice
+(EMBED-SEED-IMPL-1, §11) runs only after D-ES-7 + D-ES-10 (and the carried D-ES-2,3,5,6,8,9) are
+ratified.
 
 ---
 
@@ -1732,4 +2090,142 @@ RECOMMENDED storage/corpus/refresh/CLI decision changed; the DECISIONS set stays
      restricted to `crates/` = 32; the workspace root manifest has none); the claim already cites a
      spot-checkable `e.g. rust/crates/artifact-contracts/Cargo.toml` anchor (§10, D-ES-9 A2), so no
      change was needed for this sub-item.
+
+---
+
+## 22. Change log — iteration 7 REWORK (human directive 2026-08-25: integrate into existing seams, delete the verb)
+
+The human ratified the MECHANICS (corpus, sidecar+pins, background recompute, **D-ES-4=(a)**) and
+**rejected the separate verb**; VISION was amended (commit `a3a90ce`, `docs/VISION.md:149-160`).
+This rework keeps the diff minimal, marks superseded text rather than deleting healthy sections, and
+re-litigates only the changed/new cells (TD-015). Each item is OBSERVED against the working tree at
+rework time.
+
+1. **`rmap seed` verb DELETED; §8 rewritten as the INTEGRATION CONTRACT.** The standalone verb (its
+   `main.rs`/`dispatch.rs` `"seed"` arm and `commands/seed.rs`) is removed. New §8.0 states the
+   integration model (fire last, only on total deterministic failure; additive+self-labeling;
+   degrade to today+one line). New §8.1 **enumerates the seams against code**: Group A =
+   `orient`/`explain` focus resolution (fire at the no-match branches `orient/mod.rs:251-256`,
+   `explain/mod.rs:187`, via `build_no_match_result`:369 / `build_no_match`:259; do NOT fire on
+   ambiguous `orient/mod.rs:278-287`, `explain/mod.rs:208-223`; carrier = `Focus.candidates`,
+   `dto/envelope.rs:55-121,174-210`); Group B = `callers`/`callees`/`path` symbol lookup (fire on
+   `SymbolResolveError::NotFound`, `queries.rs:568`; `dispatch.rs:1268`/`:1438`/`:2479`/`:2502`; do
+   NOT fire on `Ambiguous` `:1274`/`:1445`/`:2485`/`:2508`; carrier = the not-found error's `data`,
+   rendered by `graph.rs:98-139`).
+2. **Candidate envelope simplified to the amended-VISION shape (§8.2).** Each candidate now carries
+   `score + source:"embedding" + model_id + module + path` and a single structured `next` follow-up
+   (`explain <key>` / `orient --focus <key>` + `cwd`) — the full `(module, imports, callers)`
+   neighbourhood is what `next` yields, **not inlined**. Additive optional fields on the existing
+   `FocusCandidate` (Group A) / error `data` (Group B).
+3. **The inline deterministic file-level caller fold (pre-rework §8.2 step 5) is DELETED** — the one
+   piece of genuinely-new domain logic the pre-rework design carried. §8.2a retains the surfaces it
+   used only as "what the `next` command yields". §8.4 drops the imports/symbols/caller caps; §10
+   drops the fold from "new domain logic" (leaving only the vector envelope + cosine ranking); §11
+   and §12 drop it from the milestone and its test.
+4. **D-ES-1 → SUPERSEDED-BY-HUMAN** (recorded with its obsolete question/options for the audit
+   trail, not silently removed). **D-ES-10 NEW** (seam enumeration + fire condition + carrier; takes
+   over D-ES-1's ratification role). **D-ES-7 output-shape cells UPDATED** to the lightweight
+   candidate + named `next`. D-ES-2,3,5,6,8,9 and ratified D-ES-4 **carried unchanged**.
+5. **§2 invariants refined for honesty.** I1: no embedding fact in resolved facts/signals/`map`/
+   `modules`; candidates live only in the no-match `candidates`/error `data`. I4: the *deterministic*
+   tiers (resolved + ambiguous) are byte-unchanged; only the no-match branch gains a labeled,
+   degradable addition (the pre-rework blanket "orient/explain byte-unchanged" would now be false and
+   is corrected). §1's "what it is not" paragraph updated verb→integration.
+6. **§8.3 degraded states** reframed per-seam: the deterministic outcome is byte-identical to today
+   plus one labeled line (Group A `limits`; Group B error `data`/message). **§9 doctor** wording
+   moved off the verb onto the seam fallback; the doctor block itself (store state / model pin /
+   staleness) is unchanged.
+7. **§11 milestone** = build Group A (one `Focus`/`FocusCandidate` integration point across
+   `orient`+`explain`) as the smallest deep-vertical; **Group B specified but deferred** (different
+   carrier + file-for-symbol weaker fit). DoD rewritten to an isolated no-match
+   `rmap orient "<phrase>"` returning labeled semantic candidates, with all resolved/ambiguous
+   results byte-unchanged.
+
+---
+
+## 23. Change log — iteration 8 (closes review-7.json + OPERATOR RULING 5, 2026-08-25)
+
+Review-7 escalated on one **blocking conflict** (the candidate's `next` claimed a single command
+yielding file-level `(module, imports, callers)`, which no existing surface provides) + four OBSERVED
+code-truth mismatches. OPERATOR RULING 5 (VISION amended, commit `bf555ee`, `docs/VISION.md:159-164`)
+ratified the reviewer's RECOMMENDED option and directed the four code-truth fixes. This iteration
+applies exactly those; diff kept minimal, healthy sections untouched. Each item OBSERVED against the
+working tree at fix time.
+
+1. **Blocking conflict — follow-up is the deterministic SEQUENCE, not one command.** The binding
+   VISION wording (`:159-164`) is now: candidate carries module/path directly; `explain <candidate>`
+   yields imports + symbols; **callers are one further `explain` on a listed symbol**. Verified
+   against code: `explain_file` emits identity + imports + symbols with `module_path: None` and **no**
+   callers (`rust/crates/agent/src/explain/mod.rs:527-589`); callers are per-symbol only via
+   `explain_symbol` (`:324`). Reworded everywhere the "single command yields the full neighbourhood"
+   claim appeared: §1, §2 I1, §8.2 (intro + new code-truth note), §8.2 prose, §8.2a (now a two-hop
+   sequence with the `module_path: None` fact at `:538`), §11 (milestone + DoD + deferred bullet),
+   D-ES-7, the top rework banner item #4. Widening resolved `explain <file>` for callers was
+   explicitly rejected by the operator (byte-stable output is inviolate) and is recorded as such.
+2. **Observed #1 — empty `candidates` is OMITTED from JSON, not `[]`.** `Focus.candidates` carries
+   `#[serde(skip_serializing_if = "Vec::is_empty")]` (`rust/crates/agent/src/dto/envelope.rs:111-112`).
+   §8.3 prose + table rewritten: every zero-candidate state shows the `candidates` key **absent**; the
+   fired-but-empty / unavailable signal is carried **entirely** by the always-present labeled `Limit`.
+   Chosen resolution (recorded): **reflect code truth, no serializer change** (an always-present `[]`
+   would need a bespoke override — the smallest design declines it).
+3. **Observed #2 — `limits` is `Vec<Limit>` objects, not strings.** `Focus.limits: Vec<Limit>`
+   (`rust/crates/agent/src/dto/envelope.rs:326`); `Limit = {code: LimitCode, summary (code-derived,
+   fixed), reasons: Vec<String>, degradation}` (`rust/crates/agent/src/dto/limit.rs:330-337`), and
+   `summary` is a fixed lookup from `code` (`:136-186`). §8.2 example + §8.3 table converted to `Limit`
+   objects; the reader-facing per-situation detail moved into `reasons`. Because the closed `LimitCode`
+   enum (`:35-187`) has **no** semantic-fallback variant, adding `SemanticFallback` /
+   `SemanticFallbackUnavailable` is named as explicit IMPL work (§8.2 note, D-ES-7 RISK, §11).
+4. **Observed #3 — Group-B not-found is `InvalidRequest` today, not `SymbolNotFound`.**
+   `dispatch.rs:1268-1272` → `ErrorDetail::invalid_request` → `ErrorCode::InvalidRequest`
+   (`rust/crates/daemon-transport/src/envelope.rs:113,:164,:204-205`); no `SymbolNotFound` variant
+   exists (`:108-174`). §8.2 Group-B example fixed to `"InvalidRequest"`; the "unchanged deterministic
+   outcome" claim clarified (the tier rides the existing error's additive `data`, no code change);
+   introducing a dedicated `SymbolNotFound` code named as separate optional IMPL work, not
+   "unchanged code".
+5. **Observed #4 — §11 reconciled with D-ES-4's ratified (a).** The "conditional / preselects none /
+   no runtime" framing is corrected: D-ES-4 is **RATIFIED (a)**, so §11 is the **binding** IMPL-1 plan
+   and only D-ES-8/D-ES-9 remain open (footprint-only). The option-(b) "if the operator ratifies (b)"
+   branch is demoted to a **superseded-alternative note** (recorded for completeness, not a live
+   branch), in both the `Embedder`-implementation bullet and the deferred list.
+6. **Additional code-truth constraint surfaced (not in review-7, found while verifying #1–#4).**
+   `FocusCandidate` derives `PartialEq, Eq` (`rust/crates/agent/src/dto/envelope.rs:54`); a float
+   `score` cannot satisfy `Eq`, so the "additive optional fields" claim entails dropping that derive
+   (or carrying score as non-float). Recorded as named IMPL work in §8.2 and D-ES-7 RISK — honest
+   about the real edit the boundary-DTO extension requires.
+
+Per TD-015 the decision-review rerun still challenges only the changed/new cells: **D-ES-7** (updated
+follow-up-sequence wording + the two code-truth IMPL edits) and **D-ES-10** (unchanged in substance).
+D-ES-1 stays SUPERSEDED-BY-HUMAN; D-ES-2,3,5,6,8,9 and ratified D-ES-4 carry over unchanged.
+
+---
+
+## 24. Change log — iteration 9 (closes review-8.json, 2026-08-25)
+
+Review-8 was `revise` on **one blocking code-truth mismatch** (no new decisions, no scope change):
+§8.2/§8.2a specified the follow-up second hop as `explain <symbol-stable-key>`, implying hop 1
+(`explain <file>`) supplies symbol **stable keys**. It does not — `explain_file` emits
+`ExplainSymbolItem { name, subtype, line_start }` (`rust/crates/agent/src/dto/signal.rs:783-787`;
+built at `rust/crates/agent/src/explain/mod.rs:574-581`), with **no** `stable_key` field. The doc
+therefore overclaimed deterministic caller reachability from a file explain. All fixes are wording
+only; healthy sections untouched. Each fact OBSERVED against the tree at fix time.
+
+1. **Hop-2 keys by NAME, not stable key.** Corrected every `explain <symbol-stable-key>` /
+   "symbol keys for hop 2" claim to `explain <symbol-name>` in §8.2 (intro prose + new hop-2
+   code-truth note), §8.2 `next`-follow-up prose, §8.2a (`symbols` bullet: `stable_key` is an
+   internal ordering tiebreak, **not serialized**; `callers` bullet: hop 2 = `explain <symbol-name>`),
+   §2 I1, §11 (milestone "Done when" + deferred bullet), and D-ES-7 option cell.
+2. **Honest follow-up contract stated.** Hop 2 resolves the name via `resolve_symbol_name`
+   (`rust/crates/storage/src/agent_impl.rs:938-970`), which returns a `Vec` (`LIMIT 5`): a name may
+   match several symbols. So hop 2 returns callers **only when the name resolves uniquely**; otherwise
+   it returns the existing deterministic **ambiguity** result (contract precedence + ambiguous ⇒
+   candidates, `docs/architecture/agent-orientation-contract.md:62-86`). The doc no longer implies
+   full deterministic caller reachability from a file explain.
+3. **Recorded as an existing-surface limitation, not an implicit `explain <file>` extension.** The
+   name-only second hop and its ambiguity are marked an accepted limitation of the follow-up sequence;
+   widening resolved `explain <file>` remains explicitly rejected (I4, OPERATOR RULING 5 — byte-stable
+   output inviolate). No new IMPL work is introduced by this iteration; the two code-truth IMPL edits
+   named in iteration 8 (drop `FocusCandidate` `Eq`; new `LimitCode` variants) are unchanged.
+
+No decision cells changed substance (D-ES-7's wording is refined to match code, not re-litigated); the
+decision-review scope from iteration 8 is unchanged.
 
