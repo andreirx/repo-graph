@@ -48,3 +48,21 @@ rendered with its deterministic neighbourhood (module, imports, callers) — nev
 fixed-formula ranking (no LLM reranker); local model only, absence degrades to "no hints", never
 "no orientation". This is a VISION-level promotion (embeddings appear nowhere in VISION/ROADMAP
 today) → needs operator ratification before the spec slice runs.
+
+
+## Addendum — EMBED-CONCERN-SPIKE (2026-08-25): concept search + cross-module concern discovery
+
+**Concept search (EXECUTED, same corpus/model):** "user login and authentication" → `auth.ts`,
+`AccountCredentials.java`, `AuthContext.tsx` (all three subsystems, top-5); "email or notification
+sending" → both email services (TS + Java); "role based permissions" → `user-role.ts` + `roles.ts`.
+Honest miss: "database table schema definitions" → zod schemas (the SQL DDL files are outside the
+indexed corpus — corpus-inclusion note for the spec).
+
+**Concern discovery (EXECUTED):** K-means (K=24, cosine) over the file vectors; clusters spanning
+≥2 deployable modules ranked by span, then intra-cluster cohesion. The top cross-module clusters
+ARE glamCRM's real vertical concerns — invisible to import analysis (subsystems touch only over
+HTTP): sales-targets (frontend↔serverless, cohesion .93), tenant-config/brand (.92, 15 files),
+exchange-rate (.90), auth/Cognito (.89, 21 files across frontend+serverless). Conclusion
+(INFERRED from the above): semantic cohesion is a usable Layer-3 instrument for
+concern/seam-candidate discovery, complementary to the HTTP boundary links; ratified into scope
+2026-08-25 (VISION § Semantic Seeding, use (iii)).

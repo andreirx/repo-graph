@@ -169,6 +169,16 @@ top-5 on 14/16 real glamCRM tasks vs 8/16 lexical). Bounds that keep it inside t
 - **Local and optional.** Local model only, no API key, no network; absence degrades to
   "no hints", never to degraded orientation.
 
+**Ratified uses (human, 2026-08-25).** The semantic substrate serves three uses, all Layer-3:
+(i) the resolution fallback tier above; (ii) **`rmap find "<concept>"`** — affirmative concept
+search (human-directed verb; "likely areas for X" with scores + provenance, never a completeness
+claim — the one deliberately search-named verb, honest because its output says hints, open the
+files); (iii) **cross-module concern hints** — cohesive embedding clusters spanning deployable
+modules surfaced on the module/boundary discovery surfaces as labeled seam/concern candidates
+(measured: glamCRM's sales-targets/tenant-brand/exchange-rate/auth clusters, spike addendum
+2026-08-25). Uses (i)+(ii) ship in the first IMPL; (iii) follows once its rendering surface is
+specced.
+
 Scope beyond these bounds (semantic search as an answer surface, cross-repo embeddings,
 model management) stays in `docs/FUTURE-ITERATIONS.md` unless separately ratified.
 
