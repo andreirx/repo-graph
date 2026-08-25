@@ -1,7 +1,7 @@
 # EMBED-SEED-1: semantic seeding — a local-embedding candidate generator for task-to-anchor orientation — SPEC
 
 Slice: EMBED-SEED-1
-Status: **SPEC — AWAITING RATIFICATION.** No production code, no `Cargo.toml`, no schema (SQL) change
+Status: **SPEC — RATIFIED 2026-08-25 (human; all-converged packet, D-ES-1..11).** IMPL authorized (EMBED-SEED-IMPL-1). The spec itself changed no production code, no `Cargo.toml`, no schema (SQL)
 (packet STOP_CONDITIONS). This doc is the whole deliverable. It runs under **decision-review**:
 the `## DECISIONS` section is the ratification surface; an IMPL slice follows only after the
 operator ratifies. (The packet cites `docs/slices/decision-review-mode-1.md` for the marker
@@ -1624,7 +1624,7 @@ and the ratified (a) `Embedder` implementation:
 
 ## DECISIONS (ratification-class — decision-review + operator ratify; the IMPL does NOT re-decide)
 
-Status: **AWAITING RATIFICATION.** Each is an exhaustive matrix; RECOMMENDED is the builder's
+Status: **RATIFIED 2026-08-25 (human).** Each is an exhaustive matrix; RECOMMENDED was the builder's
 defensible pick except D-ES-4 (distribution-level — **RATIFIED (a) 2026-08-25**). Three cells carry an
 architecture-boundary blast radius and so are ratification-class even though they name a
 RECOMMENDED: **D-ES-8** (new crate vs module — a component-graph node), **D-ES-9** (option-(a)
