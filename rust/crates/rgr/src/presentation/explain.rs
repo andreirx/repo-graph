@@ -88,6 +88,11 @@ pub struct ExplainResponse {
     pub signals: Vec<CoherenceEnvelope<ExplainSignal>>,
     #[serde(default)]
     pub truncated: bool,
+    /// EMBED-SEED-IMPL-1 (spec §8.2/§8.3): the `Limit` list the daemon attaches — the
+    /// semantic fallback's honesty header / degraded line rides here (same `{code,
+    /// summary}` shape orient uses). Absent on the wire from an older daemon.
+    #[serde(default)]
+    pub limits: Vec<crate::presentation::orient::Limit>,
     /// RECON-M-R4 (§5.5): the additive Layer-2 attribution block the daemon attaches on SYMBOL
     /// focus (`layer2_resolution` — likely resolutions + contested signals). `None` on zero-SCIP /
     /// non-symbol / no-hint answers (absent on the wire); rendered by the shared witness projection.
@@ -122,6 +127,20 @@ pub struct FocusCandidate {
     #[serde(default)]
     pub file: Option<String>,
     pub kind: String,
+    // EMBED-SEED-IMPL-1 (spec §8.2 Group A): additive, semantic-only fields — present
+    // ONLY on a semantic fallback candidate (a deterministic *ambiguous* candidate
+    // omits them, so its render is byte-identical to before). `module`/`next` stay raw
+    // `Value` so the shared honesty-preserving formatters render them.
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub module: Option<serde_json::Value>,
+    #[serde(default)]
+    pub next: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +181,13 @@ impl ExplainResponse {
 
         // ── Handle unresolved focus ──────────────��─────────────────
         if !self.focus.resolved {
+            // EMBED-SEED-IMPL-1 (spec §8.2 Group A): explain shares orient's no-match
+            // contract — render the labeled semantic candidates (or the honest degraded
+            // line) here, so `explain "<concept>"` is not a dead human surface.
+            let semantic = self.render_semantic_fallback();
+            if !semantic.is_empty() {
+                out.push_str(&semantic);
+            }
             return out.trim_end().to_string();
         }
 
@@ -284,6 +310,73 @@ impl ExplainResponse {
         None
     }
 
+    /// EMBED-SEED-IMPL-1 (spec §8.2 Group A): render the semantic fallback tier for
+    /// explain HUMAN mode — the labeled Layer-3 candidates (or the honest degraded/
+    /// known-zero line) a `no_match` explain now carries. Mirrors orient's
+    /// `render_semantic_fallback`; reuses the shared honesty-preserving module/next
+    /// formatters. Empty when the focus is not a no_match, or when a no-match carries
+    /// no seed candidate AND no seed limit (old daemon / seeding not consulted).
+    fn render_semantic_fallback(&self) -> String {
+        if self.focus.resolved || self.focus.reason.as_deref() != Some("no_match") {
+            return String::new();
+        }
+        let embedding: Vec<&FocusCandidate> = self
+            .focus
+            .candidates
+            .iter()
+            .filter(|c| c.source.as_deref() == Some("embedding"))
+            .collect();
+        let semantic_limit = self
+            .limits
+            .iter()
+            .find(|l| l.code.starts_with("SEMANTIC_FALLBACK"));
+
+        if embedding.is_empty() {
+            // Degraded / known-zero: the honest line WITH the specific cause from
+            // `reasons` (review-9 #2), not just the generic summary.
+            return match semantic_limit {
+                Some(limit) => crate::presentation::seed::render_semantic_header(
+                    &limit.summary,
+                    &limit.reasons,
+                ),
+                None => String::new(),
+            };
+        }
+
+        // Fired: honesty header + per-cause reasons (model id + stale-subset detail,
+        // review-9 #2), then the labeled candidate list.
+        let mut out = match semantic_limit {
+            Some(limit) => {
+                crate::presentation::seed::render_semantic_header(&limit.summary, &limit.reasons)
+            }
+            None => "Semantic hints: No exact match — the candidates below are Layer-3 embedding hints, not resolved facts.\n".to_string(),
+        };
+        for (i, c) in embedding.iter().enumerate() {
+            // Every identity field is REQUIRED on a semantic candidate; a genuinely
+            // absent one is a malformed response (old daemon / bug), surfaced as such,
+            // NEVER fabricated (STANDING HONESTY RULE).
+            let (Some(file), Some(score), Some(model)) =
+                (c.file.as_deref(), c.score, c.model_id.as_deref())
+            else {
+                out.push_str(&format!(
+                    "  {}. (malformed candidate: missing file/score/model_id)\n",
+                    i + 1
+                ));
+                continue;
+            };
+            let module = crate::presentation::seed::render_module_hint(c.module.as_ref());
+            out.push_str(&format!(
+                "  {}. {file}  (score {score:.2}, embedding, model {model}{module})\n",
+                i + 1
+            ));
+            out.push_str(&crate::presentation::seed::render_next(
+                c.next.as_ref(),
+                &c.stable_key,
+            ));
+        }
+        out
+    }
+
     fn render_candidates(&self) -> String {
         let mut out = heading("Ambiguous target - multiple matches found");
         for c in &self.focus.candidates {
@@ -322,6 +415,7 @@ mod tests {
             confidence: "high".to_string(),
             signals: vec![],
             truncated: false,
+            limits: vec![],
             layer2_resolution: None,
             index_drift: None,
         }
@@ -370,11 +464,21 @@ mod tests {
                     stable_key: "r1:src/auth:AuthService.validate:SYMBOL".to_string(),
                     file: Some("src/auth/service.ts".to_string()),
                     kind: "symbol".to_string(),
+                    source: None,
+                    model_id: None,
+                    score: None,
+                    module: None,
+                    next: None,
                 },
                 FocusCandidate {
                     stable_key: "r1:src/user:UserService.validate:SYMBOL".to_string(),
                     file: Some("src/user/service.ts".to_string()),
                     kind: "symbol".to_string(),
+                    source: None,
+                    model_id: None,
+                    score: None,
+                    module: None,
+                    next: None,
                 },
             ],
         };
@@ -382,6 +486,97 @@ mod tests {
         assert!(out.contains("Ambiguous target"));
         assert!(out.contains("AuthService.validate"));
         assert!(out.contains("UserService.validate"));
+    }
+
+    #[test]
+    fn semantic_no_match_renders_labeled_candidates_in_human_mode() {
+        // EMBED-SEED-IMPL-1 (operator finding 2026-08-25): `explain "<concept>"` in
+        // HUMAN mode must render labeled Layer-3 candidates, not a bare no_match line.
+        let mut r = minimal_response();
+        r.focus = ExplainFocus {
+            input: Some("where discounts are applied".to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_path: None,
+            reason: Some("no_match".to_string()),
+            candidates: vec![FocusCandidate {
+                stable_key: "glamCRM:src/price.ts:FILE".to_string(),
+                file: Some("src/price.ts".to_string()),
+                kind: "file".to_string(),
+                source: Some("embedding".to_string()),
+                model_id: Some("text-embedding-nomic-embed-text-v1.5".to_string()),
+                score: Some(0.71),
+                module: Some(serde_json::json!({ "owning": "backend/pricing" })),
+                next: Some(serde_json::json!({
+                    "cmd": "explain", "args": ["glamCRM:src/price.ts:FILE"], "cwd": "/repo"
+                })),
+            }],
+        };
+        r.limits = vec![crate::presentation::orient::Limit {
+            code: "SEMANTIC_FALLBACK".to_string(),
+            summary: "No exact match. The candidates below are Layer-3 embedding hints, not resolved facts; open one and re-run.".to_string(),
+            reasons: Vec::new(),
+        }];
+        let out = r.render_human(false);
+        assert!(out.contains("Semantic hints:"), "honesty header: {out}");
+        assert!(out.contains("src/price.ts"), "candidate path: {out}");
+        assert!(out.contains("embedding"), "labeled embedding: {out}");
+        assert!(
+            out.contains("module backend/pricing"),
+            "owning module: {out}"
+        );
+        assert!(
+            out.contains("rmap explain glamCRM:src/price.ts:FILE"),
+            "next follow-up: {out}"
+        );
+    }
+
+    /// review-9 #2 + #5: `explain "<concept>"` degraded (model down) must render the
+    /// SPECIFIC cause in HUMAN mode, deserialized from the daemon JSON (proving the
+    /// rgr `Limit` retains `reasons`).
+    #[test]
+    fn explain_degraded_renders_specific_cause_from_json() {
+        let limit: crate::presentation::orient::Limit = serde_json::from_str(
+            r#"{"code":"SEMANTIC_FALLBACK_UNAVAILABLE","summary":"No exact match, and semantic hints are unavailable; deterministic resolution is unaffected.","reasons":["no local embedding model reachable; seeding is optional, resolution is unaffected"]}"#,
+        )
+        .expect("Limit deserializes with reasons");
+        let mut r = minimal_response();
+        r.focus = ExplainFocus {
+            input: Some("where discounts are applied".to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_path: None,
+            reason: Some("no_match".to_string()),
+            candidates: Vec::new(),
+        };
+        r.limits = vec![limit];
+        let out = r.render_human(false);
+        assert!(out.contains("Semantic hints:"), "honesty header: {out}");
+        assert!(
+            out.contains("no local embedding model reachable"),
+            "the specific cause is rendered, not just the generic summary: {out}"
+        );
+    }
+
+    #[test]
+    fn no_match_without_seed_candidate_is_todays_bare_line() {
+        // Byte-parity: a no_match with no seed candidate + no seed limit (old daemon /
+        // seeding not consulted) renders exactly today's bare target line.
+        let mut r = minimal_response();
+        r.focus = ExplainFocus {
+            input: Some("nope".to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_path: None,
+            reason: Some("no_match".to_string()),
+            candidates: vec![],
+        };
+        let out = r.render_human(false);
+        assert!(
+            !out.contains("Semantic hints:"),
+            "no semantic section: {out}"
+        );
+        assert!(out.contains("Target: nope (unresolved: no_match)"));
     }
 
     /// Wrap a bare `ExplainSignal` as a LEAF `CoherenceEnvelope<ExplainSignal>` (the post-wrapper signal

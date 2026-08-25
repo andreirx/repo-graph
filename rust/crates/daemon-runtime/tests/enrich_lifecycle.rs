@@ -82,6 +82,13 @@ fn serial_guard() -> MutexGuard<'static, ()> {
 fn set_overrides(enrich_on: bool) {
     set_auto_retention_for_test(false);
     set_auto_enrich_for_test(enrich_on);
+    // EMBED-SEED-IMPL-1: the maintenance tail is now enrich → seed → retention, so an
+    // enrich-OFF index still spawns the background embed pass directly (dispatch.rs). That
+    // pass briefly holds the repo read lock and (on a host where the local model is up)
+    // embeds — contention that makes the synchronous `try_enrich_attempt` supersede/run
+    // proofs below Yield instead of Run. Disable it here for the same reason enrich/retention
+    // are disabled: these proofs drive the generation logic manually and need no background pass.
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
 }
 
 struct Quiet;
@@ -334,6 +341,11 @@ fn enrich_chains_retention_when_both_enabled() {
     // test that exercises the chain, so it opts retention back in while holding the serial lock.
     set_auto_retention_for_test(true);
     set_auto_enrich_for_test(true);
+    // EMBED-SEED-IMPL-1: keep this a pure enrich→retention sequencing proof (its documented
+    // intent) and process-global-atomic-order-independent — disable the intervening seed pass so
+    // the chain is enrich → (seed skipped) → retention. Set explicitly (not via `set_overrides`,
+    // which this test bypasses to opt retention back in), so a prior test's atomic cannot leak in.
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
 
     let (dispatcher, state, _root) = isolated();
     let repo_root = tempdir().unwrap();

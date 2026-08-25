@@ -190,6 +190,7 @@ pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)
 pub mod queries; // Read-side graph queries (R10+)
 mod refresh_copy_forward_impl; // Refresh artifact copy-forward (refresh-integrity-parity slice)
 pub mod retention; // CACHE-SEMANTICS-1: Snapshot retention management
+mod seed_impl; // SeedCorpusRead impl for StorageConnection (EMBED-SEED-IMPL-1)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 pub mod types;
 

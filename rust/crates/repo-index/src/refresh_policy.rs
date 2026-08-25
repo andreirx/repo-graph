@@ -76,6 +76,23 @@ pub const REINDEX_FAMILIES: &[ArtifactFamily] = &[
     ArtifactFamily::ContractElements,
 ];
 
+/// Families whose data lives OUTSIDE the snapshot DB and is therefore
+/// **deliberately absent from every refresh array above** — the snapshot
+/// refresh dispatch must not (and cannot) touch them.
+///
+/// - [`ArtifactFamily::SeedVectors`] (EMBED-SEED-IMPL-1, §3.4): a table-less,
+///   non-authoritative state-root `.vec` sidecar, refreshed by the daemon's
+///   own background seed pass (content-hash incremental, ordered
+///   enrich → seed → retention) and safe to delete at any time. Listing it in
+///   a snapshot refresh array would claim a lifecycle this dispatcher does
+///   not own.
+///
+/// The exemption is EXPLICIT so the compose wildcard cannot silently swallow
+/// a family (review-10 #2): `validate_family_implementation` rejects any
+/// family present here that grows a `table_name`, and the audit test below
+/// pins the exemption list.
+pub const SNAPSHOT_EXTERNAL_FAMILIES: &[ArtifactFamily] = &[ArtifactFamily::SeedVectors];
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Refresh Dispatch Result
 // ═══════════════════════════════════════════════════════════════════════════
@@ -215,6 +232,16 @@ pub fn validate_family_implementation(family: ArtifactFamily) -> Option<String> 
         // but implementation currently re-indexes everything.
         // This is documented, not an error.
         None
+    }
+    // Snapshot-external families: refreshed OUTSIDE this dispatcher by design.
+    else if SNAPSHOT_EXTERNAL_FAMILIES.contains(&family) {
+        // Table-less is the invariant that keeps the exemption honest: the moment
+        // such a family grows a snapshot table it MUST move into a refresh array.
+        family.table_name().map(|t| {
+            format!(
+                "{family:?}: in SNAPSHOT_EXTERNAL_FAMILIES but has snapshot table '{t}' — move it into a refresh array"
+            )
+        })
     } else {
         // Family not in any executable subset - that's fine, just not implemented
         None
@@ -254,6 +281,31 @@ pub fn validate_all_implementations() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+
+    // Pins the snapshot-external exemption (review-10 #2): SeedVectors is refreshed
+    // OUTSIDE this dispatcher by design, must appear in NO refresh array, and stays
+    // valid only while table-less.
+    #[test]
+    fn seed_vectors_is_the_pinned_snapshot_external_exemption() {
+        assert_eq!(
+            SNAPSHOT_EXTERNAL_FAMILIES,
+            &[ArtifactFamily::SeedVectors],
+            "the exemption list is deliberate — extend it consciously, never by drift"
+        );
+        for family in SNAPSHOT_EXTERNAL_FAMILIES {
+            assert!(
+                !COPY_FORWARD_FAMILIES.contains(family)
+                    && !RECOMPUTE_FAMILIES.contains(family)
+                    && !REINDEX_FAMILIES.contains(family),
+                "{family:?} is snapshot-external and must not also be in a refresh array"
+            );
+            assert_eq!(
+                validate_family_implementation(*family),
+                None,
+                "a snapshot-external family must be table-less to keep the exemption honest"
+            );
+        }
+    }
     use super::*;
 
     #[test]

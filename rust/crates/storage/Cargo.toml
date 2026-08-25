@@ -160,6 +160,12 @@ repo-graph-indexer = { path = "../indexer" }
 # projection consumed by `get_trust_summary`.
 repo-graph-agent = { path = "../agent" }
 
+# Seed crate — EMBED-SEED-IMPL-1. Same adapter → policy direction: the seed
+# crate (policy, pure) defines the `SeedCorpusRead` port; the storage adapter
+# implements it (see src/seed_impl.rs). No reverse edge — repo-graph-seed does
+# NOT depend on storage.
+repo-graph-seed = { path = "../repo-graph-seed" }
+
 # Gate crate — added in Rust-43A so the storage crate (adapter)
 # can implement the GateStorageRead trait defined by the gate
 # crate (policy). Same dependency direction: adapter → policy.

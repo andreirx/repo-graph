@@ -1171,11 +1171,13 @@ dependencies = [
  "repo-graph-quality-policy-runner",
  "repo-graph-repo-index",
  "repo-graph-scip-ingest",
+ "repo-graph-seed",
  "repo-graph-storage",
  "repo-graph-trust",
  "repo-graph-trust-model",
  "repo-graph-warm-cache",
  "repo-graph-warm-cache-feed",
+ "rusqlite",
  "rust-analyzer-resolver",
  "serde",
  "serde_json",
@@ -1476,6 +1478,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-seed"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "hex",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "repo-graph-state-bindings"
 version = "0.1.0"
 dependencies = [
@@ -1512,6 +1526,7 @@ dependencies = [
  "repo-graph-gate",
  "repo-graph-indexer",
  "repo-graph-policy-facts",
+ "repo-graph-seed",
  "repo-graph-trust",
  "rusqlite",
  "serde",

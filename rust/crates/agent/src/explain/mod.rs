@@ -208,10 +208,12 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     // Ambiguous — return candidates.
                     let focus_candidates = symbol_candidates
                         .into_iter()
-                        .map(|c| crate::dto::envelope::FocusCandidate {
-                            stable_key: c.stable_key,
-                            file: c.file,
-                            kind: crate::dto::envelope::ResolvedKind::Symbol,
+                        .map(|c| {
+                            crate::dto::envelope::FocusCandidate::deterministic(
+                                c.stable_key,
+                                c.file,
+                                crate::dto::envelope::ResolvedKind::Symbol,
+                            )
                         })
                         .collect();
                     Ok(OrientResult {

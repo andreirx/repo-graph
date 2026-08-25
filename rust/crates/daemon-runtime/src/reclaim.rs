@@ -82,6 +82,15 @@ use serde_json::{json, Value};
 use crate::registry::RegistryEntry;
 use crate::state::DaemonState;
 
+/// Orphan `.vec` seed-sidecar reclaim mechanism (EMBED-SEED-IMPL-1 §4.1, class D). A
+/// CHILD module (extracted for the 500-line guardrail, review-6 #2) so the new
+/// seed-reclaim mechanism does not grow this module; it reaches `FileEntry`/`ReclaimUnit`/
+/// `OrphanReport`/`stat_len_or_record` via parent visibility. The `OrphanReport` field +
+/// aggregation, the `forget` deletion, and the boot-log line stay woven here (field/format
+/// wiring on an existing struct, not a separable mechanism).
+#[path = "reclaim_seed.rs"]
+mod reclaim_seed;
+
 // ── Artifact outcomes ───────────────────────────────────────────────────
 
 /// The fate of one artifact a forget touched. `Failed` carries the reader-frame I/O reason.
@@ -290,6 +299,16 @@ fn forget_repo_barriered<F: FnMut()>(
         None => None,
     };
 
+    // EMBED-SEED-IMPL-1 (review-5 #2): signal any in-flight background seed pass for
+    // this DB to stop, so a slow embed does not keep running (and burning the model)
+    // for a repo we are deleting. This is a COURTESY stop, not the race fix: the pass
+    // embeds while holding no lock, so it may already be past its last cancel check.
+    // The load-bearing guarantee that it cannot resurrect the `.vec` is the pass's
+    // publish-time write-slot + registry-validity recheck (see `seed_pass.rs`): it
+    // runs under the SAME DB write guard forget holds here across `.vec` deletion, and
+    // rechecks the registry — which this forget empties below — before republishing.
+    state.seed_coord().request_cancel_for_db(&entry.db_path);
+
     let mut artifacts = Vec::new();
 
     // In-memory state ONLY. Keyed on the registry repo_uid, NOT on the DB file existing (the field
@@ -345,6 +364,10 @@ fn forget_repo_barriered<F: FnMut()>(
         artifacts.push(kept_file_artifact("database", &entry.db_path));
         artifacts.push(kept_file_artifact("wal", &sidecar(&entry.db_path, "-wal")));
         artifacts.push(kept_file_artifact("shm", &sidecar(&entry.db_path, "-shm")));
+        // EMBED-SEED-IMPL-1: the `.vec` seed sidecar is kept alongside the DB.
+        if let Some(vec_path) = crate::seed::sidecar_path(&entry.db_path) {
+            artifacts.push(kept_file_artifact("seed-vectors", &vec_path));
+        }
     } else {
         artifacts.push(remove_file_artifact("database", &entry.db_path));
         artifacts.push(remove_file_artifact(
@@ -355,6 +378,12 @@ fn forget_repo_barriered<F: FnMut()>(
             "shm",
             &sidecar(&entry.db_path, "-shm"),
         ));
+        // EMBED-SEED-IMPL-1: delete the `.vec` seed sidecar so forget leaves no
+        // orphan (it lives in `<state_root>/seed-vectors/<hash16>.vec`, a sibling
+        // of the DB). Safe-to-delete non-authoritative Layer-3 cache.
+        if let Some(vec_path) = crate::seed::sidecar_path(&entry.db_path) {
+            artifacts.push(remove_file_artifact("seed-vectors", &vec_path));
+        }
     }
 
     // `<repo>/.rgr/` warm cache + livegraph-compare sidecars. review-10: gate on `fs::metadata`, NOT
@@ -446,13 +475,17 @@ pub(crate) struct DeadPathEntry {
     pub(crate) display: String,
 }
 
-/// The three orphan classes computed from a `databases/` listing + the registry.
+/// The orphan classes computed from a `databases/` (+ `seed-vectors/`) listing and the registry.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OrphanReport {
     /// Class A — orphan DB files (+ their sidecars).
     pub(crate) orphan_dbs: Vec<OrphanDb>,
     /// Class C — sidecars with no base `.db` file at all.
     pub(crate) stray_sidecars: Vec<FileEntry>,
+    /// Class D (EMBED-SEED-IMPL-1 §4.1) — `.vec` seed sidecars in
+    /// `<state_root>/seed-vectors/` whose base `<hash16>.db` the registry no longer
+    /// references (forgotten out-of-band / DB already reclaimed).
+    pub(crate) orphan_seed_vectors: Vec<FileEntry>,
     /// Class B — registry entries whose repo path is gone.
     pub(crate) dead_path_entries: Vec<DeadPathEntry>,
     /// `Some` when the `databases/` listing itself failed (unknown, never rendered as zero).
@@ -466,13 +499,17 @@ impl OrphanReport {
     pub(crate) fn stray_bytes(&self) -> u64 {
         self.stray_sidecars.iter().map(|s| s.bytes).sum()
     }
-    /// Bytes `rmap maintenance gc` would reclaim (classes A + C — NOT the dead-path entries).
+    pub(crate) fn seed_vector_bytes(&self) -> u64 {
+        self.orphan_seed_vectors.iter().map(|s| s.bytes).sum()
+    }
+    /// Bytes `rmap maintenance gc` would reclaim (classes A + C + D — NOT the dead-path entries).
     pub(crate) fn reclaimable_bytes(&self) -> u64 {
-        self.orphan_db_bytes() + self.stray_bytes()
+        self.orphan_db_bytes() + self.stray_bytes() + self.seed_vector_bytes()
     }
     pub(crate) fn is_empty(&self) -> bool {
         self.orphan_dbs.is_empty()
             && self.stray_sidecars.is_empty()
+            && self.orphan_seed_vectors.is_empty()
             && self.dead_path_entries.is_empty()
     }
 
@@ -482,6 +519,8 @@ impl OrphanReport {
             "orphan_db_bytes": self.orphan_db_bytes(),
             "stray_sidecar_count": self.stray_sidecars.len(),
             "stray_sidecar_bytes": self.stray_bytes(),
+            "orphan_seed_vector_count": self.orphan_seed_vectors.len(),
+            "orphan_seed_vector_bytes": self.seed_vector_bytes(),
             "reclaimable_bytes": self.reclaimable_bytes(),
             "dead_path_entries": self.dead_path_entries.iter().map(|d| json!({
                 "path": d.canonical_path.to_string_lossy(),
@@ -616,6 +655,15 @@ pub(crate) fn scan_orphans(db_dir: &Path, entries: &[RegistryEntry]) -> OrphanRe
         }
     }
 
+    // EMBED-SEED-IMPL-1 §4.1: reclaim orphaned `.vec` seed sidecars (class D). They
+    // live in a SIBLING dir `<state_root>/seed-vectors/` keyed by the SAME `<hash16>`
+    // as `<hash16>.db`; an unreferenced base ⇒ orphan. The scan MECHANISM lives in the
+    // `reclaim_seed` child module (extracted for the 500-line guardrail, review-6 #2);
+    // the classified orphans ride on this report's `orphan_seed_vectors` field. A
+    // missing dir is NORMAL; other faults fold into `scan_errors` (unknown-never-zero).
+    let orphan_seed_vectors =
+        reclaim_seed::scan_orphan_seed_vectors(db_dir, &referenced, &mut scan_errors);
+
     // A partially-unreadable directory (or an unstattable registered path) is UNKNOWN, not clean:
     // surface the count + first cause so callers (gc / doctor / boot log) render it as unknown
     // rather than as zero orphans.
@@ -628,6 +676,7 @@ pub(crate) fn scan_orphans(db_dir: &Path, entries: &[RegistryEntry]) -> OrphanRe
     OrphanReport {
         orphan_dbs: orphan_by_name.into_values().collect(),
         stray_sidecars,
+        orphan_seed_vectors,
         dead_path_entries,
         scan_error,
     }
@@ -670,11 +719,13 @@ pub(crate) fn log_orphans_at_boot(state: &DaemonState) {
         " — run `rmap maintenance gc` to reclaim, `rmap doctor` to inspect"
     };
     eprintln!(
-        "info: startup orphan scan: {} orphan DB file(s) ({} bytes), {} stray sidecar(s) ({} bytes), {} dead-path registry entr(y/ies){hint}",
+        "info: startup orphan scan: {} orphan DB file(s) ({} bytes), {} stray sidecar(s) ({} bytes), {} orphan seed vector(s) ({} bytes), {} dead-path registry entr(y/ies){hint}",
         report.orphan_dbs.len(),
         report.orphan_db_bytes(),
         report.stray_sidecars.len(),
         report.stray_bytes(),
+        report.orphan_seed_vectors.len(),
+        report.seed_vector_bytes(),
         report.dead_path_entries.len(),
     );
 }
@@ -808,6 +859,11 @@ fn reclaim_units(db_dir: &Path, scan: &OrphanReport) -> Vec<ReclaimUnit> {
             .push(("stray-sidecar", s.path.clone(), s.bytes));
     }
     units.extend(stray_by_base.into_values());
+
+    // EMBED-SEED-IMPL-1 §4.1: attach each orphan `.vec` to the unit for its base
+    // `<hash16>.db` so it is unlinked under the SAME DB write-slot guard + registry
+    // recheck as its DB (run_gc). Mechanism in the `reclaim_seed` child module (review-6 #2).
+    reclaim_seed::attach_orphan_seed_units(&mut units, scan, db_dir);
     units
 }
 
@@ -1277,6 +1333,104 @@ mod tests {
         let report = scan_orphans(&missing, &[]);
         assert!(report.scan_error.is_some(), "listing failure is surfaced");
         assert!(report.is_empty());
+    }
+
+    // ── EMBED-SEED-IMPL-1 §4.1: orphan `.vec` seed-sidecar reclaim (class D) ──
+
+    #[test]
+    fn scan_classifies_orphan_seed_vectors() {
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join("databases");
+        let seed_dir = dir.path().join("seed-vectors");
+        fs::create_dir_all(&db_dir).unwrap();
+        fs::create_dir_all(&seed_dir).unwrap();
+
+        // A live, referenced repo with a matching `.vec` (base `<hash>.db` referenced).
+        let repo_dir = dir.path().join("live");
+        fs::create_dir_all(&repo_dir).unwrap();
+        let live = entry_referencing(&db_dir, &repo_dir);
+        touch(&live.db_path, 100);
+        let live_stem = live
+            .db_path
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        touch(&seed_dir.join(format!("{live_stem}.vec")), 20); // live → NOT orphan
+
+        // An orphan `.vec` whose base `<hash>.db` is referenced by nobody.
+        touch(&seed_dir.join("deadbeefdeadbeef.vec"), 500);
+
+        let report = scan_orphans(&db_dir, std::slice::from_ref(&live));
+        assert!(report.scan_error.is_none(), "{:?}", report.scan_error);
+        assert_eq!(report.orphan_seed_vectors.len(), 1, "one orphan .vec");
+        assert_eq!(report.seed_vector_bytes(), 500);
+        assert!(
+            report.orphan_seed_vectors[0]
+                .path
+                .to_string_lossy()
+                .contains("deadbeefdeadbeef.vec"),
+            "the unreferenced .vec is the orphan; the live one is spared"
+        );
+        assert_eq!(
+            report.reclaimable_bytes(),
+            500,
+            "only the orphan .vec is reclaimable (the live .vec is not)"
+        );
+    }
+
+    #[test]
+    fn scan_missing_seed_vectors_dir_is_clean_not_an_error() {
+        // A repo indexed but never seeded has no seed-vectors/ dir — that is NORMAL,
+        // never a scan fault (unknown-is-never-zero applies to genuine faults only).
+        let dir = tempdir().unwrap();
+        let db_dir = dir.path().join("databases");
+        fs::create_dir_all(&db_dir).unwrap();
+        let report = scan_orphans(&db_dir, &[]);
+        assert!(
+            report.scan_error.is_none(),
+            "absent seed-vectors/ is not a fault"
+        );
+        assert!(report.orphan_seed_vectors.is_empty());
+    }
+
+    #[test]
+    fn gc_reclaims_orphan_seed_vector_and_spares_referenced() {
+        let root = tempdir().unwrap();
+        let state = seed_state(root.path());
+        let repo_dir = root.path().join("repo");
+        let entry = register_and_create_db(&state, &repo_dir);
+        let seed_dir = root.path().join("seed-vectors");
+        fs::create_dir_all(&seed_dir).unwrap();
+
+        // A live `.vec` (base `<hash>.db` is registered) → must survive gc.
+        let live_stem = entry
+            .db_path
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let live_vec = seed_dir.join(format!("{live_stem}.vec"));
+        touch(&live_vec, 30);
+        // An orphan `.vec` (base `<hash>.db` not registered) → must be reclaimed.
+        let orphan_vec = seed_dir.join("0123456789abcdef.vec");
+        touch(&orphan_vec, 400);
+
+        let outcome = run_gc(&state, false);
+        assert!(!outcome.any_failed(), "{:?}", outcome.items);
+        assert!(!orphan_vec.exists(), "orphan .vec reclaimed");
+        assert!(
+            live_vec.exists(),
+            "referenced .vec spared (its base db is registered)"
+        );
+        assert!(
+            outcome
+                .items
+                .iter()
+                .any(|i| i.kind == "orphan-seed-vector" && i.removed),
+            "gc reports the reclaimed orphan .vec: {:?}",
+            outcome.items
+        );
     }
 
     // review-9 #1: a reclaim candidate whose `stat` FAILS (not merely NotFound) makes the whole scan

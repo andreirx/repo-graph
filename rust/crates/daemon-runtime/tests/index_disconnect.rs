@@ -91,6 +91,7 @@ fn isolated() -> (ServiceDispatcher, TempDir) {
     // terminal-status reads and hold the write lock over the very snapshot state it asserts. This binary
     // tests INDEX-DISCONNECT, not enrichment (proven directly in `enrich_lifecycle`), so disable it too.
     repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

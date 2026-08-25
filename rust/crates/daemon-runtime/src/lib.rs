@@ -105,6 +105,8 @@ pub(crate) mod reclaim;
 pub mod registry;
 pub mod resource_metrics;
 pub mod retention_pass;
+pub mod seed; // EMBED-SEED-IMPL-1: option-(a) Embedder (a2 transport) + query-time fallback
+pub mod seed_pass; // EMBED-SEED-IMPL-1: background embed pass + coordinator
 pub mod snapshot_facts;
 pub mod state;
 pub mod trust_coherence;

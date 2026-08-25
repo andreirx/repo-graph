@@ -25,6 +25,11 @@ mod daemon_info;
 /// module for the same 500-line-guardrail reason; `format_size` is shared via `super::`.
 mod storage_probe;
 
+/// `storage_health`-derived "Semantic seeding" probe (EMBED-SEED-IMPL-1 §9). Extracted into a
+/// child module for the same 500-line-guardrail reason (review-6 #2); `ProbeOutput`/`DoctorOutput`/
+/// `print_probe_labeled` are shared via `super::`.
+mod seed;
+
 /// Doctor output for JSON mode.
 #[derive(Debug, Serialize)]
 struct DoctorOutput {
@@ -211,6 +216,7 @@ fn storage_summary_probes() -> Vec<ProbeResult> {
 
     let mut probes = vec![storage_probe::storage_probe_from_facts(&response)];
     probes.extend(storage_probe::witness_probe_from_facts(&response));
+    probes.push(seed::semantic_seeding_from_facts(&response));
     probes
 }
 
@@ -360,6 +366,10 @@ fn print_human_output(output: &DoctorOutput) {
         }
         println!();
     }
+
+    // EMBED-SEED-IMPL-1 (spec §9): the "Semantic seeding" section (extracted to
+    // `seed.rs`, review-6 #2).
+    seed::print_seed_section(output);
 
     // Resources (DOCTOR-RESOURCE-REPORT): daemon RAM (RSS) + total on-disk storage.
     // `daemon_memory` and `total_storage` belong to no other group, so this section is

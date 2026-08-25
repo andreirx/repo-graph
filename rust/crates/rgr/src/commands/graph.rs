@@ -128,6 +128,15 @@ fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
                 }
             } else {
                 eprintln!("error: {}: {}", code, message);
+                // EMBED-SEED-IMPL-1 (spec §8, Group B): a `symbol not found` error may
+                // carry the additive semantic tier under `data` (candidates + hint) —
+                // render it to stderr, the SAME idiom used above for AmbiguousSymbol's
+                // `matches`. `None` ⇒ no seed keys ⇒ today's error is unchanged.
+                if let Some(rendered) =
+                    crate::presentation::seed::render_symbol_not_found_semantic(data.as_ref())
+                {
+                    eprint!("{}", rendered);
+                }
             }
             ExitCode::from(2)
         }

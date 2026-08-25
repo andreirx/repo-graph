@@ -21,6 +21,7 @@ fn ladder_fixture() -> OrientResponse {
     r.limits = vec![Limit {
         code: "GATE_NOT_CONFIGURED".to_string(),
         summary: "No active requirement declarations.".to_string(),
+        reasons: Vec::new(),
     }];
     r.next = vec![NextAction {
         kind: "check".to_string(),

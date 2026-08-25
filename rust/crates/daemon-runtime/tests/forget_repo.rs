@@ -47,6 +47,9 @@ fn isolated() -> (ServiceDispatcher, Arc<DaemonState>, TempDir) {
     // `index_disconnect.rs::isolated`.)
     repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
     repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+    // EMBED-SEED-IMPL-1: same rationale — keep the background embed pass from
+    // racing forget's on-disk assertions (it briefly reads the DB for the corpus).
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
     let root = tempdir().expect("state root tempdir");
     let registry =
         RepoRegistry::with_state_root(root.path()).expect("isolated registry under temp root");

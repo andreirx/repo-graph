@@ -1078,13 +1078,13 @@ pub fn run_auto_enrich(
                     repo_display.to_string(),
                     outcome,
                 ));
-                chain_retention(state, db_path, repo_uid, repo_display);
+                chain_maintenance_tail(state, db_path, repo_uid, repo_display);
                 return;
             }
             EnrichAttempt::Failed(e) => {
                 crate::oplog::log_op_outcome("enrich", repo_uid, None, &format!("failed: {e}"));
                 // Still chain retention — the index succeeded; cleanup should not hinge on enrich.
-                chain_retention(state, db_path, repo_uid, repo_display);
+                chain_maintenance_tail(state, db_path, repo_uid, repo_display);
                 return;
             }
             EnrichAttempt::Superseded => {
@@ -1110,21 +1110,22 @@ pub fn run_auto_enrich(
         ),
     );
     // Deferred (never ran) — still hand off to retention so cleanup runs this cycle.
-    chain_retention(state, db_path, repo_uid, repo_display);
+    chain_maintenance_tail(state, db_path, repo_uid, repo_display);
 }
 
-/// Chain the background retention pass after enrichment (the retention slice's "after enrichment
-/// promotion once ENRICH-LIFECYCLE-1 lands" hook). Sequencing enrichment BEFORE retention — rather
-/// than spawning both from the completion path — is what keeps them from contending: retention's
-/// bounded requeue never competes with (and so is never starved by) a long enrichment holding the
-/// write lock. No-op when retention is opted out (`spawn_auto_retention` checks it).
-fn chain_retention(state: &Arc<DaemonState>, db_path: &Path, repo_uid: &str, repo_display: &str) {
-    crate::retention_pass::spawn_auto_retention(
-        Arc::clone(state),
-        db_path.to_path_buf(),
-        repo_uid.to_string(),
-        repo_display.to_string(),
-    );
+/// Chain the maintenance tail after enrichment: **enrich → seed → retention**
+/// (EMBED-SEED-IMPL-1, spec §5). The seed pass runs after enrichment and itself
+/// chains retention on completion; when seeding is opted out, retention is
+/// chained directly. Sequencing the passes — rather than spawning them all from
+/// the completion path — is what keeps them from contending for the write lock.
+/// Each hop is a no-op when its pass is opted out.
+fn chain_maintenance_tail(
+    state: &Arc<DaemonState>,
+    db_path: &Path,
+    repo_uid: &str,
+    repo_display: &str,
+) {
+    crate::seed_pass::chain_seed_then_retention(state, db_path, repo_uid, repo_display);
 }
 
 /// Reader-frame one-liner for the daemon log: "enriched N/M edges, promoted P (top rejections: …)

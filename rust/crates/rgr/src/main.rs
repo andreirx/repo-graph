@@ -52,10 +52,10 @@ use repo_graph_rgr::cli::print_usage;
 use repo_graph_rgr::commands::{
     run_assess, run_boundaries, run_callees, run_callers, run_check_cmd, run_churn, run_contracts,
     run_coverage, run_cycles, run_dead, run_declare, run_deps, run_dev, run_docs, run_doctor,
-    run_enrich, run_explain_cmd, run_gate, run_hook, run_hotspots, run_imports, run_index,
-    run_inferences, run_integrate, run_maintenance, run_map, run_metrics, run_modules, run_orient,
-    run_path, run_perf, run_policy, run_refresh, run_reliability, run_repo, run_resource, run_risk,
-    run_stats, run_surfaces, run_trust, run_uninstall, run_violations,
+    run_enrich, run_explain_cmd, run_find, run_gate, run_hook, run_hotspots, run_imports,
+    run_index, run_inferences, run_integrate, run_maintenance, run_map, run_metrics, run_modules,
+    run_orient, run_path, run_perf, run_policy, run_refresh, run_reliability, run_repo,
+    run_resource, run_risk, run_stats, run_surfaces, run_trust, run_uninstall, run_violations,
 };
 use std::process::ExitCode;
 
@@ -94,6 +94,7 @@ fn main() -> ExitCode {
         "violations" => run_violations(&args[2..]),
         "gate" => run_gate(&args[2..]),
         "orient" => run_orient(&args[2..]),
+        "find" => run_find(&args[2..]),
         "check" => run_check_cmd(&args[2..]),
         "churn" => run_churn(&args[2..]),
         "hotspots" => run_hotspots(&args[2..]),

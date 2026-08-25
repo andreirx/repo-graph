@@ -109,6 +109,12 @@ pub enum ArtifactFamily {
     /// Table: `surface_fs_mutation_evidence`
     SurfaceFsMutationEvidence,
 
+    /// Local-embedding seed vectors: per-file dense vectors for task→anchor
+    /// candidate generation (EMBED-SEED-IMPL-1). A non-authoritative,
+    /// safe-to-delete state-root `.vec` sidecar — NOT a SQL table.
+    /// Table: none (sidecar family; the pin/refresh live in the sidecar header).
+    SeedVectors,
+
     // ═══════════════════════════════════════════════════════════════════
     // Layer 4: Governance Overlays
     // Human-authored policy and declarations.
@@ -123,35 +129,42 @@ pub enum ArtifactFamily {
 }
 
 impl ArtifactFamily {
-    /// Returns the primary database table name for this family.
+    /// Returns the primary database table name for this family, or `None` for a
+    /// family that has **no** SQL table (a sidecar / read-model family — the
+    /// artifact model explicitly allows "a read model with no table").
     ///
-    /// Note: Some families may span multiple tables or have no direct table.
-    /// This returns the primary table for storage operations.
-    pub fn table_name(&self) -> &'static str {
+    /// Note: Some families may span multiple tables. This returns the primary
+    /// table for storage operations. `None` is the honest answer for
+    /// [`ArtifactFamily::SeedVectors`], whose data lives in a state-root `.vec`
+    /// sidecar, not a table (the SQL-path mapping in `repo-index`'s
+    /// `family_to_table` returns `None` correspondingly).
+    pub fn table_name(&self) -> Option<&'static str> {
         match self {
-            Self::FileVersions => "file_versions",
-            Self::Nodes => "nodes",
-            Self::Edges => "edges",
-            Self::Measurements => "measurements",
-            Self::BoundaryInteractionSurfaces => "boundary_interaction_surfaces",
-            Self::BoundaryChannelDetails => "boundary_channel_details",
-            Self::ContractSchemas => "contract_schemas",
-            Self::ContractElements => "contract_elements",
-            Self::PolicyFacts => "policy_facts",
-            Self::BoundaryContracts => "boundary_contracts",
-            Self::BoundaryInteractionLinks => "boundary_interaction_links",
-            Self::Inferences => "inferences",
-            Self::ModuleCandidates => "module_candidates",
-            Self::ProjectSurfaces => "project_surfaces",
-            Self::ProjectSurfaceEvidence => "project_surface_evidence",
-            Self::SurfaceEntrypoints => "surface_entrypoints",
-            Self::SurfaceConfigRoots => "surface_config_roots",
-            Self::SurfaceEnvDependencies => "surface_env_dependencies",
-            Self::SurfaceEnvEvidence => "surface_env_evidence",
-            Self::SurfaceFsMutations => "surface_fs_mutations",
-            Self::SurfaceFsMutationEvidence => "surface_fs_mutation_evidence",
-            Self::RequirementDeclarations => "declarations",
-            Self::Waivers => "declarations",
+            Self::FileVersions => Some("file_versions"),
+            Self::Nodes => Some("nodes"),
+            Self::Edges => Some("edges"),
+            Self::Measurements => Some("measurements"),
+            Self::BoundaryInteractionSurfaces => Some("boundary_interaction_surfaces"),
+            Self::BoundaryChannelDetails => Some("boundary_channel_details"),
+            Self::ContractSchemas => Some("contract_schemas"),
+            Self::ContractElements => Some("contract_elements"),
+            Self::PolicyFacts => Some("policy_facts"),
+            Self::BoundaryContracts => Some("boundary_contracts"),
+            Self::BoundaryInteractionLinks => Some("boundary_interaction_links"),
+            Self::Inferences => Some("inferences"),
+            Self::ModuleCandidates => Some("module_candidates"),
+            Self::ProjectSurfaces => Some("project_surfaces"),
+            Self::ProjectSurfaceEvidence => Some("project_surface_evidence"),
+            Self::SurfaceEntrypoints => Some("surface_entrypoints"),
+            Self::SurfaceConfigRoots => Some("surface_config_roots"),
+            Self::SurfaceEnvDependencies => Some("surface_env_dependencies"),
+            Self::SurfaceEnvEvidence => Some("surface_env_evidence"),
+            Self::SurfaceFsMutations => Some("surface_fs_mutations"),
+            Self::SurfaceFsMutationEvidence => Some("surface_fs_mutation_evidence"),
+            // Sidecar family — no SQL table (spec §3.4, D-ES-2 option (i)).
+            Self::SeedVectors => None,
+            Self::RequirementDeclarations => Some("declarations"),
+            Self::Waivers => Some("declarations"),
         }
     }
 
@@ -182,6 +195,7 @@ impl ArtifactFamily {
             Self::SurfaceEnvEvidence,
             Self::SurfaceFsMutations,
             Self::SurfaceFsMutationEvidence,
+            Self::SeedVectors,
             // Layer 4
             Self::RequirementDeclarations,
             Self::Waivers,

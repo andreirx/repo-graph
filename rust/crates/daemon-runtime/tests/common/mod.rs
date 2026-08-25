@@ -49,6 +49,7 @@ impl ProgressEmitter for Quiet {
 pub fn isolated() -> (ServiceDispatcher, TempDir) {
     set_auto_retention_for_test(false);
     set_auto_enrich_for_test(false);
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

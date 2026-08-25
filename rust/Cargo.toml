@@ -49,6 +49,7 @@ members = [
     "crates/repo-graph-ir",
     "crates/repo-graph-import-resolver",
     "crates/repo-graph-scip-ingest",
+    "crates/repo-graph-seed",
     "crates/repo-graph-trust-model",
     "crates/repo-graph-coherence",
     "crates/repo-graph-livegraph",

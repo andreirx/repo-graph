@@ -112,6 +112,19 @@ pub enum LimitCode {
     /// `Unavailable`) and fell back to the proven SQLite primary (`fallback_reason = LiveGraphUnavailable`).
     /// The LiveGraph producer never built a current-state graph for this answer.
     ProducerUnavailable,
+
+    /// EMBED-SEED-IMPL-1 (spec §8.2/§8.3). The deterministic tiers found no exact
+    /// match, so the semantic fallback tier fired and populated `candidates` with
+    /// Layer-3 embedding hints (or scored nothing / dropped stale entries). The
+    /// per-situation detail rides `reasons`; this code's summary is the fixed
+    /// honesty contract line.
+    SemanticFallback,
+
+    /// EMBED-SEED-IMPL-1 (spec §8.3). No exact match AND the semantic fallback
+    /// was unavailable (no vector store yet / model unreachable / pins mismatch).
+    /// The deterministic outcome is byte-identical to today; this labeled line
+    /// states the fallback was unavailable and why (via `reasons`).
+    SemanticFallbackUnavailable,
 }
 
 impl LimitCode {
@@ -127,6 +140,8 @@ impl LimitCode {
             Self::AuthorityOverlayApplied => "AUTHORITY_OVERLAY_APPLIED",
             Self::PrecisionPending => "PRECISION_PENDING",
             Self::ProducerUnavailable => "PRODUCER_UNAVAILABLE",
+            Self::SemanticFallback => "SEMANTIC_FALLBACK",
+            Self::SemanticFallbackUnavailable => "SEMANTIC_FALLBACK_UNAVAILABLE",
         }
     }
 
@@ -181,6 +196,14 @@ impl LimitCode {
                 "No current-state LiveGraph was available for this answer \
 				 (not preloaded/refreshed); LiveGraph-first signals fell \
 				 back to the SQLite primary."
+            }
+            Self::SemanticFallback => {
+                "No exact match. The candidates below are Layer-3 embedding \
+                 hints, not resolved facts; open one and re-run."
+            }
+            Self::SemanticFallbackUnavailable => {
+                "No exact match, and semantic hints are unavailable; \
+                 deterministic resolution is unaffected."
             }
         }
     }

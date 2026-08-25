@@ -352,6 +352,14 @@ pub struct Focus {
     pub resolved_path: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// EMBED-SEED-IMPL-1 (spec §8.2 Group A): the previously-empty `candidates` list
+    /// the semantic fallback tier fills on a `no_match`. Kept as raw `Value` (the
+    /// same idiom `find`/Group-B rendering uses) so the shared honesty-preserving
+    /// candidate formatter reads the additive `source`/`score`/`module`/`next` fields
+    /// directly; a resolved/ambiguous focus carries no `source:"embedding"` candidate,
+    /// so this stays inert there (byte-parity).
+    #[serde(default)]
+    pub candidates: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -388,6 +396,14 @@ pub struct Signal {
 pub struct Limit {
     pub code: String,
     pub summary: String,
+    /// The daemon-attached per-cause reasons (agent `Limit.reasons`, spec §8.3).
+    /// EMBED-SEED-IMPL-1 review-9 #2: the human render MUST surface the specific
+    /// cause (e.g. "no local embedding model reachable", "N files changed since
+    /// last embed") — collapsing it into the generic `summary` mislabels a dead
+    /// endpoint as a generic "hints unavailable". `#[serde(default)]`: an old daemon
+    /// (or any limit without reasons) omits the field ⇒ empty, no cause line.
+    #[serde(default)]
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -455,6 +471,15 @@ impl OrientResponse {
             out.push_str(&focus_line);
         }
 
+        // EMBED-SEED-IMPL-1 (spec §8.2 Group A): the semantic fallback tier's labeled
+        // candidates (or the honest degraded line) on a `no_match`, at EVERY depth —
+        // they are the load-bearing answer when deterministic resolution found nothing.
+        // Empty (byte-identical to today) for any resolved/ambiguous focus.
+        let semantic = self.render_semantic_fallback();
+        if !semantic.is_empty() {
+            out.push_str(&semantic);
+        }
+
         // ── HEADLINE (every budget — the dense load-bearing set) ────
         for alert in self.headline_alerts() {
             out.push_str(&alert);
@@ -505,9 +530,13 @@ impl OrientResponse {
         // the module list, and a complexity top-slice — re-composed from the SAME
         // sections `large` uses, only capped tighter (see `complexity_breakdown_cap`).
         if depth.shows_detail() {
-            if !self.limits.is_empty() {
+            // `render_limits` returns "" when the only limits are semantic (rendered
+            // by the top section) — guard on the rendered content, not the raw list,
+            // so a semantic-only limit set adds no empty "Limits" heading / blank line.
+            let limits = self.render_limits();
+            if !limits.is_empty() {
                 out.push('\n');
-                out.push_str(&self.render_limits());
+                out.push_str(&limits);
             }
             if !self.next.is_empty() {
                 out.push('\n');

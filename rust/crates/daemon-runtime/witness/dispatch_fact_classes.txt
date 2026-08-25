@@ -13,10 +13,10 @@
 # §3.3, that makes a new arm pay its integration explicitly (a new arm goes RED until
 # it is declared here; a typo'd or empty declaration goes RED too).
 #
-# The live arm count is reconciled against dispatch.rs; it is 68 today: EC-1 §3.3's 67
+# The live arm count is reconciled against dispatch.rs; it is 69 today: EC-1 §3.3's 67
 # (10 mixed + 17 SQLite-graph + 20 non-graph + 7 registry + 13 writers; +1 SQLite-graph
 # = `reliability`, RESOLUTION-BREAKDOWN-CLI-1) + 1 operational = `maintenance_gc`
-# (FORGET-REPO-1). The witness
+# (FORGET-REPO-1) + 1 mixed = `find` (EMBED-SEED-IMPL-1). The witness
 # does NOT hard-code 66 — the reconciliation against the live match IS the guard.
 #
 # FACT CLASSES (EC-1 §3.2): FC0 extraction stream (pipeline input) · FC1 structure
@@ -36,6 +36,9 @@ cycles                 = FC1, FC2b
 stats                  = FC1, FC2a-agg, FC2b, FC3, FC4, FC5
 orient                 = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
 explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
+# EMBED-SEED-IMPL-1: `rmap find` resolves file paths → stable keys (FC1) and
+# surfaces the non-authoritative seed-vector sidecar as a Layer-3 hint (FC8).
+find                   = FC1, FC8
 trust                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
 cycle_completeness_audit = FC1, FC2b
 

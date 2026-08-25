@@ -178,6 +178,9 @@ fn family_to_table(family: ArtifactFamily) -> Option<&'static str> {
         | ArtifactFamily::PolicyFacts => None,
         // Governance overlays don't have freshness columns
         ArtifactFamily::RequirementDeclarations | ArtifactFamily::Waivers => None,
+        // Sidecar family — no SQL table at all; its refresh is the background
+        // embed pass (EMBED-SEED-IMPL-1, spec §3.4), never DB impact propagation.
+        ArtifactFamily::SeedVectors => None,
     }
 }
 

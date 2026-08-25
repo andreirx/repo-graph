@@ -1,0 +1,30 @@
+# ── repo-graph-seed ────────────────────────────────────────────────
+# EMBED-SEED-IMPL-1 (Semantic Seeding track): the PURE support crate for
+# local-embedding seed vectors — corpus-document build (§3.2), the `.vec`
+# sidecar envelope + validation (§4.3), the source/snapshot-race hash
+# admission (§3.5), and cosine+path-tie ranking (§7.2). It is INNER/pure:
+# it defines the `Embedder` and `SeedCorpusRead` PORTS (§10) and depends on
+# NO storage adapter, NO daemon, NO model runtime. Headless-testable with
+# faked ports. Spec: docs/slices/embed-seed-1.md.
+#
+# D-ES-8 host = new crate (RECOMMENDED cell, ratified). Dependency edges:
+# repo-graph-storage → repo-graph-seed (adapter → policy) implements
+# SeedCorpusRead; daemon-runtime → repo-graph-seed uses the ports + pure
+# logic. Nothing depends back inward. Graph stays a DAG.
+[package]
+name = "repo-graph-seed"
+version = "0.1.0"
+edition = "2021"
+description = "Pure seed-vector support crate: corpus docs, .vec envelope, source/snapshot-race admission, cosine ranking (EMBED-SEED-IMPL-1). Non-production."
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+thiserror = "1"
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

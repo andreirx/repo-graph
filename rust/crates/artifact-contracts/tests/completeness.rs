@@ -45,7 +45,8 @@ fn all_families_have_valid_maturity() {
 fn family_count_matches_expected() {
     // This test catches accidental additions/removals without registry updates.
     // Update this count when adding new families.
-    let expected_count = 23;
+    // 24 = 23 + SeedVectors (EMBED-SEED-IMPL-1, the table-less sidecar family).
+    let expected_count = 24;
     let actual_count = all_families().len();
     assert_eq!(
         actual_count, expected_count,

@@ -1,0 +1,156 @@
+//! Unit tests for `seed_pass.rs` (the background embed pass + coordinator). Split
+//! out via `#[path]` (the repo idiom, e.g. `pass_tests.rs`) so `seed_pass.rs` stays
+//! under the 500-line guardrail (review-6 #2). Child module of `seed_pass`;
+//! `super::*` = the pass + coordinator under test.
+
+use super::*;
+#[test]
+fn generation_supersede_is_per_repo_and_monotonic() {
+    let c = SeedCoordinator::new();
+    assert_eq!(c.current_generation("r1"), 0);
+    let g1 = c.bump_generation("r1");
+    let g2 = c.bump_generation("r1");
+    assert!(g2 > g1, "a newer trigger supersedes the older generation");
+    assert_eq!(c.current_generation("r1"), g2);
+    // Independent per repo — one repo's bump never advances another's.
+    assert_eq!(c.current_generation("r2"), 0);
+}
+
+/// review-5 #2 regression — the forget-vs-seed publication race is closed
+/// DETERMINISTICALLY (no detached thread / no live embedder): an in-flight pass
+/// that built its bytes BEFORE a concurrent `forget` completed must NOT resurrect
+/// the `.vec` sidecar for a now-forgotten repo. The gate is `publish_guarded`'s
+/// registry recheck under the DB write slot — exactly the code the real pass runs.
+#[test]
+fn publish_is_skipped_after_forget_removes_the_registry_entry() {
+    let root = tempfile::tempdir().expect("state root");
+    let registry = crate::registry::RepoRegistry::with_state_root(root.path()).expect("registry");
+    let state = Arc::new(DaemonState::with_registry(registry));
+
+    // Register a repo — allocates repo_uid + db_path under <root>/databases/.
+    let repo_dir = root.path().join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+    let (repo_uid, db_path, canonical_path) = {
+        let mut reg = state.registry_mut();
+        let e = reg.register(&repo_dir).expect("register").clone();
+        (e.repo_uid, e.db_path, e.canonical_path)
+    };
+    let generation = state.seed_coord().bump_generation(&repo_uid);
+    let sidecar = crate::seed::sidecar_path(&db_path).expect("sidecar path");
+    let bytes = b"seed-store-bytes".to_vec();
+
+    // (1) A pass publishing for a STILL-REGISTERED repo writes the sidecar.
+    let out = publish_guarded(&state, &db_path, &repo_uid, generation, &sidecar, &bytes);
+    assert!(
+        matches!(out, PublishOutcome::Published),
+        "a registered repo publishes, got {out:?}"
+    );
+    assert!(sidecar.exists(), "sidecar present after a valid publish");
+
+    // (2) `forget` completes: it deletes the `.vec` AND removes the registry entry
+    //     (exactly what `reclaim::forget_repo` does) — WITHOUT bumping the seed
+    //     generation (forget is not an index).
+    std::fs::remove_file(&sidecar).unwrap();
+    state
+        .registry_mut()
+        .remove(&canonical_path)
+        .expect("forget removes the registry entry");
+
+    // (3) The late in-flight pass — SAME generation — attempts to publish. The
+    //     registry recheck must fire and SKIP: no orphan sidecar resurrected.
+    let out2 = publish_guarded(&state, &db_path, &repo_uid, generation, &sidecar, &bytes);
+    match out2 {
+        PublishOutcome::Skipped(reason) => assert!(
+            reason.contains("forgotten"),
+            "skip names the forget cause: {reason}"
+        ),
+        other => panic!("a forgotten repo must skip publish, got {other:?}"),
+    }
+    assert!(
+        !sidecar.exists(),
+        "the forget-vs-seed race is closed: no `.vec` resurrected for a forgotten repo"
+    );
+}
+
+/// review-9 #3 regression — the pass declines with an honest, recorded reason when
+/// `RMAP_SEED_DIM` is invalid, rather than building a store at the silently-defaulted
+/// 768 dimension. Driven through the exact precondition the pass runs
+/// (`config_skip_reason`), deterministically, with no env-var mutation.
+#[test]
+fn invalid_dim_config_skips_the_pass_before_building() {
+    let mut cfg = SeedEndpointConfig::from_env();
+    // A valid/absent dim runs the pass (no skip).
+    cfg.dim_config_error = None;
+    assert!(
+        config_skip_reason(&cfg).is_none(),
+        "a valid seed config must NOT skip the pass"
+    );
+    // A present-but-invalid dim declines with a reason naming the bad value.
+    cfg.dim_config_error = Some(
+        "RMAP_SEED_DIM is not a valid embedding dimension: 'abc' (expected a positive integer)"
+            .to_string(),
+    );
+    let reason = config_skip_reason(&cfg).expect("an invalid dim must skip the pass");
+    assert!(
+        reason.contains("seed config invalid"),
+        "skip reason labels the config cause: {reason}"
+    );
+    assert!(
+        reason.contains("abc"),
+        "skip reason surfaces the specific bad value: {reason}"
+    );
+}
+
+#[test]
+fn running_registration_is_doctor_visible_and_cancellable() {
+    let c = SeedCoordinator::new();
+    let db = Path::new("/x/databases/abcd1234.db");
+    assert!(!c.is_running_for_db(db), "no pass registered yet");
+
+    let (guard, flag) = c.register_running(db);
+    assert!(
+        c.is_running_for_db(db),
+        "a registered pass is doctor-visible (building)"
+    );
+    assert!(!flag.is_cancelled());
+
+    // A newer index cancels the in-flight pass via its db_path.
+    c.request_cancel_for_db(db);
+    assert!(
+        flag.is_cancelled(),
+        "request_cancel_for_db fires the pass's cancel flag"
+    );
+
+    drop(guard);
+    assert!(
+        !c.is_running_for_db(db),
+        "the RunningGuard deregisters on drop — no stale 'building' after the pass ends"
+    );
+}
+
+// review-10 #3: a cancel issued BEFORE a pass registers is lost (no flag exists to
+// set) — the premise for the post-register generation re-check in `attempt_seed`.
+// This pins the coordinator semantics the re-check compensates for: cancel-before-
+// register does NOT reach the later flag; cancel-after-register does.
+#[test]
+fn cancel_before_register_is_lost_cancel_after_register_reaches_the_flag() {
+    let coord = SeedCoordinator::default();
+    let db = std::path::Path::new("/tmp/seed-race-test.db");
+
+    // Cancel with nothing registered: a no-op (nothing to set).
+    coord.request_cancel_for_db(db);
+    let (_guard, flag) = coord.register_running(db);
+    assert!(
+        !flag.is_cancelled(),
+        "a cancel issued before registration must NOT mark the later flag — \
+         this lost-cancel window is exactly what the post-register generation \
+         re-check in attempt_seed closes"
+    );
+
+    // Cancel after registration reaches the live flag.
+    coord.request_cancel_for_db(db);
+    assert!(
+        flag.is_cancelled(),
+        "post-registration cancel reaches the flag"
+    );
+}

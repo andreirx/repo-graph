@@ -10,6 +10,17 @@ use serde_json::json;
 
 use crate::state::DaemonState;
 
+/// An explicit unavailable-with-reason "Semantic seeding" doctor block (review-2
+/// #4): the honest state when facts cannot be computed (daemon busy, repo won't
+/// load, storage won't open, or serialization fails). NEVER an omission and NEVER
+/// `null`. The rgr renderer treats `state:"unavailable"` as a distinct honest row.
+fn seed_unavailable(reason: &str) -> serde_json::Value {
+    json!({
+        "state": "unavailable",
+        "unavailable_reason": reason,
+    })
+}
+
 /// Handle `perf` request.
 ///
 /// Returns database metrics for a single repo or aggregate.
@@ -249,5 +260,31 @@ pub fn handle_storage_health(state: &DaemonState, request: &Request) -> Dispatch
             }
         }
     }
+    // EMBED-SEED-IMPL-1 (spec §9): the doctor "Semantic seeding" facts — store
+    // state, model pin + identity provenance, staleness count. Self-contained
+    // (sidecar + current corpus). The block is ALWAYS present (review-2 #4): when
+    // facts cannot be computed we emit an explicit unavailable-with-reason block —
+    // never omit it (which reads as "no seeding concern") and never collapse a
+    // serialization failure to `null` (STANDING HONESTY RULE — review-2 #3).
+    facts["seed"] = if in_use {
+        seed_unavailable(
+            "daemon is writing this repo right now; seed facts unavailable until it settles",
+        )
+    } else {
+        match state.load_repo(db_path, repo_uid) {
+            Err(e) => seed_unavailable(&format!("could not load repo: {e}")),
+            Ok(repo_state) => match repo_state.storage() {
+                Err(e) => seed_unavailable(&format!("could not open storage: {e}")),
+                Ok(storage) => {
+                    let is_building = state.seed_coord().is_running_for_db(db_path);
+                    let sf =
+                        crate::seed::seed_doctor_facts(&storage, repo_uid, db_path, is_building);
+                    serde_json::to_value(&sf).unwrap_or_else(|e| {
+                        seed_unavailable(&format!("could not serialize seed facts: {e}"))
+                    })
+                }
+            },
+        }
+    };
     DispatchResult::success(&request.id, facts)
 }

@@ -449,6 +449,12 @@ pub struct DaemonState {
     /// and the most-recent completed pass for the `rmap doctor` lifecycle line. Own interior
     /// mutability (see `EnrichCoordinator`), so it does not affect `DaemonState: Send + Sync`.
     enrich: crate::enrich_pass::EnrichCoordinator,
+
+    /// EMBED-SEED-IMPL-1: daemon-global seed-lifecycle coordination — the per-repo
+    /// trigger generation (supersede), the "one background embed pass at a time"
+    /// run slot, and the running pass's cancel flag. Own interior mutability, so it
+    /// does not affect `DaemonState: Send + Sync`.
+    seed: crate::seed_pass::SeedCoordinator,
 }
 
 /// FORGET-REPO-1 (review-8 slot-lifecycle fix): the outcome of evicting a repo's IN-MEMORY state,
@@ -500,6 +506,7 @@ impl DaemonState {
             activity: crate::activity::ActivityRegistry::new(),
             last_retention: Mutex::new(None),
             enrich: crate::enrich_pass::EnrichCoordinator::new(),
+            seed: crate::seed_pass::SeedCoordinator::new(),
         }
     }
 
@@ -516,6 +523,7 @@ impl DaemonState {
             activity: crate::activity::ActivityRegistry::new(),
             last_retention: Mutex::new(None),
             enrich: crate::enrich_pass::EnrichCoordinator::new(),
+            seed: crate::seed_pass::SeedCoordinator::new(),
         }
     }
 
@@ -543,6 +551,12 @@ impl DaemonState {
     /// ENRICH-LIFECYCLE-1: the daemon-global enrichment coordinator (trigger generations, the
     /// one-at-a-time run slot, and the last-completed pass). The auto-enrich pass drives it;
     /// `rmap doctor` reads the last pass via [`Self::last_enrichment_json`].
+    /// EMBED-SEED-IMPL-1: access the seed-lifecycle coordinator (generation +
+    /// run slot + cancel flag).
+    pub fn seed_coord(&self) -> &crate::seed_pass::SeedCoordinator {
+        &self.seed
+    }
+
     pub fn enrich_coord(&self) -> &crate::enrich_pass::EnrichCoordinator {
         &self.enrich
     }

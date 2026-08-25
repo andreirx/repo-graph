@@ -265,7 +265,11 @@ fn recompute_policy_matches_truth_kind() {
 #[test]
 fn table_names_are_valid() {
     for family in all_families() {
-        let table = family.table_name();
+        // A table-less sidecar family (e.g. SeedVectors) honestly returns `None`;
+        // only families that DO map to a table must have a valid table name.
+        let Some(table) = family.table_name() else {
+            continue;
+        };
         assert!(
             !table.is_empty(),
             "{:?}: table_name should not be empty",

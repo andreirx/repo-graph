@@ -327,11 +327,7 @@ fn build_ambiguous_result(
 ) -> OrientResult {
     let focus_candidates: Vec<FocusCandidate> = candidates
         .into_iter()
-        .map(|c| FocusCandidate {
-            stable_key: c.stable_key,
-            file: c.file,
-            kind: ResolvedKind::Symbol,
-        })
+        .map(|c| FocusCandidate::deterministic(c.stable_key, c.file, ResolvedKind::Symbol))
         .collect();
 
     OrientResult {

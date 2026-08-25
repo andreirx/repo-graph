@@ -39,6 +39,14 @@ use crate::handlers::inventory::classify_retention_only;
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
+/// Seed dispatch surface (EMBED-SEED-IMPL-1 §8/§8B): the `find` handler, the semantic
+/// fallback tier, and the `next.cwd` canonical-root resolver. A CHILD module (extracted
+/// for the 500-line guardrail, review-6 #2) so the seed responsibility does not grow the
+/// already-oversized dispatcher; named `seed_dispatch` — NOT `seed` — so it never reads
+/// as the top-level `crate::seed` domain module. Its `pub(super)` items are wired below.
+#[path = "dispatch_seed.rs"]
+mod seed_dispatch;
+
 /// INDEX-BASIS-1: attach a computed serving fact (`index_drift`, `parse_status`)
 /// onto the serialized envelope's `value` object, so rgr's response structs capture
 /// it via one `#[serde(default)]` field. Additive: if `value` is somehow not an
@@ -365,6 +373,8 @@ impl Dispatcher for ServiceDispatcher {
             "orient" => self.handle_orient(request, emitter),
             "check" => self.handle_check(request, emitter),
             "explain" => self.handle_explain(request, emitter),
+            // EMBED-SEED-IMPL-1 (spec §8B): affirmative concept search.
+            "find" => self.handle_find(request, emitter),
 
             // ── Deterministic MAP.md facts (MAP-FROM-INDEX-1) ────────
             // Flat extracted facts for the `rmap map` renderer; no model call.
@@ -1266,9 +1276,20 @@ impl ServiceDispatcher {
         let target = match storage.resolve_symbol(epoch.snapshot_uid(), symbol) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
+                // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the semantic tier on the
+                // deterministic-zero NotFound — additive `data` (candidates + hint) on
+                // the UNCHANGED `symbol not found` error (code/message/exit byte-stable).
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::invalid_request(format!("symbol not found: {}", symbol)),
+                    self.symbol_not_found_with_semantic(
+                        &storage,
+                        epoch.snapshot_uid(),
+                        &repo_uid,
+                        repo_state.db_path(),
+                        &request.params,
+                        "callers",
+                        symbol,
+                    ),
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
@@ -1433,9 +1454,19 @@ impl ServiceDispatcher {
         let target = match storage.resolve_symbol(epoch.snapshot_uid(), symbol) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
+                // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the semantic tier on the
+                // deterministic-zero NotFound (additive `data`; error otherwise unchanged).
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::invalid_request(format!("symbol not found: {}", symbol)),
+                    self.symbol_not_found_with_semantic(
+                        &storage,
+                        epoch.snapshot_uid(),
+                        &repo_uid,
+                        repo_state.db_path(),
+                        &request.params,
+                        "callees",
+                        symbol,
+                    ),
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
@@ -2477,9 +2508,20 @@ impl ServiceDispatcher {
         let from_sym = match storage.resolve_symbol(epoch.snapshot_uid(), from_query) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
+                // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the tier on the `from`
+                // endpoint's deterministic-zero NotFound (additive `data`; error
+                // otherwise unchanged).
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::invalid_request(format!("symbol not found: {}", from_query)),
+                    self.symbol_not_found_with_semantic(
+                        &storage,
+                        epoch.snapshot_uid(),
+                        &repo_uid,
+                        repo_state.db_path(),
+                        &request.params,
+                        "path",
+                        from_query,
+                    ),
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
@@ -2500,9 +2542,20 @@ impl ServiceDispatcher {
         let to_sym = match storage.resolve_symbol(epoch.snapshot_uid(), to_query) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
+                // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the tier on the `to`
+                // endpoint's deterministic-zero NotFound (additive `data`; error
+                // otherwise unchanged).
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::invalid_request(format!("symbol not found: {}", to_query)),
+                    self.symbol_not_found_with_semantic(
+                        &storage,
+                        epoch.snapshot_uid(),
+                        &repo_uid,
+                        repo_state.db_path(),
+                        &request.params,
+                        "path",
+                        to_query,
+                    ),
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
@@ -2619,7 +2672,8 @@ impl ServiceDispatcher {
         repo_display: String,
     ) -> DispatchResult {
         let enrichment_state = if crate::enrich_pass::auto_enrich_enabled() {
-            // Enrichment chains retention on completion — one queued call covers both passes.
+            // Enrichment chains the tail (enrich → seed → retention, spec §5) on
+            // completion — one queued call covers all three passes in order.
             crate::enrich_pass::spawn_auto_enrich(
                 Arc::clone(&self.state),
                 db_path.to_path_buf(),
@@ -2628,22 +2682,30 @@ impl ServiceDispatcher {
             );
             "queued"
         } else {
-            // Enrichment off → it will NOT chain retention, so trigger retention directly here.
-            crate::retention_pass::spawn_auto_retention(
-                Arc::clone(&self.state),
-                db_path.to_path_buf(),
-                repo_uid.to_string(),
-                repo_display,
+            // Enrichment off → it will NOT chain the tail, so trigger the
+            // seed → retention tail directly here (EMBED-SEED-IMPL-1, spec §5).
+            crate::seed_pass::chain_seed_then_retention(
+                &self.state,
+                db_path,
+                repo_uid,
+                &repo_display,
             );
             "disabled"
         };
-        // Retention runs (chained after enrich, or directly above) iff retention itself is enabled.
+        // Seed runs (chained after enrich, or directly above) iff seeding is enabled.
+        let seed_state = if crate::seed::seed_enabled() {
+            "queued"
+        } else {
+            "disabled"
+        };
+        // Retention runs (chained after enrich/seed, or directly above) iff retention itself is enabled.
         let retention_state = if crate::retention_pass::auto_retention_enabled() {
             "queued"
         } else {
             "disabled"
         };
         Self::annotate_auto_pass(&mut response, "enrichment", enrichment_state);
+        Self::annotate_auto_pass(&mut response, "seed", seed_state);
         Self::annotate_auto_pass(&mut response, "retention", retention_state);
         DispatchResult::success(request_id, response)
     }
@@ -4191,6 +4253,27 @@ impl ServiceDispatcher {
         // CLI-OUT-2B: Inject display_name for human renderers
         result.display_name = Some(display_name);
 
+        // EMBED-SEED-IMPL-1 (spec §8, Group A): the semantic fallback tier. Fires
+        // ONLY on the deterministic-zero no-match branch (byte-unchanged for every
+        // resolved/ambiguous result), filling the previously-empty
+        // `focus.candidates` with labeled Layer-3 embedding hints + a `Limit`.
+        {
+            // Canonical registry root for `next.cwd` (review-2 #2), not the raw
+            // `repo` param (may be an alias / relative path). `None` when the registry
+            // lookup is unavailable ⇒ `next.cwd` omitted with a reason (operator
+            // ruling 2 — never a fabricated empty cwd).
+            let repo_root = self.canonical_root(&request.params);
+            seed_dispatch::apply_semantic_fallback(
+                &mut result,
+                &storage,
+                &epoch.snapshot.snapshot_uid,
+                &repo_uid,
+                repo_state.db_path(),
+                repo_root.as_deref(),
+                seed_dispatch::SEMANTIC_FALLBACK_CAP,
+            );
+        }
+
         // ORIENT-LIVEGRAPH-IMPL: assemble the `CoherenceEnvelope<CoherentOrientResult>` response. This
         // REPLACES the prior post-serialize top-level `trust` overlay injection: the degraded-state
         // briefing now rides on `value.trust_briefing` (D-ORIENT-6 = O2), and the wrapper adds per-signal
@@ -4614,6 +4697,27 @@ impl ServiceDispatcher {
 
         // CLI-OUT-3: Inject display_name for human renderers.
         result.display_name = Some(display_name);
+
+        // EMBED-SEED-IMPL-1 (spec §8, Group A): the semantic fallback tier on
+        // explain's no-match branch (identical contract to orient). Only runs when
+        // a READY snapshot epoch was captured (else candidate stable_keys cannot be
+        // resolved) — a no-snapshot explain keeps today's output.
+        if let Some(ep) = epoch.as_ref() {
+            // Canonical registry root for `next.cwd` (review-2 #2), not the raw
+            // `repo` param (may be an alias / relative path). `None` when the registry
+            // lookup is unavailable ⇒ `next.cwd` omitted with a reason (operator
+            // ruling 2 — never a fabricated empty cwd).
+            let repo_root = self.canonical_root(&request.params);
+            seed_dispatch::apply_semantic_fallback(
+                &mut result,
+                &storage,
+                &ep.snapshot.snapshot_uid,
+                &repo_uid,
+                repo_state.db_path(),
+                repo_root.as_deref(),
+                seed_dispatch::SEMANTIC_FALLBACK_CAP,
+            );
+        }
 
         // EXPLAIN-LIVEGRAPH-IMPL (operator 2026-06-12): assemble the `CoherenceEnvelope<CoherentOrientResult>`
         // response, mirroring `handle_orient`/`handle_check`. The adapter GENUINELY SERVES each green LG-first

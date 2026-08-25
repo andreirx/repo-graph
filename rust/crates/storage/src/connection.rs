@@ -76,6 +76,36 @@ use rusqlite::{Connection, OpenFlags};
 use crate::error::StorageError;
 use crate::migrations::run_migrations;
 
+/// EMBED-SEED-IMPL-1 (operator ruling 2, 2026-08-25): the WAL busy-handler bound.
+///
+/// The storage databases run `PRAGMA journal_mode = WAL` (set in `run_migrations`)
+/// but historically set no busy handler, so a connection that could not immediately
+/// acquire a contended lock failed **instantly** with `SQLITE_BUSY`
+/// ("database is locked") rather than waiting. That latent defect already bit the
+/// operator's real daemon: a long retention reclaim (a multi-minute writer) caused a
+/// concurrent `rmap check` to return "database is locked", and the default-on
+/// background seed pass makes the window routine.
+///
+/// `sqlite3_busy_timeout(5000)` installs SQLite's built-in busy handler: a contended
+/// lock now WAITS (retrying) up to 5s before it gives up. This is honest, not a
+/// hang: a writer that holds the lock **longer** than the bound still yields a real
+/// `SQLITE_BUSY` error — the wait is finite, the failure is truthful, and the common
+/// sub-second contention (reclaim/seed vs. a request) resolves transparently.
+const BUSY_TIMEOUT_MS: u64 = 5000;
+
+/// Install the WAL busy handler (see [`BUSY_TIMEOUT_MS`]) on a freshly-opened
+/// file-backed connection. This is the single init choke point for the timeout,
+/// called by [`StorageConnection::open`] and [`StorageConnection::open_existing`].
+///
+/// `open_in_memory` is intentionally EXCLUDED: each `:memory:` database is private
+/// to its one connection (there is no second opener to contend with), so a busy
+/// handler is meaningless there — and the exclusion keeps the in-memory test-path
+/// timing byte-for-byte unchanged (operator ruling 2: "in-memory excluded").
+fn set_busy_timeout(conn: &Connection) -> Result<(), StorageError> {
+    conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
+    Ok(())
+}
+
 /// Owned, fully-initialized connection to a storage database.
 ///
 /// Construction via `open(path)` or `open_in_memory()` opens the
@@ -132,6 +162,7 @@ impl StorageConnection {
     /// also surface via `StorageError`.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
         let mut conn = Connection::open(path.as_ref())?;
+        set_busy_timeout(&conn)?;
         run_migrations(&mut conn)?;
         Ok(Self { conn })
     }
@@ -174,6 +205,7 @@ impl StorageConnection {
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         match Connection::open_with_flags(path, flags) {
             Ok(mut conn) => {
+                set_busy_timeout(&conn)?;
                 run_migrations(&mut conn)?;
                 Ok(Self { conn })
             }
@@ -938,5 +970,219 @@ mod tests {
                 "interrupt must abort the in-flight statement with SQLITE_INTERRUPT, got: {other:?}"
             ),
         }
+    }
+
+    // ── EMBED-SEED-IMPL-1 (operator ruling 2): WAL busy-handler contention ──────
+    //
+    // These prove the `busy_timeout` fix for the "database is locked" defect the
+    // operator's real daemon hit (reclaim vs. `rmap check`), which the default-on
+    // seed pass would make routine. They model that contention with a competing
+    // writer holding the file lock while a `StorageConnection` (busy_timeout set at
+    // `open`) issues its own write.
+
+    /// A competing writer that holds the DB lock briefly must NOT make a second
+    /// connection's write fail instantly — `busy_timeout` lets it WAIT then succeed.
+    #[test]
+    fn open_busy_timeout_lets_a_contending_writer_wait_then_succeed() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("contend.db");
+
+        // Materialize + migrate the file (also sets WAL + busy_timeout on `victim`).
+        let victim = StorageConnection::open(&db_path).expect("open new file");
+
+        // A separate connection grabs the write lock and holds it ~300 ms.
+        let holder_path = db_path.clone();
+        let holder = std::thread::spawn(move || {
+            let c = Connection::open(&holder_path).expect("holder open");
+            c.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
+            c.execute_batch("BEGIN IMMEDIATE;")
+                .expect("holder takes write lock");
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            c.execute_batch("COMMIT;").expect("holder releases");
+        });
+
+        // Let the holder acquire the lock first.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // The victim's write must WAIT for the lock (busy_timeout = 5 s) and then
+        // succeed — never fail instantly with "database is locked".
+        let res = victim
+            .connection()
+            .execute_batch("BEGIN IMMEDIATE; COMMIT;");
+        assert!(
+            res.is_ok(),
+            "busy_timeout must let a contending writer wait then succeed, got: {res:?}"
+        );
+        holder.join().expect("holder joins");
+    }
+
+    /// The operator-named regression (review-4 #2 / operator ruling 2): a
+    /// DETERMINISTIC READ must SUCCEED while a concurrent maintenance WRITER (the
+    /// `enrich → seed → retention` chain, or a reclaim) holds the DB. This is the
+    /// exact shape of the operator's 2026-08-24 incident (reclaim's long write made
+    /// `rmap check` return "database is locked") that default-on seeding would make
+    /// routine.
+    ///
+    /// The reader models the daemon's CACHED connection — already open (as it is in
+    /// production, established at repo-load), so it never contends on open-time WAL/
+    /// migration setup. Under WAL a reader proceeds against the last committed
+    /// snapshot even while a writer holds the write lock; the installed `busy_timeout`
+    /// absorbs any transient page contention rather than surfacing a spurious lock
+    /// error. Both ends are real `StorageConnection`s (the shipped `open` path that
+    /// sets WAL + `busy_timeout`) — this proves the shipped configuration, not a
+    /// hand-tuned one.
+    #[test]
+    fn read_succeeds_while_a_maintenance_writer_holds_the_db() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("seed_read.db");
+
+        // Both connections open FIRST (WAL + busy_timeout set on each) — the reader is
+        // the daemon's already-established cached connection, the writer is the
+        // background maintenance chain. Opening before the lock is taken mirrors
+        // production: the daemon does not re-open per request.
+        let reader = StorageConnection::open(&db_path).expect("reader (cached) opens storage");
+        let writer = StorageConnection::open(&db_path).expect("writer (maintenance) opens storage");
+
+        // The maintenance writer takes and holds the write lock (models reclaim / the
+        // seed-then-retention chain actively writing).
+        writer
+            .connection()
+            .execute_batch("BEGIN IMMEDIATE;")
+            .expect("maintenance writer takes the write lock");
+
+        // The deterministic read must complete WHILE the writer holds its lock.
+        let start = std::time::Instant::now();
+        let count: Result<i64, _> =
+            reader
+                .connection()
+                .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                    row.get(0)
+                });
+        let waited = start.elapsed();
+        assert!(
+            count.is_ok(),
+            "a deterministic read must SUCCEED while a maintenance writer holds the DB, got: {count:?}"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(1),
+            "the read must not stall (WAL reader is non-blocking): waited {waited:?}"
+        );
+
+        writer
+            .connection()
+            .execute_batch("COMMIT;")
+            .expect("maintenance writer releases");
+    }
+
+    /// A writer that holds the lock LONGER than the busy bound must yield an honest
+    /// `SQLITE_BUSY` error — a finite wait then a truthful failure, never an infinite
+    /// hang. (The test re-sets this one connection's bound to a short value to prove
+    /// the same mechanism the 5 s production value uses, without a 5 s wall-clock.)
+    #[test]
+    fn writer_past_busy_timeout_yields_honest_error_not_a_hang() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("timeout.db");
+        let victim = StorageConnection::open(&db_path).expect("open new file");
+        victim
+            .connection()
+            .busy_timeout(std::time::Duration::from_millis(150))
+            .unwrap();
+
+        let holder_path = db_path.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let c = Connection::open(&holder_path).expect("holder open");
+            c.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
+            c.execute_batch("BEGIN IMMEDIATE;")
+                .expect("holder takes write lock");
+            tx.send(()).expect("signal lock held");
+            std::thread::sleep(std::time::Duration::from_millis(800)); // > victim's 150 ms
+            c.execute_batch("COMMIT;").expect("holder releases");
+        });
+        rx.recv().expect("wait until the lock is actually held");
+
+        let start = std::time::Instant::now();
+        let res = victim
+            .connection()
+            .execute_batch("BEGIN IMMEDIATE; COMMIT;");
+        let waited = start.elapsed();
+
+        match res {
+            Err(rusqlite::Error::SqliteFailure(e, _)) => assert_eq!(
+                e.code,
+                rusqlite::ErrorCode::DatabaseBusy,
+                "a lock held past busy_timeout must surface SQLITE_BUSY, got: {e:?}"
+            ),
+            other => panic!(
+                "a lock held past busy_timeout must ERROR honestly (not succeed / not hang), got: {other:?}"
+            ),
+        }
+        assert!(
+            waited < std::time::Duration::from_millis(600),
+            "the wait must be bounded by busy_timeout (no hang): waited {waited:?}"
+        );
+        holder.join().expect("holder joins");
+    }
+
+    /// review-5 #3 / operator ruling 2 — the ACTUAL production bound (not a shortened
+    /// analogue). A writer that holds the lock LONGER than the shipped 5 s
+    /// `busy_timeout` must make a contending writer that uses the SHIPPED configuration
+    /// (no per-connection override) wait out the ~5 s bound and then yield an honest
+    /// `SQLITE_BUSY` — never hang until release. This deliberately costs ~5 s of
+    /// wall-clock: it proves the configured `BUSY_TIMEOUT_MS = 5000` value the operator
+    /// ratified, which a re-set-to-150 ms victim cannot. The victim here is a real
+    /// shipped `StorageConnection::open` (WAL + 5 s busy_timeout), the exact production
+    /// path a deterministic writer takes while the maintenance chain holds the DB.
+    #[test]
+    fn writer_held_past_production_5s_bound_yields_honest_busy() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("prod_bound.db");
+        // The victim uses ONLY the shipped configuration (open installs busy_timeout =
+        // BUSY_TIMEOUT_MS = 5000 ms). No override — this is the production bound.
+        let victim = StorageConnection::open(&db_path).expect("open (production 5 s busy_timeout)");
+
+        let holder_path = db_path.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let c = Connection::open(&holder_path).expect("holder open");
+            c.busy_timeout(std::time::Duration::from_secs(30)).unwrap();
+            c.execute_batch("BEGIN IMMEDIATE;")
+                .expect("holder takes write lock");
+            tx.send(()).expect("signal lock held");
+            // Hold PAST the victim's 5 s production bound so the victim gives up on the
+            // timeout, not on our release.
+            std::thread::sleep(std::time::Duration::from_millis(6500));
+            c.execute_batch("COMMIT;").expect("holder releases");
+        });
+        rx.recv().expect("wait until the lock is actually held");
+
+        let start = std::time::Instant::now();
+        let res = victim
+            .connection()
+            .execute_batch("BEGIN IMMEDIATE; COMMIT;");
+        let waited = start.elapsed();
+
+        match res {
+            Err(rusqlite::Error::SqliteFailure(e, _)) => assert_eq!(
+                e.code,
+                rusqlite::ErrorCode::DatabaseBusy,
+                "a lock held past the 5 s production busy_timeout must surface SQLITE_BUSY, got: {e:?}"
+            ),
+            other => panic!(
+                "a lock held past the production bound must ERROR honestly (not succeed / not hang), got: {other:?}"
+            ),
+        }
+        // The victim actually waited out the ~5 s production bound (it did not fail
+        // instantly) ...
+        assert!(
+            waited >= std::time::Duration::from_millis(4500),
+            "the victim must wait out the ~5 s production bound before erroring: waited {waited:?}"
+        );
+        // ... and gave up ON THE TIMEOUT, not by blocking until the 6.5 s holder release.
+        assert!(
+            waited < std::time::Duration::from_millis(6400),
+            "the wait must be bounded by the 5 s busy_timeout, not block until release: waited {waited:?}"
+        );
+        holder.join().expect("holder joins");
     }
 }

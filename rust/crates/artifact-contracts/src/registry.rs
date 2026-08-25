@@ -41,6 +41,7 @@ pub fn get_contract(family: ArtifactFamily) -> &'static ArtifactContract {
         ArtifactFamily::SurfaceEnvEvidence => &SURFACE_ENV_EVIDENCE_CONTRACT,
         ArtifactFamily::SurfaceFsMutations => &SURFACE_FS_MUTATIONS_CONTRACT,
         ArtifactFamily::SurfaceFsMutationEvidence => &SURFACE_FS_MUTATION_EVIDENCE_CONTRACT,
+        ArtifactFamily::SeedVectors => &SEED_VECTORS_CONTRACT,
 
         // Layer 4: Governance Overlays
         ArtifactFamily::RequirementDeclarations => &REQUIREMENT_DECLARATIONS_CONTRACT,
@@ -289,6 +290,36 @@ static INFERENCES_CONTRACT: ArtifactContract = ArtifactContract::new(
     ClassificationMaturity::Provisional,
     &[ArtifactFamily::Nodes, ArtifactFamily::Edges],
     "Derived facts with confidence (dead-code candidates, trust signals)",
+);
+
+// EMBED-SEED-IMPL-1 (spec §3.4). A table-less sidecar family: its data lives in
+// the state-root `.vec` store, so `table_name()` returns `None` and
+// `family_to_table()` (repo-index) returns `None`. It is deliberately absent from
+// every refresh-array (COPY_FORWARD/RECOMPUTE/REINDEX) — its refresh is the
+// background embed pass (spec §5), not DB copy-forward.
+static SEED_VECTORS_CONTRACT: ArtifactContract = ArtifactContract::new(
+    ArtifactFamily::SeedVectors,
+    // Layer-3 evidence-backed hint — NEVER Layer 0 (I2).
+    TruthKind::Inference,
+    // Content-hash change marks the file's entry impacted; the background pass
+    // recomputes only changed files (spec §3.4/§5).
+    RefreshPolicy::MarkImpactedDeferRecompute,
+    // Per-entry logical key = file_uid; the body is pinned/discriminated by
+    // content_hash in the sidecar header.
+    IdentityPolicy::StableLogicalKey,
+    // Absence / pin-mismatch / staleness → explicit "no hints", never known-zero.
+    DegradationPolicy::MayBeOmittedWithExplicitUnknown,
+    // Each vector's basis is exactly one Layer-0 item — the file's file_versions row.
+    ProvenancePolicy::DerivedFromLayer0Items,
+    // Only the changed file's entry is impacted (per-file provenance).
+    ImpactPolicy::MarkImpactedOnRelevantLayer0Change,
+    // Freshness discriminator is the content_hash pin itself.
+    FreshnessTracking::PerRow,
+    // Honesty about a first cut (the project's "prototype" stage; this enum has
+    // no `prototype` variant — Experimental is the assignable first-cut value).
+    ClassificationMaturity::Experimental,
+    &[ArtifactFamily::FileVersions],
+    "Local-embedding seed vectors: per-file dense vectors for task→anchor candidate generation. Non-authoritative sidecar; Layer-3 hint.",
 );
 
 static MODULE_CANDIDATES_CONTRACT: ArtifactContract = ArtifactContract::new(

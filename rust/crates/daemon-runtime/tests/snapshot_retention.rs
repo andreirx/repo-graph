@@ -105,6 +105,7 @@ fn serial_guard() -> MutexGuard<'static, ()> {
 fn set_overrides(retention_on: bool) {
     set_auto_retention_for_test(retention_on);
     set_auto_enrich_for_test(false);
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
 }
 
 // ── Harness (mirrors tests/daemon_visibility.rs) ─────────────────────────────────────────────────

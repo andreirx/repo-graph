@@ -10,6 +10,10 @@ pub mod envelope;
 pub mod index_drift;
 pub mod limit;
 pub mod parse_status;
+/// Semantic-candidate value types + `FocusCandidate` constructors (EMBED-SEED-IMPL-1
+/// §8.2). Crate-private; its public items are re-exported through `envelope` so every
+/// call site keeps the `dto::envelope::…` path (extracted for the 500-line guardrail).
+mod semantic_candidate;
 pub mod signal;
 pub mod source;
 

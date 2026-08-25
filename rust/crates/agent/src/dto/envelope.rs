@@ -27,6 +27,12 @@ use serde::Serialize;
 use crate::dto::limit::Limit;
 use crate::dto::signal::Signal;
 
+// The semantic-candidate value types + `FocusCandidate` constructors live in
+// `semantic_candidate.rs` (extracted for the 500-line guardrail, review-6 #2), but
+// are re-exported here so `dto::envelope::{NextCommand, ModuleHint}` — the path every
+// call site already uses — is unchanged (byte-parity on the public surface).
+pub use crate::dto::semantic_candidate::{ModuleHint, NextCommand};
+
 // ── Focus ─────────────────────────────────────────────────────────
 
 /// What kind of entity the focus resolved to.
@@ -50,12 +56,44 @@ pub enum FocusFailureReason {
     Ambiguous,
 }
 
-/// One candidate when focus resolution is ambiguous.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// One candidate when focus resolution is ambiguous, OR a Layer-3 semantic
+/// fallback candidate (spec §8.2, Group A).
+///
+/// The first three fields are the original deterministic-ambiguity shape,
+/// byte-unchanged. The remaining fields are **additive and semantic-only** —
+/// they are populated ONLY for an embedding fallback candidate and
+/// `skip_serializing_if` absent otherwise, so a deterministic *ambiguous*
+/// candidate serializes byte-identical to before (I4).
+///
+/// `Eq` is intentionally dropped (it was on the pre-seed struct): `score` is a
+/// float, which cannot satisfy `Eq`. `PartialEq` is retained (tests and
+/// assert_eq! still work); nothing keyed this DTO in a `HashSet`/`HashMap`
+/// (verified — those use `AgentFocusCandidate`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FocusCandidate {
     pub stable_key: String,
     pub file: Option<String>,
     pub kind: ResolvedKind,
+
+    // ── additive, semantic-only fields (absent on deterministic candidates) ──
+    /// Always `"embedding"` on a semantic candidate (I2). Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The store pin's `model_id` (I2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    /// Cosine score (spec §7.2). A float ⇒ this DTO does not derive `Eq`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    /// Owning-module hint, carried directly (spec §8.2a) — not re-derivable from the
+    /// `explain <file>` follow-up, which sets `module_path: None`. Absent on
+    /// deterministic candidates (byte-parity); present as a self-labeling
+    /// [`ModuleHint`] on a semantic candidate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<ModuleHint>,
+    /// The deterministic follow-up first hop (`explain <stable_key>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<NextCommand>,
 }
 
 /// Focus resolution outcome.
@@ -89,7 +127,9 @@ pub struct FocusCandidate {
 /// (sometimes a stable key, sometimes user input). Option 1
 /// was selected: add `resolved_path` as a separate field and
 /// keep `resolved_key` strictly nullable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// `Eq` dropped: `Focus` carries `Vec<FocusCandidate>`, and a semantic
+// `FocusCandidate` holds a float `score` (no `Eq`). `PartialEq` is retained.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Focus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,

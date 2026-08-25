@@ -21,6 +21,7 @@ fn minimal_response() -> OrientResponse {
             resolved_kind: Some("repo".to_string()),
             resolved_path: None,
             reason: None,
+            candidates: Vec::new(),
         },
         confidence: "high".to_string(),
         documentation: None,
@@ -177,6 +178,7 @@ fn path_focus_shows_focus_line() {
         resolved_kind: Some("module".to_string()),
         resolved_path: Some("src/core".to_string()),
         reason: None,
+        candidates: Vec::new(),
     };
     let out = r.render_human(OrientDepth::Small);
     assert!(out.contains("Focus: src/core (module)"));
@@ -191,9 +193,198 @@ fn unresolved_focus_shows_reason() {
         resolved_kind: None,
         resolved_path: None,
         reason: Some("no_match".to_string()),
+        candidates: Vec::new(),
     };
     let out = r.render_human(OrientDepth::Small);
     assert!(out.contains("Focus: nonexistent/path (unresolved: no_match)"));
+}
+
+#[test]
+fn semantic_no_match_renders_labeled_candidates_in_human_mode() {
+    // EMBED-SEED-IMPL-1 (operator finding 2026-08-25): a no-match orient in HUMAN mode
+    // must render the labeled Layer-3 candidates at the DEFAULT depth (not only --json).
+    let mut r = minimal_response();
+    r.focus = Focus {
+        input: Some("where discounts are applied".to_string()),
+        resolved: false,
+        resolved_kind: None,
+        resolved_path: None,
+        reason: Some("no_match".to_string()),
+        candidates: vec![serde_json::json!({
+            "stable_key": "glamCRM:src/price.ts:FILE",
+            "file": "src/price.ts",
+            "kind": "file",
+            "source": "embedding",
+            "model_id": "text-embedding-nomic-embed-text-v1.5",
+            "score": 0.71,
+            "module": {"owning": "backend/pricing"},
+            "next": {"cmd": "explain", "args": ["glamCRM:src/price.ts:FILE"], "cwd": "/repo"}
+        })],
+    };
+    r.limits = vec![crate::presentation::orient::Limit {
+        code: "SEMANTIC_FALLBACK".to_string(),
+        summary: "No exact match. The candidates below are Layer-3 embedding hints, not resolved facts; open one and re-run.".to_string(),
+        reasons: Vec::new(),
+    }];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("Semantic hints:"),
+        "honesty header present: {out}"
+    );
+    assert!(
+        out.contains("src/price.ts"),
+        "candidate path rendered: {out}"
+    );
+    assert!(out.contains("embedding"), "labeled as embedding: {out}");
+    assert!(
+        out.contains("module backend/pricing"),
+        "owning module: {out}"
+    );
+    assert!(
+        out.contains("rmap explain glamCRM:src/price.ts:FILE"),
+        "next follow-up rendered: {out}"
+    );
+}
+
+#[test]
+fn resolved_focus_renders_no_semantic_section_human() {
+    // Byte-parity: a resolved focus (no embedding candidate) shows no semantic section.
+    let out = nginx_like().render_human(OrientDepth::Small);
+    assert!(
+        !out.contains("Semantic hints:"),
+        "no semantic section: {out}"
+    );
+}
+
+/// review-9 #2 + #5: the SPECIFIC degraded cause (a dead endpoint) must be rendered
+/// in HUMAN mode — not collapsed into the generic summary. Driven from the daemon's
+/// JSON so it also proves the rgr `Limit` DTO RETAINS `reasons` through
+/// deserialization (the exact field that was dropped).
+#[test]
+fn semantic_no_match_degraded_renders_specific_cause_from_json() {
+    let limit_json = r#"{
+        "code": "SEMANTIC_FALLBACK_UNAVAILABLE",
+        "summary": "No exact match, and semantic hints are unavailable; deterministic resolution is unaffected.",
+        "reasons": ["no local embedding model reachable; seeding is optional, resolution is unaffected"]
+    }"#;
+    let limit: crate::presentation::orient::Limit =
+        serde_json::from_str(limit_json).expect("Limit deserializes with reasons");
+    assert_eq!(
+        limit.reasons.len(),
+        1,
+        "reasons survived deserialization (was dropped before review-9 #2)"
+    );
+
+    let mut r = minimal_response();
+    r.focus = Focus {
+        input: Some("where discounts are applied".to_string()),
+        resolved: false,
+        resolved_kind: None,
+        resolved_path: None,
+        reason: Some("no_match".to_string()),
+        candidates: Vec::new(),
+    };
+    r.limits = vec![limit];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(out.contains("Semantic hints:"), "honesty header: {out}");
+    assert!(
+        out.contains("no local embedding model reachable"),
+        "the SPECIFIC cause is rendered, not just the generic summary: {out}"
+    );
+}
+
+/// review-9 #2: the pins-mismatch and no-store causes each render their own reason
+/// line (none collapses into the generic "hints unavailable").
+#[test]
+fn semantic_no_match_degraded_causes_are_distinct_in_human() {
+    let cases = [
+        (
+            "seed vectors were built with a different model; rebuild on next index",
+            "pins",
+        ),
+        (
+            "no seed vectors yet; they build in the background after indexing",
+            "no-store",
+        ),
+    ];
+    for (reason, label) in cases {
+        let mut r = minimal_response();
+        r.focus = Focus {
+            input: Some("q".to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_path: None,
+            reason: Some("no_match".to_string()),
+            candidates: Vec::new(),
+        };
+        r.limits = vec![crate::presentation::orient::Limit {
+            code: "SEMANTIC_FALLBACK_UNAVAILABLE".to_string(),
+            summary: "No exact match, and semantic hints are unavailable; deterministic resolution is unaffected.".to_string(),
+            reasons: vec![reason.to_string()],
+        }];
+        let out = r.render_human(OrientDepth::Small);
+        assert!(out.contains(reason), "[{label}] cause rendered: {out}");
+    }
+}
+
+/// review-9 #2: on a FIRED tier the stale-subset detail ("N files changed since last
+/// embed") rides `reasons` and must be surfaced, not silently dropped.
+#[test]
+fn semantic_no_match_fired_renders_stale_subset_detail() {
+    let mut r = minimal_response();
+    r.focus = Focus {
+        input: Some("where discounts are applied".to_string()),
+        resolved: false,
+        resolved_kind: None,
+        resolved_path: None,
+        reason: Some("no_match".to_string()),
+        candidates: vec![serde_json::json!({
+            "stable_key": "glamCRM:src/price.ts:FILE",
+            "file": "src/price.ts",
+            "kind": "file",
+            "source": "embedding",
+            "model_id": "m",
+            "score": 0.71,
+            "module": {"owning": "backend/pricing"},
+            "next": {"cmd": "explain", "args": ["glamCRM:src/price.ts:FILE"], "cwd": "/repo"}
+        })],
+    };
+    r.limits = vec![crate::presentation::orient::Limit {
+        code: "SEMANTIC_FALLBACK".to_string(),
+        summary: "No exact match. The candidates below are Layer-3 embedding hints, not resolved facts; open one and re-run.".to_string(),
+        reasons: vec![
+            "1 candidate(s) (model m); run each candidate's `next`".to_string(),
+            "3 file(s) changed since last embed — not yet re-seeded".to_string(),
+        ],
+    }];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("src/price.ts"),
+        "candidate still rendered: {out}"
+    );
+    assert!(
+        out.contains("3 file(s) changed since last embed"),
+        "the stale-subset detail is surfaced: {out}"
+    );
+}
+
+/// review-9 #5: resolved/ambiguous byte-parity at the RENDER level — a resolved
+/// focus renders byte-identically whether or not a stray semantic limit is attached
+/// (the tier is unreachable on resolved, so nothing about the output may change).
+#[test]
+fn resolved_focus_render_is_byte_identical_with_or_without_semantic_limit() {
+    let base = nginx_like().render_human(OrientDepth::Full);
+    let mut with_limit = nginx_like();
+    with_limit.limits.push(crate::presentation::orient::Limit {
+        code: "SEMANTIC_FALLBACK_UNAVAILABLE".to_string(),
+        summary: "No exact match, and semantic hints are unavailable.".to_string(),
+        reasons: vec!["no local embedding model reachable".to_string()],
+    });
+    let with_out = with_limit.render_human(OrientDepth::Full);
+    assert_eq!(
+        base, with_out,
+        "a resolved focus must be byte-identical regardless of a semantic limit"
+    );
 }
 
 #[test]
@@ -687,6 +878,7 @@ fn medium_adds_limits_and_next_but_small_does_not() {
     r.limits = vec![Limit {
         code: "GATE_NOT_CONFIGURED".to_string(),
         summary: "No active requirement declarations.".to_string(),
+        reasons: Vec::new(),
     }];
     r.next = vec![NextAction {
         kind: "check".to_string(),
