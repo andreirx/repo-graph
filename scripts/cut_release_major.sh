@@ -78,3 +78,17 @@ echo "To abort (before pushing):"
 echo "  git tag -d ${TAG}"
 echo "  git reset --hard HEAD~1"
 echo ""
+
+# ── Post-release cleanup (operator directive 2026-08-26) ────────────────
+# On SUCCESS (set -e guarantees we only reach here after validate/bump/tag),
+# reclaim the debug build artifacts the validation run just produced
+# (~tens of GB). Debug-only: target/release/ is PRESERVED so the follow-up
+# dev-install-local.sh does not pay a full rebuild. Never fails the release:
+# the tag already exists; cleanup trouble is reported, not fatal.
+echo ""
+echo "=== Post-release cleanup (debug artifacts) ==="
+if "$SCRIPT_DIR/clean-build.sh"; then
+    echo "  Cleanup done (release artifacts preserved for dev-install)."
+else
+    echo "  WARNING: clean-build.sh failed — release is DONE and tagged; run cleanup manually." >&2
+fi
