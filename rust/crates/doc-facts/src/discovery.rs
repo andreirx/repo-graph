@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::classification::{classify_doc_kind, is_generated_by_path};
+use crate::classification::classify_doc_kind;
 use crate::types::DocFile;
 
 /// Maximum directory depth for recursive discovery.
@@ -78,71 +78,107 @@ fn discover_recursive(
             if SKIP_DIRS.contains(&file_name) {
                 continue;
             }
-
-            // Special case: docs/ directory gets deeper exploration
-            if file_name == "docs" || file_name == "design" {
-                discover_recursive(repo_root, &path, depth + 1, results, seen);
-            } else {
-                // For other dirs, only look for MAP.md and .env files
-                discover_recursive(repo_root, &path, depth + 1, results, seen);
-            }
-        } else if path.is_file() && is_doc_candidate(&path, file_name) {
-            if let Some(doc_file) = make_doc_file(repo_root, &path) {
-                results.push(doc_file);
+            // Recurse into every non-skipped directory. Candidacy (including
+            // whether a file sits inside a docs/doc/design tree) is decided
+            // per-file from its repo-relative path, not from the recursion arm.
+            discover_recursive(repo_root, &path, depth + 1, results, seen);
+        } else if path.is_file() {
+            let rel_path = match path.strip_prefix(repo_root).ok().and_then(|p| p.to_str()) {
+                Some(r) => r,
+                None => continue,
+            };
+            if is_doc_candidate(rel_path, file_name) {
+                if let Some(doc_file) = make_doc_file(repo_root, &path) {
+                    results.push(doc_file);
+                }
             }
         }
     }
 }
 
-/// Check if a file is a documentation candidate.
-fn is_doc_candidate(path: &Path, file_name: &str) -> bool {
-    // Exact matches for known doc files
+/// Documentation file extensions admitted inside a docs tree (SELF-POLLUTION-1
+/// §3): Markdown plus reStructuredText / plain-text, so django's `docs/**.txt`
+/// and Sphinx `.rst` render, not just `.md`.
+const DOC_EXTENSIONS: &[&str] = &[".md", ".txt", ".rst"];
+
+/// Directory names that open a "documentation tree": any file with a doc
+/// extension *anywhere below* one of these (not just its immediate child) is a
+/// candidate. `doc` (singular, e.g. leveldb `doc/impl.md`) is included alongside
+/// `docs`/`design`.
+const DOC_TREE_DIRS: &[&str] = &["docs", "doc", "design"];
+
+/// Is any ANCESTOR directory of `rel_path` a documentation-tree root? Checks the
+/// path components excluding the final basename, so `docs/ref/models/fields.txt`
+/// (django) and `doc/impl.md` (leveldb) both qualify.
+fn in_docs_tree(rel_path: &str) -> bool {
+    let mut components: Vec<&str> = rel_path.split('/').collect();
+    components.pop(); // drop the basename; only ancestors count
+    components.iter().any(|c| DOC_TREE_DIRS.contains(c))
+}
+
+/// Check if a file is a documentation candidate, from its repo-relative path.
+///
+/// NOTE on `.env*`: it IS a candidate here because the semantic-fact extractor
+/// (`docs extract`) still derives an `EnvironmentSurface` hint from it. It is NOT
+/// a *document*, so `discover_doc_inventory` drops it from the inventory /
+/// orient surface (SELF-POLLUTION-1 §3) — the exclusion the slice requires lives
+/// at that layer, not here.
+fn is_doc_candidate(rel_path: &str, file_name: &str) -> bool {
+    // .env files (including .env.production, .env.development, etc.) — kept for
+    // the extractor; filtered out of the inventory downstream.
+    if file_name.starts_with(".env") {
+        return true;
+    }
+
+    // Exact matches for known doc files.
     let known_docs = [
         "README.md",
         "README",
         "ARCHITECTURE.md",
         "CONTRIBUTING.md",
         "CHANGELOG.md",
-        "MAP.md",
         "docker-compose.yml",
         "docker-compose.yaml",
         "compose.yml",
         "compose.yaml",
     ];
-
     if known_docs.contains(&file_name) {
         return true;
     }
 
-    // .env files (including .env.production, .env.development, etc.)
-    if file_name.starts_with(".env") {
+    // `rmap map` sidecars anywhere. Discovered so they can be COUNTED and, on
+    // opt-in, listed; whether they are self-generated (excluded by default) is
+    // decided later from the first-line marker, not from the name.
+    if crate::self_generated::has_map_sidecar_name(rel_path) {
         return true;
     }
 
-    // Markdown files in docs/ directories
-    if let Some(parent) = path.parent() {
-        if let Some(parent_name) = parent.file_name().and_then(|n| n.to_str()) {
-            if (parent_name == "docs" || parent_name == "design") && file_name.ends_with(".md") {
-                return true;
-            }
-        }
+    // Doc-extension files inside a docs/doc/design tree.
+    if DOC_EXTENSIONS.iter().any(|e| file_name.ends_with(e)) && in_docs_tree(rel_path) {
+        return true;
     }
 
     false
 }
 
 /// Create a DocFile from a discovered path.
+///
+/// `generated` starts `false` — discovery has NO generation evidence yet. A bare
+/// filename (`MAP.md`) is not evidence (honesty rule): the authoritative generation
+/// signal is set downstream, where content is available — the marker-gated
+/// [`crate::self_generated::is_self_generated`] in `discover_doc_inventory`, or the
+/// frontmatter analysis in `extract_semantic_facts`. This keeps the marker-gated
+/// predicate the SOLE generation classifier (review-5 finding 2).
 fn make_doc_file(repo_root: &Path, path: &Path) -> Option<DocFile> {
     let relative_path = path.strip_prefix(repo_root).ok()?.to_str()?.to_string();
 
     let kind = classify_doc_kind(&relative_path);
-    let generated = is_generated_by_path(&relative_path);
 
     Some(DocFile {
         path: path.to_path_buf(),
         relative_path,
         kind,
-        generated,
+        generated: false,
         content: None,
         content_hash: None,
     })
@@ -187,17 +223,37 @@ mod tests {
     }
 
     #[test]
-    fn discovers_env_files() {
+    fn env_files_still_candidates_for_extraction() {
+        // `.env*` remains a discovery candidate (the semantic-fact extractor uses
+        // it); the inventory layer is what drops it as a "document"
+        // (see `discover_doc_inventory` — env_files_excluded_from_inventory).
         let dir = tempdir().unwrap();
         create_file(dir.path(), ".env", "FOO=bar");
         create_file(dir.path(), ".env.production", "FOO=prod");
 
         let files = discover_doc_files(dir.path());
-
-        assert_eq!(files.len(), 2);
         let paths: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert!(paths.contains(&".env"));
         assert!(paths.contains(&".env.production"));
+    }
+
+    #[test]
+    fn admits_txt_and_rst_under_docs_tree() {
+        // django ships docs as deeply-nested `.txt`; leveldb uses `doc/` (singular).
+        let dir = tempdir().unwrap();
+        create_file(dir.path(), "docs/ref/models/fields.txt", "Model fields");
+        create_file(dir.path(), "docs/index.rst", "Index");
+        create_file(dir.path(), "doc/impl.md", "impl notes");
+        // A .txt OUTSIDE any docs tree is not a doc.
+        create_file(dir.path(), "src/notes.txt", "scratch");
+
+        let files = discover_doc_files(dir.path());
+        let paths: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
+
+        assert!(paths.contains(&"docs/ref/models/fields.txt"), "{paths:?}");
+        assert!(paths.contains(&"docs/index.rst"), "{paths:?}");
+        assert!(paths.contains(&"doc/impl.md"), "{paths:?}");
+        assert!(!paths.contains(&"src/notes.txt"), "{paths:?}");
     }
 
     #[test]
@@ -209,7 +265,10 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert!(files[0].relative_path.ends_with("MAP.md"));
-        assert!(files[0].generated); // MAP.md is marked generated by path
+        // review-5 finding 2: discovery no longer asserts generation from the bare
+        // `MAP.md` name — there is no marker here, so it is NOT generated. The
+        // marker-gated predicate (in `discover_doc_inventory`) is the sole classifier.
+        assert!(!files[0].generated);
     }
 
     #[test]

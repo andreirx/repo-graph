@@ -34,37 +34,34 @@ pub fn classify_doc_kind(relative_path: &str) -> DocKind {
         return DocKind::Architecture;
     }
 
-    // Config files
+    // Config files.
+    //
+    // `.env*` is NOT special-cased here: it falls through to the `DocKind::Config`
+    // default below ON PURPOSE. `classify_doc_kind` feeds the semantic-fact EXTRACTOR
+    // (`extractors::extract_from_file` dispatches `DocKind::Config → config::extract`,
+    // which derives the `EnvironmentSurface` hint from `.env*`), so a doc kind is
+    // required for that retained path. The SELF-POLLUTION-1 §3 rule — `.env*` is never
+    // a *document*, never listed, never on orient's Docs line — is enforced ONE layer
+    // up, in `discover_doc_inventory` via `is_env_path`, NOT by withholding a kind here
+    // (review-4 finding 2). Classifying it Config here and excluding it from the
+    // inventory there are not in tension: the extractor and the inventory are different
+    // surfaces.
     if file_name.starts_with("docker-compose")
         || file_name.starts_with("compose.")
-        || file_name.starts_with(".env")
         || file_name.ends_with(".yaml")
         || file_name.ends_with(".yml")
     {
         return DocKind::Config;
     }
 
-    // Default to architecture for unknown markdown
-    if file_name.ends_with(".md") {
+    // Prose documentation: Markdown plus reStructuredText / plain-text (the
+    // extensions admitted inside docs trees).
+    if file_name.ends_with(".md") || file_name.ends_with(".rst") || file_name.ends_with(".txt") {
         return DocKind::Architecture;
     }
 
     // Default for unknown
     DocKind::Config
-}
-
-/// Check if a file is likely generated based on path alone.
-///
-/// This is a heuristic check. Full detection also uses frontmatter.
-pub fn is_generated_by_path(relative_path: &str) -> bool {
-    let file_name = relative_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(relative_path)
-        .to_lowercase();
-
-    // MAP.md is the primary generated doc pattern
-    file_name == "map.md"
 }
 
 /// Frontmatter markers that indicate generated content.
@@ -135,8 +132,10 @@ pub fn get_generated_from_frontmatter(content: &str) -> Option<bool> {
 /// Returns true only if content contains positive generation evidence
 /// (explicit frontmatter markers like `generated: true` or `generated_by`).
 ///
-/// When content is provided but silent on generation status, returns `false`.
-/// Use `is_generated_by_path()` only when content is unavailable.
+/// When content is provided but silent on generation status, returns `false`:
+/// a bare path (e.g. a `MAP.md` filename) is NOT evidence of generation. The one
+/// authoritative path-vs-name generation signal — rmap's own `map` sidecars — is
+/// the marker-gated [`crate::self_generated::is_self_generated`], never a filename.
 pub fn is_generated(_relative_path: &str, content: &str) -> bool {
     // Content analysis is authoritative. Path alone is insufficient.
     get_generated_from_frontmatter(content).unwrap_or(false)
@@ -255,15 +254,33 @@ mod tests {
     #[test]
     fn classify_config() {
         assert_eq!(classify_doc_kind("docker-compose.yml"), DocKind::Config);
-        assert_eq!(classify_doc_kind(".env"), DocKind::Config);
-        assert_eq!(classify_doc_kind(".env.production"), DocKind::Config);
+        assert_eq!(classify_doc_kind("config.yaml"), DocKind::Config);
     }
 
     #[test]
-    fn generated_by_path() {
-        assert!(is_generated_by_path("MAP.md"));
-        assert!(is_generated_by_path("src/core/MAP.md"));
-        assert!(!is_generated_by_path("README.md"));
+    fn classify_env_as_config_for_extractor_only() {
+        // review-4 finding 2: `.env*` DOES receive a doc kind here — `DocKind::Config`,
+        // via the default — because the semantic-fact extractor dispatches on kind
+        // (`DocKind::Config → config::extract` → EnvironmentSurface). The §3 "never a
+        // document" rule is enforced in the INVENTORY layer (is_env_path), not by
+        // withholding a kind. This pins the extractor-facing contract so a future edit
+        // cannot silently starve the env-surface extractor.
+        assert_eq!(classify_doc_kind(".env"), DocKind::Config);
+        assert_eq!(classify_doc_kind(".env.production"), DocKind::Config);
+        assert_eq!(
+            classify_doc_kind("frontend/web/.env.local"),
+            DocKind::Config
+        );
+    }
+
+    #[test]
+    fn classify_txt_and_rst_as_docs() {
+        // SELF-POLLUTION-1 §3: .txt/.rst are prose docs, not the Config fallthrough.
+        assert_eq!(
+            classify_doc_kind("docs/ref/fields.txt"),
+            DocKind::Architecture
+        );
+        assert_eq!(classify_doc_kind("docs/index.rst"), DocKind::Architecture);
     }
 
     #[test]

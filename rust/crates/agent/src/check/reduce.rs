@@ -586,6 +586,8 @@ mod tests {
             files_changed: 3,
             indexed_changed: 3,
             modules: vec!["src".to_string()],
+            excluded: 0,
+            unreadable: 0,
         });
         let result = check(&input);
         let drift = result

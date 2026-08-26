@@ -389,6 +389,17 @@ fn try_seed_attempt(
     let repo_root = Path::new(repo_display).to_path_buf();
     let read_file = |rel: &str| std::fs::read_to_string(repo_root.join(rel));
 
+    // SELF-POLLUTION-1 §2.4: never EMBED rmap's OWN `map` exhaust or secrets-adjacent
+    // `.env*`. Same shared classifier as drift + docs inventory (one truth); the
+    // `rmap map` marker read is gated to sidecar-NAMED candidates (honesty rule —
+    // a bare name is not evidence). Already-built stores drop these on the next
+    // content-hash refresh pass — no migration (DEC-2: filtered at the composition
+    // root so `repo-graph-seed` stays a clean pure crate).
+    let entries: Vec<_> = entries
+        .into_iter()
+        .filter(|e| !seed_path_is_exhaust(&repo_root, &e.path))
+        .collect();
+
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -437,6 +448,39 @@ fn try_seed_attempt(
         BuildOutcome::NoCorpus => SeedAttempt::Skipped("no seedable corpus".to_string()),
         BuildOutcome::Embed(e) => SeedAttempt::Skipped(format!("model unavailable: {e}")),
         BuildOutcome::Store(e) => SeedAttempt::Skipped(format!("store encode failed: {e}")),
+    }
+}
+
+/// Is a corpus path rmap's OWN exhaust (`map` sidecar / `.rgr/`) or a secrets-adjacent
+/// `.env*` — i.e. must NOT be embedded (SELF-POLLUTION-1 §2.4)? `.env*` is a pure name
+/// rule; the `rmap map` marker is read ONLY for sidecar-NAMED candidates (honesty
+/// rule — a bare name is not evidence). `repo_root` is the canonical working-tree root.
+///
+/// A read failure on a sidecar candidate keeps the file for embedding (the
+/// conservative direction: an unprovable candidate is never dropped as exhaust). The
+/// `NotFound`-vs-unreadable outcomes are kept DISTINCT (not collapsed to a bare `.ok()`
+/// / `Err => None`), so an unreadable file is treated as UNKNOWN — kept — never a
+/// silent "not exhaust" assertion from a failed read (operator RULING 3, honesty rule
+/// #1, review-5 finding 3).
+fn seed_path_is_exhaust(repo_root: &Path, rel_path: &str) -> bool {
+    if repo_graph_doc_facts::is_env_path(rel_path) {
+        return true;
+    }
+    // Non-sidecar paths: name-definitional only (`.rgr/` tool-state) — no read.
+    if !repo_graph_doc_facts::has_map_sidecar_name(rel_path) {
+        return repo_graph_doc_facts::is_self_generated(rel_path, None);
+    }
+    // Sidecar-NAMED: the first-line marker is the evidence.
+    match std::fs::read_to_string(repo_root.join(rel_path)) {
+        // Read OK → the marker decides exhaust-or-not.
+        Ok(c) => {
+            repo_graph_doc_facts::is_self_generated(rel_path, Some(c.lines().next().unwrap_or("")))
+        }
+        // `NotFound`: the file is gone — no marker, not provable exhaust → KEPT.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        // Unreadable (permission/IO): UNKNOWN — we cannot prove exhaust, so KEEP the
+        // file for embedding rather than silently drop it as exhaust from a failed read.
+        Err(_) => false,
     }
 }
 

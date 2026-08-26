@@ -221,7 +221,28 @@ fn fixed_vector() -> Vec<f32> {
 /// Publish a `.vec` sidecar for the indexed repo using the real store format +
 /// real corpus, so freshness + `resolve_path_focus` succeed at query time.
 fn publish_store(db_path: &str, repo_uid: &str, repo_root: &Path) {
-    let conn = StorageConnection::open(db_path).unwrap();
+    // The daemon's post-index maintenance chain (enrich -> seed -> retention) may
+    // still hold this DB when the test proceeds; under full-suite parallelism the
+    // 5s busy budget can expire. A bounded retry here is TEST serialization with
+    // that chain — not product behavior (the product surfaces the honest busy
+    // error; the test must simply wait its turn). Flaked twice before this guard.
+    let conn = {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match StorageConnection::open(db_path) {
+                Ok(c) => break c,
+                Err(e) if std::time::Instant::now() < deadline => {
+                    let msg = format!("{e}");
+                    assert!(
+                        msg.contains("locked") || msg.contains("busy"),
+                        "non-busy open failure must not be retried: {msg}"
+                    );
+                    thread::sleep(std::time::Duration::from_millis(250));
+                }
+                Err(e) => panic!("storage open still busy after 30s: {e}"),
+            }
+        }
+    };
     let entries = conn.seed_corpus(repo_uid).unwrap();
     assert!(!entries.is_empty(), "the TS repo must yield a seed corpus");
     let key = repo_graph_daemon_runtime::seed::SeedEndpointConfig::from_env().store_key();

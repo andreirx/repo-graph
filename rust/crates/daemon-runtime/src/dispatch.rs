@@ -5232,18 +5232,24 @@ impl ServiceDispatcher {
             }
         };
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "command": "docs list",
-                "repo": repo_uid,
-                "repo_path": repo.root_path,
-                "entries": inventory.entries,
-                "count": inventory.entries.len(),
-                "counts_by_kind": inventory.counts_by_kind,
-                "generated_count": inventory.generated_count
-            }),
-        )
+        let mut payload = serde_json::json!({
+            "command": "docs list",
+            "repo": repo_uid,
+            "repo_path": repo.root_path,
+            "entries": inventory.entries,
+            "count": inventory.entries.len(),
+            "counts_by_kind": inventory.counts_by_kind,
+            "generated_count": inventory.generated_count
+        });
+        // SELF-POLLUTION-1 / operator RULING 3: surface sidecar-named files we could
+        // not read to check the marker ("unreadable" — UNKNOWN, admitted but not
+        // asserted authored). Emitted ONLY when > 0 so the common case stays
+        // byte-identical to the pre-slice payload (no `unreadable` key), preserving
+        // `docs list --json` parity on repos with nothing unreadable.
+        if inventory.unreadable_count > 0 {
+            payload["unreadable"] = serde_json::json!(inventory.unreadable_count);
+        }
+        DispatchResult::success(&request.id, payload)
     }
 
     /// Extract semantic facts from documentation (write operation).

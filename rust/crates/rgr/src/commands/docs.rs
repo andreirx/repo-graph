@@ -53,8 +53,12 @@ pub fn run_docs(args: &[String]) -> ExitCode {
 
 fn print_docs_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap docs list [--json]    — documentation inventory (run from repo)");
-    eprintln!("  rmap docs extract [--json] — extract semantic hints (run from repo)");
+    eprintln!(
+        "  rmap docs list [--json] [--include-generated]  — documentation inventory (run from repo)"
+    );
+    eprintln!(
+        "  rmap docs extract [--json]                     — extract semantic hints (run from repo)"
+    );
 }
 
 /// Parse --json flag from args.
@@ -73,14 +77,41 @@ fn parse_json_flag(args: &[String]) -> (bool, Vec<&String>) {
     (json_mode, remaining)
 }
 
+/// Parse `docs list` flags: `--json` and `--include-generated` (SELF-POLLUTION-1
+/// §3). Returns `(json_mode, include_generated, unrecognized_args)`; any leftover
+/// arg is a usage error at the call site.
+fn parse_docs_list_flags(args: &[String]) -> (bool, bool, Vec<&String>) {
+    let mut json_mode = false;
+    let mut include_generated = false;
+    let mut remaining = Vec::new();
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json_mode = true,
+            "--include-generated" => include_generated = true,
+            _ => remaining.push(arg),
+        }
+    }
+
+    (json_mode, include_generated, remaining)
+}
+
 /// List documentation inventory (primary documentation surface).
 ///
 /// REG-1 contract: resolves repo from cwd via daemon.
+///
+/// SELF-POLLUTION-1 §3: `--include-generated` opts rmap's OWN `map` sidecars back
+/// into the listing (they are excluded by default so `docs list` shows the reader's
+/// docs, not rmap's exhaust). The daemon always returns the FULL inventory; the
+/// default-exclusion filter is applied in the presentation layer to BOTH surfaces —
+/// `render_human` for text, `filtered_json_view` for `--json` (which reports the
+/// excluded count as a machine-readable `excluded_generated` field, or passes the raw
+/// daemon value through unchanged when nothing is filtered — byte-parity).
 fn run_docs_list(args: &[String]) -> ExitCode {
-    let (json_mode, remaining) = parse_json_flag(args);
+    let (json_mode, include_generated, remaining) = parse_docs_list_flags(args);
 
     if !remaining.is_empty() {
-        eprintln!("usage: rmap docs list [--json]");
+        eprintln!("usage: rmap docs list [--json] [--include-generated]");
         eprintln!("       (run from within a repo directory)");
         return ExitCode::from(1);
     }
@@ -115,29 +146,37 @@ fn run_docs_list(args: &[String]) -> ExitCode {
     let params = serde_json::json!({ "repo": repo_path });
     match client.request("docs_list", Some(params)) {
         Ok(result) => {
-            if json_mode {
-                // Raw JSON output
-                match serde_json::to_string_pretty(&result) {
-                    Ok(json) => {
-                        println!("{}", json);
+            // Parse the FULL daemon inventory, then apply the SAME §2.3 default-
+            // exclusion filter to whichever surface we render. For `--json`, when
+            // nothing is filtered (no generated maps, or --include-generated) we print
+            // the RAW daemon result UNCHANGED — byte-parity with the pre-slice output
+            // (review-5 finding 1). Only when rmap's maps are actually excluded do we
+            // emit the filtered view + machine-readable excluded/unreadable counts, so a
+            // machine consumer gets the same honesty the human does.
+            match serde_json::from_value::<DocsListResponse>(result.clone()) {
+                Ok(response) => {
+                    if json_mode {
+                        let out_value = response
+                            .filtered_json_view(include_generated)
+                            .unwrap_or(result);
+                        match serde_json::to_string_pretty(&out_value) {
+                            Ok(json) => {
+                                println!("{}", json);
+                                ExitCode::SUCCESS
+                            }
+                            Err(e) => {
+                                eprintln!("error: failed to serialize result: {}", e);
+                                ExitCode::from(2)
+                            }
+                        }
+                    } else {
+                        print!("{}", response.render_human(include_generated));
                         ExitCode::SUCCESS
-                    }
-                    Err(e) => {
-                        eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
                     }
                 }
-            } else {
-                // Human-readable output
-                match serde_json::from_value::<DocsListResponse>(result) {
-                    Ok(response) => {
-                        print!("{}", response.render_human());
-                        ExitCode::SUCCESS
-                    }
-                    Err(e) => {
-                        eprintln!("error: failed to parse response: {}", e);
-                        ExitCode::from(2)
-                    }
+                Err(e) => {
+                    eprintln!("error: failed to parse response: {}", e);
+                    ExitCode::from(2)
                 }
             }
         }

@@ -24,7 +24,12 @@
 pub mod classification;
 pub mod discovery;
 pub mod extractors;
+pub mod self_generated;
 pub mod types;
+
+pub use self_generated::{
+    has_map_sidecar_name, is_os_noise, is_self_generated, is_tool_state_path, GENERATED_MARKER,
+};
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -72,6 +77,14 @@ pub struct DocInventoryResult {
     pub counts_by_kind: HashMap<String, usize>,
     /// Generated docs encountered.
     pub generated_count: usize,
+    /// Sidecar-NAMED entries (`MAP.md` / `*_MAP.md`) that could NOT be read to check
+    /// the `rmap map` marker (a genuine read failure — permission/IO — NOT a
+    /// `NotFound`). Such an entry is ADMITTED to the inventory (conservative: never
+    /// silently excluded) and left `generated = false` — but we do NOT assert it is
+    /// authored: it is UNKNOWN, counted here so the surface can say so out loud
+    /// ("+N unreadable, counted"), never a silent "not generated" (operator RULING 3,
+    /// honesty rule #1). ⊆ the entry count.
+    pub unreadable_count: usize,
 }
 
 /// Discover documentation inventory without extracting semantic facts.
@@ -79,17 +92,24 @@ pub struct DocInventoryResult {
 /// This is the primary documentation surface. Returns doc file paths,
 /// kinds, and generated flags. Content hashing is optional.
 ///
-/// ## Generated flag semantics
+/// ## Generated flag semantics (marker-gated — SELF-POLLUTION-1 §2.1)
 ///
-/// The `generated` flag is determined by **path convention only**:
-/// - `MAP.md` files are marked generated (workflow convention)
-/// - All other doc files are marked as authored
+/// The `generated` flag is **evidence-based**, shared with drift + seed through the
+/// one `self_generated::is_self_generated` predicate so the three surfaces cannot
+/// diverge on what "rmap's own exhaust" means. A sidecar-NAMED file (`MAP.md` /
+/// `*_MAP.md`) is classified from the first-line `rmap map`
+/// [`self_generated::GENERATED_MARKER`], read ONLY for sidecar names (a large doc tree
+/// is never fully read here). THREE outcomes, never collapsed (operator RULING 3):
+/// - **marker present** → `generated = true` (rmap's own exhaust; excluded by default).
+/// - **read OK, no marker** → `generated = false`, authored (a user's hand-authored
+///   `MAP.md` name-collision stays in the inventory — a bare name is not evidence).
+/// - **`NotFound`** → the file is gone; no marker to read → `generated = false`.
+/// - **unreadable** (permission/IO, NOT `NotFound`) → UNKNOWN: `generated = false` so
+///   it is ADMITTED (conservative, never silently excluded), but it is NOT asserted
+///   authored — it is counted in `unreadable_count` so the surface can say
+///   "+N unreadable, counted". Never a silent "not generated" from a failed read.
 ///
-/// This is an advisory workflow hint, not semantic truth. Content-based
-/// frontmatter detection (e.g., `generated: true` in YAML) belongs in
-/// the semantic-fact extraction layer, not the inventory layer.
-///
-/// For semantic fact extraction, use `extract_semantic_facts` instead.
+/// For richer semantic fact extraction, use `extract_semantic_facts` instead.
 pub fn discover_doc_inventory(
     repo_path: &Path,
     compute_hashes: bool,
@@ -100,7 +120,14 @@ pub fn discover_doc_inventory(
         ));
     }
 
-    let mut doc_files = discovery::discover_doc_files(repo_path);
+    // SELF-POLLUTION-1 §3: `.env*` is never a *document* — secrets-adjacent, zero
+    // doc value — so it never enters the inventory (and thus never orient's Docs
+    // line). It remains a discovery candidate for `docs extract`'s env-surface
+    // hint; only the inventory surface drops it.
+    let mut doc_files: Vec<DocFile> = discovery::discover_doc_files(repo_path)
+        .into_iter()
+        .filter(|d| !is_env_path(&d.relative_path))
+        .collect();
 
     // Optionally read and hash content (for staleness detection)
     if compute_hashes {
@@ -109,10 +136,36 @@ pub fn discover_doc_inventory(
         }
     }
 
-    // NOTE: generated flag is path-based only (set in discover_doc_files).
-    // Content-based frontmatter override was removed to unify behavior
-    // between `docs list` and `orient`. See architectural lock in
-    // docs/design/documentation-semantic-facts.md.
+    // SELF-POLLUTION-1 §2.1: the `generated` flag is EVIDENCE-based, shared with
+    // drift + seed via `is_self_generated`. For a sidecar-NAMED file we read the first
+    // line and require the `rmap map` marker; a user's marker-less MAP.md (name
+    // collision) stays `generated = false` and is NOT excluded. A read that FAILS
+    // (permission/IO, not `NotFound`) is UNKNOWN — admitted (conservative) but counted
+    // in `unreadable_count`, never silently asserted authored (operator RULING 3).
+    let mut unreadable_count = 0usize;
+    for doc in &mut doc_files {
+        if self_generated::has_map_sidecar_name(&doc.relative_path) {
+            match first_line_of(doc) {
+                MarkerRead::Line(line) => {
+                    doc.generated =
+                        self_generated::is_self_generated(&doc.relative_path, Some(&line));
+                }
+                // The file is gone (`NotFound`): no marker to read, honestly authored.
+                MarkerRead::Absent => doc.generated = false,
+                // A genuine read failure: we cannot prove exhaust NOR authorship.
+                // Admit it (generated = false) but flag it as unknown, never a silent
+                // "not generated" assertion.
+                MarkerRead::Unreadable => {
+                    doc.generated = false;
+                    unreadable_count += 1;
+                }
+            }
+        } else {
+            // `.rgr/` tool-state paths (never reached by discovery today) and all
+            // other docs: not self-generated (name-definitional, no read).
+            doc.generated = self_generated::is_self_generated(&doc.relative_path, None);
+        }
+    }
 
     // Build entries
     let entries: Vec<DocInventoryEntry> = doc_files
@@ -137,6 +190,7 @@ pub fn discover_doc_inventory(
         entries,
         counts_by_kind,
         generated_count,
+        unreadable_count,
     })
 }
 
@@ -174,13 +228,14 @@ pub fn extract_semantic_facts(repo_path: &Path) -> Result<ExtractionResult, DocF
         }
     }
 
-    // Step 3: Update generated flag from content analysis.
+    // Step 3: Set the generated flag from content evidence.
     //
-    // Path-based detection is provisional and NOT strong enough evidence alone.
-    // Content analysis is authoritative:
+    // Discovery leaves `generated = false` (a bare name is not evidence); content
+    // analysis is the authoritative signal here:
     //   - Explicit frontmatter (generated: true/false) → use that value
-    //   - Readable content but silent on generated → NOT generated (path alone insufficient)
-    //   - Unreadable content → keep path-based guess (no better signal available)
+    //   - Readable content but silent on generated → NOT generated (no evidence)
+    //   - Unreadable content → stays `false` (the conservative default; we cannot
+    //     prove generation from a file we could not read — honesty rule #1)
     for doc in &mut doc_files {
         if let Some(content) = &doc.content {
             match classification::get_generated_from_frontmatter(content) {
@@ -189,13 +244,13 @@ pub fn extract_semantic_facts(repo_path: &Path) -> Result<ExtractionResult, DocF
                     doc.generated = explicit;
                 }
                 None => {
-                    // Content is readable but silent on generated status.
-                    // Path alone is not strong enough provenance to mark as generated.
+                    // Content is readable but silent on generated status → no evidence.
                     doc.generated = false;
                 }
             }
         }
-        // If content is None (unreadable), keep path-based provisional value
+        // Unreadable content: keep the conservative `false` default (never asserted
+        // generated from an unread file).
     }
 
     // Step 4: Run extractors on each file
@@ -224,6 +279,48 @@ pub fn extract_semantic_facts(repo_path: &Path) -> Result<ExtractionResult, DocF
         generated_docs_count,
         warnings,
     })
+}
+
+/// Is `rel_path` a `.env*` file (by basename)? Such files are secrets-adjacent
+/// and never a document (SELF-POLLUTION-1 §3). Public so the seed corpus pass
+/// applies the SAME `.env` rule as the inventory (§2.4 — one truth); it is a
+/// pure name predicate (the extension defines it — no content to read).
+pub fn is_env_path(rel_path: &str) -> bool {
+    rel_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(rel_path)
+        .starts_with(".env")
+}
+
+/// The outcome of reading a sidecar candidate's first line for the `rmap map` marker
+/// check. THREE outcomes, never collapsed (operator RULING 3, honesty rule #1) — the
+/// same distinction the drift path draws with its `CandidateLine`:
+///   - `Line` — the file was read; carries its first line (empty for an empty file).
+///   - `Absent` — `io::NotFound`: the file is genuinely gone (only `NotFound` means
+///     absent).
+///   - `Unreadable` — any other IO error: the file exists (or its state is unknown)
+///     but could not be read; NOT evidence either way, so it is UNKNOWN.
+enum MarkerRead {
+    Line(String),
+    Absent,
+    Unreadable,
+}
+
+/// The first line of a doc file, for the `rmap map` marker check. Uses already-loaded
+/// content when present (hash pass); otherwise reads the file, distinguishing
+/// genuinely-absent (`NotFound`) from unreadable (permission/IO). The `NotFound`-vs-
+/// unreadable split is the honesty distinction operator RULING 3 requires (a bare
+/// `.ok()`/`Err => None` collapse would erase it and silently assert "not generated").
+fn first_line_of(doc: &DocFile) -> MarkerRead {
+    if let Some(content) = &doc.content {
+        return MarkerRead::Line(content.lines().next().unwrap_or("").to_string());
+    }
+    match fs::read_to_string(&doc.path) {
+        Ok(content) => MarkerRead::Line(content.lines().next().unwrap_or("").to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => MarkerRead::Absent,
+        Err(_) => MarkerRead::Unreadable,
+    }
 }
 
 /// Read file content and compute SHA-256 hash.
@@ -257,179 +354,5 @@ mod hex {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::{self, File};
-    use std::io::Write;
-    use tempfile::tempdir;
-
-    fn create_file(dir: &Path, name: &str, content: &str) {
-        let path = dir.join(name);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        let mut f = File::create(path).unwrap();
-        f.write_all(content.as_bytes()).unwrap();
-    }
-
-    #[test]
-    fn extract_from_repo_with_readme() {
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "README.md",
-            "# Test\n\n<!-- rg:replaces old-module -->\n",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.files_scanned, 1);
-        assert_eq!(result.facts.len(), 1);
-        assert_eq!(result.facts[0].fact_kind, FactKind::ReplacementFor);
-    }
-
-    #[test]
-    fn extract_from_repo_with_docker_compose() {
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "docker-compose.yml",
-            "services:\n  api:\n    image: api:latest\n",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.files_scanned, 1);
-        assert_eq!(result.facts.len(), 1);
-        assert_eq!(result.facts[0].fact_kind, FactKind::EnvironmentSurface);
-    }
-
-    #[test]
-    fn extract_detects_generated_from_frontmatter() {
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "src/core/MAP.md",
-            "---\ngenerated_by: rgistr\n---\n# Core\n\n<!-- rg:replaces legacy -->\n",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.generated_docs_count, 1);
-        assert!(result.facts[0].generated);
-    }
-
-    #[test]
-    fn extract_handles_unreadable_files() {
-        let dir = tempdir().unwrap();
-        create_file(dir.path(), "README.md", "# OK");
-        // Create a directory with the same name as a file pattern
-        // This simulates an unreadable situation
-        fs::create_dir_all(dir.path().join("docs")).unwrap();
-        create_file(dir.path(), "docs/guide.md", "# Guide");
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        // Should succeed even if some paths are tricky
-        assert!(result.files_scanned >= 1);
-    }
-
-    #[test]
-    fn error_on_non_directory() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("file.txt");
-        File::create(&file_path).unwrap();
-
-        let result = extract_semantic_facts(&file_path);
-
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            DocFactsError::NotADirectory(_)
-        ));
-    }
-
-    #[test]
-    fn files_by_kind_counts() {
-        let dir = tempdir().unwrap();
-        create_file(dir.path(), "README.md", "# Readme");
-        create_file(dir.path(), "ARCHITECTURE.md", "# Arch");
-        create_file(dir.path(), ".env", "FOO=bar");
-        create_file(dir.path(), ".env.production", "FOO=prod");
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.files_by_kind.get(&DocKind::Readme), Some(&1));
-        assert_eq!(result.files_by_kind.get(&DocKind::Architecture), Some(&1));
-        assert_eq!(result.files_by_kind.get(&DocKind::Config), Some(&2));
-    }
-
-    #[test]
-    fn authored_map_md_explicit_false_not_generated() {
-        // P2 fix: MAP.md with explicit `generated: false` is not marked as generated
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "src/core/MAP.md",
-            "---\ngenerated: false\ntitle: Core Module\n---\n# Core\n\nAuthored documentation.\n",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.files_scanned, 1);
-        // Frontmatter `generated: false` overrides path-based detection
-        assert_eq!(result.generated_docs_count, 0);
-    }
-
-    #[test]
-    fn authored_map_md_silent_frontmatter_not_generated() {
-        // P2 fix: MAP.md with silent frontmatter (no generated field) is NOT generated.
-        // Path alone is not strong enough provenance.
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "src/core/MAP.md",
-            "---\ntitle: Core Module\nauthor: human\n---\n# Core\n\nAuthored documentation.\n",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.files_scanned, 1);
-        // Silent frontmatter means no evidence of generation → not generated
-        assert_eq!(result.generated_docs_count, 0);
-    }
-
-    #[test]
-    fn authored_map_md_no_frontmatter_not_generated() {
-        // P2 fix: MAP.md with no frontmatter at all is NOT generated.
-        // Readable content without generation evidence → authored.
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "src/core/MAP.md",
-            "# Core Module\n\nThis is human-written documentation.\n",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.files_scanned, 1);
-        // No frontmatter, content readable → not generated
-        assert_eq!(result.generated_docs_count, 0);
-    }
-
-    #[test]
-    fn nested_env_file_has_module_scope() {
-        // P1 fix: nested .env files use parent directory as subject, not repo root
-        let dir = tempdir().unwrap();
-        create_file(
-            dir.path(),
-            "frontend/web/.env.prod",
-            "API_URL=https://prod.api.example.com",
-        );
-
-        let result = extract_semantic_facts(dir.path()).unwrap();
-
-        assert_eq!(result.facts.len(), 1);
-        assert_eq!(result.facts[0].subject_ref, "frontend/web");
-    }
-}
+#[path = "lib_tests.rs"]
+mod tests;

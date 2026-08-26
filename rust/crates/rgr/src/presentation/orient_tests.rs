@@ -1121,7 +1121,8 @@ fn wrapper_renders_index_basis_and_drift_line() {
                     "commits_ahead": 1,
                     "files_changed": 3,
                     "indexed_changed": 3,
-                    "modules": ["src"]
+                    "modules": ["src"],
+                    "excluded": 0
                 }
             },
             "provenance": { "source": ["sqlite"] },

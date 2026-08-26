@@ -35,119 +35,18 @@ use std::path::Path;
 
 use repo_graph_agent::dto::index_drift::IndexDrift;
 use repo_graph_agent::storage_port::AgentStorageRead;
-use repo_graph_repo_index::compose::{BasisOutcome, INDEX_BASIS_DIAG_KEY};
-use repo_graph_storage::StorageConnection;
-use repo_graph_trust::TrustStorageRead;
+use repo_graph_doc_facts as doc_facts;
+use repo_graph_repo_index::compose::BasisOutcome;
 
 /// Cap on named modules in a drift line; the remainder folds into "+N more" so the
 /// footer stays one line. Deterministic (modules are sorted before capping).
 const MODULE_NAME_CAP: usize = 6;
 
-/// WRITE path: the git `HEAD` to stamp as `snapshots.basis_commit`.
-///
-/// Three OUTCOMES, never collapsed:
-///   - `Ok(Some(sha))` — a git repo with a HEAD; the basis to stamp.
-///   - `Ok(None)`      — NOT a git repo; the contract reserves `None` for this KNOWN
-///     "no basis exists" state, and only this state.
-///   - `Err(e)`        — a git repo whose HEAD could not be read (a repo with zero
-///     commits, or a git error).
-///
-/// The caller feeds this straight into [`basis_outcome_from_probe`] to build the
-/// persisted [`BasisOutcome`]; see that function for how each outcome is recorded.
-pub(crate) fn basis_at_index(repo_path: &Path) -> Result<Option<String>, repo_graph_git::GitError> {
-    repo_graph_git::head_commit(repo_path)
-}
-
-/// WRITE path: classify a git-HEAD probe into the persisted [`BasisOutcome`] (operator
-/// RULING 3). The daemon owns the git probe (the composition root), so the unborn-vs-generic
-/// determination is made HERE, from git's actual state at index time (the freshest evidence),
-/// and stored as an already-rendered reason — so the query path surfaces it verbatim and
-/// never re-derives it live (closing review-4's unborn-then-committed mis-attribution).
-///
-///   - `Ok(Some(sha))` → `Basis { commit }` (also stamped in the `basis_commit` column;
-///     compose writes NO diagnostic for this — the column carries it).
-///   - `Ok(None)`      → `NonGit` (recorded, so the query path can tell a THIS-slice
-///     non-git NULL from a pre-slice NULL).
-///   - `Err(e)`        → the HEAD is a git repo we could not read; a SECOND, POSITIVE probe
-///     ([`repo_graph_git::is_unborn_head`]) decides unborn-vs-generic — see
-///     [`classify_head_failure`]. review-9 #1: git's `unknown revision`/`ambiguous
-///     argument 'HEAD'` stderr does NOT establish unborn (a committed repo with a broken
-///     HEAD emits the identical text), so we never classify from that stderr; unborn is
-///     asserted ONLY when the commit-graph probe positively establishes it.
-pub(crate) fn basis_outcome_from_probe(
-    repo_path: &Path,
-    probe: Result<Option<String>, repo_graph_git::GitError>,
-) -> BasisOutcome {
-    match probe {
-        Ok(Some(commit)) => BasisOutcome::Basis { commit },
-        Ok(None) => BasisOutcome::NonGit,
-        Err(e) => classify_head_failure(&e, repo_graph_git::is_unborn_head(repo_path)),
-    }
-}
-
-/// PURE decision: given the HEAD-read error and the result of the POSITIVE unborn probe
-/// (`git rev-list -n 1 --all`, via [`repo_graph_git::is_unborn_head`]), pick the recorded
-/// failure reason. Split out so the "unborn is claimed ONLY on positive establishment"
-/// contract is unit-testable without forging repositories per case (review-9 #1).
-///
-///   - `Ok(true)`         → `Failure { "repository has no commits yet" }` — the commit graph
-///     is empty, so the repo is genuinely unborn.
-///   - `Ok(false)`        → `Failure { "git HEAD unreadable at index time (<head_err>)" }` —
-///     the repo HAS commits, so an unreadable HEAD is a GENERIC failure (a broken-HEAD
-///     committed repo, NOT an empty one).
-///   - `Err(_)` (probe failed) → the generic reason too — we could NOT positively establish
-///     unborn, so we must NOT claim it (honest degradation). The reason carries the ORIGINAL
-///     HEAD error, not the probe's.
-fn classify_head_failure(
-    head_err: &repo_graph_git::GitError,
-    unborn_probe: Result<bool, repo_graph_git::GitError>,
-) -> BasisOutcome {
-    match unborn_probe {
-        Ok(true) => BasisOutcome::Failure {
-            reason: "repository has no commits yet".to_string(),
-        },
-        Ok(false) | Err(_) => BasisOutcome::Failure {
-            reason: format!("git HEAD unreadable at index time ({head_err})"),
-        },
-    }
-}
-
-/// READ path: the recorded [`BasisOutcome`] for a snapshot, if any. THREE outcomes, never
-/// collapsed (honesty rule #1 — a failed read is unknown, never silently `None`):
-///   - `Ok(Some(o))` — an index-basis outcome WAS recorded at index time.
-///   - `Ok(None)`    — the diagnostics blob was read and carries NO `index_basis` key.
-///     For a `basis_commit=None` snapshot this means it predates basis tracking →
-///     `BasisUnknown`.
-///   - `Err(reason)` — the diagnostics blob could NOT be read/parsed → genuinely UNKNOWN;
-///     the query renders `Unknown`-with-reason, never a false `BasisUnknown`/`Clean`.
-///
-/// Only consulted when `basis_commit` is `None`; a stamped basis needs no record.
-pub(crate) fn read_basis_outcome(
-    storage: &StorageConnection,
-    snapshot_uid: &str,
-) -> Result<Option<BasisOutcome>, String> {
-    match TrustStorageRead::get_snapshot_extraction_diagnostics(storage, snapshot_uid) {
-        Ok(blob) => parse_basis_outcome(blob.as_deref()),
-        Err(e) => Err(format!("extraction diagnostics unreadable ({e})")),
-    }
-}
-
-/// Extract the `index_basis` record from a diagnostics blob. Pure (operates on the JSON
-/// string) so the absent-key / malformed-key / valid-key distinctions are unit-testable
-/// without a storage connection. A blob that is absent or carries no key → `Ok(None)`; a
-/// blob that is not valid JSON or a malformed key → `Err` (rendered as Unknown, never
-/// silently dropped to `None` — honesty rule #1).
-fn parse_basis_outcome(blob: Option<&str>) -> Result<Option<BasisOutcome>, String> {
-    let Some(s) = blob else { return Ok(None) };
-    let value: serde_json::Value = serde_json::from_str(s)
-        .map_err(|e| format!("extraction diagnostics not valid JSON ({e})"))?;
-    match value.get(INDEX_BASIS_DIAG_KEY) {
-        None => Ok(None),
-        Some(entry) => serde_json::from_value::<BasisOutcome>(entry.clone())
-            .map(Some)
-            .map_err(|e| format!("index_basis diagnostic malformed ({e})")),
-    }
-}
+// The write-side basis vocabulary lives in `index_basis_probe` (guardrail split);
+// re-exported here so existing call sites keep one import path.
+pub(crate) use crate::index_basis_probe::{
+    basis_at_index, basis_outcome_from_probe, read_basis_outcome,
+};
 
 /// QUERY path: the working-tree drift of `repo_path` since the recorded `basis`.
 ///
@@ -228,25 +127,128 @@ pub(crate) fn compute_index_drift<S: AgentStorageRead + ?Sized>(
         };
     }
 
-    // Classify the M changed files against the index. A storage read failure here is
-    // UNKNOWN (honest), never K=0 — we know there IS drift but cannot classify it.
-    let (indexed_changed, modules) =
-        match classify_changed(storage, snapshot_uid, &drift.changed_files) {
-            Ok(v) => v,
-            Err(reason) => {
-                return IndexDrift::Unknown {
-                    basis: Some(basis.to_string()),
-                    reason,
-                }
+    // SELF-POLLUTION-1 §2.2: rmap must not measure its OWN exhaust. Split the changed
+    // set into the READER's paths and rmap's own `map` sidecars / `.rgr/` / OS noise.
+    // Only the reader's paths count toward `files_changed` (M) and get classified; the
+    // excluded count is surfaced on the drift line so nothing is silently hidden.
+    // `unreadable` is the sub-count of reader paths that are sidecar-NAMED but could
+    // not be read to check the marker — counted (conservative) yet flagged, never
+    // silently asserted "not generated" (operator RULING 3).
+    let (reader_changed, excluded, unreadable) = partition_changed(repo_path, &drift.changed_files);
+
+    // Classify the reader's M changed files against the index. A storage read failure
+    // here is UNKNOWN (honest), never K=0 — we know there IS drift but cannot classify it.
+    let (indexed_changed, modules) = match classify_changed(storage, snapshot_uid, &reader_changed)
+    {
+        Ok(v) => v,
+        Err(reason) => {
+            return IndexDrift::Unknown {
+                basis: Some(basis.to_string()),
+                reason,
             }
-        };
+        }
+    };
 
     IndexDrift::Drifted {
         basis: basis.to_string(),
         commits_ahead: drift.commits_ahead,
-        files_changed: drift.changed_files.len() as u64,
+        files_changed: reader_changed.len() as u64,
         indexed_changed,
         modules,
+        excluded,
+        unreadable,
+    }
+}
+
+/// How a single git-changed path classifies against rmap's own exhaust.
+enum DriftClass {
+    /// rmap's OWN exhaust / OS noise — not the reader's change (dropped from M, counted
+    /// in `excluded`).
+    Excluded,
+    /// The reader's change (counts toward M).
+    Reader,
+    /// A sidecar-NAMED path we could NOT read to check the marker (a genuine read
+    /// failure — permission/IO — NOT a `NotFound`). Counted as the reader's change
+    /// (conservative), but ALSO flagged so the drift line can surface it — we never
+    /// assert "not generated" from a failed read (operator RULING 3, honesty rule #1).
+    UnreadableReader,
+}
+
+/// Partition git-changed paths into (the reader's changed paths, count of rmap's own
+/// exhaust / OS noise excluded, count of sidecar-named-but-unreadable reader paths).
+/// Excluded = rmap's OWN `map` sidecars (confirmed by the first-line marker — read
+/// ONLY for sidecar-NAMED candidates, honesty rule: a bare name is not evidence), the
+/// `.rgr/` tool-state dir, and `.DS_Store`-class OS noise. Unreadable sidecar-named
+/// paths stay the reader's (counted in M) and are reported separately. Both counts are
+/// surfaced on the drift line (SELF-POLLUTION-1 §2.2, operator RULING 3).
+fn partition_changed(repo_path: &Path, changed_files: &[String]) -> (Vec<String>, u64, u64) {
+    let mut readers = Vec::new();
+    let mut excluded: u64 = 0;
+    let mut unreadable: u64 = 0;
+    for path in changed_files {
+        match classify_for_drift(repo_path, path) {
+            DriftClass::Excluded => excluded += 1,
+            DriftClass::Reader => readers.push(path.clone()),
+            DriftClass::UnreadableReader => {
+                readers.push(path.clone());
+                unreadable += 1;
+            }
+        }
+    }
+    (readers, excluded, unreadable)
+}
+
+/// Classify one changed path. The `rmap map` marker read is gated to sidecar-NAMED
+/// candidates so a large changed-set is never fully read (DEC-1: §3's name-only
+/// exception is NOT invoked — reads are bounded to candidates and honesty is
+/// preferred). `.rgr/` and OS noise are name-definitional (no read). A read failure on
+/// a sidecar candidate distinguishes `NotFound` (the file is genuinely gone — a
+/// deleted sidecar IS a real reader change, `Reader`) from any other IO error
+/// (`UnreadableReader` — counted but flagged, never silently "not generated").
+fn classify_for_drift(repo_path: &Path, rel_path: &str) -> DriftClass {
+    if doc_facts::is_os_noise(rel_path) || doc_facts::is_tool_state_path(rel_path) {
+        return DriftClass::Excluded;
+    }
+    if !doc_facts::has_map_sidecar_name(rel_path) {
+        return DriftClass::Reader;
+    }
+    match read_candidate_first_line(&repo_path.join(rel_path)) {
+        CandidateLine::Line(line) => {
+            if doc_facts::is_self_generated(rel_path, Some(&line)) {
+                DriftClass::Excluded
+            } else {
+                DriftClass::Reader
+            }
+        }
+        // NotFound: the file is gone (a deleted sidecar) → a real reader change, no
+        // marker to read, honestly not-generated.
+        CandidateLine::Absent => DriftClass::Reader,
+        // A genuine read failure: we cannot prove exhaust, so keep it as the reader's
+        // change AND flag it (never assert "not generated" from a failed read).
+        CandidateLine::Unreadable => DriftClass::UnreadableReader,
+    }
+}
+
+/// The outcome of reading a sidecar candidate's first line for the marker check.
+enum CandidateLine {
+    /// The file was read; carries its first line (empty string for an empty file).
+    Line(String),
+    /// `io::NotFound` — the file is genuinely absent (deleted). Only `NotFound` means
+    /// absent (honesty rule #1).
+    Absent,
+    /// Any other IO error — the file exists (or its state is unknown) but could not be
+    /// read; we must not treat it as evidence either way.
+    Unreadable,
+}
+
+/// Read a candidate sidecar's first line, distinguishing genuinely-absent (`NotFound`)
+/// from unreadable (permission/IO/etc.) — the honesty distinction operator RULING 3
+/// requires (a `.ok()` collapse would erase it).
+fn read_candidate_first_line(abs_path: &Path) -> CandidateLine {
+    match std::fs::read_to_string(abs_path) {
+        Ok(content) => CandidateLine::Line(content.lines().next().unwrap_or("").to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CandidateLine::Absent,
+        Err(_) => CandidateLine::Unreadable,
     }
 }
 

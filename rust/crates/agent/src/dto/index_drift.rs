@@ -51,16 +51,35 @@ pub enum IndexDrift {
     Clean { basis: String },
 
     /// The working tree has moved past the basis. `files_changed` (M) is every
-    /// changed path; `indexed_changed` (K ≤ M) is how many of those are files the
-    /// index actually tracks; `modules` names the modules those K files belong to
-    /// (may be empty when module data is unavailable — an honest omission, not a
-    /// claim of "no modules").
+    /// changed path THAT IS THE READER'S (rmap's own `map` sidecars and OS noise
+    /// are excluded upstream and counted in `excluded`); `indexed_changed` (K ≤ M)
+    /// is how many of those are files the index actually tracks; `modules` names
+    /// the modules those K files belong to (may be empty when module data is
+    /// unavailable — an honest omission, not a claim of "no modules"). `excluded`
+    /// is the count of changed paths dropped as rmap's own exhaust / OS noise, so
+    /// the reader can see what was ignored rather than have it silently hidden
+    /// (SELF-POLLUTION-1 §2.2).
+    ///
+    /// `unreadable` (⊆ `files_changed`) is the count of sidecar-NAMED changed paths
+    /// we could NOT read to check the `rmap map` marker (a genuine read failure —
+    /// permission/IO — NOT a `NotFound`, which means the file is simply gone). The
+    /// honesty rule forbids asserting such a file is "not generated" from a failed
+    /// read, so it is COUNTED as the reader's change (the conservative direction)
+    /// AND surfaced ("+N unreadable, counted") rather than silently folded in
+    /// (operator RULING 3, closing review-3's `.ok()`-collapse finding). Additive
+    /// field (`#[serde(default)]`): absent in older JSON → 0.
     Drifted {
         basis: String,
         commits_ahead: u64,
         files_changed: u64,
         indexed_changed: u64,
         modules: Vec<String>,
+        /// Additive (review-6 #1): a legacy `drifted` payload without this
+        /// field must still deserialize — default 0 means "none excluded".
+        #[serde(default)]
+        excluded: u64,
+        #[serde(default)]
+        unreadable: u64,
     },
 }
 
@@ -114,20 +133,49 @@ impl IndexDrift {
                 files_changed,
                 indexed_changed,
                 modules,
+                excluded,
+                unreadable,
             } => {
                 let sha7 = sha7(basis);
-                let modules_clause = if modules.is_empty() {
-                    String::new()
+                // What we ignored, said out loud (never silently hidden).
+                let excluded_clause = if *excluded > 0 {
+                    format!(" (+{excluded} tool/OS file{} ignored)", plural(*excluded))
                 } else {
-                    format!(", modules {}", modules.join(", "))
+                    String::new()
                 };
-                format!(
-                    "index basis: {sha7}; HEAD is {commits_ahead} commit{} ahead, \
-                     {files_changed} file{} changed in the working tree \
-                     ({indexed_changed} indexed{modules_clause}) — run `rmap refresh` to re-anchor",
-                    plural(*commits_ahead),
-                    plural(*files_changed),
-                )
+                // Sidecar-named changes we could not read to check the marker: kept in
+                // the count (conservative) but flagged, never silently asserted
+                // "not generated" (operator RULING 3).
+                let unreadable_clause = if *unreadable > 0 {
+                    format!(" (+{unreadable} unreadable, counted)")
+                } else {
+                    String::new()
+                };
+                if *indexed_changed == 0 {
+                    // K=0 calibration (SELF-POLLUTION-1 §2.2): NO indexed file
+                    // moved, so the index facts still describe the tracked tree.
+                    // This is a Pass (see `makes_check_incomplete`) — informational,
+                    // never a `run rmap refresh` nag.
+                    format!(
+                        "index basis: {sha7}; {files_changed} working-tree file{} changed, \
+                         none indexed{excluded_clause}{unreadable_clause} — index facts current",
+                        plural(*files_changed),
+                    )
+                } else {
+                    let modules_clause = if modules.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", modules {}", modules.join(", "))
+                    };
+                    format!(
+                        "index basis: {sha7}; HEAD is {commits_ahead} commit{} ahead, \
+                         {files_changed} file{} changed in the working tree \
+                         ({indexed_changed} indexed{modules_clause}){excluded_clause}\
+                         {unreadable_clause} — run `rmap refresh` to re-anchor",
+                        plural(*commits_ahead),
+                        plural(*files_changed),
+                    )
+                }
             }
         }
     }
@@ -139,15 +187,23 @@ impl IndexDrift {
     /// - `Clean` → Pass (facts describe the tree).
     /// - `NotGit` → Pass (drift tracking not applicable — like gate-not-configured
     ///   or enrichment-not-applicable, an honest "no concern here", not unknown).
-    /// - `Drifted` / `BasisUnknown` / `Unknown` → Incomplete (either measured
-    ///   drift or an unknown we must not paper over as Pass).
+    /// - `Drifted` with `indexed_changed == 0` → Pass (K=0 calibration,
+    ///   SELF-POLLUTION-1 §2.2): NO indexed file moved, so the facts still
+    ///   describe the tracked tree. Working-tree changes to non-indexed files (or
+    ///   ignored tool/OS exhaust) do not stale the index.
+    /// - `Drifted` with `indexed_changed > 0` / `BasisUnknown` / `Unknown` →
+    ///   Incomplete (either measured drift of indexed files, or an unknown we must
+    ///   not paper over as Pass).
     ///
     /// Never `Fail` by itself (INDEX-BASIS-1 §2.4).
     pub fn makes_check_incomplete(&self) -> bool {
-        matches!(
-            self,
-            IndexDrift::Drifted { .. } | IndexDrift::BasisUnknown | IndexDrift::Unknown { .. }
-        )
+        match self {
+            IndexDrift::Drifted {
+                indexed_changed, ..
+            } => *indexed_changed > 0,
+            IndexDrift::BasisUnknown | IndexDrift::Unknown { .. } => true,
+            IndexDrift::Clean { .. } | IndexDrift::NotGit => false,
+        }
     }
 }
 
@@ -167,6 +223,36 @@ fn sha7(full: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    // review-6 #1: BOTH additive fields must default so a legacy serialized
+    // `drifted` payload (pre-`excluded`/`unreadable`) still deserializes.
+    #[test]
+    fn legacy_drifted_payload_without_additive_fields_deserializes() {
+        let legacy = serde_json::json!({
+            "state": "drifted",
+            "basis": "abc1234",
+            "commits_ahead": 1,
+            "files_changed": 3,
+            "indexed_changed": 2,
+            "modules": ["core"]
+        });
+        let d: IndexDrift =
+            serde_json::from_value(legacy).expect("legacy payload must deserialize");
+        match d {
+            IndexDrift::Drifted {
+                excluded,
+                unreadable,
+                ..
+            } => {
+                assert_eq!(
+                    excluded, 0,
+                    "absent additive field defaults to none-excluded"
+                );
+                assert_eq!(unreadable, 0);
+            }
+            other => panic!("expected Drifted, got {other:?}"),
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -202,8 +288,110 @@ mod tests {
             files_changed: 3,
             indexed_changed: 3,
             modules: vec![],
+            excluded: 0,
+            unreadable: 0,
         }
         .makes_check_incomplete());
+    }
+
+    #[test]
+    fn k0_indexed_changed_is_pass_with_informational_line() {
+        // SELF-POLLUTION-1 §2.2: 0 INDEXED files changed → Pass (never Incomplete),
+        // even though working-tree files moved (here all excluded as rmap's exhaust).
+        let k0 = IndexDrift::Drifted {
+            basis: "abcdef0123456789".to_string(),
+            commits_ahead: 0,
+            files_changed: 0,
+            indexed_changed: 0,
+            modules: vec![],
+            excluded: 3_721,
+            unreadable: 0,
+        };
+        assert!(
+            !k0.makes_check_incomplete(),
+            "K=0 drift must be a Pass, not Incomplete"
+        );
+        let s = k0.describe();
+        assert!(s.contains("none indexed"), "informational K=0 line: {s}");
+        assert!(
+            s.contains("+3721 tool/OS files ignored"),
+            "excluded count surfaced, not silently hidden: {s}"
+        );
+        assert!(
+            !s.contains("rmap refresh"),
+            "K=0 is informational, never a refresh nag: {s}"
+        );
+    }
+
+    #[test]
+    fn drifted_reports_excluded_count_on_the_refresh_line() {
+        // When indexed files DID change, the line is still the actionable refresh
+        // nag, but the excluded tool/OS count is appended (never silently hidden).
+        let d = IndexDrift::Drifted {
+            basis: "abcdef0123456789".to_string(),
+            commits_ahead: 1,
+            files_changed: 2,
+            indexed_changed: 1,
+            modules: vec!["src".to_string()],
+            excluded: 5,
+            unreadable: 0,
+        };
+        let s = d.describe();
+        assert!(s.contains("(1 indexed, modules src)"), "{s}");
+        assert!(s.contains("+5 tool/OS files ignored"), "{s}");
+        assert!(s.contains("rmap refresh"), "{s}");
+        assert!(d.makes_check_incomplete(), "K>0 stays Incomplete");
+    }
+
+    #[test]
+    fn drifted_surfaces_unreadable_count_never_silently_folds_it() {
+        // operator RULING 3: a sidecar-named change we could not READ (a genuine
+        // read failure, not NotFound) is COUNTED as the reader's change AND
+        // surfaced "+N unreadable, counted" — never silently asserted "not
+        // generated". Rides both the K=0 informational line and the K>0 refresh line.
+        let k0 = IndexDrift::Drifted {
+            basis: "abcdef0123456789".to_string(),
+            commits_ahead: 0,
+            files_changed: 2,
+            indexed_changed: 0,
+            modules: vec![],
+            excluded: 3,
+            unreadable: 2,
+        };
+        let s = k0.describe();
+        assert!(s.contains("+3 tool/OS files ignored"), "{s}");
+        assert!(s.contains("+2 unreadable, counted"), "{s}");
+        assert!(s.contains("none indexed"), "{s}");
+        assert!(!k0.makes_check_incomplete(), "K=0 stays Pass: {s}");
+
+        let k1 = IndexDrift::Drifted {
+            basis: "abcdef0123456789".to_string(),
+            commits_ahead: 1,
+            files_changed: 3,
+            indexed_changed: 1,
+            modules: vec!["src".to_string()],
+            excluded: 0,
+            unreadable: 1,
+        };
+        let t = k1.describe();
+        assert!(t.contains("+1 unreadable, counted"), "{t}");
+        assert!(t.contains("rmap refresh"), "{t}");
+
+        // Zero unreadable → no clause (never a "+0 unreadable" noise line).
+        let none = IndexDrift::Drifted {
+            basis: "abcdef0123456789".to_string(),
+            commits_ahead: 1,
+            files_changed: 1,
+            indexed_changed: 1,
+            modules: vec![],
+            excluded: 0,
+            unreadable: 0,
+        };
+        assert!(
+            !none.describe().contains("unreadable"),
+            "{}",
+            none.describe()
+        );
     }
 
     #[test]
@@ -214,6 +402,8 @@ mod tests {
             files_changed: 1,
             indexed_changed: 1,
             modules: vec!["src/git".to_string()],
+            excluded: 0,
+            unreadable: 0,
         };
         let s = one.describe();
         assert!(s.contains("index basis: abcdef0"), "{s}");
@@ -228,6 +418,8 @@ mod tests {
             files_changed: 12,
             indexed_changed: 4,
             modules: vec![],
+            excluded: 0,
+            unreadable: 0,
         };
         let m = many.describe();
         assert!(m.contains("3 commits ahead"), "{m}");
@@ -292,6 +484,8 @@ mod tests {
             files_changed: 5,
             indexed_changed: 3,
             modules: vec!["m".to_string()],
+            excluded: 7,
+            unreadable: 0,
         };
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.contains("\"state\":\"drifted\""), "{json}");

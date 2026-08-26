@@ -16,7 +16,7 @@
 //! - Full output, no truncation
 //! - `--json` preserved for machine mode
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 // ── docs list ────────────────────────────────────────────────────────────────
@@ -31,60 +31,184 @@ pub struct DocsListResponse {
     pub count: usize,
     pub counts_by_kind: BTreeMap<String, usize>,
     pub generated_count: usize,
+    /// Sidecar-named files the daemon could not read to check the `rmap map` marker
+    /// (UNKNOWN — admitted but not asserted authored; operator RULING 3). The daemon
+    /// emits this key ONLY when > 0, so `#[serde(default)]` keeps older/clean payloads
+    /// (no key) parsing as 0 — and keeps `docs list --json` byte-identical to pre-slice
+    /// when nothing is unreadable (review-5 finding 1).
+    #[serde(default)]
+    pub unreadable: usize,
 }
 
 /// Individual documentation entry.
-#[derive(Debug, Deserialize, Clone)]
+///
+/// `Serialize` is derived so the filtered `--json` view (`filtered_json_view`) can
+/// re-emit the VISIBLE subset with the same field shape the daemon produced.
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DocEntry {
     pub path: String,
     pub kind: String,
     pub generated: bool,
-    #[allow(dead_code)]
     pub content_hash: String,
 }
 
 impl DocsListResponse {
+    /// The default-exclusion VIEW shared by human rendering and `--json` (§2.3):
+    /// the entries actually listed — sorted by path, with rmap's OWN generated
+    /// maps dropped unless `include_generated` — and the count that was excluded.
+    ///
+    /// ONE computation decides "what the listing is" for BOTH surfaces so they can
+    /// never diverge on it (the exact class of drift SELF-POLLUTION-1 fixes). The
+    /// excluded count is derived from the entries themselves (never the daemon's
+    /// total blindly), so it is exact for the set actually rendered.
+    fn visible_view(&self, include_generated: bool) -> (Vec<DocEntry>, usize) {
+        let mut entries = self.entries.clone();
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        let excluded_generated = if include_generated {
+            0
+        } else {
+            entries.iter().filter(|e| e.generated).count()
+        };
+        let visible: Vec<DocEntry> = entries
+            .into_iter()
+            .filter(|e| include_generated || !e.generated)
+            .collect();
+        (visible, excluded_generated)
+    }
+
+    /// The machine-readable (`--json`) view, OR `None` when nothing is filtered.
+    ///
+    /// SELF-POLLUTION-1 §2.3 + review-5 finding 1 (byte-parity): when there is nothing
+    /// for the slice to exclude — `--include-generated`, or no generated maps present —
+    /// this returns `None` and the caller prints the RAW daemon value UNCHANGED, so
+    /// `docs list --json` stays byte-identical to the pre-slice output on any repo with
+    /// no rmap exhaust. Only in the AFFECTED case (generated maps actually dropped) does
+    /// it build the filtered view: rmap's own maps removed, `excluded_generated` stating
+    /// how many (always > 0 here, so the field is present exactly when it is meaningful),
+    /// and `unreadable` when > 0 (UNKNOWN sidecars, surfaced not hidden — operator
+    /// RULING 3). `count`/`counts_by_kind`/`generated_count` reflect the VISIBLE set,
+    /// parallel to the human render.
+    pub fn filtered_json_view(&self, include_generated: bool) -> Option<serde_json::Value> {
+        let excluded_generated = if include_generated {
+            0
+        } else {
+            self.entries.iter().filter(|e| e.generated).count()
+        };
+        if excluded_generated == 0 {
+            // Nothing excluded → raw passthrough (byte-parity). The daemon payload
+            // already carries `unreadable` when > 0, so that honesty is preserved too.
+            return None;
+        }
+
+        // Affected case (include_generated is necessarily false here): drop rmap's maps.
+        let mut visible = self.entries.clone();
+        visible.sort_by(|a, b| a.path.cmp(&b.path));
+        visible.retain(|e| !e.generated);
+
+        let mut counts_by_kind: BTreeMap<String, usize> = BTreeMap::new();
+        for e in &visible {
+            *counts_by_kind.entry(e.kind.clone()).or_insert(0) += 1;
+        }
+
+        let mut view = serde_json::json!({
+            "command": self.command,
+            "repo": self.repo,
+            "repo_path": self.repo_path,
+            "entries": visible,
+            "count": visible.len(),
+            "counts_by_kind": counts_by_kind,
+            "generated_count": 0,
+            "excluded_generated": excluded_generated,
+        });
+        if self.unreadable > 0 {
+            view["unreadable"] = serde_json::json!(self.unreadable);
+        }
+        Some(view)
+    }
+
     /// Render human-readable output.
-    pub fn render_human(&self) -> String {
+    ///
+    /// SELF-POLLUTION-1 §3: rmap's OWN `map` sidecars (the `generated` entries) are
+    /// EXCLUDED from the listing by default so `docs list` shows the reader's docs,
+    /// not rmap's exhaust. `include_generated` (the `--include-generated` flag) opts
+    /// them back in; either way the excluded count is stated so nothing is silently
+    /// hidden. `--json` applies the SAME filter (see `filtered_json_view`).
+    pub fn render_human(&self, include_generated: bool) -> String {
         let mut out = String::new();
 
         // Header
         out.push_str("Documentation\n\n");
 
-        // Count line
-        let doc_word = if self.count == 1 {
+        let (visible, excluded_generated) = self.visible_view(include_generated);
+
+        // Count line (visible set).
+        let doc_word = if visible.len() == 1 {
             "document"
         } else {
             "documents"
         };
-        out.push_str(&format!("{} {}\n", self.count, doc_word));
+        out.push_str(&format!("{} {}\n", visible.len(), doc_word));
 
-        if self.count == 0 {
-            out.push_str("\nhint: no documentation files detected in this repository.\n");
+        // What we ignored, said out loud (honesty — never silently hidden).
+        if excluded_generated > 0 {
+            let map_word = if excluded_generated == 1 {
+                "map"
+            } else {
+                "maps"
+            };
+            out.push_str(&format!(
+                "{} generated {} excluded (rmap's own; use --include-generated to show)\n",
+                excluded_generated, map_word
+            ));
+        }
+
+        // Sidecar-named files the daemon could not read to check the marker: admitted
+        // (shown, conservative) but UNKNOWN — said out loud, never silently asserted
+        // authored (operator RULING 3). Surfaced regardless of the exclusion above.
+        if self.unreadable > 0 {
+            out.push_str(&format!(
+                "+{} unreadable, counted (sidecar-named; rmap marker unverifiable)\n",
+                self.unreadable
+            ));
+        }
+
+        if visible.is_empty() {
+            if excluded_generated > 0 {
+                // Docs DO exist — they are all rmap's own maps, now hidden. Do NOT
+                // claim "no documentation": that would misrepresent the repo.
+                out.push_str(
+                    "\nhint: all documentation here is rmap-generated; \
+                     use --include-generated to list it.\n",
+                );
+            } else {
+                out.push_str("\nhint: no documentation files detected in this repository.\n");
+            }
             return out;
         }
 
-        // By kind breakdown (sorted by count desc, then kind asc)
-        if !self.counts_by_kind.is_empty() {
+        // By kind breakdown over the VISIBLE set (sorted by count desc, then kind asc).
+        let mut counts_by_kind: BTreeMap<&str, usize> = BTreeMap::new();
+        for e in &visible {
+            *counts_by_kind.entry(e.kind.as_str()).or_insert(0) += 1;
+        }
+        if !counts_by_kind.is_empty() {
             out.push_str("\nBy kind:\n");
-            let mut by_kind: Vec<_> = self.counts_by_kind.iter().collect();
+            let mut by_kind: Vec<_> = counts_by_kind.iter().collect();
             by_kind.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
             for (kind, count) in by_kind {
                 out.push_str(&format!("  {}  {}\n", kind, count));
             }
         }
 
-        // Generated count if any
-        if self.generated_count > 0 {
-            out.push_str(&format!("\n{} generated\n", self.generated_count));
+        // Generated count among the VISIBLE set (only when opted in — else 0).
+        let visible_generated = visible.iter().filter(|e| e.generated).count();
+        if visible_generated > 0 {
+            out.push_str(&format!("\n{} generated\n", visible_generated));
         }
 
-        // Entry list (sorted by path for determinism)
+        // Entry list.
         out.push('\n');
-        let mut entries = self.entries.clone();
-        entries.sort_by(|a, b| a.path.cmp(&b.path));
-
-        for entry in &entries {
+        for entry in &visible {
             let generated_marker = if entry.generated { "  [generated]" } else { "" };
             out.push_str(&format!(
                 "  {}  {}{}\n",
@@ -177,247 +301,5 @@ impl DocsExtractResponse {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ── docs list tests ──────────────────────────────────────────────────────
-
-    fn sample_list_response() -> DocsListResponse {
-        let mut counts_by_kind = BTreeMap::new();
-        counts_by_kind.insert("readme".to_string(), 2);
-        counts_by_kind.insert("changelog".to_string(), 1);
-
-        DocsListResponse {
-            command: "docs list".to_string(),
-            repo: "repo_test".to_string(),
-            repo_path: "/test/repo".to_string(),
-            entries: vec![
-                DocEntry {
-                    path: "README.md".to_string(),
-                    kind: "readme".to_string(),
-                    generated: false,
-                    content_hash: "abc123".to_string(),
-                },
-                DocEntry {
-                    path: "docs/README.md".to_string(),
-                    kind: "readme".to_string(),
-                    generated: false,
-                    content_hash: "def456".to_string(),
-                },
-                DocEntry {
-                    path: "CHANGELOG.md".to_string(),
-                    kind: "changelog".to_string(),
-                    generated: true,
-                    content_hash: "ghi789".to_string(),
-                },
-            ],
-            count: 3,
-            counts_by_kind,
-            generated_count: 1,
-        }
-    }
-
-    #[test]
-    fn list_render_shows_header() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        assert!(out.starts_with("Documentation\n"));
-    }
-
-    #[test]
-    fn list_render_shows_count() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        assert!(out.contains("3 documents"));
-    }
-
-    #[test]
-    fn list_render_shows_by_kind() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        assert!(out.contains("By kind:"));
-        assert!(out.contains("readme  2"));
-        assert!(out.contains("changelog  1"));
-    }
-
-    #[test]
-    fn list_render_shows_generated_count() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        assert!(out.contains("1 generated"));
-    }
-
-    #[test]
-    fn list_render_shows_entries_sorted_by_path() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        // Entries should be sorted: CHANGELOG.md, README.md, docs/README.md
-        let changelog_pos = out.find("CHANGELOG.md").unwrap();
-        let readme_pos = out.find("README.md").unwrap();
-        let docs_readme_pos = out.find("docs/README.md").unwrap();
-        assert!(changelog_pos < readme_pos);
-        assert!(readme_pos < docs_readme_pos);
-    }
-
-    #[test]
-    fn list_render_shows_generated_marker() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        assert!(out.contains("CHANGELOG.md  changelog  [generated]"));
-    }
-
-    #[test]
-    fn list_render_shows_hint() {
-        let resp = sample_list_response();
-        let out = resp.render_human();
-        assert!(out.contains("hint: run 'rmap docs extract' to scan for explicit rg: markers"));
-    }
-
-    #[test]
-    fn list_render_empty_shows_hint() {
-        let resp = DocsListResponse {
-            command: "docs list".to_string(),
-            repo: "repo_test".to_string(),
-            repo_path: "/test/repo".to_string(),
-            entries: vec![],
-            count: 0,
-            counts_by_kind: BTreeMap::new(),
-            generated_count: 0,
-        };
-        let out = resp.render_human();
-        assert!(out.contains("0 documents"));
-        assert!(out.contains("hint: no documentation files detected"));
-    }
-
-    #[test]
-    fn list_render_singular_document() {
-        let mut counts_by_kind = BTreeMap::new();
-        counts_by_kind.insert("readme".to_string(), 1);
-
-        let resp = DocsListResponse {
-            command: "docs list".to_string(),
-            repo: "repo_test".to_string(),
-            repo_path: "/test/repo".to_string(),
-            entries: vec![DocEntry {
-                path: "README.md".to_string(),
-                kind: "readme".to_string(),
-                generated: false,
-                content_hash: "abc".to_string(),
-            }],
-            count: 1,
-            counts_by_kind,
-            generated_count: 0,
-        };
-        let out = resp.render_human();
-        assert!(out.contains("1 document\n")); // singular
-    }
-
-    // ── docs extract tests ───────────────────────────────────────────────────
-
-    fn sample_extract_response() -> DocsExtractResponse {
-        let mut files_by_kind = BTreeMap::new();
-        files_by_kind.insert("readme".to_string(), 2);
-
-        let mut counts_by_kind = BTreeMap::new();
-        counts_by_kind.insert("api_endpoint".to_string(), 5);
-        counts_by_kind.insert("config_key".to_string(), 3);
-
-        DocsExtractResponse {
-            command: "docs extract".to_string(),
-            repo: "repo_test".to_string(),
-            repo_path: "/test/repo".to_string(),
-            files_scanned: 2,
-            files_by_kind,
-            facts_extracted: 8,
-            facts_inserted: 6,
-            facts_deleted: 2,
-            counts_by_kind,
-            generated_docs_count: 1,
-            warnings: vec![],
-        }
-    }
-
-    #[test]
-    fn extract_render_shows_header() {
-        let resp = sample_extract_response();
-        let out = resp.render_human();
-        assert!(out.starts_with("Documentation Extraction\n"));
-    }
-
-    #[test]
-    fn extract_render_shows_files_scanned() {
-        let resp = sample_extract_response();
-        let out = resp.render_human();
-        assert!(out.contains("2 files scanned"));
-    }
-
-    #[test]
-    fn extract_render_shows_files_by_kind() {
-        let resp = sample_extract_response();
-        let out = resp.render_human();
-        assert!(out.contains("By kind:"));
-        assert!(out.contains("readme  2"));
-    }
-
-    #[test]
-    fn extract_render_shows_extraction_results() {
-        let resp = sample_extract_response();
-        let out = resp.render_human();
-        assert!(out.contains("Extraction results:"));
-        assert!(out.contains("8 facts extracted"));
-        assert!(out.contains("6 facts inserted"));
-        assert!(out.contains("2 facts deleted"));
-        assert!(out.contains("1 generated docs"));
-    }
-
-    #[test]
-    fn extract_render_shows_facts_by_kind() {
-        let resp = sample_extract_response();
-        let out = resp.render_human();
-        assert!(out.contains("Facts by kind:"));
-        assert!(out.contains("api_endpoint  5"));
-        assert!(out.contains("config_key  3"));
-    }
-
-    #[test]
-    fn extract_render_shows_no_warnings() {
-        let resp = sample_extract_response();
-        let out = resp.render_human();
-        assert!(out.contains("No warnings."));
-    }
-
-    #[test]
-    fn extract_render_shows_warnings() {
-        let mut resp = sample_extract_response();
-        resp.warnings = vec![
-            "Failed to parse docs/api.md".to_string(),
-            "Unknown format in CHANGELOG.md".to_string(),
-        ];
-        let out = resp.render_human();
-        assert!(out.contains("2 warnings:"));
-        assert!(out.contains("- Failed to parse docs/api.md"));
-        assert!(out.contains("- Unknown format in CHANGELOG.md"));
-    }
-
-    #[test]
-    fn extract_render_singular_file() {
-        let mut files_by_kind = BTreeMap::new();
-        files_by_kind.insert("readme".to_string(), 1);
-
-        let resp = DocsExtractResponse {
-            command: "docs extract".to_string(),
-            repo: "repo_test".to_string(),
-            repo_path: "/test/repo".to_string(),
-            files_scanned: 1,
-            files_by_kind,
-            facts_extracted: 0,
-            facts_inserted: 0,
-            facts_deleted: 0,
-            counts_by_kind: BTreeMap::new(),
-            generated_docs_count: 0,
-            warnings: vec![],
-        };
-        let out = resp.render_human();
-        assert!(out.contains("1 file scanned")); // singular
-    }
-}
+#[path = "docs_tests.rs"]
+mod tests;
