@@ -31,7 +31,17 @@ pub struct RepoConfigContext {
     /// Directory → PackageDependencySet cache (for Rust via Cargo.toml).
     cargo_cache: HashMap<String, PackageDependencySet>,
     /// Directory → PackageDependencySet cache (for Java via build.gradle[.kts]).
-    gradle_cache: HashMap<String, PackageDependencySet>,
+    /// `pub(crate)`: the Gradle resolver body lives in `manifest_deps.rs` (guardrail — config.rs is
+    /// not grown by this slice), and reaches this cache from that sibling module.
+    pub(crate) gradle_cache: HashMap<String, PackageDependencySet>,
+    /// Directory → PackageDependencySet cache (for Python via pyproject.toml). `pub(crate)` for the
+    /// same reason as `gradle_cache` (the pyproject resolver lives in `manifest_deps.rs`).
+    pub(crate) pyproject_cache: HashMap<String, PackageDependencySet>,
+    /// Manifests the deps resolvers encountered (§2.2 provenance) — parsed and present-but-failed.
+    /// Populated as a side effect of `resolve_*_deps`; serialized into the diagnostics blob by
+    /// `compose`. `pub(crate)`: the `record_*_manifest` recorders that mutate it live in
+    /// `manifest_deps.rs` (guardrail — config.rs is not grown), same as `gradle_cache`.
+    pub(crate) manifest_provenance: crate::manifest_deps::ManifestProvenanceCollector,
 }
 
 impl Default for RepoConfigContext {
@@ -49,6 +59,8 @@ impl RepoConfigContext {
             tsconfig_cache: HashMap::new(),
             cargo_cache: HashMap::new(),
             gradle_cache: HashMap::new(),
+            pyproject_cache: HashMap::new(),
+            manifest_provenance: crate::manifest_deps::ManifestProvenanceCollector::default(),
         }
     }
 
@@ -72,24 +84,63 @@ impl RepoConfigContext {
                 return result;
             }
 
-            // Try reading package.json at this directory.
-            // TS behavior: if the file EXISTS, stop here regardless of
-            // parse success. Extract deps if parseable, else empty.
-            // A broken leaf manifest should NOT inherit parent deps.
+            // Try reading package.json at this directory. TS behavior: if the file EXISTS, stop here
+            // regardless of parse success (a broken leaf manifest must NOT inherit parent deps).
             let abs_dir = if probe.is_empty() {
                 repo_root.to_path_buf()
             } else {
                 repo_root.join(&probe)
             };
             let pkg_path = abs_dir.join("package.json");
-            if pkg_path.exists() {
-                let deps = std::fs::read_to_string(&pkg_path)
-                    .ok()
-                    .and_then(|content| extract_package_dependencies(&content))
-                    .unwrap_or_else(|| empty.clone());
-                self.pkg_cache.insert(probe.clone(), deps.clone());
-                self.pkg_cache.insert(dir.clone(), deps.clone());
-                return deps;
+            // STANDING HONESTY RULE (sweep): gate on the READ, not `.exists()` + `.ok()`. `NotFound`
+            // is the only "truly absent → keep walking" case. A present-but-unreadable manifest (any
+            // other io error) and a present-but-MALFORMED manifest (valid read but `extract` returns
+            // `None` — for package.json `None` means the JSON did not parse, distinct from a valid
+            // file with zero deps which returns `Some(empty)`) are BOTH recorded as FAILED manifests
+            // (review-4 item 1), so query time renders unknown-with-reason instead of a fabricated
+            // parsed zero-dep. The directory still OWNS the manifest either way — the walk stops here.
+            match std::fs::read_to_string(&pkg_path) {
+                Ok(content) => match extract_package_dependencies(&content) {
+                    Some(deps) => {
+                        self.record_parsed_manifest(&probe, "package.json", "npm");
+                        self.pkg_cache.insert(probe.clone(), deps.clone());
+                        self.pkg_cache.insert(dir.clone(), deps.clone());
+                        return deps;
+                    }
+                    None => {
+                        eprintln!(
+                            "warning: package.json at {} malformed (not valid JSON object); \
+                             declared deps unknown",
+                            pkg_path.display(),
+                        );
+                        self.record_failed_manifest(
+                            &probe,
+                            "package.json",
+                            "npm",
+                            "malformed: not a valid JSON object".to_string(),
+                        );
+                        self.pkg_cache.insert(probe.clone(), empty.clone());
+                        self.pkg_cache.insert(dir.clone(), empty.clone());
+                        return empty;
+                    }
+                },
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    eprintln!(
+                        "warning: package.json at {} unreadable ({}); declared deps unknown",
+                        pkg_path.display(),
+                        e
+                    );
+                    self.record_failed_manifest(
+                        &probe,
+                        "package.json",
+                        "npm",
+                        format!("unreadable: {e}"),
+                    );
+                    self.pkg_cache.insert(probe.clone(), empty.clone());
+                    self.pkg_cache.insert(dir.clone(), empty.clone());
+                    return empty;
+                }
             }
 
             if probe.is_empty() {
@@ -126,12 +177,40 @@ impl RepoConfigContext {
                 repo_root.join(&probe)
             };
             let tsconfig_path = abs_dir.join("tsconfig.json");
-            if tsconfig_path.exists() {
-                let aliases = read_tsconfig_aliases_from_path(&tsconfig_path)
-                    .unwrap_or_else(|| empty.clone());
-                self.tsconfig_cache.insert(probe.clone(), aliases.clone());
-                self.tsconfig_cache.insert(dir.clone(), aliases.clone());
-                return aliases;
+            // STANDING HONESTY RULE sweep (ruling 3 item 6): gate on the READ, not `.exists()`.
+            // Aliases steer import RESOLUTION (which feeds classification), so a present-but-
+            // unreadable tsconfig must not silently become "no aliases" (which would misresolve
+            // aliased imports as external). NotFound → keep walking; any other error → warn + empty.
+            match std::fs::read_to_string(&tsconfig_path) {
+                Ok(_) => {
+                    // Present + readable — parse (the reader re-reads and also follows `extends`).
+                    // A readable-but-UNPARSEABLE tsconfig is not "no aliases": say so (review-6 #3
+                    // — the same silent-default class as the unreadable branch below).
+                    let aliases = match read_tsconfig_aliases_from_path(&tsconfig_path) {
+                        Some(a) => a,
+                        None => {
+                            eprintln!(
+                                "warning: tsconfig.json at {} did not parse; import aliases unknown",
+                                tsconfig_path.display()
+                            );
+                            empty.clone()
+                        }
+                    };
+                    self.tsconfig_cache.insert(probe.clone(), aliases.clone());
+                    self.tsconfig_cache.insert(dir.clone(), aliases.clone());
+                    return aliases;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    eprintln!(
+                        "warning: tsconfig.json at {} unreadable ({}); import aliases unknown",
+                        tsconfig_path.display(),
+                        e
+                    );
+                    self.tsconfig_cache.insert(probe.clone(), empty.clone());
+                    self.tsconfig_cache.insert(dir.clone(), empty.clone());
+                    return empty;
+                }
             }
 
             if probe.is_empty() {
@@ -169,14 +248,36 @@ impl RepoConfigContext {
                 repo_root.join(&probe)
             };
             let cargo_path = abs_dir.join("Cargo.toml");
-            if cargo_path.exists() {
-                let deps = std::fs::read_to_string(&cargo_path)
-                    .ok()
-                    .and_then(|content| extract_cargo_dependencies(&content))
-                    .unwrap_or_else(|| empty.clone());
-                self.cargo_cache.insert(probe.clone(), deps.clone());
-                self.cargo_cache.insert(dir.clone(), deps.clone());
-                return deps;
+            // STANDING HONESTY RULE (sweep): gate on the READ (NotFound → keep walking; any other
+            // error → present-but-unreadable, so stop+warn+empty-with-reason+record), not `.exists()`
+            // + `.ok()` which silently coerces an unreadable manifest into a clean measured-empty.
+            match std::fs::read_to_string(&cargo_path) {
+                Ok(content) => {
+                    let deps =
+                        extract_cargo_dependencies(&content).unwrap_or_else(|| empty.clone());
+                    self.record_parsed_manifest(&probe, "Cargo.toml", "cargo");
+                    self.cargo_cache.insert(probe.clone(), deps.clone());
+                    self.cargo_cache.insert(dir.clone(), deps.clone());
+                    return deps;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    eprintln!(
+                        "warning: Cargo.toml at {} unreadable ({}); declared deps unknown",
+                        cargo_path.display(),
+                        e
+                    );
+                    // review-4 item 1: PRESENT but unreadable → FAILED record, not parsed zero-dep.
+                    self.record_failed_manifest(
+                        &probe,
+                        "Cargo.toml",
+                        "cargo",
+                        format!("unreadable: {e}"),
+                    );
+                    self.cargo_cache.insert(probe.clone(), empty.clone());
+                    self.cargo_cache.insert(dir.clone(), empty.clone());
+                    return empty;
+                }
             }
 
             if probe.is_empty() {
@@ -189,75 +290,23 @@ impl RepoConfigContext {
         empty
     }
 
-    /// Resolve Gradle-declared dependencies for a Java file.
-    /// Walks from the file's directory upward to repo root, stopping at the
-    /// nearest owning Gradle build script (`build.gradle` Groovy DSL, or
-    /// `build.gradle.kts` Kotlin DSL). Returns the declared dependency group
-    /// ids (see [`extract_gradle_dependencies`] for the coordinate→name rule).
-    ///
-    /// Same lookup contract as [`Self::resolve_cargo_deps`] /
-    /// [`Self::resolve_package_deps`]: first build script found wins; a broken
-    /// or dependency-less leaf script does NOT inherit parent deps. This mirrors
-    /// the cargo/npm nearest-manifest rule, so a Gradle subproject resolves to
-    /// its own `build.gradle` and does not merge the root's
-    /// `subprojects {}`/`allprojects {}` blocks — the same limitation the base
-    /// cargo reader has for workspace-inherited deps (see the module note).
-    pub fn resolve_gradle_deps(
-        &mut self,
-        file_rel_path: &str,
-        repo_root: &Path,
-    ) -> PackageDependencySet {
-        let empty = PackageDependencySet { names: vec![] };
-        let dir = parent_dir(file_rel_path);
+    // `resolve_gradle_deps` (Java) and `resolve_pyproject_deps` (Python, DEPS-LIST-REWRITE-1 §2.2),
+    // plus the `record_parsed_manifest` / `record_failed_manifest` provenance recorders, live in the
+    // crate-private `manifest_deps` module (an `impl RepoConfigContext` block there) so this slice
+    // does NOT grow config.rs — the operator's binding guardrail. Same struct, same fields; call
+    // sites in the npm/cargo readers above are unchanged (methods resolve across the split impl).
 
-        let mut probe = dir.clone();
-        loop {
-            if let Some(cached) = self.gradle_cache.get(&probe) {
-                let result = cached.clone();
-                self.gradle_cache.insert(dir.clone(), result.clone());
-                return result;
-            }
-
-            let abs_dir = if probe.is_empty() {
-                repo_root.to_path_buf()
-            } else {
-                repo_root.join(&probe)
-            };
-            // Prefer the Groovy DSL (`build.gradle`); fall back to the Kotlin
-            // DSL (`build.gradle.kts`) in the same directory. Either one marks
-            // this directory as the owning manifest (walk stops here).
-            let groovy = abs_dir.join("build.gradle");
-            let kotlin = abs_dir.join("build.gradle.kts");
-            let manifest = if groovy.exists() {
-                Some(groovy)
-            } else if kotlin.exists() {
-                Some(kotlin)
-            } else {
-                None
-            };
-            if let Some(manifest_path) = manifest {
-                let deps = std::fs::read_to_string(&manifest_path)
-                    .ok()
-                    .and_then(|content| extract_gradle_dependencies(&content))
-                    .unwrap_or_else(|| empty.clone());
-                self.gradle_cache.insert(probe.clone(), deps.clone());
-                self.gradle_cache.insert(dir.clone(), deps.clone());
-                return deps;
-            }
-
-            if probe.is_empty() {
-                break;
-            }
-            probe = parent_dir(&probe);
-        }
-
-        self.gradle_cache.insert(dir, empty.clone());
-        empty
+    /// The manifests this context's deps resolvers encountered (§2.2) — parsed AND present-but-
+    /// failed (review-4 item 1). Consumed by `compose` to serialize into the extraction-diagnostics
+    /// blob before the Ready flip. `pub(crate)` (the element type is crate-private).
+    pub(crate) fn manifest_records(&self) -> &[crate::manifest_deps::ManifestRecord] {
+        self.manifest_provenance.records()
     }
 }
 
-/// Get the parent directory of a repo-relative path.
-fn parent_dir(rel_path: &str) -> String {
+/// Get the parent directory of a repo-relative path. `pub(crate)` so the relocated Gradle/pyproject
+/// readers in `manifest_deps.rs` share the exact same nearest-manifest walk step.
+pub(crate) fn parent_dir(rel_path: &str) -> String {
     match rel_path.rfind('/') {
         Some(pos) => rel_path[..pos].to_string(),
         None => String::new(), // Root directory.
@@ -1523,67 +1572,8 @@ subprojects {
 
     // ── RepoConfigContext for Gradle ─────────────────────────
 
-    /// Nearest owning build script wins; `build.gradle.kts` (Kotlin DSL) is
-    /// resolved as well as `build.gradle` (Groovy).
-    #[test]
-    fn nearest_ancestor_gradle() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-
-        // Root Groovy build script.
-        fs::write(
-            root.join("build.gradle"),
-            "dependencies {\n  implementation 'org.root:dep:1.0'\n}\n",
-        )
-        .unwrap();
-
-        // Nested subproject with a Kotlin DSL build script.
-        fs::create_dir_all(root.join("web/src/main/java/app")).unwrap();
-        fs::write(
-            root.join("web/build.gradle.kts"),
-            "dependencies {\n  implementation(\"org.web:dep:1.0\")\n}\n",
-        )
-        .unwrap();
-
-        let mut ctx = RepoConfigContext::new();
-
-        // File under root → root's Groovy deps.
-        let root_deps = ctx.resolve_gradle_deps("src/main/java/App.java", root);
-        assert_eq!(root_deps.names, vec!["org.root"]);
-
-        // File under web/ → the nearest (Kotlin DSL) build script's deps.
-        let web_deps = ctx.resolve_gradle_deps("web/src/main/java/app/Web.java", root);
-        assert_eq!(web_deps.names, vec!["org.web"]);
-    }
-
-    /// A build script with no resolvable dependencies does NOT inherit the
-    /// parent's deps — the broken-leaf-no-inherit rule shared with cargo/npm.
-    #[test]
-    fn gradle_leaf_without_deps_does_not_inherit_parent() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-
-        fs::write(
-            root.join("build.gradle"),
-            "dependencies {\n  implementation 'org.root:dep:1.0'\n}\n",
-        )
-        .unwrap();
-
-        // Subproject build script that declares only catalog refs (no literal
-        // coordinate) — its own manifest, so it stops the walk with empty deps.
-        fs::create_dir_all(root.join("leaf/src/main/java")).unwrap();
-        fs::write(
-            root.join("leaf/build.gradle"),
-            "dependencies {\n  implementation libs.guava\n}\n",
-        )
-        .unwrap();
-
-        let mut ctx = RepoConfigContext::new();
-        let leaf_deps = ctx.resolve_gradle_deps("leaf/src/main/java/Leaf.java", root);
-        assert!(
-            leaf_deps.names.is_empty(),
-            "leaf build.gradle owns the manifest; must not inherit root's org.root, got {:?}",
-            leaf_deps.names
-        );
-    }
+    // The Gradle + pyproject RESOLVER tests (`nearest_ancestor_gradle`,
+    // `gradle_leaf_without_deps_does_not_inherit_parent`, `resolve_pyproject_nearest_manifest_wins`)
+    // moved with their resolvers to `crate::manifest_deps` (guardrail: config.rs is not grown). The
+    // Gradle/pyproject PARSER tests (`extract_*`) stay here beside the parsers they exercise.
 }

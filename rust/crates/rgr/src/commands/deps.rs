@@ -33,7 +33,7 @@ use crate::daemon_client::DaemonClient;
 pub fn run_deps(args: &[String]) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage:");
-        eprintln!("  rmap deps list [module] [--ecosystem npm|cargo]");
+        eprintln!("  rmap deps list [module] [--ecosystem npm|cargo|python|java] [--json]");
         eprintln!("  rmap deps why <package> [--ecosystem npm|cargo]");
         eprintln!("  rmap deps drift [--ecosystem npm|cargo]");
         eprintln!();
@@ -56,12 +56,14 @@ pub fn run_deps(args: &[String]) -> ExitCode {
 // ── deps list command ─────────────────────────────────────────────
 
 fn run_deps_list(args: &[String]) -> ExitCode {
-    // Parse args: [module] [--ecosystem npm|cargo]
-    let (module_filter, ecosystem) = match parse_deps_list_args(args) {
+    // Parse args: [module] [--ecosystem npm|cargo|python|java] [--json]
+    let (module_filter, ecosystem, json_output) = match parse_deps_list_args(args) {
         Ok(v) => v,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            eprintln!("usage: rmap deps list [module] [--ecosystem npm|cargo]");
+            eprintln!(
+                "usage: rmap deps list [module] [--ecosystem npm|cargo|python|java] [--json]"
+            );
             return ExitCode::from(1);
         }
     };
@@ -97,7 +99,8 @@ fn run_deps_list(args: &[String]) -> ExitCode {
     if let Some(module) = module_filter {
         params["module"] = serde_json::json!(module);
     }
-    if ecosystem != "npm" {
+    // Empty ecosystem = auto-detect by dominant language (§2.2); send only an explicit override.
+    if !ecosystem.is_empty() {
         params["ecosystem"] = serde_json::json!(ecosystem);
     }
 
@@ -114,14 +117,30 @@ fn run_deps_list(args: &[String]) -> ExitCode {
                 }
             }
 
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
+            // §2.5: default is the ≤20-line human table; `--json` prints the daemon payload verbatim.
+            if json_output {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
+            } else {
+                match serde_json::from_value::<crate::presentation::deps_list::DepsListResponse>(
+                    result,
+                ) {
+                    Ok(parsed) => {
+                        print!("{}", parsed.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to render result: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
             }
         }
@@ -287,25 +306,32 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
 
 // ── Argument parsing helpers ──────────────────────────────────────
 
-fn parse_deps_list_args(args: &[String]) -> Result<(Option<String>, String), String> {
+fn parse_deps_list_args(args: &[String]) -> Result<(Option<String>, String, bool), String> {
+    // ecosystem: empty string means "let the daemon auto-detect by dominant language" (§2.2);
+    // an explicit `--ecosystem` overrides that. Default is auto-detect, NOT the old hardcoded npm.
     let mut module_filter = None;
-    let mut ecosystem = "npm".to_string();
+    let mut ecosystem = String::new();
+    let mut json_output = false;
     let mut i = 0;
 
     while i < args.len() {
         match args[i].as_str() {
             "--ecosystem" => {
                 if i + 1 >= args.len() {
-                    return Err("--ecosystem requires a value (npm or cargo)".to_string());
+                    return Err("--ecosystem requires a value (npm|cargo|python|java)".to_string());
                 }
                 ecosystem = args[i + 1].clone();
-                if ecosystem != "npm" && ecosystem != "cargo" {
+                if !matches!(ecosystem.as_str(), "npm" | "cargo" | "python" | "java") {
                     return Err(format!(
-                        "invalid ecosystem: {} (expected npm or cargo)",
+                        "invalid ecosystem: {} (expected npm, cargo, python, or java)",
                         ecosystem
                     ));
                 }
                 i += 2;
+            }
+            "--json" => {
+                json_output = true;
+                i += 1;
             }
             "--format" => {
                 if i + 1 >= args.len() {
@@ -318,7 +344,7 @@ fn parse_deps_list_args(args: &[String]) -> Result<(Option<String>, String), Str
                         format
                     ));
                 }
-                // JSON is the default and only format, so this is a no-op
+                json_output = true;
                 i += 2;
             }
             other if other.starts_with("--") => {
@@ -336,7 +362,7 @@ fn parse_deps_list_args(args: &[String]) -> Result<(Option<String>, String), Str
         }
     }
 
-    Ok((module_filter, ecosystem))
+    Ok((module_filter, ecosystem, json_output))
 }
 
 fn parse_deps_why_args(args: &[String]) -> Result<(Option<String>, String), String> {

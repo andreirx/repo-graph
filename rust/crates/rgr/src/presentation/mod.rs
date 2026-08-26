@@ -36,6 +36,7 @@
 
 pub mod check;
 pub mod cycles;
+pub mod deps_list;
 pub mod explain;
 pub mod explain_sections;
 pub mod graph_edges;

@@ -6213,8 +6213,7 @@ impl ServiceDispatcher {
     /// Request: `{"method": "deps_list", "params": {"repo": "<path_or_alias>", "module": "<optional>", "ecosystem": "<optional: npm|cargo>"}}`
     fn handle_deps_list(&self, request: &Request) -> DispatchResult {
         use repo_graph_module_queries::{
-            cargo_runtime_builtins, compose_dependency_summaries, npm_runtime_builtins,
-            ComposeDependenciesInput, DependencyCategory,
+            compose_dependency_summaries, deps_runtime_builtins, ComposeDependenciesInput,
         };
 
         // REG-1: resolve repo from path/alias and auto-load
@@ -6260,31 +6259,55 @@ impl ServiceDispatcher {
             }
         };
 
-        // HONEST-DEGRADATION-IMPL-2 (D2): the repo's extracted languages (the SAME `compute_repo_summary`
-        // `orient`/`stats` consume) drive ecosystem detection. Reused below for the reader-context note.
-        let repo_languages = repo_graph_agent::AgentStorageRead::compute_repo_summary(
+        // DEPS-LIST-REWRITE-1 (§2.2): ecosystem is selected by the DOMINANT indexed language
+        // (files-table plurality), not "any TS/JS file present". Per the STANDING HONESTY RULE the
+        // fallible language-count read that DRIVES classification is surfaced as an error, never
+        // silently defaulted to a wrong ecosystem.
+        // Read via the `AgentStorageRead` port (operator ruling 2) — not a new public inherent
+        // storage API. A read failure is surfaced, never silently defaulted to a wrong ecosystem.
+        let language_counts = match repo_graph_agent::AgentStorageRead::query_file_count_by_language(
             &storage,
             &snapshot.snapshot_uid,
-        )
-        .map(|s| s.languages)
-        .unwrap_or_default();
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        let repo_languages: Vec<String> = language_counts.iter().map(|(l, _)| l.clone()).collect();
         let ecosystem = match ecosystem_param {
             Some(e) => e,
-            None => detect_deps_ecosystem(&repo_languages).to_string(),
+            None => dominant_deps_ecosystem(&language_counts).to_string(),
         };
 
-        // Select runtime builtins based on ecosystem. `none-detected` (no manifest reader for this
-        // language) has none — the compose then attributes nothing, leaving the honest empty result.
-        let runtime_builtins = match ecosystem.as_str() {
-            "cargo" => cargo_runtime_builtins(),
-            "npm" => npm_runtime_builtins(),
-            _ => std::collections::HashSet::new(),
-        };
+        // Runtime-builtin vocabulary for the ecosystem (§2.1): globals/stdlib classify as builtins,
+        // never packages. `none-detected` / unknown → empty set (shape-only rejection).
+        let runtime_builtins = deps_runtime_builtins(&ecosystem);
+
+        // §2.2 manifest provenance (operator rulings 2026-08-26 + ruling 3 item 2): the
+        // parsed-manifest records persisted at index time, as a quad-state that keeps the "no exact
+        // file" causes distinct (predates tracking vs. read failure vs. corruption) — never one
+        // collapsed label and never a fabricated path.
+        let manifest_provenance =
+            crate::deps_headline::read_manifest_provenance(&storage, &snapshot.snapshot_uid);
+        // Workspace-coverage denominator (ruling 3 item 4; review-3 item 2): how many manifests of
+        // this ecosystem are PRESENT (scanned) — read from the SEPARATE `deps_manifests_present`
+        // key, NOT the parsed record, so unparsed workspace manifests count toward the denominator
+        // without being laundered into the parsed provenance. `None` = unknown → coverage omitted.
+        let manifests_present = crate::deps_headline::read_manifests_present(
+            &storage,
+            &snapshot.snapshot_uid,
+            &ecosystem,
+        );
 
         let input = ComposeDependenciesInput {
             snapshot_uid: &snapshot.snapshot_uid,
             runtime_builtins,
             ecosystem: ecosystem.clone(),
+            manifest_provenance,
         };
 
         let result = match compose_dependency_summaries(&storage, &input) {
@@ -6297,95 +6320,63 @@ impl ServiceDispatcher {
             }
         };
 
-        // Helper to format category
-        fn format_category(cat: DependencyCategory) -> &'static str {
-            match cat {
-                DependencyCategory::DeclaredAndUsed => "declared_and_used",
-                DependencyCategory::DeclaredButUnobserved => "declared_but_unobserved",
-                DependencyCategory::ObservedButUndeclared => "observed_but_undeclared",
-                DependencyCategory::RuntimeBuiltin => "runtime_builtin",
-                DependencyCategory::UnknownExternalLike => "unknown_external_like",
-            }
-        }
+        // §2.3 unattributed headline — pure helper over the WHOLE repo (before any module filter),
+        // so a per-module view never hides repo-level unattributed imports (glamCRM's false `0`).
+        let unattributed =
+            crate::deps_headline::compute_unattributed(&result, &ecosystem, &repo_languages);
+        let total_rejected = crate::deps_headline::total_rejected(&result);
 
-        // Filter to specific module if requested
-        let summaries: Vec<_> = if let Some(filter) = module_filter {
-            result
-                .summaries
-                .into_iter()
-                .filter(|s| {
-                    s.module == filter
-                        || s.module.ends_with(&format!("/{}", filter))
-                        || s.module.starts_with(&format!("{}/", filter))
-                })
-                .collect()
-        } else {
-            result.summaries
+        // §2.4 resolution-state honesty (operator ruling 2, 2026-08-26 — Option B): reuse the SAME
+        // query-time trust overlay `orient`/`trust` already assemble
+        // (`compute_trust_overlay_for_snapshot`) — one shared function, two callers, no persistence,
+        // no new machinery, computed once here. `alias_resolution_suspicion` is the downgrade the
+        // audit named for FRAKTAG's `@fraktag/engine` (a workspace/alias import restated as
+        // certainty); there is no separate persisted "workspace-package-as-library" flag, this one
+        // covers that case. When active, a `declared_but_unobserved` row may be an UNRESOLVED import
+        // rather than a truly-unused dep, so it renders "declared — imports not resolved on this
+        // index" with capped confidence (below), never restated 1.0 certainty. Basis "IMPORTS" — deps
+        // is an import-graph surface (matches the trust-overlay basis the import surfaces use).
+        // Ruling 3 item 1 / review-5 item 3: the trust-overlay read is fallible; a failure is
+        // UNKNOWN-with-the-ACTUAL-reason, NOT `unwrap_or(false)` (silent certainty — the audit's
+        // false-1.0 case) and NOT a generic "could not be assembled" string that hides the cause.
+        // `try_trust_overlay_for_snapshot` is the same single assembly path as
+        // `compute_trust_overlay_for_snapshot` (which delegates to it) — it just preserves the
+        // underlying error instead of collapsing it to `None`.
+        let resolution = match crate::util::trust::try_trust_overlay_for_snapshot(
+            &storage, &repo_uid, &snapshot, "IMPORTS",
+        ) {
+            Ok(o) => {
+                if o.degradation_flags
+                    .iter()
+                    .any(|f| f == "alias_resolution_suspicion")
+                {
+                    crate::deps_headline::ResolutionState::Downgraded
+                } else {
+                    crate::deps_headline::ResolutionState::Clean
+                }
+            }
+            Err(e) => crate::deps_headline::ResolutionState::Unknown {
+                reason: format!("overlay read failed: {e}"),
+            },
         };
 
-        // Build JSON output
-        let results: Vec<serde_json::Value> = summaries
-            .iter()
-            .map(|s| {
-                let entries: Vec<serde_json::Value> = s
-                    .entries
-                    .iter()
-                    .map(|e| {
-                        serde_json::json!({
-                            "package": e.package,
-                            "category": format_category(e.category),
-                            "import_count": e.import_count,
-                            "confidence": e.confidence,
-                        })
-                    })
-                    .collect();
-
-                serde_json::json!({
-                    "module": s.module,
-                    "manifest_path": s.manifest_path,
-                    "manifest_scope_available": s.manifest_scope_available,
-                    "declared_and_used": s.declared_and_used_count(),
-                    "declared_but_unobserved": s.declared_but_unobserved_count(),
-                    "observed_but_undeclared": s.observed_but_undeclared_count(),
-                    "runtime_builtins": s.runtime_builtins_count(),
-                    "entries": entries,
-                })
-            })
-            .collect();
-
-        let count = results.len();
-
-        let mut response = serde_json::json!({
-            "command": "deps list",
-            "repo": repo_uid,
-            "snapshot": snapshot.snapshot_uid,
-            "results": results,
-            "count": count,
-            "ecosystem": ecosystem,
-            "total_external_imports": result.total_external_imports,
-            "modules_without_manifest_context": result.modules_without_manifest_context.len(),
-        });
-
-        // HONEST-DEGRADATION-IMPL-2 (D2): when no dependency-manifest reader exists for this language,
-        // pair the honest `none-detected` ecosystem with a reader-context note over the EXISTING external
-        // -import count (no resolver ran — attribution numbers unchanged). Absent for npm/cargo repos.
-        if ecosystem == "none-detected" {
-            if let serde_json::Value::Object(ref mut map) = response {
-                map.insert(
-                    "reader_context".to_string(),
-                    serde_json::json!(deps_reader_context_note(
-                        &repo_languages,
-                        result.total_external_imports,
-                    )),
-                );
-            }
-        }
-
-        if let Some(m) = module_filter {
-            if let serde_json::Value::Object(ref mut map) = response {
-                map.insert("module_filter".to_string(), serde_json::json!(m));
-            }
-        }
+        // §2.2/§2.3/§2.4/§2.5: assemble the full JSON payload (module filter, per-entry downgrade
+        // labels + capped confidence, exact `manifest_path` or unknown-with-reason, headline-first
+        // envelope, reader-context note). Extracted to the crate-private `deps_headline` module so
+        // this dispatch arm stays wiring, not a 140-line JSON builder (guardrail: dispatch.rs is not
+        // grown by this slice).
+        let response = crate::deps_headline::build_deps_list_response(
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            &ecosystem,
+            &repo_languages,
+            result,
+            module_filter,
+            &resolution,
+            &unattributed,
+            total_rejected,
+            manifests_present,
+        );
 
         DispatchResult::success(&request.id, response)
     }
@@ -6395,9 +6386,9 @@ impl ServiceDispatcher {
     /// Request: `{"method": "deps_why", "params": {"repo": "<path_or_alias>", "package": "<name>", "ecosystem": "<optional: npm|cargo>"}}`
     fn handle_deps_why(&self, request: &Request) -> DispatchResult {
         use repo_graph_module_queries::{
-            build_identifier_resolution_map, cargo_runtime_builtins, compose_dependency_summaries,
-            normalize_cargo_specifier, normalize_npm_specifier, npm_runtime_builtins,
-            resolve_import_specifier, ComposeDependenciesInput, DependencyCategory,
+            build_identifier_resolution_map, compose_dependency_summaries, deps_runtime_builtins,
+            normalize_cargo_specifier, normalize_npm_specifier, resolve_import_specifier,
+            ComposeDependenciesInput, DependencyCategory,
         };
         use std::collections::HashMap;
 
@@ -6521,15 +6512,19 @@ impl ServiceDispatcher {
             };
         let identifier_to_specifier = build_identifier_resolution_map(&import_bindings);
 
-        // Get reconciliation summaries to check if package is declared
-        let runtime_builtins = match ecosystem.as_str() {
-            "cargo" => cargo_runtime_builtins(),
-            _ => npm_runtime_builtins(),
-        };
+        // Per-ecosystem builtin set (all four ecosystems — a bare cargo/npm match
+        // here previously classified python/java against npm builtins).
+        let runtime_builtins = deps_runtime_builtins(&ecosystem);
         let compose_input = ComposeDependenciesInput {
             snapshot_uid: &snapshot.snapshot_uid,
             runtime_builtins,
             ecosystem: ecosystem.clone(),
+            // `deps why` reports declared/observed status, not the manifest file; still read the
+            // real provenance (never a fabricated `Absent`) so the shared assembly stays consistent.
+            manifest_provenance: crate::deps_headline::read_manifest_provenance(
+                &storage,
+                &snapshot.snapshot_uid,
+            ),
         };
         let reconciled = match compose_dependency_summaries(&storage, &compose_input) {
             Ok(r) => r,
@@ -6649,8 +6644,8 @@ impl ServiceDispatcher {
     /// Request: `{"method": "deps_drift", "params": {"repo": "<path_or_alias>", "ecosystem": "<optional: npm|cargo>"}}`
     fn handle_deps_drift(&self, request: &Request) -> DispatchResult {
         use repo_graph_module_queries::{
-            cargo_runtime_builtins, compose_dependency_summaries, npm_runtime_builtins,
-            ComposeDependenciesInput, DependencyCategory,
+            compose_dependency_summaries, deps_runtime_builtins, ComposeDependenciesInput,
+            DependencyCategory,
         };
 
         // REG-1: resolve repo from path/alias and auto-load
@@ -6692,16 +6687,19 @@ impl ServiceDispatcher {
             }
         };
 
-        // Select runtime builtins based on ecosystem
-        let runtime_builtins = match ecosystem.as_str() {
-            "cargo" => cargo_runtime_builtins(),
-            _ => npm_runtime_builtins(),
-        };
+        // Per-ecosystem builtin set (all four ecosystems; see the sibling arm).
+        let runtime_builtins = deps_runtime_builtins(&ecosystem);
 
         let input = ComposeDependenciesInput {
             snapshot_uid: &snapshot.snapshot_uid,
             runtime_builtins,
             ecosystem: ecosystem.clone(),
+            // `deps drift` reports usage anomalies, not manifest files; still read the real
+            // provenance (never a fabricated `Absent`) so the shared assembly stays consistent.
+            manifest_provenance: crate::deps_headline::read_manifest_provenance(
+                &storage,
+                &snapshot.snapshot_uid,
+            ),
         };
 
         let result = match compose_dependency_summaries(&storage, &input) {
@@ -6759,7 +6757,6 @@ impl ServiceDispatcher {
             "snapshot": snapshot.snapshot_uid,
             "ecosystem": ecosystem,
             "modules_analyzed": result.summaries.len(),
-            "modules_without_manifest_context": result.modules_without_manifest_context.len(),
             "results": drift_entries,
             "count": count,
         });
@@ -9245,14 +9242,14 @@ pub(crate) fn configured_resolver_languages_from_env() -> Vec<EnrichmentLanguage
     configured_resolver_languages(std::env::var("JDTLS_PATH").ok().as_deref())
 }
 
-// HONEST-DEGRADATION-IMPL-2-REFACTOR: the pure reader-context label helpers (D2 ecosystem + note, D5
+// HONEST-DEGRADATION-IMPL-2-REFACTOR: the pure reader-context label helpers (D2 ecosystem, D5
 // next-action line) and their unit tests moved to `reader_context.rs` — behavior unchanged. Re-exported
-// `pub(crate)` so this module's call sites (`detect_deps_ecosystem`, `deps_reader_context_note`,
-// `relationship_next_action_line`) AND `orient_coherence`'s `crate::dispatch::relationship_reliability_is_low`
-// / `…::relationship_next_action_line` resolve exactly as before (a compile-time path alias only).
+// `pub(crate)` so this module's call sites (`dominant_deps_ecosystem`, `relationship_next_action_line`)
+// AND `orient_coherence`'s `crate::dispatch::relationship_reliability_is_low` /
+// `…::relationship_next_action_line` resolve exactly as before (a compile-time path alias only).
+// (`deps_reader_context_note` is consumed directly by `deps_headline`, not re-exported here.)
 pub(crate) use crate::reader_context::{
-    deps_reader_context_note, detect_deps_ecosystem, relationship_next_action_line,
-    relationship_reliability_is_low,
+    dominant_deps_ecosystem, relationship_next_action_line, relationship_reliability_is_low,
 };
 
 #[cfg(test)]

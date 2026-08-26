@@ -144,6 +144,16 @@ impl AgentStorageRead for StorageConnection {
             .collect())
     }
 
+    fn query_file_count_by_language(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<(String, u64)>, AgentStorageError> {
+        // Delegates to the crate-private inherent read (DEPS-LIST-REWRITE-1 §2.2). Kept behind the
+        // storage read port (operator ruling 2, 2026-08-26) rather than as a new public inherent API.
+        <StorageConnection>::query_file_count_by_language(self, snapshot_uid)
+            .map_err(map_err("query_file_count_by_language"))
+    }
+
     fn find_module_cycles(&self, snapshot_uid: &str) -> Result<Vec<AgentCycle>, AgentStorageError> {
         // Storage's `find_cycles` takes a level param; we always
         // use the module level at the agent boundary.

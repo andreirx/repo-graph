@@ -470,6 +470,20 @@ pub struct PreparedRepoInputs {
     /// Inferred module detection results (rust-module-parity Phase 3).
     /// Only populated if no declared modules exist for the repo.
     pub inferred_modules: InferredExtractionResult,
+    /// Manifests the deps resolvers ENCOUNTERED (DEPS-LIST-REWRITE-1 §2.2; operator ruling
+    /// 2026-08-26) — parsed (`error == None`) AND present-but-unreadable/malformed
+    /// (`error == Some(reason)`, review-4 item 1). Serialized into the extraction-diagnostics blob
+    /// (the `deps_manifests` key) before the Ready flip so query time renders the exact
+    /// `manifest_path` per module, or the failure reason. `pub(crate)`: the element type is
+    /// crate-private (`manifest_deps` is `pub(crate)`), and only `index_options_diagnostic` consumes it.
+    pub(crate) manifest_records: Vec<crate::manifest_deps::ManifestRecord>,
+    /// Count of manifests PRESENT (scanned on disk) per ecosystem — the workspace-coverage
+    /// DENOMINATOR (§2.2/ruling-3 item 4), kept STRICTLY SEPARATE from `manifest_records` so a
+    /// scanned-but-never-dep-parsed manifest (a workspace `package.json` governing no indexed
+    /// source — the amodx 9-of-43 gap) is NEVER laundered into the parsed-provenance record
+    /// (review-3 item 2). Query time reports `attributed of present`; present > attributed is the
+    /// honest REPORTED SHORTFALL. `pub(crate)`: only `index_options_diagnostic` serializes it.
+    pub(crate) manifests_present: std::collections::BTreeMap<String, usize>,
 }
 
 /// Scan the repo, resolve config per file, assemble typed FileInput.
@@ -578,8 +592,15 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                         let gradle_deps = config_ctx.resolve_gradle_deps(&ok.rel_path, repo_path);
                         (gradle_deps, empty_tsconfig)
                     }
+                    Some("python") => {
+                        // Python: pyproject.toml `[project].dependencies` /
+                        // `[tool.poetry.dependencies]` (DEPS-LIST-REWRITE-1 §2.2). requirements*.txt
+                        // / setup.py are named extension points, not read; tsconfig N/A.
+                        let py_deps = config_ctx.resolve_pyproject_deps(&ok.rel_path, repo_path);
+                        (py_deps, empty_tsconfig)
+                    }
                     _ => {
-                        // C, C++, Python, unknown: no manifest reader implemented yet.
+                        // C, C++, unknown: no manifest reader implemented yet.
                         // Return empty rather than inheriting a nearby package.json.
                         (empty_deps, empty_tsconfig)
                     }
@@ -642,6 +663,25 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
         detect_inferred_modules_gap_fill(&file_inputs, &declared_roots, repo_path)
     };
 
+    // §2.2 provenance: snapshot the manifests the deps resolvers ENCOUNTERED — parsed (dep-read,
+    // including a parsed zero-dependency manifest) AND present-but-unreadable/malformed (recorded
+    // with a failure reason, review-4 item 1). A scanned-but-never-opened manifest is NOT put in
+    // this set (review-3 item 2 — the record must never assert a parse that did not happen); the
+    // separate `manifests_present` denominator counts those.
+    let manifest_records = config_ctx.manifest_records().to_vec();
+
+    // §2.2/ruling-3 item 4: the workspace-coverage DENOMINATOR, computed SEPARATELY as the count of
+    // manifests present on disk per ecosystem. This is the honest denominator behind "N of M
+    // manifests attributed" — the amodx 9-of-43 REPORTED SHORTFALL — WITHOUT laundering the
+    // unattributed (M − N) manifests into the parsed-provenance record. Gradle (Java) has no global
+    // scan map, so no Java denominator is emitted (query time then omits the coverage line for Java,
+    // honest: unknown denominator, never a fabricated count).
+    let mut manifests_present: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    manifests_present.insert("npm".to_string(), package_json_files.len());
+    manifests_present.insert("python".to_string(), pyproject_toml_files.len());
+    manifests_present.insert("cargo".to_string(), cargo_toml_files.len());
+
     Ok(PreparedRepoInputs {
         file_inputs,
         read_failed_paths,
@@ -652,6 +692,8 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
         pyproject_modules,
         gradle_modules,
         inferred_modules,
+        manifest_records,
+        manifests_present,
     })
 }
 
@@ -1690,6 +1732,55 @@ fn basis_outcome_diagnostic(
     let value = serde_json::to_value(outcome)
         .map_err(|e| ComposeError::Index(format!("serialize index-basis outcome: {e}")))?;
     Ok(Some(serde_json::json!({ INDEX_BASIS_DIAG_KEY: value })))
+}
+
+/// Additive key under which the parsed-manifest provenance rides the SAME pre-Ready diagnostics
+/// blob as [`INDEX_BASIS_DIAG_KEY`] (DEPS-LIST-REWRITE-1 §2.2; operator ruling 2026-08-26). The
+/// orchestrator's finalize merge is key-agnostic (it copies every entry of `IndexOptions.
+/// basis_diagnostic` into the blob), so this key flows through with NO orchestrator change.
+/// PRESENT (even as `[]`) at query time ⇒ provenance was tracked → exact per-module `manifest_path`;
+/// ABSENT (a snapshot indexed before this slice) ⇒ `manifest_context: unavailable (indexed before
+/// provenance tracking)`.
+pub(crate) const DEPS_MANIFESTS_DIAG_KEY: &str = "deps_manifests";
+
+/// Diagnostics-blob key for the PRESENT-manifest denominator (`{ecosystem: count}`) — the honest
+/// workspace-coverage denominator (§2.2/ruling-3 item 4), separate from the parsed record so a
+/// scanned-but-unparsed manifest is never counted as parsed (review-3 item 2). ABSENT ⇒ predates
+/// this signal (denominator unknown → coverage line omitted, never a fabricated count).
+pub(crate) const DEPS_MANIFESTS_PRESENT_DIAG_KEY: &str = "deps_manifests_present";
+
+/// Build the combined pre-Ready diagnostics fragment for `IndexOptions.basis_diagnostic`:
+/// the index-basis outcome (if any) PLUS the parsed-manifest provenance (§2.2). Returns `None`
+/// only when BOTH are empty, so a normal index with no manifests and a read git HEAD keeps its
+/// diagnostics blob byte-for-byte unchanged. FALLIBLE — a serialize error propagates (§2.2
+/// provenance kept honest, never silently dropped).
+fn index_options_diagnostic(
+    outcome: Option<&BasisOutcome>,
+    manifest_records: &[crate::manifest_deps::ManifestRecord],
+    manifests_present: &std::collections::BTreeMap<String, usize>,
+) -> Result<Option<serde_json::Value>, ComposeError> {
+    let mut obj = serde_json::Map::new();
+    if let Some(basis) = basis_outcome_diagnostic(outcome)? {
+        if let Some(basis_obj) = basis.as_object() {
+            for (k, v) in basis_obj {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    // Record provenance whenever the deps resolvers ran (even zero manifests: an empty list is a
+    // POSITIVE "tracked, none parsed" signal distinct from a pre-slice absent key).
+    let manifests = serde_json::to_value(manifest_records)
+        .map_err(|e| ComposeError::Index(format!("serialize deps-manifest provenance: {e}")))?;
+    obj.insert(DEPS_MANIFESTS_DIAG_KEY.to_string(), manifests);
+
+    // §2.2/ruling-3 item 4: the present-manifest DENOMINATOR, a sibling key kept SEPARATE from the
+    // parsed record so the shortfall can be reported without laundering unparsed manifests into
+    // `deps_manifests` (review-3 item 2). Additive; rides the same pre-Ready merge.
+    let present = serde_json::to_value(manifests_present)
+        .map_err(|e| ComposeError::Index(format!("serialize deps-manifest present counts: {e}")))?;
+    obj.insert(DEPS_MANIFESTS_PRESENT_DIAG_KEY.to_string(), present);
+
+    Ok(Some(serde_json::Value::Object(obj)))
 }
 
 /// Record that `count` files were skipped by a postpass because their AST
@@ -3236,11 +3327,15 @@ pub fn index_into_storage_with_progress(
 
         let mut idx_options = IndexOptions {
             basis_commit: options.basis_commit.clone(),
-            // INDEX-BASIS-1 (RULING 4): forward the write-time basis OUTCOME as a raw JSON
-            // fragment so the orchestrator persists it in the SAME finalize blob it writes
-            // before flipping the snapshot READY — crash-safe, replacing the old
-            // post-compose (post-READY) `record_basis_outcome` postpass.
-            basis_diagnostic: basis_outcome_diagnostic(options.basis_outcome.as_ref())?,
+            // INDEX-BASIS-1 (RULING 4) + DEPS-LIST-REWRITE-1 §2.2: forward the write-time basis
+            // OUTCOME *and* the parsed-manifest provenance as one raw JSON fragment so the
+            // orchestrator persists both in the SAME finalize blob it writes before flipping the
+            // snapshot READY — crash-safe, replacing the old post-compose postpass.
+            basis_diagnostic: index_options_diagnostic(
+                options.basis_outcome.as_ref(),
+                &prepared.manifest_records,
+                &prepared.manifests_present,
+            )?,
             edge_batch_size: options.edge_batch_size,
             c_include_roots: options.c_include_roots.clone(),
             on_progress: Some(&mut indexer_progress_callback),
@@ -3659,10 +3754,14 @@ pub fn refresh_into_storage_with_progress(
 
     let mut idx_options = IndexOptions {
         basis_commit: options.basis_commit.clone(),
-        // INDEX-BASIS-1 (RULING 4): symmetric with the index path — forward the
-        // refresh-start basis OUTCOME so the orchestrator persists it crash-safely at
-        // finalize (before READY), replacing the old post-compose postpass.
-        basis_diagnostic: basis_outcome_diagnostic(options.basis_outcome.as_ref())?,
+        // INDEX-BASIS-1 (RULING 4) + DEPS-LIST-REWRITE-1 §2.2: symmetric with the index path —
+        // forward the refresh-start basis OUTCOME *and* parsed-manifest provenance so the
+        // orchestrator persists both crash-safely at finalize (before READY).
+        basis_diagnostic: index_options_diagnostic(
+            options.basis_outcome.as_ref(),
+            &prepared.manifest_records,
+            &prepared.manifests_present,
+        )?,
         edge_batch_size: options.edge_batch_size,
         c_include_roots: options.c_include_roots.clone(),
         on_progress: Some(&mut indexer_progress_callback),

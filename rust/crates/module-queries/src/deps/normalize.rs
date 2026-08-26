@@ -88,6 +88,50 @@ pub fn normalize_cargo_specifier(specifier: &str) -> String {
     }
 }
 
+/// Normalize a Python import specifier to its top-level distribution-ish module name.
+///
+/// Python imports are dotted (`asgiref.sync`, `os.path`); the package identity is the first
+/// segment (`asgiref`, `os`). Lower-cased so it lines up with `pyproject` distribution names,
+/// which the reader also lower-cases. This is best-effort: PyPI distribution names and import
+/// module names diverge for some packages (`beautifulsoup4` → `bs4`) — an inherent Python limit,
+/// not fixable at this layer.
+///
+/// `pub(crate)`: the sole caller is `classify.rs` (crate-internal). Unlike the npm/cargo
+/// normalizers (published on the crate's public API with doctests), the python/java normalizers
+/// added by DEPS-LIST-REWRITE-1 have no external consumer, so they stay crate-private.
+pub(crate) fn normalize_python_specifier(specifier: &str) -> String {
+    let head = specifier.split('.').next().unwrap_or(specifier);
+    head.to_ascii_lowercase()
+}
+
+/// Normalize a Java import specifier (a fully-qualified name) to its package path.
+///
+/// A Java import is `pkg.sub.ClassName` (optionally `.member`). Drop the trailing type/member
+/// segments (those whose first char is uppercase — the class and any static member) to recover the
+/// package (`org.springframework.boot.SpringApplication` → `org.springframework.boot`), which is
+/// what Gradle declares as a dependency group id. Keeps `SpringApplication` from being counted as a
+/// package of its own (the petclinic double-count the audit named). A wildcard tail (`.*`) is
+/// dropped too.
+///
+/// `pub(crate)`: sole caller is `classify.rs` (crate-internal), same as `normalize_python_specifier`.
+pub(crate) fn normalize_java_specifier(specifier: &str) -> String {
+    let mut segments: Vec<&str> = specifier.split('.').collect();
+    while let Some(last) = segments.last() {
+        let is_type_or_member = last == &"*"
+            || last
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_uppercase())
+                .unwrap_or(false);
+        if is_type_or_member && segments.len() > 1 {
+            segments.pop();
+        } else {
+            break;
+        }
+    }
+    segments.join(".")
+}
+
 /// Determine if a specifier looks like a relative/local import.
 ///
 /// Returns `true` for:
@@ -173,6 +217,36 @@ mod tests {
         assert_eq!(normalize_cargo_specifier("crate::utils"), "crate::utils");
         assert_eq!(normalize_cargo_specifier("self::helper"), "self::helper");
         assert_eq!(normalize_cargo_specifier("super::parent"), "super::parent");
+    }
+
+    // ── Python normalization ──────────────────────────────────────
+
+    #[test]
+    fn python_top_segment() {
+        assert_eq!(normalize_python_specifier("asgiref.sync"), "asgiref");
+        assert_eq!(normalize_python_specifier("os.path"), "os");
+        assert_eq!(normalize_python_specifier("Django"), "django");
+        assert_eq!(normalize_python_specifier("sqlparse"), "sqlparse");
+    }
+
+    // ── Java normalization ────────────────────────────────────────
+
+    #[test]
+    fn java_drops_type_and_member_tail() {
+        assert_eq!(
+            normalize_java_specifier("org.springframework.boot.SpringApplication"),
+            "org.springframework.boot"
+        );
+        assert_eq!(normalize_java_specifier("java.util.List"), "java.util");
+        assert_eq!(
+            normalize_java_specifier("com.example.pkg"),
+            "com.example.pkg"
+        );
+        assert_eq!(
+            normalize_java_specifier("com.google.common.collect.ImmutableList"),
+            "com.google.common.collect"
+        );
+        assert_eq!(normalize_java_specifier("java.util.*"), "java.util");
     }
 
     // ── Local detection ───────────────────────────────────────────

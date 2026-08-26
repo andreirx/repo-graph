@@ -56,6 +56,11 @@ fn disable_background_maintenance_for_dispatch_tests() {
     // `database is locked` under parallel load). Disable it too; enrichment's lifecycle is proven in
     // `daemon-runtime`'s `enrich_lifecycle`.
     repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+    // EMBED-SEED-IMPL-1: the background embed pass is the THIRD such actor (same class; with a live
+    // local embedding endpoint on the developer's machine it really runs and really embeds). These
+    // tests assert dispatch shape, not seeding — seeding's lifecycle is proven in `seed_seam` /
+    // `seed_pass`. Flaked callers_ambiguous_symbol_returns_structured_error before this line.
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
 }
 
 /// Run a single daemon request with an isolated state.

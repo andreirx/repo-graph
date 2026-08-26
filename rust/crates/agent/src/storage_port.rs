@@ -590,6 +590,24 @@ pub trait AgentStorageRead {
         snapshot_uid: &str,
     ) -> Result<AgentRepoSummary, AgentStorageError>;
 
+    /// Per-language indexed-file counts for a snapshot, sorted count-DESC then language-ASC
+    /// (DEPS-LIST-REWRITE-1 §2.2 — `deps list` selects the dependency-manifest ecosystem by the
+    /// DOMINANT indexed language, which needs counts, not the DISTINCT-language list that
+    /// [`compute_repo_summary`](Self::compute_repo_summary) exposes). Sole current caller: the
+    /// `deps list` dispatch arm. DEFAULT: a loud error — an adapter that has not implemented this
+    /// read must fail honestly, never silently return "no languages" (which would misselect the
+    /// ecosystem). The real storage adapter overrides it.
+    fn query_file_count_by_language(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<(String, u64)>, AgentStorageError> {
+        let _ = snapshot_uid;
+        Err(AgentStorageError::new(
+            "query_file_count_by_language",
+            "not implemented by this storage adapter",
+        ))
+    }
+
     /// Assemble a narrow trust projection for the snapshot.
     ///
     /// Implementation note: the storage adapter is expected to

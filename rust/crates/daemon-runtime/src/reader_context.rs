@@ -66,26 +66,40 @@ fn display_language_names(languages: &[String]) -> String {
     names.join("/")
 }
 
-/// HONEST-DEGRADATION-IMPL-2 (D2): derive the dependency `ecosystem` from the repo's extracted languages
-/// instead of the old hardcoded `"npm"` default. A dependency-manifest reader exists only for npm (the
-/// TypeScript/JavaScript family incl. `tsx`/`jsx` → `package.json`) and Cargo (Rust → `Cargo.toml`); any
-/// other language has none on this build → `"none-detected"`.
+/// Map one indexer language token to the dependency-manifest ecosystem whose reader owns it,
+/// or `None` for a language with no manifest reader on this build (C / C++ / Go / …).
 ///
-/// NOTE: this is a MANIFEST-ecosystem mapping, deliberately INDEPENDENT of [`token_enrichment_language`]'s
-/// resolver mapping — they share the TS/JS token set only by coincidence (a Python *enrichment* resolver,
-/// if added, must not imply a Python *manifest* reader). Keep them separate.
-pub(crate) fn detect_deps_ecosystem(languages: &[String]) -> &'static str {
-    let has_npm = languages
-        .iter()
-        .any(|l| matches!(l.as_str(), "typescript" | "tsx" | "javascript" | "jsx"));
-    let has_cargo = languages.iter().any(|l| l == "rust");
-    if has_npm {
-        "npm"
-    } else if has_cargo {
-        "cargo"
-    } else {
-        "none-detected"
+/// npm = the TypeScript/JavaScript family (`package.json`); cargo = Rust (`Cargo.toml`);
+/// python = `pyproject.toml`; java = Gradle build scripts. This is a MANIFEST-ecosystem
+/// mapping, deliberately INDEPENDENT of [`token_enrichment_language`]'s resolver mapping —
+/// they share token sets only by coincidence (a Python *enrichment* resolver, if added, must
+/// not imply anything about the Python *manifest* reader). Keep them separate.
+fn language_deps_ecosystem(token: &str) -> Option<&'static str> {
+    Some(match token {
+        "typescript" | "tsx" | "javascript" | "jsx" => "npm",
+        "rust" => "cargo",
+        "python" => "python",
+        "java" => "java",
+        _ => return None,
+    })
+}
+
+/// DEPS-LIST-REWRITE-1 (§2.2): select the dependency `ecosystem` by the repo's DOMINANT indexed
+/// language (files-table plurality), superseding the old "any TS/JS file present → npm" rule that
+/// mislabelled Python-plurality django as npm and hoisted a fabricated `package.json` onto Maven
+/// petclinic. `language_counts` MUST arrive sorted by count DESC (as
+/// `query_file_count_by_language` returns). The plurality is taken over real *code* languages only
+/// (those with a [`language_display_name`]) so config-file tokens (json/yaml) never win; the
+/// dominant code language's manifest ecosystem is returned, or `"none-detected"` when the dominant
+/// language has no manifest reader (C / C++ / Go / …) — which is honest, and triggers the
+/// unattributed headline rather than a wrong-ecosystem guess.
+pub(crate) fn dominant_deps_ecosystem(language_counts: &[(String, u64)]) -> &'static str {
+    for (lang, _n) in language_counts {
+        if language_display_name(lang).is_some() {
+            return language_deps_ecosystem(lang).unwrap_or("none-detected");
+        }
     }
+    "none-detected"
 }
 
 /// HONEST-DEGRADATION-IMPL-2 (D2): the reader-context note for a repo with no dependency-manifest reader.
@@ -275,18 +289,45 @@ mod honest_degradation_tests {
         assert_eq!(token_enrichment_language("python"), None);
     }
 
-    // ── D2 ──────────────────────────────────────────────────────
+    // ── §2.2 dominant-language ecosystem selection ──────────────
+    fn counts(pairs: &[(&str, u64)]) -> Vec<(String, u64)> {
+        pairs.iter().map(|(l, n)| (l.to_string(), *n)).collect()
+    }
+
     #[test]
-    fn detect_ecosystem_maps_languages() {
-        assert_eq!(detect_deps_ecosystem(&langs(&["typescript"])), "npm");
-        assert_eq!(detect_deps_ecosystem(&langs(&["javascript"])), "npm");
-        // A pure-React repo must NOT regress to none-detected.
-        assert_eq!(detect_deps_ecosystem(&langs(&["tsx"])), "npm");
-        assert_eq!(detect_deps_ecosystem(&langs(&["jsx"])), "npm");
-        assert_eq!(detect_deps_ecosystem(&langs(&["rust"])), "cargo");
-        assert_eq!(detect_deps_ecosystem(&langs(&["c"])), "none-detected");
-        assert_eq!(detect_deps_ecosystem(&langs(&["java"])), "none-detected");
-        assert_eq!(detect_deps_ecosystem(&[]), "none-detected");
+    fn dominant_ecosystem_picks_plurality_code_language() {
+        // django: python plurality, minor tooling TS/JS → python, NOT npm.
+        assert_eq!(
+            dominant_deps_ecosystem(&counts(&[
+                ("python", 900),
+                ("typescript", 30),
+                ("javascript", 12)
+            ])),
+            "python"
+        );
+        // petclinic: java plurality → java, NOT a fabricated npm/package.json.
+        assert_eq!(
+            dominant_deps_ecosystem(&counts(&[("java", 60), ("javascript", 3)])),
+            "java"
+        );
+        // TS-plurality stays npm; pure-React (tsx) must not regress to none-detected.
+        assert_eq!(
+            dominant_deps_ecosystem(&counts(&[("typescript", 500)])),
+            "npm"
+        );
+        assert_eq!(dominant_deps_ecosystem(&counts(&[("tsx", 500)])), "npm");
+        assert_eq!(dominant_deps_ecosystem(&counts(&[("rust", 40)])), "cargo");
+        // leveldb: C++ plurality → none-detected (headline fires), even with minor JS present.
+        assert_eq!(
+            dominant_deps_ecosystem(&counts(&[("cpp", 120), ("javascript", 2)])),
+            "none-detected"
+        );
+        // Config-file tokens never win the plurality (only real code languages do).
+        assert_eq!(
+            dominant_deps_ecosystem(&counts(&[("json", 9999), ("python", 5)])),
+            "python"
+        );
+        assert_eq!(dominant_deps_ecosystem(&[]), "none-detected");
     }
 
     #[test]

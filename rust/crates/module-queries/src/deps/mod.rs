@@ -23,11 +23,15 @@
 //! If DEP-2/DEP-3 need to reuse this logic, or a second non-CLI
 //! consumer appears, extract to a dedicated `deps-reconcile` crate.
 
+mod builtins;
+mod classify;
 mod compose;
 mod normalize;
 mod reconcile;
 mod resolve;
 mod types;
+
+pub use builtins::deps_runtime_builtins;
 
 pub use compose::{
     cargo_runtime_builtins, compose_dependency_summaries, npm_runtime_builtins,
@@ -37,6 +41,6 @@ pub use normalize::{normalize_cargo_specifier, normalize_npm_specifier};
 pub use reconcile::{reconcile_module_dependencies, ReconcileInput};
 pub use resolve::{build_identifier_resolution_map, resolve_import_specifier};
 pub use types::{
-    DependencyCategory, DependencyEntry, DriftEntry, DriftKind, ModuleDependencySummary,
-    PackageUsage,
+    DependencyCategory, DependencyEntry, DriftEntry, DriftKind, ManifestContext,
+    ManifestProvenance, ModuleDependencySummary, PackageUsage, ProvenanceRead,
 };

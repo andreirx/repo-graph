@@ -54,6 +54,10 @@ pub mod config;
 pub mod express_detector;
 pub(crate) mod http_boundary;
 pub mod impact_propagation;
+// DEPS-LIST-REWRITE-1 §2.2: manifest provenance + the pyproject/Gradle readers. `pub(crate)` — no
+// cross-crate consumer (verified); the query side reads provenance off the diagnostics blob by the
+// `deps_manifests` wire key, not by importing these types.
+pub(crate) mod manifest_deps;
 // PERF-INSTRUMENTATION-1: runtime perf-trace gate (RMAP_PERF). Shared by this
 // crate's `perf_log!` and daemon-runtime's `perf_trace!` (which reaches it via
 // the pre-existing daemon-runtime -> repo-index dependency).

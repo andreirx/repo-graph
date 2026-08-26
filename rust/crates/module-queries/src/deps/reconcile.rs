@@ -6,16 +6,17 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::normalize::{is_local_specifier, normalize_cargo_specifier, normalize_npm_specifier};
-use super::types::{DependencyCategory, DependencyEntry, ModuleDependencySummary};
+use super::classify::{classify_observed, ObservedKind};
+use super::types::{DependencyCategory, DependencyEntry, ManifestContext, ModuleDependencySummary};
 
 /// Input data for dependency reconciliation.
 #[derive(Debug, Clone)]
 pub struct ReconcileInput {
     /// Module identifier (canonical_root_path).
     pub module: String,
-    /// Manifest file path (if available).
-    pub manifest_path: Option<String>,
+    /// Provenance of the manifest this module's deps were parsed from (§2.2). Set by `compose`
+    /// from the persisted parsed-manifest records; never a fabricated fixed-name path.
+    pub manifest_context: ManifestContext,
     /// Declared dependency package names from manifest.
     /// Empty if manifest context is unavailable.
     pub declared_dependencies: Vec<String>,
@@ -29,6 +30,9 @@ pub struct ReconcileInput {
     pub runtime_builtins: HashSet<String>,
     /// Ecosystem for normalization rules: "npm" or "cargo".
     pub ecosystem: String,
+    /// Observed references the assembly (`compose`) already dropped as non-import call targets
+    /// (bare unbound identifiers, §2.1) — folded into `rejected_non_specifier` for honest totals.
+    pub pre_rejected_non_specifier: usize,
 }
 
 /// Reconcile declared and observed dependencies for a module.
@@ -49,56 +53,59 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
         .map(|s| s.as_str())
         .collect();
 
-    // Normalize observed imports and count occurrences.
+    // Classify observed references through the specifier-only gate (DEPS-LIST-REWRITE-1
+    // §2.1). Only import-specifier-shaped values reach the package namespace; language
+    // builtins classify as builtins; call-expression text is dropped and counted.
     let mut observed_packages: HashMap<String, ObservedPackage> = HashMap::new();
+    let mut observed_builtins: HashMap<String, ObservedPackage> = HashMap::new();
+    let mut rejected_non_specifier: usize = input.pre_rejected_non_specifier;
 
-    for specifier in &input.observed_external_imports {
-        // Skip local/relative imports.
-        if is_local_specifier(specifier) {
-            continue;
-        }
-
-        // Normalize to package name.
-        let package = match input.ecosystem.as_str() {
-            "cargo" => normalize_cargo_specifier(specifier),
-            _ => normalize_npm_specifier(specifier),
-        };
-
-        // Skip crate-relative paths for Rust.
-        if package.starts_with("crate::")
-            || package.starts_with("self::")
-            || package.starts_with("super::")
-        {
-            continue;
-        }
-
-        let entry = observed_packages
-            .entry(package)
-            .or_insert_with(|| ObservedPackage {
-                import_count: 0,
-                raw_specifiers: Vec::new(),
-            });
-        entry.import_count += 1;
-        if !entry.raw_specifiers.contains(specifier) {
-            entry.raw_specifiers.push(specifier.clone());
+    for raw in &input.observed_external_imports {
+        match classify_observed(raw, &input.ecosystem, &input.runtime_builtins) {
+            ObservedKind::Local => {}
+            ObservedKind::NonSpecifier => rejected_non_specifier += 1,
+            ObservedKind::Builtin { name } => {
+                let entry = observed_builtins
+                    .entry(name)
+                    .or_insert_with(|| ObservedPackage {
+                        import_count: 0,
+                        raw_specifiers: Vec::new(),
+                    });
+                entry.import_count += 1;
+                if !entry.raw_specifiers.contains(raw) {
+                    entry.raw_specifiers.push(raw.clone());
+                }
+            }
+            ObservedKind::Package { package } => {
+                let entry = observed_packages
+                    .entry(package)
+                    .or_insert_with(|| ObservedPackage {
+                        import_count: 0,
+                        raw_specifiers: Vec::new(),
+                    });
+                entry.import_count += 1;
+                if !entry.raw_specifiers.contains(raw) {
+                    entry.raw_specifiers.push(raw.clone());
+                }
+            }
         }
     }
 
-    // Categorize each observed package.
-    for (package, observed) in &observed_packages {
-        // Check if it's a runtime builtin.
-        let is_builtin = is_runtime_builtin(package, &input.runtime_builtins, &input.ecosystem);
+    // Emit builtin usages (already proven builtins by the gate — never packages).
+    for (name, observed) in &observed_builtins {
+        entries.push(DependencyEntry {
+            package: name.clone(),
+            category: DependencyCategory::RuntimeBuiltin,
+            import_count: observed.import_count,
+            dependency_class: None,
+            confidence: 1.0,
+            raw_specifiers: observed.raw_specifiers.clone(),
+        });
+    }
 
-        if is_builtin {
-            entries.push(DependencyEntry {
-                package: package.clone(),
-                category: DependencyCategory::RuntimeBuiltin,
-                import_count: observed.import_count,
-                dependency_class: None,
-                confidence: 1.0,
-                raw_specifiers: observed.raw_specifiers.clone(),
-            });
-        } else if declared_set.contains(package.as_str()) {
+    // Categorize each observed package (specifier-shaped, non-builtin).
+    for (package, observed) in &observed_packages {
+        if declared_set.contains(package.as_str()) {
             entries.push(DependencyEntry {
                 package: package.clone(),
                 category: DependencyCategory::DeclaredAndUsed,
@@ -160,9 +167,10 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
 
     ModuleDependencySummary {
         module: input.module,
-        manifest_path: input.manifest_path,
+        manifest_context: input.manifest_context,
         manifest_scope_available: input.manifest_scope_available,
         entries,
+        rejected_non_specifier,
     }
 }
 
@@ -170,32 +178,6 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
 struct ObservedPackage {
     import_count: usize,
     raw_specifiers: Vec<String>,
-}
-
-/// Check if a package is a runtime builtin.
-fn is_runtime_builtin(package: &str, builtins: &HashSet<String>, ecosystem: &str) -> bool {
-    // Direct match in builtins set.
-    if builtins.contains(package) {
-        return true;
-    }
-
-    // Node.js: check for `node:` prefix variants.
-    if ecosystem == "npm" {
-        let with_prefix = format!("node:{}", package);
-        let without_prefix = package.strip_prefix("node:").unwrap_or("");
-        if builtins.contains(&with_prefix)
-            || (!without_prefix.is_empty() && builtins.contains(without_prefix))
-        {
-            return true;
-        }
-    }
-
-    // Rust: `std` is always a builtin.
-    if ecosystem == "cargo" && package == "std" {
-        return true;
-    }
-
-    false
 }
 
 /// Ordering for dependency categories in output.
@@ -233,7 +215,9 @@ mod tests {
     fn declared_and_used_match() {
         let input = ReconcileInput {
             module: "frontend".to_string(),
-            manifest_path: Some("package.json".to_string()),
+            manifest_context: ManifestContext::Parsed {
+                path: "manifest".to_string(),
+            },
             declared_dependencies: vec!["react".to_string(), "lodash".to_string()],
             manifest_scope_available: true,
             observed_external_imports: vec![
@@ -243,6 +227,7 @@ mod tests {
             ],
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -271,12 +256,15 @@ mod tests {
     fn declared_but_unobserved() {
         let input = ReconcileInput {
             module: "frontend".to_string(),
-            manifest_path: Some("package.json".to_string()),
+            manifest_context: ManifestContext::Parsed {
+                path: "manifest".to_string(),
+            },
             declared_dependencies: vec!["react".to_string(), "moment".to_string()],
             manifest_scope_available: true,
             observed_external_imports: vec!["react".to_string()],
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -296,7 +284,9 @@ mod tests {
     fn observed_but_undeclared() {
         let input = ReconcileInput {
             module: "frontend".to_string(),
-            manifest_path: Some("package.json".to_string()),
+            manifest_context: ManifestContext::Parsed {
+                path: "manifest".to_string(),
+            },
             declared_dependencies: vec!["react".to_string()],
             manifest_scope_available: true,
             observed_external_imports: vec![
@@ -305,6 +295,7 @@ mod tests {
             ],
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -321,15 +312,45 @@ mod tests {
     }
 
     #[test]
+    fn zero_declared_but_scoped_imports_are_observed_but_undeclared() {
+        // Ruling-3 item 3 end state: a PARSED zero-dependency manifest sets scope=true with an
+        // EMPTY declared set. Its observed imports must reconcile as `observed_but_undeclared`
+        // (declared-context known, nothing declared) — NOT `unknown_external_like` (which is the
+        // no-manifest-scope degrade). This is the behavioural pair to `scope_available`'s truth.
+        let input = ReconcileInput {
+            module: "pkg".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "pkg/package.json".to_string(),
+            },
+            declared_dependencies: vec![], // parsed manifest, zero declared deps
+            manifest_scope_available: true,
+            observed_external_imports: vec!["leftpad".to_string()],
+            runtime_builtins: npm_builtins(),
+            ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
+        };
+
+        let summary = reconcile_module_dependencies(input);
+        assert_eq!(summary.observed_but_undeclared_count(), 1);
+        assert_eq!(summary.unknown_external_like_count(), 0);
+        let leftpad = &summary.entries[0];
+        assert_eq!(leftpad.package, "leftpad");
+        assert_eq!(leftpad.category, DependencyCategory::ObservedButUndeclared);
+    }
+
+    #[test]
     fn runtime_builtins_detected() {
         let input = ReconcileInput {
             module: "backend".to_string(),
-            manifest_path: Some("package.json".to_string()),
+            manifest_context: ManifestContext::Parsed {
+                path: "manifest".to_string(),
+            },
             declared_dependencies: vec![],
             manifest_scope_available: true,
             observed_external_imports: vec!["fs".to_string(), "node:path".to_string()],
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -351,12 +372,13 @@ mod tests {
     fn manifest_unavailable_degrades_to_unknown() {
         let input = ReconcileInput {
             module: "python-module".to_string(),
-            manifest_path: None,
+            manifest_context: ManifestContext::Absent,
             declared_dependencies: vec![],
             manifest_scope_available: false, // Python, no manifest context
             observed_external_imports: vec!["requests".to_string()],
             runtime_builtins: HashSet::new(),
             ecosystem: "npm".to_string(), // doesn't matter
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -373,7 +395,9 @@ mod tests {
     fn cargo_normalization_works() {
         let input = ReconcileInput {
             module: "rust-crate".to_string(),
-            manifest_path: Some("Cargo.toml".to_string()),
+            manifest_context: ManifestContext::Parsed {
+                path: "manifest".to_string(),
+            },
             declared_dependencies: vec!["tokio".to_string(), "serde".to_string()],
             manifest_scope_available: true,
             observed_external_imports: vec![
@@ -384,6 +408,7 @@ mod tests {
             ],
             runtime_builtins: HashSet::new(),
             ecosystem: "cargo".to_string(),
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -408,7 +433,9 @@ mod tests {
     fn local_imports_ignored() {
         let input = ReconcileInput {
             module: "frontend".to_string(),
-            manifest_path: Some("package.json".to_string()),
+            manifest_context: ManifestContext::Parsed {
+                path: "manifest".to_string(),
+            },
             declared_dependencies: vec!["react".to_string()],
             manifest_scope_available: true,
             observed_external_imports: vec![
@@ -419,6 +446,7 @@ mod tests {
             ],
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
         };
 
         let summary = reconcile_module_dependencies(input);
