@@ -384,7 +384,7 @@ mod tests {
         let p = after
             .split("provider")
             .next()
-            .and_then(|s| s.trim().split_whitespace().next_back())
+            .and_then(|s| s.split_whitespace().next_back())
             .and_then(|n| n.parse().ok())
             .unwrap_or_else(|| panic!("no provider count in {line:?}"));
         let c = after
