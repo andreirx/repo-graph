@@ -32,6 +32,7 @@ mod graph;
 mod hook;
 mod index;
 mod inferences;
+mod inferences_render;
 mod integrate;
 mod maintenance;
 mod map;

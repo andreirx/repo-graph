@@ -68,9 +68,10 @@ pub mod focus_resolution_cert;
 pub mod handlers;
 mod http_boundary_read; // HTTP-BOUNDARY-1: read-time HTTP boundary render helpers (crate-private)
 mod http_surface_union; // HTTP-SURFACE-COHERENCE-1 §2.3: read-time union of the two HTTP families
-                        // INDEX-BASIS-1: stamp the git basis at index/refresh; compute working-tree drift at
-                        // query time. Crate-internal glue between repo-graph-git and the agent IndexDrift DTO;
-                        // the five callers (index/refresh/orient/check/explain handlers) are all in this crate.
+mod inferences_serve; // INFERENCES-SURFACE-1: detector inventory + empty-state honesty for inferences_list (crate-private)
+                      // INDEX-BASIS-1: stamp the git basis at index/refresh; compute working-tree drift at
+                      // query time. Crate-internal glue between repo-graph-git and the agent IndexDrift DTO;
+                      // the five callers (index/refresh/orient/check/explain handlers) are all in this crate.
 pub(crate) mod deps_headline;
 pub(crate) mod index_basis_probe;
 pub(crate) mod index_drift;

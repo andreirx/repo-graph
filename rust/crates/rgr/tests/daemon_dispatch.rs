@@ -2344,6 +2344,139 @@ fn inferences_list_returns_envelope() {
 }
 
 #[test]
+fn inferences_list_additive_headline_and_empty_state() {
+    // INFERENCES-SURFACE-1 §2/§4: a snapshot with NO inferences carries the additive
+    // headline fields honestly (returned/truncated/limit) AND an explanatory `empty`
+    // object + the detector inventory — never a bare `count: 0`.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("inferences-empty-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    // Plain TS, no react import → React applies (a .ts file) but detects nothing.
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let index_request = format!(
+        r#"{{"id":"ie-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_dir.to_string_lossy()
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_uid, _db, canonical) = extract_index_result(&results[0]);
+
+    let req = format!(
+        r#"{{"id":"ie-2","method":"inferences_list","params":{{"repo":"{}"}}}}"#,
+        canonical
+    );
+    let results = run_daemon_requests_with_state(vec![&req], state);
+    let parsed: serde_json::Value = serde_json::from_str(&results[0]).unwrap();
+    let r = &parsed["result"];
+
+    assert_eq!(r["count"], 0, "no inferences: {}", results[0]);
+    assert_eq!(r["returned"], 0, "returned == 0");
+    assert_eq!(
+        r["truncated"], false,
+        "not truncated when no limit and empty"
+    );
+    assert!(r["limit"].is_null(), "limit null when not passed");
+    assert!(r["detectors"].is_array(), "detector inventory present");
+    assert!(
+        r["empty"]["reason"].is_string(),
+        "empty state explained: {}",
+        results[0]
+    );
+    // Plain TS with no react import: React is applicable (a .ts file) but recorded
+    // nothing. The message must be phrased as DERIVED-from-language, never assert the
+    // detector "ran" (execution is not recorded).
+    let msg = r["empty"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("React") && msg.contains("recorded no inferences"),
+        "reader-facing empty message: {}",
+        results[0]
+    );
+    assert!(
+        !msg.contains(" ran "),
+        "must not claim unrecorded execution: {}",
+        results[0]
+    );
+}
+
+#[test]
+fn inferences_list_limit_truncates_and_reports_true_total() {
+    // INFERENCES-SURFACE-1 §2: a limit is self-declaring — count = TRUE total,
+    // returned = rows in payload, truncated = true when count > returned.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("inferences-react-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    // A react file: one component + one hook usage → ≥2 inferences.
+    std::fs::write(
+        repo_dir.join("Widget.tsx"),
+        "import React, { useEffect, useState } from 'react';\n\
+         export function Widget() { const [n] = useState(0); useEffect(() => {}, [n]); return null; }\n",
+    )
+    .unwrap();
+
+    let index_request = format!(
+        r#"{{"id":"il-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_dir.to_string_lossy()
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_uid, _db, canonical) = extract_index_result(&results[0]);
+
+    let req = format!(
+        r#"{{"id":"il-2","method":"inferences_list","params":{{"repo":"{}","limit":1}}}}"#,
+        canonical
+    );
+    let results = run_daemon_requests_with_state(vec![&req], state);
+    let parsed: serde_json::Value = serde_json::from_str(&results[0]).unwrap();
+    let r = &parsed["result"];
+
+    let count = r["count"].as_u64().unwrap();
+    assert!(
+        count >= 2,
+        "react file yields ≥2 inferences: {}",
+        results[0]
+    );
+    assert_eq!(r["returned"], 1, "limit=1 returns exactly one record");
+    assert_eq!(r["limit"], 1, "limit echoed");
+    assert_eq!(r["truncated"], true, "cap bit → truncated flag set");
+    assert_eq!(
+        r["results"].as_array().unwrap().len(),
+        1,
+        "payload holds exactly the returned rows"
+    );
+    // Detector inventory reflects React's produced count (a fact) — UNFILTERED, so a
+    // --limit on the SHOWN records never shrinks it.
+    let react = r["detectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["detector"] == "react")
+        .expect("react detector entry");
+    assert!(
+        react["count"].as_u64().unwrap() >= 2,
+        "react produced count is the true total, not the capped payload: {}",
+        results[0]
+    );
+    assert!(
+        react.get("ran").is_none(),
+        "no unverifiable `ran` field: {}",
+        results[0]
+    );
+    // Add a compact-detail location proof: the single returned record renders a
+    // file path parsed from the stable key (operator ruling §1).
+    let rec = &r["results"].as_array().unwrap()[0];
+    assert_eq!(
+        rec["file"], "Widget.tsx",
+        "record carries its projected file: {}",
+        results[0]
+    );
+}
+
+#[test]
 fn inferences_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"inf-err-1","method":"inferences_list","params":{"repo":"/nonexistent/path"}}"#,

@@ -6131,6 +6131,10 @@ impl ServiceDispatcher {
         // Parse optional kind filter
         let kind_filter = Self::get_optional_string_param(&request.params, "kind");
 
+        // INFERENCES-SURFACE-1: optional `--limit N` — caps only the RECORDS in this
+        // payload (see `inferences_serve` for the truncation contract).
+        let limit = request.params.get("limit").and_then(|v| v.as_u64());
+
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
         let storage = match repo_state.storage() {
@@ -6160,48 +6164,46 @@ impl ServiceDispatcher {
             }
         };
 
-        // Load inferences
-        let inferences =
-            match storage.list_inferences_for_snapshot(&snapshot.snapshot_uid, kind_filter) {
-                Ok(i) => i,
+        // Load ALL inferences UNFILTERED (`None`, not `kind_filter`): the read is
+        // faithful (no LIMIT) and the detector inventory must be built from the true
+        // per-kind totals — a `--kind` filter changes what is SHOWN (applied in
+        // `build_response`), never what a detector produced (operator ruling §2).
+        let inferences = match storage.list_inferences_for_snapshot(&snapshot.snapshot_uid, None) {
+            Ok(i) => i,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Snapshot language mix — drives detector-applicability + empty-state honesty.
+        // RENDERED/CLASSIFIED, so a read failure is surfaced, never treated as "no
+        // languages". Lowercased to match the catalog's lowercase language labels.
+        let languages: std::collections::BTreeSet<String> =
+            match storage.distinct_file_languages_for_snapshot(&snapshot.snapshot_uid) {
+                Ok(v) => v.into_iter().map(|l| l.to_lowercase()).collect(),
                 Err(e) => {
                     return DispatchResult::error(
                         &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            format!("read snapshot languages: {e}"),
+                        ),
                     );
                 }
             };
 
-        // Map to JSON output
-        let results: Vec<serde_json::Value> = inferences
-            .into_iter()
-            .map(|i| {
-                serde_json::json!({
-                    "inference_uid": i.inference_uid,
-                    "target_stable_key": i.target_stable_key,
-                    "kind": i.kind,
-                    "value": serde_json::from_str::<serde_json::Value>(&i.value_json).ok(),
-                    "confidence": i.confidence,
-                    "extractor": i.extractor,
-                    "created_at": i.created_at,
-                })
-            })
-            .collect();
-
-        let count = results.len();
-        let mut response = serde_json::json!({
-            "command": "inferences list",
-            "repo": repo_uid,
-            "snapshot": snapshot.snapshot_uid,
-            "results": results,
-            "count": count,
-        });
-
-        if let Some(k) = kind_filter {
-            if let serde_json::Value::Object(ref mut map) = response {
-                map.insert("filter_kind".to_string(), serde_json::json!(k));
-            }
-        }
+        // Assemble the additive, self-declaring response in the crate-private module.
+        let response = crate::inferences_serve::build_response(
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            inferences,
+            &languages,
+            kind_filter,
+            limit,
+        );
 
         DispatchResult::success(&request.id, response)
     }
