@@ -164,6 +164,14 @@ struct BoundariesSummaryResponseDto {
     snapshot: String,
     #[serde(default)]
     summary: Option<BoundarySummaryDto>,
+    /// §2.3 — the UNIFIED HTTP provider/consumer counts (same aggregation the
+    /// surfaces footer prints). `None` = the union read degraded.
+    #[serde(default)]
+    http_surface_providers: Option<usize>,
+    #[serde(default)]
+    http_surface_consumers: Option<usize>,
+    #[serde(default)]
+    http_surface_degraded: Option<String>,
 }
 
 /// Response structure for boundaries summary command (normalized).
@@ -173,6 +181,11 @@ pub struct BoundariesSummaryResponse {
     pub repo: String,
     pub snapshot: String,
     pub summary: Option<BoundarySummary>,
+    /// §2.3 — unified HTTP provider/consumer counts (see the DTO fields). Both
+    /// `Some` = counts available; `http_degraded` set = the union read failed.
+    pub http_providers: Option<usize>,
+    pub http_consumers: Option<usize>,
+    pub http_degraded: Option<String>,
 }
 
 impl BoundariesSummaryResponse {
@@ -184,6 +197,9 @@ impl BoundariesSummaryResponse {
             repo: dto.repo,
             snapshot: dto.snapshot,
             summary: dto.summary.map(BoundarySummary::from),
+            http_providers: dto.http_surface_providers,
+            http_consumers: dto.http_surface_consumers,
+            http_degraded: dto.http_surface_degraded,
         })
     }
 }
@@ -206,6 +222,15 @@ impl BoundariesSummaryResponse {
         // -- Totals --
         out.push_str(&format!("{} surfaces\n", summary.total_surfaces));
         out.push_str(&format!("{} channels\n", summary.total_channels));
+
+        // -- HTTP/REST (§2.3): the unified provider/consumer count, from the SAME
+        // read-time union the `surfaces list` footer prints, so the two commands
+        // cannot disagree. A degraded union read is UNKNOWN, never a silent zero.
+        out.push_str(&render_http_line(
+            self.http_providers,
+            self.http_consumers,
+            self.http_degraded.as_deref(),
+        ));
 
         // -- Empty case --
         if summary.total_surfaces == 0 && summary.total_channels == 0 {
@@ -303,6 +328,36 @@ impl BoundariesSummaryResponse {
     }
 }
 
+/// §2.3 — the unified HTTP provider/consumer line. Both counts present → the
+/// "P providers, C consumers" phrase (matching the surfaces footer format); a
+/// degraded read → UNKNOWN with the reason; neither present → empty (older
+/// daemons that don't send the field).
+fn render_http_line(
+    providers: Option<usize>,
+    consumers: Option<usize>,
+    degraded: Option<&str>,
+) -> String {
+    if let Some(reason) = degraded {
+        return format!(
+            "\nHTTP/REST surfaces: unknown — {} (not reporting 0; rerun after reindex).\n",
+            reason
+        );
+    }
+    match (providers, consumers) {
+        // Genuinely no HTTP surfaces → no line (a repo with no HTTP stays clean
+        // and byte-stable; the line only adds signal when there IS an HTTP story).
+        (Some(0), Some(0)) => String::new(),
+        (Some(p), Some(c)) => format!(
+            "\nHTTP/REST surfaces: {} provider{}, {} consumer{}\n",
+            p,
+            if p == 1 { "" } else { "s" },
+            c,
+            if c == 1 { "" } else { "s" },
+        ),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,6 +419,9 @@ mod tests {
                     "src/db/pool.ts".to_string(),
                 ],
             }),
+            http_providers: Some(3),
+            http_consumers: Some(2),
+            http_degraded: None,
         }
     }
 
@@ -372,6 +430,9 @@ mod tests {
             command: "boundaries summary".to_string(),
             repo: "repo_123".to_string(),
             snapshot: "snap_456".to_string(),
+            http_providers: None,
+            http_consumers: None,
+            http_degraded: None,
             summary: Some(BoundarySummary {
                 total_surfaces: 0,
                 total_channels: 0,
@@ -407,6 +468,30 @@ mod tests {
         assert!(output.contains("By channel kind:"));
         assert!(output.contains("http_client"));
         assert!(output.contains("database"));
+    }
+
+    #[test]
+    fn summary_render_shows_unified_http_line() {
+        // §2.3: the unified HTTP provider/consumer line (same aggregation the
+        // surfaces footer prints).
+        let resp = sample_summary_response();
+        let output = resp.render_human();
+        assert!(
+            output.contains("HTTP/REST surfaces: 3 providers, 2 consumers"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn summary_render_http_degraded_is_unknown() {
+        // §2.3 + honesty: a degraded union read is UNKNOWN, never a silent zero.
+        let mut resp = sample_summary_response();
+        resp.http_providers = None;
+        resp.http_consumers = None;
+        resp.http_degraded = Some("db locked".to_string());
+        let output = resp.render_human();
+        assert!(output.contains("HTTP/REST surfaces: unknown"), "{output}");
+        assert!(output.contains("db locked"), "{output}");
     }
 
     #[test]

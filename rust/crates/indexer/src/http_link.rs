@@ -256,6 +256,9 @@ mod tests {
             route: route.map(str::to_string),
             source_file: format!("{uid}.rs"),
             symbol_stable_key: format!("r:{uid}:FILE"),
+            is_test: None,
+            framework: None,
+            route_unknown_reason: None,
         }
     }
 

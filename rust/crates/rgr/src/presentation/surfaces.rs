@@ -114,9 +114,22 @@ impl SurfacesListResponse {
         out.push_str("Surfaces\n\n");
 
         // -- Count --
+        // HTTP-SURFACE-COHERENCE-1 §2.3: this counts the PROJECT-surface catalog
+        // only (backend/cli/lib …). When an HTTP section is ALSO present, the noun
+        // is made explicit ("N project surfaces") so the top line can never read
+        // "0 surfaces" above a populated HTTP section (the audit's glamCRM
+        // contradiction). With no HTTP section there is nothing to contradict, so
+        // the plain "N surfaces" wording is kept — no-HTTP repos stay byte-stable.
+        let http_present = !self.http_boundary_surfaces.is_empty()
+            || self.http_boundary_surfaces_degraded.is_some();
+        let (sing, plur) = if http_present {
+            ("project surface", "project surfaces")
+        } else {
+            ("surface", "surfaces")
+        };
         out.push_str(&format!(
             "{}\n",
-            format_count(self.count as usize, "surface", "surfaces")
+            format_count(self.count as usize, sing, plur)
         ));
 
         // -- Active filters --
@@ -465,9 +478,12 @@ mod tests {
 
     #[test]
     fn list_render_shows_count() {
+        // §2.3: with NO HTTP section present, the plain "N surfaces" wording is
+        // kept (nothing to contradict) — no-HTTP outputs stay byte-stable.
         let resp = sample_list_response();
         let output = resp.render_human();
-        assert!(output.contains("2 surfaces"));
+        assert!(output.contains("2 surfaces"), "{output}");
+        assert!(!output.contains("project surfaces"), "{output}");
     }
 
     #[test]
@@ -503,6 +519,7 @@ mod tests {
             http_method: "POST".to_string(),
             route: Some("/api/v2/etape".to_string()),
             source_file: "serverless/api.ts".to_string(),
+            ..Default::default()
         }];
         let output = resp.render_human();
         assert!(output.contains("HTTP/REST API surfaces"), "{output}");
@@ -510,6 +527,42 @@ mod tests {
         assert!(
             !output.contains("No recognized patterns"),
             "empty-hint must not fire when HTTP surfaces exist:\n{output}"
+        );
+    }
+
+    /// §2.3: the glamCRM contradiction — ZERO project surfaces with a populated
+    /// HTTP section must NOT headline "0 surfaces" above the HTTP rows. The top
+    /// count is explicitly scoped ("0 project surfaces") and the HTTP section
+    /// carries its own coherent provider count, so an agent is never misled.
+    #[test]
+    fn list_render_top_count_scoped_not_contradicting_http_section() {
+        let mut resp = sample_empty_list_response();
+        resp.degradation = None;
+        resp.results = vec![];
+        resp.count = 0;
+        resp.http_boundary_surfaces = vec![
+            HttpBoundarySurfaceEntry {
+                direction: "provider".to_string(),
+                http_method: "GET".to_string(),
+                route: Some("/api/a".to_string()),
+                source_file: "backend/A.java".to_string(),
+                ..Default::default()
+            },
+            HttpBoundarySurfaceEntry {
+                direction: "provider".to_string(),
+                http_method: "POST".to_string(),
+                route: Some("/api/b".to_string()),
+                source_file: "backend/B.java".to_string(),
+                ..Default::default()
+            },
+        ];
+        let output = resp.render_human();
+        // Top line is scoped to PROJECT surfaces, not a bare "0 surfaces".
+        assert!(output.contains("0 project surfaces"), "{output}");
+        // The HTTP section reports the real provider count below.
+        assert!(
+            output.contains("HTTP/REST API surfaces: 2 providers"),
+            "{output}"
         );
     }
 

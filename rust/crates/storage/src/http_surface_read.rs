@@ -24,11 +24,19 @@ pub(crate) fn query_http_surfaces(
     conn: &Connection,
     snapshot_uid: &str,
 ) -> Result<Vec<HttpSurfaceRow>, rusqlite::Error> {
+    // §2.5: LEFT JOIN `files` (keyed by repo_uid + path) for the `is_test` flag —
+    // the SAME flag the call-graph partitions on. LEFT (not INNER) so an HTTP
+    // surface whose file is not tracked still returns (with `is_test = NULL` =
+    // no positive test evidence), never dropped. `files.is_test` is stored 0/1;
+    // a NULL means no matching `files` row (data absence, not a read failure).
     let mut stmt = conn.prepare(
         r#"
-        SELECT surface_uid, direction, source_file, symbol_stable_key, evidence_json
-        FROM boundary_interaction_surfaces
-        WHERE snapshot_uid = ? AND channel_kind = 'http'
+        SELECT bis.surface_uid, bis.direction, bis.source_file, bis.symbol_stable_key,
+               bis.evidence_json, f.is_test
+        FROM boundary_interaction_surfaces bis
+        LEFT JOIN files f
+               ON f.repo_uid = bis.repo_uid AND f.path = bis.source_file
+        WHERE bis.snapshot_uid = ? AND bis.channel_kind = 'http'
         "#,
     )?;
 
@@ -38,18 +46,22 @@ pub(crate) fn query_http_surfaces(
         let source_file: String = row.get(2)?;
         let symbol_stable_key: String = row.get(3)?;
         let evidence_json: String = row.get(4)?;
+        // is_test rides as a nullable INTEGER. Strict `== 1` matches TrackedFile's
+        // mapper (out-of-range values → false); NULL (no files row) → None.
+        let is_test: Option<bool> = row.get::<_, Option<i64>>(5)?.map(|v| v == 1);
         Ok((
             surface_uid,
             direction,
             source_file,
             symbol_stable_key,
             evidence_json,
+            is_test,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (surface_uid, direction, source_file, symbol_stable_key, evidence_json) = row?;
+        let (surface_uid, direction, source_file, symbol_stable_key, evidence_json, is_test) = row?;
         // review-5 item 3: a surface whose `evidence_json` cannot be parsed (or
         // lacks the required `httpMethod`) is CORRUPT, not "a dynamic-route
         // consumer". Silently substituting (UNKNOWN, None) would classify it as
@@ -58,7 +70,7 @@ pub(crate) fn query_http_surfaces(
         // UNKNOWN (via the collected `surface_query_error`) rather than serving a
         // false-complete map. Our writer always emits valid evidence, so this
         // only fires on genuine corruption.
-        let (http_method, route) = parse_http_evidence(&evidence_json).map_err(|e| {
+        let parsed = parse_http_evidence(&evidence_json).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
                 4, // evidence_json column
                 rusqlite::types::Type::Text,
@@ -71,13 +83,27 @@ pub(crate) fn query_http_surfaces(
         out.push(HttpSurfaceRow {
             surface_uid,
             direction,
-            http_method,
-            route,
+            http_method: parsed.http_method,
+            route: parsed.route,
             source_file,
             symbol_stable_key,
+            is_test,
+            framework: parsed.framework,
+            route_unknown_reason: parsed.route_unknown_reason,
         });
     }
     Ok(out)
+}
+
+/// The presentation-relevant fields parsed out of an HTTP surface's
+/// `evidence_json` (§2.5). Distinct from the storage row so the parse's honesty
+/// contract (method required; route/framework/reason optional) is in one place.
+#[derive(Debug)]
+struct HttpEvidence {
+    http_method: String,
+    route: Option<String>,
+    framework: Option<String>,
+    route_unknown_reason: Option<String>,
 }
 
 /// A malformed HTTP surface `evidence_json` — distinct from a valid one with a
@@ -108,7 +134,7 @@ impl std::fmt::Display for HttpEvidenceError {
 ///   legitimate absence, never fabricated;
 /// - a parse failure, a missing `httpMethod`, or a non-string `route` is
 ///   CORRUPTION → `Err`, never silently coerced to (UNKNOWN, None).
-fn parse_http_evidence(evidence_json: &str) -> Result<(String, Option<String>), HttpEvidenceError> {
+fn parse_http_evidence(evidence_json: &str) -> Result<HttpEvidence, HttpEvidenceError> {
     let value: serde_json::Value =
         serde_json::from_str(evidence_json).map_err(|_| HttpEvidenceError::NotJson)?;
     let method = value
@@ -123,7 +149,23 @@ fn parse_http_evidence(evidence_json: &str) -> Result<(String, Option<String>), 
         Some(serde_json::Value::String(s)) => Some(s.clone()),
         Some(_) => return Err(HttpEvidenceError::RouteNotString),
     };
-    Ok((method, route))
+    // framework / routeUnknownReason are OPTIONAL labels (§2.1/§2.5/§3). A
+    // missing or non-string value is simply "no label" — never an error (unlike
+    // the required httpMethod). A present string is carried verbatim.
+    let framework = value
+        .get("framework")
+        .and_then(|f| f.as_str())
+        .map(str::to_string);
+    let route_unknown_reason = value
+        .get("routeUnknownReason")
+        .and_then(|r| r.as_str())
+        .map(str::to_string);
+    Ok(HttpEvidence {
+        http_method: method,
+        route,
+        framework,
+        route_unknown_reason,
+    })
 }
 
 #[cfg(test)]
@@ -220,27 +262,43 @@ mod tests {
 
     #[test]
     fn parses_method_and_route() {
-        let (m, r) = parse_http_evidence(r#"{"httpMethod":"GET","route":"/api/v2/clients/{id}"}"#)
+        let e = parse_http_evidence(r#"{"httpMethod":"GET","route":"/api/v2/clients/{id}"}"#)
             .expect("valid evidence");
-        assert_eq!(m, "GET");
-        assert_eq!(r.as_deref(), Some("/api/v2/clients/{id}"));
+        assert_eq!(e.http_method, "GET");
+        assert_eq!(e.route.as_deref(), Some("/api/v2/clients/{id}"));
+    }
+
+    #[test]
+    fn parses_framework_and_unknown_reason_labels() {
+        // §2.1/§2.5/§3: framework + routeUnknownReason are optional labels carried
+        // verbatim when present.
+        let e = parse_http_evidence(
+            r#"{"httpMethod":"GET","route":null,"routeUnknownReason":"catch-all","framework":"nextjs_app_router"}"#,
+        )
+        .expect("valid evidence with labels");
+        assert_eq!(e.route, None);
+        assert_eq!(e.framework.as_deref(), Some("nextjs_app_router"));
+        assert_eq!(e.route_unknown_reason.as_deref(), Some("catch-all"));
+        // Absent labels → None, never an error.
+        let bare = parse_http_evidence(r#"{"httpMethod":"GET","route":"/x"}"#).unwrap();
+        assert_eq!(bare.framework, None);
+        assert_eq!(bare.route_unknown_reason, None);
     }
 
     #[test]
     fn null_route_stays_none() {
         // A dynamic URL persists `route: null` — the one legitimate None.
-        let (m, r) = parse_http_evidence(r#"{"httpMethod":"POST","route":null}"#)
+        let e = parse_http_evidence(r#"{"httpMethod":"POST","route":null}"#)
             .expect("valid dynamic-route evidence");
-        assert_eq!(m, "POST");
-        assert_eq!(r, None);
+        assert_eq!(e.http_method, "POST");
+        assert_eq!(e.route, None);
     }
 
     #[test]
     fn missing_route_key_is_dynamic_none() {
-        let (m, r) =
-            parse_http_evidence(r#"{"httpMethod":"GET"}"#).expect("route key may be absent");
-        assert_eq!(m, "GET");
-        assert_eq!(r, None);
+        let e = parse_http_evidence(r#"{"httpMethod":"GET"}"#).expect("route key may be absent");
+        assert_eq!(e.http_method, "GET");
+        assert_eq!(e.route, None);
     }
 
     #[test]
@@ -248,8 +306,8 @@ mod tests {
         // review-5 item 3: `{}` lacks httpMethod → a typed failure, NOT
         // (UNKNOWN, None) classified as a dynamic consumer.
         assert_eq!(
-            parse_http_evidence("{}"),
-            Err(HttpEvidenceError::MissingMethod)
+            parse_http_evidence("{}").unwrap_err(),
+            HttpEvidenceError::MissingMethod
         );
     }
 
@@ -257,16 +315,16 @@ mod tests {
     fn malformed_json_is_typed_error_not_fabricated() {
         // review-5 item 3: corrupt evidence propagates, never coerced to UNKNOWN.
         assert_eq!(
-            parse_http_evidence("not json"),
-            Err(HttpEvidenceError::NotJson)
+            parse_http_evidence("not json").unwrap_err(),
+            HttpEvidenceError::NotJson
         );
     }
 
     #[test]
     fn non_string_route_is_typed_error() {
         assert_eq!(
-            parse_http_evidence(r#"{"httpMethod":"GET","route":123}"#),
-            Err(HttpEvidenceError::RouteNotString)
+            parse_http_evidence(r#"{"httpMethod":"GET","route":123}"#).unwrap_err(),
+            HttpEvidenceError::RouteNotString
         );
     }
 }

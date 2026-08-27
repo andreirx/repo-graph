@@ -30,6 +30,18 @@ use super::{extract_route_literal, file_symbol_key, node_text, HttpSurfaceDraft}
 /// HTTP verbs recognized on the consumer side (axios verb methods / fetch).
 const HTTP_VERBS: &[&str] = &["get", "post", "put", "delete", "patch", "head", "options"];
 
+/// The recorded reason for a consumer whose URL is not statically readable
+/// (review-0 item 4): `Some(reason)` when the route came back UNKNOWN, `None`
+/// when it is a known static route. Kept in one place so every TS consumer site
+/// records the same honest reason instead of a bare `None`.
+fn dynamic_url_reason(route_is_unknown: bool) -> Option<&'static str> {
+    if route_is_unknown {
+        Some("dynamic URL — first argument is not a static string/template literal")
+    } else {
+        None
+    }
+}
+
 /// Express receiver names — a consumer detector must NOT treat these as HTTP
 /// clients (they are provider-side route registrations handled by
 /// `express_detector`).
@@ -238,10 +250,12 @@ fn try_extract_consumer(
     let first = first_call_argument(&args)?;
     // A dynamic (non-literal) URL is surfaced with an UNKNOWN route, not dropped.
     let route = route_of_arg(&first, source);
+    let route_unknown_reason = dynamic_url_reason(route.is_none());
     Some(HttpSurfaceDraft {
         direction: Direction::Consumer,
         http_method: method.to_uppercase(),
         route,
+        route_unknown_reason,
         source_file: file.to_string(),
         line_start: call.start_position().row as i64 + 1,
         col_start: call.start_position().column as i64,
@@ -309,6 +323,7 @@ fn try_extract_fetch(
     let args = call.child_by_field_name("arguments")?;
     let first = first_call_argument(&args)?;
     let route = route_of_arg(&first, source);
+    let route_unknown_reason = dynamic_url_reason(route.is_none());
     // review-5 item 2: fetch's method defaults to GET ONLY when no method is
     // supplied. A supplied-but-non-static method (`{ method: dynamicVerb }`) is
     // UNKNOWN, never fabricated as GET — an UNKNOWN method matches no provider,
@@ -322,6 +337,7 @@ fn try_extract_fetch(
         direction: Direction::Consumer,
         http_method: method,
         route,
+        route_unknown_reason,
         source_file: file.to_string(),
         line_start: call.start_position().row as i64 + 1,
         col_start: call.start_position().column as i64,
@@ -448,6 +464,7 @@ fn try_extract_cdk_routes(
             direction: Direction::Provider,
             http_method: verb,
             route: Some(route.clone()),
+            route_unknown_reason: None,
             source_file: file.to_string(),
             line_start: verb_node.start_position().row as i64 + 1,
             col_start: verb_node.start_position().column as i64,

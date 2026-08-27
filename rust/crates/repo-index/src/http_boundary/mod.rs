@@ -10,10 +10,13 @@
 //! ## Module layout (HTTP-BOUNDARY-1 review-0 item 6 — the 500-line split)
 //!
 //! Detection is split by cohesive concern, each a crate-private submodule:
-//! - [`spring`] — Java Spring `@RestController` PROVIDER routes, from the
-//!   java-extractor `metadata_json` annotations already on each graph node.
+//! - [`spring`] — Java Spring `@RestController` (REST) + `@Controller` (MVC)
+//!   PROVIDER routes, from the java-extractor `metadata_json` annotations
+//!   already on each graph node.
 //! - [`typescript`] — TS/JS CONSUMER calls (`axios`/`fetch`/api-client) and the
 //!   AWS-CDK apigatewayv2 serverless PROVIDER form glamCRM uses.
+//! - [`app_router`] — Next.js App Router `app/**/route.{ts,js}` PROVIDER surfaces
+//!   (exported HTTP-verb handlers), keyed on the app-dir location + verb name.
 //! - [`java_consumer`] — Java CONSUMER call sites (`RestTemplate` / `WebClient` /
 //!   `HttpClient`), parsed from `.java` source.
 //!
@@ -24,6 +27,7 @@
 //! concatenation) yields a surface with an UNKNOWN route (`route: null`,
 //! `routeIsDynamic: true`) — never a fabricated path.
 
+mod app_router;
 mod imports;
 mod java_consumer;
 mod spring;
@@ -58,6 +62,12 @@ struct HttpSurfaceDraft {
     /// Route template, e.g. "/api/v2/clients/{id}". `None` = statically
     /// unreadable (dynamic URL) — surfaced honestly, never fabricated.
     route: Option<String>,
+    /// When `route` is `None`, the recorded reason the URL is not statically
+    /// derivable (an inexpressible App Router shape, an unreadable Spring path
+    /// constant, a dynamic consumer base). `None` route + `None` reason means the
+    /// detector had no specific reason to attach (kept for older call sites).
+    /// Rendered honestly alongside `<dynamic>`, never dropped (§3; review-0 item 4).
+    route_unknown_reason: Option<&'static str>,
     /// Repo-relative source file.
     source_file: String,
     /// 1-based start line of the interaction site.
@@ -88,6 +98,11 @@ impl HttpSurfaceDraft {
             "httpMethod": self.http_method,
             "route": self.route,
             "routeIsDynamic": route_is_dynamic,
+            // §3 / review-0 item 4: when the route is UNKNOWN, persist WHY (the
+            // inexpressible-shape reason) so the read path can render it beside
+            // `<dynamic>` — an unknown route without its reason is a silent gap.
+            // Absent when the route is known (a `null` here is not a reason).
+            "routeUnknownReason": self.route_unknown_reason,
             "framework": self.framework,
         })
         .to_string();
@@ -156,6 +171,11 @@ pub(crate) fn persist_http_boundary_interactions(
 
     let mut drafts = spring::detect_spring_http_providers(&nodes, repo_uid, &spring_provider_files);
     drafts.extend(typescript::detect_ts_http(file_inputs));
+    // Next.js App Router provider surfaces (HTTP-SURFACE-COHERENCE-1 §2.2). The
+    // detector is self-gating on the `app/**/route.{ts,js}` location + exported
+    // verb names, so it takes the whole file set (no pre-computed evidence set,
+    // unlike Spring which reads graph nodes).
+    drafts.extend(app_router::detect_app_router_providers(file_inputs));
     drafts.extend(java_consumer::detect_java_http_consumers(file_inputs));
 
     if drafts.is_empty() {
@@ -408,6 +428,78 @@ mod tests {
     use std::ops::ControlFlow;
     use tree_sitter::Parser;
 
+    fn ts_file(rel_path: &str, src: &str) -> FileInput {
+        FileInput {
+            rel_path: rel_path.to_string(),
+            content: src.to_string(),
+            content_hash: String::new(),
+            size_bytes: src.len(),
+            line_count: src.lines().count(),
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }
+    }
+
+    /// The full TS-side draft set for a file: App Router providers PLUS TS
+    /// consumers (the two independent detectors `persist_http_boundary_interactions`
+    /// composes at mod.rs:173/178). Mirrors that composition so the test proves the
+    /// SAME behavior the persist path yields.
+    fn ts_drafts(file: &FileInput) -> Vec<HttpSurfaceDraft> {
+        let mut d = app_router::detect_app_router_providers(std::slice::from_ref(file));
+        d.extend(typescript::detect_ts_http(std::slice::from_ref(file)));
+        d
+    }
+
+    #[test]
+    fn app_router_handler_without_outbound_call_is_provider_only() {
+        // §2.2 (review-3 item 5): a `route.ts` that exports a verb but makes NO
+        // outbound call is a PROVIDER only — it no longer counts as a consumer.
+        let src = r#"
+            import { NextResponse } from "next/server";
+            export async function GET(req) { return NextResponse.json({ ok: true }); }
+        "#;
+        let drafts = ts_drafts(&ts_file("renderer/src/app/api/health/route.ts", src));
+        assert_eq!(drafts.len(), 1, "provider only: {drafts:?}");
+        assert_eq!(drafts[0].direction, Direction::Provider);
+        assert_eq!(drafts[0].http_method, "GET");
+        assert_eq!(drafts[0].route.as_deref(), Some("/api/health"));
+        assert!(
+            drafts.iter().all(|d| d.direction != Direction::Consumer),
+            "no consumer surface without an outbound call: {drafts:?}"
+        );
+    }
+
+    #[test]
+    fn app_router_handler_with_outbound_call_is_provider_and_consumer() {
+        // §2.2 (review-3 item 5): a `route.ts` that exports a verb AND proxies a
+        // backend with `fetch(...)` is BOTH a provider (the endpoint it serves) and
+        // a consumer (the call it makes) — the outbound call keeps the consumer
+        // surface the audit originally saw, now alongside the provider.
+        let src = r#"
+            export async function GET(req) {
+                const r = await fetch("/backend/data");
+                return Response.json(await r.json());
+            }
+        "#;
+        let drafts = ts_drafts(&ts_file("renderer/src/app/api/proxy/route.ts", src));
+        let providers: Vec<&HttpSurfaceDraft> = drafts
+            .iter()
+            .filter(|d| d.direction == Direction::Provider)
+            .collect();
+        let consumers: Vec<&HttpSurfaceDraft> = drafts
+            .iter()
+            .filter(|d| d.direction == Direction::Consumer)
+            .collect();
+        assert_eq!(providers.len(), 1, "one provider: {drafts:?}");
+        assert_eq!(providers[0].route.as_deref(), Some("/api/proxy"));
+        assert_eq!(
+            consumers.len(),
+            1,
+            "the outbound fetch keeps a consumer surface: {drafts:?}"
+        );
+        assert_eq!(consumers[0].route.as_deref(), Some("/backend/data"));
+    }
+
     #[test]
     fn join_route_composes_base_and_suffix() {
         assert_eq!(
@@ -525,6 +617,50 @@ mod tests {
             }
             other => panic!("expected ComposeError::Index, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn into_surface_serializes_unknown_route_reason() {
+        // review-0 item 4: an UNKNOWN route persists its reason in evidence_json,
+        // never a bare null. A known route persists no reason (a `null` reason).
+        let draft = HttpSurfaceDraft {
+            direction: Direction::Provider,
+            http_method: "GET".into(),
+            route: None,
+            route_unknown_reason: Some("catch-all segment — not a single route"),
+            source_file: "app/api/[...slug]/route.ts".into(),
+            line_start: 1,
+            col_start: 0,
+            symbol_stable_key: "r:app/api/[...slug]/route.ts:FILE".into(),
+            basis: InteractionBasis::Convention,
+            framework: "nextjs_app_router",
+        };
+        let surface = draft.into_surface("snap", "r").expect("builds");
+        let ev: serde_json::Value = serde_json::from_str(&surface.evidence_json).unwrap();
+        assert_eq!(ev["route"], serde_json::Value::Null);
+        assert_eq!(ev["routeIsDynamic"], serde_json::json!(true));
+        assert_eq!(
+            ev["routeUnknownReason"],
+            serde_json::json!("catch-all segment — not a single route")
+        );
+
+        // A known route carries no reason.
+        let known = HttpSurfaceDraft {
+            direction: Direction::Provider,
+            http_method: "GET".into(),
+            route: Some("/api/x".into()),
+            route_unknown_reason: None,
+            source_file: "app/api/x/route.ts".into(),
+            line_start: 1,
+            col_start: 0,
+            symbol_stable_key: "r:app/api/x/route.ts:FILE".into(),
+            basis: InteractionBasis::Convention,
+            framework: "nextjs_app_router",
+        };
+        let ev2: serde_json::Value =
+            serde_json::from_str(&known.into_surface("snap", "r").unwrap().evidence_json).unwrap();
+        assert_eq!(ev2["route"], serde_json::json!("/api/x"));
+        assert_eq!(ev2["routeUnknownReason"], serde_json::Value::Null);
     }
 
     #[test]

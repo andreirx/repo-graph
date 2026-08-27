@@ -41,6 +41,25 @@ pub struct HttpSurfaceRow {
     pub source_file: String,
     /// Surface symbol stable key (for provenance).
     pub symbol_stable_key: String,
+    /// HTTP-SURFACE-COHERENCE-1 §2.5 — presentation labels the matcher IGNORES.
+    /// Carried here (not a second query) so the ONE read that feeds linking also
+    /// feeds rendering, with no parallel SQL to drift.
+    ///
+    /// `files.is_test` for `source_file`: `Some(true)` = a test file (rendered
+    /// `[test]`), `Some(false)` = a non-test tracked file, `None` = the file is
+    /// not in the `files` table (no positive test evidence — never labelled, and
+    /// never asserted non-test). Honest-degradation: a `None` here is data
+    /// absence (no `files` row), NOT a read failure — a failed read Errs the whole
+    /// query upstream.
+    pub is_test: Option<bool>,
+    /// Framework label off `evidence_json.framework` (`spring` / `spring_mvc` /
+    /// `nextjs_app_router` / `axios` / …) — distinguishes REST vs MVC/view-render
+    /// providers (§2.1 basis note). `None` when evidence carried no framework.
+    pub framework: Option<String>,
+    /// When `route` is `None`, the recorded reason (`evidence_json
+    /// .routeUnknownReason`) the URL is not statically derivable (§3). Rendered
+    /// beside `<dynamic>` so an unknown route is never a silent gap.
+    pub route_unknown_reason: Option<String>,
 }
 
 // ── Result DTOs ───────────────────────────────────────────────────────
@@ -204,6 +223,9 @@ mod tests {
             route: route.map(|s| s.to_string()),
             source_file: file.to_string(),
             symbol_stable_key: format!("r:{}:FILE", file),
+            is_test: None,
+            framework: None,
+            route_unknown_reason: None,
         }
     }
 

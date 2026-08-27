@@ -132,45 +132,201 @@ impl BoundariesListResponse {
             return out;
         }
 
-        out.push('\n');
-
-        // -- Boundary rows (deterministic order) --
-        let mut entries = self.results.clone();
-        // Sort by (channel_kind, direction, service_name, file_path, boundary_channel_uid)
-        entries.sort_by(|a, b| {
-            (
-                &a.channel_kind,
-                &a.direction,
-                &a.service_name,
-                &a.file_path,
-                &a.boundary_channel_uid,
-            )
-                .cmp(&(
-                    &b.channel_kind,
-                    &b.direction,
-                    &b.service_name,
-                    &b.file_path,
-                    &b.boundary_channel_uid,
-                ))
-        });
-
-        // Full output, no truncation
-        for entry in &entries {
-            let identity = entry
-                .service_name
-                .as_deref()
-                .or(entry.file_path.as_deref())
-                .unwrap_or(&entry.boundary_channel_uid);
-
-            let family = entry.protocol_family.as_deref().unwrap_or("-");
-
-            out.push_str(&format!(
-                "  {}  {}  {}  {}  {}\n",
-                entry.channel_kind, entry.direction, entry.boundary_scope, family, identity
-            ));
-        }
-
+        out.push_str(&render_grouped(&self.results));
         out
+    }
+}
+
+/// Max methods/routes listed per group before summarizing the tail as `+K more`.
+const MAX_ROUTES_PER_GROUP: usize = 6;
+
+/// §2.4 (operator ruling (b)): `boundaries list` is the GROUPED view of the same
+/// boundary rows, keyed literally on **file × direction**, with `×N` counts, the
+/// methods/routes summarized, and constant-valued columns (kind, scope, family)
+/// lifted out and stated ONCE. Strictly a summary of `surfaces list` (it shares
+/// its HTTP-surface read for the route detail), so the audit's "74%
+/// verbatim-duplicate rows / scope unknown on every row" collapses to signal.
+/// Channel-kind-AGNOSTIC — gRPC / DB / broker rows group the same way.
+fn render_grouped(rows: &[BoundaryListEntry]) -> String {
+    // Accumulate one group per (file, direction); the other columns are collected
+    // as per-group value SETS (a file×direction may legitimately span >1 kind).
+    let mut groups: std::collections::BTreeMap<GroupKey, GroupAgg> =
+        std::collections::BTreeMap::new();
+    for r in rows {
+        groups.entry(GroupKey::from_entry(r)).or_default().add(r);
+    }
+    let groups: Vec<(&GroupKey, &GroupAgg)> = groups.iter().collect();
+
+    // A column is constant iff its value SET across every group has exactly one
+    // member — then it is dropped from the rows and stated once.
+    let const_kind = single_across(groups.iter().map(|(_, g)| &g.kinds));
+    let const_scope = single_across(groups.iter().map(|(_, g)| &g.scopes));
+    let const_family = single_across(groups.iter().map(|(_, g)| &g.families));
+    let const_dir = single_value(groups.iter().map(|(k, _)| k.direction.as_str()));
+
+    let mut out = String::new();
+
+    let mut context = Vec::new();
+    if let Some(k) = &const_kind {
+        context.push(format!("kind={}", k));
+    }
+    if let Some(d) = const_dir {
+        context.push(format!("direction={}", d));
+    }
+    if let Some(s) = &const_scope {
+        context.push(format!("scope={}", s));
+    }
+    if let Some(f) = &const_family {
+        context.push(format!("protocol={}", f));
+    }
+    if !context.is_empty() {
+        out.push_str(&format!("\nAll boundaries: {}\n", context.join(", ")));
+    }
+    out.push_str(&format!(
+        "\n{} file×direction group{} (detail: `rmap surfaces list`):\n",
+        groups.len(),
+        if groups.len() == 1 { "" } else { "s" }
+    ));
+
+    // Deterministic order: (kind, direction, file) so a kind-sorted read is
+    // stable even though the grouping key is (file, direction).
+    let mut ordered = groups;
+    ordered.sort_by(|(ka, ga), (kb, gb)| {
+        set_repr(&ga.kinds)
+            .cmp(&set_repr(&gb.kinds))
+            .then_with(|| ka.direction.cmp(&kb.direction))
+            .then_with(|| ka.file.cmp(&kb.file))
+    });
+
+    for (key, agg) in &ordered {
+        let mut cols = Vec::new();
+        if const_kind.is_none() {
+            cols.push(join_set(&agg.kinds));
+        }
+        if const_dir.is_none() {
+            cols.push(key.direction.clone());
+        }
+        if const_scope.is_none() {
+            cols.push(join_set(&agg.scopes));
+        }
+        if const_family.is_none() {
+            cols.push(join_set(&agg.families));
+        }
+        cols.push(key.file.clone());
+        out.push_str(&format!("  {}  ×{}", cols.join("  "), agg.n));
+        // §2.4: the methods/routes summary (from `surface_display_name`), the
+        // signal that lived only in `surfaces list` before.
+        let routes = summarize_routes(&agg.routes);
+        if !routes.is_empty() {
+            out.push_str(&format!("  {}", routes));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Per-group accumulator: the `×N` count plus the value SETS of the columns that
+/// are no longer part of the grouping key.
+#[derive(Debug, Default)]
+struct GroupAgg {
+    n: usize,
+    kinds: std::collections::BTreeSet<String>,
+    scopes: std::collections::BTreeSet<String>,
+    families: std::collections::BTreeSet<String>,
+    /// The methods/routes (`surface_display_name`) seen in this group.
+    routes: std::collections::BTreeSet<String>,
+}
+
+impl GroupAgg {
+    fn add(&mut self, e: &BoundaryListEntry) {
+        self.n += 1;
+        self.kinds.insert(e.channel_kind.clone());
+        self.scopes.insert(e.boundary_scope.clone());
+        self.families
+            .insert(e.protocol_family.clone().unwrap_or_else(|| "-".to_string()));
+        if let Some(name) = &e.surface_display_name {
+            if !name.trim().is_empty() {
+                self.routes.insert(name.clone());
+            }
+        }
+    }
+}
+
+/// Join a small value set for a per-row column (already sorted by `BTreeSet`).
+fn join_set(set: &std::collections::BTreeSet<String>) -> String {
+    set.iter().cloned().collect::<Vec<_>>().join("/")
+}
+
+/// A stable representative (the min) of a set, for ordering groups by kind.
+fn set_repr(set: &std::collections::BTreeSet<String>) -> String {
+    set.iter().next().cloned().unwrap_or_default()
+}
+
+/// Summarize the methods/routes in a group: up to `MAX_ROUTES_PER_GROUP`, then
+/// `+K more` — a summary, not the full per-route list (that is `surfaces list`).
+fn summarize_routes(routes: &std::collections::BTreeSet<String>) -> String {
+    if routes.is_empty() {
+        return String::new();
+    }
+    let shown: Vec<&String> = routes.iter().take(MAX_ROUTES_PER_GROUP).collect();
+    let mut s = shown
+        .iter()
+        .map(|r| r.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if routes.len() > MAX_ROUTES_PER_GROUP {
+        s.push_str(&format!(", +{} more", routes.len() - MAX_ROUTES_PER_GROUP));
+    }
+    s
+}
+
+/// `Some(v)` iff every group's value SET is the same single value; `None`
+/// otherwise. Drives constant-column detection over per-group sets (§2.4).
+fn single_across<'a>(
+    mut sets: impl Iterator<Item = &'a std::collections::BTreeSet<String>>,
+) -> Option<String> {
+    let first = sets.next()?;
+    if first.len() != 1 {
+        return None;
+    }
+    let val = first.iter().next().cloned();
+    if sets.all(|s| s.len() == 1 && s.iter().next() == val.as_ref()) {
+        val
+    } else {
+        None
+    }
+}
+
+/// `Some(v)` iff every element equals the same `v`; `None` if the iterator is
+/// empty or holds ≥2 distinct values. Drives constant-direction detection (§2.4).
+fn single_value<'a>(mut it: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let first = it.next()?;
+    if it.all(|v| v == first) {
+        Some(first)
+    } else {
+        None
+    }
+}
+
+/// The grouping key for the §2.4 rollup: literally **file × direction**. Ordered
+/// so `BTreeMap` iteration is deterministic.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct GroupKey {
+    direction: String,
+    file: String,
+}
+
+impl GroupKey {
+    fn from_entry(e: &BoundaryListEntry) -> Self {
+        GroupKey {
+            direction: e.direction.clone(),
+            file: e
+                .file_path
+                .clone()
+                .or_else(|| e.service_name.clone())
+                .unwrap_or_else(|| e.boundary_channel_uid.clone()),
+        }
     }
 }
 
@@ -257,11 +413,19 @@ mod tests {
 
     #[test]
     fn list_render_shows_boundaries() {
+        // §2.4: the grouped view is keyed on file × direction (per-service /
+        // contract detail lives in `boundaries show`), so it shows the channel
+        // kinds and the FILES, one `×N` row per file×direction group.
         let resp = sample_list_response();
         let output = resp.render_human();
         assert!(output.contains("http_client"));
         assert!(output.contains("database"));
-        assert!(output.contains("UserService"));
+        assert!(output.contains("src/api/client.ts"), "{output}");
+        assert!(output.contains("src/db/pool.ts"), "{output}");
+        assert!(
+            output.contains('×'),
+            "grouped rows carry a ×N count:\n{output}"
+        );
     }
 
     #[test]
@@ -270,6 +434,76 @@ mod tests {
         let output = resp.render_human();
         assert!(output.contains("outbound"));
         assert!(output.contains("bidirectional"));
+    }
+
+    #[test]
+    fn list_render_groups_duplicate_rows_with_count() {
+        // The audit defect: N verbatim-duplicate rows. The grouped view collapses
+        // them to ONE row with `×N`, and lifts the constant columns out.
+        let mut resp = sample_empty_response();
+        let dup = |uid: &str| BoundaryListEntry {
+            boundary_channel_uid: uid.to_string(),
+            channel_kind: "http".to_string(),
+            boundary_scope: "unknown".to_string(),
+            direction: "provider".to_string(),
+            protocol_family: Some("http".to_string()),
+            service_name: None,
+            file_path: Some("src/app/api/x/route.ts".to_string()),
+            symbol_key: None,
+            confidence: 0.9,
+            basis: None,
+            surface_uid: None,
+            surface_display_name: None,
+        };
+        resp.results = vec![dup("a"), dup("b"), dup("c")];
+        resp.count = 3;
+        let output = resp.render_human();
+        // Constant columns stated once, not per row.
+        assert!(output.contains("kind=http"), "{output}");
+        assert!(output.contains("scope=unknown"), "{output}");
+        // The three duplicates collapse to a single ×3 row.
+        assert!(output.contains("×3"), "{output}");
+        assert_eq!(
+            output.matches("src/app/api/x/route.ts").count(),
+            1,
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn list_render_summarizes_methods_routes_per_file_direction() {
+        // §2.4: the grouped view keys on (file, direction) and summarizes the
+        // methods/routes (surface_display_name) — the signal that lived only in
+        // `surfaces list`. Two routes in one provider file collapse to ONE group
+        // with both routes summarized.
+        let mut resp = sample_empty_response();
+        let route = |uid: &str, disp: &str| BoundaryListEntry {
+            boundary_channel_uid: uid.to_string(),
+            channel_kind: "http".to_string(),
+            boundary_scope: "unknown".to_string(),
+            direction: "provider".to_string(),
+            protocol_family: Some("http".to_string()),
+            service_name: None,
+            file_path: Some("src/app/api/x/route.ts".to_string()),
+            symbol_key: None,
+            confidence: 0.9,
+            basis: None,
+            surface_uid: None,
+            surface_display_name: Some(disp.to_string()),
+        };
+        resp.results = vec![route("a", "GET /api/x"), route("b", "POST /api/x")];
+        resp.count = 2;
+        let output = resp.render_human();
+        // One file×direction group, ×2, with BOTH methods/routes summarized.
+        assert!(output.contains("×2"), "{output}");
+        assert!(output.contains("GET /api/x"), "{output}");
+        assert!(output.contains("POST /api/x"), "{output}");
+        // The file appears once (grouped, not two verbatim rows).
+        assert_eq!(
+            output.matches("src/app/api/x/route.ts").count(),
+            1,
+            "{output}"
+        );
     }
 
     #[test]

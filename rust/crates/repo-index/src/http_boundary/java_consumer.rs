@@ -125,10 +125,16 @@ fn collect_java_consumers(
             if let Some((verb, route, framework)) = classify_java_invocation(&node, source, imports)
             {
                 let anchor = node.child_by_field_name("name").unwrap_or(node);
+                let route_unknown_reason = if route.is_none() {
+                    Some("dynamic URL — request URL is not a static string literal")
+                } else {
+                    None
+                };
                 out.push(HttpSurfaceDraft {
                     direction: Direction::Consumer,
                     http_method: verb,
                     route,
+                    route_unknown_reason,
                     source_file: file.to_string(),
                     line_start: anchor.start_position().row as i64 + 1,
                     col_start: anchor.start_position().column as i64,

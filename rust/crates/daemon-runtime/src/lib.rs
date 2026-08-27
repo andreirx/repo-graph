@@ -58,6 +58,8 @@ pub mod detached;
 pub mod dispatch;
 // ENRICH-LIFECYCLE-1: the automatic background enrichment pass (toolchain-aware, activity-stamped,
 // two-gate contention), spawned after every successful index/refresh — mirrors `retention_pass`.
+mod boundaries_list_read; // HTTP-SURFACE-COHERENCE-1 §2.4: boundaries-list response assembly (crate-private)
+mod boundaries_summary_read; // HTTP-SURFACE-COHERENCE-1 §2.3: summary counts reconciled to the union (crate-private)
 pub mod enrich_pass;
 pub mod explain_coherence;
 pub mod explain_lg_identity;
@@ -65,6 +67,7 @@ pub mod explain_lg_serve;
 pub mod focus_resolution_cert;
 pub mod handlers;
 mod http_boundary_read; // HTTP-BOUNDARY-1: read-time HTTP boundary render helpers (crate-private)
+mod http_surface_union; // HTTP-SURFACE-COHERENCE-1 §2.3: read-time union of the two HTTP families
                         // INDEX-BASIS-1: stamp the git basis at index/refresh; compute working-tree drift at
                         // query time. Crate-internal glue between repo-graph-git and the agent IndexDrift DTO;
                         // the five callers (index/refresh/orient/check/explain handlers) are all in this crate.

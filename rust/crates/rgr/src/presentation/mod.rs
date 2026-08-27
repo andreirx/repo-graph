@@ -226,3 +226,228 @@ mod tests {
         assert_eq!(DisplaySeverity::parse("unknown"), DisplaySeverity::Low);
     }
 }
+
+/// HTTP-SURFACE-COHERENCE-1 §2.3 — cross-renderer count coherence.
+///
+/// The slice mandates ONE shared HTTP aggregation feeding `surfaces list`
+/// (headline + footer), `boundaries summary`, and `boundaries list`. In
+/// production all three read `unified_http_surfaces` in the daemon; this test
+/// closes the loop at the PRESENTATION boundary: given ONE logical HTTP row set,
+/// it drives all three human renderers, PARSES their rendered output, and asserts
+/// the provider/consumer counts agree — the audit's headline-vs-footer-vs-summary
+/// contradiction is impossible if this passes.
+#[cfg(test)]
+mod http_count_coherence {
+    use super::boundaries_list::{BoundariesListResponse, BoundaryListEntry};
+    use super::boundaries_summary::{BoundariesSummaryResponse, BoundarySummary};
+    use super::http_boundary::{render_surfaces, HttpBoundarySurfaceEntry};
+
+    /// One logical HTTP surface, shared by every renderer under test.
+    struct Surface {
+        direction: &'static str,
+        method: &'static str,
+        route: Option<&'static str>,
+        file: &'static str,
+    }
+
+    fn fixture() -> Vec<Surface> {
+        vec![
+            Surface {
+                direction: "provider",
+                method: "GET",
+                route: Some("/api/a"),
+                file: "app/a/route.ts",
+            },
+            Surface {
+                direction: "provider",
+                method: "POST",
+                route: Some("/api/a"),
+                file: "app/a/route.ts",
+            },
+            Surface {
+                direction: "provider",
+                method: "GET",
+                route: Some("/api/b"),
+                file: "app/b/route.ts",
+            },
+            Surface {
+                direction: "provider",
+                method: "GET",
+                route: None,
+                file: "app/c/route.ts",
+            },
+            Surface {
+                direction: "consumer",
+                method: "GET",
+                route: Some("/api/a"),
+                file: "web/client.ts",
+            },
+            Surface {
+                direction: "consumer",
+                method: "GET",
+                route: Some("/ext"),
+                file: "web/other.ts",
+            },
+        ]
+    }
+
+    /// The single source of truth every renderer's count derives from (the
+    /// daemon's `http_surface_union::counts` uses this exact rule).
+    fn counts(rows: &[Surface]) -> (usize, usize) {
+        (
+            rows.iter().filter(|r| r.direction == "provider").count(),
+            rows.iter().filter(|r| r.direction == "consumer").count(),
+        )
+    }
+
+    fn to_surfaces_entries(rows: &[Surface]) -> Vec<HttpBoundarySurfaceEntry> {
+        rows.iter()
+            .map(|r| HttpBoundarySurfaceEntry {
+                direction: r.direction.to_string(),
+                http_method: r.method.to_string(),
+                route: r.route.map(str::to_string),
+                source_file: r.file.to_string(),
+                is_test: None,
+                framework: None,
+                route_unknown_reason: None,
+                module: None,
+                conflict: None,
+            })
+            .collect()
+    }
+
+    fn to_boundaries_entries(rows: &[Surface]) -> Vec<BoundaryListEntry> {
+        rows.iter()
+            .map(|r| {
+                let route = r.route.unwrap_or("<dynamic>");
+                BoundaryListEntry {
+                    boundary_channel_uid: format!("http:{}:{}", r.method, r.file),
+                    channel_kind: "http".to_string(),
+                    boundary_scope: "unknown".to_string(),
+                    direction: r.direction.to_string(),
+                    protocol_family: Some("http".to_string()),
+                    service_name: None,
+                    file_path: Some(r.file.to_string()),
+                    symbol_key: None,
+                    confidence: 0.9,
+                    basis: None,
+                    surface_uid: None,
+                    surface_display_name: Some(format!("{} {}", r.method, route)),
+                }
+            })
+            .collect()
+    }
+
+    /// Parse "P provider(s), C consumer(s)" out of any of the three renderers'
+    /// count phrases.
+    fn parse_phrase(line: &str) -> (usize, usize) {
+        let after = line.rsplit(':').next().unwrap_or(line);
+        let num_before = |kw: &str| -> usize {
+            after
+                .split(kw)
+                .next()
+                .and_then(|s| {
+                    s.trim()
+                        .trim_end_matches(", ")
+                        .split_whitespace()
+                        .next_back()
+                })
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_else(|| panic!("no {kw} count in {line:?}"))
+        };
+        (num_before("provider"), num_before("consumer"))
+    }
+
+    #[test]
+    fn surfaces_footer_summary_line_and_boundaries_rows_agree() {
+        let rows = fixture();
+        let (p, c) = counts(&rows);
+
+        // 1) surfaces list — parse the footer phrase.
+        let surfaces_out = render_surfaces(&to_surfaces_entries(&rows));
+        let footer = surfaces_out
+            .lines()
+            .find(|l| l.starts_with('—'))
+            .expect("surfaces footer");
+        assert_eq!(
+            parse_phrase(footer),
+            (p, c),
+            "surfaces footer:\n{surfaces_out}"
+        );
+
+        // 2) boundaries summary — HTTP line built from the SAME (p, c) the daemon
+        //    computes via the shared aggregation.
+        let summary = BoundariesSummaryResponse {
+            command: "boundaries summary".to_string(),
+            repo: "r".to_string(),
+            snapshot: "s".to_string(),
+            summary: Some(BoundarySummary {
+                total_surfaces: (p + c) as u64,
+                total_channels: 0,
+                by_channel_kind: vec![],
+                by_boundary_scope: vec![],
+                by_direction: vec![],
+                by_protocol_family: vec![],
+                by_basis: vec![],
+                files_with_boundaries: vec![],
+            }),
+            http_providers: Some(p),
+            http_consumers: Some(c),
+            http_degraded: None,
+        };
+        let summary_out = summary.render_human();
+        let http_line = summary_out
+            .lines()
+            .find(|l| l.contains("HTTP/REST surfaces:"))
+            .expect("summary HTTP line");
+        assert_eq!(
+            parse_phrase(http_line),
+            (p, c),
+            "summary line:\n{summary_out}"
+        );
+
+        // 3) boundaries list — the grouped view of the SAME rows: sum the ×N
+        //    counts split by direction and confirm they reconstruct (p, c).
+        let list = BoundariesListResponse {
+            command: "boundaries list".to_string(),
+            repo: "r".to_string(),
+            snapshot: "s".to_string(),
+            results: to_boundaries_entries(&rows),
+            count: (p + c) as u64,
+            filter_kind: None,
+            filter_scope: None,
+            filter_direction: None,
+            filter_family: None,
+            filter_file: None,
+            filter_file_prefix: None,
+            filter_symbol: None,
+        };
+        let list_out = list.render_human();
+        let (mut lp, mut lc) = (0usize, 0usize);
+        for line in list_out.lines() {
+            // grouped rows are indented `  <direction>  <file>  ×N  <routes>`;
+            // the `N file×direction groups` header also contains `×` but is not
+            // indented, so require the two-space row prefix.
+            if !line.starts_with("  ") {
+                continue;
+            }
+            let Some(times_idx) = line.find('×') else {
+                continue;
+            };
+            let n: usize = line[times_idx + '×'.len_utf8()..]
+                .split_whitespace()
+                .next()
+                .and_then(|t| t.parse().ok())
+                .expect("×N count");
+            if line.contains("provider") {
+                lp += n;
+            } else if line.contains("consumer") {
+                lc += n;
+            }
+        }
+        assert_eq!((lp, lc), (p, c), "boundaries grouped rows:\n{list_out}");
+
+        // All three renderers reconstructed the identical (providers, consumers).
+        assert_eq!((p, c), (4, 2));
+    }
+}

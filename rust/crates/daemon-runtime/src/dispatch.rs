@@ -6860,9 +6860,12 @@ impl ServiceDispatcher {
             }
         };
 
-        // Build results
+        // Build results. §2.3: HTTP-kind project surfaces are lifted OUT of the
+        // catalog — the read-time union renders them ONCE in the richer HTTP/REST
+        // section below (see `unified_http_surfaces_json`).
         let results: Vec<serde_json::Value> = surfaces
             .into_iter()
+            .filter(|s| !matches!(s.surface_kind.as_str(), "http_provider" | "http_consumer"))
             .map(|s| {
                 let module = module_map.get(s.module_candidate_uid.as_str());
                 serde_json::json!({
@@ -6887,21 +6890,18 @@ impl ServiceDispatcher {
 
         let count = results.len();
 
-        // HTTP-BOUNDARY-1 (review-0 item 2): render the HTTP/REST provider &
-        // consumer map here too. HTTP surfaces live in the boundary-interaction
-        // store (channel_kind='http'), not `project_surfaces`, so we read them as
-        // a separate, honestly-labelled section — never mixed into the project
-        // surface rows. `route: null` for a dynamic URL is preserved. See the
-        // crate-private `http_boundary_read` module (off this 8.9k-line file).
-        // A failed read is UNKNOWN, never an empty REST map (review-4 item 2):
-        // `Err` degrades to an empty list PLUS a labelled degradation field the
-        // renderer prints — it must NOT render as "no recognized patterns".
+        // §2.3 / Option B: the UNIFIED HTTP surfaces (boundary family ⋈ legacy
+        // `project_surfaces` HTTP family, deduped) feed this ONE section; the
+        // renderer counts off these exact rows (headline == footer == rows). A
+        // failed read is UNKNOWN, never an empty map (review-4 item 2). See
+        // `unified_http_surfaces_json` (off this 8.9k-line file).
         let (http_boundary_surfaces, http_boundary_surfaces_degraded) =
-            match crate::http_boundary_read::http_boundary_surfaces_json(
+            match crate::http_boundary_read::unified_http_surfaces_json(
                 &storage,
+                &repo_uid,
                 &snapshot.snapshot_uid,
             ) {
-                Ok(list) => (list, None),
+                Ok((list, _providers, _consumers)) => (list, None),
                 Err(reason) => (Vec::new(), Some(reason)),
             };
 
@@ -7187,52 +7187,26 @@ impl ServiceDispatcher {
             }
         };
 
-        let count = items.len();
-
-        let mut response = serde_json::json!({
-            "command": "boundaries list",
-            "repo": repo_uid,
-            "snapshot": snapshot.snapshot_uid,
-            "results": items,
-            "count": count,
-        });
-
-        // Add filter info
-        if let serde_json::Value::Object(ref mut map) = response {
-            if filter.channel_kind.is_some() {
-                map.insert(
-                    "filter_kind".to_string(),
-                    serde_json::json!(filter.channel_kind.map(|k| k.as_str())),
-                );
+        // §2.3/§2.4: the response (results = non-HTTP boundary rows ⋈ the ONE
+        // unified HTTP set the surfaces footer/summary also count, grouped
+        // file×direction; filter echo; count) is assembled off this 8.9k-line file
+        // in `boundaries_list_read`. A failed read degrades honestly, never a
+        // partial/false count.
+        let response = match crate::boundaries_list_read::boundaries_list_response_json(
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            &filter,
+            items,
+            &storage,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e),
+                )
             }
-            if filter.boundary_scope.is_some() {
-                map.insert(
-                    "filter_scope".to_string(),
-                    serde_json::json!(filter.boundary_scope.map(|s| s.as_str())),
-                );
-            }
-            if filter.direction.is_some() {
-                map.insert(
-                    "filter_direction".to_string(),
-                    serde_json::json!(filter.direction.map(|d| d.as_str())),
-                );
-            }
-            if filter.protocol_family.is_some() {
-                map.insert(
-                    "filter_family".to_string(),
-                    serde_json::json!(filter.protocol_family.map(|f| f.as_str())),
-                );
-            }
-            if let Some(ref f) = filter.file {
-                map.insert("filter_file".to_string(), serde_json::json!(f));
-            }
-            if let Some(ref p) = filter.file_prefix {
-                map.insert("filter_file_prefix".to_string(), serde_json::json!(p));
-            }
-            if let Some(ref s) = filter.symbol {
-                map.insert("filter_symbol".to_string(), serde_json::json!(s));
-            }
-        }
+        };
 
         DispatchResult::success(&request.id, response)
     }
@@ -7379,12 +7353,24 @@ impl ServiceDispatcher {
             }
         };
 
-        let response = serde_json::json!({
-            "command": "boundaries summary",
-            "repo": repo_uid,
-            "snapshot": snapshot.snapshot_uid,
-            "summary": summary,
-        });
+        // §2.3: the summary's COUNT breakdowns are reconciled to the ONE unified
+        // HTTP aggregation (same rows the surfaces footer and boundaries list
+        // count), off this 8.9k-line file in `boundaries_summary_read`. A failed
+        // read degrades honestly, never a partial/contradictory count.
+        let response = match crate::boundaries_summary_read::summary_response_json(
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            &storage,
+            &summary,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e),
+                )
+            }
+        };
 
         DispatchResult::success(&request.id, response)
     }
@@ -8747,8 +8733,9 @@ impl ServiceDispatcher {
         // `Err` → `null` count PLUS a labelled degradation the renderer reads to
         // suppress that claim.
         let (http_boundary_link_count, http_boundary_link_degraded) =
-            match crate::http_boundary_read::http_boundary_link_count(
+            match crate::http_boundary_read::unified_http_link_count(
                 &storage,
+                &repo_uid,
                 &snapshot.snapshot_uid,
             ) {
                 Ok(n) => (Some(n), None::<String>),
