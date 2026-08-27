@@ -7,7 +7,8 @@ CODE slice. Maturity: MATURE surfaces (HTTP-BOUNDARY-1 shipped v0.9.0).
 ## 1. Problem (measured)
 
 - **Spring MVC providers missed entirely** (OBSERVED): spring-petclinic renders `0 surfaces`
-  against 6 `@Controller` classes / 18 mapping methods; the only rows shown are 3 integration-TEST
+  against 6 `@Controller` classes / 17 mapping methods (measured — see §4 note; the audit's
+  "18" was an over-count); the only rows shown are 3 integration-TEST
   consumers — an agent learns the app has no HTTP surface, the opposite of the truth. The
   detector keys on `@RestController` only, while `inferences list` on the same snapshot names all
   6 controllers at 0.95 confidence (the spring_container_managed data is already there).
@@ -65,8 +66,13 @@ NOT commit.
   provider (static + `[param]` + verb exports; a route.ts with no verb exports emits nothing);
   count-coherence (rendered counts == rendered rows, headline == footer); grouped boundaries
   view; `[test]` labeling; dual-implementation note.
-- LIVE isolated proofs: petclinic — `surfaces list` shows the 6 controllers/18 routes as
-  providers, test consumers labeled `[test]`, `boundaries summary` coherent; amodx — the 11
+- LIVE isolated proofs: petclinic — `surfaces list` shows the 6 controllers / **17 method-level
+  routes** as providers (measured ground truth, operator ruling 2026-08-26 (c): `grep` of
+  `src/main` = 12 `@GetMapping` + 5 `@PostMapping` = 17; the only 2 `@RequestMapping` hits are one
+  Javadoc comment and one CLASS-LEVEL base path `@RequestMapping("/owners/{ownerId}")` on
+  PetController — a prefix composed into its method routes, NOT an 18th servable route. Emitting it
+  would fabricate a route the framework does not serve, the exact dishonesty this slice prevents),
+  test consumers labeled `[test]`, `boundaries summary` coherent; amodx — the 11
   App Router handlers flip to providers with real routes; FRAKTAG — footer says 47 providers
   under 47 provider rows; glamCRM — headline counts the 244, dual Spring/CDK routes noted.
   Before/after captures vs `smoke-runs/2026-08-25T22-41-37Z` in the report.
