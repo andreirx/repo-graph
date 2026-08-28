@@ -395,6 +395,8 @@ impl Dispatcher for ServiceDispatcher {
             "hotspots" => crate::handlers::quality::handle_hotspots(&self.state, request),
             "risk" => crate::handlers::quality::handle_risk(&self.state, request),
             "coverage" => crate::handlers::quality::handle_coverage(&self.state, request),
+            // DEAD-CAUSES-1: derived facts for `rmap dead`'s refusal "Root causes" (READ-only).
+            "dead_causes" => crate::handlers::quality::handle_dead_causes(&self.state, request),
 
             // ── Governance (LEGACY-CONTRACT-MIGRATION-1C) ────────────
             // Handlers extracted to handlers/governance.rs

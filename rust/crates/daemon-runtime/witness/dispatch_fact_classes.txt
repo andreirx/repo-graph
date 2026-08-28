@@ -13,10 +13,11 @@
 # §3.3, that makes a new arm pay its integration explicitly (a new arm goes RED until
 # it is declared here; a typo'd or empty declaration goes RED too).
 #
-# The live arm count is reconciled against dispatch.rs; it is 69 today: EC-1 §3.3's 67
+# The live arm count is reconciled against dispatch.rs; it is 70 today: EC-1 §3.3's 67
 # (10 mixed + 17 SQLite-graph + 20 non-graph + 7 registry + 13 writers; +1 SQLite-graph
 # = `reliability`, RESOLUTION-BREAKDOWN-CLI-1) + 1 operational = `maintenance_gc`
-# (FORGET-REPO-1) + 1 mixed = `find` (EMBED-SEED-IMPL-1). The witness
+# (FORGET-REPO-1) + 1 mixed = `find` (EMBED-SEED-IMPL-1) + 1 non-graph = `dead_causes`
+# (DEAD-CAUSES-1). The witness
 # does NOT hard-code 66 — the reconciliation against the live match IS the guard.
 #
 # FACT CLASSES (EC-1 §3.2): FC0 extraction stream (pipeline input) · FC1 structure
@@ -76,6 +77,10 @@ boundaries_links       = FC6
 surfaces_list          = FC1, FC6
 surfaces_show          = FC1, FC6
 inferences_list        = FC6
+# DEAD-CAUSES-1: `rmap dead`'s refusal derives its Root causes from the snapshot —
+# framework inferences (FC6) + line_coverage measurements (FC4) + active entrypoint
+# declarations (FC5) + file languages (FC1). READ-only; no raw-graph tables touched.
+dead_causes            = FC1, FC4, FC5, FC6
 policy                 = FC5
 modules_files          = FC1
 modules_unowned        = FC1

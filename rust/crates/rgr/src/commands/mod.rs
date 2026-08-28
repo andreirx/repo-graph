@@ -21,6 +21,7 @@ mod assess;
 mod boundaries;
 mod contracts;
 mod dead;
+mod dead_render;
 mod declare;
 mod deps;
 mod docs;

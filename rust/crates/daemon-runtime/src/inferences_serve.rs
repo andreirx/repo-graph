@@ -131,6 +131,32 @@ fn applies(spec: &DetectorSpec, langs: &BTreeSet<String>) -> bool {
     spec.languages.iter().any(|l| langs.contains(*l))
 }
 
+/// Languages present in the snapshot that NO shipping inference detector covers.
+/// Derived from the static CATALOG ∩ the snapshot's language mix — this module is the
+/// ONE place that knows which languages have a detector, so callers (the `inferences`
+/// empty-state and the `dead_causes` handler) never re-encode that catalog and cannot
+/// re-rot it independently. Verified from `CATALOG`, never from a name.
+pub fn uncovered_languages(langs: &BTreeSet<String>) -> BTreeSet<String> {
+    langs
+        .iter()
+        .filter(|l| !CATALOG.iter().any(|s| s.languages.contains(&l.as_str())))
+        .cloned()
+        .collect()
+}
+
+/// The honest "no inference detector on this build covers X" clause for a non-empty
+/// uncovered-language set, in reader languages. `None` when nothing is uncovered — so a
+/// caller renders the line ONLY when a real detector gap exists on the reader's snapshot.
+pub fn no_detector_note(uncovered: &BTreeSet<String>) -> Option<String> {
+    if uncovered.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "No inference detector on this build covers {}.",
+        reader_language_list(uncovered)
+    ))
+}
+
 /// Parse the source FILE path from a `target_stable_key`. Handles both inference
 /// key shapes: `{repo}:{path}#{sym}:SYMBOL:{kind}` (path is before `#`) and
 /// `{repo}:{path}:FILE` (path is before the trailing `:FILE`). `repo_uid` carries no
@@ -192,12 +218,8 @@ pub fn build_detectors(
 ///
 /// Only called when the snapshot's TRUE total is 0.
 pub fn empty_state(langs: &BTreeSet<String>) -> serde_json::Value {
-    let covered: BTreeSet<String> = langs
-        .iter()
-        .filter(|l| CATALOG.iter().any(|s| s.languages.contains(&l.as_str())))
-        .cloned()
-        .collect();
-    let uncovered: BTreeSet<String> = langs.difference(&covered).cloned().collect();
+    let uncovered = uncovered_languages(langs);
+    let covered: BTreeSet<String> = langs.difference(&uncovered).cloned().collect();
 
     let applicable_labels: Vec<&str> = CATALOG
         .iter()
@@ -228,11 +250,9 @@ pub fn empty_state(langs: &BTreeSet<String>) -> serde_json::Value {
             applicable_labels.join(" and "),
             reader_language_list(&covered),
         );
-        if !uncovered.is_empty() {
-            message.push_str(&format!(
-                " No inference detector on this build covers {}.",
-                reader_language_list(&uncovered)
-            ));
+        if let Some(note) = no_detector_note(&uncovered) {
+            message.push(' ');
+            message.push_str(&note);
         }
         serde_json::json!({
             "reason": "applicable_detectors_recorded_nothing",
@@ -459,6 +479,34 @@ mod tests {
         let e = empty_state(&langs(&["python"]));
         assert_eq!(e["reason"], "no_detector_for_languages");
         assert!(e["message"].as_str().unwrap().contains("Python"));
+    }
+
+    #[test]
+    fn uncovered_languages_names_only_languages_with_no_detector() {
+        // Mixed snapshot: java (Spring), typescript (React) both covered; c/cpp not.
+        let u = uncovered_languages(&langs(&["java", "typescript", "c", "cpp"]));
+        assert_eq!(u, langs(&["c", "cpp"]), "only the detector-less languages");
+        // Fully covered → empty.
+        assert!(uncovered_languages(&langs(&["java", "tsx"])).is_empty());
+        // Fully uncovered → all.
+        assert_eq!(
+            uncovered_languages(&langs(&["go", "ruby"])),
+            langs(&["go", "ruby"])
+        );
+    }
+
+    #[test]
+    fn no_detector_note_present_only_for_a_real_gap_in_reader_language() {
+        assert_eq!(no_detector_note(&BTreeSet::new()), None, "no gap → no line");
+        let note = no_detector_note(&langs(&["c", "cpp"])).expect("gap → a line");
+        assert!(
+            note.contains("C") && note.contains("C++"),
+            "reader langs: {note}"
+        );
+        assert!(
+            note.starts_with("No inference detector on this build covers"),
+            "honest phrasing: {note}"
+        );
     }
 
     #[test]

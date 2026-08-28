@@ -11,6 +11,7 @@
 
 mod churn;
 mod coverage;
+mod dead_causes;
 mod hotspots;
 mod risk;
 // INDEX-BASIS-1: `pub(crate)` so the orient/check/explain drift helper (in
@@ -25,5 +26,6 @@ mod tests;
 
 pub use churn::handle_churn;
 pub use coverage::handle_coverage;
+pub use dead_causes::handle_dead_causes;
 pub use hotspots::handle_hotspots;
 pub use risk::handle_risk;
