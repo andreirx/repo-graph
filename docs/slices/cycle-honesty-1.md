@@ -18,28 +18,32 @@ Maturity: MATURE (cycles output contract shipped as CYCLES-OUTPUT-CONTRACT-1).
 
 ## 2. Contract
 
-1. **Additive `edges` on the cycle DTO.** The daemon's cycles computation (Tarjan — the SCC
-   already knows its intra-SCC edges) returns, per cycle, the **real intra-SCC directed edges**
-   (`from_node_id`, `to_node_id`), additively (new optional field; `nodes`, `count`, JSON shape
-   otherwise unchanged — CI-facing consumers keep working). Cap edges per cycle at a sane bound
-   (e.g. 200) with an explicit `edges_truncated: true` marker — never silent truncation.
-2. **The human render draws only real arrows.** With edges present: render an actual cycle walk
-   found by DFS over the real edges (every SCC contains one); members not on the displayed walk
-   render as `+ N more members in this cycle`. Without edges (older daemon reply, or truncated):
-   render `members (unordered): A, B, C` — NO arrows. An arrow may only ever appear between
-   nodes with a verified edge.
-3. **Test-only labeling.** A cycle whose member modules are ALL test modules renders with a
-   `(test-only)` label; a mixed cycle names its test members (`includes test modules: X, Y`).
-   Basis: the files' existing `is_test` fact aggregated per member module — a module is a test
-   module iff ALL its files are `is_test` (conservative; a module with any production file is
-   production). If per-module test composition is not cheaply queryable at the cycles
-   computation site, STOP + DECISION_REQUIRED (do not proxy from path names — the standing
-   no-name-classification rule).
-4. **Type-only honesty by caveat, not by data we don't have.** On repos where TS/JS files
-   participate in any rendered cycle, one footer line: "import edges do not distinguish
-   `import type` (type-only imports may create cycles that vanish at runtime)". No per-cycle
-   claim. Recording type-only at extraction is a NAMED FOLLOW-UP (extractor + storage fact —
-   its own slice, human-ratified), not this slice.
+1. **Additive `edges` on the cycle DTO — only where honestly carried** (operator ruling
+   module-cycle-edge-contract = A1, 2026-08-28: the LiveGraph fastpath's no-loss certificate
+   proves member-set equality, NOT edge equality, so the default route must not claim edges).
+   The SQLite serving path returns, per cycle, the **real intra-SCC directed edges**
+   (`from_node_id`, `to_node_id`) as a new optional field; the LiveGraph route OMITS the field
+   (an absent optional field is honest). `nodes`, `count`, JSON shape otherwise unchanged.
+   Cap edges per cycle at a sane bound (e.g. 200) with an explicit `edges_truncated: true`
+   marker — never silent truncation. No change to the certificate, witness, or
+   backend-independence contract (extending certification to edge sets is the follow-up, §6).
+2. **The human render draws only real arrows.** With verified edges present: render an actual
+   cycle walk found by DFS over them (every SCC contains one); members not on the displayed
+   walk render as `+ N more members in this cycle`. Without edges (LiveGraph route, older
+   daemon reply, or truncated): render `members (unordered): A, B, C` — NO arrows. An arrow
+   may only ever appear between nodes with a verified edge.
+3. **Test-only labeling — DEFERRED (operator ruling test-label-data-path = B3, 2026-08-28).**
+   The STOP path fired: `is_test` does not exist in the LiveGraph IR (VERIFIED review-0), so
+   fact-based labels on the default route are impossible without projecting the fact into
+   IR/warm-cache/witness (human-class blast radius), and SQLite-only labels would be a
+   mostly-dormant, engine-asymmetric capability. Labels move to the follow-up (§6). Never
+   label from names.
+4. **Type-only honesty by caveat, not by data we don't have** (operator ruling ts-caveat-basis
+   = C1 at REPO level, 2026-08-28). When the repo's stored language facts show material TS/JS
+   presence AND at least one cycle renders, one footer line: "this repo contains
+   TypeScript/JavaScript; import edges do not distinguish `import type` — some cycles may
+   vanish at runtime". Repo-scoped truthful; no per-cycle claim, no new aggregation.
+   Recording type-only at extraction is part of the follow-up (§6).
 5. JSON: new fields additive only; human render changes are the point. Contract doc
    (`docs/architecture/` cycles section / CYCLES-OUTPUT-CONTRACT-1 doc) updated in-slice.
 
@@ -56,19 +60,26 @@ root. Do NOT commit.
 
 - Unit: DFS walk renders only real edges (fixture SCC where alphabetical order is NOT a walk —
   the old renderer's output would be provably fake); no-edges fallback renders "members
-  (unordered)" with zero arrows; truncation marker; test-only and mixed labeling; TS caveat
-  line appears iff TS/JS members are present in rendered cycles.
+  (unordered)" with zero arrows; truncation marker; TS caveat line appears iff the repo's
+  language facts show material TS/JS and cycles render.
 - Live proof (isolated state roots, registry sha256 unchanged): leveldb and django — the
   audit's grep check re-run on the new output: **every rendered arrow corresponds to a real
   import** (grep/`rmap imports` cross-check in the report); glamCRM or FRAKTAG for the TS
-  caveat; a test-only cycle capture if one exists in the corpus (else say so — do not
-  manufacture one).
+  caveat.
 - Chunked cargo gates; consolidation witness 15/15 (+ new arm declared if a dispatch arm is
   added); `./scripts/dogfood-isolated.sh` green.
 
 ## 5. Definition of done
 
 No rendered arrow without a verified edge anywhere in cycles output; unordered fallback is
-explicit; test-only cycles are labeled from the is_test fact (or the slice STOPPED with the
-decision); TS repos carry the type-only caveat; the type-only *fact* is a recorded follow-up;
-gates green.
+explicit; TS repos carry the type-only caveat; the follow-up (§6) is recorded; gates green.
+
+## 6. Named follow-up — CYCLE-FACTS-2 (human ratification required; NOT this slice)
+
+One slice, three coupled extensions the frozen surfaces blocked here (review-0 evidence):
+(a) extend the LiveGraph no-loss certificate + witness to intra-SCC **edge-set equality** so
+real walks render on every backend (was A2); (b) project `is_test` into the LiveGraph IR so
+test-only/mixed cycle labels are fact-based and engine-symmetric (was B2/B3 deferral);
+(c) record **type-only** import status at extraction (extractor + storage fact) so phantom TS
+cycles are labeled per-cycle instead of caveated per-repo. All three touch witness/IR/schema —
+human-class blast radius; surface as one DECISION_REQUIRED packet when queue #7-#10 are done.
