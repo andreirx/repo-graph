@@ -1314,6 +1314,35 @@ impl StorageConnection {
         Ok(map)
     }
 
+    /// CYCLE-HONESTY-1: the MODULE→MODULE `IMPORTS` edges of one snapshot as `(source_uid, target_uid)`
+    /// pairs — the SAME edge set `find_cycles_cancellable` loads for its SCC pass (step 1), but returned
+    /// so the SQLite cycles serve can attach the REAL intra-SCC import edges to each rendered cycle (the
+    /// renderer draws an arrow ONLY for a pair present here). `find_cycles` discards these after Tarjan;
+    /// exposing them here keeps that widely-used method's signature untouched. Read-only; no SCC work.
+    /// `DISTINCT` mirrors the `find_cycles` load exactly (one directed edge per ordered pair), so the
+    /// endpoints are precisely the module identities the canonical cycle nodes carry as `node_id`.
+    pub fn module_import_edges(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<(String, String)>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT DISTINCT e.source_node_uid, e.target_node_uid
+             FROM edges e
+             JOIN nodes src ON e.source_node_uid = src.node_uid
+             JOIN nodes tgt ON e.target_node_uid = tgt.node_uid
+             WHERE e.snapshot_uid = ?
+               AND e.type = 'IMPORTS'
+               AND src.kind = 'MODULE'
+               AND tgt.kind = 'MODULE'",
+        )?;
+        let edges = stmt
+            .query_map(rusqlite::params![snapshot_uid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(edges)
+    }
+
     /// EC-M2-LEAF-SERVE-1: the per-file STRUCTURAL rows of one snapshot — `(path, stored language,
     /// SYMBOL-node count)` — the SQLite half of the MODULE_SUMMARY identity-reconciliation cert
     /// BUILD (read ONCE per fingerprint, the drilldown invariant; never on the serve path).

@@ -29,11 +29,22 @@
 //! Every existing field is preserved (`cycle_id`, `length`, per node `node_id`/`name`/`file`); `qualified_name`
 //! is ADDED. `node_id` stays backend-native (SQLite node_uid / LiveGraph module path); the cross-backend stable
 //! identity for the human + agents is `qualified_name`.
+//!
+//! # Module layout
+//!
+//! The CYCLE-HONESTY-1 additive intra-SCC edge attachment (the "cycles draw only real arrows" contract) lives
+//! in the crate-private sibling [`edges`], split out to keep BOTH files under the 500-line guardrail and to
+//! separate the certified member-set canonicalization (here) from the additive edge post-pass (there). The one
+//! cross-module entry point, [`sqlite_module_cycles_json_with_edges`], is re-exported so its call sites are
+//! unchanged.
 
 use std::collections::{BTreeMap, HashMap};
 
 use repo_graph_storage::queries::CycleResult;
 use serde_json::{json, Value};
+
+mod edges;
+pub(crate) use edges::sqlite_module_cycles_json_with_edges;
 
 /// A module-cycle node normalized for the canonical output: the backend-native `node_id`, the SHORT display
 /// `name` (preserved for back-compat), and the QUALIFIED module path — the deterministic sort key AND the

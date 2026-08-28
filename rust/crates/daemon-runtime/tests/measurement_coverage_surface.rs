@@ -33,6 +33,12 @@ impl ProgressEmitter for Quiet {
 
 /// Isolated daemon under a temp state root — never touches the operator's real registry.
 fn isolated() -> (ServiceDispatcher, TempDir) {
+    // Disable the REAL background maintenance passes (enrich -> seed -> retention) the index
+    // dispatch queues: with a LIVE local embeddings endpoint the seed pass actually runs and
+    // holds the DB while the test reads it -> `database is locked` flakes (4th recurrence of
+    // this class, 2026-08-28; same override seed_seam.rs / forget_repo.rs use).
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
+    repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
     let state_root = tempdir().expect("state root tempdir");
     let registry = RepoRegistry::with_state_root(state_root.path())
         .expect("isolated registry under temp root");

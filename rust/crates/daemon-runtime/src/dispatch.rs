@@ -2429,8 +2429,38 @@ impl ServiceDispatcher {
                 );
             }
         };
-        let canonical_cycles = crate::cycle_output::sqlite_module_cycles_json(&cycles, &qualified);
+        // CYCLE-HONESTY-1 (§2.1): the forced SQLite escape hatch also carries the REAL intra-SCC edges so it
+        // renders a verified walk (never a fabricated ring). Same edge set `find_cycles` loaded above.
+        let module_edges = match storage.module_import_edges(&snapshot.snapshot_uid) {
+            Ok(e) => e,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        let canonical_cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
+            &cycles,
+            &qualified,
+            &module_edges,
+        );
         let cycle_count = canonical_cycles.len();
+        // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): the type-only caveat basis — stored per-language
+        // file facts under the ≥10% materiality gate, the SAME basis every other cycles route reads.
+        // CLASSIFIED read -> a genuine error propagates (never a silent false claim).
+        let ts_type_only_caveat = match crate::livegraph_feed::snapshot_has_material_ts_js(
+            &storage,
+            &snapshot.snapshot_uid,
+        ) {
+            Ok(has) => has && cycle_count > 0,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
         let query_ms = query_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -2453,6 +2483,7 @@ impl ServiceDispatcher {
                 "snapshot_uid": snapshot.snapshot_uid,
                 "cycles": canonical_cycles,
                 "count": cycle_count,
+                "ts_type_only_caveat": ts_type_only_caveat,
             }),
         )
     }

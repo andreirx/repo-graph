@@ -1190,6 +1190,18 @@ pub fn file_import_cycles_response(
         ),
     };
     let count = cycles.len();
+    // CYCLE-HONESTY-1 (§2.4, review-2 route-consistency): the type-only caveat basis is the SAME stored
+    // per-language file facts (≥10% materiality) every cycles route reads — NOT `contributing_languages`.
+    // Read AFTER the LiveGraph guard is dropped (no lock nesting). CLASSIFIED read -> a genuine error
+    // PROPAGATES; when count == 0 the caveat is false regardless, but the read still surfaces honestly.
+    let has_ts = {
+        let conn = repo_state.storage().map_err(|e| {
+            repo_graph_storage::error::StorageError::InvalidArgument(format!(
+                "failed to open storage connection for the TS/JS caveat: {e}"
+            ))
+        })?;
+        snapshot_has_material_ts_js(&conn, snapshot_uid)?
+    };
     Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
@@ -1203,6 +1215,7 @@ pub fn file_import_cycles_response(
         "freshness": freshness,
         "missing_partitions": missing,
         "degradation_reasons": reasons,
+        "ts_type_only_caveat": has_ts && count > 0,
     }))
 }
 
@@ -1291,6 +1304,17 @@ pub fn module_import_cycles_response(
         ),
     };
     let count = cycles.len();
+    // CYCLE-HONESTY-1 (§2.4, review-2 route-consistency): SAME stored per-language file facts (≥10%
+    // materiality) as every cycles route — NOT `contributing_languages`. Read AFTER the guard is dropped
+    // (no lock nesting). CLASSIFIED read -> a genuine error PROPAGATES.
+    let has_ts = {
+        let conn = repo_state.storage().map_err(|e| {
+            repo_graph_storage::error::StorageError::InvalidArgument(format!(
+                "failed to open storage connection for the TS/JS caveat: {e}"
+            ))
+        })?;
+        snapshot_has_material_ts_js(&conn, snapshot_uid)?
+    };
     Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
@@ -1304,6 +1328,7 @@ pub fn module_import_cycles_response(
         "freshness": freshness,
         "missing_partitions": missing,
         "degradation_reasons": reasons,
+        "ts_type_only_caveat": has_ts && count > 0,
     }))
 }
 
@@ -2383,6 +2408,17 @@ pub fn module_cycle_compare_response(
         extra_in_livegraph,
     };
     let sidecar = write_module_compare_sidecar(repo_root, &report).ok();
+    // CYCLE-HONESTY-1 (§2.4): the repo-level type-only caveat, uniform with the other routes. The compare's
+    // PRIMARY cycles (`data.sqlite_cycles`, raw `CycleResult`) carry NO edges, so the renderer draws
+    // `members (unordered)` — the caveat is the only cycle-honesty output on this diagnostic surface.
+    // CLASSIFIED read -> a genuine error propagates.
+    let conn = repo_state.storage().map_err(|e| {
+        repo_graph_storage::error::StorageError::InvalidArgument(format!(
+            "failed to open storage connection: {e}"
+        ))
+    })?;
+    let ts_type_only_caveat =
+        snapshot_has_material_ts_js(&conn, snapshot_uid)? && data.sqlite_count > 0;
     let mut v = json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
@@ -2391,6 +2427,7 @@ pub fn module_cycle_compare_response(
         "count": data.sqlite_count,
         "backend_used": "sqlite",
         "kind": "module-import",
+        "ts_type_only_caveat": ts_type_only_caveat,
         "livegraph_module_compare": serde_json::to_value(&report).unwrap_or(Value::Null),
     });
     if let Some(p) = sidecar {
@@ -2428,6 +2465,13 @@ fn serve_cycles_fastpath(
     display_name: &str,
     snapshot_uid: &str,
     lg_cycles: &[Vec<String>],
+    // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): the repo shows MATERIALLY-present TS/JS — computed
+    // by the caller (`cycles_auto_response`) from the SAME stored per-language file facts + ≥10% gate the
+    // SQLite route reads, so the caveat is route-consistent (not `contributing_languages` guesswork). NO
+    // `edges` are carried here: the LiveGraph dirname-aggregated module edges are not cert-proven equal to
+    // SQLite's, so omitting the field is honest (operator ruling A1) and the renderer draws `members
+    // (unordered)`.
+    repo_has_ts_js: bool,
 ) -> Value {
     let cycles = crate::cycle_output::livegraph_module_cycles_json(lg_cycles);
     let count = cycles.len();
@@ -2439,6 +2483,7 @@ fn serve_cycles_fastpath(
         "count": count,
         "backend_used": "livegraph",
         "fallback_reason": Value::Null,
+        "ts_type_only_caveat": repo_has_ts_js && count > 0,
     })
 }
 
@@ -2462,8 +2507,21 @@ fn serve_cycles_sqlite(
     })?;
     let sqlite_cycles = conn.find_cycles_cancellable(snapshot_uid, "module", cancel)?;
     let qualified = conn.module_qualified_names(snapshot_uid)?;
-    let cycles = crate::cycle_output::sqlite_module_cycles_json(&sqlite_cycles, &qualified);
+    // CYCLE-HONESTY-1 (§2.1): attach the REAL intra-SCC MODULE→MODULE IMPORTS edges so the renderer can draw
+    // a verified walk. These are the SAME edges `find_cycles` loaded for its SCC pass; the renderer draws an
+    // arrow ONLY for a pair present here.
+    let module_edges = conn.module_import_edges(snapshot_uid)?;
+    let cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
+        &sqlite_cycles,
+        &qualified,
+        &module_edges,
+    );
     let count = cycles.len();
+    // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): stored per-language file facts, ≥10% materiality
+    // gate — the SAME basis the fastpath now reads, so the caveat is route-consistent. This path already
+    // reads SQLite. The read is CLASSIFIED (it drives the caveat), so a read error PROPAGATES (standing
+    // honesty rule 1) — never a silent `false` that would be an unproven "no material TS/JS" claim.
+    let repo_has_ts_js = snapshot_has_material_ts_js(&conn, snapshot_uid)?;
     Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
@@ -2472,7 +2530,38 @@ fn serve_cycles_sqlite(
         "count": count,
         "backend_used": "sqlite",
         "fallback_reason": fallback_reason.as_str(),
+        "ts_type_only_caveat": repo_has_ts_js && count > 0,
     }))
+}
+
+/// CYCLE-HONESTY-1 (§2.4, ts-caveat-basis C1 REPO-level + review-2 route-consistency): true iff the
+/// snapshot has MATERIALLY-present TS/JS — the repo-level type-only (`import type`) caveat basis. Reads the
+/// stored per-language file counts (`query_file_count_by_language` via the `AgentStorageRead` port — the
+/// SAME stored fact EVERY cycles route reads, so the caveat is route-consistent by construction) and
+/// applies the SHARED ≥10%-of-code-files materiality gate ([`crate::reader_context::repo_has_material_ts_js`],
+/// CONTRADICTION-SWEEP-1's `material_code_languages` — NOT a re-derived threshold). "Any TS/JS file present"
+/// is deliberately NOT enough: a ~3.7% incidental JS (django) must not trip the caveat.
+///
+/// NOT name/extension classification — it reads the stored language fact. A genuine read error PROPAGATES
+/// (the caller `?`s it) — a failed read is not evidence of "no material TS/JS", so it must never silently
+/// become `false` (standing honesty rule 1). An EMPTY inventory (a legitimate no-rows result) is honest
+/// `false`.
+pub(crate) fn snapshot_has_material_ts_js(
+    conn: &repo_graph_storage::StorageConnection,
+    snapshot_uid: &str,
+) -> Result<bool, repo_graph_storage::error::StorageError> {
+    // Cross-crate via the `AgentStorageRead` port (the pattern `deps list` uses); map its error into a
+    // StorageError so the CLASSIFIED read still propagates rather than collapsing to a false "no TS/JS".
+    let language_counts =
+        repo_graph_agent::AgentStorageRead::query_file_count_by_language(conn, snapshot_uid)
+            .map_err(|e| {
+                repo_graph_storage::error::StorageError::InvalidArgument(format!(
+                    "failed to read per-language file counts for the TS/JS type-only caveat: {e}"
+                ))
+            })?;
+    Ok(crate::reader_context::repo_has_material_ts_js(
+        &language_counts,
+    ))
 }
 
 /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (build): run the SHARED module-cycle compare -> verdict, STORE the cert
@@ -2707,6 +2796,20 @@ pub fn cycles_auto_response(
             ),
         }
     };
+    // CYCLE-HONESTY-1 (§2.4, review-2 route-consistency): the type-only caveat basis is the SAME stored
+    // per-language file facts (≥10% materiality) on BOTH the fastpath and the SQLite fallback — computed
+    // here from a fresh read connection so the fastpath cannot diverge from `contributing_languages`
+    // guesswork. This is a cheap grouped language COUNT, NOT the `find_cycles` Tarjan the fastpath exists to
+    // avoid; the served cycle SET stays SQLite-free. Operator ruling 2026-08-28 item 1 explicitly mandates
+    // the LiveGraph route read the same stored facts. CLASSIFIED read -> a genuine error PROPAGATES.
+    let repo_has_ts_js = {
+        let conn = repo_state.storage().map_err(|e| {
+            repo_graph_storage::error::StorageError::InvalidArgument(format!(
+                "failed to open storage connection for the TS/JS caveat: {e}"
+            ))
+        })?;
+        snapshot_has_material_ts_js(&conn, snapshot_uid)?
+    };
     // EV-A: serve the LiveGraph fastpath iff the resident fingerprint still equals the captured green-validated
     // eligibility witness; mismatch / None (a swap/straddle since capture, or no GREEN cycles cert) -> SQLite.
     let epoch_eligible = current_fp.is_some() && current_fp.as_ref() == epoch.fingerprint.as_ref();
@@ -2714,7 +2817,15 @@ pub fn cycles_auto_response(
         precondition_met,
         precondition_reason,
         epoch_eligible,
-        || serve_cycles_fastpath(repo_uid, display_name, snapshot_uid, &lg_cycles),
+        || {
+            serve_cycles_fastpath(
+                repo_uid,
+                display_name,
+                snapshot_uid,
+                &lg_cycles,
+                repo_has_ts_js,
+            )
+        },
         |reason, cancel| {
             serve_cycles_sqlite(
                 repo_state,
@@ -3376,10 +3487,10 @@ mod tests {
         use crate::callgraph_cert::{callgraph_cert_eligibility, test_fixture};
         use crate::livegraph_feed::{
             callees_engine_response, callers_engine_response, cycles_auto_response,
-            cycles_cert_eligibility, import_cert_eligibility, import_cert_fingerprint,
-            imports_auto_response, path_engine_response, stats_auto_response,
-            stats_cert_eligibility, Engine, ImportNoLossCert, RequestEpoch, StatsEligibility,
-            StatsNoLossCert, StatsOutcome,
+            cycles_cert_eligibility, file_import_cycles_response, import_cert_eligibility,
+            import_cert_fingerprint, imports_auto_response, module_import_cycles_response,
+            path_engine_response, stats_auto_response, stats_cert_eligibility, Engine,
+            ImportNoLossCert, RequestEpoch, StatsEligibility, StatsNoLossCert, StatsOutcome,
         };
         use crate::orient_serve::{
             orient_bounded_cert_eligibility, orient_bounded_cert_is_green, OrientServeDecorator,
@@ -3825,6 +3936,100 @@ mod tests {
             );
         }
 
+        /// CYCLE-HONESTY-1 (§2.4, review-3 finding 1): the TS/JS type-only caveat is ROUTE-CONSISTENT on a
+        /// RESIDENT LiveGraph. Every `cycles` route — the DEFAULT `auto` route SERVING the LiveGraph fastpath
+        /// (`backend_used=livegraph`, NOT a silent SQLite fallback), the explicit `--engine livegraph --kind
+        /// file-import` and `--kind module-import` routes, and the SQLite answer the `auto` route reaches
+        /// after a swap — derives `ts_type_only_caveat` from the SAME stored per-language file facts under the
+        /// SAME ≥10% materiality gate (`snapshot_has_material_ts_js` → `reader_context::repo_has_material_ts_js`).
+        ///
+        /// The faithful fixture is 100% TypeScript (three `.ts` files) WITH a real `src`↔`lib` cycle at BOTH
+        /// FILE and MODULE granularity, so the caveat's TRUE path (material TS AND a rendered cycle) is
+        /// observable on the LiveGraph fastpath — the path the hermetic dispatcher integration test
+        /// (`tests/cycle_honesty_route_consistency.rs`) CANNOT reach, because it never preloads a LiveGraph so
+        /// its `auto` always falls back to SQLite. `backend_used` is asserted on the LiveGraph routes so a
+        /// route that silently served SQLite (which would make an "auto == sqlite" caveat comparison vacuous —
+        /// exactly the review-3 gap) is caught here.
+        #[test]
+        fn cycles_caveat_route_consistent_on_resident_livegraph() {
+            let f = test_fixture::build_fixture(false);
+            let mut never = || std::ops::ControlFlow::Continue(());
+
+            // DEFAULT (`auto`) route: a GREEN cycles cert at the resident fingerprint licenses the LiveGraph
+            // fastpath, so this route genuinely SERVES the LiveGraph (asserted below), not a SQLite fallback.
+            let fingerprint = cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
+                .expect("eligibility never errors here");
+            assert!(
+                fingerprint.is_some(),
+                "faithful TS fixture -> GREEN cycles cert -> the auto route is fastpath-eligible"
+            );
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+            let auto =
+                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
+                    .unwrap();
+            assert_eq!(
+                auto["backend_used"], "livegraph",
+                "GREEN cert -> the DEFAULT route SERVES the LiveGraph fastpath (not a silent SQLite fallback)"
+            );
+            assert!(
+                auto["count"].as_u64().unwrap() >= 1,
+                "the fixture carries a real src<->lib module cycle -> the fastpath renders one"
+            );
+            let auto_caveat = auto["ts_type_only_caveat"].as_bool().unwrap();
+            assert!(
+                auto_caveat,
+                "material TS repo WITH a rendered cycle -> caveat TRUE on the LiveGraph fastpath \
+                 (the TRUE path the hermetic integration test cannot reach)"
+            );
+
+            // Explicit LiveGraph routes: both read the SAME stored language facts for the caveat. The fixture
+            // has the cycle at BOTH granularities, so each renders >=1 cycle and its caveat is likewise TRUE.
+            let file_import = file_import_cycles_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &f.snapshot_uid,
+                &mut never,
+            )
+            .unwrap();
+            assert_eq!(file_import["backend_used"], "livegraph");
+            assert!(file_import["count"].as_u64().unwrap() >= 1);
+            let module_import = module_import_cycles_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &f.snapshot_uid,
+                &mut never,
+            )
+            .unwrap();
+            assert_eq!(module_import["backend_used"], "livegraph");
+            assert!(module_import["count"].as_u64().unwrap() >= 1);
+
+            // SQLite answer via the `auto` route after a mid-request swap moves the resident fingerprint: the
+            // captured epoch no longer matches -> fail soft to the canonical SQLite answer at the pin.
+            swap_livegraph(&f.state);
+            let sqlite =
+                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
+                    .unwrap();
+            assert_eq!(sqlite["backend_used"], "sqlite");
+            assert!(sqlite["count"].as_u64().unwrap() >= 1);
+
+            // The invariant: ALL routes derive the caveat from the SAME repo-level stored facts, so with a
+            // rendered cycle on every route the value is identically TRUE. A route reading a DIFFERENT basis
+            // (the review-2 `contributing_languages` divergence) would break this equality.
+            for (label, v) in [
+                ("file-import", &file_import),
+                ("module-import", &module_import),
+                ("sqlite-fallback", &sqlite),
+            ] {
+                assert_eq!(
+                    v["ts_type_only_caveat"].as_bool().unwrap(),
+                    auto_caveat,
+                    "the {label} route must derive the SAME caveat as the LiveGraph fastpath (same stored basis)"
+                );
+            }
+        }
+
         // ── W-B-EPOCH-IMPL-2B: `stats` build-then-peek eligibility + EV-A ─────────────────────────
 
         /// The stats-cert eligibility witness is BUILD-THEN-PEEK: `Some` ONLY when a GREEN stats cert exists
@@ -4163,10 +4368,15 @@ mod tests {
             "disp",
             "snap",
             &[vec!["b/x".to_string(), "a/y".to_string()]],
+            true, // repo_has_ts_js: caller-computed material-TS/JS signal (count>0 -> caveat true)
         );
         assert_eq!(out["backend_used"], "livegraph");
         assert!(out["fallback_reason"].is_null());
         assert_eq!(out["count"], 1);
+        // CYCLE-HONESTY-1: the fastpath carries NO edges (LiveGraph route omits the field), so the renderer
+        // renders `members (unordered)`; the repo-level TS caveat rides on the response.
+        assert!(out["cycles"][0].get("edges").is_none());
+        assert_eq!(out["ts_type_only_caveat"], true);
         let names: Vec<&str> = out["cycles"][0]["nodes"]
             .as_array()
             .unwrap()

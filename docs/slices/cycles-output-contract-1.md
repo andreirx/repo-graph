@@ -208,9 +208,64 @@ CONSEQUENCE: FASTPATH-1 (BLOCKED) is now UNBLOCKED — byte-identity is proven, 
   first, fastpath after).
 ```
 
+## Amendment — CYCLE-HONESTY-1 (2026-08-28): additive `edges` + `ts_type_only_caveat`
+
+The default cycles output previously rendered an arrow ring drawn from the canonical member SET (a
+Tarjan/sort order, NOT a walk) — a fabricated import claim (audit fix queue #7). CYCLE-HONESTY-1
+amends this contract ADDITIVELY (operator ruling A1 / C1-repo-level):
+
+- **`edges` (additive, per cycle).** The SQLite-served canonical output
+  (`sqlite_module_cycles_json_with_edges`) now carries the REAL intra-SCC directed `IMPORTS` edges
+  `[{from_node_id, to_node_id}]` (capped at 200 with `edges_truncated`). The renderer draws a DFS
+  walk over these; with no edges it renders `members (unordered)`. An arrow only ever appears between
+  a verified edge pair. The LiveGraph fastpath adapter (`livegraph_module_cycles_json`) OMITS the
+  field (absent optional = honest); the compare + file/module-import LiveGraph routes carry no edges
+  and render unordered.
+- **Truncated edges render unordered, NO arrows (§2.2, ruling A1).** `edges_truncated == true` means
+  the carried edges are an incomplete subset of the real intra-SCC set. A walk drawn over a capped
+  subset could imply a chain the full set does not, so a truncated cycle is a no-arrows fallback case
+  — rendered `members (unordered)` exactly like the LiveGraph route and older daemon replies, checked
+  BEFORE any walk attempt. The member COUNT line stays complete; `--json` still carries the capped
+  `edges` and the `edges_truncated: true` marker for programmatic consumers.
+- **Byte-identity scope tightened, NOT broken.** The CERTIFIED fields (`cycle_id`, `length`,
+  `nodes[].qualified_name`) stay byte-identical across both default backends — the no-loss cert,
+  module-cycle compare, and consolidation witness are UNCHANGED. Only the additive `edges` field
+  differs between the SQLite serve (present) and the LiveGraph fastpath (absent). ACCEPTED, RATIFIED
+  DIVERGENCE: a TS repo's auto-fastpath serve renders `members (unordered)` while a cert-stale
+  auto-SQLite fallback renders a real walk — both honest, neither fabricates. Restoring walks on the
+  LiveGraph backend under a strengthened edge-set cert is the named follow-up CYCLE-FACTS-2(a).
+- **`ts_type_only_caveat` (additive, repo-level bool).** True iff stored language facts show
+  MATERIALLY-present TS/JS AND ≥1 cycle renders; the renderer prints one repo-scoped footer
+  (`import type` edges may create cycles that vanish at runtime). No per-cycle claim (the per-cycle
+  `type_only` fact is follow-up CYCLE-FACTS-2(c)).
+  - **Materiality basis, route-consistent (review-2, operator ruling 2026-08-28 item 1).** "Material"
+    is the ESTABLISHED ≥10%-of-code-files gate — the SAME `reader_context::material_code_languages`
+    CONTRADICTION-SWEEP-1 uses for the enrich CTA, reused (not a re-derived threshold) via
+    `reader_context::repo_has_material_ts_js`. "Any TS/JS file present" is deliberately NOT enough: a
+    ~3.7% incidental JS (django) must not trip the caveat. EVERY cycles route — the SQLite serve, the
+    forced `--engine sqlite` arm, the module-compare route, AND the three LiveGraph routes (default
+    `auto` fastpath, file-import, module-import) — now derives the flag from the SAME stored
+    per-language file facts (`query_file_count_by_language`) through the single
+    `livegraph_feed::snapshot_has_material_ts_js`. The LiveGraph routes NO LONGER read the in-memory
+    answer envelope's `contributing_languages` (which carried no counts, so it could not gate on
+    materiality and diverged from the SQLite route). This costs the default `auto` route one cheap
+    grouped language-count read; it still avoids the `find_cycles` Tarjan (the fastpath's performance
+    rationale). The read is CLASSIFIED — a failure PROPAGATES (never a silent `false`).
+
+Module layout (guardrail): `daemon-runtime/src/cycle_output.rs` (was 515) is split into
+`cycle_output/mod.rs` (the certified canonical member-set output) + `cycle_output/edges.rs` (the
+additive CYCLE-HONESTY-1 intra-SCC edge attachment); `rgr/src/presentation/cycles.rs` (was 746) is
+split into `cycles/mod.rs` (response DTOs + renderers + caveat footer) + `cycles/walk.rs` (the DFS
+walk-over-real-edges body renderer). Both halves are crate-private and ≤500 lines; the three
+edge-attachment items are `pub(crate)` (no longer public APIs, review-2).
+
+Spec: `docs/slices/cycle-honesty-1.md`.
+
 ## References
 - `docs/slices/cycles-livegraph-default-fastpath-1.md` (BLOCKED — the discovery + the C ruling)
 - `rust/crates/storage/src/queries.rs` (`find_cycles` short name + Tarjan order; `module_qualified_names` qualified)
 - `rust/crates/daemon-runtime/src/livegraph_feed.rs` (`module_import_cycles_json` qualified members + derivation order; `module_cycle_compare_response`)
-- `rust/crates/rgr/src/presentation/cycles.rs` (the human renderer — reads name + nodes.len only)
+- `rust/crates/rgr/src/presentation/cycles/` (`mod.rs` renderers + `walk.rs` the real-edge walk)
+- `rust/crates/daemon-runtime/src/cycle_output/` (`mod.rs` canonical output + `edges.rs` intra-SCC edges)
+- `rust/crates/daemon-runtime/src/reader_context.rs` (`repo_has_material_ts_js` — the shared ≥10% gate)
 - `docs/slices/sqlite-raw-decommission-readiness-6.md` (cycles = the highest-leverage REMAINING eager-SQLite default)

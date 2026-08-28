@@ -179,6 +179,25 @@ fn material_code_languages(language_counts: &[(String, u64)]) -> Vec<MaterialLan
         .collect()
 }
 
+/// CYCLE-HONESTY-1 (§2.4, ts-caveat-basis C1 REPO-level, operator ruling 2026-08-28 + review-2): is TS/JS
+/// a MATERIALLY-present code language of this repo — the SAME ≥10%-of-code-files gate
+/// [`material_code_languages`] applies for the D5 next-action, REUSED (never a re-derived threshold) so the
+/// cycles type-only caveat and the enrich CTA speak from ONE materiality definition. `language_counts` MUST
+/// arrive count-DESC (as `query_file_count_by_language` returns). "Any TS/JS file present" is NOT enough: a
+/// ~3.7% incidental JS (django is 2904 Python / 111 JavaScript, VERIFIED 2026-08-28) is BELOW the gate →
+/// `false`, so the caveat does not fire on a Python repo with tooling JS; a TS/JS-dominant repo → `true`.
+/// Sole current consumer: the cycles routes' `snapshot_has_material_ts_js` (livegraph_feed) — one function,
+/// no axis of variation, the rejected simpler alternative (inline the `matches!` at each call site) would
+/// duplicate the TS/JS token vocabulary across five routes.
+pub(crate) fn repo_has_material_ts_js(language_counts: &[(String, u64)]) -> bool {
+    material_code_languages(language_counts).iter().any(|m| {
+        matches!(
+            m.token.as_str(),
+            "typescript" | "tsx" | "javascript" | "jsx"
+        )
+    })
+}
+
 /// HONEST-DEGRADATION-IMPL-2 (D5) + CONTRADICTION-SWEEP-1 §5: the honest next-action line for a
 /// LOW-relationship-reliability repo, keyed on the repo's MATERIALLY-PRESENT languages (≥10% of code
 /// files — see [`material_code_languages`]) × the daemon's CONFIGURED resolvers. `language_counts` MUST
@@ -673,5 +692,38 @@ mod honest_degradation_tests {
         let mut medium = high();
         medium.call_graph = axis(ReliabilityLevel::MEDIUM);
         assert!(relationship_next_action_line(&medium, &langs(&["c"]), &builtin_only()).is_none());
+    }
+
+    // ── CYCLE-HONESTY-1 (§2.4): the TS/JS caveat's materiality gate reuses the ≥10% code-file rule ──
+
+    #[test]
+    fn material_ts_js_requires_ten_percent_not_mere_presence() {
+        // django-shape: 2904 Python / 111 JavaScript -> JS ~3.7%, incidental tooling, NOT material.
+        let django = vec![
+            ("python".to_string(), 2904u64),
+            ("javascript".to_string(), 111u64),
+        ];
+        assert!(
+            !repo_has_material_ts_js(&django),
+            "incidental (<10%) JS must NOT trip the caveat"
+        );
+        // A TS-dominant repo (config-file tokens like json never dilute the CODE-file denominator).
+        let ts = vec![
+            ("typescript".to_string(), 900u64),
+            ("json".to_string(), 300u64),
+        ];
+        assert!(repo_has_material_ts_js(&ts), "TS-dominant repo is material");
+        // Exactly 10% of code files clears the gate (`count*10 >= total`).
+        let border = vec![("python".to_string(), 90u64), ("tsx".to_string(), 10u64)];
+        assert!(repo_has_material_ts_js(&border), "exactly 10% is material");
+        // Just under 10% does not.
+        let under = vec![("python".to_string(), 91u64), ("tsx".to_string(), 9u64)];
+        assert!(!repo_has_material_ts_js(&under), "9% is not material");
+        // No TS/JS token at all -> false regardless of share.
+        let none = vec![("rust".to_string(), 500u64)];
+        assert!(!repo_has_material_ts_js(&none));
+        // The full TS/JS family vocabulary is recognized (jsx here dominates).
+        let jsx = vec![("jsx".to_string(), 50u64), ("python".to_string(), 50u64)];
+        assert!(repo_has_material_ts_js(&jsx));
     }
 }
