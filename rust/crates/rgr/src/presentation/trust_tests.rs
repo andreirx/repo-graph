@@ -9,10 +9,10 @@ use super::*;
 use repo_graph_coherence::{FreshnessState, QueryCompleteness, TrustPosture};
 use repo_graph_trust::trust_to_coherent;
 use repo_graph_trust::types::{
-    DowngradeTrigger, EnrichmentStatus, EnrichmentTopType, ReliabilityAxisScore, ReliabilityLevel,
-    TrustBasisClassificationRow, TrustCategoryRow, TrustClassificationRow, TrustDowngrades,
-    TrustExternalDependencyAttribution, TrustNamedDependencyRow, TrustReliability, TrustReport,
-    TrustSummary,
+    DowngradeTrigger, EnrichmentStatus, EnrichmentTopType, ModuleTrustRow, ReliabilityAxisScore,
+    ReliabilityLevel, TrustBasisClassificationRow, TrustCategoryRow, TrustClassificationRow,
+    TrustDowngrades, TrustExternalDependencyAttribution, TrustNamedDependencyRow, TrustReliability,
+    TrustReport, TrustSummary,
 };
 use repo_graph_trust::{LiveGraphPartitionPosture, LiveGraphPosture};
 use std::collections::BTreeSet;
@@ -76,6 +76,39 @@ fn report() -> TrustReport {
         enrichment_eligible_count: 0,
         unresolved_calls_unknown: 0,
     }
+}
+
+#[test]
+fn suspicious_modules_state_basis_and_point_at_stats() {
+    // CONTRADICTION-SWEEP-1 §3: the zero-connectivity suspicion must state its
+    // basis inline and reconcile with `stats` (different granularity, not a
+    // contradiction). Computation is untouched — this asserts RENDERING only.
+    let mut r = report();
+    r.modules = vec![ModuleTrustRow {
+        module_stable_key: "repo:include:MODULE".into(),
+        qualified_name: "include".into(),
+        fan_in: 0,
+        fan_out: 0,
+        file_count: 3,
+        suspicious_zero_connectivity: true,
+        trust_notes: vec![],
+    }];
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("Suspicious Modules (zero connectivity)"),
+        "section present:\n{out}"
+    );
+    // The flagged module is named.
+    assert!(out.contains("include"), "module named:\n{out}");
+    // The basis is stated inline and reconciles with stats.
+    assert!(
+        out.contains("fan_in = fan_out = 0"),
+        "states the basis inline:\n{out}"
+    );
+    assert!(
+        out.contains("`stats`"),
+        "points at stats for finer-grained connectivity:\n{out}"
+    );
 }
 
 fn warm_posture() -> CoherenceEnvelope<LiveGraphPosture> {

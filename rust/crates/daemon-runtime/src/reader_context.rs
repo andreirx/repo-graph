@@ -132,51 +132,117 @@ pub(crate) fn relationship_reliability_is_low(
         || reliability.change_impact.level == LOW
 }
 
-/// HONEST-DEGRADATION-IMPL-2 (D5): the honest next-action line for a LOW-relationship-reliability repo,
-/// keyed on the repo's language(s) × the daemon's CONFIGURED resolvers. `configured` MUST come from
+/// The minimum file-share a language must hold among a repo's CODE files before the D5 next-action
+/// speaks to it — CONTRADICTION-SWEEP-1 §5 (operator ruling CS1-5, OPTION B, 2026-08-28). A language
+/// below this is incidental tooling, not part of the repo's semantic surface, so it must NOT drive the
+/// remedy either way.
+///
+/// This gate is applied SYMMETRICALLY (to the enrichable AND the non-enrichable side), which is what
+/// makes the ruling's stated django outcome hold: django is 2904 Python / 111 JavaScript files
+/// (VERIFIED 2026-08-28) — its JavaScript is ~3.7%, an enrichable family present but incidental, so it
+/// must NOT trip an enrich CTA; django reads as Python-only → the honest no-path sentence stands alone
+/// with NO CTA. glamCRM's TS/JS is a demonstrable ~90% half (VERIFIED), well above the gate, so its true
+/// CTA survives while its ~10% Java draws its own JDTLS truth. Integer comparison `count * 10 >= total`
+/// == `share >= 10%`.
+const MATERIAL_LANGUAGE_SHARE_NUM: u64 = 10;
+
+/// A CODE language materially present in the repo (a token with a reader display name AND a file share
+/// at or above [`MATERIAL_LANGUAGE_SHARE_NUM`]%), with its display name. `total_code_files` is the sum
+/// of file counts over CODE languages only (config-file tokens like json/yaml never dilute the share).
+struct MaterialLanguage {
+    token: String,
+    display: &'static str,
+}
+
+/// The materially-present CODE languages of `language_counts` (count-DESC as
+/// `query_file_count_by_language` returns), each ≥ the [`MATERIAL_LANGUAGE_SHARE_NUM`]% code-file gate,
+/// in the same count-DESC order. Config-file tokens (no display name) are excluded from BOTH the share
+/// denominator and the result.
+fn material_code_languages(language_counts: &[(String, u64)]) -> Vec<MaterialLanguage> {
+    let total_code: u64 = language_counts
+        .iter()
+        .filter(|(l, _)| language_display_name(l).is_some())
+        .map(|(_, n)| *n)
+        .sum();
+    if total_code == 0 {
+        return Vec::new();
+    }
+    language_counts
+        .iter()
+        .filter_map(|(l, n)| {
+            let display = language_display_name(l)?;
+            (n * MATERIAL_LANGUAGE_SHARE_NUM >= total_code).then_some(MaterialLanguage {
+                token: l.clone(),
+                display,
+            })
+        })
+        .collect()
+}
+
+/// HONEST-DEGRADATION-IMPL-2 (D5) + CONTRADICTION-SWEEP-1 §5: the honest next-action line for a
+/// LOW-relationship-reliability repo, keyed on the repo's MATERIALLY-PRESENT languages (≥10% of code
+/// files — see [`material_code_languages`]) × the daemon's CONFIGURED resolvers. `language_counts` MUST
+/// arrive count-DESC (as [`query_file_count_by_language`] returns). `configured` MUST come from
 /// [`configured_resolver_languages`] / [`configured_resolver_languages_from_env`] (the SAME source
 /// `handle_enrich` registers from) — passed in so this stays pure + unit-testable across the jdtls matrix.
-/// `None` when no relationship axis is LOW (no noise on a resolved repo), or when no honest statement
-/// applies (an unknown-only language set — no false promise either way).
+/// `None` when no relationship axis is LOW (no noise on a resolved repo), or when no code language is
+/// materially present (an unknown-only / config-only set — no false promise either way).
 ///
-/// One line, by priority:
-/// 1. some present language maps to a CONFIGURED resolver (Rust / the TS-JS family always; Java iff JDTLS)
-///    → suggest enrichment (a STATEMENT only — auto-run is ENRICH-LIFECYCLE-1). `rmap enrich` auto-selects
-///    the resolvable languages, so "resolve more" is honestly partial, never a per-language promise.
-/// 2. Java is present but its resolver is NOT configured (no JDTLS) → name the JDTLS requirement instead
-///    of a blind enrich suggestion (a `languages:["java"]` enrich would error without JDTLS).
-/// 3. no resolver exists for any present language (C / C++ / Python / …) → state the dead-end, naming the
-///    language(s); never a false promise.
+/// Per CS1-5 OPTION B (operator-ratified 2026-08-28) the line is PER-LANGUAGE truthful:
+/// 1. ≥1 materially-present language is enrichable now → CTA "run `rmap enrich` — resolves <those
+///    languages>", PLUS one clause per materially-present NON-enrichable language stating ITS OWN truth
+///    (Java without JDTLS → set `JDTLS_PATH`; C / C++ / Python / … → no resolver exists on any build).
+///    This kills django's false CTA WITHOUT killing glamCRM's true one: only the false clauses die.
+/// 2. NO materially-present language is enrichable → NO CTA; the no-path (or JDTLS) sentence for the
+///    DOMINANT (plurality) code language stands alone.
 ///
 /// `configured_resolver_languages` / `configured_resolver_languages_from_env` are referenced by their
 /// `crate::dispatch::…` path (they stay in `dispatch`); the doc-links above resolve through `dispatch`'s
 /// `pub(crate) use` re-export of this module.
 pub(crate) fn relationship_next_action_line(
     reliability: &repo_graph_trust::types::TrustReliability,
-    repo_languages: &[String],
+    language_counts: &[(String, u64)],
     configured: &[EnrichmentLanguage],
 ) -> Option<String> {
     if !relationship_reliability_is_low(reliability) {
         return None;
     }
 
-    let enrichable_now = repo_languages
-        .iter()
-        .any(|t| match token_enrichment_language(t) {
-            Some(lang) => configured.contains(&lang),
-            None => false,
-        });
-    if enrichable_now {
-        return Some(
-            "relationship facts are low-confidence on this index; run `rmap enrich` to resolve more"
-                .to_string(),
-        );
+    let material = material_code_languages(language_counts);
+    if material.is_empty() {
+        return None; // unknown-only / config-only — no honest statement applies.
     }
 
-    let java_present = repo_languages
+    let is_enrichable = |token: &str| match token_enrichment_language(token) {
+        Some(lang) => configured.contains(&lang),
+        None => false,
+    };
+
+    // The enrichable languages present now (display names, sorted + deduped so the TS/JS family reads as
+    // its two present member names, not a repeated resolver identity).
+    let mut enrichable_names: Vec<&'static str> = material
         .iter()
-        .any(|t| token_enrichment_language(t) == Some(EnrichmentLanguage::Java));
-    if java_present {
+        .filter(|m| is_enrichable(&m.token))
+        .map(|m| m.display)
+        .collect();
+    enrichable_names.sort_unstable();
+    enrichable_names.dedup();
+
+    if !enrichable_names.is_empty() {
+        // CS1-5 §5.1: the true CTA, plus each materially-present non-enrichable language's own truth.
+        let mut line = format!(
+            "relationship facts are low-confidence on this index; run `rmap enrich` — resolves {}",
+            enrichable_names.join("/")
+        );
+        for clause in non_enrichable_clauses(&material, &is_enrichable) {
+            line.push_str(&clause);
+        }
+        return Some(line);
+    }
+
+    // CS1-5 §5.2: nothing enrichable is materially present → no CTA; speak the dominant language's truth.
+    let dominant = &material[0];
+    if token_enrichment_language(&dominant.token) == Some(EnrichmentLanguage::Java) {
         // Java has a resolver, but it is JDTLS-gated and not configured on this build.
         return Some(
             "semantic enrichment for Java requires JDTLS (`jdtls_path` / `JDTLS_PATH`) configured; \
@@ -184,16 +250,73 @@ pub(crate) fn relationship_next_action_line(
                 .to_string(),
         );
     }
-
-    // No resolver exists for any present language (C / C++ / Python / …).
-    let names = display_language_names(repo_languages);
-    if names.is_empty() {
-        return None;
-    }
     Some(format!(
-        "no semantic-resolution path exists for {names} on this build; these relationship facts remain \
-         low-confidence"
+        "no semantic-resolution path exists for {} on this build; these relationship facts remain \
+         low-confidence",
+        dominant.display
     ))
+}
+
+/// CONTRADICTION-SWEEP-1 (review-1 #1): the next-action for a repo whose per-language file counts were
+/// requested but the READ FAILED. When a relationship axis is LOW the reader is OWED a next-action; a
+/// failed language-breakdown read must therefore render an **unknown-with-reason** line, NOT silently
+/// omit the remedy (which would misclassify the repo as "nothing to say" — the STANDING HONESTY RULE:
+/// a rendered/classified fallible read is unknown-with-reason, never dropped). `None` only when no
+/// relationship axis is LOW (a resolved repo genuinely has no next-action).
+///
+/// This is the ONE site both `stats`/deps (dispatch) and `orient` (orient_coherence) route the
+/// counts-read result through, so the two surfaces render the SAME line on success AND the SAME
+/// unknown-with-reason on failure — the cross-surface coherence this slice exists to hold.
+pub(crate) fn relationship_next_action_line_or_read_error(
+    reliability: &repo_graph_trust::types::TrustReliability,
+    language_counts: Result<Vec<(String, u64)>, String>,
+    configured: &[EnrichmentLanguage],
+) -> Option<String> {
+    if !relationship_reliability_is_low(reliability) {
+        return None; // resolved repo — no next-action, success or failure irrelevant.
+    }
+    match language_counts {
+        Ok(counts) => relationship_next_action_line(reliability, &counts, configured),
+        Err(reason) => Some(format!(
+            "relationship facts are low-confidence on this index; the per-language remedy is \
+             unavailable — could not read the language breakdown ({reason})"
+        )),
+    }
+}
+
+/// CS1-5 §5.1: one reader-frame clause per materially-present NON-enrichable code language, in display
+/// order, each stating that language's OWN remedy truth. Empty when every material language is enrichable.
+fn non_enrichable_clauses(
+    material: &[MaterialLanguage],
+    is_enrichable: &impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut langs: Vec<&MaterialLanguage> = material
+        .iter()
+        .filter(|m| !is_enrichable(&m.token))
+        .collect();
+    langs.sort_unstable_by_key(|m| m.display);
+    langs
+        .into_iter()
+        .map(|m| match token_enrichment_language(&m.token) {
+            // Java: a resolver exists but is JDTLS-gated and unconfigured on this build.
+            Some(EnrichmentLanguage::Java) => format!(
+                "; {}: set `JDTLS_PATH` to enable its resolver (no semantic resolver is configured for \
+                 it on this build)",
+                m.display
+            ),
+            // A resolver exists but is not configured (unreachable with the built-in Rust/TS set, which
+            // is always configured — handled honestly rather than silently dropped).
+            Some(_) => format!(
+                "; {}: its semantic resolver is not configured on this build",
+                m.display
+            ),
+            // No resolver exists for this language on ANY build (C / C++ / Python / Go / …).
+            None => format!(
+                "; no semantic-resolution path exists for {} on this build",
+                m.display
+            ),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -225,8 +348,11 @@ mod honest_degradation_tests {
         r.call_graph = axis(ReliabilityLevel::LOW);
         r
     }
-    fn langs(ts: &[&str]) -> Vec<String> {
-        ts.iter().map(|s| s.to_string()).collect()
+    /// Equal-share language counts (each token 100 files) — every listed language clears the ≥10%
+    /// material gate, so a `langs(&["c", "rust"])` reads as "C and Rust both materially present",
+    /// preserving the pre-CS1-5 single-/dual-language test intent under the counts signature.
+    fn langs(ts: &[&str]) -> Vec<(String, u64)> {
+        ts.iter().map(|s| (s.to_string(), 100)).collect()
     }
     /// The built-in-only configured set (no JDTLS), as `configured_resolver_languages(None)` returns.
     fn builtin_only() -> Vec<EnrichmentLanguage> {
@@ -332,7 +458,7 @@ mod honest_degradation_tests {
 
     #[test]
     fn deps_note_names_language_and_keeps_count() {
-        let note = deps_reader_context_note(&langs(&["c"]), 56);
+        let note = deps_reader_context_note(&["c".to_string()], 56);
         assert!(
             note.contains("no dependency-manifest reader for C on this build"),
             "{note}"
@@ -378,10 +504,18 @@ mod honest_degradation_tests {
 
     #[test]
     fn d5_cpp_python_named_no_enrich() {
-        let line =
-            relationship_next_action_line(&call_low(), &langs(&["cpp", "python"]), &builtin_only())
-                .unwrap();
-        assert!(line.contains("C++/Python"), "{line}");
+        // Nothing enrichable is materially present → no CTA; the no-path sentence names the DOMINANT
+        // (plurality) language and stands alone (CS1-5 §5.2). C++ leads the count here.
+        let line = relationship_next_action_line(
+            &call_low(),
+            &counts(&[("cpp", 120), ("python", 40)]),
+            &builtin_only(),
+        )
+        .unwrap();
+        assert!(
+            line.contains("no semantic-resolution path exists for C++"),
+            "{line}"
+        );
         assert!(!line.contains("rmap enrich"), "{line}");
     }
 
@@ -404,12 +538,119 @@ mod honest_degradation_tests {
     }
 
     #[test]
-    fn d5_mixed_builtin_and_no_resolver_prefers_enrich() {
-        // Rust + C: enrichment helps the Rust part → suggest it ("resolve more", honestly partial).
+    fn d5_mixed_enrichable_and_no_resolver_is_per_language_truthful() {
+        // CS1-5 OPTION B (operator-ratified 2026-08-28, supersedes the pre-slice "any-enrichable →
+        // resolve more" rule — that behavior change IS the point). Rust + C, both material: the CTA
+        // names the enrichable part (Rust) AND states C's own no-path truth in the SAME line. Only the
+        // false clause dies; the true CTA survives.
         let line =
             relationship_next_action_line(&call_low(), &langs(&["c", "rust"]), &builtin_only())
                 .unwrap();
-        assert!(line.contains("rmap enrich"), "{line}");
+        assert!(
+            line.contains("run `rmap enrich` — resolves Rust"),
+            "true CTA names the enrichable language: {line}"
+        );
+        assert!(
+            line.contains("no semantic-resolution path exists for C on this build"),
+            "the non-enrichable language states its own truth: {line}"
+        );
+    }
+
+    // CS1-5 §5.1 (glamCRM shape): a Java-plurality repo whose TS/JS half is materially present renders
+    // the TRUE enrich CTA for the TS/JS family AND Java's own JDTLS truth — dominant-gating would have
+    // killed the true CTA; B keeps it and adds the honest Java clause.
+    #[test]
+    fn d5_java_plus_material_ts_js_gets_cta_plus_java_jdtls_clause() {
+        let line = relationship_next_action_line(
+            &call_low(),
+            // java ~10%, ts ~27%, js ~63% — all material (glamCRM's verified rough shape).
+            &counts(&[("javascript", 1658), ("typescript", 699), ("java", 273)]),
+            &builtin_only(),
+        )
+        .unwrap();
+        assert!(line.contains("run `rmap enrich` — resolves"), "{line}");
+        assert!(
+            line.contains("JavaScript") && line.contains("TypeScript"),
+            "the enrichable family members are both named: {line}"
+        );
+        assert!(
+            line.contains("Java: set `JDTLS_PATH`"),
+            "Java draws its own JDTLS truth, not a blind enrich promise: {line}"
+        );
+    }
+
+    // CS1-5 §5.2 (django shape): a Python-dominant repo whose only enrichable family (JavaScript) is
+    // BELOW the ≥10% material gate (django is ~3.7% JS, VERIFIED) reads as Python-only → NO enrich CTA;
+    // the honest no-path sentence for Python stands alone. This is the measured false CTA dying.
+    #[test]
+    fn d5_django_minor_tooling_js_below_gate_gets_no_cta() {
+        let line = relationship_next_action_line(
+            &call_low(),
+            &counts(&[("python", 2904), ("javascript", 111)]),
+            &builtin_only(),
+        )
+        .unwrap();
+        assert!(
+            !line.contains("rmap enrich"),
+            "incidental (<10%) JS must NOT trip an enrich CTA: {line}"
+        );
+        assert!(
+            line.contains("no semantic-resolution path exists for Python on this build"),
+            "the dominant language's honest no-path sentence stands alone: {line}"
+        );
+    }
+
+    // review-1 #1: a language-breakdown READ FAILURE on a LOW axis renders an UNKNOWN-WITH-REASON
+    // next-action, carrying the error reason — NEVER a silent omission (which would misclassify the repo
+    // as "nothing to say" and hide a remedy the reader is owed). Both `stats`/deps and `orient` route
+    // their read result through this ONE wrapper, so they render the SAME failure line.
+    #[test]
+    fn read_error_on_low_axis_renders_unknown_with_reason() {
+        let line = relationship_next_action_line_or_read_error(
+            &call_low(),
+            Err("db locked".to_string()),
+            &builtin_only(),
+        )
+        .expect("a LOW axis owes the reader a next-action even when the counts read fails");
+        assert!(
+            line.contains("per-language remedy is unavailable"),
+            "must render unknown-with-reason, not omit: {line}"
+        );
+        assert!(
+            line.contains("db locked"),
+            "the read-failure reason is preserved: {line}"
+        );
+        assert!(
+            !line.contains("rmap enrich"),
+            "a failed read must not fabricate a remedy it could not compute: {line}"
+        );
+    }
+
+    // review-1 #1: a read failure on a RESOLVED (no LOW axis) repo stays `None` — a healthy repo is owed
+    // no next-action, so the failure is irrelevant (and the hot-path guard means the read is never issued).
+    #[test]
+    fn read_error_on_high_axis_is_none() {
+        assert!(relationship_next_action_line_or_read_error(
+            &high(),
+            Err("db locked".to_string()),
+            &builtin_only(),
+        )
+        .is_none());
+    }
+
+    // review-1 #1: on success the wrapper delegates to `relationship_next_action_line` byte-for-byte, so
+    // the Ok path is unchanged from the direct helper.
+    #[test]
+    fn read_ok_delegates_to_line_helper() {
+        let counts = langs(&["rust"]);
+        assert_eq!(
+            relationship_next_action_line_or_read_error(
+                &call_low(),
+                Ok(counts.clone()),
+                &builtin_only()
+            ),
+            relationship_next_action_line(&call_low(), &counts, &builtin_only())
+        );
     }
 
     #[test]

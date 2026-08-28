@@ -567,6 +567,18 @@ fn render_suspicious_modules(v: &CoherentTrustReport) -> String {
         &v.modules,
         "snapshot-scoped extraction",
     );
+    // CONTRADICTION-SWEEP-1 §3: state the basis inline so this never reads as a
+    // contradiction of `stats`. "Zero connectivity" here = zero RESOLVED
+    // module-to-module import edges attributed to THIS module's directory node
+    // (fan_in = fan_out = 0). A finer-grained CHILD module (e.g. a subdirectory)
+    // can still carry connectivity that `stats` reports against its own node — so
+    // the two surfaces are consistent at different granularity, not in conflict.
+    // Computation is UNCHANGED (this slice aligns wording, not math).
+    out.push_str(
+        "  basis: no resolved module-to-module import edges attach to this module's \
+         directory node (fan_in = fan_out = 0); a finer-grained child module may still \
+         be connected — cross-check per-module fan_in/fan_out in `stats`.\n",
+    );
     for m in suspicious.iter().take(10) {
         out.push_str(&bullet(&m.qualified_name));
     }

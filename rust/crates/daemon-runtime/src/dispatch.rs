@@ -1803,14 +1803,25 @@ impl ServiceDispatcher {
         // CONFIGURED resolvers (`configured_resolver_languages_from_env` — the SAME source `handle_enrich`
         // registers from) × the repo's languages. `None` unless a relationship axis is LOW (no noise on a
         // resolved repo). The SAME helper backs `orient`, so the two surfaces render ONE coherent line.
+        // CONTRADICTION-SWEEP-1 §5: the next-action is now keyed on per-language FILE COUNTS (the ≥10%
+        // material-share gate), not the DISTINCT-language list — so an incidental tooling language (e.g.
+        // django's ~3.7% JS) cannot trip a false enrich CTA. Counts are read ONLY when a relationship
+        // axis is LOW (guarding the query off the healthy hot path). review-1 #1: a counts-read FAILURE
+        // renders an UNKNOWN-WITH-REASON next-action (via `relationship_next_action_line_or_read_error`),
+        // NOT a silent omission — the reader is owed a remedy on a LOW axis, and a dropped read would
+        // misclassify the repo as "nothing to say". The read is only issued on the LOW branch.
         let relationship_next_action: Option<String> = overlay.as_ref().and_then(|o| {
-            let languages = repo_summary
-                .as_ref()
-                .map(|s| s.languages.as_slice())
-                .unwrap_or(&[]);
-            relationship_next_action_line(
+            if !relationship_reliability_is_low(&o.reliability) {
+                return None;
+            }
+            let language_counts = repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+                &storage,
+                &snapshot.snapshot_uid,
+            )
+            .map_err(|e| e.to_string());
+            relationship_next_action_line_or_read_error(
                 &o.reliability,
-                languages,
+                language_counts,
                 &configured_resolver_languages_from_env(),
             )
         });
@@ -9232,12 +9243,16 @@ pub(crate) fn configured_resolver_languages_from_env() -> Vec<EnrichmentLanguage
 
 // HONEST-DEGRADATION-IMPL-2-REFACTOR: the pure reader-context label helpers (D2 ecosystem, D5
 // next-action line) and their unit tests moved to `reader_context.rs` — behavior unchanged. Re-exported
-// `pub(crate)` so this module's call sites (`dominant_deps_ecosystem`, `relationship_next_action_line`)
-// AND `orient_coherence`'s `crate::dispatch::relationship_reliability_is_low` /
-// `…::relationship_next_action_line` resolve exactly as before (a compile-time path alias only).
-// (`deps_reader_context_note` is consumed directly by `deps_headline`, not re-exported here.)
+// `pub(crate)` so this module's call sites (`dominant_deps_ecosystem`) AND `orient_coherence`'s
+// `crate::dispatch::relationship_reliability_is_low` / `…::relationship_next_action_line_or_read_error`
+// resolve as before (a compile-time path alias only). CONTRADICTION-SWEEP-1 review-1 #1: both surfaces
+// now route the counts-read RESULT through the shared `relationship_next_action_line_or_read_error`
+// wrapper (which owns the LOW-axis check and the unknown-with-reason failure line); the bare
+// `relationship_next_action_line` is called only inside `reader_context` (by that wrapper), so it no
+// longer needs re-exporting here. (`deps_reader_context_note` is consumed directly by `deps_headline`.)
 pub(crate) use crate::reader_context::{
-    dominant_deps_ecosystem, relationship_next_action_line, relationship_reliability_is_low,
+    dominant_deps_ecosystem, relationship_next_action_line_or_read_error,
+    relationship_reliability_is_low,
 };
 
 #[cfg(test)]

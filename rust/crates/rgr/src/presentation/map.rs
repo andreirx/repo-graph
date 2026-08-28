@@ -615,7 +615,7 @@ fn render_dir_map(
         .collect();
     if !unmapped.is_empty() {
         s.push_str(&format!("## Unmapped files ({})\n", unmapped.len()));
-        s.push_str("Present in the index but not parsed for symbols; listed so the map never hides a file.\n");
+        s.push_str("Present in the index but not mapped for symbols; listed so the map never hides a file.\n");
         for f in &unmapped {
             s.push_str(&format!(
                 "- {} — {}\n",
@@ -748,25 +748,66 @@ pub fn render_summary(facts: &MapFacts, rendered: &[RenderedMapFile]) -> String 
         .filter(|r| r.rel_path == "MAP.md" || r.rel_path.ends_with("/MAP.md"))
         .count();
     let file_maps = rendered.len() - dir_maps;
-    let unmapped = facts
+    // The unmapped set = indexed files with no per-file symbol map (no extractor,
+    // oversized, parse failed, …). This is EXTRACTION-COVERAGE — a DIFFERENT notion
+    // from `check`'s UNPARSED_FILES (files whose recorded parse state is behind the
+    // stored version / re-parse-pending). CONTRADICTION-SWEEP-1 §2: they read
+    // different sources and legitimately differ, so each surface names its own
+    // notion and the summary NAMES the files (capped) rather than an unactionable
+    // bare count.
+    //
+    // review-0: the files are named by FULL REPO-RELATIVE PATH, not `base_of`.
+    // A bare basename collapses distinct files — `src/config.py` and
+    // `tests/config.py` would both render as `config.py`, defeating the point
+    // (the reader cannot open the right file). The stored `path` IS already the
+    // repo-relative path, so this is the actionable identity with no extra read.
+    let mut unmapped_names: Vec<&str> = facts
         .files
         .iter()
         .filter(|f| !is_mapped(&f.parse_status))
-        .count();
+        .map(|f| f.path.as_str())
+        .collect();
+    unmapped_names.sort_unstable();
+    let unmapped = unmapped_names.len();
     let scope = if facts.path.is_empty() {
         "(whole repo)".to_string()
     } else {
         facts.path.clone()
     };
+    let unmapped_line = if unmapped == 0 {
+        "all indexed files are mapped for symbols.".to_string()
+    } else {
+        format!(
+            "{} file(s) present in the index but not mapped for symbols \
+             (extraction coverage — distinct from `check` UNPARSED_FILES): {}.",
+            unmapped,
+            capped_name_list(&unmapped_names, UNMAPPED_SUMMARY_CAP),
+        )
+    };
     format!(
         "map: {} directory maps, {} file maps from snapshot {} [{}]\n\
-         {} file(s) listed as unmapped (not parsed).\n",
+         {}\n",
         dir_maps,
         file_maps,
         short_uid(&facts.snapshot),
         scope,
-        unmapped,
+        unmapped_line,
     )
+}
+
+/// How many unmapped filenames the `map` summary names inline before collapsing the
+/// rest into a `(+N more)` tail — keeps the line bounded on a repo with many
+/// no-extractor files while still making the set actionable (names, not a count).
+const UNMAPPED_SUMMARY_CAP: usize = 12;
+
+/// Join up to `cap` names with `, `, appending `(+K more)` when the list is longer.
+/// `names` is assumed already ordered by the caller (deterministic output).
+fn capped_name_list(names: &[&str], cap: usize) -> String {
+    if names.len() <= cap {
+        return names.join(", ");
+    }
+    let shown = names[..cap].join(", ");
+    format!("{} (+{} more)", shown, names.len() - cap)
 }
 
 #[cfg(test)]
@@ -1091,6 +1132,90 @@ mod tests {
     }
 
     #[test]
+    fn summary_names_unmapped_files_and_marks_distinct_notion() {
+        // CONTRADICTION-SWEEP-1 §2: the CLI summary must NAME the unmapped files
+        // (not an unactionable bare count) AND mark the notion as distinct from
+        // `check`'s UNPARSED_FILES so the two surfaces never read as a contradiction.
+        let facts = fixture();
+        let rendered = render_maps(&facts);
+        let summary = render_summary(&facts, &rendered);
+        assert!(
+            summary.contains("2 file(s) present in the index but not mapped for symbols"),
+            "count + notion:\n{}",
+            summary
+        );
+        assert!(
+            summary.contains("distinct from `check` UNPARSED_FILES"),
+            "must disambiguate from check's parse notion:\n{}",
+            summary
+        );
+        // The files are NAMED by FULL repo-relative path (sorted), not hidden behind
+        // a count and not collapsed to a basename (review-0).
+        assert!(
+            summary.contains("src/big.rs"),
+            "names src/big.rs by full path:\n{}",
+            summary
+        );
+        assert!(
+            summary.contains("src/data.bin"),
+            "names src/data.bin by full path:\n{}",
+            summary
+        );
+        // The old colliding wording is gone.
+        assert!(
+            !summary.contains("listed as unmapped (not parsed)"),
+            "old colliding wording retired:\n{}",
+            summary
+        );
+    }
+
+    // review-0: two unmapped files that share a basename must render as DISTINCT,
+    // openable identities — `base_of` collapsed `src/config.py` and
+    // `tests/config.py` into indistinguishable `config.py` entries. The full
+    // repo-relative path keeps them apart.
+    #[test]
+    fn summary_names_basename_collisions_by_full_path() {
+        let unmapped = |path: &str| FileFact {
+            path: path.to_string(),
+            language: Some("python".to_string()),
+            parse_status: "skipped".to_string(),
+            extractor: None,
+            is_test: false,
+            is_generated: false,
+            symbol_count: 0,
+        };
+        let facts = MapFacts {
+            snapshot: "snap-abcdef012345-tail".to_string(),
+            path: String::new(),
+            files: vec![unmapped("src/config.py"), unmapped("tests/config.py")],
+            ..Default::default()
+        };
+        let rendered = render_maps(&facts);
+        let summary = render_summary(&facts, &rendered);
+        assert!(
+            summary.contains("src/config.py") && summary.contains("tests/config.py"),
+            "both colliding basenames must render as distinct full paths:\n{}",
+            summary
+        );
+        // The collapsed basename must NOT appear as a standalone bare entry.
+        assert!(
+            !summary.contains(": config.py.") && !summary.contains(", config.py,"),
+            "must not collapse to a bare basename:\n{}",
+            summary
+        );
+    }
+
+    #[test]
+    fn summary_caps_long_unmapped_list_with_more_tail() {
+        // The named list is bounded: past the cap it collapses to `(+K more)`.
+        let names: Vec<&str> = vec!["x"; UNMAPPED_SUMMARY_CAP + 3];
+        let out = capped_name_list(&names, UNMAPPED_SUMMARY_CAP);
+        assert!(out.ends_with("(+3 more)"), "cap tail:\n{}", out);
+        // At or under the cap, no tail.
+        assert_eq!(capped_name_list(&["a", "b"], UNMAPPED_SUMMARY_CAP), "a, b");
+    }
+
+    #[test]
     fn file_imports_list_resolved_and_external() {
         let rendered = render_maps(&fixture());
         let a = dir_map(&rendered, "src/a_rs_MAP.md");
@@ -1377,7 +1502,7 @@ Repository: demo
 - skip.bin — skipped — no extractor for this language
 
 ## Unmapped files (1)
-Present in the index but not parsed for symbols; listed so the map never hides a file.
+Present in the index but not mapped for symbols; listed so the map never hides a file.
 - skip.bin — skipped — no extractor for this language
 ";
         assert_eq!(dir, expected, "golden dir map drift:\n{}", dir);

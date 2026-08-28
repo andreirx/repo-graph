@@ -321,16 +321,22 @@ fn compute_briefing_and_remedy(
         return (None, None);
     };
     let briefing = briefing_json(&overlay);
-    // Only fetch the repo languages when a relationship axis is actually LOW — this guards the
-    // repo-summary COUNT off the healthy-repo hot path. (The line helper re-checks LOW for safety.)
+    // Only fetch the per-language file COUNTS when a relationship axis is actually LOW — this guards the
+    // count query off the healthy-repo hot path. (The shared helper re-checks LOW for safety.)
+    // CONTRADICTION-SWEEP-1 §5: counts (not the distinct-language list) feed the ≥10% material-share gate
+    // so an incidental tooling language cannot trip a false enrich CTA. review-1 #1: a counts-read FAILURE
+    // renders an UNKNOWN-WITH-REASON next-action (via the SAME shared wrapper `stats`/deps use), NOT a
+    // silent omission — the reader is owed a remedy on a LOW axis, and the two surfaces stay coherent on
+    // the failure path just as they do on success.
     let remedy = if crate::dispatch::relationship_reliability_is_low(&overlay.reliability) {
-        let languages =
-            repo_graph_agent::AgentStorageRead::compute_repo_summary(&storage, snapshot_uid)
-                .map(|s| s.languages)
-                .unwrap_or_default();
-        crate::dispatch::relationship_next_action_line(
+        let language_counts = repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+            &storage,
+            snapshot_uid,
+        )
+        .map_err(|e| e.to_string());
+        crate::dispatch::relationship_next_action_line_or_read_error(
             &overlay.reliability,
-            &languages,
+            language_counts,
             &crate::dispatch::configured_resolver_languages_from_env(),
         )
     } else {

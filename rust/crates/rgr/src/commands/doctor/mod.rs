@@ -30,12 +30,27 @@ mod storage_probe;
 /// `print_probe_labeled` are shared via `super::`.
 mod seed;
 
+/// Summary framing (CONTRADICTION-SWEEP-1 §1): the cwd snapshot verdict, the health-vs-snapshot status
+/// line, and the per-probe display tone. Extracted for the same 500-line-guardrail reason (review-1 #5);
+/// reaches the parent's private `ProbeOutput`/`Summary` via `super::`.
+mod summary;
+
+use summary::{
+    apply_degraded_enrichment_tone, cwd_check_verdict, status_line, ProbeTone, SnapshotVerdict,
+};
+
 /// Doctor output for JSON mode.
 #[derive(Debug, Serialize)]
 struct DoctorOutput {
     platform: String,
     probes: Vec<ProbeOutput>,
     summary: Summary,
+    /// CONTRADICTION-SWEEP-1 §1: the cwd repo's `check` verdict, so doctor's summary NAMES snapshot
+    /// quality separately from daemon/install health (doctor's checks) instead of implying the two are
+    /// one. review-1 #4: `#[serde(skip)]` — this drives ONLY the human summary line; doctor's JSON
+    /// contract is unchanged (adding a public JSON field is DECISION_REQUIRED, which this avoids).
+    #[serde(skip)]
+    snapshot_verdict: Option<SnapshotVerdict>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +60,12 @@ struct ProbeOutput {
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     details: Option<String>,
+    /// Human-render display tone (CONTRADICTION-SWEEP-1 §1). `#[serde(skip)]`: the JSON contract is
+    /// unchanged — `passed` remains the machine health signal; `tone` only refines the HUMAN marker
+    /// (`[ok]` / `[note]` / `[FAIL]`). A passed probe can still be `Note` (degraded-but-healthy, e.g. a
+    /// 0-promotion enrichment pass), which the boolean `passed` alone cannot express.
+    #[serde(skip)]
+    tone: ProbeTone,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,11 +78,20 @@ struct Summary {
 
 impl From<ProbeResult> for ProbeOutput {
     fn from(p: ProbeResult) -> Self {
+        // Default tone follows health: FAIL when the probe failed, else Ok. A degraded-but-passing
+        // advisory (`Note`) is applied explicitly by the caller (execute_doctor) where it is known —
+        // `ProbeResult` carries no tone (see the ProbeTone rationale).
+        let tone = if p.passed {
+            ProbeTone::Ok
+        } else {
+            ProbeTone::Fail
+        };
         Self {
             name: p.name,
             passed: p.passed,
             message: p.message,
             details: p.details,
+            tone,
         }
     }
 }
@@ -125,9 +155,16 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     probes.extend(storage_summary_probes());
 
     // daemon_info-derived probes: authority policy (STATE-ROOT-SEPARATION-1) plus
-    // daemon memory + total storage (DOCTOR-RESOURCE-REPORT), from one round-trip.
-    probes.extend(daemon_info::probes());
+    // daemon memory + total storage (DOCTOR-RESOURCE-REPORT), from one round-trip. The
+    // enrichment-degraded display signal (§1) rides alongside — it cannot travel on a flat
+    // `ProbeResult`.
+    let daemon_info::DaemonInfoProbes {
+        probes: info_probes,
+        enrichment_degraded,
+    } = daemon_info::daemon_info_probes();
+    probes.extend(info_probes);
 
+    // health verdict is `passed`-only: a degraded-but-passing enrichment pass never flips it.
     let passed = probes.iter().filter(|p| p.passed).count();
     let failed = probes.len() - passed;
     let healthy = failed == 0;
@@ -140,15 +177,20 @@ fn execute_doctor() -> (DoctorOutput, bool) {
         "unknown".to_string()
     };
 
+    let mut probe_outputs: Vec<ProbeOutput> = probes.into_iter().map(ProbeOutput::from).collect();
+    apply_degraded_enrichment_tone(&mut probe_outputs, enrichment_degraded);
+
     let output = DoctorOutput {
         platform,
-        probes: probes.into_iter().map(ProbeOutput::from).collect(),
+        probes: probe_outputs,
         summary: Summary {
             total: passed + failed,
             passed,
             failed,
             healthy,
         },
+        // §1: name the cwd repo's check verdict (or omit honestly when cwd is not a resolvable repo).
+        snapshot_verdict: cwd_check_verdict(),
     };
 
     (output, healthy)
@@ -317,7 +359,17 @@ fn print_human_output(output: &DoctorOutput) {
     // Daemon
     println!("Daemon:");
     for probe in &service_probes {
-        print_probe(probe);
+        // CONTRADICTION-SWEEP-1 §2.4 (operator ruling CS1-4, OPTION A): doctor's enrichment line is
+        // the DAEMON-WIDE last-pass lifecycle — a DIFFERENT fact from a cwd snapshot's enrichment
+        // state (orient/check/trust, worded via the shared `enrichment_state_summary` accessor). It
+        // is explicitly labelled daemon-wide so a reader cannot mistake it for THIS snapshot's state.
+        // The machine `name` stays "enrichment" (the tone-lookup + section-filter key); only the
+        // human display label changes. Other daemon probes keep their machine name as the label.
+        let label = match probe.name.as_str() {
+            "enrichment" => "last enrichment pass (daemon-wide)",
+            other => other,
+        };
+        print_probe_labeled(probe, label);
     }
     println!();
 
@@ -394,18 +446,8 @@ fn print_human_output(output: &DoctorOutput) {
         println!();
     }
 
-    // Summary
-    if output.summary.healthy {
-        println!(
-            "Status: healthy ({}/{} checks passed)",
-            output.summary.passed, output.summary.total
-        );
-    } else {
-        println!(
-            "Status: UNHEALTHY ({}/{} checks failed)",
-            output.summary.failed, output.summary.total
-        );
-    }
+    // Summary. §1: doctor reports DAEMON/INSTALL health — it must NOT imply snapshot quality.
+    println!("{}", status_line(&output.summary, &output.snapshot_verdict));
 }
 
 fn print_probe(probe: &ProbeOutput) {
@@ -416,8 +458,9 @@ fn print_probe(probe: &ProbeOutput) {
 /// machine-readable `name`. DOCTOR-RESOURCE-REPORT uses this for the Resources section
 /// (JSON `daemon_memory` → human "daemon memory").
 fn print_probe_labeled(probe: &ProbeOutput, label: &str) {
-    let status = if probe.passed { "ok" } else { "FAIL" };
-    println!("  [{}] {}: {}", status, label, probe.message);
+    // §1: the marker comes from the display TONE, not `passed` alone — a healthy-but-degraded probe
+    // (e.g. a 0-promotion enrichment pass) renders `[note]`, never a misleading `[ok]`.
+    println!("  [{}] {}: {}", probe.tone.marker(), label, probe.message);
     if let Some(ref details) = probe.details {
         println!("        {}", details);
     }
@@ -435,4 +478,51 @@ fn print_usage() {
     eprintln!("Exit codes:");
     eprintln!("  0    All checks passed (healthy)");
     eprintln!("  1    One or more checks failed (unhealthy)");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // §1: From<ProbeResult> defaults tone from health (passed→Ok, failed→Fail); the degraded-but-passing
+    // Note tone is applied explicitly by execute_doctor, never inferred from `passed`. (The tone-marker,
+    // status-line, and degraded-flag unit tests moved with their code to `summary.rs`.)
+    #[test]
+    fn probe_output_default_tone_follows_health() {
+        let ok: ProbeOutput = ProbeResult::pass("x", "m").into();
+        assert_eq!(ok.tone, ProbeTone::Ok);
+        let bad: ProbeOutput = ProbeResult::fail("y", "m").into();
+        assert_eq!(bad.tone, ProbeTone::Fail);
+    }
+
+    // review-1 #4: the cwd snapshot verdict drives the HUMAN summary only — it must NOT appear in the
+    // doctor JSON contract (adding a public JSON field is DECISION_REQUIRED). `#[serde(skip)]` enforces
+    // this; this test is the regression guard so a future re-derive cannot silently re-introduce the key.
+    #[test]
+    fn snapshot_verdict_is_absent_from_json_contract() {
+        let output = DoctorOutput {
+            platform: "macos".to_string(),
+            probes: vec![],
+            summary: Summary {
+                total: 1,
+                passed: 1,
+                failed: 0,
+                healthy: true,
+            },
+            snapshot_verdict: Some(SnapshotVerdict {
+                repo: "glamCRM".to_string(),
+                check: summary::SnapshotCheck::Verdict("FAIL"),
+            }),
+        };
+        let json = serde_json::to_value(&output).unwrap();
+        assert!(
+            json.get("snapshot_verdict").is_none(),
+            "snapshot_verdict must not be in the JSON contract: {json}"
+        );
+        // The `tone` display refinement is likewise HUMAN-only, never in the wire contract.
+        assert!(
+            json.get("probes").is_some(),
+            "probes stays the wire contract"
+        );
+    }
 }

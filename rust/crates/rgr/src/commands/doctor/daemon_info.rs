@@ -32,16 +32,62 @@ use super::format_size;
 /// On daemon-unreachable the authority-policy probe FAILS (unchanged contract — the
 /// daemon being down is a real fault), while the resource probes degrade to a PASSING
 /// "unavailable": a diagnostic metric must never flip the `healthy` verdict.
-pub(super) fn probes() -> Vec<ProbeResult> {
+/// The daemon-info probe set PLUS the display-tone signals the parent renderer needs but that a flat
+/// `Vec<ProbeResult>` cannot carry — currently only [`DaemonInfoProbes::enrichment_degraded`]
+/// (CONTRADICTION-SWEEP-1 §1). Added because the enrichment probe stays health-`passed` (a degraded
+/// yield is not installation ill-health) yet must render as a neutral `[note]`, not `[ok]` — a display
+/// distinction the boolean `ProbeResult.passed` deliberately does not encode. One concrete current
+/// consumer: [`super::execute_doctor`]. Simpler alternative rejected: a `tone` field on every
+/// `ProbeResult` (~32 construction sites across `platform/`, out of this slice's doctor scope) for a
+/// distinction only ONE probe ever draws.
+pub(super) struct DaemonInfoProbes {
+    pub probes: Vec<ProbeResult>,
+    /// The last enrichment pass COMPLETED but promoted nothing despite eligible work — a degraded
+    /// outcome whose doctor line drops `[ok]` for `[note]` (§1).
+    pub enrichment_degraded: bool,
+}
+
+pub(super) fn daemon_info_probes() -> DaemonInfoProbes {
     let mut client = match DaemonClient::new() {
         Ok(c) => c,
-        Err(e) => return unreachable_probes("daemon unavailable", format!("{}", e)),
+        Err(e) => {
+            return DaemonInfoProbes {
+                probes: unreachable_probes("daemon unavailable", format!("{}", e)),
+                enrichment_degraded: false,
+            }
+        }
     };
 
     match client.request("daemon_info", None) {
-        Ok(response) => probes_from_response(&response),
-        Err(e) => unreachable_probes("query failed", format!("{}", e)),
+        Ok(response) => DaemonInfoProbes {
+            probes: probes_from_response(&response),
+            enrichment_degraded: enrichment_is_degraded(&response),
+        },
+        Err(e) => DaemonInfoProbes {
+            probes: unreachable_probes("query failed", format!("{}", e)),
+            enrichment_degraded: false,
+        },
     }
+}
+
+/// CONTRADICTION-SWEEP-1 §1: did the LAST enrichment pass COMPLETE but bank nothing despite eligible
+/// work? That is the "0/N-promotion" degraded outcome the operator saw doctor mark `[ok]` — a green
+/// checkmark on a pass that resolved receiver types yet promoted zero call edges. Reads the SAME
+/// `last_enrichment` fields [`enrichment_probe`] renders, so the marker and the line cannot disagree:
+/// a `completed` pass (never `skipped`/absent), with `eligible_count > 0` (there WAS work) and
+/// `promoted_count == 0` (nothing banked). A missing count is treated as "not degraded" (io-absent =
+/// unknown, never a fabricated degradation) — the honest default, since a genuine degraded pass carries
+/// the funnel that also drives the `[note]`'s top-rejection clause.
+fn enrichment_is_degraded(response: &serde_json::Value) -> bool {
+    let Some(le) = response.get("last_enrichment").filter(|le| le.is_object()) else {
+        return false;
+    };
+    if le.get("state").and_then(|v| v.as_str()) != Some("completed") {
+        return false;
+    }
+    let eligible = le.get("eligible_count").and_then(|v| v.as_u64());
+    let promoted = le.get("promoted_count").and_then(|v| v.as_u64());
+    matches!((eligible, promoted), (Some(e), Some(0)) if e > 0)
 }
 
 /// Degraded probe set when `daemon_info` cannot be reached.
@@ -432,21 +478,24 @@ fn enrichment_funnel_details(funnel: Option<&serde_json::Value>) -> Option<Strin
 }
 
 /// ENRICH-LIFECYCLE-1 (D3): the enrichment lifecycle line for `rmap doctor`, from
-/// `daemon_info.{last_enrichment, enrichment_enabled, enrichment_activity}`. The full lifecycle
-/// across states (shown here as the DISPLAYED doctor line):
-/// - "enrichment: disabled (RMAP_AUTO_ENRICH)"  (opted out)
-/// - "enrichment: queued — a background pass is scheduled"  (spawned, not yet holding the write lock)
-/// - "enrichment: running — resolving receiver types now"  (first pass, before it records)
-/// - "enrichment: resolved N/M receiver types, promoted P, T ago"  (completed;
+/// `daemon_info.{last_enrichment, enrichment_enabled, enrichment_activity}`. This is the DAEMON-WIDE
+/// last-pass lifecycle — CONTRADICTION-SWEEP-1 §2.4 (operator ruling CS1-4, OPTION A) has the doctor
+/// renderer label it "last enrichment pass (daemon-wide)" so it is not mistaken for a cwd snapshot's
+/// enrichment state (which orient/check/trust word via the shared `enrichment_state_summary` accessor).
+/// The full lifecycle across states (shown here as the DISPLAYED doctor line):
+/// - "last enrichment pass (daemon-wide): disabled (RMAP_AUTO_ENRICH)"  (opted out)
+/// - "last enrichment pass (daemon-wide): queued — a background pass is scheduled"  (spawned, not yet holding the write lock)
+/// - "last enrichment pass (daemon-wide): running — resolving receiver types now"  (first pass, before it records)
+/// - "last enrichment pass (daemon-wide): resolved N/M receiver types, promoted P, T ago"  (completed;
 ///   "; skipped <lang>: <reason>" per toolchain-absent language on a mixed run)
-/// - "enrichment: skipped — <reason>, T ago"  (every eligible language had no toolchain)
-/// - "enrichment: none yet — runs after the next index"  (no pass, none in flight)
+/// - "last enrichment pass (daemon-wide): skipped — <reason>, T ago"  (every eligible language had no toolchain)
+/// - "last enrichment pass (daemon-wide): none yet — runs after the next index"  (no pass, none in flight)
 ///
-/// The `"enrichment: "` prefix on each displayed line is supplied by the doctor renderer's probe
-/// LABEL (`[ok] enrichment: …`, `print_probe_labeled` keyed on `name`). This probe's `message`
-/// therefore carries only the state text (e.g. "disabled (RMAP_AUTO_ENRICH)"), NOT the label — if
-/// the message repeated its own name the line would render "enrichment: enrichment: …". (The
-/// retention probe follows the same rule: its message leads with "cleanup:", a different word.)
+/// The display LABEL is supplied by the doctor renderer (`print_probe_labeled`, keyed on `name` and
+/// mapped to the daemon-wide label in the Daemon section). This probe's `message` carries only the
+/// state text (e.g. "disabled (RMAP_AUTO_ENRICH)"), NOT the label. The machine `name` stays
+/// "enrichment" (the tone-lookup + section-filter key); the message must still not begin with
+/// "enrichment:" (the retention probe follows the same rule: its message leads with "cleanup:").
 ///
 /// `enrichment_activity` ("idle"|"queued"|"running") is what lets this line tell "queued" from the
 /// false "none yet — runs after the next index" (review-0 item 1): a pass IS in flight, so "none yet"
@@ -1123,7 +1172,8 @@ mod tests {
             json!({ "enrichment_enabled": false, "last_enrichment": serde_json::Value::Null });
         let probe = enrichment_probe(&response);
         assert!(probe.passed, "enrichment line never flips health");
-        // The message carries only the state; the doctor renderer's LABEL adds "enrichment: ".
+        // The message carries only the state; the renderer's LABEL adds "last enrichment pass
+        // (daemon-wide): " (the daemon-wide label, ruling CS1-4).
         assert_eq!(probe.message, "disabled (RMAP_AUTO_ENRICH)");
     }
 
@@ -1440,6 +1490,68 @@ mod tests {
             enrichment_probe(&json!({ "enrichment_enabled": true })).message,
             "none yet — runs after the next index"
         );
+    }
+
+    // ── CONTRADICTION-SWEEP-1 §1: the degraded-enrichment [note] signal ─────────────────────────────
+
+    // A completed pass that promoted nothing despite eligible work is DEGRADED → [note], not [ok]
+    // (the exact 0/N-promotion case the operator saw doctor mark green).
+    #[test]
+    fn enrichment_degraded_when_completed_but_zero_promotion() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "r", "state": "completed",
+                "eligible_count": 881, "enriched_count": 700, "promoted_count": 0,
+                "finished_secs_ago": 5
+            }
+        });
+        assert!(enrichment_is_degraded(&response));
+    }
+
+    // A pass that promoted something is NOT degraded (stays [ok]).
+    #[test]
+    fn enrichment_not_degraded_when_something_promoted() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "r", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "finished_secs_ago": 5
+            }
+        });
+        assert!(!enrichment_is_degraded(&response));
+    }
+
+    // Nothing eligible → nothing to promote → NOT degraded (an up-to-date repo is not a degraded one).
+    #[test]
+    fn enrichment_not_degraded_when_nothing_eligible() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "r", "state": "completed",
+                "eligible_count": 0, "enriched_count": 0, "promoted_count": 0, "finished_secs_ago": 5
+            }
+        });
+        assert!(!enrichment_is_degraded(&response));
+    }
+
+    // A skipped pass, or no pass / a missing count, is NOT classified as degraded (absence ≠ degradation).
+    #[test]
+    fn enrichment_not_degraded_for_skipped_absent_or_missing_counts() {
+        let skipped = json!({ "enrichment_enabled": true, "last_enrichment": {
+            "repo": "r", "state": "skipped", "eligible_count": 0, "promoted_count": 0,
+            "skipped": [{"language": "java", "reason": "jdtls not found"}], "finished_secs_ago": 5
+        }});
+        assert!(!enrichment_is_degraded(&skipped));
+        assert!(!enrichment_is_degraded(
+            &json!({ "enrichment_enabled": true })
+        ));
+        // Completed but the counts are absent (older daemon) → unknown, not a fabricated degradation.
+        let no_counts = json!({ "enrichment_enabled": true, "last_enrichment": {
+            "repo": "r", "state": "completed", "finished_secs_ago": 5
+        }});
+        assert!(!enrichment_is_degraded(&no_counts));
     }
 
     #[test]

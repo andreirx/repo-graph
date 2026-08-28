@@ -1399,10 +1399,19 @@ impl Signal {
     }
 
     pub fn trust_no_enrichment(evidence: TrustNoEnrichmentEvidence) -> Self {
-        let summary = String::from(
-            "Enrichment phase did not run; call graph resolution \
-			 relies on syntax-only extraction.",
-        );
+        // CONTRADICTION-SWEEP-1 §2.4 (operator ruling CS1-4, OPTION A — one COMPUTATION per fact):
+        // trust CALLS the ONE shared enrichment-state accessor `check::enrichment_state_summary`,
+        // the SAME function `check`'s condition and the `reliability` breakdown call — it does NOT
+        // reach for a baked phrase constant (phrase-sharing over an independent computation is the
+        // divergence defect itself). This signal exists only for the NotRun state, so it resolves
+        // that state THROUGH the shared computation; if `check` ever changes how a not-run phase is
+        // worded at its one home, this trust clause moves with it (kills contradiction #4). Trust
+        // appends only the resolution CONSEQUENCE this signal exists to state.
+        let state_clause = crate::check::enrichment_state_summary(Some(
+            crate::storage_port::EnrichmentState::NotRun,
+        ));
+        let summary =
+            format!("{state_clause} Call graph resolution relies on syntax-only extraction.");
         Self::build(
             SignalCode::TrustNoEnrichment,
             summary,
@@ -1984,6 +1993,30 @@ mod tests {
         });
         assert_eq!(s.code, SignalCode::TrustNoEnrichment);
         assert_eq!(s.severity, Severity::Low);
+    }
+
+    // CONTRADICTION-SWEEP-1 §2.4 (operator ruling CS1-4, OPTION A): trust words its enrichment STATE by
+    // CALLING the ONE shared accessor `check::enrichment_state_summary` — not by baking a phrase. This
+    // test proves the SHARED READ, not phrase equality: trust's clause is exactly whatever that function
+    // returns for NotRun. If check re-words the not-run state at its one home, this assertion tracks it
+    // (there is no local literal to fall out of sync). Doctor's LAST-PASS lifecycle is a distinct
+    // daemon-wide fact with its own labelled line (ruling CS1-4), not this per-snapshot state.
+    #[test]
+    fn trust_no_enrichment_words_state_via_shared_accessor_call() {
+        use crate::check::enrichment_state_summary;
+        use crate::storage_port::EnrichmentState;
+        let s = Signal::trust_no_enrichment(TrustNoEnrichmentEvidence {
+            enrichment_eligible: 10,
+            enrichment_enriched: 0,
+        });
+        // Resolve the NotRun state through the SAME function trust calls; trust's summary must open
+        // with exactly that string. No trust-local constant is referenced — the accessor IS the source.
+        let shared = enrichment_state_summary(Some(EnrichmentState::NotRun));
+        assert!(
+            s.summary.starts_with(shared),
+            "trust must open with the shared accessor's NotRun phrase ({shared:?}): {}",
+            s.summary
+        );
     }
 
     #[test]

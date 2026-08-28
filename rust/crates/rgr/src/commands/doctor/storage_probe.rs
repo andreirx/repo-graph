@@ -138,10 +138,12 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
     if ready > 0 {
         // ENRICH-LIFECYCLE-1: auto-enrichment now runs after every index/refresh. The full lifecycle
         // (completed / skipped-with-reason / disabled) is the authoritative Daemon-section
-        // `enrichment` line (daemon_info); this Storage-section pointer just states it is automatic
-        // so the old "not run automatically" claim is no longer a standing (now-false) statement.
+        // "last enrichment pass (daemon-wide)" line (daemon_info); this Storage-section pointer just
+        // states it is automatic so the old "not run automatically" claim is no longer a standing
+        // (now-false) statement.
         detail_lines.push(
-            "enrichment: runs automatically after each index (see the Daemon 'enrichment' line)"
+            "enrichment: runs automatically after each index \
+             (see the Daemon 'last enrichment pass (daemon-wide)' line)"
                 .to_string(),
         );
     }
@@ -467,8 +469,8 @@ mod tests {
             "the Storage line states enrichment is automatic, not a manual next-action: {details}"
         );
         assert!(
-            details.contains("Daemon 'enrichment' line"),
-            "and points at the authoritative Daemon lifecycle line: {details}"
+            details.contains("Daemon 'last enrichment pass (daemon-wide)' line"),
+            "and points at the authoritative daemon-wide lifecycle line (ruling CS1-4): {details}"
         );
     }
 
