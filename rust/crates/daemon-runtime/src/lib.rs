@@ -89,9 +89,11 @@ pub mod module_summary_cert;
 // DAEMON-CRASH-RECOVERY-1 (F8): op-lifecycle lines in the daemon LOG (index/refresh/enrich/retention/
 // reconcile), so a crashed op's forensics survive in the ONE surface a dead daemon leaves behind.
 pub mod oplog;
+mod orient_additive_fields; // ORIENT-SEGMENT-2: daemon-injected additive orient fields orchestrator (crate-private)
 pub mod orient_coherence;
 pub mod orient_lg_decisions;
 pub mod orient_serve;
+mod orient_topology_fallback; // ORIENT-SEGMENT-2 §2.1: directory-group topology fallback on package-group collapse (crate-private)
 pub mod partition_discovery;
 // HONEST-DEGRADATION-IMPL-2-REFACTOR: pure reader-context label helpers (D2 + D5), extracted verbatim
 // from the oversized `dispatch.rs`. Crate-internal (all public items are `pub(crate)`); `dispatch`

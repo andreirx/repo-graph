@@ -221,6 +221,19 @@ pub struct AgentModuleSize {
     pub path: String,
     /// Number of files this module owns in the snapshot.
     pub file_count: u64,
+    /// ORIENT-SEGMENT-2 §2.2: the module's DECLARED name (`module_candidates
+    /// .display_name`, e.g. `@amodx/plugins`, `Django`), when the detector recorded
+    /// one. `None` for an inferred/directory module — the row then renders by path.
+    /// Carried PER ROW (not a path-keyed side map) because two modules can share a
+    /// `canonical_root_path` — django declares TWO `Django` modules BOTH rooted at
+    /// `.` (a root `pyproject.toml` AND a root `package.json`), distinguishable only
+    /// by their manifest.
+    pub name: Option<String>,
+    /// ORIENT-SEGMENT-2 §2.2: the owning manifest filename (`pyproject.toml`,
+    /// `package.json`, `Cargo.toml`, `settings.gradle`), derived from the
+    /// `module_key` source prefix. `None` for an inferred / directory module (no
+    /// manifest) — honest, never guessed.
+    pub manifest: Option<String>,
 }
 
 /// One leaf directory that owns files — a row of the directory TOPOLOGY

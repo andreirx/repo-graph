@@ -55,7 +55,7 @@ mod seed_dispatch;
 /// and `parse_status` (orient); axis = per-field additive `value` enrichment; the
 /// rejected simpler alternative (one bespoke fn per field) duplicated this
 /// object-get/insert/log logic.
-fn inject_value_field<T: serde::Serialize>(
+pub(crate) fn inject_value_field<T: serde::Serialize>(
     output: &mut serde_json::Value,
     key: &str,
     value: &T,
@@ -79,7 +79,7 @@ fn inject_value_field<T: serde::Serialize>(
 /// computed from the SAME `get_stale_files` read that drives `check`'s
 /// `UNPARSED_FILES` condition. A FAILED read is `Unknown` WITH the reason — never
 /// `Ok`/zero (standing honesty rule: a rendered fallible read is unknown, not zero).
-fn compute_parse_status(
+pub(crate) fn compute_parse_status(
     storage: &StorageConnection,
     snapshot_uid: &str,
 ) -> repo_graph_agent::dto::parse_status::ParseStatus {
@@ -4317,22 +4317,21 @@ impl ServiceDispatcher {
             }
         };
 
-        // INDEX-BASIS-1: inject the query-time working-tree drift as an ADDITIVE
-        // field on the envelope's `value` (the same post-serialize enrichment
-        // explain uses for its witness projections). It rides `value` so rgr's
-        // `OrientResponse` captures it with one `#[serde(default)]` field; the pure
-        // agent envelope is untouched. `epoch.snapshot` carries the recorded basis
-        // for the pinned request epoch. rgr renders it as the "index basis / drift"
-        // footer line.
+        // INDEX-BASIS-1 + ORIENT-SEGMENT-2: compute the query-time drift (needs
+        // `&self`), then hand ALL post-serialize additive `value` fields — drift,
+        // parse, the §2.1 collapse fallback, the §2.5 HTTP headline — to the orient
+        // orchestrator (kept out of dispatch; see `orient_additive_fields`).
         let index_drift =
             self.compute_query_drift(&storage, &repo_state, &repo_uid, &epoch.snapshot);
-        inject_value_field(&mut output, "index_drift", &index_drift, &repo_uid);
-
-        // INDEX-BASIS-1 (review-0 fix #2): the parse axis is its OWN honest value
-        // (from get_stale_files), NOT the coherence-envelope freshness meet (which
-        // keeps its own name). rgr renders it as the footer `parse: ok|N unparsed`.
-        let parse_status = compute_parse_status(&storage, &epoch.snapshot.snapshot_uid);
-        inject_value_field(&mut output, "parse_status", &parse_status, &repo_uid);
+        crate::orient_additive_fields::inject(
+            &mut output,
+            &index_drift,
+            &repo_state,
+            emitter,
+            &storage,
+            &repo_uid,
+            &epoch.snapshot.snapshot_uid,
+        );
 
         let envelope_ms = envelope_start.elapsed().as_millis();
 

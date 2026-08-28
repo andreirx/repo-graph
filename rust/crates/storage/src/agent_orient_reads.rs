@@ -109,9 +109,14 @@ pub(crate) fn module_sizes(
     limit: usize,
 ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
     let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    // ORIENT-SEGMENT-2 §2.2: also project the DECLARED name (`display_name`) and the
+    // `module_key` (whose source prefix names the owning manifest), so each row is
+    // self-describing — orient can render `name [manifest]` on a collision/divergence
+    // WITHOUT a path-keyed side map (two modules can share a `canonical_root_path`).
     let mut stmt = conn
         .prepare(
-            "SELECT mc.canonical_root_path AS path, COUNT(o.file_uid) AS file_count \
+            "SELECT mc.canonical_root_path AS path, COUNT(o.file_uid) AS file_count, \
+                    mc.display_name AS display_name, mc.module_key AS module_key \
              FROM module_candidates mc \
              JOIN module_file_ownership o \
                ON o.module_candidate_uid = mc.module_candidate_uid \
@@ -126,15 +131,38 @@ pub(crate) fn module_sizes(
 
     let rows = stmt
         .query_map(rusqlite::params![snapshot_uid, limit_i64], |row| {
+            let display_name: Option<String> = row.get(2)?;
+            let module_key: Option<String> = row.get(3)?;
             Ok(AgentModuleSize {
                 path: row.get::<_, String>(0)?,
                 file_count: row.get::<_, i64>(1)? as u64,
+                name: display_name.filter(|n| !n.trim().is_empty()),
+                manifest: module_key
+                    .as_deref()
+                    .and_then(manifest_for_module_key)
+                    .map(str::to_string),
             })
         })
         .map_err(map_err("list_module_sizes"))?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(map_err("list_module_sizes"))
+}
+
+/// ORIENT-SEGMENT-2 §2.2: map a `module_key` (`<source>:<repo_uid>:<root>`) to the
+/// owning manifest filename. The source prefix is the indexer's own deterministic
+/// tag (each `indexer::*::generate_module_key`), so this is a total, typo-proof
+/// mapping — an unknown / inferred prefix returns `None` (no manifest), never a
+/// guessed file.
+fn manifest_for_module_key(module_key: &str) -> Option<&'static str> {
+    match module_key.split(':').next() {
+        Some("cargo") => Some("Cargo.toml"),
+        Some("pyproject") => Some("pyproject.toml"),
+        Some("npm") => Some("package.json"),
+        Some("gradle") => Some("settings.gradle"),
+        // "inferred" / "directory" / anything else -> no manifest declared it.
+        _ => None,
+    }
 }
 
 /// List leaf directories that own ≥1 file, with their owned-file counts
@@ -329,18 +357,73 @@ mod tests {
             vec![
                 AgentModuleSize {
                     path: "src/http".into(),
-                    file_count: 3
+                    file_count: 3,
+                    name: None,
+                    manifest: None,
                 },
                 AgentModuleSize {
                     path: "src/core".into(),
-                    file_count: 2
+                    file_count: 2,
+                    name: None,
+                    manifest: None,
                 },
                 AgentModuleSize {
                     path: "src/util".into(),
-                    file_count: 1
+                    file_count: 1,
+                    name: None,
+                    manifest: None,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn declared_module_carries_name_and_derived_manifest() {
+        // ORIENT-SEGMENT-2 §2.2: a manifest-declared module surfaces its display_name
+        // + the manifest derived from the module_key source prefix; an inferred module
+        // carries neither (honest — no manifest declared it).
+        let storage = setup();
+        let snap = snapshot(&storage);
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_candidates \
+                 (module_candidate_uid, snapshot_uid, repo_uid, module_key, module_kind, \
+                  canonical_root_path, confidence, display_name) VALUES \
+                 ('mc_py', '{snap}', 'r1', 'pyproject:r1:.', 'declared', '.', 1.0, 'Django'), \
+                 ('mc_dir', '{snap}', 'r1', 'inferred:r1:src', 'inferred', 'src', 1.0, NULL); \
+                 INSERT INTO module_file_ownership \
+                 (snapshot_uid, repo_uid, file_uid, module_candidate_uid, assignment_kind, confidence) VALUES \
+                 ('{snap}', 'r1', 'r1:./a.py', 'mc_py', 'directory', 1.0), \
+                 ('{snap}', 'r1', 'r1:src/b.py', 'mc_dir', 'directory', 1.0)"
+            ))
+            .unwrap();
+        let got = storage.list_module_sizes(&snap, ALL).unwrap();
+        let py = got.iter().find(|m| m.path == ".").unwrap();
+        assert_eq!(py.name.as_deref(), Some("Django"));
+        assert_eq!(py.manifest.as_deref(), Some("pyproject.toml"));
+        let dir = got.iter().find(|m| m.path == "src").unwrap();
+        assert_eq!(dir.name, None, "inferred module has no declared name");
+        assert_eq!(dir.manifest, None, "inferred module has no manifest");
+    }
+
+    #[test]
+    fn manifest_prefixes_map_to_files() {
+        assert_eq!(manifest_for_module_key("cargo:r:."), Some("Cargo.toml"));
+        assert_eq!(
+            manifest_for_module_key("pyproject:django:."),
+            Some("pyproject.toml")
+        );
+        assert_eq!(
+            manifest_for_module_key("npm:r:packages/plugins"),
+            Some("package.json")
+        );
+        assert_eq!(
+            manifest_for_module_key("gradle:k:core"),
+            Some("settings.gradle")
+        );
+        assert_eq!(manifest_for_module_key("inferred:r:src"), None);
+        assert_eq!(manifest_for_module_key("weird"), None);
     }
 
     #[test]
@@ -375,11 +458,15 @@ mod tests {
             vec![
                 AgentModuleSize {
                     path: "src/http".into(),
-                    file_count: 3
+                    file_count: 3,
+                    name: None,
+                    manifest: None,
                 },
                 AgentModuleSize {
                     path: "src/core".into(),
-                    file_count: 2
+                    file_count: 2,
+                    name: None,
+                    manifest: None,
                 },
             ],
             "limit=2 returns the top-2 by size (prefix of the full order)"

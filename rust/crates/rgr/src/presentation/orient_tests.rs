@@ -35,6 +35,8 @@ fn minimal_response() -> OrientResponse {
         witnesses: None,
         index_drift: None,
         parse_status: None,
+        directory_group_fallback: None,
+        http_surfaces: None,
     }
 }
 

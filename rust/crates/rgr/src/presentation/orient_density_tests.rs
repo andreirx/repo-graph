@@ -271,24 +271,25 @@ fn d7_scale_bounded_human_true_omission_at_every_tier() {
         "large caps the section at 50:\n{large}"
     );
 
-    // FULL: package groups stay BOUNDED (§13 D7) — the SAME top-50 as `large`,
-    // NOT uncapped. `--full` uncaps only the complexity table (see
-    // `medium_caps_complexity_large_expands_full_uncapped`), never the package
-    // topology, which on a monorepo scales with directories into the thousands —
-    // the exact overrun D7 exists to bound on the primary surface. Same TRUE
-    // omission as `large` (130 - 50 = 80); the COMPLETE 130-group set rides JSON.
+    // FULL: ORIENT-SEGMENT-2 §2.4 (operator ruling 2, 2026-08-28) UNCAPS the
+    // package-group section at `--full` — the COMPLETE breakdown the small-budget
+    // footer advertises. A >50-group repo's `--full` renders EVERY group (all 130
+    // here), so there is NO omission line. This deliberately supersedes the earlier
+    // MODULE-MODEL-2 §13 D7 "bounded at every tier" reading FOR PACKAGE GROUPS AT FULL
+    // ONLY (medium/large stay bounded above); the headline still names the complete
+    // total and the JSON evidence is untouched.
     let full = r.render_human(OrientDepth::Full);
     assert!(
-        full.contains("… and 80 more groups — see `stats --json` / `modules`"),
-        "full omission must be true — bounded at EVERY tier, incl. --full:\n{full}"
+        !full.contains("more groups — see `stats --json`"),
+        "full renders every group — no omission line:\n{full}"
     );
     assert!(
-        full.contains("g049 — "),
-        "50th group shown at full:\n{full}"
+        full.contains("g050 — "),
+        "51st group shown at full (large capped it):\n{full}"
     );
     assert!(
-        !full.contains("g050 — "),
-        "full caps the package-group section at 50 (§13 D7 — NOT uncapped):\n{full}"
+        full.contains("g129 — 871 files"),
+        "last (130th) group shown at full — the complete breakdown:\n{full}"
     );
     // The headline still names the COMPLETE total (asserted in the tier loop above),
     // and the JSON evidence is untouched — human bounding is presentation-only.
@@ -346,5 +347,57 @@ fn root_manifest_limitation_marker_renders_in_package_groups_section() {
     assert!(
         !out.contains("not folded"),
         "no marker when evidence carries none:\n{out}"
+    );
+}
+
+// ── ORIENT-SEGMENT-2 §2.3: budgets change LENGTH, never NUMBERS (rgr path) ──────
+
+/// The agent-side guard (`agent/tests/orient_repo_budget_identity.rs`) proves the
+/// USE CASE emits identical numbers across budgets. This companion proves the same
+/// through the rgr PRESENTATION path (reviewer correction: "compare the RENDERED
+/// numeric fields incl. the cycle counts, through the rgr presentation path"): the
+/// load-bearing facts render byte-identically at every depth while the rendered
+/// LENGTH grows monotonically. (FRAKTAG's 28-vs-31 was an enrichment-EPOCH change
+/// between the audit's two captures — NOT a budget effect; see the agent test's
+/// header and the build report for the reproduction.)
+#[test]
+fn rendered_numbers_are_budget_invariant_length_is_monotonic() {
+    let r = nginx_like();
+    let depths = [
+        OrientDepth::Small,
+        OrientDepth::Medium,
+        OrientDepth::Large,
+        OrientDepth::Full,
+    ];
+    let renders: Vec<String> = depths.iter().map(|d| r.render_human(*d)).collect();
+
+    // 1. NUMERIC IDENTITY through rgr — every load-bearing fact (structure totals,
+    // the top complexity value, and the CYCLE COUNT) renders identically at EVERY
+    // depth. A budget that changed any of these would drop one of these substrings.
+    for fact in [
+        "397 file",        // file_count (structure line)
+        "5000 symbol",     // symbol_count (structure line)
+        "6 package group", // package-group total
+        "cx 89",           // top complexity center value
+        "3 import cycle",  // IMPORT_CYCLES cycle_count (the reviewer's named field)
+    ] {
+        for (i, out) in renders.iter().enumerate() {
+            assert!(
+                out.contains(fact),
+                "fact {fact:?} must render at {:?} (numbers never depend on the budget):\n{out}",
+                depths[i]
+            );
+        }
+    }
+
+    // 2. MONOTONIC LENGTH — depth trades DETAIL, never inverts, and genuinely grows.
+    let lens: Vec<usize> = renders.iter().map(|s| s.len()).collect();
+    assert!(
+        lens.windows(2).all(|w| w[0] <= w[1]),
+        "rendered length must be monotonic non-decreasing small->full: {lens:?}"
+    );
+    assert!(
+        lens[0] < lens[lens.len() - 1],
+        "small must render shorter than full (budget really trades depth): {lens:?}"
     );
 }

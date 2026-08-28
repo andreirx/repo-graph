@@ -551,6 +551,16 @@ pub struct ModuleSizeEvidence {
     pub path: String,
     /// Files this module owns in the snapshot.
     pub file_count: u64,
+    /// ORIENT-SEGMENT-2 §2.2: the DECLARED module name (`display_name`), when the
+    /// detector recorded one; `None` for an inferred/directory module. Carried per
+    /// row so orient can render `name [manifest]` on a name collision / divergence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// ORIENT-SEGMENT-2 §2.2: the owning manifest filename (`pyproject.toml` /
+    /// `package.json` / `Cargo.toml` / `settings.gradle`), derived from the module
+    /// source; `None` for an inferred module (no manifest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<String>,
 }
 
 /// One logical package/directory group for the `orient` STRUCTURE headline
@@ -1836,10 +1846,14 @@ mod tests {
                 ModuleSizeEvidence {
                     path: "src/http".into(),
                     file_count: 30,
+                    name: None,
+                    manifest: None,
                 },
                 ModuleSizeEvidence {
                     path: "src/core".into(),
                     file_count: 12,
+                    name: None,
+                    manifest: None,
                 },
             ],
             package_groups: Vec::new(),

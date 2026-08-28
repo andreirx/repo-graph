@@ -21,11 +21,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use repo_graph_agent::{
-    AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle, AgentDeadNode,
-    AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry,
-    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-    AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-    AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+    AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentComplexityMeasurement,
+    AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge,
+    AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
+    AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -130,6 +131,18 @@ pub struct FakeAgentStorage {
 
     // ── Documentation inventory seed data (docs-primary pivot) ──
     pub doc_inventory: HashMap<String, Vec<AgentDocEntry>>,
+
+    // ── Structure / complexity seed data (ORIENT-SEGMENT-2 budget-identity) ──
+    //
+    // Keyed by snapshot_uid. Default-empty so every existing fake user is
+    // unaffected (the methods below fall back to the prior empty/None/false
+    // behaviour when a key is unseeded). Seeded only by the four-budget
+    // numeric-identity test, which needs orient's DEPTH lists (top_modules /
+    // top_complex) to genuinely vary with budget while the numeric totals stay
+    // fixed — the invariant the slice asserts.
+    pub module_summaries: HashMap<String, AgentModuleSummary>,
+    pub module_sizes: HashMap<String, Vec<AgentModuleSize>>,
+    pub complexity_measurements: HashMap<String, Vec<AgentComplexityMeasurement>>,
 
     /// If set to the name of a port operation, the fake returns
     /// `AgentStorageError` from that operation. Used to verify
@@ -542,43 +555,80 @@ impl AgentStorageRead for FakeAgentStorage {
 
     fn query_high_complexity_symbols(
         &self,
-        _snapshot_uid: &str,
-        _min_threshold: u64,
-        _limit: usize,
+        snapshot_uid: &str,
+        min_threshold: u64,
+        limit: usize,
     ) -> Result<Vec<repo_graph_agent::AgentComplexityMeasurement>, AgentStorageError> {
         self.fail_if_forced("query_high_complexity_symbols")?;
-        // Default: no measurements. Tests that need complexity
-        // data should seed this map when the feature is added.
-        Ok(Vec::new())
+        // Seeded: the above-threshold set, honoring `limit` like the real
+        // adapter. The orient complexity aggregator passes FETCH_ALL and does
+        // the budget cut itself, so the seed drives the DEPTH the budget
+        // truncates. Unseeded: no measurements (prior behaviour).
+        Ok(self
+            .complexity_measurements
+            .get(snapshot_uid)
+            .map(|rows| {
+                rows.iter()
+                    .filter(|m| m.complexity >= min_threshold)
+                    .take(limit)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
-    fn has_complexity_measurements(&self, _snapshot_uid: &str) -> Result<bool, AgentStorageError> {
+    fn has_complexity_measurements(&self, snapshot_uid: &str) -> Result<bool, AgentStorageError> {
         self.fail_if_forced("has_complexity_measurements")?;
-        // Default: no measurements (emits COMPLEXITY_UNAVAILABLE limit).
-        Ok(false)
+        // Seeded ⇒ measurements present; unseeded ⇒ COMPLEXITY_UNAVAILABLE limit
+        // (prior behaviour).
+        Ok(self.complexity_measurements.contains_key(snapshot_uid))
     }
 
     fn count_high_complexity_symbols(
         &self,
-        _snapshot_uid: &str,
-        _min_threshold: u64,
+        snapshot_uid: &str,
+        min_threshold: u64,
     ) -> Result<u64, AgentStorageError> {
         self.fail_if_forced("count_high_complexity_symbols")?;
-        // Default: no measurements.
-        Ok(0)
+        // The TRUE above-threshold total (never limited) — the number orient
+        // reports as `high_complexity_count`, budget-invariant by construction.
+        Ok(self
+            .complexity_measurements
+            .get(snapshot_uid)
+            .map(|rows| {
+                rows.iter()
+                    .filter(|m| m.complexity >= min_threshold)
+                    .count() as u64
+            })
+            .unwrap_or(0))
     }
 
     // ── Module discovery methods ──────────────────────────────────
 
     fn get_module_summary(
         &self,
-        _snapshot_uid: &str,
+        snapshot_uid: &str,
     ) -> Result<Option<repo_graph_agent::AgentModuleSummary>, AgentStorageError> {
         self.fail_if_forced("get_module_summary")?;
-        // Default: no module candidates (emits MODULE_DATA_UNAVAILABLE).
-        // Tests that need module discovery data should seed this when
-        // the feature requires validation.
-        Ok(None)
+        // Seeded ⇒ module discovery data present; unseeded ⇒ None
+        // (MODULE_DATA_UNAVAILABLE, prior behaviour).
+        Ok(self.module_summaries.get(snapshot_uid).cloned())
+    }
+
+    fn list_module_sizes(
+        &self,
+        snapshot_uid: &str,
+        limit: usize,
+    ) -> Result<Vec<AgentModuleSize>, AgentStorageError> {
+        self.fail_if_forced("list_module_sizes")?;
+        // Honor the budget-derived `limit` exactly like the real adapter so
+        // `top_modules` DEPTH scales with budget; unseeded ⇒ empty (default
+        // trait behaviour).
+        Ok(self
+            .module_sizes
+            .get(snapshot_uid)
+            .map(|rows| rows.iter().take(limit).cloned().collect())
+            .unwrap_or_default())
     }
 
     fn get_boundary_links_freshness(

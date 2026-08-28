@@ -49,8 +49,22 @@ pub mod modules_list;
 pub mod modules_show;
 pub mod modules_violations;
 pub mod orient;
+// ORIENT-SEGMENT-2 (review-3 §3): guardrail SPLIT modules, not new public APIs — pure
+// relocations of `impl OrientResponse` blocks / response DTOs out of `orient.rs` /
+// `orient_sections.rs` to hold each file under the 500-line guardrail. They are consumed
+// only within this crate; `orient::*` re-exports (`pub use super::orient_types::…`)
+// preserve every prior public `presentation::orient::<Type>` path, so nothing public
+// changes. `pub(crate)` keeps the split from minting a new public surface (the packet
+// freezes new public APIs; only crate-private splits are pre-ratified).
+pub(crate) mod orient_guidance;
 pub mod orient_reliability;
+pub(crate) mod orient_reliability_caveats;
 pub mod orient_sections;
+// ORIENT-SEGMENT-2 (operator ruling 2, 2026-08-28): rgr-INTERNAL presentation, not a
+// new public API — the seg2 renderers/DTOs are consumed only by the sibling orient
+// presenters within this crate.
+pub(crate) mod orient_seg2;
+pub(crate) mod orient_types;
 pub mod path;
 pub mod reliability;
 pub mod seed;

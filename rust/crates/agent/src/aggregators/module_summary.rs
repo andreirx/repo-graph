@@ -117,6 +117,10 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 .map(|m| ModuleSizeEvidence {
                     path: m.path,
                     file_count: m.file_count,
+                    // ORIENT-SEGMENT-2 §2.2: carry the declared name + owning manifest
+                    // per row so orient renders `name [manifest]` on collision/divergence.
+                    name: m.name,
+                    manifest: m.manifest,
                 })
                 .collect();
             let evidence = ModuleSummaryEvidence {
