@@ -100,6 +100,20 @@ sidecars), and cross-command contradictions. Ranked queue (operator, pending hum
    quartet collapse. 10. churn sort + budgets, stats de-dup. Seeding corpus levers (boilerplate
    skip, symbol names, config/test exclusion) fold into the symbol-granularity milestone.
 
+## Usefulness audit v0.11.0 — the fix queue (2026-08-31)
+
+Post-release audit of v0.11.0 (all ten v0.9.0 fixes verified live in the field; grade matrix
+artifact + `docs/audits/2026-08-31-per-command-usefulness-v0.11.0.md`; standalone Codex second
+opinion concurring). Ranked queue: 1. **ORIENT-FACT-COHERENCE-1** (budgeted orient serves
+pre-enrichment cached facts + stale CTA — one snapshot fact source, freshness-labeled).
+2. **INFERENCE-CAP-1** (write-time 752-row inference cap DB-proven on two repos; render claims
+"complete" over it — mechanism hunt pending). 3. **DEPS-ATTRIB-2** (glamCRM zero content, false
+manifest diagnosis, silent Gradle/Maven absence). 4. **FIXTURE-POLLUTION-1** (own test fixtures
+dominate boundaries/cycles/docs). 5. **CHECK-SIGNAL-1** (always-LOW verdict; no-path language
+blamed). 6. **FIND-RANK-1** (kind-weighted non-test-first ranking under the cap). 7-10:
+RESOURCE-HONESTY-1, TRUST-FIRSTPARTY-1, MODULES-IDENTITY-2, DOCS-LIST-2. Protocol gaps: arm one
+boundary next smoke; capture explain + amodx find; linux client-timeout override.
+
 ## Semantic seeding — ratified track (2026-08-24)
 
 Operator-ratified (VISION § Semantic Seeding; spike evidence
