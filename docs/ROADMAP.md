@@ -72,7 +72,12 @@ hypotheses until that run speaks.
    F14 (extractor deep-file guard), GRADLE-DEP-READER-1 (Java attribution prereq),
    ENRICH-YIELD residuals (dependency-version capture; caller-level version resolution).
 
-## Usefulness audit v0.9.0 — the fix queue (2026-08-26)
+## Usefulness audit v0.9.0 — the fix queue — COMPLETE (2026-08-30)
+
+All ten shipped: #1-5 pre-queue (SELF-POLLUTION-1, DEPS-LIST-REWRITE-1, HTTP-SURFACE-COHERENCE-1,
+INFERENCES-SURFACE-1, ORIENT-SEGMENT-2), #6 CONTRADICTION-SWEEP-1 b66391c, #7 CYCLE-HONESTY-1
+4574fd0 (CYCLE-FACTS-2 follow-up awaits human ratification), #8 DEAD-CAUSES-1 e909190,
+#9 GOV-ARMED-1 be7fa5b, #10 QUANT-MECH-1 1fe015a. (2026-08-26)
 
 Per-command QUALITY+QUANTITY audit across six repos (protocol run
 `smoke-runs/2026-08-25T22-41-37Z`; full report `docs/audits/2026-08-26-per-command-usefulness-v0.9.0.md`,
