@@ -99,7 +99,8 @@ sidecars), and cross-command contradictions. Ranked queue (operator, pending hum
 
 Operator-ratified (VISION § Semantic Seeding; spike evidence
 `docs/spikes/2026-08-23-embed-seed-spike-1.md`). Queue: **EMBED-SEED-1** (SPEC via relay,
-decision-review) → IMPL. Layer-3, opt-in verb, local model, pinned vectors, fixed-formula
+decision-review) → IMPL. → **FIND-FACTS-1** (human-ratified 2026-08-30: facts tier
+from the fact tables renders ABOVE demoted embedding seeds; `docs/slices/find-facts-1.md`). Layer-3, opt-in verb, local model, pinned vectors, fixed-formula
 ranking — the bounds are in the VISION section and are not re-litigated per slice.
 
 ## Product-surface honesty — track ledger (largely DELIVERED)
