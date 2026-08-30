@@ -5194,6 +5194,9 @@ impl ServiceDispatcher {
             "toolchain": toolchain,
             "obligations": report.obligations,
             "gate": report.outcome,
+            // GOV-ARMED-1: additive configuration-presence fact. Frozen exit
+            // codes and existing fields are untouched.
+            "armed": report.armed,
         });
 
         DispatchResult::success(&request.id, response)
@@ -7945,6 +7948,12 @@ impl ServiceDispatcher {
         let violation_count = result.evaluation.violations.len();
         let stale_count = result.evaluation.stale_declarations.len();
 
+        // GOV-ARMED-1: armed iff the repo has any active boundary declaration.
+        // Config-presence fact from the loaded declarations, NOT inferred from
+        // `count == 0`.
+        let declarations_evaluated = result.declarations_evaluated;
+        let armed = declarations_evaluated > 0;
+
         // Build response
         let response = serde_json::json!({
             "command": "modules violations",
@@ -7956,6 +7965,9 @@ impl ServiceDispatcher {
             },
             "count": violation_count,
             "stale_count": stale_count,
+            // GOV-ARMED-1: additive configuration-presence facts.
+            "armed": armed,
+            "declarations_checked": declarations_evaluated,
             "diagnostics": {
                 "imports_edges_total": result.diagnostics.imports_total,
                 "imports_source_no_file": 0,

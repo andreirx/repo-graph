@@ -46,6 +46,12 @@ pub struct AssessResponse {
     pub assessments: AssessmentsBreakdown,
     #[serde(default)]
     pub baseline_required_count: u64,
+    /// GOV-ARMED-1: whether any quality policy is configured for this repo.
+    /// `Some(false)` → unarmed one-liner; `Some(true)` → the evaluated
+    /// breakdown; `None` → daemon did not report the fact → unknown-with-reason.
+    /// Configuration-presence fact, never inferred from `assessments.total == 0`.
+    #[serde(default)]
+    pub armed: Option<bool>,
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -64,6 +70,23 @@ impl AssessResponse {
         out.push_str(&format!("Snapshot: {}\n", self.snapshot));
         if let Some(ref baseline) = self.baseline_snapshot {
             out.push_str(&format!("Baseline: {}\n", baseline));
+        }
+
+        // GOV-ARMED-1: unarmed / unknown short-circuits before the counts.
+        match self.armed {
+            Some(false) => {
+                // UNARMED — one honest line + the real arming path. No
+                // "0 policies evaluated" dressed as a result.
+                out.push_str("Assess: not armed — no quality policies configured for this repo.\n");
+                out.push_str(
+                    "To arm: declare a quality policy (`rmap declare quality-policy ...`).\n",
+                );
+                return out;
+            }
+            None => {
+                out.push_str(&crate::presentation::armed_unknown_line("Assess"));
+            }
+            Some(true) => {}
         }
 
         // Total count
@@ -156,19 +179,47 @@ mod tests {
                 not_comparable,
             },
             baseline_required_count,
+            // Fixtures with policies → armed; overridden per test where needed.
+            armed: Some(true),
         }
     }
 
+    // GOV-ARMED-1: no policies configured → one honest line + arming CTA, NOT
+    // "0 policies evaluated" dressed as a result.
     #[test]
-    fn render_empty_assessment() {
-        let resp = make_response(0, 0, 0, 0, 0, None, 0);
+    fn render_unarmed_assessment() {
+        let mut resp = make_response(0, 0, 0, 0, 0, None, 0);
+        resp.armed = Some(false);
         let out = resp.render_human();
 
         assert!(out.contains("Quality Assessment"));
         assert!(out.contains("Snapshot: snap_abc123"));
+        assert!(out.contains("Assess: not armed — no quality policies configured for this repo."));
+        assert!(out.contains("rmap declare quality-policy"));
+        // The "N policies evaluated" result line is GONE.
+        assert!(!out.contains("policies evaluated"));
+    }
+
+    // GOV-ARMED-1: armed with policies present still renders the evaluated count.
+    #[test]
+    fn render_armed_clean_assessment() {
+        let resp = make_response(2, 2, 0, 0, 0, None, 0);
+        let out = resp.render_human();
+
+        assert!(out.contains("2 policies evaluated"));
+        assert!(!out.contains("not armed"));
+    }
+
+    // GOV-ARMED-1: determination fact absent → unknown-with-reason, full body kept.
+    #[test]
+    fn render_assessment_armed_unknown() {
+        let mut resp = make_response(0, 0, 0, 0, 0, None, 0);
+        resp.armed = None;
+        let out = resp.render_human();
+
+        assert!(out.contains("Assess: armed state unknown"));
+        assert!(!out.contains("not armed"));
         assert!(out.contains("0 policies evaluated"));
-        // No breakdown section for empty
-        assert!(!out.contains("pass"));
     }
 
     #[test]

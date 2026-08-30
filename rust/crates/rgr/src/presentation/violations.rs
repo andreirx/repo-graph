@@ -80,6 +80,16 @@ pub struct ViolationsResponse {
     #[serde(default)]
     pub stale_declarations: Vec<StaleDeclaration>,
     pub stale_count: u64,
+    /// GOV-ARMED-1: whether any boundary declaration is configured for this
+    /// repo. `Some(false)` → unarmed one-liner; `Some(true)` → the violation
+    /// render; `None` → daemon did not report it → unknown-with-reason.
+    /// Configuration-presence fact, never inferred from `count == 0`.
+    #[serde(default)]
+    pub armed: Option<bool>,
+    /// GOV-ARMED-1: number of active boundary declarations checked. Used to make
+    /// the armed-and-clean render explicit ("N boundary declarations checked").
+    #[serde(default)]
+    pub declarations_checked: Option<u64>,
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -94,6 +104,25 @@ impl ViolationsResponse {
 
         // Header
         out.push_str("Architectural Violations\n\n");
+
+        // GOV-ARMED-1: unarmed / unknown short-circuits before the zero counts.
+        match self.armed {
+            Some(false) => {
+                out.push_str(
+                    "Violations: not armed — no boundary declarations exist for this repo; \
+                     nothing has been checked.\n",
+                );
+                out.push_str(
+                    "To arm: declare a boundary \
+                     (`rmap declare boundary <module_path> --forbids <target>`).\n",
+                );
+                return out;
+            }
+            None => {
+                out.push_str(&crate::presentation::armed_unknown_line("Violations"));
+            }
+            Some(true) => {}
+        }
 
         // Counts summary
         out.push_str(&format!(
@@ -121,9 +150,22 @@ impl ViolationsResponse {
             )
         ));
 
-        // Empty case
+        // Empty case (armed and clean — declarations exist, nothing violated).
+        // GOV-ARMED-1: name the declarations checked so this reads as a real
+        // result, never confusable with the unarmed one-liner above.
         if self.count == 0 && self.stale_count == 0 {
-            out.push_str("\nNo violations detected.\n");
+            match self.declarations_checked {
+                Some(n) => out.push_str(&format!(
+                    "\n{} boundary {} checked — no violations.\n",
+                    n,
+                    if n == 1 {
+                        "declaration"
+                    } else {
+                        "declarations"
+                    }
+                )),
+                None => out.push_str("\nNo violations detected.\n"),
+            }
             return out;
         }
 
@@ -233,6 +275,10 @@ mod tests {
             discovered_module_count: discovered_count,
             stale_declarations: stale,
             stale_count,
+            // Fixtures represent armed repos (declarations exist); overridden
+            // per test for the unarmed / unknown cases.
+            armed: Some(true),
+            declarations_checked: Some(3),
         }
     }
 
@@ -279,15 +325,48 @@ mod tests {
         }
     }
 
+    // GOV-ARMED-1: armed and clean — declarations exist, nothing violated. The
+    // render names the declarations checked; it is NOT the unarmed one-liner.
     #[test]
-    fn render_empty_violations() {
+    fn render_armed_clean_violations() {
         let resp = make_response(vec![], vec![], vec![]);
         let out = resp.render_human();
 
         assert!(out.contains("Architectural Violations"));
         assert!(out.contains("0 declared boundary violations"));
-        assert!(out.contains("0 discovered module violations"));
-        assert!(out.contains("0 stale declarations"));
+        assert!(out.contains("3 boundary declarations checked — no violations."));
+        assert!(!out.contains("not armed"));
+    }
+
+    // GOV-ARMED-1: no boundary declarations configured → one honest line + CTA.
+    #[test]
+    fn render_unarmed_violations() {
+        let mut resp = make_response(vec![], vec![], vec![]);
+        resp.armed = Some(false);
+        resp.declarations_checked = Some(0);
+        let out = resp.render_human();
+
+        assert!(out.contains(
+            "Violations: not armed — no boundary declarations exist for this repo; \
+             nothing has been checked."
+        ));
+        assert!(out.contains("rmap declare boundary"));
+        // No zero table.
+        assert!(!out.contains("0 declared boundary violations"));
+        assert!(!out.contains("No violations detected"));
+    }
+
+    // GOV-ARMED-1: determination fact absent → unknown-with-reason.
+    #[test]
+    fn render_violations_armed_unknown() {
+        let mut resp = make_response(vec![], vec![], vec![]);
+        resp.armed = None;
+        resp.declarations_checked = None;
+        let out = resp.render_human();
+
+        assert!(out.contains("Violations: armed state unknown"));
+        assert!(!out.contains("not armed"));
+        // Falls through to the full body; with no count fact, uses the neutral line.
         assert!(out.contains("No violations detected"));
     }
 

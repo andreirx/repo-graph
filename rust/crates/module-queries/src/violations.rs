@@ -27,6 +27,14 @@ pub struct DiscoveredModuleViolationsResult {
 
     /// Edge derivation diagnostics from the module graph facts.
     pub diagnostics: ModuleEdgeDiagnostics,
+
+    /// GOV-ARMED-1: number of active boundary declarations loaded for the
+    /// repo (the `declarations` rows with `kind='boundary' AND is_active=1`).
+    /// This is a CONFIGURATION-PRESENCE fact: `> 0` means the repo has
+    /// declared boundaries, so a zero-violation result is "armed and clean",
+    /// NOT "nothing was ever checked". It is deliberately independent of the
+    /// violation/stale counts, which are RESULTS of checking.
+    pub declarations_evaluated: usize,
 }
 
 /// Evaluate discovered-module violations from preloaded facts.
@@ -84,6 +92,8 @@ pub fn evaluate_violations_from_facts(
     Ok(DiscoveredModuleViolationsResult {
         evaluation,
         diagnostics: facts.diagnostics.clone(),
+        // Config presence = raw boundary declarations loaded for the repo.
+        declarations_evaluated: declarations.len(),
     })
 }
 
@@ -141,5 +151,7 @@ pub fn evaluate_violations_from_preloaded(
     Ok(DiscoveredModuleViolationsResult {
         evaluation,
         diagnostics: facts.diagnostics.clone(),
+        // Config presence = raw boundary declarations passed in.
+        declarations_evaluated: declarations.len(),
     })
 }

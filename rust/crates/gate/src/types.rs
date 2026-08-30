@@ -285,6 +285,15 @@ pub struct GateReport {
     /// Quality-policy assessment evaluations (separate domain).
     pub quality_assessments: Vec<GateQualityAssessmentEvaluation>,
     pub outcome: GateOutcome,
+    /// GOV-ARMED-1: whether this repo has any gate configuration at all
+    /// (at least one requirement declared OR at least one quality policy
+    /// configured). This is a CONFIGURATION-PRESENCE fact derived from the
+    /// gate input, NOT an inference from `outcome.counts.total == 0`. An
+    /// unarmed gate (`armed == false`) is byte-different in the human render
+    /// from an armed-and-clean gate: the former is "not armed" with an
+    /// arming CTA, the latter reports its evaluated counts. Frozen exit-code
+    /// and existing-field semantics are untouched — this field is additive.
+    pub armed: bool,
 }
 
 // ── Gate mode ────────────────────────────────────────────────────

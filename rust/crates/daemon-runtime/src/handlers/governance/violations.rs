@@ -232,6 +232,15 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or(serde_json::Value::Null);
 
+    // GOV-ARMED-1: the surface is "armed" iff the repo has any active boundary
+    // declaration. Both the legacy declared-boundary path and the discovered-
+    // module path read the SAME `declarations` rows (kind='boundary',
+    // is_active=1), so `declarations_evaluated` from the discovered result is
+    // the single honest configuration-presence count for this surface. This is
+    // a config fact, NOT an inference from `count == 0`.
+    let declarations_evaluated = discovered_result.declarations_evaluated;
+    let armed = declarations_evaluated > 0;
+
     let response = serde_json::json!({
         "command": "arch violations",
         "repo": repo_uid,
@@ -241,6 +250,9 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
         "declared_boundary_count": declared_count,
         "discovered_module_count": discovered_count,
         "stale_count": stale_count,
+        // GOV-ARMED-1: additive configuration-presence facts.
+        "armed": armed,
+        "declarations_checked": declarations_evaluated,
         "results": {
             "declared_boundary_violations": declared_violations_json,
             "discovered_module_violations": discovered_violations_json,

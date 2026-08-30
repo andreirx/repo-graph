@@ -95,6 +95,16 @@ pub struct ModulesViolationsResponse {
     pub stale_count: u64,
     #[serde(default)]
     pub diagnostics: Option<ImportDiagnostics>,
+    /// GOV-ARMED-1: whether any module boundary declaration is configured for
+    /// this repo. `Some(false)` → unarmed one-liner; `Some(true)` → the
+    /// violation render; `None` → daemon did not report it → unknown-with-reason.
+    /// Configuration-presence fact, never inferred from `count == 0`.
+    #[serde(default)]
+    pub armed: Option<bool>,
+    /// GOV-ARMED-1: number of active boundary declarations checked, for the
+    /// explicit armed-and-clean render.
+    #[serde(default)]
+    pub declarations_checked: Option<u64>,
 }
 
 impl ModulesViolationsResponse {
@@ -104,6 +114,26 @@ impl ModulesViolationsResponse {
 
         // -- Header --
         out.push_str("Module Violations\n\n");
+
+        // GOV-ARMED-1: unarmed / unknown short-circuits before the zero counts
+        // and import analysis.
+        match self.armed {
+            Some(false) => {
+                out.push_str(
+                    "Violations: not armed — no module boundary declarations exist for \
+                     this repo; nothing has been checked.\n",
+                );
+                out.push_str(
+                    "To arm: declare a boundary \
+                     (`rmap declare boundary <module_path> --forbids <target>`).\n",
+                );
+                return out;
+            }
+            None => {
+                out.push_str(&super::armed_unknown_line("Violations"));
+            }
+            Some(true) => {}
+        }
 
         // -- Counts --
         out.push_str(&format!(
@@ -141,8 +171,21 @@ impl ModulesViolationsResponse {
         }
 
         // -- Violations list --
+        // GOV-ARMED-1: armed and clean — declarations exist, nothing violated.
+        // Name the declarations checked so it never reads as unarmed.
         if self.results.violations.is_empty() && self.results.stale_declarations.is_empty() {
-            out.push_str("\nNo boundary violations detected.\n");
+            match self.declarations_checked {
+                Some(n) => out.push_str(&format!(
+                    "\n{} boundary {} checked — no violations.\n",
+                    n,
+                    if n == 1 {
+                        "declaration"
+                    } else {
+                        "declarations"
+                    }
+                )),
+                None => out.push_str("\nNo boundary violations detected.\n"),
+            }
             return out;
         }
 
@@ -228,6 +271,8 @@ mod tests {
                 cross_module_edges: 5,
                 from_unowned_edges: 5,
             }),
+            armed: Some(true),
+            declarations_checked: Some(3),
         }
     }
 
@@ -248,6 +293,9 @@ mod tests {
                 cross_module_edges: 0,
                 from_unowned_edges: 143,
             }),
+            // Armed and clean: declarations exist, none violated.
+            armed: Some(true),
+            declarations_checked: Some(5),
         }
     }
 
@@ -301,10 +349,41 @@ mod tests {
         assert!(output.contains("missing: packages/legacy"));
     }
 
+    // GOV-ARMED-1: armed and clean names the declarations checked.
     #[test]
     fn violations_render_empty_shows_message() {
         let resp = sample_empty_violations_response();
         let output = resp.render_human();
+        assert!(output.contains("5 boundary declarations checked — no violations."));
+        assert!(!output.contains("not armed"));
+    }
+
+    // GOV-ARMED-1: no module boundary declarations → one honest line + CTA, no
+    // zero counts / import analysis dump.
+    #[test]
+    fn violations_render_unarmed() {
+        let mut resp = sample_empty_violations_response();
+        resp.armed = Some(false);
+        resp.declarations_checked = Some(0);
+        let output = resp.render_human();
+        assert!(output.contains(
+            "Violations: not armed — no module boundary declarations exist for this repo; \
+             nothing has been checked."
+        ));
+        assert!(output.contains("rmap declare boundary"));
+        assert!(!output.contains("Import analysis:"));
+        assert!(!output.contains("0 violations"));
+    }
+
+    // GOV-ARMED-1: determination fact absent → unknown-with-reason.
+    #[test]
+    fn violations_render_armed_unknown() {
+        let mut resp = sample_empty_violations_response();
+        resp.armed = None;
+        resp.declarations_checked = None;
+        let output = resp.render_human();
+        assert!(output.contains("Violations: armed state unknown"));
+        assert!(!output.contains("not armed"));
         assert!(output.contains("No boundary violations detected"));
     }
 

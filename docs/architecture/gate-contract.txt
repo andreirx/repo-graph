@@ -388,10 +388,21 @@ the exception). The waived count is visible separately for audit.
       "pass": <n>, "fail": <n>, "waived": <n>,
       "missing_evidence": <n>, "unsupported": <n>
     }
-  }
+  },
+  "armed": true | false
 }
 
 Process exit code = gate.exit_code.
+
+`armed` (GOV-ARMED-1, ADDITIVE — 2026-08-28): a configuration-presence fact.
+`false` iff the repo has NO requirement declared AND NO quality policy
+configured (nothing to evaluate). It is derived from the gate INPUT
+(requirements + quality-policy facts), NOT from `gate.counts.total == 0` — an
+unarmed gate must never be confused with an armed gate that produced zero
+obligations. The exit-code and `gate.*` semantics are UNCHANGED: an unarmed gate
+still reduces to `outcome: "pass", exit_code: 0` (vacuous). The human render uses
+`armed` to collapse the unarmed state to one honest line + arming CTA instead of
+a zero table; consumers that ignore the field see byte-compatible prior output.
 
 
 ================================================================================

@@ -142,6 +142,14 @@ pub struct GateResponse {
     #[serde(default)]
     pub quality_assessments: Vec<QualityAssessmentEvaluation>,
     pub gate: GateOutcome,
+    /// GOV-ARMED-1: whether this repo has any gate configuration (a
+    /// requirement or a quality policy). `Some(false)` → unarmed (one honest
+    /// line, no zero table); `Some(true)` → armed (full render); `None` → the
+    /// daemon did not report the fact (older daemon) → unknown-with-reason.
+    /// This is a configuration-presence fact from the payload, never inferred
+    /// from `counts.total == 0`.
+    #[serde(default)]
+    pub armed: Option<bool>,
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -160,6 +168,34 @@ impl GateResponse {
 
         // Header
         out.push_str("Gate Evaluation\n\n");
+
+        // GOV-ARMED-1: unarmed / unknown short-circuits before the zero table.
+        match self.armed {
+            Some(false) => {
+                // UNARMED — one honest line, the vacuous outcome (actual
+                // outcome/exit preserved — frozen CI semantics), and the real
+                // arming path. No obligation/quality zero table.
+                out.push_str(
+                    "Gate: not armed — no obligations or quality policies configured for this repo.\n",
+                );
+                out.push_str(&format!(
+                    "Outcome: {} (vacuous — nothing was evaluated)\n",
+                    self.gate.outcome
+                ));
+                out.push_str(&format!("Exit code: {}\n", self.gate.exit_code));
+                out.push_str(
+                    "To arm: declare a requirement (`rmap declare requirement ...`) \
+                     or a quality policy (`rmap declare quality-policy ...`).\n",
+                );
+                return out;
+            }
+            None => {
+                // UNKNOWN — cannot classify armed/unarmed; flag it, then fall
+                // through to the full render so no data is lost.
+                out.push_str(&crate::presentation::armed_unknown_line("Gate"));
+            }
+            Some(true) => {}
+        }
 
         // Outcome summary
         out.push_str(&format!("Outcome: {}\n", self.gate.outcome));
@@ -407,23 +443,75 @@ mod tests {
             obligations,
             quality_assessments: vec![],
             gate: outcome,
+            // These fixtures carry obligations/quality → armed by default.
+            armed: Some(true),
         }
     }
 
+    // GOV-ARMED-1: unarmed gate collapses to one honest line + arming CTA — no
+    // zero obligation table, but the frozen exit code is still shown truthfully.
     #[test]
-    fn render_empty_gate() {
-        let resp = make_response(
+    fn render_unarmed_gate() {
+        let mut resp = make_response(
             make_outcome("pass", "default", 0, make_counts(0, 0, 0, 0, 0, 0)),
             vec![],
         );
+        resp.armed = Some(false);
         let out = resp.render_human();
 
         assert!(out.contains("Gate Evaluation"));
-        assert!(out.contains("Outcome: pass"));
-        assert!(out.contains("Mode: default"));
+        assert!(out.contains(
+            "Gate: not armed — no obligations or quality policies configured for this repo."
+        ));
+        assert!(out.contains("Outcome: pass (vacuous — nothing was evaluated)"));
         assert!(out.contains("Exit code: 0"));
-        assert!(out.contains("total              0"));
-        assert!(out.contains("No obligations or quality policies configured"));
+        // Names the real arming paths (verified against `rmap declare` usage).
+        assert!(out.contains("rmap declare requirement"));
+        assert!(out.contains("rmap declare quality-policy"));
+        // The zero table is GONE.
+        assert!(!out.contains("Obligation counts:"));
+        assert!(!out.contains("total              0"));
+        assert!(!out.contains("No obligations or quality policies configured."));
+    }
+
+    // GOV-ARMED-1: armed-and-clean still renders the evaluated counts — it must
+    // NOT be confused with the unarmed one-liner.
+    #[test]
+    fn render_armed_clean_gate() {
+        let resp = make_response(
+            make_outcome("pass", "default", 0, make_counts(3, 3, 0, 0, 0, 0)),
+            vec![make_obligation(
+                "REQ-001",
+                1,
+                "obl-1",
+                "core clean",
+                "arch_violations",
+                "PASS",
+                "PASS",
+            )],
+        );
+        let out = resp.render_human();
+
+        assert!(out.contains("Obligation counts:"));
+        assert!(out.contains("total              3"));
+        assert!(!out.contains("not armed"));
+    }
+
+    // GOV-ARMED-1: determination fact absent (older daemon) → unknown-with-reason,
+    // never a silent "armed"/"not armed" guess; full body still rendered.
+    #[test]
+    fn render_gate_armed_unknown() {
+        let mut resp = make_response(
+            make_outcome("pass", "default", 0, make_counts(0, 0, 0, 0, 0, 0)),
+            vec![],
+        );
+        resp.armed = None;
+        let out = resp.render_human();
+
+        assert!(out.contains("Gate: armed state unknown"));
+        assert!(!out.contains("not armed"));
+        // Full body preserved under unknown.
+        assert!(out.contains("Obligation counts:"));
     }
 
     #[test]

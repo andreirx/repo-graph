@@ -158,6 +158,32 @@ pub fn next_steps(commands: &[&str]) -> String {
     out
 }
 
+/// GOV-ARMED-1: the shared "unknown" degradation line for the governance
+/// quartet (`gate` / `assess` / `violations` / `modules violations`).
+///
+/// Each of those surfaces determines whether it is "armed" (any policy /
+/// requirement / boundary declaration configured) from an additive
+/// configuration-presence field in the daemon response. If that field is
+/// ABSENT — e.g. a CLI newer than the daemon it is talking to — the armed
+/// state is genuinely UNKNOWN. Per the VISION's honesty rules we never guess
+/// "armed" or "not armed" from a missing fact; we say the state is unknown and
+/// name the fix. The suffix is identical across all four surfaces, so it lives
+/// here to prevent wording drift; only `subject` (the surface's display name)
+/// varies.
+///
+/// GOV-ARMED-1 (review-0 fix): `pub(crate)`, not `pub`. All four callers
+/// (gate/assess/violations/modules_violations presenters) live inside this
+/// crate; the packet freezes new PUBLIC APIs, and a crate-private helper is the
+/// smallest compliant form. Verified via ripgrep across all crates: one
+/// definition + exactly these four in-crate call sites, no external reference.
+pub(crate) fn armed_unknown_line(subject: &str) -> String {
+    format!(
+        "{}: armed state unknown — the daemon did not report configuration \
+         presence; upgrade rmap and the daemon to matching versions.\n",
+        subject
+    )
+}
+
 /// Severity levels for display grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DisplaySeverity {

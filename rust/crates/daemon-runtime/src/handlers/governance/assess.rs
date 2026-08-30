@@ -144,6 +144,9 @@ pub fn handle_assess(state: &DaemonState, request: &Request) -> DispatchResult {
             "not_comparable": result.not_comparable_count,
         },
         "baseline_required_count": result.baseline_required_count,
+        // GOV-ARMED-1: additive configuration-presence fact — whether any
+        // quality policy is configured for this repo.
+        "armed": result.armed,
     });
 
     DispatchResult::success(&request.id, response)

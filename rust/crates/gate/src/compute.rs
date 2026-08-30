@@ -237,10 +237,18 @@ pub fn compute(input: GateInput) -> GateReport {
 
     let outcome = reduce_outcome(&evaluations, &input.quality_assessment_facts, input.mode);
 
+    // GOV-ARMED-1: the gate is "armed" iff the repo has configured at least
+    // one requirement OR one quality policy. Read straight off the input's
+    // configuration objects — deliberately NOT from `outcome.counts.total`,
+    // which would collapse "nothing configured" with "configured, produced
+    // zero obligations".
+    let armed = !input.requirements.is_empty() || !input.quality_assessment_facts.is_empty();
+
     GateReport {
         obligations: evaluations,
         quality_assessments,
         outcome,
+        armed,
     }
 }
 
@@ -691,6 +699,47 @@ mod tests {
             matching_waivers: HashMap::new(),
             quality_assessment_facts: Vec::new(),
         }
+    }
+
+    // ── GOV-ARMED-1: armed determination (config presence, not zero counts) ──
+
+    #[test]
+    fn armed_false_when_no_requirements_and_no_quality() {
+        let report = compute(empty_input(vec![], GateMode::Default));
+        assert!(!report.armed, "no config → not armed");
+        // Frozen: an unarmed gate still reduces to vacuous pass / exit 0.
+        assert_eq!(report.outcome.outcome, "pass");
+        assert_eq!(report.outcome.exit_code, 0);
+        assert_eq!(report.outcome.counts.total, 0);
+    }
+
+    #[test]
+    fn armed_true_when_a_requirement_exists() {
+        let r = req(
+            "REQ-1",
+            1,
+            vec![obl("o1", "arch_violations", Some("src/core"), None)],
+        );
+        let report = compute(empty_input(vec![r], GateMode::Default));
+        assert!(report.armed, "a declared requirement → armed");
+    }
+
+    #[test]
+    fn armed_true_when_only_a_quality_policy_exists() {
+        // No requirements at all, but one configured quality policy. `armed`
+        // must read the quality-policy configuration arm — not just requirement
+        // presence — so the gate is armed here. (review-0 fix: the prior tests
+        // covered no-config and requirement-only; this exercises the
+        // quality-only branch of `!requirements.is_empty() || !quality.is_empty()`.)
+        let mut input = empty_input(vec![], GateMode::Default);
+        input.quality_assessment_facts = vec![quality_fact(
+            "QP-001",
+            GateAssessmentState::Present,
+            Some(GateAssessmentVerdict::Pass),
+            GateQualityPolicySeverity::Fail,
+        )];
+        let report = compute(input);
+        assert!(report.armed, "a configured quality policy → armed");
     }
 
     // ── arch_violations ──

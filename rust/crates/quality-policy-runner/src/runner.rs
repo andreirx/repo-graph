@@ -34,6 +34,13 @@ pub struct AssessmentResult {
 
     /// Number of policies that required baseline.
     pub baseline_required_count: usize,
+
+    /// GOV-ARMED-1: whether any quality policy is configured for this repo
+    /// (at least one active policy was loaded). This is a
+    /// CONFIGURATION-PRESENCE fact, NOT an inference from
+    /// `total_assessments == 0`: a repo with no policies is "not armed",
+    /// distinct from a repo with policies that produced zero findings.
+    pub armed: bool,
 }
 
 /// Quality policy assessment orchestrator.
@@ -86,6 +93,8 @@ impl<P: QualityPolicyStoragePort> QualityPolicyRunner<P> {
                 not_applicable_count: 0,
                 not_comparable_count: 0,
                 baseline_required_count: 0,
+                // GOV-ARMED-1: no active policies loaded → not armed.
+                armed: false,
             });
         }
 
@@ -361,6 +370,10 @@ impl<P: QualityPolicyStoragePort> QualityPolicyRunner<P> {
             not_applicable_count: not_applicable,
             not_comparable_count: not_comparable,
             baseline_required_count,
+            // GOV-ARMED-1: `build_result` is only reached after the
+            // empty-policies early return above, so reaching here means at
+            // least one active policy was loaded → armed.
+            armed: true,
         }
     }
 }
@@ -471,6 +484,12 @@ mod tests {
         /// Snapshots keyed by UID for get_snapshot lookups.
         snapshots: std::collections::HashMap<String, Snapshot>,
         persisted: RefCell<Vec<QualityAssessmentInput>>,
+        /// GOV-ARMED-1 (review-0 fix): when set, `load_active_quality_policies`
+        /// fails instead of returning rows — simulates a read fault at the
+        /// configuration-presence boundary (e.g. a malformed policy row that
+        /// cannot be parsed during load). Used to prove the armed determination
+        /// fails CLOSED: an error with its reason, never a defaulted armed/unarmed.
+        fail_policy_load: bool,
     }
 
     impl MockPort {
@@ -481,7 +500,13 @@ mod tests {
                 baseline_measurements: None,
                 snapshots: std::collections::HashMap::new(),
                 persisted: RefCell::new(vec![]),
+                fail_policy_load: false,
             }
+        }
+
+        fn with_failing_policy_load(mut self) -> Self {
+            self.fail_policy_load = true;
+            self
         }
 
         fn with_policies(mut self, policies: Vec<LoadedPolicy>) -> Self {
@@ -515,6 +540,12 @@ mod tests {
             &self,
             _repo_uid: &str,
         ) -> Result<Vec<LoadedPolicy>, StorageError> {
+            if self.fail_policy_load {
+                return Err(StorageError::MalformedQualityPolicy {
+                    declaration_uid: "qp-broken".to_string(),
+                    reason: "value_json not parseable".to_string(),
+                });
+            }
             Ok(self.policies.clone())
         }
 
@@ -608,6 +639,40 @@ mod tests {
             .expect("should succeed");
 
         assert_eq!(result.total_assessments, 0);
+        // GOV-ARMED-1: no policies configured → not armed (config-presence fact).
+        assert!(!result.armed);
+    }
+
+    #[test]
+    fn assess_snapshot_config_read_failure_errors_with_reason() {
+        // GOV-ARMED-1 (review-0 fix): the armed determination reads the
+        // configuration-presence source (`load_active_quality_policies`). When
+        // THAT read FAILS — as opposed to returning zero rows — the operation
+        // must fail CLOSED: propagate an error carrying its reason, NEVER
+        // fabricate an armed/unarmed AssessmentResult from a defaulted value.
+        // This is distinct from the absent/empty case (`assess_snapshot_no_policies`,
+        // which is a legitimate "not armed" fact).
+        let port = MockPort::new().with_failing_policy_load();
+        let mut runner = QualityPolicyRunner::new(port);
+
+        let err = runner
+            .assess_snapshot("r1", "snap1", None)
+            .expect_err("a failed config-source read must NOT yield a result");
+
+        // The error preserves the underlying reason (Storage propagation), so a
+        // caller/renderer can report unknown-with-reason rather than a guessed
+        // armed state.
+        assert!(
+            matches!(
+                err,
+                RunnerError::Storage(StorageError::MalformedQualityPolicy { .. })
+            ),
+            "expected Storage(MalformedQualityPolicy), got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("value_json not parseable"),
+            "error must carry its reason, got: {err}"
+        );
     }
 
     #[test]
@@ -639,6 +704,8 @@ mod tests {
         assert_eq!(result.total_assessments, 1);
         assert_eq!(result.pass_count, 1);
         assert_eq!(result.fail_count, 0);
+        // GOV-ARMED-1: a policy is configured → armed.
+        assert!(result.armed);
     }
 
     #[test]
