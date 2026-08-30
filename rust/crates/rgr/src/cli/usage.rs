@@ -65,8 +65,15 @@ pub fn print_usage() {
     eprintln!("  rmap orient [--focus <path>] [--budget small|medium|large] [--full]");
     eprintln!("  rmap check [--full]");
     eprintln!("  rmap explain <target> [--budget medium|large] [--full]");
-    eprintln!("  rmap find \"<concept>\" [--json]    Semantic concept search (Layer-3 hints — open the files)");
-    eprintln!("    --full   uncap output for grep (no budget truncation; no-op on check)");
+    eprintln!("  rmap find \"<concept>\" [--exact] [--full] [--json]");
+    eprintln!(
+        "    Fact tables FIRST (deterministic; each hit certainty-tagged + a runnable next command),"
+    );
+    eprintln!(
+        "    then demoted semantic (embedding) guesses. Answers even when the model is down."
+    );
+    eprintln!("    --exact  facts tables only; the embedding endpoint is never consulted (scriptable form)");
+    eprintln!("    --full   uncap output (no budget / per-class truncation; no-op on check)");
     eprintln!("  rmap map [path] [--dry-run] [--json]    Deterministic MAP.md docs from the index (no LLM)");
     eprintln!("    --dry-run  print rendered maps to stdout, write nothing");
     eprintln!();

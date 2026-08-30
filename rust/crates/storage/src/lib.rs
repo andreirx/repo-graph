@@ -173,6 +173,7 @@ mod deps_language_read; // DEPS-LIST-REWRITE-1 §2.2: query_file_count_by_langua
 pub(crate) mod diagnostic;
 mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
 pub mod error;
+pub mod find_facts_reads; // FIND-FACTS-1: lexical (LIKE) fact-table reads for the `find` FACTS tier
 mod freshness_impl; // FreshnessStoragePort impl for StorageConnection (ACR-3)
 pub mod freshness_port; // Freshness and provenance storage port (ACR-3)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)

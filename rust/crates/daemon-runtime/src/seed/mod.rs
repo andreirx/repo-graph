@@ -40,7 +40,8 @@ mod transport;
 
 // Flat public API preserved (the callers keep using `crate::seed::X`).
 pub use doctor::{seed_doctor_facts, SeedDoctorFacts};
-pub use dto::{build_find_response, build_group_b_data, FindCandidate, FindNext, FindResponse};
+pub(crate) use dto::build_find_response;
+pub use dto::{build_group_b_data, FindCandidate, FindNext, FindResponse};
 pub use query::{run_semantic_query, DegradeReason, SemanticCandidate, SemanticResult};
 pub use transport::{EndpointEmbedder, ModelIdentity};
 

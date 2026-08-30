@@ -1,31 +1,59 @@
-//! `rmap find "<concept>"` — the affirmative concept-search verb (EMBED-SEED-IMPL-1,
-//! spec §8B). Extracted from `commands/orient.rs` (operator ruling 2026-08-25 /
-//! review-1 #5: `orient.rs` was over the 500-line guardrail and must not grow).
+//! `rmap find "<query>"` — the concept/identifier search verb.
 //!
-//! One positional concept string; resolves the repo from cwd; consults the semantic
-//! store via the daemon; prints ≤10 labeled Layer-3 candidates under an honesty
-//! header (or a labeled empty result when the substrate is unavailable). Mirrors
-//! `run_orient`'s request/emit shape. Read-only.
+//! FIND-FACTS-1: `find` answers FIRST from a deterministic lexical match over the
+//! indexed FACT TABLES (symbols, files, modules, HTTP routes, dependencies,
+//! framework inferences, and governance boundary/requirement/quality-policy
+//! declarations — review-6 re-home), each hit labeled with its fact class and the
+//! command that renders it. BELOW that it renders the DEMOTED
+//! semantic-seed tier — embedding similarity, ranked guesses, never facts — which
+//! degrades to unavailable-with-reason when the local model is down. The verb
+//! answers without the embedding endpoint; `--exact` renders the facts tier alone
+//! and never touches the endpoint.
+//!
+//! Read-only. Resolves the repo from cwd (same convention as orient/explain).
+//!
+//! STANDING HONESTY RULE: the response is our OWN DTO (`FindResponse`). Every
+//! required field is expected present; a genuinely-absent required field means a
+//! MALFORMED response (old daemon / serialization bug) and is surfaced as such,
+//! NEVER papered over with a fabricated default.
+//!
+//! This file is the command ENTRY + tier ORCHESTRATOR only; the two tiers'
+//! rendering lives in crate-private children — [`facts_render`] (the FACTS tier:
+//! group envelope + hit rendering) and [`seed_render`] (the DEMOTED semantic-seed
+//! tier). Split from the former 988-line single file per the ≤500-line guardrail
+//! (review-4 item 1). Abstraction one-liners head each child.
 
 use std::process::ExitCode;
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
 
+mod fact_hit;
+mod facts_render;
+mod seed_render;
+
+#[cfg(test)]
+mod test_fixtures;
+
 fn print_find_usage() {
-    eprintln!("usage: rmap find \"<concept>\" [--json]");
-    eprintln!("  Semantic (embedding) concept search — Layer-3 hints, not resolved facts.");
-    eprintln!("  Prints likely files to open; open one and re-run explain/callers on it.");
+    eprintln!("usage: rmap find \"<query>\" [--exact] [--full] [--json]");
+    eprintln!("  Searches the indexed fact tables FIRST (deterministic), each hit labeled");
+    eprintln!("  with its fact class and the command that renders it; then demoted semantic");
+    eprintln!("  (embedding) guesses below. --exact = facts only, endpoint never consulted.");
 }
 
 pub fn run_find(args: &[String]) -> ExitCode {
     let mut query: Option<String> = None;
     let mut json_mode = false;
+    let mut exact = false;
+    let mut full = false;
 
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
             "--json" => json_mode = true,
+            "--exact" => exact = true,
+            "--full" => full = true,
             "--help" | "-h" => {
                 print_find_usage();
                 return ExitCode::SUCCESS;
@@ -50,7 +78,7 @@ pub fn run_find(args: &[String]) -> ExitCode {
     let query = match query {
         Some(q) => q,
         None => {
-            eprintln!("error: missing concept argument");
+            eprintln!("error: missing query argument");
             print_find_usage();
             return ExitCode::from(1);
         }
@@ -83,6 +111,8 @@ pub fn run_find(args: &[String]) -> ExitCode {
     let params = serde_json::json!({
         "repo": repo_path,
         "query": query,
+        "exact": exact,
+        "full": full,
     });
 
     match client.request("find", Some(params)) {
@@ -99,7 +129,7 @@ pub fn run_find(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                print!("{}", render_find_human(&result));
+                print!("{}", render_find_human(&result, exact));
                 ExitCode::SUCCESS
             }
         }
@@ -119,211 +149,159 @@ pub fn run_find(args: &[String]) -> ExitCode {
     }
 }
 
-/// Render the `find` response (its own DTO — §8B.2) for human mode: the
-/// always-present honesty `summary` line, then each candidate's path + score +
-/// model + `next` follow-up. An empty `candidates: []` prints just the summary
-/// (the honest "no hints"/"declined" line), never a fabricated zero.
-///
-/// STANDING HONESTY RULE: a candidate is our own DTO, so every field is expected
-/// present. A genuinely-absent required field means a MALFORMED response (an old
-/// daemon, a serialization bug) — it is surfaced as such, NEVER papered over with a
-/// fabricated default score/path.
-fn render_find_human(result: &serde_json::Value) -> String {
+/// Render the `find` response (FIND-FACTS-1 §2): the FACTS tier first, then (unless
+/// `exact`) the demoted semantic-seed tier. `exact` is the CLI's own flag — in exact
+/// mode the seed section is omitted entirely (the endpoint was never consulted).
+fn render_find_human(result: &serde_json::Value, exact: bool) -> String {
     let mut out = String::new();
-    let summary = result
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .unwrap_or("(malformed find response: no summary line)");
-    out.push_str(summary);
-    out.push('\n');
-    // `candidates` is our OWN DTO field (`FindResponse.candidates: Vec<_>`), ALWAYS
-    // serialized — `[]` when empty, never omitted. A MISSING key (or a non-array)
-    // is therefore a MALFORMED response (old daemon / serialization bug), NOT a
-    // genuine zero-candidate result — surface it as such rather than silently
-    // rendering the honest "no hints" shape (STANDING HONESTY RULE — review-4 #1).
-    let candidates = match result.get("candidates") {
-        Some(serde_json::Value::Array(a)) => a,
-        _ => {
-            out.push_str("  (malformed find response: candidates missing or not a list)\n");
-            return out;
-        }
-    };
-    if candidates.is_empty() {
-        return out;
+    // `query` is our OWN DTO field, ALWAYS serialized (FindResponse.query: String).
+    // A missing / non-string value is a MALFORMED response — surfaced as such, never
+    // papered over with an empty-string echo (STANDING HONESTY RULE 1).
+    match result.get("query").and_then(|v| v.as_str()) {
+        Some(q) => out.push_str(&format!("find \"{q}\"\n\n")),
+        None => out.push_str("find (malformed find response: query missing or not a string)\n\n"),
     }
-    out.push('\n');
-    for c in candidates {
-        // The identity fields below are our OWN DTO (`FindCandidate`), always
-        // present. A genuinely-absent REQUIRED field means a MALFORMED response (old
-        // daemon / serialization bug) — surface it, NEVER fabricate a path, score,
-        // model identity, or provenance label (review-2 #3: no fake "?" model;
-        // review-11: no hardcoded "embedding" pasted over the payload's `source`).
-        let path = c.get("path").and_then(|v| v.as_str());
-        let key = c.get("stable_key").and_then(|v| v.as_str());
-        let score = c.get("score").and_then(|v| v.as_f64());
-        let model = c.get("model_id").and_then(|v| v.as_str());
-        // STANDING HONESTY RULE (review-11, mirrors presentation/seed.rs review-10 #4):
-        // the provenance label is the daemon's OWN `source`, VALIDATED — never a literal
-        // "embedding" printed regardless of the payload. `FindCandidate.source` is a
-        // required field always == "embedding" by construction; a foreign / old-daemon /
-        // serialization-bug payload whose `source` is absent or not "embedding" is
-        // surfaced as malformed, never relabeled as a Layer-3 embedding hint.
-        let source = c.get("source").and_then(|v| v.as_str());
-        let (Some(path), Some(key), Some(score), Some(model), Some(source)) =
-            (path, key, score, model, source)
-        else {
-            out.push_str(
-                "  (malformed candidate: missing required field — path/stable_key/score/model_id/source)\n",
-            );
-            continue;
-        };
-        if source != "embedding" {
-            out.push_str(&format!(
-                "  (malformed candidate: source {source:?} is not a Layer-3 embedding hint)\n"
-            ));
-            continue;
-        }
-        // `module` is a REQUIRED field of our own `FindCandidate` DTO — every candidate
-        // carries a self-labeling `ModuleHint` (a genuine `{owning}` OR an explicit
-        // `{unavailable: <reason>}`; operator ruling 2026-08-25). A MISSING `module`,
-        // or one that is neither shape, is therefore a MALFORMED response — surfaced as
-        // such, NEVER rendered as though no module information were required (review-6 #3
-        // / STANDING HONESTY RULE).
-        let Some(module) = render_module_hint(c.get("module")) else {
-            out.push_str(
-                "  (malformed candidate: missing or invalid module hint — expected owning/unavailable)\n",
-            );
-            continue;
-        };
-        // `source` is validated == "embedding"; render the daemon's own label, not a literal.
-        out.push_str(&format!(
-            "  {path}  (score {score:.2}, {source}, model {model}{module})\n"
-        ));
-        out.push_str(&render_next(c.get("next"), key));
+
+    facts_render::render_facts_tier(result, &mut out);
+
+    if !exact {
+        out.push('\n');
+        seed_render::render_seed_tier(result, &mut out);
     }
     out
-}
-
-/// Render a candidate's `next` follow-up line. `cwd` is OPTIONAL (operator ruling 2):
-/// when the registry resolved the repo root it prints the `cd <cwd> && …` hint; when
-/// the lookup was unavailable it prints the honest reason from `next.cwd_unavailable`
-/// (never a fabricated empty cwd). A `next` object carrying NEITHER is malformed.
-fn render_next(next: Option<&serde_json::Value>, key: &str) -> String {
-    let Some(n) = next.and_then(|v| v.as_object()) else {
-        return "    (malformed candidate: missing next follow-up)\n".to_string();
-    };
-    let cwd = n.get("cwd").and_then(|v| v.as_str());
-    let unavailable = n.get("cwd_unavailable").and_then(|v| v.as_str());
-    match (cwd, unavailable) {
-        (Some(cwd), _) => format!("    → (cd {cwd} && rmap explain {key})\n"),
-        (None, Some(reason)) => {
-            format!(
-                "    → rmap explain {key}  (run from the repo root — working directory {reason})\n"
-            )
-        }
-        (None, None) => {
-            "    (malformed candidate: next has neither cwd nor a reason)\n".to_string()
-        }
-    }
-}
-
-/// Render the owning-module hint (`ModuleHint`, externally tagged) for human mode:
-/// `Some(", module <path>")` when a genuine module is known, `Some(", module: <reason>")`
-/// when explicitly unavailable. Returns `None` when the field is absent or is neither
-/// tagged shape — a MALFORMED candidate (our own DTO always carries one of the two), which
-/// the caller surfaces rather than rendering as "no module required". Never fabricates.
-fn render_module_hint(module: Option<&serde_json::Value>) -> Option<String> {
-    let m = module?.as_object()?;
-    if let Some(path) = m.get("owning").and_then(|v| v.as_str()) {
-        return Some(format!(", module {path}"));
-    }
-    if let Some(reason) = m.get("unavailable").and_then(|v| v.as_str()) {
-        return Some(format!(", module: {reason}"));
-    }
-    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::find::test_fixtures::{empty_facts, well_formed_candidate};
     use serde_json::json;
 
-    fn well_formed_candidate(source: serde_json::Value) -> serde_json::Value {
-        let mut c = serde_json::Map::new();
-        c.insert("path".to_string(), json!("src/auth.ts"));
-        c.insert("stable_key".to_string(), json!("glamCRM:auth.ts:FILE"));
-        c.insert("score".to_string(), json!(0.71));
-        c.insert("model_id".to_string(), json!("nomic-embed-text-v1.5"));
-        c.insert("module".to_string(), json!({"owning": "backend/auth"}));
-        c.insert("next".to_string(), json!({"cwd": "/repo"}));
-        if !source.is_null() {
-            c.insert("source".to_string(), source);
-        }
-        serde_json::Value::Object(c)
-    }
-
     #[test]
-    fn well_formed_embedding_candidate_renders_the_validated_label() {
+    fn facts_render_above_seeds_with_class_and_command_labels() {
         let result = json!({
-            "summary": "likely areas for \"auth\" (semantic hints — open the files)",
+            "query": "bnr",
+            "facts": [
+                {"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+                 "hits": [{"display": "bnrService", "path": "src/bnr.ts", "key": "k1", "next": "explain k1"}],
+                 "matched": 1, "matched_is_floor": false},
+                {"fact_class": "http-surface", "render_command": "boundaries list", "certainty": "inferred",
+                 "hits": [{"display": "provider GET /api/offers", "path": "src/offer.ts", "next": "boundaries list"}],
+                 "matched": 1, "matched_is_floor": false},
+                {"fact_class": "file", "render_command": "explain", "certainty": "extracted", "hits": [], "matched": 0, "matched_is_floor": false},
+                {"fact_class": "module", "render_command": "map --dry-run", "certainty": "inferred", "hits": [], "matched": 0, "matched_is_floor": false},
+                {"fact_class": "dependency", "render_command": "deps list", "certainty": "extracted", "hits": [], "matched": 0, "matched_is_floor": false},
+                {"fact_class": "framework", "render_command": "inferences list", "certainty": "hint", "hits": [], "matched": 0, "matched_is_floor": false},
+                {"fact_class": "boundary", "certainty": "governance", "hits": [], "matched": 0, "matched_is_floor": false}
+            ],
+            "seeds_available": true,
+            "summary": "ranked guesses for \"bnr\" (embedding similarity — not facts)",
             "candidates": [well_formed_candidate(json!("embedding"))],
         });
-        let out = render_find_human(&result);
-        assert!(out.contains("src/auth.ts"), "renders the path: {out}");
+        let out = render_find_human(&result, false);
+        // Facts tier appears BEFORE the seed tier.
+        let facts_pos = out
+            .find("[symbol · extracted → rmap explain]")
+            .expect("symbol label with certainty");
+        let seed_pos = out.find("Semantic seeds").expect("seed header");
+        assert!(facts_pos < seed_pos, "facts render above seeds:\n{out}");
+        assert!(
+            out.contains("bnrService  — src/bnr.ts"),
+            "symbol hit: {out}"
+        );
+        // The runnable per-hit next command is rendered (review-1 item 1).
+        assert!(
+            out.contains("→ rmap explain k1"),
+            "runnable per-hit next command: {out}"
+        );
+        assert!(
+            out.contains("[http-surface · inferred → rmap boundaries list]"),
+            "http label with certainty: {out}"
+        );
+        assert!(
+            out.contains("provider GET /api/offers  — src/offer.ts"),
+            "route hit: {out}"
+        );
+        // Seed candidate still rendered below, with its validated label.
         assert!(
             out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
-            "renders the validated embedding label: {out}"
-        );
-        assert!(
-            out.contains("module backend/auth"),
-            "renders the module: {out}"
-        );
-        assert!(
-            out.contains("cd /repo && rmap explain glamCRM:auth.ts:FILE"),
-            "renders the follow-up: {out}"
+            "seed candidate below: {out}"
         );
     }
 
     #[test]
-    fn non_embedding_source_is_malformed_never_relabeled_embedding() {
-        // review-11: a fully-formed `find` candidate whose `source` is NOT "embedding"
-        // (a foreign / old-daemon / serialization-bug payload) must NOT be presented as
-        // an embedding hint. Every identity field is present; only the `source` guard rejects.
-        let result = json!({
-            "summary": "likely areas for \"auth\"",
-            "candidates": [well_formed_candidate(json!("lexical"))],
+    fn endpoint_down_renders_facts_and_seed_unavailable_with_reason() {
+        let mut facts = empty_facts();
+        facts[0] = json!({
+            "fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+            "hits": [{"display": "bnrService", "path": "src/bnr.ts", "key": "k1", "next": "explain k1"}],
+            "matched": 1, "matched_is_floor": false
         });
-        let out = render_find_human(&result);
+        let result = json!({
+            "query": "bnr", "facts": facts,
+            "seeds_available": false,
+            "seeds_unavailable_reason": "no local embedding model reachable; seeding is optional, resolution is unaffected",
+            "summary": "no local embedding model reachable — semantic hints unavailable (find is optional)",
+            "candidates": [],
+        });
+        let out = render_find_human(&result, false);
+        // Facts intact.
         assert!(
-            out.contains("malformed candidate"),
-            "surfaced as malformed: {out}"
+            out.contains("bnrService  — src/bnr.ts"),
+            "facts intact: {out}"
         );
+        // Seeds explicitly unavailable WITH reason.
         assert!(
-            out.contains("\"lexical\""),
-            "names the offending source: {out}"
-        );
-        assert!(
-            !out.contains("0.71, embedding"),
-            "must NOT relabel a non-embedding source as an embedding hint: {out}"
+            out.contains("semantic seeds unavailable (no local embedding model reachable"),
+            "seed unavailable with reason: {out}"
         );
     }
 
     #[test]
-    fn missing_source_is_malformed_never_fabricated_embedding() {
-        // The daemon's `source` is a required `FindCandidate` field; a candidate arriving
-        // without it (old daemon / bug) is malformed, never a fabricated "embedding" label.
+    fn exact_mode_omits_seed_section_entirely() {
         let result = json!({
-            "summary": "likely areas for \"auth\"",
-            "candidates": [well_formed_candidate(serde_json::Value::Null)],
+            "query": "bnr", "facts": empty_facts(),
+            "seeds_available": false,
+            "seeds_unavailable_reason": "not consulted (--exact — facts only)",
+            "candidates": [],
         });
-        let out = render_find_human(&result);
+        let out = render_find_human(&result, true);
         assert!(
-            out.contains("malformed candidate"),
-            "surfaced as malformed: {out}"
+            !out.contains("Semantic seeds"),
+            "no seed section in --exact: {out}"
         );
         assert!(
-            !out.contains("embedding, model"),
-            "no fabricated embedding label: {out}"
+            out.contains("Facts (deterministic lexical match over the indexed tables"),
+            "facts present: {out}"
+        );
+    }
+
+    #[test]
+    fn honest_empty_names_searched_classes() {
+        let result = json!({
+            "query": "zzz", "facts": empty_facts(),
+            "seeds_available": true, "candidates": [],
+        });
+        let out = render_find_human(&result, false);
+        assert!(
+            out.contains(
+                "no matches: symbol, file, module, http-surface, dependency, framework, boundary"
+            ),
+            "honest empty names searched classes: {out}"
+        );
+        assert!(
+            out.contains("(no area scored above zero)"),
+            "seed empty stated: {out}"
+        );
+    }
+
+    #[test]
+    fn query_missing_is_malformed_never_empty_echo() {
+        let result = json!({"facts": empty_facts(), "seeds_available": true, "candidates": []});
+        let out = render_find_human(&result, false);
+        assert!(
+            out.contains("malformed find response: query missing or not a string"),
+            "missing query surfaced: {out}"
         );
     }
 }

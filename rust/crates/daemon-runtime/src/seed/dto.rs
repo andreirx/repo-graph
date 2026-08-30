@@ -8,6 +8,7 @@ use repo_graph_agent::dto::envelope::{ModuleHint, NextCommand};
 use serde_json::{json, Value};
 
 use super::query::{DegradeReason, SemanticResult};
+use crate::find_facts::ClassOutcome;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FindResponse {
@@ -16,10 +17,77 @@ pub struct FindResponse {
     pub repo: String,
     pub snapshot: String,
     pub query: String,
-    /// ALWAYS present — the Layer-3 honesty header (I1/I2); never a completeness claim.
+    /// The DEMOTED semantic-seed tier's honesty header (FIND-FACTS-1 §2.3 renames it
+    /// to ranked-guesses wording). ALWAYS present; never a completeness claim.
     pub summary: String,
-    /// Plain Vec → `[]` when empty, never omitted (spec §8B.3).
+    /// Semantic-seed candidates. Plain Vec → `[]` when empty, never omitted.
     pub candidates: Vec<FindCandidate>,
+    /// FIND-FACTS-1 (§2.1) additive: the FACTS tier — one group PER fact class, in a
+    /// fixed order, ALWAYS present (an empty/errored class still appears, so the
+    /// searched set is honest). JSON-additive: existing seed consumers ignore it.
+    pub facts: Vec<FindFactGroup>,
+    /// FIND-FACTS-1 (§2.3): whether the semantic-seed tier was consulted AND
+    /// reachable this run. `false` under `--exact` (never consulted) or a degraded
+    /// substrate — the facts tier answers regardless.
+    pub seeds_available: bool,
+    /// The reader-facing reason the seed tier is unavailable (§2.3), when it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seeds_unavailable_reason: Option<String>,
+}
+
+/// One fact class's group in the FACTS tier (§2.2). Always present per class so the
+/// searched set is honest even when a class is empty or its read failed.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FindFactGroup {
+    /// The fact-class tag (`symbol`, `http-surface`, …).
+    pub fact_class: String,
+    /// The single command that renders this class — the reader's next move (verb only).
+    /// ABSENT for a class whose renderer varies per hit (the `boundary` governance-
+    /// declaration class: `violations` for a boundary-kind row, `gate` for a
+    /// requirement/quality-policy row — review-6 re-home). When absent, each hit's own
+    /// `next` carries the move and the group header omits the `→ rmap <cmd>`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render_command: Option<String>,
+    /// The certainty LAYER of this class's source (`extracted` | `inferred` | `hint` |
+    /// `governance`) — rendered in the label so a Layer 2–3 hit is never presented as an
+    /// extracted fact (review-1 honesty defect; VISION § Fact Certainty Model).
+    /// `governance` is the Layer-4 label for the boundary declaration class: authored
+    /// policy statements, not extracted facts (review-8 doc reconciliation). Always present.
+    pub certainty: String,
+    /// The capped hits (empty when nothing matched OR the class read failed).
+    pub hits: Vec<FindFactHit>,
+    /// Total matched BEFORE the display cap. `remainder = matched - hits.len()`.
+    pub matched: usize,
+    /// `true` when `matched` is a FLOOR (fetch window saturated), not an exact count.
+    pub matched_is_floor: bool,
+    /// Set when THIS class's read failed — rendered as `unavailable (<reason>)`,
+    /// never a silent empty (STANDING HONESTY RULE).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// One fact hit (§2.2).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FindFactHit {
+    pub display: String,
+    /// The owning path when KNOWN. Mutually exclusive with `path_unknown_reason`;
+    /// both absent = the class has no path dimension (dependency, framework).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// FIND-FACTS-1 additive (review-4 item 2): set when the class HAS a path
+    /// dimension but THIS hit's path is unknown — the reason, rendered as
+    /// `path unknown (<reason>)`, never a silent omission (STANDING HONESTY RULE).
+    /// Optional + skip-serialized → byte-compatible for existing consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_unknown_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// The runnable `rmap` invocation (WITHOUT the `rmap` prefix) that takes the
+    /// reader from THIS hit to its rendering — `explain <key>` / `map <path>` for the
+    /// argument-taking classes, the whole-listing command for the `… list` classes.
+    /// Always present and executable (review-1 item 1): the renderer prints it and
+    /// the e2e proof runs it verbatim, exit 0.
+    pub next: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -164,16 +232,98 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
     }
 }
 
-/// Build the `find` response DTO from a semantic query outcome (spec §8B.2/§8B.3).
-pub fn build_find_response(
+/// Project the FACTS-tier outcomes (§2.2) into the additive JSON groups — one per
+/// fact class, in the fixed [`crate::find_facts::FactClass::ALL`] order. A class
+/// whose read FAILED carries its `error` (rendered `unavailable (<reason>)`),
+/// never a silent empty (STANDING HONESTY RULE).
+fn fact_groups(facts: &[ClassOutcome]) -> Vec<FindFactGroup> {
+    facts
+        .iter()
+        .map(|o| match &o.result {
+            Ok(hits) => FindFactGroup {
+                fact_class: o.class.label().to_string(),
+                render_command: o.class.render_command().map(str::to_string),
+                certainty: o.class.certainty_tag().to_string(),
+                hits: hits
+                    .hits
+                    .iter()
+                    .map(|h| {
+                        // Project the HitPath sum type into the two mutually-exclusive
+                        // wire fields: a KNOWN path, an UNKNOWN-with-reason, or neither
+                        // (no path dimension) — never a silent omission standing in for
+                        // an unknown (review-4 item 2).
+                        let (path, path_unknown_reason) = match &h.path {
+                            crate::find_facts::HitPath::Known(p) => (Some(p.clone()), None),
+                            crate::find_facts::HitPath::Unknown(reason) => {
+                                (None, Some(reason.clone()))
+                            }
+                            crate::find_facts::HitPath::None => (None, None),
+                        };
+                        // The runnable next command: a boundary hit carries its OWN
+                        // per-declaration-kind renderer (`violations`/`gate`); every other
+                        // class derives it from (class, key) here — the single site that
+                        // owns both, never re-derived in the CLI. Matched over BOTH sources
+                        // as a tuple (not an `unwrap_or_default`, which the STANDING HONESTY
+                        // RULE forbids on a rendered field): a boundary hit takes its
+                        // `next_command`; a single-renderer class takes its `hit_command`
+                        // (always `Some` for those six by construction). The final arm is
+                        // unreachable by construction — only boundary yields a `None`
+                        // `hit_command`, and every boundary hit sets `next_command`; if a
+                        // future change ever produced neither, it emits the empty string the
+                        // CLI surfaces as a malformed hit (loud fail-safe, never a fabricated
+                        // command).
+                        let next = match (h.next_command, o.class.hit_command(h.key.as_deref())) {
+                            (Some(cmd), _) => cmd.to_string(),
+                            (None, Some(cmd)) => cmd,
+                            (None, None) => String::new(),
+                        };
+                        FindFactHit {
+                            next,
+                            display: h.display.clone(),
+                            path,
+                            path_unknown_reason,
+                            key: h.key.clone(),
+                        }
+                    })
+                    .collect(),
+                matched: hits.matched,
+                matched_is_floor: hits.matched_is_floor,
+                error: None,
+            },
+            Err(reason) => FindFactGroup {
+                fact_class: o.class.label().to_string(),
+                render_command: o.class.render_command().map(str::to_string),
+                certainty: o.class.certainty_tag().to_string(),
+                hits: Vec::new(),
+                matched: 0,
+                matched_is_floor: false,
+                error: Some(reason.clone()),
+            },
+        })
+        .collect()
+}
+
+/// Build the `find` response DTO (FIND-FACTS-1 §2): the FACTS tier ALWAYS present,
+/// the DEMOTED semantic-seed tier below it (renamed to ranked-guesses wording, or
+/// unavailable-with-reason). `seed` is `None` under `--exact` — the endpoint is
+/// never touched and the seed tier renders as not-consulted.
+pub(crate) fn build_find_response(
     repo: &str,
     snapshot: &str,
     query: &str,
-    result: SemanticResult,
+    facts: &[ClassOutcome],
+    seed: Option<SemanticResult>,
     repo_root: Option<&str>,
 ) -> FindResponse {
-    let (summary, candidates) = match result {
-        SemanticResult::Fired { candidates, .. } => {
+    let (summary, candidates, seeds_available, seeds_unavailable_reason) = match seed {
+        // `--exact`: the endpoint is never consulted (§2.4).
+        None => (
+            format!("semantic seeds not consulted for \"{query}\" (--exact — facts only)"),
+            Vec::new(),
+            false,
+            Some("not consulted (--exact — facts only)".to_string()),
+        ),
+        Some(SemanticResult::Fired { candidates, .. }) => {
             let cands = candidates
                 .into_iter()
                 .map(|c| {
@@ -190,15 +340,26 @@ pub fn build_find_response(
                 })
                 .collect();
             (
-                format!("likely areas for \"{query}\" (semantic hints — open the files)"),
+                format!("ranked guesses for \"{query}\" (embedding similarity — not facts)"),
                 cands,
+                true,
+                None,
             )
         }
-        SemanticResult::NothingScored => (
-            format!("no area scored above zero for \"{query}\""),
+        Some(SemanticResult::NothingScored) => (
+            format!("no area scored above zero for \"{query}\" (embedding similarity)"),
             Vec::new(),
+            true,
+            None,
         ),
-        SemanticResult::Unavailable(reason) => (find_degrade_summary(reason), Vec::new()),
+        // Degraded substrate: the facts tier still answered above; the seed tier
+        // says unavailable-with-reason — the verb no longer dies with the endpoint.
+        Some(SemanticResult::Unavailable(reason)) => (
+            find_degrade_summary(reason),
+            Vec::new(),
+            false,
+            Some(reason.reason().to_string()),
+        ),
     };
 
     FindResponse {
@@ -209,5 +370,8 @@ pub fn build_find_response(
         query: query.to_string(),
         summary,
         candidates,
+        facts: fact_groups(facts),
+        seeds_available,
+        seeds_unavailable_reason,
     }
 }

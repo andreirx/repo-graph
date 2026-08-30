@@ -20,11 +20,40 @@ has only guesses.
    (case-insensitive substring; SQL `LIKE` — no FTS index unless measured slow, not
    preemptively) over the CURRENT snapshot's fact tables: symbol names/qualified names, file
    paths, module names/paths, HTTP surface route templates, dependency names, framework
-   inference identifiers, boundary/entrypoint declarations. The corpus is the FACT TABLES —
-   never the rendered text of other commands (a hit must not depend on another renderer's
-   budget or phrasing).
-2. **Every hit is labeled with its fact class and the command that renders it** — e.g.
-   `[http-surface → rmap boundaries] GET /api/offers … serverless/src/handlers/offer.ts`.
+   inference identifiers, governance boundary/requirement/quality-policy declarations. The
+   corpus is the FACT TABLES — never the rendered text of other commands (a hit must not
+   depend on another renderer's budget or phrasing).
+   - **`boundary` class corpus** (review-6, operator-ratified 2026-08-30): the governance
+     DECLARATIONS store (`declarations`, active rows), NOT `surface_entrypoints`.
+     `surface_entrypoints` is EXCLUDED from `find`'s corpus — no serving surface renders that
+     table, so any next-command for such a hit is unfulfillable and dead-ends the reader; it is
+     eligible again only if a renderer ever ships. Declarations DO render: a `boundary`-kind
+     declaration via `rmap violations`, a `requirement`/`quality_policy`-kind one via `rmap
+     gate` — so the `boundary` group's per-hit next-command points at the command that renders
+     THAT declaration kind (a per-hit renderer; no single class-level verb).
+2. **Every hit is labeled with its fact class, its source certainty, and the command that
+   renders it**, and every hit carries a RUNNABLE next command — e.g. a group header
+   `[http-surface · inferred → rmap boundaries list]` over `provider GET /api/offers …
+   serverless/src/handlers/offer.ts` with a per-hit `→ rmap boundaries list`; a symbol hit
+   `bnrService — src/bnr.ts` with a per-hit `→ rmap explain <stable_key>`.
+   - **Certainty tag** (review-1 honesty defect): each class is tagged by the certainty LAYER
+     of its SOURCE table (VISION § Fact Certainty Model / architecture Product Layer Stack) —
+     `extracted` (Layer 0–1: symbol/file `nodes`/`files`, dependency declared manifest names),
+     `inferred` (Layer 2: module `module_candidates`, http-surface runtime surfaces), `hint`
+     (Layer 3: framework `inferences`), `governance` (Layer 4 governance/policy overlay:
+     boundary = the authored `declarations` store — review-6 re-home). The lexical RETRIEVAL is
+     deterministic; the content's certainty is the table's layer. A discovered module boundary
+     is NEVER presented as an extracted fact, and a Layer-4 governance DECLARATION is never
+     tagged `extracted` (that would describe an authored policy overlay as Layer-0 code truth).
+   - **Runnable next command** (review-1 item 1): the group header shows the class VERB (a bare
+     `rmap boundaries`/`deps`/`inferences`/`surfaces` prints usage — the runnable form is the
+     `list` subcommand; `explain` is a read-only top-level verb that takes a target). Every hit
+     ALSO renders an executable, **NON-MUTATING** invocation: `explain <key>` for symbol/file,
+     `map <path> --dry-run` for module (review-2 item 1: `rmap map` WRITES `MAP.md` into the tree
+     by default — a discovery next-step must never mutate on paste, so the rendered/header form is
+     `map --dry-run`, which prints the map to stdout and writes nothing), each shell-quoted; the
+     whole-listing command for the `… list` classes. Each emitted form is probed exit-0 against
+     the release binary; the e2e proof runs them verbatim and never writes into the target checkout.
    The label teaches the next move; hits are grouped by fact class, capped per class with an
    explicit `(+N more — --full)` per the audit's budget-honesty standard, deduped across
    classes by (fact class, path, identity-within-class).
@@ -38,9 +67,13 @@ has only guesses.
    2026-08-30: the name promises determinism a semantic-capable verb cannot keep).
 5. Zero facts hits + zero/unavailable seeds → an honest empty: what was searched (the fact
    classes, by name) and what was not (semantic, with reason if unavailable).
-6. JSON: additive (facts tier as a new array; existing seed fields unchanged). Contract doc +
-   VISION § Semantic Seeding amended in-slice (facts-first wording — the VISION edit is
-   pre-ratified by the human direction of 2026-08-30).
+6. JSON: additive (facts tier as a new array; existing seed fields unchanged). Each fact group
+   additionally carries `certainty` (`extracted` | `inferred` | `hint` | `governance` — the
+   last is the Layer-4 label for authored declaration hits, which are policy statements, not
+   extracted facts; amendment 2026-08-30, review-8) and each hit a `next` (the runnable
+   invocation) — both additive, byte-compatible for existing seed consumers. Contract
+   doc + VISION § Semantic Seeding amended in-slice (facts-first + certainty wording — the
+   VISION edit is pre-ratified by the human direction of 2026-08-30).
 
 ## 3. Stop conditions
 

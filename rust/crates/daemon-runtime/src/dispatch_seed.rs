@@ -207,6 +207,25 @@ impl ServiceDispatcher {
             Ok(q) => q.to_string(),
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+        // FIND-FACTS-1 request flags — INDEPENDENT (ratified contract, revision 1
+        // operator ruling item 3). These are request inputs with a well-defined
+        // absent-default (a flag not passed = false), NOT rendered facts, so the
+        // `.unwrap_or(false)` here is the CLI contract, not a silent zero-collapse.
+        //   `exact` = facts tier ALONE, the endpoint never touched (§2.4).
+        //   `full`  = lift the per-class display caps (uncapped facts render).
+        // They do NOT imply each other: `--exact` alone applies the default per-class
+        // caps; `--exact --full` is facts-only AND uncapped; `--full` alone caps
+        // nothing but still consults the endpoint.
+        let exact = request
+            .params
+            .get("exact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let full_facts = request
+            .params
+            .get("full")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         // `next.cwd` is the registry's absolute canonical root (review-2 #2), never
         // the raw `repo` param (which may be an alias / relative path). The repo
         // resolved above, so this is normally `Some`; when a registry lookup is
@@ -231,13 +250,26 @@ impl ServiceDispatcher {
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(s)) => s.snapshot_uid,
                 Ok(None) => {
+                    // No READY snapshot ⇒ nothing to search. Every fact class is named
+                    // as unavailable-with-reason (honest searched set), and the seed
+                    // tier is unavailable too (store cannot exist). `--exact` still
+                    // never consults the endpoint.
+                    let facts = crate::find_facts::unavailable_all(
+                        "repo not indexed yet — run `rmap index .`",
+                    );
+                    let seed = if exact {
+                        None
+                    } else {
+                        Some(crate::seed::SemanticResult::Unavailable(
+                            crate::seed::DegradeReason::NoStore,
+                        ))
+                    };
                     let resp = crate::seed::build_find_response(
                         &display_name,
                         "",
                         &query,
-                        crate::seed::SemanticResult::Unavailable(
-                            crate::seed::DegradeReason::NoStore,
-                        ),
+                        &facts,
+                        seed,
                         repo_root.as_deref(),
                     );
                     return finish_find(&request.id, &resp);
@@ -250,21 +282,34 @@ impl ServiceDispatcher {
                 }
             };
 
-        let cfg = crate::seed::SeedEndpointConfig::from_env();
-        let result = crate::seed::run_semantic_query(
-            &storage,
-            &snapshot_uid,
-            &repo_uid,
-            repo_state.db_path(),
-            &query,
-            FIND_CANDIDATE_CAP,
-            &cfg,
-        );
+        // FACTS tier FIRST (§2.1) — always, deterministically, whether or not the
+        // embedding endpoint is reachable. This is the answer that outranks guesses.
+        let facts =
+            crate::find_facts::gather_facts(&storage, &repo_uid, &snapshot_uid, &query, full_facts);
+
+        // DEMOTED semantic-seed tier (§2.3) — skipped entirely under `--exact` so the
+        // endpoint is never touched (§2.4). Otherwise it degrades to
+        // unavailable-with-reason when the model is down; the facts above still answer.
+        let seed = if exact {
+            None
+        } else {
+            let cfg = crate::seed::SeedEndpointConfig::from_env();
+            Some(crate::seed::run_semantic_query(
+                &storage,
+                &snapshot_uid,
+                &repo_uid,
+                repo_state.db_path(),
+                &query,
+                FIND_CANDIDATE_CAP,
+                &cfg,
+            ))
+        };
         let response = crate::seed::build_find_response(
             &display_name,
             &snapshot_uid,
             &query,
-            result,
+            &facts,
+            seed,
             repo_root.as_deref(),
         );
         finish_find(&request.id, &response)

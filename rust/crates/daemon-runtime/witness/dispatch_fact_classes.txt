@@ -37,9 +37,15 @@ cycles                 = FC1, FC2b
 stats                  = FC1, FC2a-agg, FC2b, FC3, FC4, FC5
 orient                 = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
 explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
-# EMBED-SEED-IMPL-1: `rmap find` resolves file paths → stable keys (FC1) and
-# surfaces the non-authoritative seed-vector sidecar as a Layer-3 hint (FC8).
-find                   = FC1, FC8
+# FIND-FACTS-1: `rmap find` answers FIRST from a deterministic lexical match over the
+# fact tables — symbols/files (FC1), declared modules + HTTP surfaces + framework
+# inferences (FC6), dependency names via the deps compose over unresolved external
+# imports (FC3), and (review-6 re-home) the `boundary` class over the governance
+# DECLARATIONS store (FC5 declarations/governance — rendered by violations/gate; the
+# former `surface_entrypoints` corpus was DROPPED, no renderer) — THEN surfaces the
+# non-authoritative seed-vector sidecar as a demoted Layer-3 hint (FC8). Expanded from
+# the EMBED-SEED-IMPL-1 `FC1, FC8`.
+find                   = FC1, FC3, FC5, FC6, FC8
 trust                  = FC1, FC2a-agg, FC2b, FC3, FC5, FC8
 cycle_completeness_audit = FC1, FC2b
 
