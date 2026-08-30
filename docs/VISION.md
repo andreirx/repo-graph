@@ -173,11 +173,15 @@ top-5 on 14/16 real glamCRM tasks vs 8/16 lexical). Bounds that keep it inside t
 uses, all Layer-3:
 (i) the resolution fallback tier above; (ii) **`rmap find "<concept>"`** — where the semantic
 seeds are the DEMOTED LOWER TIER (amendment 2026-08-30, FIND-FACTS-1): `find` answers FIRST
-from a deterministic lexical match over the fact tables (every hit labeled with its fact class
-and the command that renders it), and only below that renders the embedding seeds, named as
-ranked guesses ("likely areas for X" with scores + provenance, never a completeness claim);
-facts outrank similarity, and the verb answers even when the local model is down (the seed
-tier then says unavailable-with-reason); (iii) **cross-module concern hints** — cohesive embedding clusters spanning deployable
+from a deterministic lexical match over the fact tables (every hit labeled with its fact class,
+the runnable command that renders it, AND the certainty LAYER of its source — `extracted`
+fact vs `inferred` vs `hint` vs `governance` (a Layer-4 authored boundary/requirement/
+quality-policy declaration) — so a Layer 2–4 hit such as a discovered module boundary or a
+governance boundary declaration is never presented as an extracted fact; the retrieval is deterministic,
+the content's certainty is the source table's layer), and only below that renders the embedding
+seeds, named as ranked guesses ("likely areas for X" with scores + provenance, never a
+completeness claim); facts outrank similarity, and the verb answers even when the local model
+is down (the seed tier then says unavailable-with-reason); (iii) **cross-module concern hints** — cohesive embedding clusters spanning deployable
 modules surfaced on the module/boundary discovery surfaces as labeled seam/concern candidates
 (measured: glamCRM's sales-targets/tenant-brand/exchange-rate/auth clusters, spike addendum
 2026-08-25). Uses (i)+(ii) ship in the first IMPL; (iii) follows once its rendering surface is

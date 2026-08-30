@@ -1127,6 +1127,23 @@ visible omission `limit` rather than silently truncating. The candidate cap (≤
 
 ## 8B. `rmap find "<concept>"` — the affirmative concept-search verb (VISION use (ii); DECISION D-ES-11)
 
+> **SUPERSEDED IN PART by FIND-FACTS-1 (2026-08-30, human-ratified) — read
+> `docs/slices/find-facts-1.md` for the CURRENT contract.** The §8B rendering below
+> described `find` as an embeddings-ONLY verb (its output *was* the semantic seed
+> tier). FIND-FACTS-1 inverts the priority: `find` now answers FIRST from a
+> deterministic lexical match over the FACT TABLES (symbols, files, modules, HTTP
+> routes, dependency names, framework inferences, governance boundary/requirement/
+quality-policy declarations — the authored `declarations` store, NOT `surface_entrypoints`,
+which FIND-FACTS-1 review-6 dropped as unrenderable), each hit
+> labeled `[<fact-class> → rmap <command>]`; the embedding tier below §8B is DEMOTED
+> and renamed in-output to *"Semantic seeds (embedding similarity — ranked guesses,
+> not facts)"*, and renders `semantic seeds unavailable (<reason>)` when the endpoint
+> is down — the verb answers WITHOUT the model. `--exact` renders the facts tier
+> alone and never touches the endpoint. The §8B JSON DTO is UNCHANGED and EXTENDED
+> additively (`facts[]`, `seeds_available`, `seeds_unavailable_reason`); the §8B
+> `summary`/`candidates` fields still carry the (now demoted) seed tier. The prose
+> below is retained as the seed-tier's own historical spec.
+
 **Scope note (HUMAN DIRECTIVE 2, 2026-08-25).** The fallback tier (§8) is not the ceiling. VISION
 § Semantic Seeding now ratifies **three** uses of the same substrate (commit `8adabca`, binding;
 measured in the spike addendum): (i) the §8 fallback tier; (ii) **`rmap find`**, this section; (iii)
