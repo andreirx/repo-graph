@@ -184,6 +184,32 @@ pub(crate) fn armed_unknown_line(subject: &str) -> String {
     )
 }
 
+/// QUANT-MECH-1 §2.2: the house default row budget for the quantity surfaces
+/// (`churn`, `hotspots`) — the top-N rows the human render shows before the
+/// remainder line. `--full` renders every row uncapped; the COMPLETE set always
+/// rides `--json` (budgets are a HUMAN-render concern only). 25 matches the audit's
+/// house standard cap.
+pub(crate) const HUMAN_ROW_BUDGET: usize = 25;
+
+/// QUANT-MECH-1 §2.2: the shared "(+N more — --full)" remainder line for the
+/// budgeted quantity surfaces (`churn`, `hotspots`).
+///
+/// Returns `Some` ONLY when the human render bounded the list (`total > shown`);
+/// `None` when everything shown (nothing hidden → never a "+0 more" line). `total`
+/// is the COMPLETE row count and `shown` the rendered subset, so the remainder
+/// count is always TRUE.
+///
+/// `pub(crate)`: both callers (churn/hotspots presenters) live in this crate; the
+/// packet freezes new PUBLIC APIs. One helper backs both so the wording + count stay
+/// identical. Rejected simpler: inline the identical line in each renderer — the
+/// wording-drift smell that `stats::section_omission_line` already documents.
+pub(crate) fn budget_remainder_line(total: usize, shown: usize) -> Option<String> {
+    if total <= shown {
+        return None;
+    }
+    Some(format!("  (+{} more — --full)\n", total - shown))
+}
+
 /// Severity levels for display grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DisplaySeverity {

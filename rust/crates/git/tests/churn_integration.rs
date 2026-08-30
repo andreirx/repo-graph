@@ -160,7 +160,10 @@ fn churn_multiple_files() {
 // ── Sort order ─────────────────────────────────────────────────
 
 #[test]
-fn churn_sorted_by_lines_desc() {
+fn churn_lines_desc_is_tiebreak_when_commits_equal() {
+    // QUANT-MECH-1 §2.1: commit_count is now the lead sort key; lines_changed is the
+    // tiebreaker. Both files land in ONE commit here (equal commit_count), so the
+    // lines-desc tiebreaker decides — large.rs (10 lines) before small.rs (1 line).
     let repo = TestRepo::new();
 
     // Small file
@@ -195,7 +198,7 @@ fn churn_tiebreaker_commit_count() {
 
     // a.rs: 2 commits, 5 + 2 = 7 lines
     // b.rs: 1 commit, 5 lines
-    // a.rs first by lines
+    // a.rs first by commit_count (the lead key under QUANT-MECH-1 §2.1)
     assert_eq!(results[0].file_path, "a.rs");
 }
 
@@ -290,8 +293,11 @@ fn churn_high_commits_low_lines() {
     assert!(bulk.lines_changed > tweaked.lines_changed);
     assert!(tweaked.commit_count > bulk.commit_count);
 
-    // Sorted by lines, so bulk should be first
-    assert_eq!(results[0].file_path, "bulk.rs");
+    // QUANT-MECH-1 §2.1 (audit #10, ratified 2026-08-30): churn ranks by commit_count
+    // FIRST (the "what keeps changing" signal), lines_changed only as tiebreaker. The
+    // sustained-change file (tweaked.rs, 3 commits) now outranks the one-shot bulk edit
+    // (bulk.rs, 10 lines but 1 commit) — the deliberate behavior change this slice made.
+    assert_eq!(results[0].file_path, "tweaked.rs");
 }
 
 // ── Error cases ────────────────────────────────────────────────

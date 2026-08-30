@@ -59,3 +59,24 @@ commit.
 Churn's leader is the file that keeps changing, not the file that once changed hugely; no
 quantity surface renders an unbudgeted wall; stats states each directory once; contract docs
 record the ratified sort change; gates green.
+
+## 6. Contract record (IMPLEMENTED 2026-08-30)
+
+- **Churn ordering (RATIFIED behavior change, §2.1).** The deterministic total order is now
+  `commit_count DESC, lines_changed DESC, file_path ASC` at BOTH layers: the git computation
+  (`rust/crates/git/src/churn.rs::parse_churn_output`) and the human renderer
+  (`rust/crates/rgr/src/presentation/churn.rs`). The `churn --json` array follows the same
+  order (no field added/removed). No consumer named in
+  `docs/architecture/gate-contract.txt` depends on churn ordering (that contract covers only
+  obligations/evidence/gate JSON), so §2.1's STOP condition did not trigger. What is COUNTED
+  is unchanged — only the SORT key priority changed.
+- **Budgets (§2.2).** `churn` and `hotspots` human output is bounded to a default of 25 rows
+  (`presentation::HUMAN_ROW_BUDGET`) followed by an explicit `(+N more — --full)` remainder
+  line; `--full` renders every row. `--json` stays the COMPLETE set (budgets are human-render
+  only). Exit codes and JSON shapes unchanged.
+- **Stats de-dup (§2.3).** The four former per-metric sections (`By size` / `By fan-in` /
+  `By fan-out` / `By distance`) are collapsed into a single "Directory groups (by size)" table
+  — one row per directory group carrying every metric as a column (files, symbols, fan_in,
+  fan_out, I, D, A). Each directory is stated exactly once. `stats --json` is unchanged (human
+  render only). The dependency-reliability caveat / next-action / union-accounting line render
+  once, above the table.

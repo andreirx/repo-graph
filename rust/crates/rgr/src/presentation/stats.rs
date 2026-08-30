@@ -2,11 +2,14 @@
 //!
 //! # CLI-OUT-2C
 //!
-//! Transforms daemon module stats into human-readable plain text.
-//! Renders sorted sections to point the reader in the right direction. No
-//! threshold-based "at risk" labeling. MODULE-MODEL-2 §13 D7: every per-group
-//! table is bounded to the top [`STATS_SECTION_CAP`] rows + an honest omission
-//! line; the COMPLETE set always rides `stats --json`.
+//! Transforms daemon module stats into human-readable plain text. QUANT-MECH-1
+//! §2.3 (audit #10): the directory population is rendered ONCE — a single
+//! "Directory groups" table with one row per directory carrying every metric as a
+//! column, replacing the four former per-metric sections that each re-listed the
+//! same ~50 directories. No threshold-based "at risk" labeling. MODULE-MODEL-2 §13
+//! D7: the package-group table and the directory table are each bounded to the top
+//! [`STATS_SECTION_CAP`] rows + an honest omission line; the COMPLETE set (and every
+//! metric) always rides `stats --json`.
 //!
 //! ## Human Output Structure
 //!
@@ -29,24 +32,10 @@
 //!   models                 files=38
 //!   ...
 //!
-//! By size
-//!   src/handlers           files=45  symbols=892
-//!   src/models             files=38  symbols=634
-//!   ...
-//!
-//! By fan-in
-//!   src/utils              fan_in=18  fan_out=2
-//!   src/models             fan_in=15  fan_out=4
-//!   ...
-//!
-//! By fan-out
-//!   src/handlers           fan_out=12  fan_in=3
-//!   src/api                fan_out=9   fan_in=5
-//!   ...
-//!
-//! By distance from main sequence
-//!   src/legacy             D=0.89  I=0.11  A=0.00
-//!   src/adapters           D=0.72  I=0.28  A=0.00
+//! Directory groups (by size)
+//!   path            files  symbols  fan_in  fan_out        I        D     A
+//!   src/handlers       45      892       3       12     0.80     0.20  0.00
+//!   src/models         38      634       4        2     0.33     0.67  0.00
 //!   ...
 //! ```
 
@@ -54,20 +43,18 @@ use serde::Deserialize;
 
 use crate::presentation::heading;
 
-/// MODULE-MODEL-2 §13 D7: the top-N cap for EVERY per-group table on the human
-/// `stats` surface — the folded "Package groups" table AND the four per-directory
-/// "By size / fan-in / fan-out / distance" views. `stats` has no orient-style
-/// budget ladder, so it bounds at a single generous tier (aligned with orient's
-/// `large`) followed by an honest omission line. `stats --json` carries the
-/// COMPLETE set (the daemon folds + ships every group via the shared
-/// `rollup_package_groups`), so bounding the human tables loses nothing.
+/// MODULE-MODEL-2 §13 D7: the top-N cap for EACH per-group table on the human
+/// `stats` surface — the folded "Package groups" table AND the single "Directory
+/// groups" table (QUANT-MECH-1 §2.3 collapsed the four former per-metric views into
+/// one). `stats` has no orient-style budget ladder, so it bounds at a single generous
+/// tier (aligned with orient's `large`) followed by an honest omission line.
+/// `stats --json` carries the COMPLETE set (the daemon folds + ships every group via
+/// the shared `rollup_package_groups`), so bounding the human tables loses nothing.
 ///
-/// ONE cap for ALL sections is the "same budget notion" the surface uses
-/// (MODULE-MODEL-2 review-0 #1): the four `By …` tables enumerate the SAME
-/// `self.stats` population, so bounding only one would leave its omission line
-/// FALSE-in-context — the "omitted" groups would reappear in full three sections
-/// down. Bounding every table keeps each omission line TRUE (the tail rows live
-/// ONLY in `stats --json`).
+/// ONE cap for both tables is the "same budget notion" the surface uses
+/// (MODULE-MODEL-2 review-0 #1). Since QUANT-MECH-1 the directory population is a
+/// SINGLE table (not four re-listing views), so its one omission line is
+/// unambiguously TRUE — the tail rows live ONLY in `stats --json`.
 const STATS_SECTION_CAP: usize = 50;
 
 /// MODULE-MODEL-2 §13 D7: the honest omission tail for a bounded `stats` section.
@@ -77,7 +64,7 @@ const STATS_SECTION_CAP: usize = 50;
 /// `total` is the COMPLETE group count (never the displayed subset), so the
 /// omission count is always TRUE. `drill` names where the full set lives:
 /// `stats --json` for every table; the package-group table additionally points at
-/// `modules` (review-0 #3, parity with `orient`'s line). One helper backs all five
+/// `modules` (review-0 #3, parity with `orient`'s line). One helper backs both
 /// bounded tables so the tail wording + count stay uniform — and so a future edit
 /// cannot bound one table while leaving a sibling unbounded (the review-0 #1 bug).
 fn section_omission_line(total: usize, noun: &str, drill: &str) -> Option<String> {
@@ -194,8 +181,8 @@ pub struct ModuleStats {
 impl StatsResponse {
     /// Render the stats response as human-readable plain text.
     ///
-    /// MODULE-MODEL-2 §13 D7: every per-group table (the folded "Package groups"
-    /// view and the four per-directory "By …" views) is bounded to
+    /// MODULE-MODEL-2 §13 D7 + QUANT-MECH-1 §2.3: both per-group tables (the folded
+    /// "Package groups" view and the single "Directory groups" table) are bounded to
     /// [`STATS_SECTION_CAP`] rows followed by an honest omission line; the COMPLETE
     /// set always rides `stats --json`. Headline counts (the Summary block) count
     /// ALL groups, never the displayed subset, so the omission counts are TRUE.
@@ -275,44 +262,13 @@ impl StatsResponse {
         }
         out.push('\n');
 
-        // ── By size (per directory group — MODULE-MODEL-2 §13 D7 bounded) ──
-        // Top-N by file count + a TRUE omission line (review-0 #1). The four
-        // per-directory `By …` views all bound the SAME `self.stats` population,
-        // so each omission line is honest: the omitted directory groups are NOT
-        // shown elsewhere on the human surface — they ride `stats --json`.
-        out.push_str(&heading("By size"));
-        let mut by_size = self.stats.clone();
-        by_size.sort_by(|a, b| {
-            b.file_count
-                .cmp(&a.file_count)
-                // MODULE-MODEL-2 review-2 #2 + §13 D7: file count DESC then
-                // lexicographic module path — and NO symbol-count key. D7 defines the
-                // topology ranking as "top-N by file count, lexicographic-path
-                // tie-break"; a secondary symbol-count key would order two equal-file
-                // groups by an unrelated metric (and could change which tied rows
-                // cross the cap boundary). Module paths are unique, so path alone
-                // makes the order TOTAL → `.take(cap)` is deterministic regardless of
-                // input row order (the review-1 #2 property, preserved).
-                .then_with(|| a.module.cmp(&b.module))
-        });
-        for m in by_size.iter().take(STATS_SECTION_CAP) {
-            out.push_str(&format!(
-                "  {}  files={}  symbols={}\n",
-                m.module, m.file_count, m.symbol_count
-            ));
-        }
-        if let Some(line) =
-            section_omission_line(by_size.len(), "directory group", "`stats --json`")
-        {
-            out.push_str(&line);
-        }
-        out.push('\n');
-
         // ── Dependency-section reliability caveat (HONEST-DEGRADATION-IMPL-1 D1) ──
-        // fan-in/out, instability, and distance all ride the resolved IMPORTS graph. When that graph
-        // is not fully resolved (import-graph axis != HIGH), the coupling numbers below are partial —
-        // attach a reason-specific reader-context caveat (mirroring orient/trust's posture) so the
-        // reader treats them as directional, not as measured architectural fact.
+        // The Directory-groups table below carries the import-graph-derived columns
+        // (fan_in/fan_out/I/D). When the imports graph is not fully resolved
+        // (import-graph axis != HIGH), those columns are partial — attach a
+        // reason-specific reader-context caveat (mirroring orient/trust) so the reader
+        // treats them as directional, not as measured architectural fact. It renders
+        // ONCE, above the single table (QUANT-MECH-1 §2.3: state each fact once).
         if let Some(caveat) = self.dependency_reliability_caveat() {
             out.push_str(&caveat);
             out.push('\n');
@@ -336,77 +292,71 @@ impl StatsResponse {
             out.push('\n');
         }
 
-        // ── By fan-in (MODULE-MODEL-2 §13 D7 bounded — see "By size") ──
-        out.push_str(&heading("By fan-in"));
-        let mut by_fan_in = self.stats.clone();
-        // review-1 #2: module-path tie-break → TOTAL order → deterministic `.take(cap)`.
-        by_fan_in.sort_by(|a, b| {
-            b.fan_in
-                .cmp(&a.fan_in)
+        // ── Directory groups (QUANT-MECH-1 §2.3: one row per directory, stated ONCE) ──
+        // Audit #10 de-dup: the four former per-metric sections ("By size / By fan-in
+        // / By fan-out / By distance") each RE-LISTED the SAME `self.stats` directory
+        // population — the same ~50 directories printed four times. Collapsed to a
+        // SINGLE table: one row per directory group carrying every metric as a column,
+        // so each directory appears exactly once. No metric is dropped (files, symbols,
+        // fan_in, fan_out, I, D, A are all columns); the per-metric ranked *views* are
+        // traded for the honesty of a single listing — the reader/agent sorts the
+        // column it needs, and the COMPLETE set (every metric) rides `stats --json`.
+        //
+        // Sorted by file_count DESC then module path ASC — the former "By size"
+        // primary, and a TOTAL order (module paths are unique) so `.take(cap)` is
+        // deterministic regardless of input row order. Bounded to STATS_SECTION_CAP +
+        // a TRUE omission line (the count is the COMPLETE directory-group total).
+        out.push_str(&heading("Directory groups (by size)"));
+        let mut dirs = self.stats.clone();
+        dirs.sort_by(|a, b| {
+            b.file_count
+                .cmp(&a.file_count)
                 .then_with(|| a.module.cmp(&b.module))
         });
-        for m in by_fan_in.iter().take(STATS_SECTION_CAP) {
-            out.push_str(&format!(
-                "  {}  fan_in={}  fan_out={}\n",
-                m.module, m.fan_in, m.fan_out
-            ));
-        }
-        if let Some(line) =
-            section_omission_line(by_fan_in.len(), "directory group", "`stats --json`")
-        {
-            out.push_str(&line);
-        }
-        out.push('\n');
+        let shown = &dirs[..STATS_SECTION_CAP.min(dirs.len())];
 
-        // ── By fan-out (MODULE-MODEL-2 §13 D7 bounded — see "By size") ──
-        out.push_str(&heading("By fan-out"));
-        let mut by_fan_out = self.stats.clone();
-        // review-1 #2: module-path tie-break → TOTAL order → deterministic `.take(cap)`.
-        by_fan_out.sort_by(|a, b| {
-            b.fan_out
-                .cmp(&a.fan_out)
-                .then_with(|| a.module.cmp(&b.module))
-        });
-        for m in by_fan_out.iter().take(STATS_SECTION_CAP) {
-            out.push_str(&format!(
-                "  {}  fan_out={}  fan_in={}\n",
-                m.module, m.fan_out, m.fan_in
-            ));
-        }
-        if let Some(line) =
-            section_omission_line(by_fan_out.len(), "directory group", "`stats --json`")
-        {
-            out.push_str(&line);
-        }
-        out.push('\n');
+        // Column widths over the SHOWN rows (aligns to what is printed). Each width
+        // has a floor = its header label width so the header never overflows.
+        let path_w = shown
+            .iter()
+            .map(|m| m.module.len())
+            .max()
+            .unwrap_or(0)
+            .max(4);
+        let files_w = col_width(shown.iter().map(|m| m.file_count.to_string()), 5);
+        let symbols_w = col_width(shown.iter().map(|m| m.symbol_count.to_string()), 7);
+        let fanin_w = col_width(shown.iter().map(|m| m.fan_in.to_string()), 6);
+        let fanout_w = col_width(shown.iter().map(|m| m.fan_out.to_string()), 7);
+        // I/D render via `fmt_metric` → "unknown" (7 chars) on a degenerate row, so
+        // their column floor is 7 to hold the widest token.
+        let metric_w = 7;
 
-        // ── By distance from main sequence (MODULE-MODEL-2 §13 D7 bounded) ──
-        out.push_str(&heading("By distance from main sequence"));
-        let mut by_distance = self.stats.clone();
-        by_distance.sort_by(|a, b| {
-            b.distance_from_main_sequence
-                .partial_cmp(&a.distance_from_main_sequence)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                // review-1 #2: module-path tie-break → TOTAL order → deterministic
-                // `.take(cap)` (also pins the order of the many `None`/`Equal` rows,
-                // which `partial_cmp` alone leaves at input order).
-                .then_with(|| a.module.cmp(&b.module))
-        });
-        for m in by_distance.iter().take(STATS_SECTION_CAP) {
-            // HONEST-DEGRADATION-IMPL-1 (D1): a degenerate (zero-degree) module has unknown
-            // instability/distance — render "unknown", never "0.00" read as "on the main sequence".
-            // Abstractness is import-graph-independent, so it stays a concrete number.
+        out.push_str(&format!(
+            "  {:<path_w$}  {:>files_w$}  {:>symbols_w$}  {:>fanin_w$}  {:>fanout_w$}  {:>metric_w$}  {:>metric_w$}  {:>4}\n",
+            "path", "files", "symbols", "fan_in", "fan_out", "I", "D", "A",
+            path_w = path_w, files_w = files_w, symbols_w = symbols_w,
+            fanin_w = fanin_w, fanout_w = fanout_w, metric_w = metric_w,
+        ));
+        for m in shown {
+            // HONEST-DEGRADATION-IMPL-1 (D1): a degenerate (zero-degree) module has
+            // unknown instability/distance — `fmt_metric` renders "unknown", never a
+            // bare "0.00" that reads as "on the main sequence". Abstractness is
+            // import-graph-independent, so it stays a concrete number.
             out.push_str(&format!(
-                "  {}  D={}  I={}  A={:.2}\n",
+                "  {:<path_w$}  {:>files_w$}  {:>symbols_w$}  {:>fanin_w$}  {:>fanout_w$}  {:>metric_w$}  {:>metric_w$}  {:>4.2}\n",
                 m.module,
-                fmt_metric(m.distance_from_main_sequence),
+                m.file_count,
+                m.symbol_count,
+                m.fan_in,
+                m.fan_out,
                 fmt_metric(m.instability),
-                m.abstractness
+                fmt_metric(m.distance_from_main_sequence),
+                m.abstractness,
+                path_w = path_w, files_w = files_w, symbols_w = symbols_w,
+                fanin_w = fanin_w, fanout_w = fanout_w, metric_w = metric_w,
             ));
         }
-        if let Some(line) =
-            section_omission_line(by_distance.len(), "directory group", "`stats --json`")
-        {
+        if let Some(line) = section_omission_line(dirs.len(), "directory group", "`stats --json`") {
             out.push_str(&line);
         }
 
@@ -454,6 +404,15 @@ impl StatsResponse {
             "Dependency metrics below reflect only the imports resolved on this index{detail}; treat these as directional.\n"
         ))
     }
+}
+
+/// QUANT-MECH-1 §2.3: the render width for one numeric column of the Directory-groups
+/// table — the widest rendered token, floored at the column's header-label width so the
+/// header never overflows its own column. A tiny local helper for the four numeric
+/// columns of the single table (its only callers); the alternative (four inline
+/// `map().max().unwrap_or(0).max(floor)` chains) merely repeats this exact expression.
+fn col_width(vals: impl Iterator<Item = String>, floor: usize) -> usize {
+    vals.map(|s| s.len()).max().unwrap_or(0).max(floor)
 }
 
 /// HONEST-DEGRADATION-IMPL-1 (D1): render a coupling metric as a fixed-2dp number, or `unknown` when
@@ -535,6 +494,15 @@ mod tests {
         }
     }
 
+    /// QUANT-MECH-1 §2.3: the single de-duped "Directory groups" table substring
+    /// (heading through end of output). One place tests slice the table.
+    fn directory_table(output: &str) -> &str {
+        output
+            .split("Directory groups (by size)\n")
+            .nth(1)
+            .expect("directory groups table present")
+    }
+
     #[test]
     fn render_human_includes_repo_name() {
         let resp = sample_stats();
@@ -574,74 +542,58 @@ mod tests {
     }
 
     #[test]
-    fn render_human_sorts_by_size_descending() {
+    fn render_human_sorts_directory_table_by_size_descending() {
         let resp = sample_stats();
         let output = resp.render_human();
-        // src/handlers (45 files) should come before src/models (38 files)
-        let by_size_section = output
-            .split("By size\n")
-            .nth(1)
-            .unwrap()
-            .split("By fan-in")
-            .next()
-            .unwrap();
-        let handlers_pos = by_size_section.find("src/handlers").unwrap();
-        let models_pos = by_size_section.find("src/models").unwrap();
-        assert!(handlers_pos < models_pos);
+        // The single directory table is sorted by file_count DESC: src/handlers (45)
+        // before src/models (38) before src/utils (10).
+        let table = directory_table(&output);
+        let handlers = table.find("src/handlers").unwrap();
+        let models = table.find("src/models").unwrap();
+        let utils = table.find("src/utils").unwrap();
+        assert!(handlers < models && models < utils, "{table}");
     }
 
     #[test]
-    fn render_human_sorts_by_fan_in_descending() {
+    fn render_human_directory_table_carries_every_metric_column() {
+        // QUANT-MECH-1 §2.3: no metric is dropped by the de-dup — the single table
+        // carries files, symbols, fan_in, fan_out, I, D, A as columns. src/utils has
+        // fan_in=18, fan_out=0 — both must be present on its one row.
         let resp = sample_stats();
         let output = resp.render_human();
-        // src/utils (fan_in=18) should come first
-        let by_fan_in_section = output
-            .split("By fan-in\n")
-            .nth(1)
-            .unwrap()
-            .split("By fan-out")
-            .next()
-            .unwrap();
-        let utils_pos = by_fan_in_section.find("src/utils").unwrap();
-        let models_pos = by_fan_in_section.find("src/models").unwrap();
-        assert!(utils_pos < models_pos);
-    }
-
-    #[test]
-    fn render_human_sorts_by_distance_descending() {
-        let resp = sample_stats();
-        let output = resp.render_human();
-        // src/models (D=0.86) should come before src/utils (D=0.5)
-        let by_distance_section = output
-            .split("By distance from main sequence\n")
-            .nth(1)
-            .unwrap();
-        let models_pos = by_distance_section.find("src/models").unwrap();
-        let utils_pos = by_distance_section.find("src/utils").unwrap();
-        assert!(models_pos < utils_pos);
-    }
-
-    #[test]
-    fn render_human_includes_all_modules_in_each_section() {
-        let resp = sample_stats();
-        let output = resp.render_human();
-        // All 3 modules should appear in each section
-        for section in ["By size", "By fan-in", "By fan-out", "By distance"] {
-            let section_text = output.split(section).nth(1).unwrap_or("");
+        for col in [
+            "path", "files", "symbols", "fan_in", "fan_out", "I", "D", "A",
+        ] {
             assert!(
-                section_text.contains("src/handlers"),
-                "section {} missing src/handlers",
-                section
+                directory_table(&output).contains(col),
+                "missing column {col}:\n{output}"
             );
-            assert!(
-                section_text.contains("src/models"),
-                "section {} missing src/models",
-                section
-            );
-            assert!(
-                section_text.contains("src/utils"),
-                "section {} missing src/utils",
-                section
+        }
+        // src/utils's coupling values appear on its single row (fan_in=18, fan_out=0).
+        let table = directory_table(&output);
+        let utils_row = table
+            .lines()
+            .find(|l| l.contains("src/utils"))
+            .expect("utils row");
+        assert!(
+            utils_row.contains("18") && utils_row.contains('0'),
+            "{utils_row}"
+        );
+    }
+
+    #[test]
+    fn render_human_states_each_directory_exactly_once() {
+        // QUANT-MECH-1 §2.3 DoD: each directory group is rendered ONCE (the audit
+        // measured the same population printed across FOUR per-metric sections). The
+        // fully-qualified path (`src/handlers`, unlike the short package-group name
+        // `handlers`) is unique to the directory table, so each occurs exactly once.
+        let resp = sample_stats();
+        let output = resp.render_human();
+        for dir in ["src/handlers", "src/models", "src/utils"] {
+            assert_eq!(
+                output.matches(dir).count(),
+                1,
+                "{dir} must appear exactly once (de-duped):\n{output}"
             );
         }
     }
@@ -755,20 +707,29 @@ mod tests {
             stats: vec![degenerate_module()],
         };
         let output = resp.render_human();
-        let distance_section = output
-            .split("By distance from main sequence")
-            .nth(1)
-            .expect("distance section present");
+        let table = directory_table(&output);
+        let core_row = table
+            .lines()
+            .find(|l| l.contains("src/core"))
+            .expect("core row present");
+        // Degenerate coupling (fan_in=fan_out=0) → I and D render "unknown", never a
+        // bare 0.00 that reads as "on the main sequence".
         assert!(
-            distance_section.contains("D=unknown") && distance_section.contains("I=unknown"),
-            "degenerate coupling must render unknown: {output}"
+            core_row.contains("unknown"),
+            "degenerate coupling must render unknown: {core_row}"
         );
+        // The row must not present a fabricated 0.00 for the undefined I/D metrics.
+        // (Abstractness is import-graph-independent → stays a concrete number, 1.00.)
         assert!(
-            !distance_section.contains("D=0.00") && !distance_section.contains("I=0.00"),
-            "must NOT render a bare 0.00 for an undefined metric: {output}"
+            core_row.contains("1.00"),
+            "abstractness stays a concrete number: {core_row}"
         );
-        // Abstractness (the kept classification metric) is still a concrete number.
-        assert!(distance_section.contains("A=1.00"), "{output}");
+        // Exactly two "unknown" tokens on the row: I and D.
+        assert_eq!(
+            core_row.matches("unknown").count(),
+            2,
+            "both I and D must be unknown: {core_row}"
+        );
     }
 
     #[test]
@@ -787,14 +748,17 @@ mod tests {
             stats: vec![degenerate_module()],
         };
         let output = resp.render_human();
-        // The caveat sits ABOVE the dependency sections and names the real count + the direction.
+        // The caveat sits ABOVE the directory table (which carries the coupling
+        // columns) and names the real count + the direction.
         let caveat_pos = output
             .find("1090 imports are unresolved")
             .expect("unresolved-imports caveat present");
-        let fanin_pos = output.find("By fan-in").expect("fan-in section present");
+        let table_pos = output
+            .find("Directory groups (by size)")
+            .expect("directory table present");
         assert!(
-            caveat_pos < fanin_pos,
-            "caveat must precede the sections: {output}"
+            caveat_pos < table_pos,
+            "caveat must precede the directory table: {output}"
         );
         assert!(output.contains("under-counted"), "{output}");
         assert!(output.contains("treat these as directional"), "{output}");
@@ -848,10 +812,12 @@ mod tests {
         let action_pos = output
             .find("no semantic-resolution path exists for C")
             .expect("next-action present");
-        let fanin_pos = output.find("By fan-in").expect("fan-in section present");
+        let table_pos = output
+            .find("Directory groups (by size)")
+            .expect("directory table present");
         assert!(
-            action_pos < fanin_pos,
-            "next-action must precede fan-in: {output}"
+            action_pos < table_pos,
+            "next-action must precede the directory table: {output}"
         );
     }
 
@@ -927,13 +893,12 @@ mod tests {
     }
 
     #[test]
-    fn render_human_bounds_directory_group_tables_with_true_omission() {
-        // review-0 #1: the four per-directory "By …" tables share ONE population
-        // (`self.stats`), so EACH must bound to STATS_SECTION_CAP + a TRUE omission
-        // line — otherwise a group omitted from "By size" reappears in full under
-        // "By fan-in", making the omission line false-in-context. Here N = cap + 15
-        // directory groups: every table shows the cap + "… 15 more directory
-        // groups", the Summary counts the COMPLETE N, and the full set rides JSON.
+    fn render_human_bounds_directory_table_with_true_omission() {
+        // QUANT-MECH-1 §2.3: the single directory table bounds to STATS_SECTION_CAP +
+        // ONE true omission line (the audit's four re-listing sections collapsed to
+        // one). Here N = cap + 15 directory groups: the table shows the cap, carries
+        // "… 15 more directory groups", the Summary counts the COMPLETE N, and the
+        // full set rides `stats --json`.
         let mut resp = sample_stats();
         let n = STATS_SECTION_CAP + 15;
         resp.stats = (0..n)
@@ -949,7 +914,7 @@ mod tests {
             })
             .collect();
         // One package group keeps the package table OFF the omission path, so this
-        // test isolates the directory-group tables.
+        // test isolates the directory table.
         resp.package_groups = vec![StatsPackageGroup {
             name: "only".to_string(),
             file_count: 1,
@@ -963,51 +928,42 @@ mod tests {
             "summary count must be the complete total:\n{output}"
         );
 
-        // Each of the 4 per-directory tables carries the SAME true omission line
-        // (15 beyond each table's own top-cap). Exactly 4 occurrences.
+        // EXACTLY ONE omission line now (not four) — the de-dup's whole point.
         let omission = "… and 15 more directory groups — see `stats --json`";
         assert_eq!(
             output.matches(omission).count(),
-            4,
-            "each of the 4 per-directory tables must carry the true omission line:\n{output}"
+            1,
+            "the single directory table carries exactly one true omission line:\n{output}"
         );
 
-        // Spot-check "By size": the largest row (d000) is shown; the row ranked at
-        // the cap boundary (d050 by size) is omitted; exactly the cap is shown.
-        let by_size = output
-            .split("By size\n")
-            .nth(1)
-            .unwrap()
-            .split("By fan-in")
-            .next()
-            .unwrap();
+        // The largest row (d000) is shown; the row ranked at the cap boundary (d050 by
+        // size) is omitted; exactly the cap of rows is shown.
+        let table = directory_table(&output);
+        assert!(table.contains("d000 "), "top row shown:\n{table}");
         assert!(
-            by_size.contains("d000  files="),
-            "top row shown:\n{by_size}"
+            !table.contains(&format!("d{:03} ", STATS_SECTION_CAP)),
+            "over-cap row omitted:\n{table}"
         );
-        assert!(
-            !by_size.contains(&format!("d{:03}  files=", STATS_SECTION_CAP)),
-            "over-cap row omitted from By size:\n{by_size}"
-        );
-        // `symbols=` is unique to the By-size row format → exactly cap rows shown.
+        // Count data rows: lines that start with "  d" (path column). Exactly cap.
+        let data_rows = table
+            .lines()
+            .filter(|l| l.trim_start().starts_with('d'))
+            .count();
         assert_eq!(
-            by_size.matches("symbols=").count(),
-            STATS_SECTION_CAP,
-            "By size must show exactly the cap:\n{by_size}"
+            data_rows, STATS_SECTION_CAP,
+            "table must show exactly the cap:\n{table}"
         );
     }
 
     #[test]
-    fn render_human_directory_tables_tie_break_is_deterministic() {
-        // review-1 #2: when MORE THAN the cap of directory groups are TIED on a
-        // table's sort metric, WHICH rows survive the `.take(cap)` must be a pure
-        // function of the SET, not the input row order. Here 60 groups (`m00`..`m59`)
-        // are identical on EVERY metric and fed in REVERSE (`m59` first). The
-        // lexicographic module-path tie-break makes each of the four `By …` sorts a
-        // TOTAL order, so every table shows the lexicographically-smallest cap
-        // (`m00`..`m49`) and omits `m50`..`m59` — regardless of input order. Without
-        // the tie-break the stable sort would keep input order and show `m59`..`m10`
-        // (the opposite selection), so this pins the fix, not merely the bound.
+    fn render_human_directory_table_tie_break_is_deterministic() {
+        // review-1 #2 (carried to the single table): when MORE THAN the cap of
+        // directory groups are TIED on file_count, WHICH rows survive `.take(cap)`
+        // must be a pure function of the SET, not the input row order. Here 60 groups
+        // (`m00`..`m59`) are identical on EVERY metric and fed in REVERSE (`m59`
+        // first). The lexicographic module-path tie-break makes the sort a TOTAL
+        // order, so the table shows the lexicographically-smallest cap (`m00`..`m49`)
+        // and omits `m50`..`m59` — regardless of input order.
         let mut resp = sample_stats();
         let n = STATS_SECTION_CAP + 10; // 60
         resp.stats = (0..n)
@@ -1023,7 +979,6 @@ mod tests {
                 symbol_count: 7,
             })
             .collect();
-        // One package group keeps the package table off the omission path.
         resp.package_groups = vec![StatsPackageGroup {
             name: "only".to_string(),
             file_count: 1,
@@ -1031,55 +986,38 @@ mod tests {
         }];
         let output = resp.render_human();
 
-        // Summary counts ALL 60 directory groups.
         assert!(
             output.contains(&format!("directory groups: {n}")),
             "summary count must be the complete total:\n{output}"
         );
-
-        // Each of the 4 per-directory tables carries the TRUE omission line (10 = 60-cap).
         assert_eq!(
             output
                 .matches("… and 10 more directory groups — see `stats --json`")
                 .count(),
-            4,
-            "each of the 4 tables carries the true omission count:\n{output}"
+            1,
+            "the single table carries one true omission line:\n{output}"
         );
 
-        // Deterministic selection: the lexicographically-smallest cap survives in
-        // EVERY table; the 10 largest-by-name rows are omitted everywhere. `m00` is
-        // shown and `m50` omitted ONLY under the path tie-break (the old stable-sort
-        // input order would show `m59`..`m10`, i.e. the inverse).
-        let sections = [
-            ("By size\n", "By fan-in"),
-            ("By fan-in\n", "By fan-out"),
-            ("By fan-out\n", "By distance"),
-            ("By distance from main sequence\n", "\u{0}"), // to end
-        ];
-        for (start, end) in sections {
-            let after = output.split(start).nth(1).unwrap_or("");
-            let section = after.split(end).next().unwrap_or(after);
-            assert!(
-                section.contains("m00") && section.contains("m49"),
-                "smallest-by-path cap must be shown in section starting {start:?}:\n{section}"
-            );
-            assert!(
-                !section.contains("m50") && !section.contains("m59"),
-                "largest-by-path rows must be omitted in section starting {start:?}:\n{section}"
-            );
-        }
+        let table = directory_table(&output);
+        assert!(
+            table.contains("m00") && table.contains("m49"),
+            "smallest-by-path cap must be shown:\n{table}"
+        );
+        assert!(
+            !table.contains("m50") && !table.contains("m59"),
+            "largest-by-path rows must be omitted:\n{table}"
+        );
     }
 
-    // ── MODULE-MODEL-2 review-2 #2 — "By size" tie-break is path, NOT symbol count ──
+    // ── QUANT-MECH-1 §2.3 — directory table tie-break is path, NOT symbol count ──
 
     #[test]
-    fn render_human_by_size_ties_break_on_path_not_symbol_count() {
-        // review-2 #2 + §13 D7: three groups TIED on file_count but with DIFFERENT
-        // symbol counts, whose path order is the INVERSE of their symbol-count order.
-        // Under D7 (file DESC, then lexicographic path — no symbol key) the rows come
-        // out `src/aaa, src/bbb, src/ccc`. With the removed symbol-count key they
-        // would come out `src/bbb (999), src/ccc (500), src/aaa (1)` — so this
-        // fixture DETECTS the key, unlike the earlier all-tied fixture.
+    fn render_human_directory_table_ties_break_on_path_not_symbol_count() {
+        // Three groups TIED on file_count but with DIFFERENT symbol counts, whose
+        // path order is the INVERSE of their symbol-count order. Under the size sort
+        // (file DESC, then lexicographic path — no symbol key) the rows come out
+        // `src/aaa, src/bbb, src/ccc`. A stray symbol-count key would give
+        // `src/bbb (999), src/ccc (500), src/aaa (1)` — so this fixture DETECTS a key.
         let mut resp = sample_stats();
         resp.stats = vec![
             ModuleStats {
@@ -1100,7 +1038,7 @@ mod tests {
                 abstractness: 0.0,
                 distance_from_main_sequence: Some(0.5),
                 file_count: 10,
-                symbol_count: 999, // largest symbols — would rank FIRST under old key
+                symbol_count: 999, // largest symbols — would rank FIRST under a symbol key
             },
             ModuleStats {
                 module: "src/ccc".to_string(),
@@ -1114,20 +1052,14 @@ mod tests {
             },
         ];
         let output = resp.render_human();
-        let by_size = output
-            .split("By size\n")
-            .nth(1)
-            .unwrap()
-            .split("By fan-in")
-            .next()
-            .unwrap();
-        let a = by_size.find("src/aaa").expect("aaa present");
-        let b = by_size.find("src/bbb").expect("bbb present");
-        let c = by_size.find("src/ccc").expect("ccc present");
+        let table = directory_table(&output);
+        let a = table.find("src/aaa").expect("aaa present");
+        let b = table.find("src/bbb").expect("bbb present");
+        let c = table.find("src/ccc").expect("ccc present");
         assert!(
             a < b && b < c,
-            "By size must order tied-file rows by path (aaa<bbb<ccc), NOT by symbol \
-             count (which would give bbb<ccc<aaa):\n{by_size}"
+            "directory table must order tied-file rows by path (aaa<bbb<ccc), NOT by \
+             symbol count (which would give bbb<ccc<aaa):\n{table}"
         );
     }
 

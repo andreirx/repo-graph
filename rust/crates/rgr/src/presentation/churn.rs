@@ -8,11 +8,16 @@
 //!
 //! # Output Contract
 //!
-//! - Deterministic ordering (by lines_changed desc, then path asc)
-//! - Full output, no truncation
-//! - `--json` preserved for machine mode
+//! - Deterministic ordering: commit_count DESC, lines_changed DESC, path ASC
+//!   (QUANT-MECH-1 §2.1 — mirrors the git layer; commit count is the signal, line
+//!   volume the tiebreaker). The JSON array follows this same order.
+//! - Human render is BUDGETED (QUANT-MECH-1 §2.2): top [`HUMAN_ROW_BUDGET`] rows +
+//!   an explicit `(+N more — --full)` remainder line; `--full` renders every row.
+//!   `--json` is always the COMPLETE set (budgets are human-render only).
 
 use serde::Deserialize;
+
+use crate::presentation::{budget_remainder_line, HUMAN_ROW_BUDGET};
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -44,14 +49,16 @@ pub struct ChurnEntry {
 impl ChurnResponse {
     /// Render the churn response as human-readable plain text.
     ///
-    /// Outputs full sorted list. No truncation. Caller can pipe to `head`.
-    pub fn render_human(&self) -> String {
+    /// QUANT-MECH-1 §2.2: BUDGETED — shows the top [`HUMAN_ROW_BUDGET`] rows then an
+    /// explicit `(+N more — --full)` remainder line. `full == true` (from `--full`)
+    /// renders every row uncapped. The COMPLETE set always rides `churn --json`.
+    pub fn render_human(&self, full: bool) -> String {
         let mut out = String::new();
 
         // Header with time window
         out.push_str(&format!("File Churn ({})\n\n", format_since(&self.since)));
 
-        // Count line
+        // Count line — the COMPLETE count, never the displayed subset.
         let file_word = if self.count == 1 { "file" } else { "files" };
         out.push_str(&format!("{} {} changed\n", self.count, file_word));
 
@@ -63,23 +70,34 @@ impl ChurnResponse {
             return out;
         }
 
-        // Sort by lines_changed desc, then path asc for determinism
+        // QUANT-MECH-1 §2.1: commit_count DESC (the signal), then lines_changed DESC
+        // (tiebreaker), then path ASC (total order → deterministic). Mirrors the git
+        // layer so the human render and the JSON array agree.
         let mut entries = self.results.clone();
         entries.sort_by(|a, b| {
-            b.lines_changed
-                .cmp(&a.lines_changed)
+            b.commit_count
+                .cmp(&a.commit_count)
+                .then_with(|| b.lines_changed.cmp(&a.lines_changed))
                 .then_with(|| a.file_path.cmp(&b.file_path))
         });
 
-        // Compute column widths for alignment
-        let max_path_len = entries.iter().map(|e| e.file_path.len()).max().unwrap_or(0);
-        let max_commits = entries.iter().map(|e| e.commit_count).max().unwrap_or(0);
-        let max_lines = entries.iter().map(|e| e.lines_changed).max().unwrap_or(0);
+        // QUANT-MECH-1 §2.2: bound to the budget unless `--full`.
+        let cap = if full {
+            entries.len()
+        } else {
+            HUMAN_ROW_BUDGET.min(entries.len())
+        };
+        let shown = &entries[..cap];
+
+        // Compute column widths over the SHOWN rows (aligns to what is printed).
+        let max_path_len = shown.iter().map(|e| e.file_path.len()).max().unwrap_or(0);
+        let max_commits = shown.iter().map(|e| e.commit_count).max().unwrap_or(0);
+        let max_lines = shown.iter().map(|e| e.lines_changed).max().unwrap_or(0);
         let commits_width = format!("{}", max_commits).len();
         let lines_width = format!("{}", max_lines).len();
 
         out.push('\n');
-        for entry in &entries {
+        for entry in shown {
             out.push_str(&format!(
                 "  {:<path_width$}  {:>commits_width$} commits  {:>lines_width$} lines\n",
                 entry.file_path,
@@ -89,6 +107,11 @@ impl ChurnResponse {
                 commits_width = commits_width,
                 lines_width = lines_width,
             ));
+        }
+
+        // Explicit remainder line (never silent) when the budget hid rows.
+        if let Some(line) = budget_remainder_line(entries.len(), shown.len()) {
+            out.push_str(&line);
         }
 
         out
@@ -133,7 +156,7 @@ mod tests {
     #[test]
     fn render_empty_churn() {
         let resp = make_response(vec![], "90.days.ago");
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("File Churn (last 90 days)"));
         assert!(out.contains("0 files changed"));
@@ -150,7 +173,7 @@ mod tests {
             }],
             "30.days.ago",
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("File Churn (last 30 days)"));
         assert!(out.contains("1 file changed"));
@@ -160,7 +183,11 @@ mod tests {
     }
 
     #[test]
-    fn render_multiple_files_sorted_by_lines() {
+    fn render_multiple_files_sorted_by_commits_then_lines() {
+        // QUANT-MECH-1 §2.1: commit_count is the lead key, lines_changed the tiebreaker.
+        // b has the most commits; c and a tie on commits? No — b(10) > c(3) > a(2), so
+        // the order is b, c, a. Under the OLD lines-first sort a and c (both 50 lines)
+        // would sort alphabetically (a before c); commit-first inverts that pair.
         let resp = make_response(
             vec![
                 ChurnEntry {
@@ -181,20 +208,108 @@ mod tests {
             ],
             "90.days.ago",
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("3 files changed"));
 
-        // Verify ordering: b (500 lines) first, then a and c (50 lines each, alphabetical)
         let b_pos = out.find("src/b.rs").unwrap();
-        let a_pos = out.find("src/a.rs").unwrap();
         let c_pos = out.find("src/c.rs").unwrap();
+        let a_pos = out.find("src/a.rs").unwrap();
 
-        assert!(b_pos < a_pos, "b should come before a (more lines)");
+        assert!(b_pos < c_pos, "b (10 commits) before c (3 commits)");
         assert!(
-            a_pos < c_pos,
-            "a should come before c (same lines, alphabetical)"
+            c_pos < a_pos,
+            "c (3 commits) before a (2 commits) — commit count leads, not line volume"
         );
+    }
+
+    #[test]
+    fn render_commit_leader_outranks_line_leader() {
+        // QUANT-MECH-1 §2.1: the sustained-change file (many commits, few lines) ranks
+        // above the one-shot bulk edit (one commit, huge line count).
+        let resp = make_response(
+            vec![
+                ChurnEntry {
+                    file_path: "big.rs".to_string(),
+                    commit_count: 1,
+                    lines_changed: 1000,
+                },
+                ChurnEntry {
+                    file_path: "hot.rs".to_string(),
+                    commit_count: 8,
+                    lines_changed: 40,
+                },
+            ],
+            "90.days.ago",
+        );
+        let out = resp.render_human(false);
+        let hot = out.find("hot.rs").unwrap();
+        let big = out.find("big.rs").unwrap();
+        assert!(hot < big, "commit leader must rank first:\n{out}");
+    }
+
+    #[test]
+    fn render_budgets_default_with_explicit_remainder() {
+        // §2.2: default render shows the top HUMAN_ROW_BUDGET rows + an explicit
+        // "(+N more — --full)" line; the count line stays the COMPLETE total.
+        let n = HUMAN_ROW_BUDGET + 7;
+        let entries: Vec<ChurnEntry> = (0..n)
+            .map(|i| ChurnEntry {
+                file_path: format!("f{i:03}.rs"),
+                // Descending commits so f000 ranks first, f{n-1} last.
+                commit_count: (n - i) as u64,
+                lines_changed: 1,
+            })
+            .collect();
+        let resp = make_response(entries, "90.days.ago");
+        let out = resp.render_human(false);
+
+        assert!(out.contains(&format!("{n} files changed")), "{out}");
+        // Top row shown, first over-budget row omitted.
+        assert!(out.contains("f000.rs"), "{out}");
+        assert!(
+            !out.contains(&format!("f{HUMAN_ROW_BUDGET:03}.rs")),
+            "over-budget row must be omitted:\n{out}"
+        );
+        assert!(out.contains("(+7 more — --full)"), "{out}");
+    }
+
+    #[test]
+    fn render_full_uncaps_and_has_no_remainder() {
+        let n = HUMAN_ROW_BUDGET + 7;
+        let entries: Vec<ChurnEntry> = (0..n)
+            .map(|i| ChurnEntry {
+                file_path: format!("f{i:03}.rs"),
+                commit_count: (n - i) as u64,
+                lines_changed: 1,
+            })
+            .collect();
+        let resp = make_response(entries, "90.days.ago");
+        let out = resp.render_human(true);
+
+        // Every row present; no remainder line.
+        assert!(
+            out.contains(&format!("f{:03}.rs", n - 1)),
+            "last row must appear under --full:\n{out}"
+        );
+        assert!(
+            !out.contains("more — --full"),
+            "no remainder under --full:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_no_remainder_when_within_budget() {
+        let resp = make_response(
+            vec![ChurnEntry {
+                file_path: "only.rs".to_string(),
+                commit_count: 1,
+                lines_changed: 1,
+            }],
+            "90.days.ago",
+        );
+        let out = resp.render_human(false);
+        assert!(!out.contains("more — --full"), "{out}");
     }
 
     #[test]
@@ -231,7 +346,7 @@ mod tests {
             ],
             "90.days.ago",
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         // Both rows should have aligned columns
         // The short path should be padded to match the long path

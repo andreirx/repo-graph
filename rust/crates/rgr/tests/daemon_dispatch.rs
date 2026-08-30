@@ -1383,23 +1383,35 @@ fn stats_low_import_graph_attaches_real_posture_and_caveat() {
     let caveat_pos = human
         .find("treat these as directional")
         .expect("the dependency-section caveat must be present in human output");
-    let fanin_pos = human
-        .find("By fan-in")
-        .expect("the fan-in section must be present");
+    // QUANT-MECH-1 §2.3: the four former per-metric sections are de-duped into one
+    // "Directory groups" table; the caveat sits above it (the table carries the
+    // coupling columns).
+    let table_pos = human
+        .find("Directory groups (by size)")
+        .expect("the directory-groups table must be present");
     assert!(
-        caveat_pos < fanin_pos,
-        "the caveat must precede the dependency sections: {human}"
+        caveat_pos < table_pos,
+        "the caveat must precede the directory table: {human}"
     );
     // And the degenerate zero-degree coupling (no resolved cross-module edges on this LOW index)
     // renders `unknown` end-to-end through the real renderer — never a fabricated `0.00` (the D1
-    // never-a-bare-0 rule, proven on real daemon JSON, not a hand-built response).
+    // never-a-bare-0 rule, proven on real daemon JSON, not a hand-built response). The I and D
+    // columns of the table render "unknown"; abstractness stays a concrete number.
     assert!(
-        human.contains("D=unknown") && human.contains("I=unknown"),
+        human.contains("unknown"),
         "degenerate coupling must render unknown through the real renderer: {human}"
     );
-    assert!(
-        !human.contains("D=0.00") && !human.contains("I=0.00"),
-        "must NOT render a fabricated 0.00 for undefined coupling: {human}"
+    // No fabricated 0.00 for the undefined I/D metrics. (A measured 0.00 abstractness may
+    // legitimately appear, so we only forbid the unknown metrics reading as 0.00 by checking
+    // the table row for the degenerate directory carries the "unknown" token, asserted above.)
+    let core_row = human
+        .lines()
+        .find(|l| l.contains("core") && l.contains("unknown"))
+        .expect("degenerate directory row present with unknown coupling");
+    assert_eq!(
+        core_row.matches("unknown").count(),
+        2,
+        "both I and D of the degenerate row must be unknown, not a fabricated number: {core_row}"
     );
 }
 

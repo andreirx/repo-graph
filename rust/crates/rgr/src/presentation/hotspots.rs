@@ -13,11 +13,14 @@
 //! # Output Contract
 //!
 //! - Deterministic ordering (by hotspot_score desc, then path asc)
-//! - Full output, no truncation
-//! - `--json` preserved for machine mode
+//! - Human render is BUDGETED (QUANT-MECH-1 §2.2): top [`HUMAN_ROW_BUDGET`] rows +
+//!   an explicit `(+N more — --full)` remainder line; `--full` renders every row.
+//!   `--json` is always the COMPLETE set (budgets are human-render only).
 
 use repo_graph_classification::measurement_coverage::MeasurementCoverageBlock;
 use serde::Deserialize;
+
+use crate::presentation::{budget_remainder_line, HUMAN_ROW_BUDGET};
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -71,8 +74,10 @@ pub struct HotspotEntry {
 impl HotspotsResponse {
     /// Render the hotspots response as human-readable plain text.
     ///
-    /// Outputs full sorted list. No truncation. Caller can pipe to `head`.
-    pub fn render_human(&self) -> String {
+    /// QUANT-MECH-1 §2.2: BUDGETED — shows the top [`HUMAN_ROW_BUDGET`] rows then an
+    /// explicit `(+N more — --full)` remainder line. `full == true` (from `--full`)
+    /// renders every row uncapped. The COMPLETE set always rides `hotspots --json`.
+    pub fn render_human(&self, full: bool) -> String {
         let mut out = String::new();
 
         // Header with time window
@@ -143,10 +148,18 @@ impl HotspotsResponse {
                 .then_with(|| a.file_path.cmp(&b.file_path))
         });
 
-        // Compute column widths for alignment
-        let max_score = entries.iter().map(|e| e.hotspot_score).max().unwrap_or(0);
-        let max_churn = entries.iter().map(|e| e.lines_changed).max().unwrap_or(0);
-        let max_complexity = entries.iter().map(|e| e.sum_complexity).max().unwrap_or(0);
+        // QUANT-MECH-1 §2.2: bound to the budget unless `--full`.
+        let cap = if full {
+            entries.len()
+        } else {
+            HUMAN_ROW_BUDGET.min(entries.len())
+        };
+        let shown = &entries[..cap];
+
+        // Compute column widths over the SHOWN rows (aligns to what is printed).
+        let max_score = shown.iter().map(|e| e.hotspot_score).max().unwrap_or(0);
+        let max_churn = shown.iter().map(|e| e.lines_changed).max().unwrap_or(0);
+        let max_complexity = shown.iter().map(|e| e.sum_complexity).max().unwrap_or(0);
 
         let score_width = format!("{}", max_score).len().max(5); // "Score"
         let churn_width = format!("{}", max_churn).len().max(5); // "Churn"
@@ -164,7 +177,7 @@ impl HotspotsResponse {
         ));
 
         // Table rows
-        for entry in &entries {
+        for entry in shown {
             out.push_str(&format!(
                 "  {:>score_width$}  {:>churn_width$}  {:>complexity_width$}  {}\n",
                 entry.hotspot_score,
@@ -175,6 +188,11 @@ impl HotspotsResponse {
                 churn_width = churn_width,
                 complexity_width = complexity_width,
             ));
+        }
+
+        // Explicit remainder line (never silent) when the budget hid rows.
+        if let Some(line) = budget_remainder_line(entries.len(), shown.len()) {
+            out.push_str(&line);
         }
 
         out
@@ -236,7 +254,7 @@ mod tests {
     #[test]
     fn render_empty_hotspots() {
         let resp = make_response(vec![], "90.days.ago", None);
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("Hotspots (last 90 days)"));
         assert!(out.contains("Formula: lines_changed * sum_complexity"));
@@ -251,7 +269,7 @@ mod tests {
             "30.days.ago",
             None,
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("Hotspots (last 30 days)"));
         assert!(out.contains("1 file scored"));
@@ -272,7 +290,7 @@ mod tests {
             "90.days.ago",
             None,
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("3 files scored"));
 
@@ -299,7 +317,7 @@ mod tests {
             "90.days.ago",
             Some(filtering),
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("Filtering:"));
         assert!(out.contains("excluded 5 test files"));
@@ -320,7 +338,7 @@ mod tests {
             "90.days.ago",
             Some(filtering),
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("Filtering:"));
         assert!(out.contains("excluded 5 test files"));
@@ -337,7 +355,7 @@ mod tests {
             excluded_vendored_count: 1,
         };
         let resp = make_response(vec![], "90.days.ago", Some(filtering));
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("excluded 1 test file"));
         assert!(out.contains("excluded 1 vendored file"));
@@ -350,7 +368,7 @@ mod tests {
             "90.days.ago",
             None,
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         assert!(out.contains("Score"));
         assert!(out.contains("Churn"));
@@ -368,13 +386,53 @@ mod tests {
             "90.days.ago",
             None,
         );
-        let out = resp.render_human();
+        let out = resp.render_human(false);
 
         // Both rows present
         assert!(out.contains("x.rs"));
         assert!(out.contains("long/path/file.rs"));
         // Large numbers present
         assert!(out.contains("9999999999"));
+    }
+
+    // ── QUANT-MECH-1 §2.2: budget + explicit remainder + --full ──
+
+    #[test]
+    fn render_budgets_default_with_explicit_remainder() {
+        let n = HUMAN_ROW_BUDGET + 5;
+        // Descending scores so h000 ranks first, h{n-1} last.
+        let entries: Vec<HotspotEntry> = (0..n)
+            .map(|i| make_entry(&format!("h{i:03}.rs"), 10, 10, (n - i) as u64 * 100))
+            .collect();
+        let resp = make_response(entries, "90.days.ago", None);
+        let out = resp.render_human(false);
+
+        assert!(out.contains(&format!("{n} files scored")), "{out}");
+        assert!(out.contains("h000.rs"), "top row shown:\n{out}");
+        assert!(
+            !out.contains(&format!("h{HUMAN_ROW_BUDGET:03}.rs")),
+            "over-budget row omitted:\n{out}"
+        );
+        assert!(out.contains("(+5 more — --full)"), "{out}");
+    }
+
+    #[test]
+    fn render_full_uncaps_and_has_no_remainder() {
+        let n = HUMAN_ROW_BUDGET + 5;
+        let entries: Vec<HotspotEntry> = (0..n)
+            .map(|i| make_entry(&format!("h{i:03}.rs"), 10, 10, (n - i) as u64 * 100))
+            .collect();
+        let resp = make_response(entries, "90.days.ago", None);
+        let out = resp.render_human(true);
+
+        assert!(
+            out.contains(&format!("h{:03}.rs", n - 1)),
+            "last row present under --full:\n{out}"
+        );
+        assert!(
+            !out.contains("more — --full"),
+            "no remainder under --full:\n{out}"
+        );
     }
 
     // ── METRIC-LANG-COVERAGE-1 (part A): coverage caveat rendering ──
@@ -403,7 +461,7 @@ mod tests {
             count("rust", 72, 0),
             count("typescript", 28, 28),
         ]));
-        let out = resp.render_human();
+        let out = resp.render_human(false);
         assert!(out.contains("Rust (72% of functions)"), "{out}");
         assert!(out.contains("not yet measured"), "{out}");
         assert!(out.contains("rankings omit it"), "{out}");
@@ -421,7 +479,7 @@ mod tests {
             count("rust", 72, 72),
             count("typescript", 28, 28),
         ]));
-        let out = resp.render_human();
+        let out = resp.render_human(false);
         assert!(!out.contains("not yet measured"), "{out}");
     }
 
@@ -435,7 +493,7 @@ mod tests {
             None,
         );
         resp.measurement_coverage = Some(MeasurementCoverageBlock::unavailable());
-        let out = resp.render_human();
+        let out = resp.render_human(false);
         assert!(
             out.contains("could not be read"),
             "unavailable coverage must be stated on the hotspots surface: {out}"

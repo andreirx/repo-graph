@@ -6,7 +6,10 @@
 //!   - `commit_count`: number of commits that touched the file in the window
 //!   - `lines_changed`: total lines added + deleted in the window
 //!   - Paths: repo-relative, forward slashes, no `./` prefix
-//!   - Ordering: deterministic total order (lines desc, commits desc, path asc)
+//!   - Ordering: deterministic total order (commits desc, lines desc, path asc).
+//!     QUANT-MECH-1 (audit #10, ratified 2026-08-30): commit_count is the churn
+//!     SIGNAL ("what keeps changing"); lines_changed is the tiebreaker, not the
+//!     lead key. Only the SORT changed here — what is counted is unchanged.
 //!
 //! Rename handling:
 //!   - Rename detection disabled (`--no-renames`)
@@ -76,8 +79,8 @@ impl ChurnWindow {
 ///
 /// Returns churn facts for all files modified in the time window.
 /// Results are sorted by:
-///   1. `lines_changed` descending
-///   2. `commit_count` descending
+///   1. `commit_count` descending
+///   2. `lines_changed` descending
 ///   3. `file_path` ascending
 ///
 /// # Errors
@@ -208,14 +211,14 @@ fn parse_churn_output(output: &str) -> Result<Vec<FileChurnEntry>, GitError> {
         )
         .collect();
 
-    // Deterministic total order:
-    // 1. lines_changed DESC
-    // 2. commit_count DESC
-    // 3. file_path ASC
+    // Deterministic total order (QUANT-MECH-1 §2.1, audit #10):
+    // 1. commit_count DESC  — the churn signal: "what keeps changing"
+    // 2. lines_changed DESC — tiebreaker, not the lead key
+    // 3. file_path ASC      — total order → deterministic ties
     results.sort_by(|a, b| {
-        b.lines_changed
-            .cmp(&a.lines_changed)
-            .then_with(|| b.commit_count.cmp(&a.commit_count))
+        b.commit_count
+            .cmp(&a.commit_count)
+            .then_with(|| b.lines_changed.cmp(&a.lines_changed))
             .then_with(|| a.file_path.cmp(&b.file_path))
     });
 
@@ -388,6 +391,34 @@ COMMIT_BOUNDARY
         // b.rs: 1 commit, 10 lines
         assert_eq!(results[0].file_path, "src/a.rs");
         assert_eq!(results[0].commit_count, 2);
+    }
+
+    #[test]
+    fn parse_churn_output_commit_leader_outranks_line_leader() {
+        // QUANT-MECH-1 §2.1 (audit #10): the RATIFIED behavior change. `big.rs` is
+        // one huge bulk edit (1 commit, 1000 lines); `hot.rs` is the sustained-change
+        // leader (3 commits, 60 lines total). Under the NEW sort (commit_count DESC)
+        // the sustained-change file ranks FIRST — the file that keeps changing, not the
+        // file that once changed hugely. The OLD sort (lines DESC) would invert this.
+        let output = r#"COMMIT_BOUNDARY
+1000	0	big.rs
+20	0	hot.rs
+COMMIT_BOUNDARY
+20	0	hot.rs
+COMMIT_BOUNDARY
+20	0	hot.rs
+"#;
+        let results = parse_churn_output(output).unwrap();
+
+        assert_eq!(results.len(), 2);
+        // hot.rs: 3 commits, 60 lines → ranks first on commit_count DESC.
+        assert_eq!(results[0].file_path, "hot.rs");
+        assert_eq!(results[0].commit_count, 3);
+        assert_eq!(results[0].lines_changed, 60);
+        // big.rs: 1 commit, 1000 lines → ranks second despite the larger line volume.
+        assert_eq!(results[1].file_path, "big.rs");
+        assert_eq!(results[1].commit_count, 1);
+        assert_eq!(results[1].lines_changed, 1000);
     }
 
     #[test]

@@ -35,24 +35,27 @@ use crate::daemon_command::{
 use crate::presentation::churn::ChurnResponse;
 
 fn print_usage() {
-    eprintln!("usage: rmap churn [--since <expr>] [--json]");
+    eprintln!("usage: rmap churn [--since <expr>] [--full] [--json]");
     eprintln!();
     eprintln!("Show file churn (commits and lines changed) for the repository.");
     eprintln!("Repository is resolved from current working directory.");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --since <expr>  Time window (default: 90.days.ago)");
+    eprintln!("  --full          Render every row (default: top 25 + a remainder line)");
     eprintln!("  --json          Output raw JSON instead of human-readable text");
 }
 
 /// Parsed arguments for churn command.
 struct ChurnArgs {
     since: String,
+    full: bool,
     json_mode: bool,
 }
 
 fn parse_args(args: &[String]) -> Result<ChurnArgs, ExitCode> {
     let mut since = "90.days.ago".to_string();
+    let mut full = false;
     let mut json_mode = false;
     let mut i = 0;
 
@@ -65,6 +68,10 @@ fn parse_args(args: &[String]) -> Result<ChurnArgs, ExitCode> {
                 }
                 since = args[i + 1].clone();
                 i += 2;
+            }
+            "--full" => {
+                full = true;
+                i += 1;
             }
             "--json" => {
                 json_mode = true;
@@ -83,7 +90,11 @@ fn parse_args(args: &[String]) -> Result<ChurnArgs, ExitCode> {
         }
     }
 
-    Ok(ChurnArgs { since, json_mode })
+    Ok(ChurnArgs {
+        since,
+        full,
+        json_mode,
+    })
 }
 
 /// Run the `rmap churn` command.
@@ -115,5 +126,7 @@ pub fn run_churn(args: &[String]) -> ExitCode {
     };
 
     // Output result
-    output_result::<ChurnResponse, _>(result, parsed.json_mode, |response| response.render_human())
+    output_result::<ChurnResponse, _>(result, parsed.json_mode, |response| {
+        response.render_human(parsed.full)
+    })
 }
