@@ -282,8 +282,19 @@ pub(super) fn render_facts_tier(result: &serde_json::Value, out: &mut String) {
             ));
         }
         if matched > shown {
-            let plus = if floor { "+" } else { "" };
-            out.push_str(&format!("    (+{}{plus} more — --full)\n", matched - shown));
+            // FIND-RANK-1 (§2.2): the cap is NAMED and EXACT — `showing 8 of 200 —
+            // --full for all`, using the real shown/matched numbers, never the former
+            // unexplained `(+N+ more)`. When `matched` is a FLOOR (the fetch window
+            // saturated — `matched_is_floor`), the total renders as `at least N` (the
+            // honest lower bound), never a fabricated exact count.
+            let total = if floor {
+                format!("at least {matched}")
+            } else {
+                matched.to_string()
+            };
+            out.push_str(&format!(
+                "    showing {shown} of {total} — --full for all\n"
+            ));
         }
     }
 

@@ -40,6 +40,7 @@ use std::collections::BTreeSet;
 use repo_graph_storage::StorageConnection;
 
 mod queries;
+mod rank;
 
 /// Per-class DISPLAY cap in the default (non-`--full`) rendering (§2.2): each class
 /// shows at most this many hits, with an explicit `(+N more — --full)` remainder.

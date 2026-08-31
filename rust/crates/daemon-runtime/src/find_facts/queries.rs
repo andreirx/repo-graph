@@ -18,7 +18,7 @@
 
 use repo_graph_storage::StorageConnection;
 
-use super::{finalize, like_fetch_limit, ClassHits, FactHit, HitPath};
+use super::{finalize, like_fetch_limit, rank, ClassHits, FactHit, HitPath};
 
 pub(super) fn symbols(
     storage: &StorageConnection,
@@ -26,31 +26,62 @@ pub(super) fn symbols(
     query: &str,
     full: bool,
 ) -> Result<ClassHits, String> {
-    let limit = like_fetch_limit(full);
+    // FIND-RANK-1 (review-0 blocking fix): the AUTHORITATIVE symbol order is the pure
+    // Rust comparator `rank`, whose precedence — non-test → KIND WEIGHT → match quality →
+    // qualified-name length → path → stable_key — a bounded SQL window ordered by
+    // (is_test, name ASC) does NOT reproduce. Under a 200-row window, 200+ lexically-early
+    // non-test lesser-kind matches (e.g. `VARIABLE`s) could CROWD OUT a prominent
+    // production `FUNCTION`/`CLASS` whose name sorts late — excluding it from the window
+    // entirely, so the comparator never sees it and the visible cap is NOT the global
+    // top-N (the contract's §2.1 guarantee). We therefore fetch the COMPLETE matching set
+    // (`usize::MAX`) and rank all of it here; the comparator stays the SINGLE source of
+    // truth (never duplicated into SQL), and the matched count is EXACT — the whole set
+    // was seen, so it is never a `+N` floor. This is what `--exact`/`--full` already
+    // fetched; default and full now differ ONLY in the display cap `finalize` applies.
     let rows = storage
-        .find_fact_symbols(snapshot_uid, query, limit)
+        .find_fact_symbols(snapshot_uid, query, usize::MAX)
         .map_err(|e| format!("symbol fact read failed: {e}"))?;
-    let saturated = rows.len() >= limit;
-    let hits = rows
-        .into_iter()
-        .map(|r| FactHit {
-            display: r.qualified_name.filter(|q| !q.is_empty()).unwrap_or(r.name),
+
+    // Rank the complete set into the ratified display order. Borrow-only views over
+    // `rows`; `finalize` then dedups + applies the display cap to the sorted hits.
+    let mut views: Vec<rank::SymbolRank> = rows
+        .iter()
+        .map(|r| rank::SymbolRank {
+            name: &r.name,
+            qualified_name: r.qualified_name.as_deref(),
+            is_test: r.is_test,
+            subtype: r.subtype.as_deref(),
+            path: r.path.as_deref(),
+            stable_key: &r.stable_key,
+        })
+        .collect();
+    rank::sort_symbols(&mut views, query);
+
+    let hits = views
+        .iter()
+        .map(|v| FactHit {
+            display: v
+                .qualified_name
+                .filter(|q| !q.is_empty())
+                .unwrap_or(v.name)
+                .to_string(),
             // A symbol ALWAYS belongs to a file; a `None` here is the LEFT JOIN
             // finding no `files` row for the node's `file_uid` — an UNKNOWN owning
             // file, surfaced with its reason, never a silent "no path" (review-4
             // item 2 / STANDING HONESTY RULE).
-            path: match r.path {
-                Some(p) => HitPath::Known(p),
+            path: match v.path {
+                Some(p) => HitPath::Known(p.to_string()),
                 None => HitPath::Unknown(
                     "owning file unresolved (no files row for this symbol's file_uid)".to_string(),
                 ),
             },
-            key: Some(r.stable_key),
+            key: Some(v.stable_key.to_string()),
             // Class-level render command (`explain <key>`); no per-hit override.
             next_command: None,
         })
         .collect();
-    Ok(finalize(hits, full, saturated))
+    // Never saturated: the whole matching set was fetched, so `matched` is EXACT.
+    Ok(finalize(hits, full, false))
 }
 
 pub(super) fn files(

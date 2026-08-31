@@ -1,7 +1,35 @@
 # FIND-RANK-1 — find's cap slots go to the symbols people are looking for
 
-Status: SPECIFIED (2026-08-31) · Track: Usefulness audit v0.11.0 fix queue, item #5 (final
-top-tier). CODE slice, ranking/presentation. Maturity: find is fresh (FIND-FACTS-1).
+Status: IMPLEMENTED (2026-08-31, builder FIND-RANK-1 build-2 — pending review) · Track:
+Usefulness audit v0.11.0 fix queue, item #5 (final top-tier). CODE slice,
+ranking/presentation. Maturity: find is fresh (FIND-FACTS-1).
+
+> IMPLEMENTATION NOTES (build-2, review-0 fix). RETRACTION of a build-1 claim: build-1
+> asserted the SQL's `(is_test, name ASC)` 200-row fetch window "contains the true winners"
+> so the Rust comparator could re-rank it. It does NOT — rank precedence weights KIND above
+> name, so 200+ lexically-early non-test lesser-kind matches (`VARIABLE`s) could crowd a
+> prominent production `FUNCTION` out of the window and off the screen (review-0 blocking
+> defect; `--exact` hid it, DEFAULT mode exposed it). FIX: `queries::symbols` now fetches the
+> COMPLETE matching set (`limit = usize::MAX` in every mode) and ranks all of it, so the
+> visible cap is the GLOBAL top-N and the `matched` count is EXACT (never a `+N` floor). The
+> SQL `ORDER BY` is retained only as a deterministic diagnostic pre-order, never a
+> winner-bearing window (comment corrected in `find_facts_reads.rs`). Regression proof:
+> `tests/find_rank_window_seam.rs` seeds 210 lexically-early non-test `VARIABLE`s ahead of one
+> prominent `FUNCTION` and asserts, through DEFAULT-mode `find`, the function leads the
+> visible hits — fails on the pre-fix window, passes on the fix. The comparator itself is
+> unchanged. Out-of-scope `docs/architecture/agent-orientation-contract.md` (a CHECK-SIGNAL-1
+> doc paragraph left in the tree) restored to HEAD (review-0 item 4).
+
+> IMPLEMENTATION NOTES (build-1). Seed similarity FLOOR pinned at **0.60**, PRESENTATION-side
+> (CLI `seed_render`), the seed formula/pins frozen (§3). Basis (§2.3): live-measured bands
+> — FRAKTAG `woocommerce` (no home) seeds 0.500–0.540; glamCRM real neighbourhoods
+> (`exchange rate`, `authentication`) 0.65–0.76 → 0.60 sits in the gap; woocommerce abstains,
+> real homes render. Kind-weight demotes the CONTRACT-NAMED lesser set
+> `{VARIABLE,CONSTANT,PROPERTY,ENUM_MEMBER}`; unknown subtype AND unknown is_test rank in the
+> favourable partition (never demote on unknown, §2.4). Rank is a pure unit-tested comparator
+> (`find_facts::rank`); the `symbol`/`file` reads carry the stored `is_test` FACT (never a path
+> string). JSON: hits are ordered (no new field); seed candidates stay raw-with-scores (the
+> human floor is presentation-only). No new fact class → witness manifest unchanged.
 
 ## 1. Problem (measured — audit run 2026-08-30T20-44-57Z)
 

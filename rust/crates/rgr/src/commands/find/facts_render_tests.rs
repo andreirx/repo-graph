@@ -30,7 +30,9 @@ fn symbol_hit_renders_with_class_and_certainty_label() {
 }
 
 #[test]
-fn per_class_cap_shows_explicit_remainder() {
+fn per_class_cap_names_exact_total() {
+    // FIND-RANK-1 §2.2: the cap is NAMED and EXACT — `showing 8 of 20 — --full for
+    // all`, the real shown/matched numbers, never the former unexplained `(+N more)`.
     let hits: Vec<serde_json::Value> = (0..8)
         .map(|i| json!({"display": format!("s{i}"), "path": format!("f{i}.ts"), "key": format!("k{i}"), "next": format!("explain k{i}")}))
         .collect();
@@ -41,13 +43,15 @@ fn per_class_cap_shows_explicit_remainder() {
     });
     let out = facts(&json!({"facts": f}));
     assert!(
-        out.contains("(+12 more — --full)"),
-        "exact remainder: {out}"
+        out.contains("showing 8 of 20 — --full for all"),
+        "named exact cap: {out}"
     );
 }
 
 #[test]
-fn floor_remainder_marked_with_plus() {
+fn floor_remainder_renders_at_least_never_plus() {
+    // FIND-RANK-1 §2.2: a saturated fetch window (matched_is_floor) renders the total
+    // as the honest lower bound `at least 200`, never the fabricated-exact `+N+`.
     let hits: Vec<serde_json::Value> = (0..8)
         .map(|i| json!({"display": format!("s{i}"), "path": format!("f{i}.ts"), "key": format!("k{i}"), "next": format!("explain k{i}")}))
         .collect();
@@ -58,9 +62,10 @@ fn floor_remainder_marked_with_plus() {
     });
     let out = facts(&json!({"facts": f}));
     assert!(
-        out.contains("(+192+ more — --full)"),
-        "floor remainder: {out}"
+        out.contains("showing 8 of at least 200 — --full for all"),
+        "floor total named as a lower bound: {out}"
     );
+    assert!(!out.contains("+"), "no unexplained +N+ marker: {out}");
 }
 
 #[test]
@@ -276,8 +281,8 @@ fn large_matched_is_preserved_not_truncated() {
     });
     let out = facts(&json!({"facts": f}));
     assert!(
-        out.contains("(+4999999999 more — --full)"),
-        "large matched preserved as exact remainder: {out}"
+        out.contains("showing 1 of 5000000000 — --full for all"),
+        "large matched preserved as the exact named total: {out}"
     );
 }
 

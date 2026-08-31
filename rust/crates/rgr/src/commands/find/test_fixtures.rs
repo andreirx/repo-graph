@@ -35,3 +35,18 @@ pub(crate) fn well_formed_candidate(source: Value) -> Value {
     }
     Value::Object(c)
 }
+
+/// A well-formed `embedding` seed candidate at a caller-chosen `score` and
+/// `stable_key`, for the FIND-RANK-1 §2.3 similarity-floor tests. All other identity
+/// fields are valid so the ONLY variable under test is the score relative to the floor.
+pub(crate) fn candidate_with_score(stable_key: &str, score: f64) -> Value {
+    json!({
+        "path": "src/x.ts",
+        "stable_key": stable_key,
+        "score": score,
+        "model_id": "nomic-embed-text-v1.5",
+        "source": "embedding",
+        "module": {"owning": "backend/x"},
+        "next": {"cwd": "/repo"},
+    })
+}

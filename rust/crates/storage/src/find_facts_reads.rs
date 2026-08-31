@@ -46,6 +46,19 @@ pub struct FactSymbolRow {
     /// Owning file path (via the `files` join); `None` when the symbol has no
     /// resolvable file association — an explicit unknown, never fabricated.
     pub path: Option<String>,
+    /// FIND-RANK-1 (§2.1a): the STORED `is_test` FACT of the symbol's DEFINING FILE
+    /// (`files.is_test`, strict `== 1` per `TrackedFile` parity) — the ranking input
+    /// that puts production symbols before test noise. `None` when the LEFT JOIN found
+    /// no `files` row (the SAME unknown that leaves `path` `None`): an UNKNOWN test
+    /// status, NEVER a fabricated "not a test". The comparator ranks unknown in the
+    /// NON-TEST partition (§2.4 — never demoted on unknown). This is the `is_test`
+    /// FACT, never a path-string classification (STANDING HONESTY RULE 2).
+    pub is_test: Option<bool>,
+    /// FIND-RANK-1 (§2.1b): the symbol's stored KIND (`nodes.subtype`, e.g. `CLASS`,
+    /// `FUNCTION`, `VARIABLE`) — the kind-weight ranking input. `None` when the producer
+    /// emitted no subtype; the comparator ranks unknown-kind Prominent (never demoted on
+    /// unknown). Raw producer string; the daemon owns the kind→weight map.
+    pub subtype: Option<String>,
 }
 
 /// One matched file path (fact class `file`, rendered by `explain`).
@@ -103,9 +116,23 @@ fn bind_limit(limit: usize) -> i64 {
 
 impl StorageConnection {
     /// Fact class `symbol` (§2.1): SYMBOL nodes whose `name` OR `qualified_name`
-    /// contains `query` (case-insensitive). Deterministic order (name, then
-    /// qualified_name, then stable_key) so `--exact` output is stable. `limit`
-    /// bounds the fetch (the caller applies the per-class display cap on top).
+    /// contains `query` (case-insensitive), carrying the defining file's `is_test`
+    /// FACT and the symbol `subtype` for the FIND-RANK-1 rank.
+    ///
+    /// FIND-RANK-1 ordering (§2.1, review-0): the SQL `ORDER BY` puts NON-TEST symbols
+    /// first (`is_test = 1` last; a NULL from the LEFT JOIN falls to the ELSE = non-test
+    /// partition, matching §2.4), then name/qualified_name/stable_key ASC. This is ONLY a
+    /// deterministic pre-order — it does NOT reproduce the ratified display precedence
+    /// (which weights KIND above name), so it must NEVER be trusted to "contain the
+    /// winners" under a truncating `LIMIT`. It does not have to: the sole caller
+    /// (`find_facts::queries::symbols`) fetches the COMPLETE matching set (`limit =
+    /// usize::MAX` in every mode) and re-ranks it with the pure Rust comparator
+    /// `find_facts::rank` (kind weight, match quality, qualified-name length, path) — the
+    /// unit-tested contract (§4) and single source of truth. A bounded window ordered by
+    /// (is_test, name) here would EXCLUDE a globally top-ranked symbol whose name sorts
+    /// late (review-0 blocking defect), so no window is applied. `limit` is retained as a
+    /// parameter (all callers pass `usize::MAX`) for signature parity with the other
+    /// fact reads; the `ORDER BY` keeps the raw row stream stable for diagnostics.
     pub fn find_fact_symbols(
         &self,
         snapshot_uid: &str,
@@ -114,14 +141,15 @@ impl StorageConnection {
     ) -> Result<Vec<FactSymbolRow>, StorageError> {
         let needle = like_needle(query);
         let mut stmt = self.connection().prepare(
-            "SELECT n.stable_key, n.name, n.qualified_name, f.path
+            "SELECT n.stable_key, n.name, n.qualified_name, f.path, f.is_test, n.subtype
              FROM nodes n
              LEFT JOIN files f ON n.file_uid = f.file_uid
              WHERE n.snapshot_uid = ?1
                AND n.kind = 'SYMBOL'
                AND ( LOWER(n.name) LIKE ?2 ESCAPE '\\'
                   OR LOWER(COALESCE(n.qualified_name, '')) LIKE ?2 ESCAPE '\\' )
-             ORDER BY n.name ASC, COALESCE(n.qualified_name, '') ASC, n.stable_key ASC
+             ORDER BY CASE WHEN f.is_test = 1 THEN 1 ELSE 0 END ASC,
+                      n.name ASC, COALESCE(n.qualified_name, '') ASC, n.stable_key ASC
              LIMIT ?3",
         )?;
         let rows = stmt
@@ -133,6 +161,10 @@ impl StorageConnection {
                         name: row.get(1)?,
                         qualified_name: row.get(2)?,
                         path: row.get(3)?,
+                        // Strict `== 1` (TrackedFile parity); NULL (no files row) →
+                        // `None` = UNKNOWN, never a fabricated `false`.
+                        is_test: row.get::<_, Option<i64>>(4)?.map(|v| v == 1),
+                        subtype: row.get(5)?,
                     })
                 },
             )?
@@ -142,7 +174,14 @@ impl StorageConnection {
 
     /// Fact class `file` (§2.1): tracked files of the snapshot whose repo-relative
     /// path contains `query`. Scoped through `file_versions` (the snapshot's tracked
-    /// universe — the same join the path/file summaries use). Path-ASC order.
+    /// universe — the same join the path/file summaries use).
+    ///
+    /// FIND-RANK-1 (§2.1, "files: non-test first, same basis"): NON-TEST files first
+    /// (`is_test = 1` last), then path ASC. This class's whole rank is expressible in
+    /// SQL (the trivial two-key order — no per-query match-quality dimension), so it
+    /// stays here rather than routing through the symbol comparator. `files.is_test` is
+    /// `NOT NULL DEFAULT 0` and the join is INNER (`file_versions` → `files`), so there
+    /// is no unknown partition for this class.
     pub fn find_fact_files(
         &self,
         snapshot_uid: &str,
@@ -156,7 +195,7 @@ impl StorageConnection {
              JOIN files f ON f.file_uid = fv.file_uid
              WHERE fv.snapshot_uid = ?1
                AND LOWER(f.path) LIKE ?2 ESCAPE '\\'
-             ORDER BY f.path ASC
+             ORDER BY CASE WHEN f.is_test = 1 THEN 1 ELSE 0 END ASC, f.path ASC
              LIMIT ?3",
         )?;
         let rows = stmt
