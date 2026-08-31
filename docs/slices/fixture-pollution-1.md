@@ -1,4 +1,9 @@
-# FIXTURE-POLLUTION-1 — rmap's own test fixtures stop posing as its architecture
+# FIXTURE-POLLUTION-1 — test-only surfaces stop posing as production architecture
+
+> AMENDED (ruling fixture-test-scope = Option 1, 2026-08-31): the demotion applies to ALL
+> structurally test-only surfaces on every repo (neutral "test-only" wording) — there is no
+> provenance fact distinguishing rmap's fixtures from user test code, and inventing one is
+> unearned. glamCRM's test-mock surfaces demoting below its real routes is intentional.
 
 Status: SPECIFIED (2026-08-31) · Track: Usefulness audit v0.11.0 fix queue, item #3 (post-
 refutation numbering). CODE slice, presentation/classification layer. Maturity: MATURE.
@@ -55,12 +60,15 @@ commit.
 - Live proof (isolated state root, registry sha unchanged): repo-graph self-index —
   boundaries headline counts the 4 real groups with the fixture section labeled below;
   cycles' fixture cycle labeled on the SQLite route; docs-list free of smoke-run sidecars
-  (or honestly caveated). glamCRM spot-check: no behavior change (its surfaces have no
-  fixture subtrees). Captures in the report.
+  (or honestly caveated). glamCRM spot-check: test-mock surfaces (if any classify test-only)
+  demote below production routes — an INTENTIONAL change, captured before/after. Captures in the report.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done
 
-An agent orienting on repo-graph reads its REAL boundaries first; fixture content is labeled
-and demoted, never silently hidden and never name-classified; docs-list stops importing
+An agent orienting on ANY repo reads production boundaries first; test-only content is
+labeled and demoted (neutral wording), never silently hidden and never name-classified;
+UNKNOWN test-composition is NEVER demoted — it stays in the main listing with an explicit
+unknown-with-reason marker (hiding possibly-real architecture is worse than showing a
+fixture); docs-list stops importing
 foreign generated maps as architecture; asymmetries are stated; gates green.
