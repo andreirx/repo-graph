@@ -84,8 +84,12 @@ pub struct StateBoundaryHook {
 const STATE_EXTRACTOR_NAME: &str = "state-extractor:0.1.0";
 
 /// Language classification result for diagnostic policy.
+///
+/// `pub(crate)` so the RESOURCE-HONESTY-1 `resource_coverage` module reuses this
+/// ONE token→`Language` family dictionary (ts/tsx/js/jsx → Typescript, etc.) rather
+/// than re-deriving it — the coverage DECISION there is still the registry's `has`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LanguageClassification {
+pub(crate) enum LanguageClassification {
     /// Language is supported and expected to have an adapter.
     /// Missing adapter = configuration fault → diagnostic.
     Supported(Language),
@@ -110,7 +114,7 @@ enum LanguageClassification {
 ///
 /// Unknown languages:
 /// - Everything else
-fn classify_language(lang_str: Option<&str>) -> LanguageClassification {
+pub(crate) fn classify_language(lang_str: Option<&str>) -> LanguageClassification {
     match lang_str {
         // SB-7A: TypeScript adapter is shipped. Missing = fault.
         Some("typescript" | "tsx" | "javascript" | "jsx") => {

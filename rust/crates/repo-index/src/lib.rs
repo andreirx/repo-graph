@@ -64,6 +64,10 @@ pub(crate) mod manifest_deps;
 pub mod perf;
 pub mod react_detector;
 pub mod refresh_policy;
+// RESOURCE-HONESTY-1: the resource-access detector coverage accessor (covered
+// languages + per-token coverage), derived from `state-extractor`'s registry so a
+// coverage statement never drifts from what detection actually runs.
+pub mod resource_coverage;
 pub mod scanner;
 pub mod state_boundary_hook;
 

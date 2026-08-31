@@ -95,6 +95,18 @@ impl AdapterRegistry {
     pub fn has(&self, language: Language) -> bool {
         self.adapters.contains_key(&language)
     }
+
+    /// The languages this registry has a resource-access adapter for.
+    ///
+    /// Order is unspecified (HashMap iteration); callers that render this
+    /// must impose their own deterministic ordering. Used by
+    /// `repo-index`'s resource-coverage accessor (RESOURCE-HONESTY-1) so a
+    /// coverage statement enumerates the ACTUALLY-registered languages from
+    /// this one registry — never a hand-maintained list that could drift
+    /// from `default_registry`.
+    pub fn registered_languages(&self) -> Vec<Language> {
+        self.adapters.keys().copied().collect()
+    }
 }
 
 impl Default for AdapterRegistry {

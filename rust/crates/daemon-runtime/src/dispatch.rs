@@ -5659,6 +5659,31 @@ impl ServiceDispatcher {
         let total_writes: i64 = resources.iter().map(|r| r.writers).sum();
         let count = resources.len();
 
+        // RESOURCE-HONESTY-1: the detector-coverage statement. `detected_languages` is the
+        // build-static list of languages this build's resource-access detection covers, from the ONE
+        // detector registry (never a hardcoded list — a registry change propagates here untouched).
+        // `material_gap` names THIS repo's materially-present languages that have NO detector, so the
+        // zero-state stops blaming the codebase and a lone result stops posing as an inventory. The
+        // per-language read is fallible and CLASSIFIED (it decides which languages are named) → a
+        // failed read renders `unknown`-with-reason, NEVER a silent empty (STANDING HONESTY RULE 1).
+        let detected_languages =
+            repo_graph_repo_index::resource_coverage::resource_detector_language_names();
+        let material_gap = match repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+            &storage,
+            &snapshot.snapshot_uid,
+        ) {
+            Ok(counts) => serde_json::json!({
+                "status": "known",
+                "uncovered_languages": resource_uncovered_material_languages(&counts, |t| {
+                    repo_graph_repo_index::resource_coverage::resource_detection_covers(t)
+                }),
+            }),
+            Err(e) => serde_json::json!({
+                "status": "unknown",
+                "reason": e.to_string(),
+            }),
+        };
+
         let mut response = serde_json::json!({
             "command": "resource list",
             "repo": repo_uid,
@@ -5667,6 +5692,10 @@ impl ServiceDispatcher {
             "count": count,
             "total_reads": total_reads,
             "total_writes": total_writes,
+            "coverage": {
+                "detected_languages": detected_languages,
+                "material_gap": material_gap,
+            },
         });
 
         if let Some(k) = kind_filter {
@@ -9535,6 +9564,7 @@ pub(crate) fn configured_resolver_languages_from_env() -> Vec<EnrichmentLanguage
 pub(crate) use crate::reader_context::{
     call_graph_ceiling_languages, dominant_deps_ecosystem,
     relationship_next_action_line_or_read_error, relationship_reliability_is_low,
+    resource_uncovered_material_languages,
 };
 
 #[cfg(test)]

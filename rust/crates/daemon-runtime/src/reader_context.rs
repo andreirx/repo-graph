@@ -233,6 +233,39 @@ pub(crate) fn call_graph_ceiling_languages(
     }
 }
 
+/// RESOURCE-HONESTY-1 (§2.1/§2.2): the repo's MATERIALLY-present code languages (the SAME
+/// ≥10%-of-code-files gate [`material_code_languages`] — REUSED so resource coverage and the
+/// call-graph ceiling / deps notes read ONE materiality definition) that this build has NO
+/// resource-access detector for. These are the languages whose resources `resource list` cannot
+/// see, so the surface names them instead of blaming the repo for the tool's blind spot.
+///
+/// `covers` is the registry-backed coverage predicate
+/// (`repo_graph_repo_index::resource_detection_covers`), injected so this stays pure + testable —
+/// the SAME daemon→pure injected-fact shape as `configured` on [`relationship_next_action_line`].
+/// `language_counts` MUST arrive count-DESC (as `query_file_count_by_language` returns). Returns
+/// sorted + deduped reader display names (empty when every material language is covered, or when no
+/// code language is materially present). The caller pairs this with the build-static covered-language
+/// list; a FAILED counts read is the caller's `Unknown`-with-reason branch, never a silent empty here.
+///
+/// Sole consumers: the daemon's `handle_resource_list` and this module's tests. Axis: the
+/// resource-detector coverage capability — a demonstrated volatile per-language mechanism (the
+/// Rust/Go-no-detector reality vs the TS/Python/Java/C/C++-detector reality). Rejected simpler:
+/// inline the filter in `handle_resource_list` — rejected because it would re-derive the materiality
+/// gate away from its one home here.
+pub(crate) fn resource_uncovered_material_languages(
+    language_counts: &[(String, u64)],
+    covers: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut names: Vec<&'static str> = material_code_languages(language_counts)
+        .iter()
+        .filter(|m| !covers(&m.token))
+        .map(|m| m.display)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names.into_iter().map(str::to_string).collect()
+}
+
 /// CYCLE-HONESTY-1 (§2.4, ts-caveat-basis C1 REPO-level, operator ruling 2026-08-28 + review-2): is TS/JS
 /// a MATERIALLY-present code language of this repo — the SAME ≥10%-of-code-files gate
 /// [`material_code_languages`] applies for the D5 next-action, REUSED (never a re-derived threshold) so the
@@ -807,6 +840,52 @@ mod honest_degradation_tests {
         assert!(call_graph_ceiling_languages(&[]).is_none());
         // Config-file tokens never establish materiality on their own.
         assert!(call_graph_ceiling_languages(&counts(&[("json", 9999)])).is_none());
+    }
+
+    // ── RESOURCE-HONESTY-1 (§2.1/§2.2): materially-present languages with no resource detector ──
+
+    /// The real build's coverage: TS/JS/Python/Java/C/C++ covered, Rust (and everything else) not.
+    /// Mirrors `repo_graph_repo_index::resource_detection_covers` without the crate dep in this pure
+    /// test — the daemon injects the real predicate at the call site.
+    fn covers(token: &str) -> bool {
+        matches!(
+            token,
+            "typescript" | "tsx" | "javascript" | "jsx" | "python" | "java" | "c" | "cpp"
+        )
+    }
+
+    #[test]
+    fn uncovered_material_names_the_detectorless_material_languages() {
+        // repo-graph's own shape: Rust-dominant with an incidental covered language. Rust is
+        // material AND has no detector → named; the covered language is filtered out.
+        assert_eq!(
+            resource_uncovered_material_languages(
+                &counts(&[("rust", 900), ("typescript", 100)]),
+                covers,
+            ),
+            vec!["Rust".to_string()]
+        );
+        // Two uncovered material languages (both reader-nameable, neither covered) → both named,
+        // sorted.
+        assert_eq!(
+            resource_uncovered_material_languages(&counts(&[("rust", 80), ("go", 60)]), covers),
+            vec!["Go".to_string(), "Rust".to_string()]
+        );
+    }
+
+    #[test]
+    fn uncovered_material_empty_when_all_material_languages_covered() {
+        // A pure-TS repo: TS is covered → nothing uncovered (the zero-state then reads as an honest
+        // "genuinely none found", not a coverage gap).
+        assert!(resource_uncovered_material_languages(&langs(&["typescript"]), covers).is_empty());
+        // Incidental (<10%) uncovered language is BELOW the material gate → not named.
+        assert!(resource_uncovered_material_languages(
+            &counts(&[("python", 950), ("rust", 50)]),
+            covers,
+        )
+        .is_empty());
+        // No material code language at all → empty.
+        assert!(resource_uncovered_material_languages(&[], covers).is_empty());
     }
 
     // ── CYCLE-HONESTY-1 (§2.4): the TS/JS caveat's materiality gate reuses the ≥10% code-file rule ──

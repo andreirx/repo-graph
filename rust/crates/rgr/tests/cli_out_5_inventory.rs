@@ -668,19 +668,30 @@ fn resource_list_json_mode_returns_valid_envelope() {
     assert!(json.get("repo").is_some());
     assert!(json.get("results").is_some());
     assert!(json.get("count").is_some());
+    // RESOURCE-HONESTY-1: the additive coverage block, with the build-static covered languages
+    // and this repo's material gap (known/unknown).
+    let coverage = json.get("coverage").expect("coverage block present");
+    assert!(coverage.get("detected_languages").is_some());
+    assert!(coverage.get("material_gap").is_some());
 }
 
 #[test]
 #[ignore] // Requires daemon pre-built
-fn resource_list_empty_shows_hint() {
-    // Use DocsHarness which doesn't have file access patterns
+fn resource_list_empty_names_coverage_not_the_codebase() {
+    // RESOURCE-HONESTY-1 §2.1: the zero-state names the tool's coverage, never blames the repo.
+    // Use DocsHarness which has no resource access patterns.
     let harness = DocsHarness::new();
     let output = harness.run_cli(&["resource", "list"]);
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("0 resources"));
-    assert!(stdout.contains("hint:"));
+    assert!(stdout.contains("No resource-access patterns detected."));
+    assert!(stdout.contains("Resource-access detection on this build covers"));
+    assert!(
+        !stdout.contains("in this codebase"),
+        "must not blame the codebase: {stdout}"
+    );
 }
 
 #[test]

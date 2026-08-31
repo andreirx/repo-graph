@@ -26,6 +26,44 @@ pub struct ResourceListResponse {
     pub count: usize,
     pub total_reads: usize,
     pub total_writes: usize,
+    /// RESOURCE-HONESTY-1: the detector-coverage statement (additive). Names which
+    /// languages this build's resource-access detection covers and which
+    /// materially-present languages it does NOT — so the zero-state stops blaming the
+    /// codebase and a lone result stops posing as an inventory.
+    pub coverage: ResourceCoverage,
+}
+
+/// RESOURCE-HONESTY-1: resource-access detector coverage for a snapshot.
+///
+/// `detected_languages` is build-static (from the detector registry); `material_gap`
+/// is this repo's uncovered materially-present languages, or `Unknown` when the
+/// per-language read failed (unknown-with-reason, never a silent empty).
+#[derive(Debug, Deserialize, Clone)]
+pub struct ResourceCoverage {
+    /// Reader display names of the languages this build detects resource access in,
+    /// sorted (e.g. `["C", "C++", "Java", "Python", "TypeScript/JavaScript"]`).
+    pub detected_languages: Vec<String>,
+    /// This repo's materially-present languages with no detector, or the read-failure
+    /// reason.
+    pub material_gap: MaterialGap,
+}
+
+/// The materiality-gap arm of [`ResourceCoverage`]: either the (possibly empty) set of
+/// uncovered material languages, or an unknown-with-reason when the language read failed.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum MaterialGap {
+    /// The per-language read succeeded. `uncovered_languages` are the materially-present
+    /// languages with no resource-access detector (empty = every material language covered).
+    Known {
+        /// Reader display names, sorted; empty when nothing material is uncovered.
+        uncovered_languages: Vec<String>,
+    },
+    /// The per-language read failed; the gap is unknown, with the reason preserved.
+    Unknown {
+        /// The read-failure reason (reader sees why coverage could not be determined).
+        reason: String,
+    },
 }
 
 /// Individual resource entry.
@@ -56,8 +94,31 @@ impl ResourceListResponse {
         out.push_str(&format!("{} {}\n", self.count, res_word));
 
         if self.count == 0 {
-            out.push_str("\nhint: no resource access patterns detected in this codebase.\n");
+            // RESOURCE-HONESTY-1 §2.1: the zero-state names the TOOL's coverage instead of
+            // blaming the codebase — which resource-access patterns this build detects and for
+            // which languages (from the detector registry), plus the honest no-detector sentence
+            // for materially-present languages this build cannot see.
+            out.push_str("\nNo resource-access patterns detected.\n");
+            out.push_str(&format!(
+                "Resource-access detection on this build covers {}.\n",
+                self.coverage.detected_languages_line()
+            ));
+            if let Some(gap) = self.coverage.gap_line() {
+                out.push_str(&format!("{}\n", gap));
+            }
             return out;
+        }
+
+        // RESOURCE-HONESTY-1 §2.2: the non-zero coverage header — "N resource(s) via <families>
+        // (coverage: <langs>)" — so a lone result reads against a KNOWN-partial lens, never as the
+        // repo's resource inventory. Families are the reader-frame kinds actually among the results.
+        out.push_str(&format!(
+            "\nvia {} access-call detection (coverage: {})\n",
+            self.detector_families_line(),
+            self.coverage.detected_languages_line()
+        ));
+        if let Some(gap) = self.coverage.gap_line() {
+            out.push_str(&format!("{}\n", gap));
         }
 
         // Totals
@@ -107,6 +168,70 @@ impl ResourceListResponse {
         out.push_str("\nhint: use 'rmap resource readers <key>' or 'rmap resource writers <key>' for details.\n");
 
         out
+    }
+
+    /// RESOURCE-HONESTY-1 §2.2: the reader-frame detector families the detected resources were
+    /// found through — the distinct resource kinds present among `results`, sorted, `/`-joined.
+    /// Derived from the results themselves (single source), so it never overclaims a family the
+    /// build did not actually produce here.
+    fn detector_families_line(&self) -> String {
+        let mut families: Vec<&'static str> = self
+            .results
+            .iter()
+            .map(|r| resource_kind_family(&r.kind))
+            .collect();
+        families.sort_unstable();
+        families.dedup();
+        families.join("/")
+    }
+}
+
+/// Reader-frame family name for a stored resource node-kind (`FS_PATH`, `DB_RESOURCE`, …).
+///
+/// Covers the current node-kind vocabulary (the four `ResourceKind` shapes: fs / db / blob /
+/// cache-state). An unrecognized kind maps to the generic `"other"` rather than a fabricated
+/// specific family — honest degradation for a vocabulary this build does not know. `STATE` is
+/// the node kind the cache/state resource family shares.
+fn resource_kind_family(kind: &str) -> &'static str {
+    match kind {
+        "FS_PATH" => "filesystem",
+        "DB_RESOURCE" => "database",
+        "BLOB" => "object-storage",
+        "STATE" => "cache/state",
+        _ => "other",
+    }
+}
+
+impl ResourceCoverage {
+    /// The covered-languages clause (`"C, C++, Java, Python, TypeScript/JavaScript"`), or an
+    /// explicit `"(no languages)"` in the impossible empty-registry case (never fabricated).
+    fn detected_languages_line(&self) -> String {
+        if self.detected_languages.is_empty() {
+            "(no languages)".to_string()
+        } else {
+            self.detected_languages.join(", ")
+        }
+    }
+
+    /// The honest coverage-gap sentence, or `None` when there is nothing to add (every material
+    /// language is covered). Names this repo's materially-present languages the build cannot see,
+    /// or — when the language read failed — states the coverage is unknown WITH the reason.
+    fn gap_line(&self) -> Option<String> {
+        match &self.material_gap {
+            MaterialGap::Known {
+                uncovered_languages,
+            } if !uncovered_languages.is_empty() => Some(format!(
+                "{} code is present but has no resource-access detector on this build — \
+                 resources accessed from {} are not counted.",
+                uncovered_languages.join(", "),
+                uncovered_languages.join(", ")
+            )),
+            MaterialGap::Known { .. } => None,
+            MaterialGap::Unknown { reason } => Some(format!(
+                "(could not determine this repo's language coverage: {})",
+                reason
+            )),
+        }
     }
 }
 
@@ -243,11 +368,29 @@ mod tests {
 
     // ── resource list tests ──────────────────────────────────────────────────
 
+    /// The real build's covered-language list, with no coverage gap (all material languages
+    /// covered) — the common case for these render tests.
+    fn covered_no_gap() -> ResourceCoverage {
+        ResourceCoverage {
+            detected_languages: vec![
+                "C".to_string(),
+                "C++".to_string(),
+                "Java".to_string(),
+                "Python".to_string(),
+                "TypeScript/JavaScript".to_string(),
+            ],
+            material_gap: MaterialGap::Known {
+                uncovered_languages: vec![],
+            },
+        }
+    }
+
     fn sample_list_response() -> ResourceListResponse {
         ResourceListResponse {
             command: "resource list".to_string(),
             repo: "repo_test".to_string(),
             snapshot: "repo_test/snapshot".to_string(),
+            coverage: covered_no_gap(),
             results: vec![
                 ResourceEntry {
                     stable_key: "repo:fs:config.json:FS_PATH".to_string(),
@@ -340,12 +483,16 @@ mod tests {
         assert!(out.contains("hint: use 'rmap resource readers <key>'"));
     }
 
+    /// RESOURCE-HONESTY-1 §2.1: the zero-state names the TOOL's coverage — never "no resource
+    /// access patterns detected in this codebase" (blaming the repo). With every material language
+    /// covered it reads as an honest "genuinely none found for the covered languages".
     #[test]
-    fn list_render_empty_shows_hint() {
+    fn list_render_empty_names_coverage_not_the_codebase() {
         let resp = ResourceListResponse {
             command: "resource list".to_string(),
             repo: "repo_test".to_string(),
             snapshot: "repo_test/snapshot".to_string(),
+            coverage: covered_no_gap(),
             results: vec![],
             count: 0,
             total_reads: 0,
@@ -353,15 +500,88 @@ mod tests {
         };
         let out = resp.render_human();
         assert!(out.contains("0 resources"));
-        assert!(out.contains("hint: no resource access patterns detected"));
+        assert!(out.contains("No resource-access patterns detected."));
+        assert!(
+            out.contains("Resource-access detection on this build covers C, C++, Java, Python, TypeScript/JavaScript."),
+            "{out}"
+        );
+        // The blaming sentence is GONE.
+        assert!(
+            !out.contains("in this codebase"),
+            "must not blame the codebase: {out}"
+        );
     }
 
+    /// RESOURCE-HONESTY-1 §2.1: a Rust-dominant repo's zero-state names Rust as the uncovered
+    /// material language — the measured "blames the codebase" case the slice exists to kill.
     #[test]
-    fn list_render_singular_resource() {
+    fn list_render_empty_names_uncovered_material_language() {
         let resp = ResourceListResponse {
             command: "resource list".to_string(),
             repo: "repo_test".to_string(),
             snapshot: "repo_test/snapshot".to_string(),
+            coverage: ResourceCoverage {
+                detected_languages: covered_no_gap().detected_languages,
+                material_gap: MaterialGap::Known {
+                    uncovered_languages: vec!["Rust".to_string()],
+                },
+            },
+            results: vec![],
+            count: 0,
+            total_reads: 0,
+            total_writes: 0,
+        };
+        let out = resp.render_human();
+        assert!(
+            out.contains("Rust code is present but has no resource-access detector on this build"),
+            "{out}"
+        );
+        assert!(
+            out.contains("resources accessed from Rust are not counted."),
+            "{out}"
+        );
+    }
+
+    /// RESOURCE-HONESTY-1 STANDING HONESTY RULE 1: a failed language read renders
+    /// unknown-with-reason in the zero-state, never a silent omission.
+    #[test]
+    fn list_render_empty_unknown_gap_renders_reason() {
+        let resp = ResourceListResponse {
+            command: "resource list".to_string(),
+            repo: "repo_test".to_string(),
+            snapshot: "repo_test/snapshot".to_string(),
+            coverage: ResourceCoverage {
+                detected_languages: covered_no_gap().detected_languages,
+                material_gap: MaterialGap::Unknown {
+                    reason: "db locked".to_string(),
+                },
+            },
+            results: vec![],
+            count: 0,
+            total_reads: 0,
+            total_writes: 0,
+        };
+        let out = resp.render_human();
+        assert!(
+            out.contains("could not determine this repo's language coverage: db locked"),
+            "{out}"
+        );
+    }
+
+    /// RESOURCE-HONESTY-1 §2.2: a single result carries the coverage header — "via <families>
+    /// (coverage: <langs>)" — so it never reads as the repo's resource inventory.
+    #[test]
+    fn list_render_singular_resource_carries_coverage_header() {
+        let resp = ResourceListResponse {
+            command: "resource list".to_string(),
+            repo: "repo_test".to_string(),
+            snapshot: "repo_test/snapshot".to_string(),
+            coverage: ResourceCoverage {
+                detected_languages: covered_no_gap().detected_languages,
+                material_gap: MaterialGap::Known {
+                    uncovered_languages: vec!["Rust".to_string()],
+                },
+            },
             results: vec![ResourceEntry {
                 stable_key: "repo:fs:file.txt:FS_PATH".to_string(),
                 name: "file.txt".to_string(),
@@ -377,6 +597,26 @@ mod tests {
         let out = resp.render_human();
         assert!(out.contains("1 resource\n")); // singular
         assert!(out.contains("1 reader  1 writer")); // singular
+                                                     // The anti-inventory header: family + language coverage + the uncovered-language note.
+        assert!(
+            out.contains("via filesystem access-call detection (coverage: C, C++, Java, Python, TypeScript/JavaScript)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("Rust code is present but has no resource-access detector"),
+            "{out}"
+        );
+    }
+
+    /// The header names ALL distinct reader-frame families among the results, sorted.
+    #[test]
+    fn list_render_header_families_cover_all_result_kinds() {
+        let resp = sample_list_response(); // FS_PATH + DB_RESOURCE present
+        let out = resp.render_human();
+        assert!(
+            out.contains("via database/filesystem access-call detection (coverage:"),
+            "{out}"
+        );
     }
 
     // ── resource readers/writers tests ───────────────────────────────────────
