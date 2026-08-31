@@ -43,6 +43,7 @@ fn orient_use_case_consumes_injected_snapshot_without_re_resolving() {
         None,
         Budget::Small,
         common::TEST_NOW,
+        None, // enrich_state_override (ORIENT-FACT-COHERENCE-1: no daemon coordinator in this unit test)
         &mut || std::ops::ControlFlow::Continue(()),
     )
     .expect("orient_cancellable ok");

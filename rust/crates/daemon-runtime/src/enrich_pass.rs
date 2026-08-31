@@ -104,7 +104,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -214,6 +214,23 @@ pub fn clear_test_registry_builder() {
 /// production.
 fn test_registry_builder() -> Option<TestRegistryBuilder> {
     TEST_REGISTRY_BUILDER.lock().clone()
+}
+
+/// ORIENT-FACT-COHERENCE-1 (operator ruling review-3(b)) — bridge the existing [`TEST_REGISTRY_BUILDER`]
+/// seam to the EXPLICIT-enrich handler (`handle_enrich`). If a fake backend is installed, build its
+/// registry for `requested`; `None` in production (no caller sets the builder), leaving `handle_enrich`'s
+/// real configured-resolver construction untouched. This is what lets the explicit-enrich real-handler
+/// coherence test park a REAL `handle_enrich` in flight (holding its `OpKind::Enrich` activity stamp)
+/// without a live LSP toolchain — the operator required testing the canon-stamp fix THROUGH the real
+/// handler, and `handle_enrich`'s real resolvers (rust-analyzer/tsserver/jdtls) cannot run hermetically.
+///
+/// (Abstraction ledger — **What:** a crate-private accessor that reuses the auto pass's resolver seam for
+/// the explicit handler. **Concrete current user:** `handle_enrich` (guarded) + the
+/// `enrich_in_flight_coherence` explicit-enrich test. **Axis of variation:** none in production — inert
+/// hermetic stand-in. **Rejected simpler alternative:** a second, separate seam for the explicit handler —
+/// rejected: one seam already models "inject a fake resolver backend"; a parallel one duplicates it.)
+pub(crate) fn test_enrich_registry(requested: &[EnrichmentLanguage]) -> Option<ResolverRegistry> {
+    test_registry_builder().map(|builder| builder(requested))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -494,9 +511,15 @@ pub struct EnrichCoordinator {
     run_slot: Mutex<()>,
     last_report: Mutex<Option<EnrichmentReport>>,
     running: Mutex<RunningRegistry>,
-    /// Count of spawned-but-not-finished auto passes (`enter_flight` .. pass-thread exit). `Arc` so
-    /// [`FlightGuard`] can hold a clone across the detached pass thread; read by `activity_state`.
-    in_flight: Arc<AtomicUsize>,
+    /// Per-DB count of spawned-but-not-finished auto passes (`enter_flight` .. pass-thread exit), keyed
+    /// by canonical db_path. `Arc<Mutex<..>>` so [`FlightGuard`] can hold a clone across the detached
+    /// pass thread; read by `activity_state` (daemon-wide) and `auto_enrichment_in_flight_for_db` (per-repo).
+    ///
+    /// ORIENT-FACT-COHERENCE-1: this was a daemon-wide `AtomicUsize`. It is now PER-DB so the daemon can
+    /// answer "is a pass queued for THIS repo" without cross-labelling a second repo as enriching while
+    /// a first repo's pass runs (a STANDING HONESTY-RULE violation — a false in-flight claim). The
+    /// daemon-wide `activity_state()` (doctor) is derived from "any db in flight", byte-identical.
+    in_flight: Arc<Mutex<BTreeMap<PathBuf, usize>>>,
 }
 
 impl EnrichCoordinator {
@@ -548,21 +571,44 @@ impl EnrichCoordinator {
     pub fn activity_state(&self) -> &'static str {
         if !self.running.lock().flags.is_empty() {
             "running"
-        } else if self.in_flight.load(Ordering::Relaxed) > 0 {
+        } else if !self.in_flight.lock().is_empty() {
             "queued"
         } else {
             "idle"
         }
     }
 
-    /// Mark an auto pass as in-flight (spawned) and return a guard that clears the mark on drop.
-    /// [`spawn_auto_enrich`] calls this and moves the guard into the pass thread, so the "queued"
+    /// ORIENT-FACT-COHERENCE-1: is the AUTO background enrichment pass QUEUED or RUNNING **for this db**
+    /// right now? RUNNING is the per-DB cancel-flag registry (`running.flags`); QUEUED is a spawned-but-
+    /// not-yet-lock-holding pass (`in_flight[db] > 0`). Both keys are canonicalized the SAME way the pass
+    /// registers them (via [`canon_db`]), so the repo scope is exact — never a second repo. `false` when
+    /// no auto pass is in flight (the common case).
+    ///
+    /// SCOPE (honest name — review-1 F1): this covers ONLY the auto pass, which is all the coordinator
+    /// tracks (`enter_flight` / `register_running` have no explicit-enrich caller). An explicit `rmap
+    /// enrich` is in flight in the [`ActivityRegistry`](crate::activity) (`OpKind::Enrich`), NOT here, so
+    /// the reader-facing "is any enrichment in flight" question is answered by
+    /// [`DaemonState::enrichment_in_flight_for_db`](crate::state::DaemonState::enrichment_in_flight_for_db),
+    /// which unions this with the activity registry. Handlers call THAT, not this.
+    pub(crate) fn auto_enrichment_in_flight_for_db(&self, db_path: &Path) -> bool {
+        let key = canon_db(db_path);
+        if self.running.lock().flags.contains_key(&key) {
+            return true;
+        }
+        self.in_flight.lock().get(&key).copied().unwrap_or(0) > 0
+    }
+
+    /// Mark an auto pass as in-flight (spawned) for `db_path` and return a guard that clears the mark on
+    /// drop. [`spawn_auto_enrich`] calls this and moves the guard into the pass thread, so the "queued"
     /// signal is live from spawn until the pass thread exits on ANY terminal state (ran / failed /
-    /// superseded / deferred). See [`activity_state`](Self::activity_state).
-    pub fn enter_flight(&self) -> FlightGuard {
-        self.in_flight.fetch_add(1, Ordering::Relaxed);
+    /// superseded / deferred). See [`activity_state`](Self::activity_state) and
+    /// [`auto_enrichment_in_flight_for_db`](Self::auto_enrichment_in_flight_for_db).
+    pub fn enter_flight(&self, db_path: &Path) -> FlightGuard {
+        let key = canon_db(db_path);
+        *self.in_flight.lock().entry(key.clone()).or_insert(0) += 1;
         FlightGuard {
-            counter: Arc::clone(&self.in_flight),
+            counts: Arc::clone(&self.in_flight),
+            key,
         }
     }
 
@@ -664,17 +710,25 @@ impl Drop for RunningPassGuard<'_> {
     }
 }
 
-/// RAII guard decrementing the in-flight auto-pass count on drop (mirrors [`RunningPassGuard`]). Held
-/// by the spawned pass thread for its whole life, so [`EnrichCoordinator::activity_state`] reports
-/// "queued"/"running" for exactly as long as a pass is in flight. `Send + 'static` (holds an owned
-/// `Arc`, not a coordinator borrow), so it moves into the detached pass thread.
+/// RAII guard decrementing the per-DB in-flight auto-pass count on drop (mirrors [`RunningPassGuard`]).
+/// Held by the spawned pass thread for its whole life, so [`EnrichCoordinator::activity_state`] and
+/// [`EnrichCoordinator::auto_enrichment_in_flight_for_db`] report "queued"/"running" for exactly as long as a
+/// pass is in flight. `Send + 'static` (holds an owned `Arc` + `PathBuf`, not a coordinator borrow), so
+/// it moves into the detached pass thread.
 pub struct FlightGuard {
-    counter: Arc<AtomicUsize>,
+    counts: Arc<Mutex<BTreeMap<PathBuf, usize>>>,
+    key: PathBuf,
 }
 
 impl Drop for FlightGuard {
     fn drop(&mut self) {
-        self.counter.fetch_sub(1, Ordering::Relaxed);
+        let mut counts = self.counts.lock();
+        if let Some(n) = counts.get_mut(&self.key) {
+            *n -= 1;
+            if *n == 0 {
+                counts.remove(&self.key);
+            }
+        }
     }
 }
 
@@ -1034,7 +1088,7 @@ pub fn spawn_auto_enrich(
     // Mark the pass in-flight NOW (before the thread starts) so `rmap doctor` immediately reads
     // "queued" rather than the false "none yet — runs after the next index" (slice §3.7). The guard
     // rides the thread and clears the mark when `run_auto_enrich` returns on ANY terminal state.
-    let flight = state.enrich_coord().enter_flight();
+    let flight = state.enrich_coord().enter_flight(&db_path);
     std::thread::spawn(move || {
         let _flight = flight;
         run_auto_enrich(&state, &db_path, &repo_uid, &repo_display, my_generation);
@@ -1353,20 +1407,28 @@ mod tests {
     #[test]
     fn activity_state_tracks_queued_running_and_idle() {
         let coord = EnrichCoordinator::new();
+        let db = Path::new("/nonexistent/activity-state-test.db");
         assert_eq!(coord.activity_state(), "idle", "nothing in flight → idle");
+        assert!(
+            !coord.auto_enrichment_in_flight_for_db(db),
+            "no pass for this db → not in flight"
+        );
 
         // A spawned-but-not-yet-running pass is QUEUED (in flight, not holding the write lock) — the
         // exact state that must NOT render as "none yet — runs after the next index".
-        let flight = coord.enter_flight();
+        let flight = coord.enter_flight(db);
         assert_eq!(
             coord.activity_state(),
             "queued",
             "an in-flight pass not yet holding the lock is queued, not idle/none-yet"
         );
+        assert!(
+            coord.auto_enrichment_in_flight_for_db(db),
+            "a queued pass registers as in-flight for its db"
+        );
 
         // Once it registers as running (holds the DB write lock) it is RUNNING (running wins over the
         // in-flight count, since a running pass is also counted in flight).
-        let db = Path::new("/nonexistent/activity-state-test.db");
         let (running_guard, _flag) = coord.register_running(db);
         assert_eq!(coord.activity_state(), "running");
 

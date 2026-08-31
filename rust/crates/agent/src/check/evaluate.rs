@@ -26,6 +26,12 @@ pub const ENRICHMENT_SUMMARY_RAN: &str = "Enrichment phase executed.";
 pub const ENRICHMENT_SUMMARY_NOT_APPLICABLE: &str = "No eligible edges for enrichment.";
 /// `EnrichmentState::NotRun` — eligible edges existed but the phase never ran.
 pub const ENRICHMENT_SUMMARY_NOT_RUN: &str = "Enrichment phase did not run.";
+/// `EnrichmentState::InFlight` — a background enrichment pass is queued/running for this snapshot
+/// RIGHT NOW (ORIENT-FACT-COHERENCE-1). Reader-frame: figures may still rise, re-run when it
+/// completes. Suppresses the stale "run `rmap enrich`" CTA — never render a "did not run" for a phase
+/// that is executing. The substring "in progress" is what the reproducing test keys on.
+pub const ENRICHMENT_SUMMARY_IN_FLIGHT: &str =
+    "Enrichment pass in progress — resolution figures may rise; re-run when it completes.";
 /// No enrichment state available (e.g. the trust summary could not be assembled).
 pub const ENRICHMENT_SUMMARY_UNAVAILABLE: &str = "Enrichment state data unavailable.";
 
@@ -37,19 +43,22 @@ pub fn enrichment_state_summary(state: Option<EnrichmentState>) -> &'static str 
         Some(EnrichmentState::Ran) => ENRICHMENT_SUMMARY_RAN,
         Some(EnrichmentState::NotApplicable) => ENRICHMENT_SUMMARY_NOT_APPLICABLE,
         Some(EnrichmentState::NotRun) => ENRICHMENT_SUMMARY_NOT_RUN,
+        Some(EnrichmentState::InFlight) => ENRICHMENT_SUMMARY_IN_FLIGHT,
         None => ENRICHMENT_SUMMARY_UNAVAILABLE,
     }
 }
 
 /// The machine wire token for the enrichment state — the SAME snake_case tokens the
 /// `repo_graph_enrichment` crate serializes (`ran`/`not_run`/`not_applicable`), so the
-/// `reliability` JSON surface speaks the established vocabulary. `None` = unavailable
+/// `reliability` JSON surface speaks the established vocabulary. `in_flight` is the additive token for
+/// the daemon-injected in-flight state (ORIENT-FACT-COHERENCE-1). `None` = unavailable
 /// (serialized as JSON `null`, never a fabricated token).
 pub fn enrichment_state_token(state: Option<EnrichmentState>) -> Option<&'static str> {
     match state {
         Some(EnrichmentState::Ran) => Some("ran"),
         Some(EnrichmentState::NotApplicable) => Some("not_applicable"),
         Some(EnrichmentState::NotRun) => Some("not_run"),
+        Some(EnrichmentState::InFlight) => Some("in_flight"),
         None => None,
     }
 }
@@ -237,9 +246,12 @@ pub fn evaluate_conditions(input: &CheckInput) -> Vec<ConditionResult> {
     // byte-identical (the consts hold the exact prior literals).
     {
         let status = match input.enrichment_state {
-            Some(EnrichmentState::Ran) | Some(EnrichmentState::NotApplicable) => {
-                ConditionStatus::Pass
-            }
+            // ORIENT-FACT-COHERENCE-1: an in-flight pass is an honest NON-FAILING form (parallel to
+            // NotApplicable's "no eligible edges" Pass) — check must not FAIL a handoff because a
+            // pass that would raise the figures is still running; the summary carries the truth.
+            Some(EnrichmentState::Ran)
+            | Some(EnrichmentState::NotApplicable)
+            | Some(EnrichmentState::InFlight) => ConditionStatus::Pass,
             Some(EnrichmentState::NotRun) => ConditionStatus::Fail,
             None => ConditionStatus::Incomplete,
         };

@@ -87,6 +87,9 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     snapshot: &AgentSnapshot,
     budget: Budget,
     now: &str,
+    // ORIENT-FACT-COHERENCE-1: daemon-injected enrichment-lifecycle override (see
+    // `aggregators::trust::aggregate`). `None` = derive from storage; `Some(state)` = authoritative.
+    enrich_state_override: Option<crate::storage_port::EnrichmentState>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     // ── 1. Resolve repo identity. ────────────────────────────
@@ -114,7 +117,8 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     merge(&mut all_signals, &mut all_limits, snap_out);
 
     // trust (returns summary + stale flag for confidence)
-    let trust_result = aggregators::trust::aggregate(storage, repo_uid, &snapshot_uid)?;
+    let trust_result =
+        aggregators::trust::aggregate(storage, repo_uid, &snapshot_uid, enrich_state_override)?;
     merge(&mut all_signals, &mut all_limits, trust_result.output);
 
     // cycles (DAEMON-CANCEL-3: the heavy module-cycle Tarjan, cancellable; reborrow

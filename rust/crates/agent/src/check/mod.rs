@@ -56,7 +56,7 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // Simple entry: no working-tree drift available (no repo path / git access at
     // this layer). The `INDEX_DRIFT` condition is omitted, not fabricated. The
     // daemon uses `run_check_cancellable` with a computed `IndexDrift`.
-    run_check_cancellable(storage, repo_uid, now, None, &mut || {
+    run_check_cancellable(storage, repo_uid, now, None, None, &mut || {
         std::ops::ControlFlow::Continue(())
     })
 }
@@ -78,6 +78,16 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     repo_uid: &str,
     now: &str,
     index_drift: Option<crate::dto::index_drift::IndexDrift>,
+    // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): the daemon-injected enrichment-
+    // lifecycle override, an enum-typed fact the pure core cannot derive from storage (mirrors
+    // `index_drift` above — same daemon→agent injection precedent, INDEX-BASIS-1). `None` = daemon
+    // supplied no override — derive the enrichment state from storage as before (NOT `NotRun`).
+    // `Some(state)` = authoritative daemon lifecycle truth; today the daemon injects
+    // `EnrichmentState::InFlight` when a pass is queued/running, so the ENRICHMENT_STATE condition
+    // renders the honest non-failing in-flight form instead of the stale "Enrichment phase did not run"
+    // Fail — check and orient tell ONE story for one snapshot. Non-daemon callers (the `run_check`
+    // wrapper, tests) pass `None`, preserving byte-identical output.
+    enrich_state_override: Option<crate::storage_port::EnrichmentState>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, CheckError> {
     // ── Phase 1: Gather ─────────────────────────────────────────
@@ -146,7 +156,11 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 unresolved_calls: trust.unresolved_calls,
                 unresolved_calls_unknown: trust.unresolved_calls_unknown,
                 external_targets: trust.external_targets.clone(),
-                enrichment_state: Some(trust.enrichment_state),
+                // ORIENT-FACT-COHERENCE-1: overlay the daemon-injected lifecycle fact onto the
+                // persisted enrichment state, so the condition never renders "did not run" for a phase
+                // that is running. `None` keeps the persisted state; `Some(state)` is authoritative. The
+                // `Some(_)` (state-present) invariant is preserved.
+                enrichment_state: Some(enrich_state_override.unwrap_or(trust.enrichment_state)),
                 gate_outcome: Some(gate_outcome),
                 // INDEX-BASIS-1: the daemon-computed working-tree drift (git +
                 // storage), passed through as pre-fetched data. `None` only on the

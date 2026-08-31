@@ -92,6 +92,10 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
         focus,
         budget,
         now,
+        // ORIENT-FACT-COHERENCE-1: the non-cancellable CLI/test boundary has no daemon coordinator, so
+        // it never observes an in-flight pass — `None` (derive from storage) preserves byte-identical
+        // output for these callers.
+        None,
         &mut || std::ops::ControlFlow::Continue(()),
     )
 }
@@ -107,6 +111,7 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
 /// byte-identical behavior for every other caller. Only the cycle/complexity
 /// aggregators consult `cancel` — the small DTO/summary reads are left alone (NARROW
 /// scope).
+#[allow(clippy::too_many_arguments)] // use-case entry: +enrich_state_override (ORIENT-FACT-COHERENCE-1)
 pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
@@ -114,13 +119,37 @@ pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     focus: Option<&str>,
     budget: Budget,
     now: &str,
+    // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): the daemon-injected enrichment-
+    // lifecycle override, an enum-typed fact the pure core cannot derive from storage (the `IndexDrift`
+    // injection precedent, INDEX-BASIS-1). `None` = daemon supplied no override — derive the enrichment
+    // state from storage as before (NOT `NotRun`). `Some(state)` = authoritative daemon lifecycle truth;
+    // today the daemon injects `EnrichmentState::InFlight` when a pass is queued/running for this repo,
+    // so the trust aggregator renders the enrichment posture in-flight instead of the stale NotRun CTA.
+    // Threaded verbatim to the trust aggregator (the one place enrichment posture is decided). Non-daemon
+    // callers ([`orient`], tests) pass `None`.
+    enrich_state_override: Option<crate::storage_port::EnrichmentState>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     match focus {
-        None => repo::orient_repo(storage, repo_uid, snapshot, budget, now, cancel),
-        Some(focus_str) => {
-            orient_focused(storage, repo_uid, snapshot, focus_str, budget, now, cancel)
-        }
+        None => repo::orient_repo(
+            storage,
+            repo_uid,
+            snapshot,
+            budget,
+            now,
+            enrich_state_override,
+            cancel,
+        ),
+        Some(focus_str) => orient_focused(
+            storage,
+            repo_uid,
+            snapshot,
+            focus_str,
+            budget,
+            now,
+            enrich_state_override,
+            cancel,
+        ),
     }
 }
 
@@ -130,6 +159,7 @@ pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
 /// and routes to the appropriate pipeline. The repo and snapshot
 /// are resolved here (shared with the pipelines) so that each
 /// pipeline does not repeat the lookup.
+#[allow(clippy::too_many_arguments)] // focus router: +enrich_state_override (ORIENT-FACT-COHERENCE-1)
 fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
@@ -137,6 +167,9 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
     focus_str: &str,
     budget: Budget,
     now: &str,
+    // ORIENT-FACT-COHERENCE-1: daemon-injected enrichment-lifecycle override, threaded verbatim (see
+    // `orient_cancellable`). `None` = derive from storage; `Some(state)` = authoritative.
+    enrich_state_override: Option<crate::storage_port::EnrichmentState>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, OrientError> {
     // ── 1. Resolve repo identity. ────────────────────────────
@@ -164,6 +197,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
             resolution.file_stable_key.as_deref(),
             budget,
             now,
+            enrich_state_override,
         );
     }
 
@@ -187,6 +221,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
             resolution.module_stable_key.as_deref(),
             budget,
             now,
+            enrich_state_override,
             cancel,
         );
     }
@@ -206,6 +241,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     focus_str,
                     budget,
                     now,
+                    enrich_state_override,
                     cancel,
                 ),
                 None => {
@@ -227,6 +263,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 Some(&candidate.stable_key),
                 budget,
                 now,
+                enrich_state_override,
             )
         }
         Some(candidate) => {
@@ -241,6 +278,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 Some(&candidate.stable_key),
                 budget,
                 now,
+                enrich_state_override,
                 cancel,
             )
         }
@@ -268,6 +306,7 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
                             focus_str,
                             budget,
                             now,
+                            enrich_state_override,
                             cancel,
                         ),
                         None => Ok(build_no_match_result(

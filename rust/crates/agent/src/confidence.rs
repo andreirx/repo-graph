@@ -66,6 +66,10 @@ pub fn derive_repo_confidence(trust: &AgentTrustSummary, stale: bool) -> Confide
         EnrichmentState::Ran => Confidence::High,
         // Phase executed with nothing to do. No penalty.
         EnrichmentState::NotApplicable => Confidence::High,
+        // ORIENT-FACT-COHERENCE-1: a pass is queued/running for this snapshot — the figures may still
+        // rise, so the agent cannot yet claim High confidence in the enrichment axis. Degrade to
+        // Medium (the same non-High posture as NotRun), honestly transient until the pass completes.
+        EnrichmentState::InFlight => Confidence::Medium,
     }
 }
 

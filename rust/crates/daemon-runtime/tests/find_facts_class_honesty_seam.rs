@@ -36,7 +36,7 @@ use serde_json::json;
 #[test]
 fn find_boundary_hit_next_command_renders_the_declaration() {
     let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
-    let (d, _root) = isolated();
+    let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
         &d,
@@ -113,7 +113,7 @@ fn find_boundary_hit_next_command_renders_the_declaration() {
 #[test]
 fn find_dependency_excludes_observed_but_undeclared() {
     let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
-    let (d, _root) = isolated();
+    let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
         &d,
@@ -214,7 +214,7 @@ fn find_dependency_excludes_observed_but_undeclared() {
 #[test]
 fn find_dependency_unavailable_when_manifest_provenance_malformed() {
     let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
-    let (d, _root) = isolated();
+    let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
         &d,

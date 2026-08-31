@@ -561,6 +561,39 @@ impl DaemonState {
         &self.enrich
     }
 
+    /// ORIENT-FACT-COHERENCE-1 (review-1 F1): is ANY enrichment pass — the AUTO background pass OR an
+    /// explicit `rmap enrich` — queued or running for this db right now? The two kinds live in two
+    /// different subsystems, and each knows only its own half:
+    /// - the [`EnrichCoordinator`](crate::enrich_pass::EnrichCoordinator) tracks the AUTO pass (queued
+    ///   via its `in_flight` counter, running via its `running.flags` cancel registry);
+    /// - the [`ActivityRegistry`](crate::activity) tracks an EXPLICIT enrich, which stamps
+    ///   `OpKind::Enrich` for its whole duration (`handle_enrich` stamps it right after taking the repo
+    ///   coordinator's refresh permit, and it stays stamped until the handler returns).
+    ///
+    /// orient/check/reliability consult THIS composed fact — not the coordinator alone — so the stale
+    /// "run `rmap enrich`" CTA / "did not run" line is suppressed for EITHER kind of pass. Under the W-B
+    /// epoch a refresh (auto or explicit enrich) ADMITS concurrent readers (`Refreshing` →
+    /// `RefreshingWithReaders`), so a reader really can run WHILE an enrich holds the refresh permit and
+    /// read the pre-enrichment epoch — exactly the window that would otherwise hand the reader a stale
+    /// CTA. The coordinator-only signal missed the explicit-enrich case (review-1 F1); this union closes
+    /// it. Repo-scoped by db_path (never a second repo). `false` when no pass of either kind is in flight.
+    ///
+    /// (Abstraction ledger — **What:** a composition-point predicate on `DaemonState`, the one place that
+    /// holds BOTH the coordinator and the activity registry, unioning their two halves of the in-flight
+    /// fact. **Concrete current users:** `handle_orient`, `handle_check`, `handle_reliability`. **Axis of
+    /// variation:** none — a cohesion point, not a plugin seam. **Rejected simpler alternative:** inline
+    /// the `auto || activity-Enrich` union at each of the three call sites — rejected: it duplicates a
+    /// correctness-sensitive predicate three times, and a reader that gets only half the union renders the
+    /// exact stale CTA this slice removes.)
+    pub(crate) fn enrichment_in_flight_for_db(&self, db_path: &Path) -> bool {
+        if self.enrich.auto_enrichment_in_flight_for_db(db_path) {
+            return true;
+        }
+        self.activity
+            .active_for_db(db_path)
+            .is_some_and(|op| op.kind == crate::activity::OpKind::Enrich)
+    }
+
     /// Record the outcome of a completed background enrichment pass. Most-recent wins; `rmap doctor`
     /// reads it via [`Self::last_enrichment_json`]. Called by the detached pass, so it never blocks a
     /// request path.

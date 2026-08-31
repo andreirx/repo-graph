@@ -152,13 +152,26 @@ pub fn handle_reliability(state: &DaemonState, request: &Request) -> DispatchRes
     // The SHARED enrichment state — the SAME value `check`/`trust` render (review-0
     // F1), read via the one source (`get_trust_summary` → the trust assembly). This
     // is why `reliability` declares the trust aggregate's fact classes (FC5, FC8) in
-    // the witness manifest. It DEGRADES to "unavailable" (JSON null) if the summary
-    // cannot be assembled, so the breakdown still serves — honest degradation, never
-    // a fabricated state.
-    let enrichment_state: Option<EnrichmentState> = storage
-        .get_trust_summary(&repo_uid, &snapshot_uid)
-        .ok()
-        .map(|s| s.enrichment_state);
+    // the witness manifest.
+    // ORIENT-FACT-COHERENCE-1: overlay the daemon's repo-scoped in-flight fact (AUTO pass OR explicit
+    // `rmap enrich` — the composed `DaemonState` predicate, review-1 F1) onto the persisted enrichment
+    // state, so the reliability breakdown renders the SAME in-flight truth orient/check do (one snapshot,
+    // one story) rather than a stale "did not run" while a pass runs. When NOT in flight the persisted
+    // enrichment state is read from the trust summary; that read is fallible and its result is RENDERED
+    // (`enrichment_state` / `enrichment_summary`), so a failure is surfaced as the established handler
+    // error (the SAME `read_or_error!` the three grouped reads above use) — NEVER `.ok()`-collapsed to a
+    // silent "unavailable" (STANDING HONESTY RULE 1, review-1 F2). `get_trust_summary` returns the
+    // summary or an error (not an Option), so there is no "absent" case to distinguish here.
+    let enrich_in_flight = state.enrichment_in_flight_for_db(repo_state.db_path());
+    let enrichment_state: Option<EnrichmentState> = if enrich_in_flight {
+        Some(EnrichmentState::InFlight)
+    } else {
+        let summary = read_or_error!(
+            storage.get_trust_summary(&repo_uid, &snapshot_uid),
+            "enrichment state (trust summary)"
+        );
+        Some(summary.enrichment_state)
+    };
 
     let breakdown: ResolutionBreakdown = build_breakdown(
         total_scope(total),

@@ -32,12 +32,31 @@ pub struct TrustAggregateResult {
     pub stale: bool,
 }
 
+/// `enrich_state_override` (ORIENT-FACT-COHERENCE-1, operator ruling review-3 = Option 2): a
+/// daemon-injected enrichment-lifecycle fact the pure core cannot derive from storage, following the
+/// ratified `IndexDrift` daemon→agent injection precedent (INDEX-BASIS-1). Semantics:
+///   - `None` = the daemon supplied no lifecycle override, so DERIVE the enrichment state from storage
+///     exactly as before (NOT `NotRun` — the persisted state stands). Non-daemon callers (the `orient`
+///     CLI wrapper, tests) pass `None`, preserving byte-identical output.
+///   - `Some(state)` = authoritative daemon lifecycle truth for this snapshot RIGHT NOW; it REPLACES
+///     the persisted `enrichment_state`. Today the daemon injects only [`EnrichmentState::InFlight`]
+///     (a pass is queued/running), so the persisted `NotRun` never emits the stale "run `rmap enrich`"
+///     consequence while the pass that would change the figures is already running, and downstream
+///     confidence reads the transient in-flight posture. It is an enum, not a parallel bool, so there
+///     is ONE representation of the enrichment state across the whole pipeline.
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
     snapshot_uid: &str,
+    enrich_state_override: Option<EnrichmentState>,
 ) -> Result<TrustAggregateResult, AgentStorageError> {
-    let summary = storage.get_trust_summary(repo_uid, snapshot_uid)?;
+    let mut summary = storage.get_trust_summary(repo_uid, snapshot_uid)?;
+    // ORIENT-FACT-COHERENCE-1: overlay the daemon-injected lifecycle fact onto the persisted enrichment
+    // state. This is the ONE place orient's enrichment posture is decided, so the trust_no_enrichment
+    // signal, the returned summary (confidence), and every consumer see ONE coherent state.
+    if let Some(state) = enrich_state_override {
+        summary.enrichment_state = state;
+    }
     let stale_files = storage.get_stale_files(snapshot_uid)?;
     let stale = !stale_files.is_empty();
 

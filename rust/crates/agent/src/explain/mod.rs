@@ -847,6 +847,10 @@ fn build_trust_signal(trust: &crate::storage_port::AgentTrustSummary) -> Signal 
             EnrichmentState::Ran => "ran".to_string(),
             EnrichmentState::NotApplicable => "not_applicable".to_string(),
             EnrichmentState::NotRun => "not_run".to_string(),
+            // ORIENT-FACT-COHERENCE-1: explain is not a targeted surface (the daemon never injects the
+            // in-flight state into explain's storage read), so this arm is defensive exhaustiveness —
+            // it mirrors the shared machine token so a value that ever reaches here reads honestly.
+            EnrichmentState::InFlight => "in_flight".to_string(),
         },
         // RELIABILITY-REFRAME-1 (review-1 §1): carry the in-scope COUNTS so the reader surface can
         // render the honest "no in-scope calls measured" for a 0-of-0 repo instead of the

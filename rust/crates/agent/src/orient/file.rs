@@ -34,6 +34,7 @@ use crate::storage_port::{AgentSnapshot, AgentStorageRead};
 /// `file_path` is the repo-relative path of the file. It must
 /// have been validated as an existing FILE node by the caller.
 /// `file_stable_key` is the FILE node's stable key, if resolved.
+#[allow(clippy::too_many_arguments)] // file pipeline: +enrich_state_override (ORIENT-FACT-COHERENCE-1)
 pub fn orient_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_name: &str,
@@ -42,6 +43,9 @@ pub fn orient_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     file_stable_key: Option<&str>,
     budget: Budget,
     now: &str,
+    // ORIENT-FACT-COHERENCE-1: daemon-injected enrichment-lifecycle override (see
+    // `aggregators::trust::aggregate`). `None` = derive from storage; `Some(state)` = authoritative.
+    enrich_state_override: Option<crate::storage_port::EnrichmentState>,
 ) -> Result<OrientResult, OrientError> {
     let _ = now; // clock parameter reserved for future use
     let snapshot_uid = &snapshot.snapshot_uid;
@@ -55,7 +59,8 @@ pub fn orient_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     merge(&mut all_signals, &mut all_limits, snap_out);
 
     // ── trust (repo-wide) ───────────────────────────────────
-    let trust_result = aggregators::trust::aggregate(storage, repo_uid, snapshot_uid)?;
+    let trust_result =
+        aggregators::trust::aggregate(storage, repo_uid, snapshot_uid, enrich_state_override)?;
     merge(&mut all_signals, &mut all_limits, trust_result.output);
 
     // ── dead_code (file-scoped) ─────────────────────────────

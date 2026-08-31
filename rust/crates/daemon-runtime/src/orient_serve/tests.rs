@@ -623,6 +623,7 @@ fn assert_callgraph_leaf_livegraph(
         result,
         true,
         false,
+        false, // enrich_in_flight (ORIENT-FACT-COHERENCE-1: not exercised here)
     );
     let leaf = env
         .value
@@ -724,6 +725,7 @@ fn red_bounded_cert_labels_callgraph_sqlite_despite_green_callgraph_cert() {
         result,
         false, // serve_from_lg: dispatch fell back to bare SQLite (bounded cert RED)
         false, // module_summary_served: never on a fallback path
+        false, // enrich_in_flight (ORIENT-FACT-COHERENCE-1: not exercised here)
     );
 
     // 4. The callgraph leaf MUST be SQLite — NOT livegraph — DESPITE the GREEN callgraph cert.

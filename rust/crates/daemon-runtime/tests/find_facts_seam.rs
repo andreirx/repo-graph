@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 #[test]
 fn find_facts_tier_answers_without_the_embedding_endpoint() {
     let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // model down
-    let (d, _root) = isolated();
+    let (d, _root) = isolated_quiet();
     let repo = make_repo(); // helper.ts defines helperFunction; main.ts defines mainEntry
     let idx = dispatch_ok(
         &d,
@@ -112,7 +112,7 @@ fn find_facts_tier_answers_without_the_embedding_endpoint() {
 #[test]
 fn find_exact_never_consults_the_endpoint() {
     let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // would fail IF touched
-    let (d, _root) = isolated();
+    let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
         &d,
@@ -157,7 +157,7 @@ fn find_exact_never_consults_the_endpoint() {
 #[test]
 fn find_facts_all_seven_classes_produce_labeled_hits() {
     let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
-    let (d, _root) = isolated();
+    let (d, _root) = isolated_quiet();
     let repo = make_repo(); // helper.ts defines helperFunction (symbol + file classes)
     let idx = dispatch_ok(
         &d,

@@ -3616,12 +3616,23 @@ impl ServiceDispatcher {
         // DAEMON-VISIBILITY-1 (D): record this enrich as in-flight (RAII-cleared on exit).
         // Enrich's pipeline does not stream per-phase progress, so the record carries op kind +
         // repo + started-at (no live counters) — enough for `rmap doctor` to say "enriching <repo>".
-        // Keyed by repo_uid (enrich is uid-addressed); the canonical path is not resolved here.
+        // Keyed by repo_uid (enrich is uid-addressed).
+        //
+        // ORIENT-FACT-COHERENCE-1 (operator ruling review-3(b)): stamp the CANONICAL db path
+        // (`repo_state.db_path()`), NOT the raw `db_path` the caller supplied. `ActivityRegistry`'s
+        // `active_for_db` matches by EXACT path equality against "the canonical DB path the write handler
+        // stamped", and every reader (`DaemonState::enrichment_in_flight_for_db`, orient/check/reliability)
+        // queries `repo_state.db_path()`. On the legacy `db_path`+`repo_uid` form, the raw `db_path` may be
+        // relative or symlinked (`RepoKey::new` canonicalizes only for the lookup, so `repo_state.db_path()`
+        // is canonical while `db_path` is not) — stamping the raw spelling would leave a concurrent reader
+        // unable to see the in-flight enrich and still handing the stale "run `rmap enrich`" CTA. Stamp the
+        // canonical path so the write matches the read and the in-flight suppression holds for BOTH the
+        // registry-resolved and the legacy form.
         let _activity = self.state.activity().begin(
             crate::activity::OpKind::Enrich,
             repo_uid.to_string(),
             Some(repo_uid.to_string()),
-            db_path.to_path_buf(),
+            repo_state.db_path().to_path_buf(),
         );
 
         let storage = match repo_state.storage() {
@@ -3825,6 +3836,25 @@ impl ServiceDispatcher {
                         "language 'java' requires jdtls_path parameter or JDTLS_PATH env var",
                     ),
                 );
+            }
+        }
+
+        // TEST SEAM (ORIENT-FACT-COHERENCE-1, operator ruling review-3(b)): if a hermetic resolver
+        // backend is installed (`enrich_pass::set_test_registry_builder`, the SAME seam the auto pass
+        // honors), use it instead of the real LSP resolvers, so the explicit-enrich real-handler coherence
+        // test can park this handler in flight without a live toolchain. Inert in production — the builder
+        // has no production caller — so the configured-resolver path above is unchanged for real enrich.
+        if let Some(test_registry) = crate::enrich_pass::test_enrich_registry(&languages) {
+            registry = test_registry;
+            if available_languages.is_empty() {
+                available_languages = languages
+                    .iter()
+                    .map(|l| match l {
+                        EnrichmentLanguage::Rust => "rust".to_string(),
+                        EnrichmentLanguage::TypeScript => "typescript".to_string(),
+                        EnrichmentLanguage::Java => "java".to_string(),
+                    })
+                    .collect();
             }
         }
 
@@ -4222,6 +4252,24 @@ impl ServiceDispatcher {
         // on an M-2-only serve). The decorator itself is constructed whenever ANY leaf serves.
         let serve_from_lg = serve_witness.bounded;
 
+        // ORIENT-FACT-COHERENCE-1 (operator ruling D-then-B; review-1 F1): is ANY enrichment pass — the
+        // AUTO background pass OR an explicit `rmap enrich` — queued/running for THIS repo right now? If
+        // so, orient renders the in-flight enrichment truth and suppresses the stale "run `rmap enrich`"
+        // CTA — the FRAKTAG divergence was this exact window (orient captured pre-pass, check post-pass).
+        // The composed `DaemonState` predicate unions the coordinator (auto) with the activity registry
+        // (explicit enrich); under the W-B epoch a reader is ADMITTED alongside a `Refreshing` enrich, so
+        // this window is real for both kinds. Repo-scoped so a second repo's concurrent pass never
+        // mislabels this one. Threaded into the trust aggregator (the enrichment posture / CTA-suppression
+        // source) and the envelope CTA.
+        let enrich_in_flight = self.state.enrichment_in_flight_for_db(repo_state.db_path());
+        // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): lift the in-flight bool into the
+        // enum-typed lifecycle override the agent use case now takes. `Some(InFlight)` is the authoritative
+        // daemon truth for a queued/running pass; `None` means "no override — derive from storage" (the
+        // agent then reads the persisted enrichment state exactly as before). The daemon injects only
+        // `InFlight` today; the enum is the single representation of the enrichment state end-to-end.
+        let enrich_state_override =
+            enrich_in_flight.then_some(repo_graph_agent::EnrichmentState::InFlight);
+
         // Call the agent orient use case.
         //
         // DAEMON-CANCEL-3: run it through `orient_cancellable` with a cooperative
@@ -4255,6 +4303,7 @@ impl ServiceDispatcher {
                     focus,
                     budget,
                     &now,
+                    enrich_state_override,
                     &mut checkpoint,
                 )
             } else {
@@ -4265,6 +4314,7 @@ impl ServiceDispatcher {
                     focus,
                     budget,
                     &now,
+                    enrich_state_override,
                     &mut checkpoint,
                 )
             }
@@ -4350,6 +4400,9 @@ impl ServiceDispatcher {
             // `{livegraph}` provenance on that race; under-claim only, never over-claim).
             serve_witness.m2.module_summary
                 && crate::orient_serve::epoch_still_resident(&repo_state.livegraph, &epoch),
+            // ORIENT-FACT-COHERENCE-1: suppress the enrich CTA + render the in-flight truth on the
+            // relationship_next_action when a pass is in flight for this repo.
+            enrich_in_flight,
         );
         let mut output = match serde_json::to_value(&envelope) {
             Ok(v) => v,
@@ -4465,6 +4518,18 @@ impl ServiceDispatcher {
                 }
             };
 
+        // ORIENT-FACT-COHERENCE-1: the SAME repo-scoped in-flight fact orient uses, so check renders the
+        // honest non-failing in-flight ENRICHMENT_STATE (never "did not run" during a running pass) and
+        // the two surfaces tell ONE story for one snapshot. Computed before the move-closure.
+        // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): lifted into the enum-typed
+        // lifecycle override `run_check_cancellable` now takes — `Some(InFlight)` = authoritative daemon
+        // truth, `None` = derive from storage. `Option<EnrichmentState>` is `Copy`, so it moves into the
+        // worker closure like the bool it replaces.
+        let enrich_state_override = self
+            .state
+            .enrichment_in_flight_for_db(repo_state.db_path())
+            .then_some(repo_graph_agent::EnrichmentState::InFlight);
+
         let check_start = Instant::now();
         let mut check_result = {
             // Hoist the interrupt handle BEFORE moving the connection into the worker
@@ -4484,6 +4549,7 @@ impl ServiceDispatcher {
                         &repo_uid_w,
                         &now_w,
                         drift_w.clone(),
+                        enrich_state_override,
                         &mut checkpoint,
                     )
                     .map_err(|e| e.to_string())

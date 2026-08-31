@@ -331,11 +331,24 @@ pub struct AgentReliabilityAxis {
 ///     indexer did not report any enrichment status at all. The
 ///     confidence axis penalizes this state because the caller
 ///     has no evidence that the call graph was ever enriched.
+///
+///   - `InFlight`: a background enrichment pass is QUEUED or
+///     RUNNING for this repo's snapshot RIGHT NOW. This is NOT a
+///     persisted-storage state (the storage adapter never
+///     produces it) — it is injected by the daemon, which is the
+///     only layer that knows a pass is in flight (ORIENT-FACT-
+///     COHERENCE-1, operator ruling D-then-B, 2026-08-31). It
+///     exists so orient/check/reliability never hand the reader
+///     the stale "run `rmap enrich`" CTA / "phase did not run"
+///     line while the pass that would change those figures is
+///     already running. Resolution figures may still rise; the
+///     honest reader action is to re-run when it completes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnrichmentState {
     Ran,
     NotApplicable,
     NotRun,
+    InFlight,
 }
 
 // ── Trust summary (projection) ───────────────────────────────────

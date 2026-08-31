@@ -57,6 +57,10 @@ pub(crate) fn build_orient_envelope(
     // decision is ABSENT and the leaf renders exactly as before M-2 (the plain sqlite leaf; RED
     // path byte-identical).
     module_summary_served: bool,
+    // ORIENT-FACT-COHERENCE-1: true iff a background enrichment pass is queued/running for this repo.
+    // When true the relationship_next_action renders the in-flight truth (via the shared enrichment
+    // accessor) instead of the stale "run `rmap enrich`" CTA — orient and check tell ONE story.
+    enrich_in_flight: bool,
 ) -> CoherenceEnvelope<CoherentOrientResult> {
     let snapshot_uid = result.snapshot.clone();
 
@@ -154,7 +158,7 @@ pub(crate) fn build_orient_envelope(
     }
 
     let (trust_briefing, relationship_next_action) =
-        compute_briefing_and_remedy(repo_state, repo_uid, &snapshot_uid);
+        compute_briefing_and_remedy(repo_state, repo_uid, &snapshot_uid, enrich_in_flight);
 
     let mut envelope = to_coherent(result, &decisions, trust_briefing, stale);
     // HONEST-DEGRADATION-IMPL-2 (D5): place the daemon-computed next-action onto the value (populated
@@ -308,6 +312,7 @@ fn compute_briefing_and_remedy(
     repo_state: &RepoState,
     repo_uid: &str,
     snapshot_uid: &str,
+    enrich_in_flight: bool,
 ) -> (Option<serde_json::Value>, Option<String>) {
     let Ok(storage) = repo_state.storage() else {
         return (None, None);
@@ -321,6 +326,18 @@ fn compute_briefing_and_remedy(
         return (None, None);
     };
     let briefing = briefing_json(&overlay);
+    // ORIENT-FACT-COHERENCE-1: while a pass is in flight for this repo, the honest next-action is NOT
+    // "run `rmap enrich`" (it is already running) — render the in-flight truth through the ONE shared
+    // enrichment accessor `check::enrichment_state_summary`, the SAME wording check/reliability render,
+    // and skip the per-language enrich CTA entirely. This is the CTA suppression + positive in-flight
+    // rendering §2.1 requires, routed through the accessor §2.2 names (no new wording minted here).
+    if enrich_in_flight {
+        let in_flight = repo_graph_agent::check::enrichment_state_summary(Some(
+            repo_graph_agent::storage_port::EnrichmentState::InFlight,
+        ))
+        .to_string();
+        return (briefing, Some(in_flight));
+    }
     // Only fetch the per-language file COUNTS when a relationship axis is actually LOW — this guards the
     // count query off the healthy-repo hot path. (The shared helper re-checks LOW for safety.)
     // CONTRADICTION-SWEEP-1 §5: counts (not the distinct-language list) feed the ≥10% material-share gate

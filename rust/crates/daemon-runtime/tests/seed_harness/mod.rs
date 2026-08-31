@@ -95,6 +95,17 @@ pub fn isolated() -> (ServiceDispatcher, TempDir) {
     (ServiceDispatcher::new(state), state_root)
 }
 
+/// `isolated()` with the REAL background maintenance passes (enrich -> seed -> retention)
+/// DISABLED process-globally — for test binaries whose EVERY test wants a quiet index (the
+/// live-LM-Studio lock-flake class, 5th recurrence 2026-08-31). NOT used by `seed_seam.rs`,
+/// which toggles the flags per-test (a global disable here races its enable-tests in the
+/// same process — bitten 2026-08-31, first placement attempt).
+pub fn isolated_quiet() -> (ServiceDispatcher, TempDir) {
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
+    repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+    isolated()
+}
+
 pub fn run_git(cwd: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
         .args(args)

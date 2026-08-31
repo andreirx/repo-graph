@@ -438,7 +438,8 @@ fn build_orient_envelope_symbol_focus_callers_leaf_is_multi_source() {
             top_modules: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false, false);
     let leaf = env
         .value
         .signals
@@ -477,7 +478,8 @@ fn build_orient_envelope_symbol_focus_callees_leaf_is_multi_source() {
             top_modules: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false, false);
     let leaf = env
         .value
         .signals
@@ -503,7 +505,8 @@ fn build_orient_envelope_repo_focus_cycles_leaf_is_livegraph() {
             cycles: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false, false);
     let leaf = env
         .value
         .signals
@@ -537,7 +540,8 @@ fn build_orient_envelope_emits_producer_unavailable_limit_without_livegraph() {
             cycles: Vec::new(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false, false);
     let leaf = env
         .value
         .signals
@@ -574,7 +578,8 @@ fn build_orient_envelope_repo_focus_complexity_leaf_is_multi_source() {
         Focus::repo(),
         vec![high_complexity_signal()],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, true, false, false);
     let leaf = env
         .value
         .signals
@@ -617,7 +622,8 @@ fn build_orient_envelope_complexity_no_livegraph_falls_back_unavailable() {
         Focus::repo(),
         vec![high_complexity_signal()],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false, false);
     let leaf = env
         .value
         .signals
@@ -652,7 +658,8 @@ fn build_orient_envelope_complexity_cert_divergence_falls_back() {
         Focus::repo(),
         vec![high_complexity_signal()],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, false, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&f.state, REPO, result, false, false, false);
     let leaf = env
         .value
         .signals
@@ -701,7 +708,8 @@ fn build_orient_envelope_stale_index_marks_leaves_stale_without_trust_signal() {
         "fixture: no TRUST_STALE_SNAPSHOT signal is emitted"
     );
 
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false, false);
     let leaf = env
         .value
         .signals
@@ -750,7 +758,8 @@ fn build_orient_envelope_fresh_index_keeps_leaves_fresh() {
             created_at: "2026-01-01T00:00:00Z".to_string(),
         })],
     );
-    let env = crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false);
+    let env =
+        crate::orient_coherence::build_orient_envelope(&state, REPO, result, false, false, false);
     let leaf = env
         .value
         .signals
@@ -873,6 +882,7 @@ fn build_orient_envelope_symbol_focus_callgraph_leaf_livegraph_via_cert() {
         result,
         true,  // serve_from_lg: handle_orient SERVED (bounded cert GREEN, asserted above)
         false, // module_summary_served: not exercised by this fixture (pre-M-2 label path)
+        false, // enrich_in_flight (ORIENT-FACT-COHERENCE-1: not exercised here)
     );
     let leaf = env
         .value
@@ -922,8 +932,9 @@ fn build_orient_envelope_module_summary_leaf_follows_actual_serve() {
             Focus::repo(),
             vec![module_summary_signal()],
         ),
-        true, // serve_from_lg
-        true, // module_summary_served
+        true,  // serve_from_lg
+        true,  // module_summary_served
+        false, // enrich_in_flight (ORIENT-FACT-COHERENCE-1: not exercised here)
     );
     let leaf = served_env
         .value
@@ -951,6 +962,7 @@ fn build_orient_envelope_module_summary_leaf_follows_actual_serve() {
         ),
         true,  // serve_from_lg (bounded GREEN — e.g. the module-summary cert alone was RED)
         false, // module_summary_served
+        false, // enrich_in_flight (ORIENT-FACT-COHERENCE-1: not exercised here)
     );
     let leaf = unserved_env
         .value
