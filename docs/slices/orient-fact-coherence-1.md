@@ -20,26 +20,28 @@ BEFORE the pass serves pre-enrichment reliability counts. The witness certifies 
 no-loss equality — reliability/enrichment-state evidently is not among the facts it certifies
 against enrichment epochs.
 
-## 2. Contract
+## 2. Contract — AMENDED (operator ruling OFC1-MECHANISM-REFUTED = D-then-B, 2026-08-31)
 
-1. **One computation per fact, per snapshot.** The reliability figures (resolved %, call
-   totals, unclassified counts), the enrichment-state line, and the enrichment CTA render
-   IDENTICALLY for a given snapshot across `orient` at every budget, `orient --full`, and
-   `check`. Budgets may cut SECTIONS; they must never change a rendered NUMBER or claim.
-2. **Fix rides the existing per-leaf serve-decision seam.** First VERIFY the mechanism (a
-   probe reproducing the divergence in a test, naming the actual serving route per side).
-   Then: the leaf(s) carrying reliability/enrichment-derived facts must either (a) prove
-   enrichment-epoch coherence in their EXISTING per-leaf decision (serve only when the
-   resident data reflects the same enrichment epoch SQLite would serve), or (b) always serve
-   those facts from SQLite (they are cheap aggregate counts) with the existing SQLite leaf
-   label. Choose the smaller change that satisfies §2.1; record which and why.
-3. **Freshness labeling**: if any surface can still legitimately render an older epoch (it
-   should not, after §2.2), it must say so explicitly — but the DEFAULT outcome of this slice
-   is identical numbers, not labeled divergence.
-4. **The CTA follows the coherent fact.** With enrichment executed, no budget tier may emit
-   "run `rmap enrich`" for already-resolved families; the CTA logic (CONTRADICTION-SWEEP-1's
-   per-language truthful line) must consume the SAME coherent enrichment state.
+**§1's suspected serving-route mechanism is REFUTED** (builder investigation cycle-1,
+reviewer-corroborated: `OrientServeDecorator::get_trust_summary` delegates to SQLite on every
+path; budget cuts only module/complexity depth) **and the measurement is re-confirmed as a
+TEMPORAL race** (operator, capture mtimes: budgets at 23:55:07-11 pre-pass, --full/check at
+23:55:13-14 post-pass — the enrichment pass completed in between). Budgets never changed facts.
+The re-scoped contract:
 
+1. **In-flight enrichment renders as in-flight.** While an enrichment pass for this repo is
+   QUEUED or RUNNING, every surface that consumes the shared enrichment-state accessor
+   (CONTRADICTION-SWEEP-1: orient/check/trust) renders that truth — e.g. "enrichment pass in
+   progress — resolution figures may rise; re-run when it completes" — and the per-language
+   enrich CTA is SUPPRESSED for the duration (never "run `rmap enrich`" while it runs; never
+   "Enrichment phase did not run" while it is queued/running).
+2. **The fix lives in the EXISTING shared accessor** (`check::enrichment_state_summary`) and
+   the daemon fact it reads: extend the enrichment-state fact with the queued/running states
+   the daemon already tracks (doctor's activity line proves the knowledge exists). No new
+   accessor, no serving-route change, no new surface.
+3. **check's ENRICHMENT_STATE follows**: queued/running is its own honest non-failing form
+   (parallel to leveldb's "No eligible edges" pattern), not "did not run".
+4. JSON additive only; exit codes unchanged.
 ## 3. Stop conditions
 
 Frozen: the no-loss certificate computation and witness semantics (consuming an existing
