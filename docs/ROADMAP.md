@@ -102,6 +102,13 @@ sidecars), and cross-command contradictions. Ranked queue (operator, pending hum
 
 ## Usefulness audit v0.11.0 — the fix queue (2026-08-31)
 
+**Top tier COMPLETE (2026-08-31/09-01):** #1 ORIENT-FACT-COHERENCE-1 5b0a6b2 (re-scoped:
+temporal race, in-flight rendering) · #2 DEPS-ATTRIB-2 a79fc19 · ENRICH-ROOT-1 2817ef6
+(field P1: cwd-independent enrichment; + launchd PATH 744141d; + busy-retry passes) ·
+#3 FIXTURE-POLLUTION-1 8e3445b · #4 CHECK-SIGNAL-1 b1c499f · #5 FIND-RANK-1 71ace5a.
+v0.12.0 released mid-queue (the two field P1s). Tail remaining: RESOURCE-HONESTY-1,
+TRUST-FIRSTPARTY-1, MODULES-IDENTITY-2, DOCS-LIST-2 → then release + re-audit.
+
 Post-release audit of v0.11.0 (all ten v0.9.0 fixes verified live in the field; grade matrix
 artifact + `docs/audits/2026-08-31-per-command-usefulness-v0.11.0.md`; standalone Codex second
 opinion concurring). Ranked queue: 1. **ORIENT-FACT-COHERENCE-1** (budgeted orient serves
