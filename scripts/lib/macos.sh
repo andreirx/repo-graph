@@ -30,10 +30,31 @@ MACOS_SOCKET_PATH="${MACOS_CONFIG_DIR}/daemon.sock"
 
 # Emit launchd plist content to stdout.
 # Used by install_launchd_plist. Can be overridden in bundled mode.
+# The daemon PATH: static base + the dirs the toolchain actually needs. tsserver is a
+# `#!/usr/bin/env node` script, so the launchd daemon MUST carry a node dir or every
+# enrichment session dies exit-127 with stderr discarded (bitten 2026-08-31: silent
+# "resolved 0/N" on every repo). Resolved at INSTALL time from the installing shell;
+# a missing node is a LOUD warning, never silent.
+rmap_toolchain_path() {
+    local base="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
+    local extra=""
+    local node_bin
+    node_bin="$(command -v node 2>/dev/null || true)"
+    if [[ -n "${node_bin}" ]]; then
+        extra="$(dirname "${node_bin}")"
+    else
+        echo "WARNING: no 'node' on the installing shell's PATH — the daemon will not be able to run tsserver enrichment (TypeScript call resolution will silently stay at baseline). Install node or re-run dev-install from a shell with node." >&2
+    fi
+    [[ -d /opt/homebrew/bin ]] && extra="${extra:+${extra}:}/opt/homebrew/bin"
+    printf '%s' "${base}${extra:+:${extra}}"
+}
+
 emit_macos_plist() {
+    local toolchain_path
+    toolchain_path="$(rmap_toolchain_path)"
     # Try template file first (modular mode)
     if [[ -n "${SCRIPT_DIR:-}" ]] && [[ -f "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}" ]]; then
-        cat "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}"
+        sed "s|@RMAP_TOOLCHAIN_PATH@|${toolchain_path}|" "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}"
         return
     fi
 

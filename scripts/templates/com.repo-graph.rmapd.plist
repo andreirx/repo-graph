@@ -41,9 +41,13 @@
     <dict>
         <key>RMAP_LOG_LEVEL</key>
         <string>info</string>
-        <!-- PATH required for git operations (churn, hotspots, risk) -->
+        <!-- PATH for git (churn/hotspots/risk) AND the node runtime tsserver enrichment needs:
+             @RMAP_TOOLCHAIN_PATH@ is substituted at install time (emit_macos_plist) with the
+             installing shell's node dir + /opt/homebrew/bin appended to the static base.
+             Bitten 2026-08-31: the static node-less PATH made every tsserver session die
+             exit-127 under launchd — enrichment silently resolved 0 on every repo. -->
         <key>PATH</key>
-        <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin</string>
+        <string>@RMAP_TOOLCHAIN_PATH@</string>
     </dict>
 
     <!-- Background process, not user-interactive -->
