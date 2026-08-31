@@ -12,7 +12,7 @@
 //! store) and the shared `map_err` from `agent_impl`, so error mapping is
 //! identical to every other `AgentStorageRead` method.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use repo_graph_agent::{
     AgentDirectoryGroup, AgentDocEntry, AgentModuleSize, AgentStorageError, ManifestKind,
@@ -60,10 +60,9 @@ pub(crate) fn doc_inventory(
     };
 
     // 2. Resolve relative to the DB file's parent (mirrors handle_docs_list).
-    let resolved: PathBuf = match conn.path().and_then(|db| Path::new(db).parent()) {
-        Some(parent) => parent.join(&raw_root),
-        None => PathBuf::from(&raw_root), // in-memory / no parent → as-is.
-    };
+    // Shared with enrichment's `get_repo_root` (ENRICH-ROOT-1) — one implementation
+    // of the DB-parent convention, not a per-site copy.
+    let resolved: PathBuf = crate::db_root_path::resolve_root_against_db_parent(conn, &raw_root);
 
     if !resolved.is_dir() {
         return Ok(Vec::new()); // Path not a directory → graceful empty.

@@ -40,8 +40,8 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use enrichment::{
-    EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver, ReceiverTypeResult,
-    ResolverError, ResolverProgress, UnresolvedCategory,
+    BatchResolution, EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver,
+    ReceiverTypeResult, ResolverError, ResolverProgress, SkippedContext, UnresolvedCategory,
 };
 
 use crate::locate::locate_tsserver;
@@ -153,9 +153,9 @@ impl ReceiverTypeResolver for TsServerResolver {
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> BatchResolution {
         if edges.is_empty() {
-            return Vec::new();
+            return BatchResolution::default();
         }
 
         // tsserver associates files with a project by ABSOLUTE path — an `open` with a relative path
@@ -210,7 +210,7 @@ impl ReceiverTypeResolver for TsServerResolver {
         let cfg_path = self.config.tsserver_path.clone();
         let locate = |ctx: &Path| locate_tsserver(ctx, repo_root, cfg_path.as_deref());
 
-        let group_results = self.resolve_groups(
+        let (group_results, skipped_contexts) = self.resolve_groups(
             repo_root, groups, &locate, total, processed, progress, cancel,
         );
         all_results.extend(group_results);
@@ -224,7 +224,10 @@ impl ReceiverTypeResolver for TsServerResolver {
             });
         }
 
-        all_results
+        BatchResolution {
+            results: all_results,
+            skipped_contexts,
+        }
     }
 
     fn shutdown(&mut self) {
@@ -262,8 +265,11 @@ impl TsServerResolver {
         mut processed: usize,
         progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> (Vec<ReceiverTypeResult>, Vec<SkippedContext>) {
         let mut results: Vec<ReceiverTypeResult> = Vec::new();
+        // Per-context skips: contexts with no located tsserver. These edges are NOT ATTEMPTED —
+        // counted as `not_attempted` in the report, never fabricated as failures (ENRICH-ROOT-1 §2).
+        let mut skipped_contexts: Vec<SkippedContext> = Vec::new();
 
         'groups: for (project_root, group_edges) in groups {
             // ENRICH-LIFECYCLE-1 batch boundary: yield to an explicit index/refresh BEFORE
@@ -283,6 +289,16 @@ impl TsServerResolver {
                     project_root = %project_root.display(),
                     "no tsserver for this project context — skipping (not failing)"
                 );
+                // Surface the skip as a counted, reader-frame "not attempted" entry (ENRICH-ROOT-1
+                // §2) instead of dropping these edges silently. The reason names the reader's world
+                // (a project directory without a TypeScript language server), not our pipeline.
+                skipped_contexts.push(SkippedContext {
+                    context_path: project_root.display().to_string(),
+                    reason:
+                        "no TypeScript language server (tsserver) found for this project context"
+                            .to_string(),
+                    edge_count: group_edges.len(),
+                });
                 processed += group_edges.len();
                 continue;
             };
@@ -396,7 +412,7 @@ impl TsServerResolver {
             session.stop();
         }
 
-        results
+        (results, skipped_contexts)
     }
 }
 
@@ -1198,14 +1214,31 @@ mod tests {
         };
 
         let resolver = TsServerResolver::new();
-        let results =
+        let (results, skipped_contexts) =
             resolver.resolve_groups(repo_root, groups, &locate, 2, 0, None, Some(&|| false));
 
-        // The missing context is SKIPPED — no result of any kind for its edge.
+        // The missing context is SKIPPED — no ATTEMPTED result of any kind for its edge.
         assert!(
             !results.iter().any(|r| r.edge_uid == "edge-missing"),
             "the context whose locator returned None must be SKIPPED — no result, not a failure: {:?}",
             results.iter().map(|r| &r.edge_uid).collect::<Vec<_>>()
+        );
+        // ENRICH-ROOT-1 §2: the skip is now SURFACED as a counted not-attempted entry (context path
+        // + reason + edge count), not dropped silently.
+        assert_eq!(
+            skipped_contexts.len(),
+            1,
+            "the missing context must produce exactly one skip entry"
+        );
+        assert_eq!(
+            skipped_contexts[0].context_path,
+            pkg_missing.display().to_string()
+        );
+        assert_eq!(skipped_contexts[0].edge_count, 1);
+        assert!(
+            skipped_contexts[0].reason.contains("tsserver"),
+            "the skip reason names the missing TypeScript language server (reader frame): {}",
+            skipped_contexts[0].reason
         );
         // The available context WAS entered — its edge has a result (a failed one here, because the
         // injected command does not exist; the presence of the result is the proof of entry).

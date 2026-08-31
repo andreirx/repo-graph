@@ -169,6 +169,7 @@ pub mod connection;
 mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection
 pub mod contract_schema_port; // Contract schema storage port (CS-1)
 pub mod crud;
+mod db_root_path; // ENRICH-ROOT-1: resolve stored root_path against the DB parent (crate-private helper)
 mod deps_language_read; // DEPS-LIST-REWRITE-1 §2.2: query_file_count_by_language (crate-private)
 pub(crate) mod diagnostic;
 mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)

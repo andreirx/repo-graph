@@ -185,6 +185,64 @@ pub enum ReceiverTypeOrigin {
     Failed,
 }
 
+/// A per-project-context skip: the resolver did NOT attempt these edges because the context
+/// (a tsconfig/project directory) had no usable toolchain — e.g. no `tsserver` located under it.
+///
+/// This is distinct from a FAILED attempt (`ReceiverTypeOrigin::Failed`): a failure means the
+/// resolver ran and could not determine the type; a skip means it never ran. Before ENRICH-ROOT-1
+/// these edges vanished from the report entirely — neither enriched nor failed — so `eligible`
+/// silently exceeded `enriched + failed` and the report claimed 0 failures while resolving nothing.
+/// They now surface here and are counted in the report's `not_attempted` total (slice §2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedContext {
+    /// The project-context path that was skipped (reader frame: the directory whose toolchain is absent).
+    pub context_path: String,
+    /// Reader-frame reason the context was skipped (e.g. "no tsserver for this project context").
+    pub reason: String,
+    /// How many eligible edges in this context went unattempted.
+    pub edge_count: usize,
+}
+
+/// The output of one resolver batch: the edges it ATTEMPTED (`results`, each success or failure)
+/// PLUS the per-context skips (`skipped_contexts`, edges it deliberately did not attempt).
+///
+/// Splitting these is the honesty fix (slice §2): "not attempted" becomes a first-class, counted
+/// outcome instead of a silent gap. Every eligible edge in a non-cancelled batch is accounted for
+/// in exactly one place — a `ReceiverTypeResult` (attempted) or a `SkippedContext` (not attempted) —
+/// so the pipeline can assert `eligible = enriched + failed + not_attempted`.
+///
+/// Resolvers with no per-context skip concept (Rust, Java, the null/test resolvers) return
+/// `skipped_contexts` empty; only the tsserver resolver, whose per-context locate-miss is the
+/// documented defect, populates it today.
+///
+/// **Abstraction one-liner (operator ratification 2026-08-31, `enrich_root_public_batch_contract`).**
+/// What: the public boundary DTO returned by `ReceiverTypeResolver::resolve_batch`. Current users:
+/// the three in-workspace resolvers (`tsserver-resolver`, `rust-analyzer-resolver`, `jdtls-resolver`)
+/// produce it; `EnrichmentPipeline` consumes it. Axis of variation: NONE for this type — the resolver
+/// TRAIT is the operations-fixed / implementations-growing boundary (interface + polymorphism); this
+/// DTO is the raw results+skips data crossing it. VERIFIED no external `ReceiverTypeResolver` impl
+/// exists (deterministic workspace grep), so the "breaking change" universe is this repo, and the
+/// compiler's exhaustive breakage was the migration list. Rejected simpler: encode "not attempted" as
+/// a `ReceiverTypeResult::failed()` or a new `ReceiverTypeOrigin::NotAttempted` — both FALSIFY the
+/// persisted `{compiler,failed}` origin contract (a skip is not a failure), the exact semantics §2.2
+/// requires the skip evidence to cross the boundary to preserve.
+#[derive(Debug, Clone, Default)]
+pub struct BatchResolution {
+    pub results: Vec<ReceiverTypeResult>,
+    pub skipped_contexts: Vec<SkippedContext>,
+}
+
+impl BatchResolution {
+    /// A batch with only attempted results and no skips (the common case for resolvers that never
+    /// skip a context).
+    pub fn from_results(results: Vec<ReceiverTypeResult>) -> Self {
+        Self {
+            results,
+            skipped_contexts: Vec::new(),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Enrichment Metadata (persisted on unresolved edge)
 // ─────────────────────────────────────────────────────────────────────────────

@@ -88,8 +88,9 @@ pub mod status;
 
 // Re-export commonly used types at crate root
 pub use contracts::{
-    EligibleEdge, EnrichmentLanguage, EnrichmentMetadata, PromotedEdge, PromotionCandidate,
-    ReceiverTypeOrigin, ReceiverTypeResult, SymbolInfo, SymbolSubtype, UnresolvedCategory,
+    BatchResolution, EligibleEdge, EnrichmentLanguage, EnrichmentMetadata, PromotedEdge,
+    PromotionCandidate, ReceiverTypeOrigin, ReceiverTypeResult, SkippedContext, SymbolInfo,
+    SymbolSubtype, UnresolvedCategory,
 };
 
 pub use eligibility::{EligibilityQuery, EnrichmentStoragePort, StorageError};

@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
-use crate::contracts::EnrichmentLanguage;
+use crate::contracts::{EnrichmentLanguage, SkippedContext};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Enrichment State
@@ -79,6 +79,20 @@ pub struct EnrichmentReport {
     /// Failed enrichment attempts.
     pub failed_count: usize,
 
+    /// Edges that were NOT ATTEMPTED because their project context had no usable resolver
+    /// toolchain (ENRICH-ROOT-1 §2). Distinct from `failed_count` (attempted, could not resolve).
+    /// The accounting invariant `eligible_count == enriched_count + failed_count +
+    /// not_attempted_count` always holds for a non-cancelled pass. `#[serde(default)]` so a report
+    /// serialized before this field deserializes to 0 (no skips recorded).
+    #[serde(default)]
+    pub not_attempted_count: usize,
+
+    /// Per-context "not attempted" breakdown — one entry per (context_path, reason), with the
+    /// count of eligible edges skipped there. Empty when nothing was skipped. `#[serde(default)]`
+    /// for backward-compatible deserialization.
+    #[serde(default)]
+    pub skipped_contexts: Vec<SkippedContext>,
+
     /// Enrichment rate as percentage.
     pub enrichment_rate: f64,
 
@@ -109,6 +123,8 @@ impl EnrichmentReport {
             eligible_count: 0,
             enriched_count: 0,
             failed_count: 0,
+            not_attempted_count: 0,
+            skipped_contexts: Vec::new(),
             enrichment_rate: 0.0,
             by_language: HashMap::new(),
             promotion: None,
@@ -119,9 +135,18 @@ impl EnrichmentReport {
     }
 
     /// Number of enrichment metadata rows we attempted to persist.
-    /// This is enriched + failed, since we persist metadata for ALL results.
+    /// This is enriched + failed, since we persist metadata for ALL ATTEMPTED results.
+    /// Not-attempted edges are deliberately excluded — they are never persisted (they must stay
+    /// eligible for a future pass), so they do not participate in the storage-discrepancy check.
     pub fn attempted_persist_count(&self) -> usize {
         self.enriched_count + self.failed_count
+    }
+
+    /// The accounting invariant (ENRICH-ROOT-1 §2): every eligible edge is enriched, failed, or
+    /// not-attempted — no silent gap. Holds for a non-cancelled pass (a cancelled pass abandons its
+    /// tail, so this may under-count there by design). Exposed for the binding invariant test.
+    pub fn accounting_holds(&self) -> bool {
+        self.eligible_count == self.enriched_count + self.failed_count + self.not_attempted_count
     }
 
     /// Check if there is a storage discrepancy (persisted != attempted).
@@ -162,6 +187,11 @@ pub struct LanguageReport {
 
     /// Failed attempts.
     pub failed: usize,
+
+    /// Edges not attempted (project context lacked a resolver toolchain). `#[serde(default)]` for
+    /// backward-compatible deserialization of reports written before ENRICH-ROOT-1.
+    #[serde(default)]
+    pub not_attempted: usize,
 
     /// Enrichment rate as percentage.
     pub rate: f64,
@@ -240,6 +270,9 @@ pub struct ReportBuilder {
     by_language: HashMap<EnrichmentLanguage, LanguageReport>,
     failure_reasons: HashMap<String, usize>,
     type_counts: HashMap<(String, bool), usize>,
+    /// Per-context skip aggregation, keyed by (context_path, reason) → edge count. A BTreeMap so
+    /// the emitted `skipped_contexts` order is deterministic (VISION: same input → same output).
+    skipped_contexts: BTreeMap<(String, String), usize>,
     promotion: Option<PromotionReport>,
     persisted_count: Option<usize>,
 }
@@ -252,6 +285,7 @@ impl ReportBuilder {
             by_language: HashMap::new(),
             failure_reasons: HashMap::new(),
             type_counts: HashMap::new(),
+            skipped_contexts: BTreeMap::new(),
             promotion: None,
             persisted_count: None,
         }
@@ -281,6 +315,17 @@ impl ReportBuilder {
         *self.failure_reasons.entry(reason.to_string()).or_insert(0) += 1;
     }
 
+    /// Record a per-context skip (edges the resolver did not attempt because the context lacked a
+    /// toolchain). Increments the language's `not_attempted` by the skip's edge count and
+    /// aggregates the (context_path, reason) breakdown (ENRICH-ROOT-1 §2).
+    pub fn record_not_attempted(&mut self, lang: EnrichmentLanguage, skip: &SkippedContext) {
+        self.by_language.entry(lang).or_default().not_attempted += skip.edge_count;
+        *self
+            .skipped_contexts
+            .entry((skip.context_path.clone(), skip.reason.clone()))
+            .or_insert(0) += skip.edge_count;
+    }
+
     /// Set promotion statistics.
     pub fn set_promotion(&mut self, report: PromotionReport) {
         self.promotion = Some(report);
@@ -302,6 +347,18 @@ impl ReportBuilder {
         let eligible_count: usize = self.by_language.values().map(|r| r.eligible).sum();
         let enriched_count: usize = self.by_language.values().map(|r| r.enriched).sum();
         let failed_count: usize = self.by_language.values().map(|r| r.failed).sum();
+        let not_attempted_count: usize = self.by_language.values().map(|r| r.not_attempted).sum();
+
+        // Per-context skip breakdown, deterministic (BTreeMap iteration order).
+        let skipped_contexts: Vec<SkippedContext> = self
+            .skipped_contexts
+            .into_iter()
+            .map(|((context_path, reason), edge_count)| SkippedContext {
+                context_path,
+                reason,
+                edge_count,
+            })
+            .collect();
 
         // Top failure reasons (sorted by count descending)
         let mut failure_vec: Vec<_> = self
@@ -331,6 +388,8 @@ impl ReportBuilder {
             eligible_count,
             enriched_count,
             failed_count,
+            not_attempted_count,
+            skipped_contexts,
             enrichment_rate: 0.0,
             by_language: self.by_language,
             promotion: self.promotion,

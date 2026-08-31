@@ -45,8 +45,8 @@ use lsp_types::{
 use tracing::{debug, warn};
 
 use enrichment::{
-    EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver, ReceiverTypeResult,
-    ResolverError, ResolverProgress, UnresolvedCategory,
+    BatchResolution, EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver,
+    ReceiverTypeResult, ResolverError, ResolverProgress, UnresolvedCategory,
 };
 
 use crate::project::{group_by_workspace_root, BuildSystem, JavaProjectContext};
@@ -173,9 +173,9 @@ impl ReceiverTypeResolver for JdtlsResolver {
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> BatchResolution {
         if edges.is_empty() {
-            return Vec::new();
+            return BatchResolution::default();
         }
 
         // Validate jdtls path
@@ -183,15 +183,17 @@ impl ReceiverTypeResolver for JdtlsResolver {
             Some(p) => p.clone(),
             None => {
                 // No jdtls configured — fail all edges
-                return edges
-                    .iter()
-                    .map(|e| {
-                        ReceiverTypeResult::failed(
-                            e.edge_uid.clone(),
-                            "jdtls not configured: set jdtls_path in config",
-                        )
-                    })
-                    .collect();
+                return BatchResolution::from_results(
+                    edges
+                        .iter()
+                        .map(|e| {
+                            ReceiverTypeResult::failed(
+                                e.edge_uid.clone(),
+                                "jdtls not configured: set jdtls_path in config",
+                            )
+                        })
+                        .collect(),
+                );
             }
         };
 
@@ -321,7 +323,9 @@ impl ReceiverTypeResolver for JdtlsResolver {
             });
         }
 
-        all_results
+        // Java resolution has no per-context skip concept (an unconfigured/failed jdtls marks edges
+        // FAILED, above), so there are no not-attempted skips to report.
+        BatchResolution::from_results(all_results)
     }
 
     fn shutdown(&mut self) {

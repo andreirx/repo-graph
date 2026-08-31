@@ -38,7 +38,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use enrichment::{
-    EligibilityQuery, EligibleEdge, EnrichmentLanguage, EnrichmentStoragePort,
+    BatchResolution, EligibilityQuery, EligibleEdge, EnrichmentLanguage, EnrichmentStoragePort,
     ReceiverTypeResolver, ReceiverTypeResult, ResolverError, ResolverProgress, ResolverRegistry,
 };
 use repo_graph_daemon_runtime::enrich_pass::{
@@ -220,23 +220,25 @@ impl ReceiverTypeResolver for GatedResolver {
         edges: &[EligibleEdge],
         _progress: Option<&dyn ResolverProgress>,
         _cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> BatchResolution {
         self.started.store(true, Ordering::SeqCst);
         let start = Instant::now();
         while !self.release.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(30) {
             thread::sleep(Duration::from_millis(5));
         }
-        edges
-            .iter()
-            .map(|e| {
-                ReceiverTypeResult::success(
-                    e.edge_uid.clone(),
-                    "SomeType".to_string(),
-                    Some("SomeType".to_string()),
-                    false,
-                )
-            })
-            .collect()
+        BatchResolution::from_results(
+            edges
+                .iter()
+                .map(|e| {
+                    ReceiverTypeResult::success(
+                        e.edge_uid.clone(),
+                        "SomeType".to_string(),
+                        Some("SomeType".to_string()),
+                        false,
+                    )
+                })
+                .collect(),
+        )
     }
     fn initialize(&mut self, _repo_root: &Path) -> Result<(), ResolverError> {
         Ok(())

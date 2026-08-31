@@ -94,7 +94,7 @@ fn self_field_method_resolves_the_field_type_not_self_live() {
     };
 
     let resolver = RustAnalyzerResolver::new();
-    let results = resolver.resolve_batch(root, &[edge], None, None);
+    let results = resolver.resolve_batch(root, &[edge], None, None).results;
 
     assert_eq!(results.len(), 1, "one result per edge");
     let r = &results[0];

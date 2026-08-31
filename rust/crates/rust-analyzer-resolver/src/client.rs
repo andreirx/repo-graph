@@ -17,8 +17,8 @@ use lsp_types::{
 use tracing::{debug, warn};
 
 use enrichment::{
-    EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver, ReceiverTypeResult,
-    ResolverError, ResolverProgress, UnresolvedCategory,
+    BatchResolution, EligibleEdge, EnrichmentLanguage, ReceiverTypeOrigin, ReceiverTypeResolver,
+    ReceiverTypeResult, ResolverError, ResolverProgress, UnresolvedCategory,
 };
 
 use crate::cargo::group_by_cargo_root;
@@ -111,9 +111,9 @@ impl ReceiverTypeResolver for RustAnalyzerResolver {
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> BatchResolution {
         if edges.is_empty() {
-            return Vec::new();
+            return BatchResolution::default();
         }
 
         // Group edges by nearest Cargo.toml
@@ -246,7 +246,9 @@ impl ReceiverTypeResolver for RustAnalyzerResolver {
             });
         }
 
-        all_results
+        // Rust resolution never skips a context (a session-start failure marks its edges FAILED,
+        // not not-attempted), so there are no per-context skips to report.
+        BatchResolution::from_results(all_results)
     }
 
     fn shutdown(&mut self) {

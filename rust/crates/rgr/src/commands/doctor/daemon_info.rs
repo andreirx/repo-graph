@@ -339,6 +339,99 @@ fn skip_detail_clauses(skipped: Option<&Vec<serde_json::Value>>) -> String {
     }
 }
 
+/// ENRICH-ROOT-1 §2: the "; N not attempted (…)" clause for a completed pass whose run left some
+/// eligible edges UNATTEMPTED because their project context had no resolver toolchain (e.g. a
+/// tsconfig with no tsserver under it). Distinct from `skipped <lang>` (a whole language with no
+/// toolchain): these are per-context misses within a language that DID run — before this slice they
+/// vanished, making `enriched + failed` silently under-count `eligible`. Names up to two reader-frame
+/// contexts (path + reason); readable contexts past the cap are "(+K more)", while entries whose
+/// fields cannot be read surface as a DISTINCT "N malformed" note — never folded into "+K more"
+/// (review-2 item 1: an unreadable entry must not masquerade as an intentionally-omitted one).
+///
+/// STANDING HONESTY RULE 1 (operator ruling 2026-08-31, item 2 — the 16th recurrence of this class):
+/// `not_attempted_count` is a RENDERED term of the enrichment accounting invariant
+/// (`eligible = enriched + failed + not_attempted`). A fallible read of it must NEVER coerce to a
+/// fabricated `0`. The current daemon ALWAYS emits it as a number (`enrich_pass.rs::to_json`), so:
+/// - present + a number ≥ 1  → the count clause (+ up to two reader-frame contexts);
+/// - present + a number == 0  → known zero (every eligible edge was attempted) → empty clause;
+/// - present but NOT a number → malformed our-own-JSON → the count is UNKNOWN → unknown-with-reason;
+/// - absent → an older daemon that never captured the term → still UNKNOWN (not zero), so the
+///   invariant is unverifiable → unknown-with-reason.
+///
+/// The absent/malformed cases render "; not-attempted count unknown (…)" rather than implying that
+/// every eligible edge was attempted — the honest degradation the slice exists to make visible.
+fn not_attempted_clause(le: &serde_json::Value) -> String {
+    let count = match le.get("not_attempted_count") {
+        // Field absent: an older daemon predating this contract never computed the term. We do NOT
+        // know it — the accounting invariant cannot be checked, so say so instead of implying zero.
+        None => return "; not-attempted count unknown (daemon did not report it)".to_string(),
+        Some(v) => match v.as_u64() {
+            Some(n) => n,
+            // Present but not a number (null / wrong type) — our own JSON is malformed. Unknown,
+            // not zero.
+            None => return "; not-attempted count unknown (malformed daemon value)".to_string(),
+        },
+    };
+    if count == 0 {
+        // Known zero: every eligible edge was attempted. Nothing to surface.
+        return String::new();
+    }
+    // count ≥ 1: name up to two reader-frame contexts behind it. `skipped_contexts` is part of the
+    // SAME daemon contract; when the count is positive but the array is absent/malformed, or no
+    // entry is readable, report the honest count and state the detail is unavailable — never drop
+    // the not-attempted work silently.
+    let detail = match le.get("skipped_contexts").and_then(|v| v.as_array()) {
+        Some(arr) if !arr.is_empty() => {
+            // Partition the array in ONE pass: an entry is READABLE only when BOTH reader-frame
+            // fields are present as strings; anything else is our-own-JSON we cannot render.
+            //
+            // STANDING HONESTY RULE 1 (review-2 item 1): a malformed entry is NEVER folded into the
+            // "+K more" truncation count. Doing so implies it was a readable context we intentionally
+            // omitted rather than one we could not read — unknown masquerading as a benign
+            // truncation. "+K more" therefore counts ONLY readable contexts past the display cap;
+            // malformed entries surface as their own explicit "N malformed" note (unknown WITH
+            // reason).
+            let mut readable: Vec<String> = Vec::new();
+            let mut malformed = 0usize;
+            for c in arr {
+                match (
+                    c.get("context_path").and_then(|v| v.as_str()),
+                    c.get("reason").and_then(|v| v.as_str()),
+                ) {
+                    (Some(path), Some(reason)) => readable.push(format!("{path}: {reason}")),
+                    _ => malformed += 1,
+                }
+            }
+            let shown = readable.len().min(2);
+            let truncated = readable.len() - shown; // readable contexts past the cap — a true truncation
+            if shown == 0 {
+                // No context was readable (array non-empty ⇒ every entry malformed). Honest
+                // "unavailable" carrying WHY, never a clean-looking omission.
+                format!(" (context details unavailable: {malformed} malformed)")
+            } else {
+                // Parenthetical notes, kept DISTINCT so a reader can tell "more contexts I didn't
+                // list" (benign truncation) from "entries I could not read" (a real unknown).
+                let mut notes: Vec<String> = Vec::new();
+                if truncated > 0 {
+                    notes.push(format!("+{truncated} more"));
+                }
+                if malformed > 0 {
+                    notes.push(format!("{malformed} malformed"));
+                }
+                let notes_clause = if notes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", notes.join(", "))
+                };
+                format!(" — {}{notes_clause}", readable[..shown].join("; "))
+            }
+        }
+        // count > 0 but the per-context array is absent/malformed → unknown detail, honest count.
+        _ => " (context details unavailable)".to_string(),
+    };
+    format!("; {count} not attempted{detail}")
+}
+
 /// ENRICH-YIELD-1: the " (top rejections: <label> N, <label> N)" clause appended to the doctor
 /// enrichment headline, or empty when there is no funnel / nothing was rejected. Names the top TWO
 /// reader-frame classes (the daemon already sorted `rejections` dominant-first). Reader labels only —
@@ -568,8 +661,11 @@ fn enrichment_probe(response: &serde_json::Value) -> ProbeResult {
                             let funnel = le.get("promotion_funnel");
                             let promoted_clause = enrichment_promoted_clause(funnel, promoted);
                             let funnel_note = enrichment_funnel_headline(funnel);
+                            // ENRICH-ROOT-1 §2: name the not-attempted edges + their contexts when
+                            // any eligible edge went unattempted for lack of a per-context toolchain.
+                            let not_attempted = not_attempted_clause(le);
                             format!(
-                                "resolved {enriched}/{eligible} receiver types, {promoted_clause}{funnel_note}, {ago}{skip}"
+                                "resolved {enriched}/{eligible} receiver types, {promoted_clause}{funnel_note}, {ago}{skip}{not_attempted}"
                             )
                         }
                     }
@@ -1184,7 +1280,8 @@ mod tests {
             "last_enrichment": {
                 "repo": "my-repo", "state": "completed",
                 "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
-                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 12
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 12,
+                "not_attempted_count": 0, "skipped_contexts": []
             }
         });
         let msg = enrichment_probe(&response).message;
@@ -1193,6 +1290,182 @@ mod tests {
             "{msg}"
         );
         assert!(msg.contains("12s ago"), "{msg}");
+    }
+
+    // ENRICH-ROOT-1 §2: a completed pass that left edges NOT ATTEMPTED (a project context with no
+    // toolchain) renders the count + the reader-frame context/reason breakdown on the doctor line.
+    #[test]
+    fn enrichment_probe_reports_not_attempted_contexts() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 60, "promoted_count": 30,
+                "enrichment_rate": 60.0, "skipped": [], "finished_secs_ago": 5,
+                "not_attempted_count": 40,
+                "skipped_contexts": [
+                    {"context_path": "packages/legacy", "reason": "no TypeScript language server (tsserver) found for this project context", "edge_count": 40}
+                ]
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("40 not attempted"),
+            "names the not-attempted count: {msg}"
+        );
+        assert!(
+            msg.contains("packages/legacy"),
+            "names the reader-frame context: {msg}"
+        );
+        assert!(msg.contains("tsserver"), "names the reason: {msg}");
+    }
+
+    // STANDING HONESTY RULE 1 (operator ruling item 2): a completed `last_enrichment` that OMITS
+    // `not_attempted_count` (an older daemon that never captured the term) cannot report the
+    // not-attempted leg of the accounting invariant. That is UNKNOWN, not zero — the line says so
+    // with a reason rather than implying every eligible edge was attempted.
+    #[test]
+    fn enrichment_probe_missing_not_attempted_count_renders_unknown_with_reason() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 12
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("not-attempted count unknown") && msg.contains("daemon did not report it"),
+            "a missing count is unknown-with-reason, never a fabricated zero: {msg}"
+        );
+    }
+
+    // A `not_attempted_count` present but the WRONG TYPE (our own JSON malformed) is likewise
+    // unknown-with-reason, never coerced to zero.
+    #[test]
+    fn enrichment_probe_malformed_not_attempted_count_renders_unknown_with_reason() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 12,
+                "not_attempted_count": "lots", "skipped_contexts": []
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("not-attempted count unknown") && msg.contains("malformed"),
+            "a malformed count is unknown-with-reason, never coerced to zero: {msg}"
+        );
+    }
+
+    // A known ZERO not-attempted count (the current daemon's normal shape when every eligible edge
+    // was attempted) renders NO not-attempted clause — known-zero is not unknown.
+    #[test]
+    fn enrichment_probe_zero_not_attempted_count_renders_no_clause() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 12,
+                "not_attempted_count": 0, "skipped_contexts": []
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            !msg.contains("not attempted") && !msg.contains("not-attempted count unknown"),
+            "known-zero not-attempted is silent, not 'unknown' and not a fabricated clause: {msg}"
+        );
+    }
+
+    // count > 0 but `skipped_contexts` is absent/empty → the honest count is still reported, with
+    // the per-context detail flagged unavailable (never dropped to look like a clean pass).
+    #[test]
+    fn enrichment_probe_not_attempted_without_contexts_reports_count_and_flags_detail() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 60, "promoted_count": 30,
+                "enrichment_rate": 60.0, "skipped": [], "finished_secs_ago": 5,
+                "not_attempted_count": 40
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("40 not attempted"),
+            "names the honest count: {msg}"
+        );
+        assert!(
+            msg.contains("context details unavailable"),
+            "flags that the per-context breakdown could not be read: {msg}"
+        );
+    }
+
+    // review-2 item 1 (STANDING HONESTY RULE 1): skipped_contexts mixing a READABLE entry with a
+    // MALFORMED one (a field missing/wrong-typed — our own JSON we cannot render) must NOT fold the
+    // malformed entry into a "+K more" truncation count. That would imply an intentionally-omitted
+    // readable context rather than an unreadable one. It surfaces as an explicit "malformed" note;
+    // the honest not-attempted count is still reported.
+    #[test]
+    fn enrichment_probe_not_attempted_mixed_valid_and_malformed_context() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 60, "promoted_count": 30,
+                "enrichment_rate": 60.0, "skipped": [], "finished_secs_ago": 5,
+                "not_attempted_count": 40,
+                "skipped_contexts": [
+                    {"context_path": "packages/legacy", "reason": "no tsserver found for this project context", "edge_count": 30},
+                    {"context_path": "packages/broken", "edge_count": 10}
+                ]
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(
+            msg.contains("40 not attempted"),
+            "the honest count is still reported: {msg}"
+        );
+        assert!(
+            msg.contains("packages/legacy"),
+            "the readable context is named: {msg}"
+        );
+        // The malformed entry is surfaced explicitly, NOT hidden as a "+1 more" truncation.
+        assert!(
+            msg.contains("1 malformed"),
+            "the unreadable entry is flagged as malformed: {msg}"
+        );
+        assert!(
+            !msg.contains("+1 more"),
+            "a malformed entry must not masquerade as an omitted readable context: {msg}"
+        );
+    }
+
+    // count > 0 and skipped_contexts present but EVERY entry malformed → the honest count with an
+    // explicit "N malformed" reason (unknown WITH reason), never a clean-looking "+K more" or a
+    // silent drop that would imply a fully-accounted pass.
+    #[test]
+    fn enrichment_probe_not_attempted_all_malformed_contexts_reports_count_and_reason() {
+        let response = json!({
+            "enrichment_enabled": true,
+            "last_enrichment": {
+                "repo": "my-repo", "state": "completed",
+                "eligible_count": 100, "enriched_count": 60, "promoted_count": 30,
+                "enrichment_rate": 60.0, "skipped": [], "finished_secs_ago": 5,
+                "not_attempted_count": 40,
+                "skipped_contexts": [ {"edge_count": 40}, {"context_path": 5, "reason": true} ]
+            }
+        });
+        let msg = enrichment_probe(&response).message;
+        assert!(msg.contains("40 not attempted"), "{msg}");
+        assert!(
+            msg.contains("context details unavailable") && msg.contains("2 malformed"),
+            "all-malformed contexts render as unavailable WITH the malformed count: {msg}"
+        );
     }
 
     // ENRICH-YIELD-1: a completed pass with a promotion funnel names the top rejecting classes in the
@@ -1205,6 +1478,7 @@ mod tests {
                 "repo": "r", "state": "completed",
                 "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
                 "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 7,
+                "not_attempted_count": 0, "skipped_contexts": [],
                 "promotion_funnel": {
                     "candidates": 78, "promoted": 40, "rejected": 38,
                     "rejections": [
@@ -1315,7 +1589,8 @@ mod tests {
             "last_enrichment": {
                 "repo": "r", "state": "completed",
                 "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
-                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 7
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 7,
+                "not_attempted_count": 0, "skipped_contexts": []
             }
         });
         let probe = enrichment_probe(&response);
@@ -1374,7 +1649,8 @@ mod tests {
             json!({ "enrichment_enabled": true }),
             json!({ "enrichment_enabled": true, "last_enrichment": {
                 "repo": "r", "state": "completed", "eligible_count": 100, "enriched_count": 81,
-                "promoted_count": 40, "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 3
+                "promoted_count": 40, "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 3,
+                "not_attempted_count": 0, "skipped_contexts": []
             }}),
             json!({ "enrichment_enabled": true, "last_enrichment": {
                 "repo": "r", "state": "skipped", "eligible_count": 0, "enriched_count": 0,
@@ -1412,7 +1688,8 @@ mod tests {
                 "eligible_count": 50, "enriched_count": 40, "promoted_count": 12,
                 "enrichment_rate": 80.0,
                 "skipped": [{ "language": "java", "reason": "jdtls not found — set JDTLS_PATH to your jdtls launcher" }],
-                "finished_secs_ago": 8
+                "finished_secs_ago": 8,
+                "not_attempted_count": 0, "skipped_contexts": []
             }
         });
         let msg = enrichment_probe(&response).message;
@@ -1465,7 +1742,8 @@ mod tests {
             "last_enrichment": {
                 "repo": "my-repo", "state": "completed",
                 "eligible_count": 100, "enriched_count": 81, "promoted_count": 40,
-                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 30
+                "enrichment_rate": 81.0, "skipped": [], "finished_secs_ago": 30,
+                "not_attempted_count": 0, "skipped_contexts": []
             }
         });
         let msg = enrichment_probe(&response).message;

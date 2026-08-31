@@ -12,7 +12,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::contracts::{EligibleEdge, EnrichmentLanguage, EnrichmentMetadata, ReceiverTypeResult};
+use crate::contracts::{
+    BatchResolution, EligibleEdge, EnrichmentLanguage, EnrichmentMetadata, ReceiverTypeResult,
+};
 use crate::eligibility::{EligibilityQuery, EnrichmentStoragePort, StorageError};
 use crate::promotion::{promote_edges, PromotionContext};
 use crate::resolver::{ResolverError, ResolverRegistry};
@@ -218,51 +220,62 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
                 break;
             }
 
-            let batch_results: Vec<ReceiverTypeResult> =
-                if let Some(resolver) = self.registry.get_mut(*lang) {
-                    // Initialize resolver
-                    resolver.initialize(repo_path)?;
+            let batch: BatchResolution = if let Some(resolver) = self.registry.get_mut(*lang) {
+                // Initialize resolver
+                resolver.initialize(repo_path)?;
 
-                    // Resolve batch (cancel threaded into the resolver's own per-session /
-                    // per-edge boundaries; a cancelled batch returns partial results).
-                    let results = resolver.resolve_batch(repo_path, lang_edges, None, Some(cancel));
+                // Resolve batch (cancel threaded into the resolver's own per-session /
+                // per-edge boundaries; a cancelled batch returns partial results).
+                let batch = resolver.resolve_batch(repo_path, lang_edges, None, Some(cancel));
 
-                    // Record results
-                    for result in &results {
-                        if result.is_success() {
-                            let type_name = result
-                                .type_display_name
-                                .as_ref()
-                                .or(result.receiver_type.as_ref())
-                                .map(|s| s.as_str())
-                                .unwrap_or("unknown");
-                            builder.record_success(*lang, type_name, result.is_external_type);
-                        } else {
-                            let reason = result.failure_reason.as_deref().unwrap_or("unknown");
-                            builder.record_failure(*lang, reason);
-                        }
+                // Record ATTEMPTED results (success or failure).
+                for result in &batch.results {
+                    if result.is_success() {
+                        let type_name = result
+                            .type_display_name
+                            .as_ref()
+                            .or(result.receiver_type.as_ref())
+                            .map(|s| s.as_str())
+                            .unwrap_or("unknown");
+                        builder.record_success(*lang, type_name, result.is_external_type);
+                    } else {
+                        let reason = result.failure_reason.as_deref().unwrap_or("unknown");
+                        builder.record_failure(*lang, reason);
                     }
+                }
 
-                    // Shutdown resolver
-                    resolver.shutdown();
-                    results
-                } else {
-                    // No resolver for this language - mark all as failed
-                    let mut results = Vec::with_capacity(lang_edges.len());
-                    for edge in lang_edges {
-                        builder.record_failure(*lang, "no_resolver_available");
-                        results.push(ReceiverTypeResult::failed(
-                            edge.edge_uid.clone(),
-                            "no resolver available",
-                        ));
-                    }
-                    results
-                };
+                // Record NOT-ATTEMPTED edges (per-context skips) — the honesty fix
+                // (ENRICH-ROOT-1 §2): these were silently dropped before, so `eligible`
+                // exceeded `enriched + failed`. Now they count toward `not_attempted` and
+                // surface with their context path + reason.
+                for skip in &batch.skipped_contexts {
+                    builder.record_not_attempted(*lang, skip);
+                }
+
+                // Shutdown resolver
+                resolver.shutdown();
+                batch
+            } else {
+                // No resolver for this language - mark all as failed
+                let mut results = Vec::with_capacity(lang_edges.len());
+                for edge in lang_edges {
+                    builder.record_failure(*lang, "no_resolver_available");
+                    results.push(ReceiverTypeResult::failed(
+                        edge.edge_uid.clone(),
+                        "no resolver available",
+                    ));
+                }
+                BatchResolution::from_results(results)
+            };
 
             // Persist this batch (skip in dry-run mode — persistence not attempted, which
             // leaves persisted_count as None so has_storage_discrepancy() cannot misfire).
+            // Only ATTEMPTED results are persisted: a not-attempted edge must NOT get an
+            // enrichment marker, or it would be excluded from the next pass and never retried
+            // once its toolchain becomes available.
             if !config.dry_run {
-                let updates: Vec<_> = batch_results
+                let updates: Vec<_> = batch
+                    .results
                     .iter()
                     .map(|r| (r.edge_uid.clone(), EnrichmentMetadata::from(r)))
                     .collect();
@@ -502,7 +515,7 @@ mod tests {
             edges: &[EligibleEdge],
             _progress: Option<&dyn crate::resolver::ResolverProgress>,
             cancel: Option<&dyn Fn() -> bool>,
-        ) -> Vec<ReceiverTypeResult> {
+        ) -> BatchResolution {
             let mut out = Vec::new();
             for e in edges {
                 if cancel.is_some_and(|c| c()) {
@@ -515,7 +528,7 @@ mod tests {
                     false,
                 ));
             }
-            out
+            BatchResolution::from_results(out)
         }
         fn initialize(&mut self, _repo_root: &Path) -> Result<(), ResolverError> {
             Ok(())
@@ -586,5 +599,131 @@ mod tests {
             processed > 0 && processed < 8,
             "cancel stopped the batch partway (processed {processed}/8)"
         );
+    }
+
+    // ── ENRICH-ROOT-1 §2: not-attempted accounting + the binding invariant ──────────────────────
+
+    /// A hermetic resolver that ATTEMPTS the first `attempt` edges (success) and reports the rest as
+    /// ONE not-attempted context skip — the shape the real tsserver produces when a project context
+    /// has no toolchain. Lets the pipeline's not_attempted accounting be proven without an LSP.
+    struct SkippingResolver {
+        lang: EnrichmentLanguage,
+        attempt: usize,
+        context_path: String,
+        reason: String,
+    }
+    impl crate::resolver::ReceiverTypeResolver for SkippingResolver {
+        fn language(&self) -> EnrichmentLanguage {
+            self.lang
+        }
+        fn resolve_batch(
+            &self,
+            _repo_root: &Path,
+            edges: &[EligibleEdge],
+            _progress: Option<&dyn crate::resolver::ResolverProgress>,
+            _cancel: Option<&dyn Fn() -> bool>,
+        ) -> BatchResolution {
+            let results: Vec<ReceiverTypeResult> = edges
+                .iter()
+                .take(self.attempt)
+                .map(|e| {
+                    ReceiverTypeResult::success(
+                        e.edge_uid.clone(),
+                        "SomeType".to_string(),
+                        Some("SomeType".to_string()),
+                        false,
+                    )
+                })
+                .collect();
+            let skipped = edges.len().saturating_sub(self.attempt);
+            let skipped_contexts = if skipped > 0 {
+                vec![crate::contracts::SkippedContext {
+                    context_path: self.context_path.clone(),
+                    reason: self.reason.clone(),
+                    edge_count: skipped,
+                }]
+            } else {
+                Vec::new()
+            };
+            BatchResolution {
+                results,
+                skipped_contexts,
+            }
+        }
+        fn initialize(&mut self, _repo_root: &Path) -> Result<(), ResolverError> {
+            Ok(())
+        }
+        fn shutdown(&mut self) {}
+    }
+
+    /// The binding invariant (slice §2): a not-attempted context is COUNTED, surfaced with its
+    /// context path + reason, and `eligible == enriched + failed + not_attempted` holds exactly.
+    #[test]
+    fn not_attempted_context_is_counted_and_satisfies_the_accounting_invariant() {
+        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        for i in 0..5 {
+            storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
+        }
+        let mut pipeline = EnrichmentPipeline::new(storage);
+        pipeline.registry_mut().register(Box::new(SkippingResolver {
+            lang: EnrichmentLanguage::TypeScript,
+            attempt: 3,
+            context_path: "packages/legacy".to_string(),
+            reason: "no tsserver for this project context".to_string(),
+        }));
+
+        let report = pipeline
+            .run("repo-1", "snap-1", &EnrichmentConfig::default())
+            .unwrap();
+
+        assert_eq!(report.eligible_count, 5);
+        assert_eq!(report.enriched_count, 3);
+        assert_eq!(report.failed_count, 0, "a skip is NOT a failure");
+        assert_eq!(report.not_attempted_count, 2, "2 edges were not attempted");
+
+        // The invariant holds exactly — no silent gap.
+        assert!(
+            report.accounting_holds(),
+            "eligible({}) must equal enriched({}) + failed({}) + not_attempted({})",
+            report.eligible_count,
+            report.enriched_count,
+            report.failed_count,
+            report.not_attempted_count
+        );
+
+        // The skip is surfaced with its context path + reason + edge count.
+        assert_eq!(report.skipped_contexts.len(), 1);
+        let sc = &report.skipped_contexts[0];
+        assert_eq!(sc.context_path, "packages/legacy");
+        assert_eq!(sc.edge_count, 2);
+        assert!(sc.reason.contains("tsserver"));
+
+        // Per-language accounting also carries the not-attempted count.
+        let ts = &report.by_language[&EnrichmentLanguage::TypeScript];
+        assert_eq!(ts.not_attempted, 2);
+    }
+
+    /// A pass with no skips keeps the invariant AND leaves the not-attempted surface empty (0 / []),
+    /// so a clean run is byte-compatible with the pre-slice report shape.
+    #[test]
+    fn no_skips_leaves_not_attempted_empty_and_invariant_intact() {
+        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        for i in 0..4 {
+            storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
+        }
+        let mut pipeline = EnrichmentPipeline::new(storage);
+        pipeline.registry_mut().register(Box::new(SkippingResolver {
+            lang: EnrichmentLanguage::TypeScript,
+            attempt: 4, // attempt all → no skip
+            context_path: "unused".to_string(),
+            reason: "unused".to_string(),
+        }));
+        let report = pipeline
+            .run("repo-1", "snap-1", &EnrichmentConfig::default())
+            .unwrap();
+        assert_eq!(report.enriched_count, 4);
+        assert_eq!(report.not_attempted_count, 0);
+        assert!(report.skipped_contexts.is_empty());
+        assert!(report.accounting_holds());
     }
 }

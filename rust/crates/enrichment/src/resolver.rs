@@ -16,7 +16,7 @@
 //! 3. Return results for every input edge (success or failure)
 //! 4. Clean up resources on drop
 
-use crate::contracts::{EligibleEdge, EnrichmentLanguage, ReceiverTypeResult};
+use crate::contracts::{BatchResolution, EligibleEdge, EnrichmentLanguage, ReceiverTypeResult};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resolver Trait
@@ -34,12 +34,18 @@ pub trait ReceiverTypeResolver: Send + Sync {
     ///
     /// # Contract
     ///
-    /// - Returns one result per input edge — **except** when `cancel` fires: a
-    ///   cancelled batch returns results only for the edges resolved before the
-    ///   cancel point (the tail is abandoned, never fabricated as failed).
-    /// - Results are in the same order as inputs
-    /// - Failures are reported via `ReceiverTypeResult::failed()`
-    /// - Partial success is acceptable
+    /// Returns a [`BatchResolution`]: the edges ATTEMPTED (`results`) plus the per-context
+    /// skips (`skipped_contexts`) — edges the resolver deliberately did NOT attempt because a
+    /// project context had no usable toolchain (ENRICH-ROOT-1 §2). The two partition the input:
+    ///
+    /// - `results` — one per ATTEMPTED edge, in input order, each success or
+    ///   `ReceiverTypeResult::failed()`. Partial success is acceptable.
+    /// - `skipped_contexts` — per-context "not attempted" entries with a reader-frame reason and
+    ///   the edge count, so `eligible = enriched + failed + not_attempted` holds. Resolvers that
+    ///   never skip a context return this empty (via [`BatchResolution::from_results`]).
+    /// - **Cancellation exception:** when `cancel` fires, the tail after the cancel point is
+    ///   neither in `results` nor `skipped_contexts` — it is abandoned (a superseding pass
+    ///   re-enriches it), never fabricated as failed.
     ///
     /// # Cancellation (ENRICH-LIFECYCLE-1)
     ///
@@ -65,7 +71,7 @@ pub trait ReceiverTypeResolver: Send + Sync {
         edges: &[EligibleEdge],
         progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult>;
+    ) -> BatchResolution;
 
     /// Initialize the resolver for a repository.
     ///
@@ -257,9 +263,10 @@ impl ReceiverTypeResolver for NullResolver {
         edges: &[EligibleEdge],
         _progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> BatchResolution {
         // Honor cooperative cancellation per-edge (the boundary a real resolver polls),
-        // returning results only for the edges processed before the cancel point.
+        // returning results only for the edges processed before the cancel point. The null
+        // resolver never skips a context, so `skipped_contexts` is empty.
         let mut out = Vec::new();
         for e in edges {
             if cancel.is_some_and(|c| c()) {
@@ -270,7 +277,7 @@ impl ReceiverTypeResolver for NullResolver {
                 "null resolver",
             ));
         }
-        out
+        BatchResolution::from_results(out)
     }
 
     fn initialize(&mut self, _repo_root: &std::path::Path) -> Result<(), ResolverError> {
@@ -314,9 +321,11 @@ mod tests {
             make_edge("edge-2", EnrichmentLanguage::TypeScript),
         ];
 
-        let results = resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, None);
+        let batch = resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, None);
+        let results = batch.results;
 
         assert_eq!(results.len(), 2);
+        assert!(batch.skipped_contexts.is_empty());
         assert!(!results[0].is_success());
         assert!(!results[1].is_success());
         assert_eq!(results[0].failure_reason, Some("null resolver".to_string()));
@@ -341,8 +350,9 @@ mod tests {
         // and the rest abandoned.
         let polls = AtomicUsize::new(0);
         let cancel = || polls.fetch_add(1, Ordering::SeqCst) >= 2;
-        let results =
-            resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, Some(&cancel));
+        let results = resolver
+            .resolve_batch(std::path::Path::new("/repo"), &edges, None, Some(&cancel))
+            .results;
         assert_eq!(
             results.len(),
             2,
@@ -350,7 +360,9 @@ mod tests {
         );
 
         // None (never cancel) processes every edge — the unchanged manual/never-cancel behavior.
-        let all = resolver.resolve_batch(std::path::Path::new("/repo"), &edges, None, None);
+        let all = resolver
+            .resolve_batch(std::path::Path::new("/repo"), &edges, None, None)
+            .results;
         assert_eq!(all.len(), 4, "no cancel → one result per input edge");
     }
 

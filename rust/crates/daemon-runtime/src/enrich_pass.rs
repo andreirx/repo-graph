@@ -379,6 +379,13 @@ pub struct EnrichPassOutcome {
     pub enrichment_rate: f64,
     /// Languages present with eligible edges but no toolchain — the honest skips (slice §3.2).
     pub skipped: Vec<SkippedLanguage>,
+    /// ENRICH-ROOT-1 §2: eligible edges NOT ATTEMPTED because their project context lacked a
+    /// toolchain (e.g. no tsserver under a tsconfig). Distinct from `skipped` (a whole LANGUAGE with
+    /// no toolchain): these are per-context misses WITHIN a language that DID run. Counted so
+    /// `eligible = enriched + failed + not_attempted` holds.
+    pub not_attempted_count: usize,
+    /// The per-context breakdown (context path + reason + edge count) behind `not_attempted_count`.
+    pub skipped_contexts: Vec<enrichment::SkippedContext>,
     /// ENRICH-YIELD-1: the promotion funnel — resolved candidates → promoted, with the reader-frame
     /// per-gate first-rejection breakdown of the rest. `None` when the pass ran no promotion (nothing
     /// eligible / all languages skipped), so a zero-work pass renders as "no data" rather than a
@@ -435,6 +442,14 @@ impl EnrichmentReport {
             "skipped": self.outcome.skipped.iter().map(|s| serde_json::json!({
                 "language": s.language,
                 "reason": s.reason,
+            })).collect::<Vec<_>>(),
+            // ENRICH-ROOT-1 §2: per-context not-attempted accounting. Always present (0 / [] when
+            // every context had its toolchain) — additive keys, all pre-existing keys byte-identical.
+            "not_attempted_count": self.outcome.not_attempted_count,
+            "skipped_contexts": self.outcome.skipped_contexts.iter().map(|c| serde_json::json!({
+                "context_path": c.context_path,
+                "reason": c.reason,
+                "edge_count": c.edge_count,
             })).collect::<Vec<_>>(),
             "finished_secs_ago": self.at.elapsed().as_secs(),
         });
@@ -866,6 +881,8 @@ pub fn run_enrich_pass(
             promoted_count: 0,
             enrichment_rate: 0.0,
             skipped,
+            not_attempted_count: 0,
+            skipped_contexts: Vec::new(),
             // No language ran → no promotion → no funnel (honest "no data", not a measured-zero).
             funnel: None,
         });
@@ -924,6 +941,10 @@ pub fn run_enrich_pass(
         promoted_count: report.promotion.as_ref().map(|p| p.promoted).unwrap_or(0),
         enrichment_rate: report.enrichment_rate,
         skipped,
+        // ENRICH-ROOT-1 §2: carry the per-context not-attempted accounting from the pipeline report
+        // to the doctor surface. Zero/empty when every eligible context had its toolchain.
+        not_attempted_count: report.not_attempted_count,
+        skipped_contexts: report.skipped_contexts.clone(),
         // ENRICH-YIELD-1: decompose the promotion funnel from the same report the promoted count
         // comes from. `Some` iff promotion ran (auto-enrich always promotes), so the funnel is
         // present here whenever a language ran; the reader-frame per-gate breakdown flows to doctor.
@@ -1451,6 +1472,8 @@ mod tests {
             promoted_count: 40,
             enrichment_rate: 81.0,
             skipped: vec![],
+            not_attempted_count: 0,
+            skipped_contexts: vec![],
             // No funnel → no rejection note; the headline stays exactly as before (backcompat).
             funnel: None,
         };
@@ -1469,6 +1492,8 @@ mod tests {
                 language: "rust".to_string(),
                 reason: "rust-analyzer not found — install rust-analyzer".to_string(),
             }],
+            not_attempted_count: 0,
+            skipped_contexts: vec![],
             funnel: None,
         };
         assert_eq!(all_skipped.lifecycle_state(), "skipped");
@@ -1480,6 +1505,8 @@ mod tests {
             promoted_count: 0,
             enrichment_rate: 0.0,
             skipped: vec![],
+            not_attempted_count: 0,
+            skipped_contexts: vec![],
             funnel: None,
         };
         assert_eq!(summarize_outcome(&empty), "nothing to enrich");
@@ -1495,6 +1522,8 @@ mod tests {
             promoted_count: 40,
             enrichment_rate: 81.0,
             skipped: vec![],
+            not_attempted_count: 0,
+            skipped_contexts: vec![],
             funnel,
         }
     }
@@ -1746,6 +1775,8 @@ mod tests {
             promoted_count: 10,
             enrichment_rate: 60.0,
             skipped: vec![],
+            not_attempted_count: 0,
+            skipped_contexts: vec![],
             funnel: None,
         };
 

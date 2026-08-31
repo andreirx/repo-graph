@@ -4030,6 +4030,14 @@ impl ServiceDispatcher {
                 "eligible_count": report.eligible_count,
                 "enriched_count": report.enriched_count,
                 "failed_count": report.failed_count,
+                // ENRICH-ROOT-1 §2: edges NOT attempted (project context lacked a toolchain), with
+                // the per-context breakdown. Additive; `eligible = enriched + failed + not_attempted`.
+                "not_attempted_count": report.not_attempted_count,
+                "skipped_contexts": report.skipped_contexts.iter().map(|c| serde_json::json!({
+                    "context_path": c.context_path,
+                    "reason": c.reason,
+                    "edge_count": c.edge_count,
+                })).collect::<Vec<_>>(),
                 "attempted_persist_count": report.attempted_persist_count(),
                 "persisted_count": report.persisted_count.unwrap_or(0),
                 "has_storage_discrepancy": report.has_storage_discrepancy(),

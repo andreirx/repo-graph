@@ -49,7 +49,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use enrichment::{
-    EligibilityQuery, EligibleEdge, EnrichmentLanguage, EnrichmentStoragePort,
+    BatchResolution, EligibilityQuery, EligibleEdge, EnrichmentLanguage, EnrichmentStoragePort,
     ReceiverTypeResolver, ReceiverTypeResult, ResolverError, ResolverProgress, ResolverRegistry,
 };
 use repo_graph_daemon_runtime::activity::OpKind;
@@ -618,7 +618,7 @@ impl ReceiverTypeResolver for ParkingResolver {
         edges: &[EligibleEdge],
         _progress: Option<&dyn ResolverProgress>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Vec<ReceiverTypeResult> {
+    ) -> BatchResolution {
         let cancelled = || cancel.is_some_and(|c| c());
         let mut out = Vec::new();
         for (i, e) in edges.iter().enumerate() {
@@ -642,7 +642,7 @@ impl ReceiverTypeResolver for ParkingResolver {
             ));
             self.processed.fetch_add(1, Ordering::SeqCst);
         }
-        out
+        BatchResolution::from_results(out)
     }
     fn initialize(&mut self, _repo_root: &Path) -> Result<(), ResolverError> {
         Ok(())
