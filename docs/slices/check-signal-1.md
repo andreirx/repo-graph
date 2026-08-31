@@ -9,7 +9,7 @@ All six graded repos land FAIL or INCOMPLETE at Fresh because `CALL_GRAPH_RELIAB
 always LOW — exit-2 is ambient, not signal; an agent (or CI) learns nothing from check's
 verdict because it is the same everywhere. Two distinct situations are conflated:
 - **Enrichable-but-unenriched** (TS repo, enrichment available/not run): LOW is actionable —
-  Incomplete with the CTA is CORRECT.
+  a failing condition with the CTA is CORRECT.
 - **No-path ceiling** (C/C++/Python on this build: no resolver exists): LOW is PERMANENT —
   nothing the reader does changes it; "Incomplete" falsely implies actionability, forever.
 Compounding: django's `ENRICHMENT_STATE: Enrichment phase did not run.` renders as a FAILING
@@ -29,7 +29,8 @@ condition where no Python path exists, while leveldb already gets the honest pas
      ceiling for <langs> (no resolver exists) — <N>% resolved is the deterministic-extraction
      figure; verify call/dead claims against source." The reliability FIGURES render
      unchanged (Layer honesty); only the verdict contribution changes.
-   - Mixed repos: the enrichable side governs (actionability exists → Incomplete + CTA naming
+   - Mixed repos: the enrichable side governs (actionability exists → the current failing
+     classification + CTA naming
      only the enrichable languages, per the CS-1 materiality gate).
 2. **ENRICHMENT_STATE follows the same fact**: no-path languages get leveldb's honest
    non-failing form (never "did not run" as a failure); in-flight keeps OFC-1's form;
@@ -57,7 +58,7 @@ STOP + DECISION_REQUIRED. Never touch the operator's real state root. Do NOT com
   honest_degradation_impl2 5× as part of validation.
 - Live proof (isolated state root, registry sha unchanged): leveldb (pure C++ →
   ceiling Pass form), django (pure Python → ceiling Pass + honest ENRICHMENT_STATE),
-  glamCRM (mixed → Incomplete with TS-only CTA), FRAKTAG post-enrichment (whatever its
+  glamCRM (mixed → current failing classification with TS-only CTA), FRAKTAG post-enrichment (whatever its
   true state now yields). Predicted-vs-measured verdict table for all four.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
