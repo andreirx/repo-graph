@@ -31,10 +31,13 @@ The manifests-to-module attribution worked on every other repo (django, FRAKTAG,
    when the manifest's subtree truly contains zero indexed files (computed, not assumed);
    otherwise the honest line states what actually failed ("N files indexed under this
    manifest, not attributed: <reason>").
-4. **Java/Gradle no-reader honesty**: repos with a materially-present ecosystem that has no
-   manifest reader on this build render the leveldb-pattern sentence ("no dependency-manifest
-   reader for Gradle/Maven on this build; N external references observed, not attributed"),
-   using the existing materiality gate. Recording a Gradle READER is NOT this slice.
+4. **Java truth in the default view — AMENDED (ruling DR-JAVA-NOREADER = Option 2,
+   2026-08-31)**: the spec's original no-reader premise was FALSE — `resolve_gradle_deps`
+   exists (repo-index compose.rs:589, manifest_deps.rs). DIAGNOSE why glamCRM's audit capture
+   contained zero java/gradle content despite the reader (where do its results go?), then make
+   the DEFAULT `deps list` view state Java's truth: attributed Gradle deps render like any
+   ecosystem; a failed/empty read renders unknown-with-reason or computed-true absence. A
+   materially-present ecosystem may never be silently absent from the default view.
 5. JSON additive; exit codes unchanged.
 
 ## 3. Stop conditions
