@@ -37,6 +37,12 @@
 pub mod check;
 pub mod cycles;
 pub mod deps_list;
+// DEPS-ATTRIB-2 §2.4: secondary-ecosystem view. `pub(crate)`, not `pub` (review-2 fix):
+// the packet freezes new PUBLIC Rust APIs beyond the additive JSON field; this is a
+// guardrail-driven crate-private extraction from `deps_list.rs`, consumed only by the
+// sibling `deps_list` presenter within this crate — same convention as `orient_types`,
+// `orient_seg2`, `http_boundary` above.
+pub(crate) mod deps_list_secondary;
 pub mod explain;
 pub mod explain_sections;
 pub mod graph_edges;

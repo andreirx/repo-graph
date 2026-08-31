@@ -35,7 +35,10 @@ fn token_enrichment_language(token: &str) -> Option<EnrichmentLanguage> {
 /// Reader-facing display name for an indexer language token (`None` for a token with no stable display
 /// name, so a raw internal token is never shown to the reader). Used by the D2 deps note and the D5
 /// no-resolution-path line.
-fn language_display_name(token: &str) -> Option<&'static str> {
+///
+/// `pub(crate)` so the DEPS-ATTRIB-2 §2.4 `deps_ecosystem_presence` module reuses the SAME code-file
+/// token set (one materiality definition, never re-derived) — see `secondary_material_ecosystems`.
+pub(crate) fn language_display_name(token: &str) -> Option<&'static str> {
     Some(match token {
         "c" => "C",
         "cpp" => "C++",
@@ -74,7 +77,10 @@ fn display_language_names(languages: &[String]) -> String {
 /// mapping, deliberately INDEPENDENT of [`token_enrichment_language`]'s resolver mapping —
 /// they share token sets only by coincidence (a Python *enrichment* resolver, if added, must
 /// not imply anything about the Python *manifest* reader). Keep them separate.
-fn language_deps_ecosystem(token: &str) -> Option<&'static str> {
+///
+/// `pub(crate)` so the DEPS-ATTRIB-2 §2.4 `deps_ecosystem_presence` module reuses this exact
+/// language→ecosystem map (never a second copy) — see `secondary_material_ecosystems`.
+pub(crate) fn language_deps_ecosystem(token: &str) -> Option<&'static str> {
     Some(match token {
         "typescript" | "tsx" | "javascript" | "jsx" => "npm",
         "rust" => "cargo",
@@ -144,7 +150,10 @@ pub(crate) fn relationship_reliability_is_low(
 /// with NO CTA. glamCRM's TS/JS is a demonstrable ~90% half (VERIFIED), well above the gate, so its true
 /// CTA survives while its ~10% Java draws its own JDTLS truth. Integer comparison `count * 10 >= total`
 /// == `share >= 10%`.
-const MATERIAL_LANGUAGE_SHARE_NUM: u64 = 10;
+///
+/// `pub(crate)` so the DEPS-ATTRIB-2 §2.4 `deps_ecosystem_presence` module gates on the SAME
+/// threshold (never a re-derived one) — see `secondary_material_ecosystems`.
+pub(crate) const MATERIAL_LANGUAGE_SHARE_NUM: u64 = 10;
 
 /// A CODE language materially present in the repo (a token with a reader display name AND a file share
 /// at or above [`MATERIAL_LANGUAGE_SHARE_NUM`]%), with its display name. `total_code_files` is the sum

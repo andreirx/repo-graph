@@ -72,6 +72,8 @@ mod inferences_serve; // INFERENCES-SURFACE-1: detector inventory + empty-state 
                       // INDEX-BASIS-1: stamp the git basis at index/refresh; compute working-tree drift at
                       // query time. Crate-internal glue between repo-graph-git and the agent IndexDrift DTO;
                       // the five callers (index/refresh/orient/check/explain handlers) are all in this crate.
+pub(crate) mod deps_coverage; // DEPS-ATTRIB-2 §2.3: manifest-coverage split (extracted per review-1 item 5)
+pub(crate) mod deps_ecosystem_presence; // DEPS-ATTRIB-2 §2.4: secondary-ecosystem truth (extracted per review-1 item 5)
 pub(crate) mod deps_headline;
 mod find_facts; // FIND-FACTS-1: the `find` verb's deterministic FACTS tier (crate-private)
 pub(crate) mod index_basis_probe;

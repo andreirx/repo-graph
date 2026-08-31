@@ -11,6 +11,8 @@
 
 use serde::Deserialize;
 
+use super::deps_list_secondary::{render_other_ecosystem, OtherEcosystem};
+
 /// One reconciled dependency entry (the machine detail; the table shows counts + examples).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct DepEntry {
@@ -78,8 +80,42 @@ pub struct DepsListResponse {
     /// unknown (old snapshot / unreadable) — the shortfall line then does not render.
     #[serde(default)]
     pub manifests_present: u64,
+    /// Parsed manifests of this ecosystem whose subtree contains ≥1 indexed file (govern indexed
+    /// source). DEPS-ATTRIB-2 §2.3: computed from file containment, NOT module attribution.
     #[serde(default)]
     pub manifests_attributed: u64,
+    /// DEPS-ATTRIB-2 §2.3 additive field: parsed manifests COMPUTED to govern ZERO indexed files —
+    /// the ONLY count that may render as "govern no indexed source". Absent (default 0) on an older
+    /// daemon; the remainder of `present - attributed` then renders as the honest "present, no
+    /// dependency record" clause instead of a false excuse.
+    #[serde(default)]
+    pub manifests_no_indexed_source: u64,
+    /// DEPS-ATTRIB-2 review-4 blocker 2 additive field: parsed manifests whose subtree contains ≥1
+    /// INDEXED source file that no module owns — indexed source present, attribution absent. The
+    /// §2.3 excuse "govern no indexed source" is FALSE for these (indexed source IS present), so they
+    /// render their own honest clause, NEVER the excuse. Absent (default 0) on an older daemon / the
+    /// all-attributed happy path.
+    #[serde(default)]
+    pub manifests_indexed_unattributed: u64,
+    /// The total indexed source files under those `manifests_indexed_unattributed` (the "N files
+    /// indexed, not attributed" count the honest §2.3 clause states). Absent (default 0) when there
+    /// are none.
+    #[serde(default)]
+    pub manifests_indexed_unattributed_files: u64,
+    /// DEPS-ATTRIB-2 review-0 item 1 / operator binding: present ONLY when the owned-files read that
+    /// feeds the coverage split FAILED. When set, the coverage line renders unknown-with-reason
+    /// instead of a computed split — never a silent omission, never a false 0.
+    #[serde(default)]
+    pub manifests_coverage_unavailable: String,
+    /// DEPS-ATTRIB-2 §2.4 (ruling Option 2): the truth of every materially-present ecosystem OTHER
+    /// than the rendered one, in the DEFAULT view — so a material ecosystem (glamCRM's Java half) is
+    /// never silently absent. Empty on a single-ecosystem repo / a targeted view.
+    // `pub(crate)`, not `pub` (DEPS-ATTRIB-2 review-2): `OtherEcosystem` is a crate-private
+    // view type, so this field is crate-private too — a `pub` field of a `pub(crate)` type in
+    // the externally-reachable `DepsListResponse` would trip `private_interfaces`. Serde still
+    // populates it (deserialize needs no `pub`); `render_human` reads it in-crate.
+    #[serde(default)]
+    pub(crate) other_ecosystems: Vec<OtherEcosystem>,
     #[serde(default)]
     pub count: u64,
     #[serde(default)]
@@ -184,21 +220,104 @@ impl DepsListResponse {
         out.push_str(&totals);
         out.push('\n');
 
-        // §2.2 / ruling-3 item-4: reported workspace-coverage shortfall — manifests present but not
-        // attributed to any reconciled module (the amodx 9-of-43 case), stated, never silent.
-        if self.manifests_present > self.manifests_attributed {
-            out.push_str(&format!(
-                "{} of {} {} manifest{} attributed to a module ({} govern no indexed source)\n",
-                self.manifests_attributed,
-                self.manifests_present,
-                if self.ecosystem.is_empty() {
-                    "workspace"
-                } else {
-                    &self.ecosystem
-                },
-                if self.manifests_present == 1 { "" } else { "s" },
-                self.manifests_present - self.manifests_attributed,
-            ));
+        let coverage_eco = if self.ecosystem.is_empty() {
+            "workspace"
+        } else {
+            &self.ecosystem
+        };
+        // DEPS-ATTRIB-2 review-1 item 2 / operator binding: a read that FEEDS the coverage split
+        // failed → coverage is UNKNOWN-with-reason, NEVER a silent omission. The scanned denominator
+        // is stated only when we still know it (`manifests_present > 0`); when even that read failed
+        // the reason stands ALONE (never a fabricated `0 manifests`). Takes precedence over the
+        // computed split (absent here).
+        if !self.manifests_coverage_unavailable.is_empty() {
+            if self.manifests_present > 0 {
+                out.push_str(&format!(
+                    "{} {} manifest{} present; coverage unknown ({})\n",
+                    self.manifests_present,
+                    coverage_eco,
+                    if self.manifests_present == 1 { "" } else { "s" },
+                    self.manifests_coverage_unavailable,
+                ));
+            } else {
+                out.push_str(&format!(
+                    "{} manifest coverage unknown ({})\n",
+                    coverage_eco, self.manifests_coverage_unavailable,
+                ));
+            }
+        } else if self.manifests_present > self.manifests_attributed {
+            let gap = self.manifests_present - self.manifests_attributed;
+            // Decompose the shortfall by cause: computed no-indexed-source, indexed-but-unattributed
+            // (review-4 blocker 2), and the scanned-but-unparsed remainder whose containment is unknown.
+            let no_dep_record = gap
+                .saturating_sub(self.manifests_no_indexed_source)
+                .saturating_sub(self.manifests_indexed_unattributed);
+            let plural = if self.manifests_present == 1 { "" } else { "s" };
+            if no_dep_record == 0 && self.manifests_indexed_unattributed == 0 {
+                // The ENTIRE shortfall is COMPUTED no-indexed-source: parsed manifests that own no
+                // source of their own (a zero-dependency workspace ROOT — FRAKTAG). The facts are
+                // unchanged from the pre-slice output, so the legacy wording is preserved VERBATIM
+                // (review-1 item 1 — FRAKTAG byte-parity). `manifests_no_indexed_source` equals the
+                // gap here and is > 0. glamCRM (attributed == present) never reaches this branch, so
+                // its false excuse still cannot render.
+                out.push_str(&format!(
+                    "{} of {} {} manifest{} attributed to a module ({} govern no indexed source)\n",
+                    self.manifests_attributed,
+                    self.manifests_present,
+                    coverage_eco,
+                    plural,
+                    self.manifests_no_indexed_source,
+                ));
+            } else {
+                // The shortfall has a cause the legacy single-excuse wording cannot express — a
+                // scanned-but-unparsed remainder (containment UNKNOWN) and/or indexed-but-unattributed
+                // manifests (§2.3 — indexed source IS present, so "govern no indexed source" is FALSE
+                // for them). Render each cause as its own honest clause; "govern no indexed source" is
+                // claimed ONLY for the computed-zero count, never for the other two.
+                let mut clauses: Vec<String> = Vec::new();
+                if self.manifests_no_indexed_source > 0 {
+                    clauses.push(format!(
+                        "{} govern no indexed source",
+                        self.manifests_no_indexed_source
+                    ));
+                }
+                if self.manifests_indexed_unattributed > 0 {
+                    // review-4 blocker 2 / §2.3: "N files indexed under this manifest, not attributed".
+                    clauses.push(format!(
+                        "{} present with indexed source not attributed to a module ({} file{})",
+                        self.manifests_indexed_unattributed,
+                        self.manifests_indexed_unattributed_files,
+                        if self.manifests_indexed_unattributed_files == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                    ));
+                }
+                if no_dep_record > 0 {
+                    clauses.push(format!(
+                        "{} present, no dependency record on this build",
+                        no_dep_record
+                    ));
+                }
+                out.push_str(&format!(
+                    "{} of {} {} manifest{} govern indexed source ({})\n",
+                    self.manifests_attributed,
+                    self.manifests_present,
+                    coverage_eco,
+                    plural,
+                    clauses.join("; "),
+                ));
+            }
+        }
+
+        // DEPS-ATTRIB-2 §2.4 (ruling Option 2): every materially-present secondary ecosystem states
+        // its truth here — attributed deps, unknown-with-reason, or computed-true absence — so a
+        // material ecosystem (glamCRM's Java half) is never silently absent from the default view.
+        // Rendered BEFORE the empty-results guard so the secondary truth survives even when the
+        // dominant ecosystem has no module rows.
+        for e in &self.other_ecosystems {
+            out.push_str(&render_other_ecosystem(e));
         }
 
         if self.results.is_empty() {
@@ -329,6 +448,223 @@ mod tests {
     }
 
     #[test]
+    fn coverage_read_failure_renders_unknown_with_reason_not_silent() {
+        // DEPS-ATTRIB-2 review-0 item 1 / operator binding: a failed owned-files read renders the
+        // coverage as UNKNOWN-with-reason over the known denominator — never a silent omission and
+        // never a false split (`manifests_attributed`/`no_indexed_source` are absent in this payload).
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 10,
+            "manifests_present": 7,
+            "manifests_coverage_unavailable": "could not read owned files: disk error",
+            "count": 0,
+            "results": []
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains("7 npm manifests present; coverage unknown (could not read owned files: disk error)"),
+            "coverage read failure not surfaced with reason: {out}"
+        );
+        assert!(
+            !out.contains("govern no indexed source"),
+            "must not fabricate a coverage split on a failed read: {out}"
+        );
+    }
+
+    #[test]
+    fn coverage_unavailable_without_denominator_renders_reason_alone() {
+        // DEPS-ATTRIB-2 review-1 item 2: the shared diagnostics blob failed → BOTH the present-count
+        // denominator AND the provenance split are unknown. The coverage line must STILL render the
+        // reason (no denominator, no fabricated `0 manifests`) — never a silent omission.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 10,
+            "manifests_coverage_unavailable": "extraction diagnostics not valid JSON: expected value",
+            "count": 0,
+            "results": []
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains(
+                "npm manifest coverage unknown (extraction diagnostics not valid JSON: expected value)"
+            ),
+            "coverage unknown without a denominator not surfaced: {out}"
+        );
+        assert!(
+            !out.contains("0 npm manifest"),
+            "must not fabricate a zero denominator: {out}"
+        );
+    }
+
+    #[test]
+    fn parsed_zero_source_manifest_keeps_legacy_govern_no_indexed_source_wording() {
+        // When the ENTIRE shortfall is COMPUTED no-indexed-source — parsed manifests whose subtree
+        // truly contains zero indexed files (`manifests_no_indexed_source == gap`) — the claim is
+        // computed-true (§2.3-honest) AND matches the pre-slice wording, so the legacy line is
+        // preserved VERBATIM (review-1 item 1, for the case the audit-line's assumption happened to be
+        // computable). NOTE: this is NOT FRAKTAG's live shape — FRAKTAG's workspace-root package.json
+        // is present-but-UNPARSED (absent from provenance → `no_indexed_source == 0`), so it renders
+        // the honest no-dependency-record line below, not this one. See build report + DECISION_REQUIRED
+        // DR-FRAKTAG-BYTEPARITY.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 635,
+            "manifests_present": 4,
+            "manifests_attributed": 3,
+            "manifests_no_indexed_source": 1,
+            "count": 3,
+            "results": [{
+                "module": "packages/api",
+                "manifest_path": "packages/api/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 2,
+                "entries": []
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains(
+                "3 of 4 npm manifests attributed to a module (1 govern no indexed source)"
+            ),
+            "computed zero-source manifest must keep the legacy verbatim wording: {out}"
+        );
+    }
+
+    #[test]
+    fn present_but_unparsed_manifest_renders_honest_no_record_never_assumed_no_source() {
+        // FRAKTAG's ACTUAL live shape (VERIFIED 2026-08-31 isolated index): 4 npm manifests present, 3
+        // parsed leaves (all govern indexed source), the workspace ROOT present-but-UNPARSED → absent
+        // from provenance → `manifests_no_indexed_source == 0`. §2.3 FORBIDS claiming "govern no indexed
+        // source" for that unparsed remainder (we never computed its subtree is empty). The honest line
+        // states what actually failed instead. This diverges from the audit capture BY DESIGN — the
+        // audit line was itself the §2.3 assumed-not-computed bug (DR-FRAKTAG-BYTEPARITY).
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 635,
+            "manifests_present": 4,
+            "manifests_attributed": 3,
+            "manifests_no_indexed_source": 0,
+            "count": 3,
+            "results": [{
+                "module": "packages/api",
+                "manifest_path": "packages/api/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 2,
+                "entries": []
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains(
+                "3 of 4 npm manifests govern indexed source (1 present, no dependency record on this build)"
+            ),
+            "unparsed remainder must render the honest no-record line, never an assumed no-source claim: {out}"
+        );
+        assert!(
+            !out.contains("govern no indexed source"),
+            "must NOT claim 'govern no indexed source' for a manifest whose emptiness was not computed: {out}"
+        );
+    }
+
+    #[test]
+    fn indexed_but_unattributed_manifest_renders_honest_clause_never_no_indexed_source() {
+        // review-4 blocker 2 / §2.3: a parsed manifest whose subtree has INDEXED source that no module
+        // owns must render the honest "indexed source not attributed" clause with the file count —
+        // NEVER "govern no indexed source" (the excuse is false; indexed source IS present).
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 10,
+            "manifests_present": 3,
+            "manifests_attributed": 2,
+            "manifests_no_indexed_source": 0,
+            "manifests_indexed_unattributed": 1,
+            "manifests_indexed_unattributed_files": 4,
+            "count": 2,
+            "results": [{
+                "module": "serverless",
+                "manifest_path": "serverless/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 1,
+                "entries": []
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains(
+                "2 of 3 npm manifests govern indexed source \
+                 (1 present with indexed source not attributed to a module (4 files))"
+            ),
+            "indexed-but-unattributed manifest must render the honest clause: {out}"
+        );
+        assert!(
+            !out.contains("govern no indexed source"),
+            "must NOT claim 'govern no indexed source' when indexed source IS present: {out}"
+        );
+    }
+
+    #[test]
+    fn secondary_ecosystem_java_states_truth_in_default_view() {
+        // §2.4 (ruling Option 2): the DEFAULT npm view names Java's attributed Gradle deps — the
+        // audit's "zero mention of Java" is gone, and NO no-reader sentence is emitted for a reader.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 100,
+            "count": 1,
+            "results": [{
+                "module": "serverless",
+                "manifest_path": "serverless/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 2,
+                "entries": []
+            }],
+            "other_ecosystems": [
+                { "ecosystem": "java", "state": "attributed", "declared_dependencies": 18, "manifests": 1 }
+            ]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains("java: 18 declared dependencies across 1 manifest — `deps list --ecosystem java` for detail"),
+            "Java truth missing from default view: {out}"
+        );
+        assert!(
+            !out.to_lowercase()
+                .contains("no dependency-manifest reader for java")
+                && !out.to_lowercase().contains("no gradle reader"),
+            "must NOT emit a no-reader sentence for an ecosystem that has a reader: {out}"
+        );
+    }
+
+    #[test]
+    fn secondary_ecosystem_unavailable_and_absence_render_honestly() {
+        // Unknown-with-reason and computed-true absence are each stated, never silent.
+        let unavail = resp(serde_json::json!({
+            "ecosystem": "npm", "count": 0, "results": [],
+            "other_ecosystems": [
+                { "ecosystem": "java", "state": "unavailable", "reason": "manifest backend/build.gradle present but not parsed: permission denied" }
+            ]
+        }));
+        assert!(
+            unavail.render_human().contains(
+                "java: dependency truth unavailable (manifest backend/build.gradle present but not parsed: permission denied)"
+            ),
+            "{}", unavail.render_human()
+        );
+        let absent = resp(serde_json::json!({
+            "ecosystem": "npm", "count": 0, "results": [],
+            "other_ecosystems": [
+                { "ecosystem": "java", "state": "no_manifest_parsed", "source_files": 267 }
+            ]
+        }));
+        assert!(
+            absent
+                .render_human()
+                .contains("java: 267 source files indexed, no manifest parsed on this index"),
+            "{}",
+            absent.render_human()
+        );
+    }
+
+    #[test]
     fn headline_is_first_and_present_when_unattributed() {
         let r = resp(serde_json::json!({
             "ecosystem": "none-detected",
@@ -433,13 +769,17 @@ mod tests {
     }
 
     #[test]
-    fn workspace_coverage_shortfall_is_reported() {
-        // Ruling 3 item 4: manifests present but not attributed to any module are stated, not silent.
+    fn workspace_coverage_shortfall_splits_no_source_from_unparsed() {
+        // DEPS-ATTRIB-2 §2.3: the shortfall line claims "govern no indexed source" ONLY for the
+        // computed-zero count; the rest of the gap is labelled "no dependency record". Here 43
+        // present, 9 govern indexed source, 30 computed to govern zero indexed files → the remaining 4
+        // are scanned-but-unparsed.
         let r = resp(serde_json::json!({
             "ecosystem": "npm",
             "total_external_imports": 100,
             "manifests_present": 43,
             "manifests_attributed": 9,
+            "manifests_no_indexed_source": 30,
             "count": 9,
             "results": [{
                 "module": "pkg0",
@@ -453,9 +793,49 @@ mod tests {
             }]
         }));
         let out = r.render_human();
-        assert!(out.contains("9 of 43 npm manifests attributed"), "{out}");
-        assert!(out.contains("34 govern no indexed source"), "{out}");
+        assert!(
+            out.contains("9 of 43 npm manifests govern indexed source"),
+            "{out}"
+        );
+        assert!(out.contains("30 govern no indexed source"), "{out}");
+        assert!(
+            out.contains("4 present, no dependency record on this build"),
+            "{out}"
+        );
         assert!(out.lines().count() <= 20, "too long: {out}");
+    }
+
+    #[test]
+    fn all_manifests_governing_source_render_no_shortfall_line() {
+        // glamCRM's shape: every present manifest governs indexed source (attributed == present) →
+        // the false "N govern no indexed source" excuse cannot render at all.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 100,
+            "manifests_present": 7,
+            "manifests_attributed": 7,
+            "manifests_no_indexed_source": 0,
+            "count": 3,
+            "results": [{
+                "module": "serverless",
+                "manifest_path": "serverless/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 2,
+                "declared_but_unobserved": 0,
+                "observed_but_undeclared": 0,
+                "runtime_builtins": 0,
+                "entries": []
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            !out.contains("govern no indexed source"),
+            "false excuse rendered: {out}"
+        );
+        assert!(
+            !out.contains("attributed to a module"),
+            "stale wording: {out}"
+        );
     }
 
     #[test]

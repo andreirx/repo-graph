@@ -21,6 +21,8 @@ use repo_graph_module_queries::{
 use repo_graph_storage::StorageConnection;
 use repo_graph_trust::TrustStorageRead;
 
+use crate::deps_coverage::{CoverageStatus, ManifestCoverage};
+use crate::deps_ecosystem_presence::{ecosystem_presence_json, EcosystemPresence};
 use crate::reader_context::deps_reader_context_note;
 
 /// Diagnostics-blob key the index writes parsed-manifest provenance under (mirror of
@@ -92,47 +94,98 @@ fn parse_manifest_provenance(blob: Option<&str>) -> ProvenanceRead {
     }
 }
 
-/// Read the PRESENT-manifest denominator for `ecosystem` (the §2.2 / ruling-3 item-4
-/// workspace-coverage line). This is the count of manifests SCANNED on disk — distinct from the
-/// PARSED-provenance record, so a scanned-but-never-dep-parsed workspace `package.json` (the amodx
-/// 9-of-43 gap) counts toward the denominator WITHOUT being laundered into the parsed record
-/// (review-3 item 2).
+/// The scanned-manifest DENOMINATOR read outcome for one ecosystem (the §2.2 / ruling-3 item-4
+/// workspace-coverage line). A sum type, NOT `Option<usize>`: this storage read is fallible AND its
+/// result feeds a RENDERED coverage line, so a read FAILURE must surface as unknown-with-reason — it
+/// can never collapse into the same `None` as a legitimate not-applicable absence and then be
+/// laundered by the caller into a fabricated denominator (STANDING HONESTY RULE #1; DEPS-ATTRIB-2
+/// review-3 / operator ruling 2026-08-31, closing the 15th recurrence of the fallible-read → `None`
+/// → fabricated-count class — the prior code read this blob a SECOND time, independently of
+/// [`read_manifest_provenance`], and a failure of THAT read was silently laundered into the parsed
+/// total by `build_deps_list_response`).
 ///
-/// `None` = denominator UNKNOWN (diagnostics unreadable, or a snapshot indexed before this signal,
-/// or the ecosystem absent from the map) → the coverage line does not render (honest degradation:
-/// unknown, never a fabricated count). `Some(n)` = exactly `n` manifests present.
+/// Abstraction (pre-ratified crate-private sum type): WHAT = the present-denominator read outcome;
+/// CALLERS = [`read_manifests_present`]/[`parse_manifests_present`] (produce), [`build_deps_list_response`]
+/// (consume); AXIS = a fallible read feeding a RENDERED line grows operations over a FIXED outcome
+/// set → sum type + exhaustive match, a read failure a DISTINCT fact from a legitimate absence;
+/// REJECTED SIMPLER = `Option<usize>`, which merges failure and absence into one `None` (the exact
+/// defect being fixed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PresentDenominator {
+    /// Exactly `n` manifests of this ecosystem were scanned on disk (the definite denominator).
+    Count(usize),
+    /// No denominator applies AND no read failed: the diagnostics blob is absent (snapshot predates
+    /// provenance tracking — io NotFound is the only "absent"), the present-manifest key is absent
+    /// (snapshot predates the present-count sub-record), or this ecosystem is absent from the map.
+    /// The coverage line falls back to the parsed-manifest total it DID compute (honest byte-parity
+    /// for co-written snapshots — the index co-writes the present count alongside the parsed records).
+    NotApplicable,
+    /// The denominator read FAILED — the diagnostics blob was unreadable (storage error), its JSON
+    /// was corrupt, or this ecosystem's count value was non-integer. The scanned total is genuinely
+    /// UNKNOWN; the caller renders unknown-with-reason, never a fabricated count.
+    Unavailable { reason: String },
+}
+
+/// Read the scanned-manifest denominator for `ecosystem` (the §2.2 / ruling-3 item-4 coverage line):
+/// the count of manifests SCANNED on disk — distinct from the PARSED-provenance record, so a
+/// scanned-but-never-dep-parsed workspace `package.json` (the amodx 9-of-43 gap) counts toward the
+/// denominator WITHOUT being laundered into the parsed record (review-3 item 2).
+///
+/// A storage read failure is [`PresentDenominator::Unavailable`] — NOT a `None` the caller fabricates
+/// over (review-3 / operator ruling 2026-08-31). Only io-NotFound (blob absent) is a legitimate
+/// [`PresentDenominator::NotApplicable`] absence. This read is independent of [`read_manifest_provenance`];
+/// its failure is surfaced by THIS return value, never assumed to be caught by the sibling read.
 pub(crate) fn read_manifests_present(
     storage: &StorageConnection,
     snapshot_uid: &str,
     ecosystem: &str,
-) -> Option<usize> {
+) -> PresentDenominator {
     let blob = match TrustStorageRead::get_snapshot_extraction_diagnostics(storage, snapshot_uid) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("warning: deps coverage — extraction diagnostics unreadable ({e})");
-            return None;
+            return PresentDenominator::Unavailable {
+                reason: format!("scanned-manifest count unreadable: {e}"),
+            };
         }
     };
     parse_manifests_present(blob.as_deref(), ecosystem)
 }
 
 /// Pure parse of one ecosystem's present-manifest count from a diagnostics blob (unit-testable).
-/// `None` for every "not a definite count" case (blob absent, not JSON, key absent, ecosystem
-/// absent, non-integer) — the caller then OMITS the coverage line rather than rendering a false 0.
-/// A malformed/absent blob is not swallowed silently system-wide: the SAME blob is read by
-/// [`read_manifest_provenance`], which surfaces its corruption/absence as the per-module
-/// `manifest_context` reason. This denominator collapses every unknown cause to the same rendering
-/// (no line), so it needs no per-cause split.
-fn parse_manifests_present(blob: Option<&str>, ecosystem: &str) -> Option<usize> {
-    let value: serde_json::Value = match serde_json::from_str(blob?) {
-        Ok(v) => v,
-        Err(_) => return None, // corruption surfaced via the provenance read; here → omit line.
+/// Distinguishes a legitimate absence ([`PresentDenominator::NotApplicable`] — blob / present-key /
+/// ecosystem absent) from corruption ([`PresentDenominator::Unavailable`] — a non-JSON blob or a
+/// present-but-non-integer count value): a fallible read feeding a rendered line never merges a
+/// failure into an absence (STANDING HONESTY RULE #1; review-3).
+fn parse_manifests_present(blob: Option<&str>, ecosystem: &str) -> PresentDenominator {
+    let s = match blob {
+        Some(s) => s,
+        None => return PresentDenominator::NotApplicable, // blob absent — predates tracking.
     };
-    value
-        .get(DEPS_MANIFESTS_PRESENT_DIAG_KEY)?
-        .get(ecosystem)?
-        .as_u64()
-        .map(|n| n as usize)
+    let value: serde_json::Value = match serde_json::from_str(s) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("warning: deps coverage — present-count diagnostics not valid JSON ({e})");
+            return PresentDenominator::Unavailable {
+                reason: format!("scanned-manifest count: diagnostics not valid JSON: {e}"),
+            };
+        }
+    };
+    let present = match value.get(DEPS_MANIFESTS_PRESENT_DIAG_KEY) {
+        Some(p) => p,
+        None => return PresentDenominator::NotApplicable, // key absent — predates present tracking.
+    };
+    match present.get(ecosystem) {
+        None => PresentDenominator::NotApplicable, // ecosystem absent from the map — no read failed.
+        Some(v) => match v.as_u64() {
+            Some(n) => PresentDenominator::Count(n as usize),
+            None => PresentDenominator::Unavailable {
+                reason: format!(
+                    "scanned-manifest count for {ecosystem} malformed (not a non-negative integer)"
+                ),
+            },
+        },
+    }
 }
 
 /// Resolution-state posture for the §2.4 honesty label (operator ruling 3 item 1). A tri-state, NOT
@@ -275,7 +328,9 @@ pub(crate) fn build_deps_list_response(
     resolution: &ResolutionState,
     unattributed: &Unattributed,
     total_rejected: usize,
-    manifests_present: Option<usize>,
+    manifests_present: &PresentDenominator,
+    manifest_coverage: Option<CoverageStatus>,
+    other_ecosystems: &[EcosystemPresence],
 ) -> serde_json::Value {
     let total_external_imports = result.total_external_imports;
 
@@ -299,16 +354,6 @@ pub(crate) fn build_deps_list_response(
         .map(|s| module_json(s, resolution))
         .collect();
     let count = results.len();
-
-    // §2.2 / ruling-3 item-4 workspace coverage: how many parsed manifests of this ecosystem were
-    // attributed to a reconciled module vs. how many were parsed in total. `present > attributed`
-    // is the REPORTED SHORTFALL (the amodx 9-of-43 case) — manifests present but governing no
-    // indexed source. Distinct `Parsed` paths across summaries = attributed.
-    let attributed: usize = summaries
-        .iter()
-        .filter_map(|s| s.manifest_context.path())
-        .collect::<std::collections::BTreeSet<_>>()
-        .len();
 
     let mut response = serde_json::json!({
         "command": "deps list",
@@ -337,18 +382,70 @@ pub(crate) fn build_deps_list_response(
                 serde_json::json!(format!("resolution-state unknown ({reason})")),
             );
         }
-        // Workspace coverage (only for the whole-repo view — a per-module drill-down would make the
-        // present-vs-attributed ratio misleading — and only when the present denominator is KNOWN
-        // (`Some`) and non-zero. `None` = unknown denominator (old snapshot / unreadable) → the line
-        // is omitted, never rendered as a false 0 (review-3 item 2; standing honesty rule).
-        if let (None, Some(present)) = (module_filter, manifests_present) {
-            if present > 0 {
-                map.insert("manifests_present".to_string(), serde_json::json!(present));
-                map.insert(
-                    "manifests_attributed".to_string(),
-                    serde_json::json!(attributed),
-                );
+        // Workspace coverage — whole-repo view only (a per-module drill would make the present-vs-
+        // attributed ratio misleading). Driven by `manifest_coverage` (review-1 item 2 — a read that
+        // FEEDS the split failing must SURFACE, never silently drop the whole line):
+        //   Computed → render the split, using the scanned `manifests_present` denominator when known,
+        //     else the parsed total we DID compute (never a fabricated 0; present and the provenance
+        //     records are co-written by the index, so a Computed result virtually always has a Some
+        //     present — the fallback only guards a corrupt present sub-field, and still tells the truth).
+        //   Unknown → the provenance blob or the owned-files read failed → render unknown-WITH-REASON,
+        //     carrying the present denominator if we still know it, none otherwise. NEVER a silent
+        //     omission, NEVER a false 0 (operator binding 2026-08-31; STANDING HONESTY RULE #1).
+        //   None → computed-known not-applicable (old snapshot / no manifests) → omit (byte-parity).
+        if module_filter.is_none() {
+            match &manifest_coverage {
+                Some(CoverageStatus::Computed(cov)) => match manifests_present {
+                    // Definite scanned denominator → render the split against it.
+                    PresentDenominator::Count(p) => insert_coverage_split(map, *p, cov),
+                    // No scanned count tracked (old snapshot) and no read failed → fall back to the
+                    // parsed total we DID compute (honest byte-parity; the index co-writes the present
+                    // count with the parsed records, so this only guards a pre-present-key snapshot).
+                    PresentDenominator::NotApplicable => {
+                        insert_coverage_split(map, cov.total_parsed(), cov)
+                    }
+                    // The scanned-count read FAILED → the denominator is genuinely UNKNOWN. Do NOT
+                    // fabricate it from the parsed total (that was the review-3 defect); surface the
+                    // coverage as unknown-with-reason (STANDING HONESTY RULE #1; operator ruling
+                    // 2026-08-31). The computed split is WITHHELD — an "X of ?" ratio has no honest
+                    // denominator to state.
+                    PresentDenominator::Unavailable { reason } => {
+                        map.insert(
+                            "manifests_coverage_unavailable".to_string(),
+                            serde_json::json!(reason),
+                        );
+                    }
+                },
+                Some(CoverageStatus::Unknown { reason }) => {
+                    map.insert(
+                        "manifests_coverage_unavailable".to_string(),
+                        serde_json::json!(reason),
+                    );
+                    // Carry the scanned denominator only when we DEFINITELY have it (a definite
+                    // count); an absence or a failed present-read contributes no number here.
+                    if let PresentDenominator::Count(present) = manifests_present {
+                        if *present > 0 {
+                            map.insert("manifests_present".to_string(), serde_json::json!(present));
+                        }
+                    }
+                }
+                None => {}
             }
+        }
+
+        // DEPS-ATTRIB-2 §2.4 (ruling DR-JAVA-NOREADER = Option 2): the DEFAULT view states the truth
+        // of every materially-present ecosystem OTHER than the rendered dominant one — attributed
+        // deps, unknown-with-reason, or computed-true absence — so a materially-present ecosystem
+        // (glamCRM's Java half) is never SILENTLY absent. Empty on a single-ecosystem repo (django,
+        // FRAKTAG) → byte-parity. Only the whole-repo default view carries it (never a module drill).
+        if module_filter.is_none() && !other_ecosystems.is_empty() {
+            map.insert(
+                "other_ecosystems".to_string(),
+                serde_json::json!(other_ecosystems
+                    .iter()
+                    .map(ecosystem_presence_json)
+                    .collect::<Vec<_>>()),
+            );
         }
     }
 
@@ -371,6 +468,49 @@ pub(crate) fn build_deps_list_response(
         }
     }
     response
+}
+
+/// Insert the §2.3 coverage split (`manifests_present` denominator + `manifests_attributed` +
+/// `manifests_no_indexed_source`) when the denominator is non-zero; a zero denominator omits the line
+/// (old snapshot / no manifests — byte-parity). Shared by the definite-count and parsed-total-fallback
+/// arms so the two honest paths render identically. `manifests_no_indexed_source` is the ONLY count
+/// that may render as "govern no indexed source" (parsed manifests computed to have zero indexed files
+/// under them); the remainder of `present - attributed` (scanned-but-unparsed manifests) renders as its
+/// own honest clause in the presenter, never laundered into the excuse.
+fn insert_coverage_split(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    denominator: usize,
+    cov: &ManifestCoverage,
+) {
+    if denominator == 0 {
+        return;
+    }
+    map.insert(
+        "manifests_present".to_string(),
+        serde_json::json!(denominator),
+    );
+    map.insert(
+        "manifests_attributed".to_string(),
+        serde_json::json!(cov.attributed),
+    );
+    map.insert(
+        "manifests_no_indexed_source".to_string(),
+        serde_json::json!(cov.no_indexed_source),
+    );
+    // review-4 blocker 2 / §2.3: parsed manifests with indexed source that no module owns. Emitted
+    // ONLY when non-zero — additive, and keeps the JSON byte-stable on the common (all-attributed)
+    // path where an older consumer / capture never saw these keys. When present, the presenter renders
+    // the honest "indexed source not attributed" clause instead of laundering these into the excuse.
+    if cov.indexed_unattributed_manifests > 0 {
+        map.insert(
+            "manifests_indexed_unattributed".to_string(),
+            serde_json::json!(cov.indexed_unattributed_manifests),
+        );
+        map.insert(
+            "manifests_indexed_unattributed_files".to_string(),
+            serde_json::json!(cov.indexed_unattributed_files),
+        );
+    }
 }
 
 /// One module's JSON object: §2.2 exact `manifest_path`/`manifest_context` and §2.4 per-entry
@@ -438,6 +578,7 @@ fn format_category(cat: DependencyCategory) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps_coverage::ManifestCoverage;
 
     #[test]
     fn absent_blob_and_absent_key_are_absent_not_unavailable() {
@@ -523,7 +664,14 @@ mod tests {
             &ResolutionState::Clean,
             &un,
             0,
-            Some(1),
+            &PresentDenominator::Count(1),
+            Some(CoverageStatus::Computed(ManifestCoverage {
+                attributed: 1,
+                no_indexed_source: 0,
+                indexed_unattributed_manifests: 0,
+                indexed_unattributed_files: 0,
+            })),
+            &[],
         );
         let obj = payload.as_object().unwrap();
         assert!(
@@ -534,6 +682,7 @@ mod tests {
         assert_eq!(obj.get("resolution_downgraded").unwrap(), false);
         assert_eq!(obj.get("manifests_present").unwrap(), 1);
         assert_eq!(obj.get("manifests_attributed").unwrap(), 1);
+        assert_eq!(obj.get("manifests_no_indexed_source").unwrap(), 0);
     }
 
     #[test]
@@ -563,7 +712,14 @@ mod tests {
             },
             &un,
             0,
-            Some(1),
+            &PresentDenominator::Count(1),
+            Some(CoverageStatus::Computed(ManifestCoverage {
+                attributed: 1,
+                no_indexed_source: 0,
+                indexed_unattributed_manifests: 0,
+                indexed_unattributed_files: 0,
+            })),
+            &[],
         );
         let obj = payload.as_object().unwrap();
         assert_eq!(obj.get("resolution_state").unwrap(), "unknown");
@@ -588,18 +744,144 @@ mod tests {
         // 43 package.json present, only some parsed.
         let blob = r#"{"deps_manifests":[{"path":"package.json","dir":"","ecosystem":"npm"}],
                        "deps_manifests_present":{"npm":43,"python":0,"cargo":0}}"#;
-        assert_eq!(parse_manifests_present(Some(blob), "npm"), Some(43));
-        assert_eq!(parse_manifests_present(Some(blob), "python"), Some(0));
-        // Ecosystem absent from the map → unknown denominator (None), not a false 0.
-        assert_eq!(parse_manifests_present(Some(blob), "java"), None);
-        // Old snapshot: key absent entirely → unknown denominator → None (coverage line omitted).
+        assert_eq!(
+            parse_manifests_present(Some(blob), "npm"),
+            PresentDenominator::Count(43)
+        );
+        assert_eq!(
+            parse_manifests_present(Some(blob), "python"),
+            PresentDenominator::Count(0)
+        );
+        // Ecosystem absent from the map → NotApplicable (no read failed), never a false 0.
+        assert_eq!(
+            parse_manifests_present(Some(blob), "java"),
+            PresentDenominator::NotApplicable
+        );
+        // Old snapshot: present key absent entirely → NotApplicable (coverage falls back to parsed).
         assert_eq!(
             parse_manifests_present(Some(r#"{"deps_manifests":[]}"#), "npm"),
-            None
+            PresentDenominator::NotApplicable
         );
-        // No blob at all, and malformed blob → unknown → None (never a fabricated 0).
-        assert_eq!(parse_manifests_present(None, "npm"), None);
-        assert_eq!(parse_manifests_present(Some("not json{"), "npm"), None);
+        // No blob at all → io-NotFound absence → NotApplicable (never a fabricated 0).
+        assert_eq!(
+            parse_manifests_present(None, "npm"),
+            PresentDenominator::NotApplicable
+        );
+    }
+
+    #[test]
+    fn present_count_corruption_is_unavailable_with_reason_not_absence() {
+        // review-3 / operator ruling 2026-08-31: a CORRUPT present-count read (non-JSON blob, or a
+        // non-integer count value) is a read FAILURE — Unavailable-with-reason, NEVER merged into the
+        // same NotApplicable absence that the caller fabricates a denominator over.
+        match parse_manifests_present(Some("not json{"), "npm") {
+            PresentDenominator::Unavailable { reason } => {
+                assert!(reason.contains("not valid JSON"), "{reason}")
+            }
+            other => panic!("expected Unavailable for corrupt blob, got {other:?}"),
+        }
+        let non_integer = r#"{"deps_manifests_present":{"npm":"lots"}}"#;
+        match parse_manifests_present(Some(non_integer), "npm") {
+            PresentDenominator::Unavailable { reason } => {
+                assert!(reason.contains("malformed"), "{reason}")
+            }
+            other => panic!("expected Unavailable for non-integer count, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn computed_split_with_failed_present_read_renders_coverage_unknown_not_fabricated() {
+        // review-3 (operator-ratified): the split WAS computed (provenance + owned-files reads
+        // succeeded), but the SEPARATE present-count read FAILED. The denominator must NOT be
+        // fabricated from the parsed total — the coverage renders unknown-with-reason, and no
+        // `manifests_present`/`manifests_attributed`/`manifests_no_indexed_source` split is emitted.
+        let res = result_of(vec![summary(
+            "app",
+            ManifestContext::Parsed {
+                path: "app/package.json".into(),
+            },
+            &[],
+        )]);
+        let un = Unattributed {
+            count: 0,
+            reason: "all attributed".into(),
+        };
+        let payload = build_deps_list_response(
+            "repo",
+            "snap",
+            "npm",
+            &[],
+            res,
+            None,
+            &ResolutionState::Clean,
+            &un,
+            0,
+            &PresentDenominator::Unavailable {
+                reason: "scanned-manifest count unreadable: disk error".into(),
+            },
+            Some(CoverageStatus::Computed(ManifestCoverage {
+                attributed: 7,
+                no_indexed_source: 0,
+                indexed_unattributed_manifests: 0,
+                indexed_unattributed_files: 0,
+            })),
+            &[],
+        );
+        let obj = payload.as_object().unwrap();
+        assert_eq!(
+            obj.get("manifests_coverage_unavailable").unwrap(),
+            "scanned-manifest count unreadable: disk error"
+        );
+        assert!(
+            !obj.contains_key("manifests_present"),
+            "must not fabricate a denominator on a failed present read: {payload}"
+        );
+        assert!(
+            !obj.contains_key("manifests_attributed")
+                && !obj.contains_key("manifests_no_indexed_source"),
+            "must not emit an 'X of ?' split with no honest denominator: {payload}"
+        );
+    }
+
+    #[test]
+    fn computed_split_not_applicable_present_falls_back_to_parsed_total() {
+        // Old snapshot: present count untracked (NotApplicable), but provenance + owned-files DID
+        // compute the split → the denominator falls back to the parsed total (attributed +
+        // no_indexed_source), a real computed quantity (byte-parity for pre-present-key snapshots).
+        let res = result_of(vec![summary(
+            "app",
+            ManifestContext::Parsed {
+                path: "app/package.json".into(),
+            },
+            &[],
+        )]);
+        let un = Unattributed {
+            count: 0,
+            reason: "all attributed".into(),
+        };
+        let payload = build_deps_list_response(
+            "repo",
+            "snap",
+            "npm",
+            &[],
+            res,
+            None,
+            &ResolutionState::Clean,
+            &un,
+            0,
+            &PresentDenominator::NotApplicable,
+            Some(CoverageStatus::Computed(ManifestCoverage {
+                attributed: 3,
+                no_indexed_source: 1,
+                indexed_unattributed_manifests: 0,
+                indexed_unattributed_files: 0,
+            })),
+            &[],
+        );
+        let obj = payload.as_object().unwrap();
+        assert_eq!(obj.get("manifests_present").unwrap(), 4); // 3 + 1 parsed total
+        assert_eq!(obj.get("manifests_attributed").unwrap(), 3);
+        assert!(!obj.contains_key("manifests_coverage_unavailable"));
     }
 
     #[test]

@@ -6392,6 +6392,9 @@ impl ServiceDispatcher {
             }
         };
         let repo_languages: Vec<String> = language_counts.iter().map(|(l, _)| l.clone()).collect();
+        // Whether the caller pinned an ecosystem. The §2.4 secondary-ecosystem truth (below) is a
+        // property of the DEFAULT whole-repo view only — an explicit `--ecosystem` is a targeted view.
+        let ecosystem_explicit = ecosystem_param.is_some();
         let ecosystem = match ecosystem_param {
             Some(e) => e,
             None => dominant_deps_ecosystem(&language_counts).to_string(),
@@ -6407,15 +6410,108 @@ impl ServiceDispatcher {
         // collapsed label and never a fabricated path.
         let manifest_provenance =
             crate::deps_headline::read_manifest_provenance(&storage, &snapshot.snapshot_uid);
-        // Workspace-coverage denominator (ruling 3 item 4; review-3 item 2): how many manifests of
-        // this ecosystem are PRESENT (scanned) — read from the SEPARATE `deps_manifests_present`
-        // key, NOT the parsed record, so unparsed workspace manifests count toward the denominator
-        // without being laundered into the parsed provenance. `None` = unknown → coverage omitted.
+        // Workspace-coverage denominator (ruling 3 item 4; review-3): how many manifests of this
+        // ecosystem are PRESENT (scanned) — read from the SEPARATE `deps_manifests_present` key, NOT
+        // the parsed record, so unparsed workspace manifests count toward the denominator without
+        // being laundered into the parsed provenance. Returns a `PresentDenominator` sum type, NOT
+        // `Option<usize>`: a FAILURE of this (independent) read surfaces as `Unavailable`-with-reason
+        // and the coverage line renders unknown — it is NEVER collapsed to `None` and fabricated over
+        // by `build_deps_list_response` (review-3 / operator ruling 2026-08-31; STANDING HONESTY RULE #1).
         let manifests_present = crate::deps_headline::read_manifests_present(
             &storage,
             &snapshot.snapshot_uid,
             &ecosystem,
         );
+
+        // DEPS-ATTRIB-2 §2.3: the HONEST "govern no indexed source" split — computed per PARSED
+        // manifest from file containment (file paths ⋈ manifest dir), NOT from module attribution.
+        // Two INDEPENDENT reads feed the split, BOTH fallible AND rendered/classified, so EITHER
+        // failure is surfaced as unknown-with-reason (`CoverageStatus::Unknown`) — NEVER `None`/silent
+        // omission (operator binding 2026-08-31, STANDING HONESTY RULE #1):
+        //   - `get_owned_files_for_rollup` = the `module_file_ownership`⋈`files` read → the ATTRIBUTED
+        //     (module-owned) file universe.
+        //   - `map_files_in_path(snapshot, "")` = every indexed file in the snapshot → the INDEXED
+        //     SOURCE universe (review-4 blocker 2: an indexed source file with no matching module
+        //     prefix stays UNOWNED, so owned files alone would misclassify indexed-but-unowned source
+        //     as "no indexed source" — a false §2.3 excuse). Filtered to CODE files via the SAME
+        //     `language_display_name` code-file predicate the materiality gate uses (config tokens
+        //     like `json` for a `package.json` are not source), never a second definition.
+        // A provenance-blob failure is caught inside `compute_manifest_coverage`
+        // (`ProvenanceRead::Unavailable` → `Unknown`). A `None` return stays the genuine
+        // not-applicable case (old snapshot / no manifests of this ecosystem).
+        let manifest_coverage: Option<crate::deps_coverage::CoverageStatus> = {
+            let owned = storage.get_owned_files_for_rollup(&snapshot.snapshot_uid);
+            let indexed = storage.map_files_in_path(&snapshot.snapshot_uid, "");
+            match (owned, indexed) {
+                (Ok(owned_files), Ok(indexed_rows)) => {
+                    let owned_paths: Vec<String> =
+                        owned_files.into_iter().map(|f| f.file_path).collect();
+                    let indexed_paths: Vec<String> = indexed_rows
+                        .into_iter()
+                        .filter(|r| match r.language.as_deref() {
+                            Some(tok) => {
+                                crate::reader_context::language_display_name(tok).is_some()
+                            }
+                            None => false, // no language token → not indexed SOURCE
+                        })
+                        .map(|r| r.path)
+                        .collect();
+                    crate::deps_coverage::compute_manifest_coverage(
+                        &manifest_provenance,
+                        &ecosystem,
+                        &owned_paths,
+                        &indexed_paths,
+                    )
+                }
+                (Err(e), _) => Some(crate::deps_coverage::CoverageStatus::Unknown {
+                    reason: format!("could not read owned files: {e}"),
+                }),
+                (_, Err(e)) => Some(crate::deps_coverage::CoverageStatus::Unknown {
+                    reason: format!("could not read indexed files: {e}"),
+                }),
+            }
+        };
+
+        // DEPS-ATTRIB-2 §2.4 (ruling DR-JAVA-NOREADER = Option 2): the DEFAULT view states the truth
+        // of every materially-present, reader-bearing ecosystem OTHER than the rendered dominant one,
+        // so a materially-present ecosystem (glamCRM's Java half) is never SILENTLY absent. Each
+        // secondary ecosystem's real attribution comes from ITS OWN compose (consistent with
+        // `--ecosystem <e>`). Empty for a single-ecosystem repo, or when the caller pinned an
+        // ecosystem / a module (targeted views, not the default). The provenance is cloned (cheap
+        // Vec-of-strings DTO) so the primary `input` still moves the original below.
+        let other_ecosystems: Vec<crate::deps_ecosystem_presence::EcosystemPresence> =
+            if module_filter.is_none() && !ecosystem_explicit {
+                crate::deps_ecosystem_presence::secondary_material_ecosystems(
+                    &language_counts,
+                    &ecosystem,
+                )
+                .into_iter()
+                .map(|(eco, source_files)| {
+                    let compose_outcome = compose_dependency_summaries(
+                        &storage,
+                        &ComposeDependenciesInput {
+                            snapshot_uid: &snapshot.snapshot_uid,
+                            runtime_builtins: deps_runtime_builtins(&eco),
+                            ecosystem: eco.clone(),
+                            manifest_provenance: manifest_provenance.clone(),
+                        },
+                    )
+                    .map_err(|e| e.to_string());
+                    let state = crate::deps_ecosystem_presence::classify_ecosystem_presence(
+                        &eco,
+                        source_files,
+                        &manifest_provenance,
+                        compose_outcome.as_ref().map_err(|e| e.clone()),
+                    );
+                    crate::deps_ecosystem_presence::EcosystemPresence {
+                        ecosystem: eco,
+                        state,
+                    }
+                })
+                .collect()
+            } else {
+                Vec::new()
+            };
 
         let input = ComposeDependenciesInput {
             snapshot_uid: &snapshot.snapshot_uid,
@@ -6489,7 +6585,9 @@ impl ServiceDispatcher {
             &resolution,
             &unattributed,
             total_rejected,
-            manifests_present,
+            &manifests_present,
+            manifest_coverage,
+            &other_ecosystems,
         );
 
         DispatchResult::success(&request.id, response)

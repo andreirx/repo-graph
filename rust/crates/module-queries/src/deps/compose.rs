@@ -193,24 +193,44 @@ pub fn compose_dependency_summaries(
     let all_module_paths: HashSet<&str> =
         reconcilable_module_paths(&module_imports, &module_declared, &module_rejected);
 
+    // Ecosystem declared-module key prefix (DEPS-ATTRIB-2): npm→`npm:`, cargo→`cargo:`,
+    // python→`pyproject:`, java→`gradle:`; `None` for `none-detected`/unknown (every module included).
+    let ecosystem_prefix: Option<&str> = match input.ecosystem.as_str() {
+        "cargo" => Some("cargo:"),
+        "npm" => Some("npm:"),
+        "python" => Some("pyproject:"),
+        "java" => Some("gradle:"),
+        _ => None,
+    };
+    // Whether ANY declared module of this ecosystem exists in the snapshot. When one does (django,
+    // FRAKTAG, repo-graph — a root/workspace manifest was discovered as an ecosystem module), the
+    // strict prefix gate is kept EXACTLY as before (byte-parity for repos that already worked). The
+    // containment fallback below activates ONLY when the ecosystem has ZERO declared modules — the
+    // DEMONSTRATED glamCRM nested-workspace shape (no root package.json / pnpm-workspace.yaml → repo-
+    // index discovers no `npm:` module, so the manifest-governed source is owned by coarse `inferred:`
+    // directory modules the old gate dropped). Gating on demonstrated variation, not imagined hybrids.
+    let has_ecosystem_module =
+        ecosystem_prefix.is_some_and(|p| modules.iter().any(|m| m.module_key.starts_with(p)));
+
     // 6. Reconcile each module.
     let mut summaries = Vec::new();
 
     for canonical_path in all_module_paths {
-        // Filter by ecosystem using module_key prefix.
-        // Module keys are formatted as "npm:repo:path" or "cargo:repo:path".
+        // A module belongs to this ecosystem's view when its `module_key` carries the ecosystem prefix,
+        // OR — only in the zero-ecosystem-module fallback — it is STRUCTURALLY covered by a PARSED
+        // manifest of this ecosystem (file/manifest CONTAINMENT, not declared-dep presence — review-0
+        // item 2). A module with no `module_key` keeps the prior "included" behaviour (no filter block
+        // runs). See [`module_covered_by_parsed_manifest`] for why the earlier `module_has_manifest`
+        // gate (NON-empty declared-dep rows) was the wrong predicate.
+        let owns_ecosystem_manifest = !has_ecosystem_module
+            && module_covered_by_parsed_manifest(
+                canonical_path,
+                &input.ecosystem,
+                &input.manifest_provenance,
+            );
         if let Some(module_key) = module_keys.get(canonical_path) {
-            // Ecosystem → declared-module key prefix (indexer::*): npm→`npm:`, cargo→`cargo:`,
-            // python→`pyproject:`, java→`gradle:`. `none-detected` (no manifest reader) includes
-            // all modules so their imports still count toward the unattributed headline.
-            let ecosystem_match = match input.ecosystem.as_str() {
-                "cargo" => module_key.starts_with("cargo:"),
-                "npm" => module_key.starts_with("npm:"),
-                "python" => module_key.starts_with("pyproject:"),
-                "java" => module_key.starts_with("gradle:"),
-                _ => true,
-            };
-            if !ecosystem_match {
+            let prefix_match = ecosystem_prefix.is_none_or(|p| module_key.starts_with(p));
+            if !(prefix_match || owns_ecosystem_manifest) {
                 continue;
             }
         }
@@ -323,6 +343,34 @@ fn attach_manifest_context(
                 },
             };
         }
+
+        // DEPS-ATTRIB-2: no ANCESTOR manifest, but a COARSE inferred module may CONTAIN several nested
+        // manifests (glamCRM's `frontend` module spans `frontend/web` + `frontend/workspace` — neither
+        // is at the module root). A single exact file can't be pinned, but the manifests DO cover this
+        // module's subtree, so the honest cell names them rather than falsely claiming "no manifest
+        // record covers this module". (Parsed records only — a present-but-unparsed nested manifest is
+        // not asserted as covering.)
+        let mut nested: Vec<&str> = records
+            .iter()
+            .filter(|r| {
+                r.ecosystem == ecosystem
+                    && r.error.is_none()
+                    && dir_is_ancestor_or_equal(canonical_path, &r.dir)
+            })
+            .map(|r| r.path.as_str())
+            .collect();
+        if !nested.is_empty() {
+            nested.sort_unstable();
+            return ManifestContext::ProvenanceUnavailable {
+                reason: format!(
+                    "governed by {} nested {} manifest{} ({})",
+                    nested.len(),
+                    ecosystem,
+                    if nested.len() == 1 { "" } else { "s" },
+                    nested.join(", "),
+                ),
+            };
+        }
     }
 
     if !has_manifest {
@@ -368,6 +416,37 @@ fn dir_is_ancestor_or_equal(dir: &str, path: &str) -> bool {
         || path
             .strip_prefix(dir)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Whether module `canonical_path` is STRUCTURALLY covered by a PARSED manifest of `ecosystem`
+/// (DEPS-ATTRIB-2, review-0 item 2). The membership fact is FILE/MANIFEST CONTAINMENT, never
+/// declared-dep presence. True when a provenance record of this ecosystem that PARSED
+/// (`error == None`) is an ANCESTOR-or-equal of the module (the module sits UNDER the manifest) OR
+/// is NESTED within the module (a coarse `inferred:` module whose subtree spans several leaf
+/// manifests — glamCRM's `frontend` over `frontend/web` + `frontend/workspace`).
+///
+/// Why NOT the earlier `module_has_manifest` gate: that flag was set only from NON-empty
+/// declared-dep rows (`compose` step 4), and the indexer stores no dep rows for a zero-dependency
+/// manifest — so a nested manifest with indexed source but zero declared deps was wrongly excluded
+/// from the ecosystem view. A parsed provenance record exists for a zero-dep manifest (ruling-3
+/// item 3), so containment over the records is the correct structural predicate. When provenance is
+/// NOT `Tracked` (old snapshot / unreadable) there is no structural evidence → `false` (honest
+/// degradation: membership is never fabricated from a name or a dep-count without a covering record;
+/// a fresh re-index restores the records and the module).
+fn module_covered_by_parsed_manifest(
+    canonical_path: &str,
+    ecosystem: &str,
+    provenance: &ProvenanceRead,
+) -> bool {
+    let ProvenanceRead::Tracked(records) = provenance else {
+        return false;
+    };
+    records.iter().any(|r| {
+        r.ecosystem == ecosystem
+            && r.error.is_none()
+            && (dir_is_ancestor_or_equal(&r.dir, canonical_path)
+                || dir_is_ancestor_or_equal(canonical_path, &r.dir))
+    })
 }
 
 /// The dependency ecosystem a source file belongs to, by extension (DEPS-LIST-REWRITE-1). Index-time
@@ -670,6 +749,29 @@ mod tests {
     }
 
     #[test]
+    fn attach_coarse_module_containing_nested_manifests_names_them_truthfully() {
+        // DEPS-ATTRIB-2: glamCRM's `frontend` inferred module CONTAINS frontend/web + frontend/workspace
+        // (no frontend/package.json at the module root). No ancestor manifest → the honest cell must
+        // name the nested manifests, NOT claim "no manifest record covers this module".
+        let records = vec![
+            prov("frontend/web/package.json", "frontend/web", "npm"),
+            prov(
+                "frontend/workspace/package.json",
+                "frontend/workspace",
+                "npm",
+            ),
+        ];
+        assert_eq!(
+            attach_manifest_context(true, "frontend", "npm", &ProvenanceRead::Tracked(records)),
+            ManifestContext::ProvenanceUnavailable {
+                reason: "governed by 2 nested npm manifests (frontend/web/package.json, \
+                         frontend/workspace/package.json)"
+                    .to_string()
+            }
+        );
+    }
+
+    #[test]
     fn attach_tracked_but_no_match_is_unavailable_with_reason() {
         // Provenance tracked, but no record covers this module/ecosystem → unknown-with-reason.
         let records = vec![prov("other/package.json", "other", "npm")];
@@ -713,6 +815,61 @@ mod tests {
             &ManifestContext::ProvenanceUnavailable {
                 reason: "manifest a/package.json present but not parsed: malformed JSON".into()
             }
+        ));
+    }
+
+    #[test]
+    fn module_covered_by_parsed_manifest_uses_containment_not_dep_presence() {
+        // DEPS-ATTRIB-2 review-0 item 2: membership is FILE/MANIFEST CONTAINMENT, not declared-dep
+        // presence. A coarse inferred module `frontend` is covered by its NESTED leaf manifests even
+        // though no manifest sits at the module root, and a FINE module `serverless/packages/backend`
+        // is covered by the manifest at its own dir. A zero-DEPENDENCY manifest still counts (it is a
+        // parsed record) — the exact gap the old `module_has_manifest` gate created.
+        let records = vec![
+            prov("frontend/web/package.json", "frontend/web", "npm"),
+            prov(
+                "frontend/workspace/package.json",
+                "frontend/workspace",
+                "npm",
+            ),
+            // zero-dependency nested manifest — a parsed record even with no declared deps.
+            prov(
+                "serverless/packages/backend/package.json",
+                "serverless/packages/backend",
+                "npm",
+            ),
+            prov("backend/build.gradle", "backend", "java"),
+        ];
+        let tracked = ProvenanceRead::Tracked(records);
+        // Coarse module NESTING several npm manifests → covered.
+        assert!(module_covered_by_parsed_manifest(
+            "frontend", "npm", &tracked
+        ));
+        // Fine module AT a (zero-dep) npm manifest dir → covered.
+        assert!(module_covered_by_parsed_manifest(
+            "serverless/packages/backend",
+            "npm",
+            &tracked
+        ));
+        // Wrong ecosystem: the java manifest does not cover an npm view of `backend`.
+        assert!(!module_covered_by_parsed_manifest(
+            "backend", "npm", &tracked
+        ));
+        // The java manifest DOES cover a java view of `backend`.
+        assert!(module_covered_by_parsed_manifest(
+            "backend", "java", &tracked
+        ));
+        // A module with no covering manifest in either direction → not covered.
+        assert!(!module_covered_by_parsed_manifest(
+            "unrelated/pkg",
+            "npm",
+            &tracked
+        ));
+        // No structural evidence (old snapshot) → never fabricated as covered.
+        assert!(!module_covered_by_parsed_manifest(
+            "frontend",
+            "npm",
+            &ProvenanceRead::Absent
         ));
     }
 
