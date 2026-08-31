@@ -474,6 +474,19 @@ pub fn compute_trust_report_cancellable(
             .collect(),
         total_named: input.external_dependencies.total_named,
         unidentified: input.external_dependencies.unidentified,
+        // TRUST-FIRSTPARTY-1: the first-party split rides through field-identically (port →
+        // report), like `top` above.
+        first_party: input
+            .external_dependencies
+            .first_party
+            .iter()
+            .map(|d| TrustNamedDependencyRow {
+                name: d.name.clone(),
+                count: d.count,
+            })
+            .collect(),
+        first_party_total: input.external_dependencies.first_party_total,
+        first_party_calls: input.external_dependencies.first_party_calls,
     };
 
     // ── Phase 5: Blast radius + enrichment ───────────────────
@@ -1053,6 +1066,13 @@ mod tests {
             ],
             total_named: 9,
             unidentified: 4,
+            // TRUST-FIRSTPARTY-1: the first-party split must ride through unchanged too.
+            first_party: vec![NamedDependencyCount {
+                name: "repo-graph-storage".into(),
+                count: 6,
+            }],
+            first_party_total: 6,
+            first_party_calls: 4,
         };
         let report = compute_trust_report(&input);
         assert_eq!(
@@ -1070,6 +1090,12 @@ mod tests {
                 ],
                 total_named: 9,
                 unidentified: 4,
+                first_party: vec![TrustNamedDependencyRow {
+                    name: "repo-graph-storage".into(),
+                    count: 6
+                }],
+                first_party_total: 6,
+                first_party_calls: 4,
             }
         );
     }

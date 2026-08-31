@@ -310,6 +310,54 @@ pub fn dependency_not_identified_line(refs: u64) -> String {
     )
 }
 
+// ── First-party (this repo's own crates/packages) — TRUST-FIRSTPARTY-1 ────────────────────────
+//
+// A reference whose resolved DECLARED dependency name matches a package THIS repo's parsed
+// manifests declare as their own (workspace member / declared package) is NOT a third-party
+// library — it is the reader's OWN code, reachable in-repo. It must never render as a "library
+// call" with a crates.io/package-docs follow (the exact defect TRUST-FIRSTPARTY-1 fixes). These
+// builders give it its own reader-frame wording + an IN-REPO next move.
+
+/// One NAMED first-party line: `"internal crate/package → <name>: <N reference(s)> (this repo)"`.
+/// `name` is the DECLARED manifest package name (`repo-graph-storage`, `@glamcrm/core`) that
+/// matched one of THIS repo's own parsed manifests — a workspace member / declared package, from
+/// structural manifest facts, never a name prefix. The "(this repo)" marker + the in-repo follow
+/// hint ([`FIRST_PARTY_FOLLOW`]) keep the reader oriented to their own code, not to a dependency.
+pub fn first_party_line(name: &str, count: u64) -> String {
+    format!(
+        "internal crate/package → {}: {} (this repo)",
+        name,
+        count_references(count)
+    )
+}
+
+/// The "identified first-party crates beyond the shown top-N" tail — repo-own packages that ARE
+/// named but did not make the bounded list. The first-party analogue of
+/// [`more_named_dependencies_line`].
+pub fn more_first_party_line(refs: u64) -> String {
+    format!(
+        "internal crate/package → other workspace crates: {} (this repo)",
+        count_references(refs)
+    )
+}
+
+/// The IN-REPO next move for first-party references (VISION: degradation/orientation states a
+/// concrete next step, in the reader's frame). Unlike the external follow hint ("follow to that
+/// dependency's crate / package docs"), this points the agent back INTO the repo — these are its
+/// own crates, discoverable with the tool itself.
+pub const FIRST_PARTY_FOLLOW: &str =
+    "these are this repo's own crates/packages — explore with `rmap explain <symbol>` or open \
+     their module, not external dependency docs";
+
+/// TRUST-FIRSTPARTY-1 (review-1 §2): the shown first-party rows sum to MORE than the reported
+/// first-party total — the two do not reconcile. Rendered in place of a saturated-to-zero
+/// remainder that would hide the inconsistency (STANDING HONESTY RULE 1 / architecture rule 6:
+/// unknown WITH REASON, never a fabricated 0). Unreachable in a coherent report (the shown rows are
+/// a truncation of the counted first-party set, so their sum is always `<= first_party_total`).
+pub const FIRST_PARTY_REMAINDER_UNRECONCILED: &str =
+    "internal crate/package → workspace-crate remainder unavailable: the listed first-party crates \
+     exceed the reported first-party total — the report is internally inconsistent";
+
 /// The reader-frame label for unresolved references whose wire basis code the renderer
 /// did not recognize (an older/newer daemon carrying a basis code this build predates).
 /// An honest catch-all so the count is never lost and the raw code never leaks.
@@ -375,6 +423,10 @@ mod tests {
         lines.push(more_named_dependencies_line(4));
         lines.push(dependency_not_identified_line(5));
         lines.push(attribution_line(AttributionClass::StandardLibrary, 2));
+        // TRUST-FIRSTPARTY-1: the first-party lines must also carry no internal code.
+        lines.push(first_party_line("repo-graph-storage", 8));
+        lines.push(more_first_party_line(3));
+        lines.push(FIRST_PARTY_FOLLOW.to_string());
         for line in lines {
             for leak in [
                 "_candidate",
@@ -426,6 +478,28 @@ mod tests {
             more_named_dependencies_line(6),
             "library call → other declared dependencies: 6 references"
         );
+    }
+
+    #[test]
+    fn first_party_lines_are_internal_framed_with_in_repo_next_move() {
+        // TRUST-FIRSTPARTY-1: repo-own crates render as internal, NEVER a library call, with an
+        // in-repo (not crates.io) next move.
+        assert_eq!(
+            first_party_line("repo-graph-storage", 8),
+            "internal crate/package → repo-graph-storage: 8 references (this repo)"
+        );
+        assert_eq!(
+            first_party_line("@glamcrm/core", 1),
+            "internal crate/package → @glamcrm/core: 1 reference (this repo)"
+        );
+        assert_eq!(
+            more_first_party_line(2),
+            "internal crate/package → other workspace crates: 2 references (this repo)"
+        );
+        // The next move points INTO the repo, not to external docs.
+        assert!(FIRST_PARTY_FOLLOW.contains("rmap explain"));
+        assert!(!FIRST_PARTY_FOLLOW.contains("crate / package docs"));
+        assert!(!first_party_line("x", 1).contains("library call"));
     }
 
     #[test]

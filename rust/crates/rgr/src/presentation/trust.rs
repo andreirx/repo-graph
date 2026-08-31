@@ -292,11 +292,19 @@ fn render_resolution(v: &CoherentTrustReport) -> String {
     // pipeline coverage instead of the reader's code. The excluded external share is named on its own
     // line below (context, not a grade). The band (Reliability section) is scored on this same in-scope
     // denominator too — genuine in-scope failure still reads low.
+    // TRUST-FIRSTPARTY-1 (spec §2.3): the reader's external SHARE must EXCLUDE first-party
+    // (repo-own workspace) calls so "external" means external. `first_party_calls` is the
+    // CALLS-family subset storage counted — normally a strict subset of `unresolved_calls_external`.
+    // The FROZEN in-scope resolution rate is derived from `unresolved_calls_internal_like` and is
+    // NOT a function of the external count, so — as `render_reliability` does — the resolution view
+    // is built with `external = 0` (only `.resolution` is read from it); the external SHARE is
+    // derived and rendered on its own below.
+    let first_party_calls = v.external_dependencies.value.first_party_calls;
     let total_calls = r.resolved_calls + r.unresolved_calls;
     let view = CallReliabilityView::derive(
         r.resolved_calls,
         r.unresolved_calls_internal_like,
-        r.unresolved_calls_external,
+        0,
         total_calls,
         Vec::new(), // the named targets render in their own section below
         None,       // the band renders in the Reliability section, not here
@@ -313,11 +321,48 @@ fn render_resolution(v: &CoherentTrustReport) -> String {
         ))),
         None => out.push_str(&bullet(reliability::NO_IN_SCOPE_CALLS)),
     }
-    // The external SHARE, named as reader context. When the heuristic identified ZERO external
-    // calls (but calls exist) this reads "no external-library calls identified (heuristic)" —
-    // a heuristic finding, never a fabricated "0% external" or a silent omission (review-3 §2).
-    if let Some(line) = view.external_line() {
-        out.push_str(&bullet(&line));
+    // The external SHARE, first-party-EXCLUDED (spec §2.3). `checked_sub`, NOT `saturating_sub`
+    // (review-1 §2): `first_party_calls` is normally a subset of `unresolved_calls_external`, but if
+    // the subset invariant does NOT hold (a corrupt or cross-version snapshot), saturating to 0
+    // would FABRICATE a measured "no external calls". Instead the figure is UNKNOWN, rendered with a
+    // reader-facing reason (STANDING HONESTY RULE 1 / architecture rule 6).
+    match r.unresolved_calls_external.checked_sub(first_party_calls) {
+        Some(external_for_share) => {
+            // Reuse the reader-frame external wording via a view carrying the corrected count.
+            let external_view = CallReliabilityView::derive(
+                r.resolved_calls,
+                r.unresolved_calls_internal_like,
+                external_for_share,
+                total_calls,
+                Vec::new(),
+                None,
+            );
+            // When the heuristic identified ZERO external calls (but calls exist) this reads "no
+            // external-library calls identified (heuristic)" — a heuristic finding, never a
+            // fabricated "0% external" or a silent omission (review-3 §2).
+            if let Some(line) = external_view.external_line() {
+                out.push_str(&bullet(&line));
+            }
+            // TRUST-FIRSTPARTY-1 (spec §2.3): when the repo's OWN workspace crates were among the
+            // external-import calls, state the external/first-party split inline so the corrected
+            // external figure is never read as a contradiction (CONTRADICTION-SWEEP-1 pattern).
+            // Only rendered when there IS a split — repos without repo-own workspace references
+            // stay byte-identical.
+            if first_party_calls > 0 {
+                out.push_str(&bullet(&reliability::external_first_party_split_line(
+                    external_for_share,
+                    first_party_calls,
+                )));
+            }
+        }
+        None => {
+            // Invariant violated (first-party calls exceed the external-import total): the external
+            // share cannot be honestly computed. Unknown WITH REASON, never a saturated zero.
+            out.push_str(&bullet(&reliability::external_share_unreconciled_line(
+                r.unresolved_calls_external,
+                first_party_calls,
+            )));
+        }
     }
     // review-3 §2 (slice §2 degraded path): when a MATERIAL share of the denominator is
     // unclassified, the rate is a conservative lower bound — say so, in the reader's frame.
@@ -491,6 +536,37 @@ fn render_library_calls(out: &mut String, v: &CoherentTrustReport) {
         if let Some(hint) = attribution::AttributionClass::ExternalDependency.follow_hint() {
             out.push_str(&bullet(hint));
         }
+    }
+
+    // TRUST-FIRSTPARTY-1: references whose declared name is one of THIS repo's own packages
+    // (workspace member / declared package — structural manifest facts, never a name prefix) are
+    // NOT third-party libraries. Render them as internal crates with an IN-REPO next move, never
+    // the crates.io/package-docs follow above (the exact defect this slice fixes). They are
+    // already excluded from the external named lines + the external figure; together with
+    // `total_named` + `unidentified` they reconcile the ExternalDependency class total.
+    let mut fp_shown = 0u64;
+    for dep in &attr.first_party {
+        out.push_str(&bullet(&attribution::first_party_line(
+            &dep.name, dep.count,
+        )));
+        fp_shown += dep.count;
+    }
+    // `checked_sub`, NOT `saturating_sub` (review-1 §2): the shown rows are a truncation of the
+    // counted first-party set, so `fp_shown <= first_party_total` in any coherent report. If it does
+    // NOT hold (a corrupt/foreign report), saturating to 0 would silently hide the reconciliation
+    // error; instead render the remainder UNKNOWN with a reason (STANDING HONESTY RULE 1).
+    match attr.first_party_total.checked_sub(fp_shown) {
+        Some(fp_remainder) => {
+            if fp_remainder > 0 {
+                out.push_str(&bullet(&attribution::more_first_party_line(fp_remainder)));
+            }
+        }
+        None => {
+            out.push_str(&bullet(attribution::FIRST_PARTY_REMAINDER_UNRECONCILED));
+        }
+    }
+    if attr.first_party_total > 0 {
+        out.push_str(&bullet(attribution::FIRST_PARTY_FOLLOW));
     }
 }
 

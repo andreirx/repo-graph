@@ -143,22 +143,45 @@ pub struct NamedDependencyCount {
 /// specifier (`repo_graph_indexer::types`) becomes the manifest name (`repo-graph-indexer`),
 /// never the raw import path (the review-2 defect).
 ///
-/// The three fields RECONCILE the "library call" class: `total_named + unidentified` equals
-/// the ExternalDependency class total (every external-import reference is counted exactly
-/// once — named if it resolves to a declared dependency, unidentified otherwise).
+/// The fields RECONCILE the "library call" class: `total_named + first_party_total +
+/// unidentified` equals the ExternalDependency class total (every external-import reference is
+/// counted exactly once — named+external, named+first-party, or unidentified).
+///
+/// TRUST-FIRSTPARTY-1: `top` / `total_named` are now the TRUE-EXTERNAL split only (a declared
+/// dependency this repo does NOT define). References that resolve to a name THIS repo's parsed
+/// manifests DECLARE as their own package (`module_candidates.module_kind = 'declared'`,
+/// `display_name` = the package's own name — workspace members / declared packages, DEPS-ATTRIB-2
+/// facts, NEVER a name prefix) split into the `first_party*` fields instead: they are the
+/// reader's OWN crates, not third-party libraries, so no agent is sent to crates.io for them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ExternalDependencyAttribution {
-    /// The top declared dependencies among the external-import references, count-descending
-    /// then name-ascending, bounded by the read's `limit`.
+    /// The top TRUE-EXTERNAL declared dependencies among the external-import references,
+    /// count-descending then name-ascending, bounded by the read's `limit`. First-party
+    /// (repo-own) packages are excluded here — see `first_party`.
     pub top: Vec<NamedDependencyCount>,
-    /// ALL external-import references that resolved to a declared dependency name (the full
-    /// count, not just the bounded `top`) — lets the renderer show "other declared
-    /// dependencies: N" for the identified-but-unlisted remainder honestly.
+    /// ALL external-import references that resolved to a TRUE-EXTERNAL declared dependency
+    /// name (the full count, not just the bounded `top`) — lets the renderer show "other
+    /// declared dependencies: N" for the identified-but-unlisted remainder honestly.
     pub total_named: u64,
     /// External-import references with NO nameable declared dependency (no source file, no
     /// manifest signal, or no matching declared dependency) — the honest "dependency not
     /// identified" bucket. Never a fabricated name.
     pub unidentified: u64,
+    /// TRUST-FIRSTPARTY-1: the top FIRST-PARTY declared dependencies — names that match a
+    /// package THIS repo's parsed manifests declare as their own (workspace members / declared
+    /// packages). Same population + ordering + `limit` as `top`; rendered as "internal
+    /// crate/package → <name> (this repo)" with an in-repo next move, NOT a crates.io CTA.
+    pub first_party: Vec<NamedDependencyCount>,
+    /// ALL external-import references that resolved to a FIRST-PARTY name (the full count, not
+    /// just the bounded `first_party`) — the "+ N more workspace crates" tail + reconciliation.
+    pub first_party_total: u64,
+    /// The FIRST-PARTY subset that is ALSO a CALLS-family unresolved edge
+    /// (`UnresolvedEdgeCategory::is_calls_category`) — a strict subset of the trust summary's
+    /// `unresolved_calls_external` (CALLS-family + `external_library_candidate`). The reader's
+    /// "% of calls go into external libraries" figure subtracts THIS so the external figure means
+    /// external (spec §2.3); it never touches the FROZEN in-scope resolution rate, which is
+    /// computed from `unresolved_calls_internal_like`, not this count.
+    pub first_party_calls: u64,
 }
 
 /// RECON-M-R4 (§5.5): one PER-SITE unresolved CALL — a raw row read from `unresolved_edges`

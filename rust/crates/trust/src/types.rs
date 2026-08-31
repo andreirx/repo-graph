@@ -231,6 +231,30 @@ pub struct TrustExternalDependencyAttribution {
     pub top: Vec<TrustNamedDependencyRow>,
     pub total_named: u64,
     pub unidentified: u64,
+    /// TRUST-FIRSTPARTY-1: the top FIRST-PARTY declared dependencies — names that match a
+    /// package THIS repo's parsed manifests declare as their own (workspace members / declared
+    /// packages, DEPS-ATTRIB-2 facts; NEVER a name prefix). Rendered as "internal crate/package
+    /// → <name> (this repo)" with an in-repo next move, excluded from the external figure.
+    ///
+    /// Additive: `#[serde(default)]` so pre-slice coherent JSON deserializes (empty), and
+    /// `skip_serializing_if` so a snapshot with no first-party references stays byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub first_party: Vec<TrustNamedDependencyRow>,
+    /// ALL first-party references (full count, not just the bounded `first_party`) — the
+    /// "+ N more workspace crates" tail + reconciliation. Byte-stable when zero.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub first_party_total: u64,
+    /// The first-party subset that is ALSO a CALLS-family edge — the exact quantity the reader's
+    /// "% of calls go into external libraries" figure subtracts (a strict subset of the summary's
+    /// `unresolved_calls_external`). The FROZEN in-scope resolution rate is NOT touched by this.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub first_party_calls: u64,
+}
+
+/// `skip_serializing_if` predicate for additive `u64` fields — keeps pre-slice coherent JSON
+/// byte-identical (the field is omitted when zero, exactly as it was absent before the slice).
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
 }
 
 // ── Blast-radius breakdown ───────────────────────────────────────

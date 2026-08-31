@@ -116,6 +116,97 @@ fn load_file_signals(
 // classification crate already defines via
 // `#[serde(rename_all = "snake_case")]`.
 
+/// TRUST-FIRSTPARTY-1 (review-1 §1): normalize a package name to its Cargo canonical form
+/// (`_`→`-`). Cargo treats `-` and `_` as EQUIVALENT in package names, and a dependent crate may
+/// spell a workspace dependency key with either separator while the depended-on crate's manifest
+/// declares one canonical spelling — so a Cargo first-party name is matched THROUGH this
+/// normalization. Applied ONLY to `cargo_toml`-evidenced packages (see [`FirstPartyMatcher`]):
+/// npm / pyproject / Gradle names are LITERAL and matched exactly, because there `foo_bar` and
+/// `foo-bar` are DISTINCT packages and normalizing them would misclassify an external `foo_bar`
+/// as a repo-owned `foo-bar` (the review-0 defect). Not a name-prefix heuristic — an exact
+/// normalized equality between two parsed-manifest facts.
+fn canonicalize_cargo_name(name: &str) -> String {
+    name.replace('_', "-")
+}
+
+/// TRUST-FIRSTPARTY-1: classifies a resolved dependency name as FIRST-PARTY (a package THIS repo's
+/// parsed manifests declare as their own) or not, from structural manifest facts — NEVER a name
+/// prefix.
+///
+/// - what: the per-snapshot first-party name matcher.
+/// - concrete current users: `attribute_external_dependencies` (sole caller).
+/// - axis of variation: package-name ECOSYSTEM SEMANTICS — Cargo treats `-`/`_` as equivalent
+///   (a normalized alias), every other ecosystem's names are literal (exact match). Two FIXED,
+///   CLOSED match rules → a struct with one method, not an interface (implementations are not
+///   growing).
+/// - rejected simpler: a single canonicalized `HashSet` (the review-0 code) — it normalized EVERY
+///   ecosystem and so could classify an external npm `foo_bar` as a repo-owned `foo-bar`.
+struct FirstPartyMatcher {
+    /// Every declared package name, matched EXACTLY (all ecosystems). A resolved name equal to a
+    /// declared name → first-party, rendered as that exact (manifest) name.
+    exact: std::collections::HashSet<String>,
+    /// Cargo-only alias: `canonicalize_cargo_name(declared_name)` → the declared MANIFEST name. A
+    /// resolved Cargo import spelled with the other separator matches here and RENDERS the declared
+    /// manifest name — never the import/normalized spelling (review-1 §1).
+    cargo_alias: std::collections::HashMap<String, String>,
+}
+
+impl FirstPartyMatcher {
+    /// The manifest display name to render if `resolved` is first-party, else `None` (→ external).
+    /// Exact match wins (the resolved name IS a declared name); otherwise the Cargo normalized
+    /// alias, which renders the DECLARED manifest name rather than the resolved import spelling.
+    fn match_name(&self, resolved: &str) -> Option<String> {
+        if self.exact.contains(resolved) {
+            return Some(resolved.to_string());
+        }
+        self.cargo_alias
+            .get(&canonicalize_cargo_name(resolved))
+            .cloned()
+    }
+}
+
+/// TRUST-FIRSTPARTY-1: build the [`FirstPartyMatcher`] for a snapshot from parsed-manifest facts —
+/// `module_candidates` rows the manifest parsers produced (`module_kind = 'declared'`,
+/// `display_name` = the package's own declared name: workspace members / declared packages,
+/// DEPS-ATTRIB-2, NEVER a name prefix), LEFT-JOINed to `module_candidate_evidence` to learn each
+/// package's ECOSYSTEM. Only `source_type = 'cargo_toml'` evidence earns the `_`/`-` alias; npm /
+/// pyproject / Gradle (and any declared candidate lacking evidence) are exact-only. A read error
+/// propagates (never coerced to empty): an unknown first-party set must not silently render
+/// repo-own code as external. Empty set (no parsed manifests) → nothing promoted → honest
+/// external-only fallback.
+fn first_party_matcher(
+    conn: &StorageConnection,
+    snapshot_uid: &str,
+) -> Result<FirstPartyMatcher, StorageError> {
+    let mut stmt = conn.connection().prepare(
+        "SELECT mc.display_name, \
+                MAX(CASE WHEN ev.source_type = 'cargo_toml' THEN 1 ELSE 0 END) AS is_cargo \
+         FROM module_candidates mc \
+         LEFT JOIN module_candidate_evidence ev \
+           ON ev.module_candidate_uid = mc.module_candidate_uid \
+         WHERE mc.snapshot_uid = ? \
+           AND mc.module_kind = 'declared' \
+           AND mc.display_name IS NOT NULL \
+         GROUP BY mc.module_candidate_uid, mc.display_name",
+    )?;
+    let rows = stmt.query_map([snapshot_uid], |row| {
+        let display_name: String = row.get(0)?;
+        let is_cargo: i64 = row.get(1)?;
+        Ok((display_name, is_cargo != 0))
+    })?;
+
+    let mut exact = std::collections::HashSet::new();
+    let mut cargo_alias = std::collections::HashMap::new();
+    for row in rows {
+        let (display_name, is_cargo) = row?;
+        if is_cargo {
+            cargo_alias.insert(canonicalize_cargo_name(&display_name), display_name.clone());
+        }
+        exact.insert(display_name);
+    }
+    Ok(FirstPartyMatcher { exact, cargo_alias })
+}
+
 /// Deserialize a raw SQL TEXT value into a typed enum variant
 /// via serde's rename-aware deserialization. Returns
 /// `Err(StorageError::Sqlite(FromSqlConversionFailure))` if the
@@ -404,11 +495,27 @@ impl TrustStorageRead for StorageConnection {
         let file_signals = load_file_signals(self.connection(), snapshot_uid)?;
         let empty_signals = FileSignalsFacts::empty();
 
+        // Step 2b (TRUST-FIRSTPARTY-1) — the FIRST-PARTY matcher: the packages THIS repo's parsed
+        // manifests declare as their OWN (`module_candidates.module_kind = 'declared'`,
+        // `display_name` = the declared package name — workspace members / declared packages,
+        // DEPS-ATTRIB-2 facts, NEVER a name prefix). Cargo packages also match through a `_`/`-`
+        // normalized alias (Cargo treats the two as equivalent); npm / pyproject / Gradle names are
+        // literal and matched exactly (review-1 §1 — normalizing them would misclassify an external
+        // `foo_bar` as a repo-own `foo-bar`). A read error propagates (never coerced to empty): an
+        // unknown first-party set must not be silently rendered as "all external". Empty set (no
+        // parsed manifests) → nothing promoted → honest external-only fallback.
+        let matcher = first_party_matcher(self, snapshot_uid)?;
+
         // Step 3 — resolve each reference to its declared dependency (the classifier's own
         // reduction), aggregating named counts (deterministic BTreeMap) and the honest
-        // unidentified bucket. `category`/`basis_code` are revalidated against the typed
-        // enum on read (policy-boundary validation, like the sibling reads).
+        // unidentified bucket. First-party names split into their own map; the first-party
+        // subset that is ALSO a CALLS-family edge is counted for the external-% correction.
+        // `category`/`basis_code` are revalidated against the typed enum on read (policy-boundary
+        // validation, like the sibling reads).
         let mut named: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+        let mut first_party: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
+        let mut first_party_calls: u64 = 0;
         let mut unidentified: u64 = 0;
         for (target_key, metadata_json, category_str, basis_code_str, file_uid) in edges {
             let category: UnresolvedEdgeCategory = deserialize_enum(&category_str, "category")?;
@@ -429,12 +536,29 @@ impl TrustStorageRead for StorageConnection {
                 &facts.bindings,
                 &facts.declared,
             ) {
-                Some(name) => *named.entry(name).or_insert(0) += 1,
+                Some(name) => match matcher.match_name(&name) {
+                    // First-party: key on the DECLARED MANIFEST name the matcher returned (never
+                    // the resolved import spelling — review-1 §1), so `repo_graph_x` and
+                    // `repo-graph-x` collapse to the one manifest name `repo-graph-x`.
+                    Some(manifest_name) => {
+                        *first_party.entry(manifest_name).or_insert(0) += 1;
+                        // The CALLS-family subset only — the exact population the trust summary's
+                        // `unresolved_calls_external` counts (CALLS-family + external classification),
+                        // so the reader's external-% subtraction stays a valid (>= 0) subset.
+                        if category.is_calls_category() {
+                            first_party_calls += 1;
+                        }
+                    }
+                    None => {
+                        *named.entry(name).or_insert(0) += 1;
+                    }
+                },
                 None => unidentified += 1,
             }
         }
 
-        // Step 4 — the bounded top (count-desc, name-asc) + the reconciling totals.
+        // Step 4 — the bounded tops (count-desc, name-asc) + the reconciling totals. Same
+        // ordering + `limit` for both splits.
         let total_named: u64 = named.values().sum();
         let mut top: Vec<NamedDependencyCount> = named
             .into_iter()
@@ -443,10 +567,21 @@ impl TrustStorageRead for StorageConnection {
         top.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
         top.truncate(limit as usize);
 
+        let first_party_total: u64 = first_party.values().sum();
+        let mut first_party: Vec<NamedDependencyCount> = first_party
+            .into_iter()
+            .map(|(name, count)| NamedDependencyCount { name, count })
+            .collect();
+        first_party.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        first_party.truncate(limit as usize);
+
         Ok(ExternalDependencyAttribution {
             top,
             total_named,
             unidentified,
+            first_party,
+            first_party_total,
+            first_party_calls,
         })
     }
 
@@ -1774,6 +1909,278 @@ mod tests {
                 ],
             )
             .unwrap();
+    }
+
+    /// Insert a `module_candidates` row — a package THIS repo's parsed manifests declare (the
+    /// structural first-party fact TRUST-FIRSTPARTY-1 reads: `module_kind = 'declared'`,
+    /// `display_name` = the package's own name).
+    fn insert_declared_module(
+        storage: &StorageConnection,
+        snap_uid: &str,
+        uid: &str,
+        canonical_root_path: &str,
+        display_name: &str,
+    ) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO module_candidates \
+                 (module_candidate_uid, snapshot_uid, repo_uid, module_key, module_kind, \
+                  canonical_root_path, confidence, display_name, metadata_json) \
+                 VALUES (?, ?, 'r1', ?, 'declared', ?, 1.0, ?, NULL)",
+                rusqlite::params![uid, snap_uid, uid, canonical_root_path, display_name],
+            )
+            .unwrap();
+    }
+
+    /// Insert a `module_candidate_evidence` row naming the manifest ECOSYSTEM that produced a
+    /// declared module (`source_type` = `cargo_toml` / `package_json` / …). TRUST-FIRSTPARTY-1
+    /// reads this to decide whether a declared package earns the Cargo `_`/`-` normalized alias.
+    fn insert_module_evidence(
+        storage: &StorageConnection,
+        snap_uid: &str,
+        candidate_uid: &str,
+        source_type: &str,
+    ) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO module_candidate_evidence \
+                 (evidence_uid, module_candidate_uid, snapshot_uid, repo_uid, \
+                  source_type, source_path, evidence_kind, confidence, payload_json) \
+                 VALUES (?, ?, ?, 'r1', ?, 'manifest', 'manifest_declaration', 1.0, NULL)",
+                rusqlite::params![
+                    format!("ev_{candidate_uid}"),
+                    candidate_uid,
+                    snap_uid,
+                    source_type
+                ],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn attribute_external_dependencies_cargo_alias_matches_underscore_spelling() {
+        // TRUST-FIRSTPARTY-1 (review-1 §1): a Cargo workspace crate declared `repo-graph-x`
+        // (hyphen) whose dependent Cargo.toml spells the dependency key `repo_graph_x` (underscore)
+        // is resolved by ATTRIBUTION-1 to the UNDERSCORE form. With `cargo_toml` evidence it must
+        // still classify first-party via the `_`/`-` alias — and RENDER the declared manifest name
+        // (`repo-graph-x`), not the underscore import spelling.
+        use repo_graph_trust::storage_port::NamedDependencyCount;
+
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_node_in_file(&mut storage, &snap_uid, "n1", "r1:src/a.rs", "src/a.rs");
+
+        insert_declared_module(&storage, &snap_uid, "m_x", "crates/x", "repo-graph-x");
+        insert_module_evidence(&storage, &snap_uid, "m_x", "cargo_toml");
+
+        // The dependent file's Cargo.toml keys the dep with the UNDERSCORE spelling, so the
+        // resolved declared name comes back underscored.
+        insert_file_signals(
+            &storage,
+            &snap_uid,
+            "r1:src/a.rs",
+            r#"[]"#,
+            r#"{"names":["repo_graph_x"]}"#,
+        );
+        insert_unresolved_edge_with_target(
+            &storage,
+            &snap_uid,
+            "ue0",
+            "n1",
+            "repo_graph_x::thing",
+            "external_library_candidate",
+            "calls_function_ambiguous_or_missing",
+            "specifier_matches_package_dependency",
+        );
+
+        let attr =
+            TrustStorageRead::attribute_external_dependencies(&storage, &snap_uid, 100).unwrap();
+
+        assert!(attr.top.is_empty(), "no true-external references");
+        assert_eq!(
+            attr.first_party,
+            vec![NamedDependencyCount {
+                name: "repo-graph-x".into(),
+                count: 1
+            }],
+            "underscore-spelled Cargo ref matched via alias and rendered as the manifest name"
+        );
+        assert_eq!(attr.first_party_calls, 1);
+    }
+
+    #[test]
+    fn attribute_external_dependencies_npm_underscore_collision_stays_external() {
+        // TRUST-FIRSTPARTY-1 (review-1 §1 — the review-0 defect): this repo owns an npm package
+        // `foo-bar`; an EXTERNAL npm dependency `foo_bar` (a DISTINCT package — npm names are
+        // literal) must NOT be classified first-party. Only Cargo earns the `_`/`-` alias, so
+        // `foo_bar` stays a true-external `top` row, never a false "this repo" claim.
+        use repo_graph_trust::storage_port::NamedDependencyCount;
+
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_node_in_file(&mut storage, &snap_uid, "n1", "r1:src/a.ts", "src/a.ts");
+
+        insert_declared_module(
+            &storage,
+            &snap_uid,
+            "m_foobar",
+            "packages/foo-bar",
+            "foo-bar",
+        );
+        insert_module_evidence(&storage, &snap_uid, "m_foobar", "package_json");
+
+        // The file depends on the EXTERNAL npm package `foo_bar` (underscore) — a different package
+        // from the repo-owned `foo-bar`.
+        insert_file_signals(
+            &storage,
+            &snap_uid,
+            "r1:src/a.ts",
+            r#"[]"#,
+            r#"{"names":["foo_bar"]}"#,
+        );
+        insert_unresolved_edge_with_target(
+            &storage,
+            &snap_uid,
+            "ue0",
+            "n1",
+            "foo_bar",
+            "external_library_candidate",
+            "imports_file_not_found",
+            "specifier_matches_package_dependency",
+        );
+
+        let attr =
+            TrustStorageRead::attribute_external_dependencies(&storage, &snap_uid, 100).unwrap();
+
+        assert_eq!(
+            attr.top,
+            vec![NamedDependencyCount {
+                name: "foo_bar".into(),
+                count: 1
+            }],
+            "external npm foo_bar must stay external — npm names are literal, no _/- alias"
+        );
+        assert!(
+            attr.first_party.is_empty(),
+            "the repo-owned npm foo-bar must NOT swallow the distinct external foo_bar"
+        );
+        assert_eq!(attr.first_party_calls, 0);
+    }
+
+    #[test]
+    fn attribute_external_dependencies_splits_first_party_from_true_external() {
+        // TRUST-FIRSTPARTY-1: a workspace path-dependency (`repo-graph-storage`) IS a declared
+        // dependency, so ATTRIBUTION-1 resolves it — but it is THIS repo's OWN package
+        // (a `module_kind='declared'` module candidate), so it must land in `first_party`, NOT
+        // `top`, and its CALLS-family subset must be counted for the external-% correction.
+        use repo_graph_trust::storage_port::NamedDependencyCount;
+
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_node_in_file(&mut storage, &snap_uid, "n1", "r1:src/a.rs", "src/a.rs");
+
+        // The repo declares `repo-graph-storage` as its OWN package (a workspace member). The
+        // manifest stores the hyphen form; the `use` path reduces to the underscore form — the
+        // canonicalization must bridge them.
+        insert_declared_module(
+            &storage,
+            &snap_uid,
+            "m_storage",
+            "crates/storage",
+            "repo-graph-storage",
+        );
+
+        // The file's declared deps include BOTH the true-external `serde` and the repo-own
+        // `repo-graph-storage` (a workspace path-dep is a declared dependency).
+        insert_file_signals(
+            &storage,
+            &snap_uid,
+            "r1:src/a.rs",
+            r#"[]"#,
+            r#"{"names":["serde","repo-graph-storage"]}"#,
+        );
+
+        // References: serde ×2 (external, both CALLS-family here) + repo_graph_storage::x ×3
+        // (first-party; 2 CALLS-family, 1 IMPORTS-family) → first_party_calls must be 2, not 3.
+        let edges: &[(&str, &str, &str)] = &[
+            (
+                "serde::de",
+                "calls_function_ambiguous_or_missing",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "serde::ser",
+                "calls_function_ambiguous_or_missing",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "repo_graph_storage::a",
+                "calls_obj_method_needs_type_info",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "repo_graph_storage::b",
+                "calls_function_ambiguous_or_missing",
+                "specifier_matches_package_dependency",
+            ),
+            (
+                "repo_graph_storage::c",
+                "imports_file_not_found",
+                "specifier_matches_package_dependency",
+            ),
+        ];
+        for (i, (target_key, category, basis)) in edges.iter().enumerate() {
+            insert_unresolved_edge_with_target(
+                &storage,
+                &snap_uid,
+                &format!("ue_{i}"),
+                "n1",
+                target_key,
+                "external_library_candidate",
+                category,
+                basis,
+            );
+        }
+
+        let attr =
+            TrustStorageRead::attribute_external_dependencies(&storage, &snap_uid, 100).unwrap();
+
+        // True-external only in `top`; NO repo-own crate leaked here (the defect).
+        assert_eq!(
+            attr.top,
+            vec![NamedDependencyCount {
+                name: "serde".into(),
+                count: 2
+            }],
+            "true-external only in top"
+        );
+        assert_eq!(attr.total_named, 2);
+        // The repo-own crate lands in `first_party` (all 3 refs, imports + calls).
+        assert_eq!(
+            attr.first_party,
+            vec![NamedDependencyCount {
+                name: "repo-graph-storage".into(),
+                count: 3
+            }],
+            "repo-own workspace crate classified first-party from the manifest fact"
+        );
+        assert_eq!(attr.first_party_total, 3);
+        // Only the CALLS-family first-party subset counts toward the external-% correction.
+        assert_eq!(
+            attr.first_party_calls, 2,
+            "2 of the 3 first-party refs are CALLS-family (the IMPORTS one is excluded)"
+        );
+        assert_eq!(attr.unidentified, 0);
+
+        // Reconciliation: external + first-party + unidentified == the ExternalDependency class
+        // total (every external-import edge counted exactly once).
+        assert_eq!(
+            attr.total_named + attr.first_party_total + attr.unidentified,
+            5,
+            "2 serde + 3 repo-graph-storage"
+        );
     }
 
     #[test]

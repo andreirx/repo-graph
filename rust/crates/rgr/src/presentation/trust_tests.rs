@@ -702,6 +702,28 @@ fn ext_attr(
         top,
         total_named,
         unidentified,
+        ..Default::default()
+    }
+}
+
+/// TRUST-FIRSTPARTY-1: an attribution with a first-party (repo-own) split alongside the
+/// true-external one. `first_party_calls` is the CALLS-family subset the external-% subtraction
+/// uses; `first_party_total` reconciles the "+ N more workspace crates" tail.
+fn ext_attr_with_first_party(
+    top: Vec<TrustNamedDependencyRow>,
+    total_named: u64,
+    unidentified: u64,
+    first_party: Vec<TrustNamedDependencyRow>,
+    first_party_total: u64,
+    first_party_calls: u64,
+) -> TrustExternalDependencyAttribution {
+    TrustExternalDependencyAttribution {
+        top,
+        total_named,
+        unidentified,
+        first_party,
+        first_party_total,
+        first_party_calls,
     }
 }
 
@@ -823,6 +845,190 @@ fn render_reframes_unresolved_breakdown_in_reader_frame() {
     assert!(
         !out.contains("Classification") && !out.contains("Unresolved Breakdown"),
         "raw section headings must never render:\n{out}"
+    );
+}
+
+/// TRUST-FIRSTPARTY-1: a report whose external-import references mix a TRUE-external dependency
+/// (`serde`) with THIS repo's OWN workspace crate (`repo-graph-storage`). The ExternalDependency
+/// class total is 10 (specifier basis); the split is serde(2) external + repo-graph-storage(8)
+/// first-party. The summary carries 6 external CALLS of which 4 are first-party CALLS.
+fn report_with_first_party() -> TrustReport {
+    let mut r = report();
+    // Resolution counts: 60 total calls, 6 external CALLS, 4 of them first-party CALLS.
+    r.summary.resolved_calls = 50;
+    r.summary.unresolved_calls = 10;
+    r.summary.unresolved_calls_external = 6;
+    r.summary.unresolved_calls_internal_like = 4;
+    // The "where they go" ExternalDependency class = 10 (all specifier-basis external imports).
+    r.basis_classifications = vec![basis("specifier_matches_package_dependency", 10)];
+    // The provenance-join split: serde(2) external, repo-graph-storage(8) first-party; 4 of the
+    // first-party refs are CALLS-family (the external-% correction subtracts THIS).
+    r.external_dependencies = ext_attr_with_first_party(
+        vec![named("serde", 2)],
+        2,
+        0,
+        vec![named("repo-graph-storage", 8)],
+        8,
+        4,
+    );
+    r
+}
+
+#[test]
+fn first_party_workspace_crate_renders_internal_not_library_call() {
+    // TRUST-FIRSTPARTY-1 (spec §2.1): the repo's OWN crate must render as an internal
+    // crate/package with an IN-REPO next move — NEVER "library call → …" with a crates.io follow.
+    let env = trust_to_coherent(report_with_first_party(), warm_posture(), false);
+    let out = render_trust_envelope(&env);
+
+    // The repo-own crate is labelled internal, with "(this repo)" and an in-repo next move.
+    assert!(
+        out.contains("internal crate/package → repo-graph-storage: 8 references (this repo)"),
+        "repo-own crate rendered as internal with (this repo):\n{out}"
+    );
+    assert!(
+        out.contains("explore with `rmap explain <symbol>`"),
+        "in-repo next move for first-party:\n{out}"
+    );
+    // The repo-own crate must NEVER appear as a library call / with the crates.io follow.
+    assert!(
+        !out.contains("library call → repo-graph-storage"),
+        "repo-own crate must not be a library call (the exact defect):\n{out}"
+    );
+    // The TRUE external is still a library call with the external follow.
+    assert!(
+        out.contains("library call → serde: 2 references"),
+        "true external still a library call:\n{out}"
+    );
+    assert!(
+        out.contains("follow to that dependency's crate / package docs"),
+        "external follow hint present for the true external:\n{out}"
+    );
+}
+
+#[test]
+fn first_party_excluded_from_external_percentage_with_basis_split() {
+    // TRUST-FIRSTPARTY-1 (spec §2.3): the external % excludes first-party, and a basis line states
+    // the split. external CALLS = 6, first-party CALLS = 4 → external share = (6−4)/60 = 3%.
+    let env = trust_to_coherent(report_with_first_party(), warm_posture(), false);
+    let out = render_trust_envelope(&env);
+    assert!(
+        out.contains("3% of calls go into external libraries"),
+        "external % excludes first-party (2 of 60, not 6 of 60):\n{out}"
+    );
+    assert!(
+        !out.contains("10% of calls go into external libraries"),
+        "the pre-fix external-inclusive figure must be gone:\n{out}"
+    );
+    assert!(
+        out.contains(
+            "basis: 2 external, 4 internal workspace references \
+             (this repo's own crates, excluded from the external figure above)"
+        ),
+        "the external/first-party split basis line:\n{out}"
+    );
+    // The FROZEN in-scope resolution rate is untouched: 50 / (50 + 4) = 93%.
+    assert!(
+        out.contains("your code's calls 93% resolved (50 of 54 in-scope or unclassified)"),
+        "frozen in-scope rate is independent of the first-party split:\n{out}"
+    );
+}
+
+#[test]
+fn no_first_party_output_is_byte_identical_to_pre_slice() {
+    // TRUST-FIRSTPARTY-1: a repo with NO first-party references (empty first_party*) must render
+    // exactly as before — no internal-crate line, no split basis line. The default `report()`
+    // fixture has `external_dependencies: Default::default()` (first_party empty, calls 0).
+    let out = render_trust_envelope(&warm_envelope());
+    assert!(
+        !out.contains("internal crate/package →"),
+        "no first-party line when there are no first-party references:\n{out}"
+    );
+    assert!(
+        !out.contains("internal workspace references"),
+        "no split basis line when there is no split:\n{out}"
+    );
+    // The external share still renders exactly as before (the pre-slice 8% line).
+    assert!(
+        out.contains("8% of calls go into external libraries — follow to their crates/docs"),
+        "external share unchanged for a no-first-party repo:\n{out}"
+    );
+}
+
+#[test]
+fn external_share_unknown_when_first_party_exceeds_external_calls() {
+    // TRUST-FIRSTPARTY-1 (review-1 §2): a corrupt or cross-version report where the first-party
+    // CALLS count (4) EXCEEDS the external-import CALLS total (2). `checked_sub` must NOT saturate
+    // to a fabricated "no external calls" — the external share is UNKNOWN, rendered WITH a reason.
+    // The FROZEN in-scope resolution rate (independent of the external count) still renders.
+    let mut r = report();
+    r.summary.resolved_calls = 50;
+    r.summary.unresolved_calls = 10;
+    r.summary.unresolved_calls_external = 2;
+    r.summary.unresolved_calls_internal_like = 4;
+    r.external_dependencies = ext_attr_with_first_party(
+        vec![named("serde", 2)],
+        2,
+        0,
+        vec![named("repo-graph-storage", 8)],
+        8,
+        4, // first_party_calls (4) > unresolved_calls_external (2): inconsistent
+    );
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("external-library share unavailable"),
+        "external share rendered unknown, not a saturated zero:\n{out}"
+    );
+    assert!(
+        out.contains("internally inconsistent"),
+        "the reader-facing reason names the inconsistency:\n{out}"
+    );
+    // NEVER a fabricated external figure from a saturated subtraction.
+    assert!(
+        !out.contains("% of calls go into external libraries"),
+        "no fabricated external % :\n{out}"
+    );
+    assert!(
+        !out.contains("no external-library calls identified"),
+        "no fabricated 'identified none' :\n{out}"
+    );
+    // The in-scope resolution rate is independent of the broken split and still renders.
+    assert!(
+        out.contains("your code's calls 93% resolved (50 of 54 in-scope or unclassified)"),
+        "frozen in-scope rate unaffected:\n{out}"
+    );
+}
+
+#[test]
+fn first_party_remainder_unknown_when_shown_exceeds_total() {
+    // TRUST-FIRSTPARTY-1 (review-1 §2): the shown first-party rows (8) sum to MORE than the
+    // reported first_party_total (5). `checked_sub` must NOT saturate the remainder to 0 (hiding the
+    // error) — render it UNKNOWN with a reason. The shown row itself still renders.
+    let mut r = report();
+    r.summary.unresolved_calls_external = 6;
+    r.summary.unresolved_calls_internal_like = 4;
+    r.basis_classifications = vec![basis("specifier_matches_package_dependency", 10)];
+    r.external_dependencies = ext_attr_with_first_party(
+        vec![named("serde", 2)],
+        2,
+        0,
+        vec![named("repo-graph-storage", 8)],
+        5, // first_party_total (5) < shown (8): inconsistent
+        4,
+    );
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("workspace-crate remainder unavailable"),
+        "the first-party remainder rendered unknown with a reason:\n{out}"
+    );
+    assert!(
+        !out.contains("other workspace crates:"),
+        "no fabricated '+N more' remainder from a saturated zero:\n{out}"
+    );
+    // The shown first-party row is a real counted row and still renders.
+    assert!(
+        out.contains("internal crate/package → repo-graph-storage: 8 references (this repo)"),
+        "the shown first-party row is unaffected:\n{out}"
     );
 }
 

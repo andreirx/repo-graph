@@ -345,6 +345,39 @@ pub const NO_IN_SCOPE_CALLS: &str = "no in-scope calls measured";
 pub const NO_EXTERNAL_IDENTIFIED: &str =
     "no external-library calls identified (heuristic name-set match, not compiler-verified)";
 
+/// TRUST-FIRSTPARTY-1 (spec §2.3): the basis line stating the external/first-party split behind
+/// the "% of calls go into external libraries" figure (CONTRADICTION-SWEEP-1 pattern — state the
+/// basis inline so a reader never mistakes the corrected external figure for a contradiction).
+/// `external` = the calls counted toward the external %; `internal_workspace` = the repo-own
+/// workspace-crate calls EXCLUDED from it. Rendered only when there IS a first-party split
+/// (`internal_workspace > 0`), so repos without repo-own workspace references stay byte-identical.
+pub fn external_first_party_split_line(external: u64, internal_workspace: u64) -> String {
+    format!(
+        "basis: {external} external, {internal_workspace} internal workspace references \
+         (this repo's own crates, excluded from the external figure above)"
+    )
+}
+
+/// TRUST-FIRSTPARTY-1 (review-1 §2): the external SHARE is UNKNOWN because the counted first-party
+/// (repo-own workspace) call count EXCEEDS the total external-import call count — the two do not
+/// reconcile, so NO honest external figure exists. Rendered instead of a saturated-to-zero share
+/// that would fabricate a measured "no external calls" (architecture rule 6 / STANDING HONESTY
+/// RULE 1: unknown renders as unknown WITH REASON, never as a measured 0). Unreachable in a
+/// coherent report — a coherent snapshot always has `first_party_calls <= unresolved_calls_external`
+/// (first-party is a subset of the external-import calls); it guards a corrupt or cross-version
+/// snapshot.
+pub fn external_share_unreconciled_line(
+    external_import_calls: u64,
+    first_party_calls: u64,
+) -> String {
+    format!(
+        "external-library share unavailable: {first_party_calls} first-party (repo-own workspace) \
+         calls exceed the {external_import_calls} external-import calls counted — the snapshot is \
+         internally inconsistent (possibly cross-version or corrupt); no honest external figure can \
+         be derived"
+    )
+}
+
 /// A call in the in-scope denominator is "unclassified" when the classifier could
 /// not attribute its target. The rate keeps these IN (conservative — never inflate),
 /// but at or above this fraction of the denominator the rate is materially a lower
