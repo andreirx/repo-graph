@@ -21,8 +21,9 @@ condition where no Python path exists, while leveldb already gets the honest pas
 1. **Split the conflation by the resolver-path fact** (the SAME per-language capability facts
    the CTA logic and dead-causes use — one source of truth, never re-derived):
    - Materially-present language(s) WITH a resolution path, enrichment not yet
-     applied/complete → `CALL_GRAPH_RELIABILITY` stays a degrading condition (Incomplete)
-     with the per-language CTA. Unchanged behavior.
+     applied/complete → `CALL_GRAPH_RELIABILITY` keeps its CURRENT failing classification
+     (Fail today — ruling actionable-verdict 2026-08-31: current behavior is authoritative;
+     this slice does not reclassify the actionable cell) with the per-language CTA.
    - ALL materially-present languages WITHOUT a resolution path on this build → the condition
      renders as a PASSING stated limitation: "call-graph resolution has reached this build's
      ceiling for <langs> (no resolver exists) — <N>% resolved is the deterministic-extraction
@@ -63,5 +64,5 @@ STOP + DECISION_REQUIRED. Never touch the operator's real state root. Do NOT com
 ## 5. Definition of done
 
 check's verdict varies with reality: permanent ceilings render as stated-limitation passes,
-actionable gaps stay Incomplete with their CTA, and the same capability fact drives the
+actionable gaps keep their current failing classification with their CTA, and the same capability fact drives the
 condition, the CTA, and ENRICHMENT_STATE; figures untouched; mapping frozen; gates green.
