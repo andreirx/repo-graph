@@ -44,29 +44,32 @@ The re-scoped contract:
 4. JSON additive only; exit codes unchanged.
 ## 3. Stop conditions
 
-Frozen: the no-loss certificate computation and witness semantics (consuming an existing
-epoch/fingerprint fact in a per-leaf DECISION is in scope; changing what the certificate
-PROVES is not — if §2.2(a) requires extending certification, take (b) instead; if neither
-works without touching frozen surfaces, STOP + DECISION_REQUIRED). Frozen: storage schema,
-exit codes, trust computation, enrichment pass semantics. STANDING HONESTY RULES. Unmet DoD →
+Frozen: serving routes and the no-loss certificate/witness (this slice touches NEITHER — the
+withdrawn routing contract is void), storage schema (the enrichment-state fact extension is a
+daemon-runtime fact, not a schema column; if it turns out to need schema, STOP +
+DECISION_REQUIRED), exit codes, trust computation, enrichment pass semantics (rendering its
+lifecycle is in scope; changing its scheduling is not). STANDING HONESTY RULES. Unmet DoD →
 STOP + DECISION_REQUIRED. Never touch the operator's real state root. Do NOT commit.
 
 ## 4. Validation (SYNCHRONOUS; INCREMENTAL REPORT — binding)
 
-- A reproducing test FIRST: index a fixture, run enrichment, force the divergence the audit
-  measured (budgeted vs full reliability figures) — must FAIL before the fix, PASS after.
-- Unit: budget tiers render byte-identical reliability/enrichment-state/CTA blocks for the
-  same snapshot; post-enrichment budgeted orient never emits the enrich CTA for resolved
-  families; leaf-decision fallback path labeled per its existing contract.
-- Live proof (isolated state root, registry sha unchanged): reproduce the FRAKTAG shape —
-  index, let enrichment complete, capture `orient --budget medium` vs `orient --full` vs
-  `check --full`: identical percentages, totals, enrichment state, and CTA. Captures in the
-  report. (LM Studio is live on this machine — disable auto-seed in any test harness that
-  indexes; see the standing lock-flake guard.)
+- Reproducing test FIRST, using the existing enrichment test seams with the pass HELD in a
+  controlled queued/running state (never racing a live pass): pre-fix, orient renders the
+  enrich CTA / "did not run" while the pass is in flight (FAILS the new assertion); post-fix,
+  orient/check/trust render the in-flight line, CTA suppressed, check's ENRICHMENT_STATE in
+  its non-failing in-flight form. Completed-pass and never-ran states unchanged (regression
+  assertions).
+- Unit: the shared accessor's new states render identically on all three consumers; JSON
+  additive.
+- Live proof (isolated state root, registry sha unchanged): index a TS repo, capture orient
+  DURING the background pass (poll fast) → in-flight line, no CTA; after completion → normal
+  post-enrichment rendering. Captures in the report. (LM Studio live — auto-seed guards in
+  any indexing harness.)
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done
 
-No rmap surface tells two factual stories about one snapshot: reliability, enrichment state,
-and the CTA are identical at every budget and on check; the reproducing test pins it; the
-serving-route decision that caused the split is documented in the fix; gates green.
+While an enrichment pass is queued or running, no rmap surface tells the reader to start one
+or claims one never ran; the in-flight truth renders through the one shared accessor on
+orient/check/trust; completed/never-ran behavior is unchanged; the temporal-race finding and
+the withdrawn routing premise are recorded (this doc); gates green.
