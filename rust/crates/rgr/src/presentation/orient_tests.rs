@@ -1544,6 +1544,7 @@ fn one_shared_projection_reaches_orient_trust_and_check() {
         enrichment_state: Some(EnrichmentState::Ran),
         gate_outcome: None,
         index_drift: None,
+        ceiling_fact: None,
     })
     .into_iter()
     .find(|c| c.code == ConditionCode::CallGraphReliability)

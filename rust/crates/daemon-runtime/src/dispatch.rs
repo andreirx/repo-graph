@@ -4531,17 +4531,61 @@ impl ServiceDispatcher {
         // condition (Incomplete when the tree has moved past the basis; Pass when
         // clean / not-a-git-repo). `None` only when there is no snapshot to anchor
         // to — the reducer then omits the condition rather than fabricate it.
-        let index_drift =
+        // CHECK-SIGNAL-1: compute BOTH the index-drift fact AND the permanent-ceiling capability
+        // fact from the ONE `get_latest_snapshot` read. The ceiling fact = every materially-present
+        // code language has no resolver on any build (the SAME materiality × resolver facts the D5
+        // CTA reads, via `call_graph_ceiling_languages`); it lets check reclassify a permanent LOW /
+        // "did not run" as a passing stated limitation instead of a false Fail (§2.1/§2.2).
+        //
+        // HONEST DEGRADATION (operator ruling 2026-08-31 `ceiling-read-unknown`, superseding
+        // build-1's `Option<ResolutionCeiling>` whose `None` conflated no-ceiling with a failed
+        // read): the read yields the exhaustive capability sum `CeilingFact`. A successful read →
+        // `Ceiling { languages }` (permanent) or `NoCeiling` (actionable); a FAILED read →
+        // `Unknown { reason }` — carried in-band as the RECORD (never a stderr-only log), rendering
+        // unknown-with-reason on the affected condition and contributing to the verdict exactly as
+        // NoCeiling (failing) — a read failure may never mint a false passing ceiling.
+        let (index_drift, ceiling_fact) =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snap)) => {
-                    Some(self.compute_query_drift(&storage, &repo_state, &repo_uid, &snap))
+                    let drift = self.compute_query_drift(&storage, &repo_state, &repo_uid, &snap);
+                    let ceiling_fact =
+                        match repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+                            &storage,
+                            &snap.snapshot_uid,
+                        ) {
+                            // Successful read: `reader_context` owns the WHICH-languages
+                            // computation (one source, never re-derived); map its Option into the
+                            // exhaustive capability sum at this composition root — the same
+                            // daemon→agent injected-fact pattern as `IndexDrift`. `Some(langs)` =
+                            // permanent ceiling; `None` = ≥1 materially-present language HAS a
+                            // resolver → affirmatively actionable.
+                            Ok(counts) => Some(match call_graph_ceiling_languages(&counts) {
+                                Some(languages) => {
+                                    repo_graph_agent::dto::ceiling_fact::CeilingFact::Ceiling {
+                                        languages,
+                                    }
+                                }
+                                None => repo_graph_agent::dto::ceiling_fact::CeilingFact::NoCeiling,
+                            }),
+                            // FAILED read → the capability is UNKNOWN. Record the reason IN the fact
+                            // so the check condition renders unknown-with-reason (never swallowed to
+                            // a sentinel, never a false Pass).
+                            Err(e) => {
+                                Some(repo_graph_agent::dto::ceiling_fact::CeilingFact::Unknown {
+                                    reason: e.to_string(),
+                                })
+                            }
+                        };
+                    (Some(drift), ceiling_fact)
                 }
-                Ok(None) => None,
+                // No snapshot → the call-graph condition is not evaluated; no ceiling analysis.
+                Ok(None) => (None, None),
                 Err(e) => {
                     // Snapshot read failed here; the check reducer re-reads it and will
-                    // surface the failure. Omit the drift condition (never a false value).
+                    // surface the failure. Omit the drift condition (never a false value); no
+                    // ceiling analysis is attempted without a snapshot to anchor to.
                     eprintln!("warning: index-drift snapshot read failed for {repo_uid}: {e}");
-                    None
+                    (None, None)
                 }
             };
 
@@ -4565,6 +4609,7 @@ impl ServiceDispatcher {
             let repo_uid_w = repo_uid.clone();
             let now_w = now.clone();
             let drift_w = index_drift.clone();
+            let ceiling_fact_w = ceiling_fact.clone();
             match crate::cancel::run_interruptible(
                 emitter,
                 "running_check",
@@ -4577,6 +4622,7 @@ impl ServiceDispatcher {
                         &now_w,
                         drift_w.clone(),
                         enrich_state_override,
+                        ceiling_fact_w.clone(),
                         &mut checkpoint,
                     )
                     .map_err(|e| e.to_string())
@@ -9487,8 +9533,8 @@ pub(crate) fn configured_resolver_languages_from_env() -> Vec<EnrichmentLanguage
 // `relationship_next_action_line` is called only inside `reader_context` (by that wrapper), so it no
 // longer needs re-exporting here. (`deps_reader_context_note` is consumed directly by `deps_headline`.)
 pub(crate) use crate::reader_context::{
-    dominant_deps_ecosystem, relationship_next_action_line_or_read_error,
-    relationship_reliability_is_low,
+    call_graph_ceiling_languages, dominant_deps_ecosystem,
+    relationship_next_action_line_or_read_error, relationship_reliability_is_low,
 };
 
 #[cfg(test)]

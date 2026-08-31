@@ -10,6 +10,7 @@
 //! The use-case layer (step 3) adds Serialize when the envelope
 //! shape is finalized.
 
+use crate::dto::ceiling_fact::CeilingFact;
 use crate::dto::index_drift::IndexDrift;
 use crate::storage_port::{AgentReliabilityLevel, EnrichmentState};
 
@@ -79,6 +80,13 @@ pub struct ConditionResult {
     pub code: ConditionCode,
     pub status: ConditionStatus,
     pub summary: String,
+    /// CHECK-SIGNAL-1: `true` iff this condition rendered its PERMANENT-CEILING form — a LOW /
+    /// no-in-scope `CALL_GRAPH_RELIABILITY` or a "did not run" `ENRICHMENT_STATE` that was
+    /// reclassified as a PASSING stated limitation because every materially-present language has
+    /// no resolver on this build. Carried explicitly (never inferred from the summary text — a
+    /// name/content sniff is a classification defect) so `condition_to_evidence` can emit the
+    /// additive JSON `ceiling: true` marker. `false` for every ordinary condition.
+    pub ceiling: bool,
 }
 
 // ── Input ───────────────────────────────────────────────────────
@@ -129,6 +137,29 @@ pub struct CheckInput {
     /// condition is then OMITTED rather than fabricated. The daemon always supplies
     /// `Some`, so production `check` always evaluates it.
     pub index_drift: Option<IndexDrift>,
+    /// CHECK-SIGNAL-1: the daemon-injected call-graph-resolution CAPABILITY fact
+    /// ([`CeilingFact`]), computed from the SAME materially-present-language × resolver facts the D5
+    /// next-action CTA and dead-causes read (`daemon_runtime::reader_context`) — one source, never
+    /// re-derived. Injected exactly like `index_drift` / `enrich_state_override` (daemon → agent),
+    /// keeping the pure reducer I/O-free. An exhaustive 3-variant sum (operator ruling 2026-08-31
+    /// `ceiling-read-unknown`, superseding build-1's `Option<ResolutionCeiling>` whose `None`
+    /// conflated no-ceiling with a failed read):
+    ///   - `Some(CeilingFact::Ceiling { languages })` = EVERY materially-present code language has NO
+    ///     resolver on ANY build → a LOW / no-in-scope `CALL_GRAPH_RELIABILITY` renders a PASSING
+    ///     stated limitation naming `languages`, and `ENRICHMENT_STATE`'s "did not run" becomes the
+    ///     honest non-failing form. FIGURES untouched — only classification + wording change.
+    ///   - `Some(CeilingFact::NoCeiling)` = affirmatively actionable (≥1 materially-present language
+    ///     HAS a resolution path) → the pre-CHECK-SIGNAL-1 degrading classification + CTA stands.
+    ///   - `Some(CeilingFact::Unknown { reason })` = the capability read failed → the affected
+    ///     condition renders unknown-WITH-REASON and contributes to the verdict exactly as `NoCeiling`
+    ///     does (failing); a read failure may never mint a Pass (Fact Certainty Model).
+    ///
+    /// `None` (the OUTER Option) = the CALLER performed no ceiling analysis (the simple `run_check`
+    /// entry, the no-snapshot branch, unit tests) → pre-CHECK-SIGNAL-1 behavior, byte-identical.
+    /// This is a distinct axis from the three capability outcomes and mirrors the sibling
+    /// `Option<IndexDrift>` fact (`None` = not computed by this caller). It is NOT a read failure —
+    /// that is `Some(Unknown)` — so no honesty conflation remains.
+    pub ceiling_fact: Option<CeilingFact>,
 }
 
 // ── Gate outcome projection ─────────────────────────────────────

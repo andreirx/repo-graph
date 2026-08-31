@@ -56,7 +56,15 @@ pub fn check(input: &CheckInput) -> CheckResult {
 mod tests {
     use super::*;
     use crate::check::types::{CheckVerdict, ConditionCode, ConditionStatus, GateOutcomeForCheck};
+    use crate::dto::ceiling_fact::CeilingFact;
     use crate::storage_port::{AgentReliabilityLevel, EnrichmentState};
+
+    /// CHECK-SIGNAL-1 test helper: an affirmative permanent-ceiling fact naming one language.
+    fn ceiling(lang: &str) -> Option<CeilingFact> {
+        Some(CeilingFact::Ceiling {
+            languages: vec![lang.to_string()],
+        })
+    }
 
     /// Helper: builds a CheckInput where everything is passing.
     fn all_pass_input() -> CheckInput {
@@ -76,6 +84,8 @@ mod tests {
             index_drift: Some(crate::dto::index_drift::IndexDrift::Clean {
                 basis: "abcdef0123456789".to_string(),
             }),
+            // CHECK-SIGNAL-1: default not-a-ceiling (actionable) → pre-slice call-graph behavior.
+            ceiling_fact: None,
         }
     }
 
@@ -283,6 +293,273 @@ mod tests {
         );
     }
 
+    // ── CHECK-SIGNAL-1: the four cells (ceiling / actionable / mixed / in-flight) ──
+
+    /// CELL "no-path only" (leveldb / django shape): a PERMANENT-ceiling repo whose only degrading
+    /// signals are the no-resolver call-graph + "did not run" enrichment → both reclassify to
+    /// PASSING stated limitations, and the verdict MOVES to Pass (the intended discrimination).
+    #[test]
+    fn ceiling_repo_low_call_graph_and_not_run_enrichment_pass_and_verdict_moves() {
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 42;
+        input.unresolved_calls_internal_like = 58; // 42% in-scope
+        input.unresolved_calls = 58; // external = 0
+        input.enrichment_state = Some(EnrichmentState::NotRun);
+        input.ceiling_fact = ceiling("C++");
+        let result = check(&input);
+
+        let cg = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::CallGraphReliability)
+            .unwrap();
+        assert_eq!(cg.status, ConditionStatus::Pass, "{}", cg.summary);
+        assert!(
+            cg.ceiling,
+            "call-graph condition carries the ceiling marker"
+        );
+        // FIGURES UNCHANGED (§2.1 / §3): the deterministic-extraction rate still renders verbatim.
+        assert!(cg.summary.contains("42% resolved"), "{}", cg.summary);
+        assert!(
+            cg.summary
+                .contains("reached this build's ceiling for C++ (no resolver exists)"),
+            "{}",
+            cg.summary
+        );
+
+        let en = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::EnrichmentState)
+            .unwrap();
+        assert_eq!(en.status, ConditionStatus::Pass, "{}", en.summary);
+        assert!(en.ceiling);
+        assert!(
+            en.summary
+                .contains("No semantic-resolution path exists for C++ on this build"),
+            "{}",
+            en.summary
+        );
+        assert!(!en.summary.contains("did not run"), "{}", en.summary);
+
+        // The intended movement: with the two former Fails now Pass (rest of all_pass_input passes),
+        // the verdict is Pass. Mapping frozen; the movement is the point (§2.3).
+        assert_eq!(result.verdict, CheckVerdict::Pass);
+    }
+
+    /// CELL "no-path only" with NO in-scope calls (a pure-external ceiling repo): still a PASSING
+    /// stated limitation, using the honest no-measurement figure (never a fabricated rate), coverage
+    /// map preserved.
+    #[test]
+    fn ceiling_repo_no_in_scope_calls_passes_with_ceiling_form() {
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::High); // vacuous 0-of-0 band
+        input.resolved_calls = 0;
+        input.unresolved_calls_internal_like = 0;
+        input.unresolved_calls = 50; // all external
+        input.ceiling_fact = ceiling("C");
+        let cg = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| c.code == ConditionCode::CallGraphReliability)
+            .unwrap();
+        assert_eq!(cg.status, ConditionStatus::Pass, "{}", cg.summary);
+        assert!(cg.ceiling);
+        assert!(
+            cg.summary
+                .contains("no in-scope calls to resolve on this build"),
+            "{}",
+            cg.summary
+        );
+        // Coverage map still renders (figures unchanged) — the external share reaches the reader.
+        assert!(
+            cg.summary.contains("go into external libraries"),
+            "{}",
+            cg.summary
+        );
+    }
+
+    /// CELL "enrichable only" / "mixed": NO ceiling fact (`None`) → the pre-slice degrading verdict
+    /// is UNCHANGED, byte-identical — LOW call-graph stays Fail, "did not run" enrichment stays Fail,
+    /// neither marked ceiling. This is the discrimination's other half.
+    #[test]
+    fn actionable_repo_keeps_degrading_verdict_unchanged() {
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 42;
+        input.unresolved_calls_internal_like = 58;
+        input.unresolved_calls = 58;
+        input.enrichment_state = Some(EnrichmentState::NotRun);
+        input.ceiling_fact = None; // enrichable / mixed → actionable
+        let result = check(&input);
+
+        let cg = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::CallGraphReliability)
+            .unwrap();
+        assert_eq!(cg.status, ConditionStatus::Fail);
+        assert!(!cg.ceiling);
+        assert!(cg
+            .summary
+            .contains("verify call/dead claims against source"));
+
+        let en = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::EnrichmentState)
+            .unwrap();
+        assert_eq!(en.status, ConditionStatus::Fail);
+        assert!(!en.ceiling);
+        assert!(en.summary.contains("did not run"));
+
+        assert_eq!(result.verdict, CheckVerdict::Fail);
+    }
+
+    /// CHECK-SIGNAL-1 (operator ruling `ceiling-read-unknown`): a FAILED capability read
+    /// (`CeilingFact::Unknown`) on a DEGRADING call-graph condition may NEVER mint a Pass — it keeps
+    /// the pre-slice FAILING classification (exactly as the no-fact/NoCeiling case) AND renders the
+    /// unknown WITH its reason in-band (STANDING HONESTY RULE #1: a classified fallible read is never
+    /// swallowed to a sentinel). This is the error path review-1 flagged as uncovered.
+    #[test]
+    fn unknown_capability_low_call_graph_stays_failing_and_surfaces_reason() {
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 42;
+        input.unresolved_calls_internal_like = 58; // 42% in-scope
+        input.unresolved_calls = 58; // external = 0
+        input.ceiling_fact = Some(CeilingFact::Unknown {
+            reason: "storage read failed: disk I/O error".to_string(),
+        });
+        let result = check(&input);
+
+        let cg = result
+            .conditions
+            .iter()
+            .find(|c| c.code == ConditionCode::CallGraphReliability)
+            .unwrap();
+        // FAILING — a read failure never improves the verdict.
+        assert_eq!(cg.status, ConditionStatus::Fail, "{}", cg.summary);
+        assert!(
+            !cg.ceiling,
+            "Unknown is NOT the ceiling form: {}",
+            cg.summary
+        );
+        // The pre-slice degrading verdict sentence is preserved verbatim …
+        assert!(
+            cg.summary
+                .contains("Your code's calls 42% resolved (LOW) — verify call/dead claims"),
+            "{}",
+            cg.summary
+        );
+        // … and the unknown is surfaced WITH its reason (not swallowed to stderr).
+        assert!(
+            cg.summary
+                .contains("Whether this is a permanent no-resolver ceiling is unknown"),
+            "unknown rendered: {}",
+            cg.summary
+        );
+        assert!(
+            cg.summary.contains("disk I/O error"),
+            "reason carried in-band: {}",
+            cg.summary
+        );
+        // A read failure may never mint a Pass — the verdict stays Fail.
+        assert_eq!(result.verdict, CheckVerdict::Fail);
+    }
+
+    /// CHECK-SIGNAL-1: on an UNKNOWN capability, a "did not run" ENRICHMENT_STATE keeps its pre-slice
+    /// FAILING form (only `CeilingFact::Ceiling` reclassifies NotRun) — an Unknown never mints the
+    /// non-failing "enrichment does not apply" Pass. The read failure is surfaced on the degrading
+    /// CALL_GRAPH_RELIABILITY condition (the only site where the capability is material), so it is
+    /// never swallowed.
+    #[test]
+    fn unknown_capability_not_run_enrichment_stays_failing() {
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 42;
+        input.unresolved_calls_internal_like = 58;
+        input.unresolved_calls = 58;
+        input.enrichment_state = Some(EnrichmentState::NotRun);
+        input.ceiling_fact = Some(CeilingFact::Unknown {
+            reason: "language breakdown unavailable".to_string(),
+        });
+        let en = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| c.code == ConditionCode::EnrichmentState)
+            .unwrap();
+        assert_eq!(en.status, ConditionStatus::Fail, "{}", en.summary);
+        assert!(
+            !en.ceiling,
+            "Unknown never mints the enrichment ceiling form"
+        );
+        assert!(en.summary.contains("did not run"), "{}", en.summary);
+    }
+
+    /// CHECK-SIGNAL-1: an affirmative `CeilingFact::NoCeiling` is byte-identical to the not-supplied
+    /// (`None`) path — both keep the pre-slice degrading classification. This pins the distinction
+    /// that build-1's `Option<ResolutionCeiling>` could not express: NoCeiling ≠ Unknown ≠ Ceiling.
+    #[test]
+    fn no_ceiling_matches_not_supplied_degrading_verdict() {
+        let mut base = all_pass_input();
+        base.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        base.resolved_calls = 42;
+        base.unresolved_calls_internal_like = 58;
+        base.unresolved_calls = 58;
+        base.enrichment_state = Some(EnrichmentState::NotRun);
+
+        let mut not_supplied = base.clone();
+        not_supplied.ceiling_fact = None;
+        let mut no_ceiling = base;
+        no_ceiling.ceiling_fact = Some(CeilingFact::NoCeiling);
+
+        // Same conditions (status + summary + marker) for both → the reducer treats an affirmative
+        // no-ceiling exactly like "no analysis supplied": pre-slice, byte-identical.
+        assert_eq!(
+            check(&not_supplied).conditions,
+            check(&no_ceiling).conditions
+        );
+        assert_eq!(check(&no_ceiling).verdict, CheckVerdict::Fail);
+    }
+
+    /// CELL "in-flight": an in-flight enrichment pass keeps OFC-1's honest non-failing form even on a
+    /// ceiling repo — the ceiling override touches ONLY the `NotRun` case, never in-flight.
+    #[test]
+    fn in_flight_enrichment_keeps_its_form_on_ceiling_repo() {
+        let mut input = all_pass_input();
+        input.enrichment_state = Some(EnrichmentState::InFlight);
+        input.ceiling_fact = ceiling("Python");
+        let en = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| c.code == ConditionCode::EnrichmentState)
+            .unwrap();
+        assert_eq!(en.status, ConditionStatus::Pass);
+        assert!(!en.ceiling, "in-flight is not the ceiling form");
+        assert!(en.summary.contains("in progress"), "{}", en.summary);
+    }
+
+    /// A ceiling repo whose call-graph is (implausibly) MEDIUM keeps the ordinary passing form — the
+    /// ceiling override reclassifies ONLY the degrading (LOW / no-in-scope) case, never fabricating a
+    /// ceiling sentence over an already-passing rate.
+    #[test]
+    fn ceiling_does_not_touch_medium_call_graph() {
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Medium);
+        input.ceiling_fact = ceiling("C");
+        let cg = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| c.code == ConditionCode::CallGraphReliability)
+            .unwrap();
+        assert_eq!(cg.status, ConditionStatus::Pass);
+        assert!(!cg.ceiling, "MEDIUM is already passing — not reclassified");
+        assert!(cg.summary.contains("MEDIUM"), "{}", cg.summary);
+        assert!(!cg.summary.contains("ceiling"), "{}", cg.summary);
+    }
+
     // ── 2. one_fail_stale_files ─────────────────────────────
 
     #[test]
@@ -310,6 +587,7 @@ mod tests {
             enrichment_state: None,
             gate_outcome: None,
             index_drift: None,
+            ceiling_fact: None,
         };
         let result = check(&input);
         assert_eq!(result.verdict, CheckVerdict::Incomplete);
@@ -502,6 +780,7 @@ mod tests {
             enrichment_state: None,
             gate_outcome: None,
             index_drift: None,
+            ceiling_fact: None,
         };
         let result = check(&input);
         assert_eq!(result.conditions.len(), 1);

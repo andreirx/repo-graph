@@ -5,6 +5,10 @@
 //! indexer, or any adapter crate. These types are pure data.
 
 pub mod budget;
+/// CHECK-SIGNAL-1: the daemon-injected call-graph-resolution capability fact
+/// (`CeilingFact` — ceiling / no-ceiling / unknown), consumed by the `check` reducer.
+/// Pure data, no serde.
+pub mod ceiling_fact;
 pub mod coherent;
 pub mod envelope;
 pub mod index_drift;
@@ -18,6 +22,7 @@ pub mod signal;
 pub mod source;
 
 pub use budget::Budget;
+pub use ceiling_fact::CeilingFact;
 pub use envelope::{
     Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction, NextKind, OrientResult,
     ResolvedKind, ORIENT_COMMAND, ORIENT_SCHEMA,

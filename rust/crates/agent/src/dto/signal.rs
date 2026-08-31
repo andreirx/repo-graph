@@ -686,6 +686,13 @@ pub struct CheckConditionEvidence {
     pub code: String,
     pub status: String,
     pub summary: String,
+    /// CHECK-SIGNAL-1 (§2.3): additive machine marker — `Some(true)` iff this condition rendered
+    /// its PERMANENT-CEILING form (a LOW / "did not run" reclassified to a passing stated
+    /// limitation because every materially-present language has no resolver on this build).
+    /// `None` (skipped on the wire) for every ordinary condition, so existing consumers keyed on
+    /// `{code, status, summary}` stay byte-compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ceiling: Option<bool>,
 }
 
 /// Evidence for `CHECK_PASS`: all conditions passed.

@@ -143,6 +143,7 @@ mod tests {
             code: code.to_string(),
             status: status.to_string(),
             summary: summary.to_string(),
+            ceiling: None,
         }
     }
 

@@ -26,6 +26,7 @@ pub use types::*;
 use repo_graph_gate::{GateMode, GateStorageRead};
 
 use crate::confidence::derive_repo_confidence;
+use crate::dto::ceiling_fact::CeilingFact;
 use crate::dto::envelope::{Confidence, Focus, OrientResult, CHECK_COMMAND, ORIENT_SCHEMA};
 use crate::dto::signal::{
     CheckConditionEvidence, CheckFailEvidence, CheckIncompleteEvidence, CheckPassEvidence, Signal,
@@ -56,7 +57,8 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // Simple entry: no working-tree drift available (no repo path / git access at
     // this layer). The `INDEX_DRIFT` condition is omitted, not fabricated. The
     // daemon uses `run_check_cancellable` with a computed `IndexDrift`.
-    run_check_cancellable(storage, repo_uid, now, None, None, &mut || {
+    // The trailing `None` is `ceiling_fact`: the simple entry performs no ceiling analysis.
+    run_check_cancellable(storage, repo_uid, now, None, None, None, &mut || {
         std::ops::ControlFlow::Continue(())
     })
 }
@@ -88,6 +90,17 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // Fail — check and orient tell ONE story for one snapshot. Non-daemon callers (the `run_check`
     // wrapper, tests) pass `None`, preserving byte-identical output.
     enrich_state_override: Option<crate::storage_port::EnrichmentState>,
+    // CHECK-SIGNAL-1: the daemon-injected call-graph-resolution CAPABILITY fact (§2.1), computed
+    // from the SAME materially-present-language × resolver facts the D5 CTA uses (`reader_context`)
+    // — same daemon→agent injection precedent as `index_drift` / `enrich_state_override`. An
+    // exhaustive 3-variant sum ([`CeilingFact`]), operator ruling 2026-08-31 `ceiling-read-unknown`
+    // (superseding build-1's `Option<ResolutionCeiling>` whose `None` conflated no-ceiling with a
+    // failed read): `Some(Ceiling)` = permanent ceiling → passing stated limitation +
+    // non-failing ENRICHMENT_STATE; `Some(NoCeiling)` = actionable → pre-slice failing; `Some(Unknown)`
+    // = capability read failed → pre-slice failing WITH the reason surfaced (never a false Pass). The
+    // OUTER `None` (the `run_check` wrapper / tests) = caller performed no ceiling analysis →
+    // pre-slice behavior, byte-identical (mirrors the sibling `Option<IndexDrift>`).
+    ceiling_fact: Option<CeilingFact>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, CheckError> {
     // ── Phase 1: Gather ─────────────────────────────────────────
@@ -121,6 +134,8 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 gate_outcome: None,
                 // No snapshot → conditions 2+ (incl. INDEX_DRIFT) are not evaluated.
                 index_drift: None,
+                // No snapshot → the call-graph condition is not evaluated; the ceiling fact is moot.
+                ceiling_fact: None,
             };
             (input, String::new(), Confidence::Low)
         }
@@ -166,6 +181,10 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 // storage), passed through as pre-fetched data. `None` only on the
                 // simple `run_check` entry / tests, where the condition is omitted.
                 index_drift: index_drift.clone(),
+                // CHECK-SIGNAL-1: the daemon-injected call-graph capability fact, threaded through
+                // verbatim (the pure reducer performs no I/O). `None` on the `run_check` wrapper /
+                // tests → pre-slice behavior; `Some(Ceiling|NoCeiling|Unknown)` from the daemon.
+                ceiling_fact: ceiling_fact.clone(),
             };
 
             (input, snap_uid, conf)
@@ -330,5 +349,44 @@ fn condition_to_evidence(c: &ConditionResult) -> CheckConditionEvidence {
             ConditionStatus::Incomplete => "incomplete".to_string(),
         },
         summary: c.summary.clone(),
+        // CHECK-SIGNAL-1 (§2.3): the additive `ceiling: true` JSON marker — emitted ONLY on a
+        // reclassified permanent-ceiling condition, ABSENT (serialized-skipped `None`) otherwise,
+        // so existing consumers stay byte-compatible.
+        ceiling: if c.ceiling { Some(true) } else { None },
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+    use crate::check::types::{ConditionCode, ConditionResult, ConditionStatus};
+
+    /// CHECK-SIGNAL-1 (§2.3): the additive JSON `ceiling` marker is emitted ONLY on a reclassified
+    /// ceiling condition, and ABSENT (serde-skipped) otherwise — so existing consumers keyed on
+    /// `{code, status, summary}` see byte-compatible JSON.
+    #[test]
+    fn ceiling_marker_present_only_when_set_and_serde_skipped_otherwise() {
+        let ordinary = condition_to_evidence(&ConditionResult {
+            code: ConditionCode::CallGraphReliability,
+            status: ConditionStatus::Fail,
+            summary: "x".to_string(),
+            ceiling: false,
+        });
+        assert_eq!(ordinary.ceiling, None);
+        let json = serde_json::to_string(&ordinary).unwrap();
+        assert!(!json.contains("ceiling"), "absent on the wire: {json}");
+
+        let ceiling = condition_to_evidence(&ConditionResult {
+            code: ConditionCode::CallGraphReliability,
+            status: ConditionStatus::Pass,
+            summary: "x".to_string(),
+            ceiling: true,
+        });
+        assert_eq!(ceiling.ceiling, Some(true));
+        let json = serde_json::to_string(&ceiling).unwrap();
+        assert!(
+            json.contains("\"ceiling\":true"),
+            "present when set: {json}"
+        );
     }
 }

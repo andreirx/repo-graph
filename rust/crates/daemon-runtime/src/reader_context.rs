@@ -188,6 +188,51 @@ fn material_code_languages(language_counts: &[(String, u64)]) -> Vec<MaterialLan
         .collect()
 }
 
+/// CHECK-SIGNAL-1 (§2.1): the PERMANENT call-graph-resolution ceiling of a repo — `Some(langs)` iff
+/// EVERY materially-present code language (the SAME ≥10%-of-code-files gate [`material_code_languages`]
+/// the D5 CTA uses, REUSED so the check verdict and the CTA read ONE materiality definition) has NO
+/// resolver on ANY build. "No resolver on any build" is exactly [`token_enrichment_language`] returning
+/// `None` (C / C++ / Python / Go / …) — a BUILD-INDEPENDENT fact, deliberately NOT gated on the
+/// daemon's `configured` set: a language whose resolver merely isn't wired here (Java without JDTLS)
+/// is ACTIONABLE (the reader can enable it), NOT a permanent ceiling, so it keeps `check`'s degrading
+/// verdict. `language_counts` MUST arrive count-DESC (as `query_file_count_by_language` returns).
+///
+/// `None` when NOT a permanent ceiling: no materially-present code language at all (unknown-/config-only),
+/// or at least one materially-present language HAS a resolver (TS/JS/Rust/Java) → the gap is actionable,
+/// so the pre-CHECK-SIGNAL-1 degrading verdict stands. `Some` carries the reader display names as a
+/// STRUCTURED list (`["C++"]`, `["Python"]`, `["C", "C++"]`), sorted + deduped for determinism and
+/// guaranteed non-empty — NOT a pre-joined prose string. `dispatch::handle_check` maps this Option into
+/// the boundary DTO `repo_graph_agent::dto::ceiling_fact::CeilingFact` at the injection site
+/// (`Some(langs)` → `Ceiling { languages }`, `None` → `NoCeiling`; a FAILED read of the underlying
+/// breakdown becomes `Unknown { reason }` there, never reaching this pure function). This function is
+/// consulted ONLY on a successful read, so it models just the two affirmative capability outcomes.
+///
+/// Sole consumers: the daemon's `handle_check` (which wraps + injects this into `CheckInput`) and this
+/// module's tests. Axis: the resolver-path capability — a demonstrated volatile per-language mechanism
+/// (the C/C++/Python-no-resolver reality vs the TS/Rust/Java-resolver reality). Rejected simpler: inline
+/// the `all(token_enrichment_language(..).is_none())` check in `handle_check` — rejected because it would
+/// re-derive the materiality gate + the resolver-family vocabulary away from their one home here, the
+/// exact "never re-derived" the slice forbids.
+pub(crate) fn call_graph_ceiling_languages(
+    language_counts: &[(String, u64)],
+) -> Option<Vec<String>> {
+    let material = material_code_languages(language_counts);
+    if material.is_empty() {
+        return None;
+    }
+    if material
+        .iter()
+        .all(|m| token_enrichment_language(&m.token).is_none())
+    {
+        let mut names: Vec<&'static str> = material.iter().map(|m| m.display).collect();
+        names.sort_unstable();
+        names.dedup();
+        Some(names.into_iter().map(str::to_string).collect())
+    } else {
+        None
+    }
+}
+
 /// CYCLE-HONESTY-1 (§2.4, ts-caveat-basis C1 REPO-level, operator ruling 2026-08-28 + review-2): is TS/JS
 /// a MATERIALLY-present code language of this repo — the SAME ≥10%-of-code-files gate
 /// [`material_code_languages`] applies for the D5 next-action, REUSED (never a re-derived threshold) so the
@@ -701,6 +746,67 @@ mod honest_degradation_tests {
         let mut medium = high();
         medium.call_graph = axis(ReliabilityLevel::MEDIUM);
         assert!(relationship_next_action_line(&medium, &langs(&["c"]), &builtin_only()).is_none());
+    }
+
+    // ── CHECK-SIGNAL-1 (§2.1): the permanent no-resolver ceiling classification ──
+
+    #[test]
+    fn ceiling_when_all_material_languages_have_no_resolver() {
+        // leveldb (pure C++), and a C/C++ mix → permanent ceiling, languages named + sorted.
+        assert_eq!(
+            call_graph_ceiling_languages(&counts(&[("cpp", 120), ("javascript", 2)])),
+            Some(vec!["C++".to_string()]),
+            "C++-dominant with incidental JS is a ceiling (JS below the material gate)"
+        );
+        assert_eq!(
+            call_graph_ceiling_languages(&counts(&[("c", 80), ("cpp", 60)])),
+            Some(vec!["C".to_string(), "C++".to_string()]),
+            "C and C++ both material, neither has a resolver → ceiling naming both, sorted"
+        );
+        // django: Python-dominant, JS ~3.7% (below gate) → Python-only ceiling.
+        assert_eq!(
+            call_graph_ceiling_languages(&counts(&[("python", 2904), ("javascript", 111)])),
+            Some(vec!["Python".to_string()]),
+            "Python-dominant with incidental JS is a Python-only ceiling"
+        );
+    }
+
+    #[test]
+    fn not_ceiling_when_any_material_language_has_a_resolver() {
+        // A resolver EXISTS for TS/JS/Rust/Java (build-independent) → actionable, never a ceiling.
+        assert!(
+            call_graph_ceiling_languages(&langs(&["typescript"])).is_none(),
+            "TS has a resolver → actionable, not a ceiling"
+        );
+        assert!(call_graph_ceiling_languages(&langs(&["rust"])).is_none());
+        // Java WITHOUT JDTLS: a resolver EXISTS (configurable) → actionable, not a permanent ceiling.
+        assert!(
+            call_graph_ceiling_languages(&langs(&["java"])).is_none(),
+            "Java's resolver is configurable (JDTLS) → not a permanent ceiling"
+        );
+        // Mixed: materially-present TS/JS half (glamCRM shape) keeps the actionable verdict even with
+        // material Java/no-resolver-langs present — the enrichable side governs.
+        assert!(
+            call_graph_ceiling_languages(&counts(&[
+                ("javascript", 1658),
+                ("typescript", 699),
+                ("java", 273)
+            ]))
+            .is_none(),
+            "a material TS/JS half makes the repo actionable, not a ceiling"
+        );
+        // Rust + C both material: Rust's resolver exists → actionable (the D5 line still names C's
+        // own no-path clause, but check treats the repo as degrading, not ceiling).
+        assert!(call_graph_ceiling_languages(&langs(&["c", "rust"])).is_none());
+    }
+
+    #[test]
+    fn not_ceiling_when_no_material_code_language() {
+        // Unknown-/config-only: nothing materially present → no ceiling statement applies.
+        assert!(call_graph_ceiling_languages(&langs(&["other"])).is_none());
+        assert!(call_graph_ceiling_languages(&[]).is_none());
+        // Config-file tokens never establish materiality on their own.
+        assert!(call_graph_ceiling_languages(&counts(&[("json", 9999)])).is_none());
     }
 
     // ── CYCLE-HONESTY-1 (§2.4): the TS/JS caveat's materiality gate reuses the ≥10% code-file rule ──
