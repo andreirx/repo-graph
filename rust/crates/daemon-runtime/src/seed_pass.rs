@@ -363,7 +363,9 @@ fn try_seed_attempt(
     // 72s cold embed would block forget/index). This scope drops both.
     let entries = {
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        // Bounded busy-retry (2026-08-31): a transient lock-upgrade SQLITE_BUSY at open must
+        // not permanently skip the pass — see `storage_with_busy_retry`.
+        let storage = match repo_state.storage_with_busy_retry() {
             Ok(s) => s,
             Err(e) => return SeedAttempt::Skipped(format!("could not open storage: {e}")),
         };

@@ -392,6 +392,43 @@ impl RepoState {
         StorageConnection::open_existing(&self.key.db_path)
             .map_err(|e| format!("failed to open storage connection: {}", e))
     }
+
+    /// [`storage`](Self::storage) with a BOUNDED busy retry for BACKGROUND passes (seed /
+    /// retention). SQLite returns `SQLITE_BUSY` IMMEDIATELY — bypassing the 5s busy handler —
+    /// on transaction lock-upgrade conflicts (the migration check's write colliding with a
+    /// concurrent read transaction), so a background pass using plain `storage()` could
+    /// permanently SKIP on a transient lock (bitten 2026-08-31: `op seed skipped: could not
+    /// open storage: database is locked` killed the v0.12.0 cut's seed_seam run). Retries the
+    /// open up to 4× at 250ms ONLY when the error text names a lock; any other error (missing
+    /// DB, corruption) surfaces immediately and honestly. Foreground request paths keep plain
+    /// `storage()` — a request should fail fast, not stall; only detached passes may wait.
+    /// (Abstraction: one helper, two callers — seed_pass + retention_pass; axis: background
+    /// vs foreground open patience; rejected simpler: retry loops duplicated at both call
+    /// sites.)
+    pub fn storage_with_busy_retry(&self) -> Result<StorageConnection, String> {
+        open_existing_with_busy_retry(&self.key.db_path)
+    }
+}
+
+/// The bounded-busy-retry open shared by the background passes (seed via
+/// [`RepoState::storage_with_busy_retry`], retention directly by `db_path`). See that
+/// method's doc for the SQLITE_BUSY lock-upgrade rationale. Retries ONLY lock/busy
+/// errors; everything else (missing DB, corruption) surfaces immediately.
+pub(crate) fn open_existing_with_busy_retry(db_path: &Path) -> Result<StorageConnection, String> {
+    let mut last_err = String::new();
+    for attempt in 0..5 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        match StorageConnection::open_existing(db_path)
+            .map_err(|e| format!("failed to open storage connection: {}", e))
+        {
+            Ok(s) => return Ok(s),
+            Err(e) if e.contains("locked") || e.contains("busy") => last_err = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(format!("{last_err} (after 5 bounded busy-retry attempts)"))
 }
 
 /// Daemon state holding all loaded repos, database runtimes, and the registry.

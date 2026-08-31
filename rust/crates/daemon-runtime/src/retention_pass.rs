@@ -423,7 +423,9 @@ pub fn try_retention_attempt(
     // NO-CREATE (FORGET-REPO-1): retention prunes an EXISTING indexed DB; a missing file (e.g. a
     // forget that won the write-lock race just before this pass) must fail honestly, never be
     // resurrected as an empty orphan.
-    let storage = match StorageConnection::open_existing(db_path) {
+    // Bounded busy-retry (2026-08-31): same transient-lock patience as the seed pass — see
+    // `open_existing_with_busy_retry`. NO-CREATE semantics preserved (it wraps open_existing).
+    let storage = match crate::state::open_existing_with_busy_retry(db_path) {
         Ok(s) => s,
         Err(e) => return RetentionAttempt::Failed(format!("could not open storage: {e}")),
     };
