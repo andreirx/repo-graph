@@ -81,6 +81,9 @@ pub(crate) mod index_drift;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
+// FIXTURE-POLLUTION-1: tri-state test-composition classification result + additive-JSON shape (crate-private)
+mod test_composition;
+
 // MODULE-OWNERSHIP-DUPLICATE-1: maps a duplicate-ownership load failure to a labeled
 // degradation for the module command surface (keeps it out of the oversized dispatch.rs).
 // Crate-internal: the five callers (dispatch.rs + governance/violations.rs) are all in

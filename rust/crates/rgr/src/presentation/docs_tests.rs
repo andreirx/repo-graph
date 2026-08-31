@@ -224,7 +224,9 @@ fn list_default_excludes_generated_maps_and_states_the_count() {
         "only the reader's doc counts: {out}"
     );
     assert!(
-        out.contains("2 generated maps excluded (rmap's own; use --include-generated to show)"),
+        out.contains(
+            "2 generated maps excluded (tool-generated map summaries; use --include-generated to show)"
+        ),
         "excluded count stated: {out}"
     );
     assert!(out.contains("README.md"), "reader's doc listed: {out}");
@@ -251,7 +253,7 @@ fn list_include_generated_shows_maps_and_no_exclusion_line() {
     );
     assert!(out.contains("src/core/MAP.md"), "{out}");
     assert!(
-        !out.contains("excluded (rmap's own"),
+        !out.contains("excluded (tool-generated"),
         "no exclusion line when opted in: {out}"
     );
     assert!(
@@ -286,7 +288,7 @@ fn list_all_generated_does_not_claim_no_docs() {
         "singular map excluded wording: {out}"
     );
     assert!(
-        out.contains("all documentation here is rmap-generated"),
+        out.contains("all documentation here is tool-generated maps"),
         "honest hint, never a false 'no documentation': {out}"
     );
     assert!(

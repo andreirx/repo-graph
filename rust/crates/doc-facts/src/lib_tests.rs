@@ -210,6 +210,53 @@ fn inventory_flags_generated_only_with_marker() {
 }
 
 #[test]
+fn inventory_flags_foreign_frontmatter_map_generated() {
+    // FIXTURE-POLLUTION-1 §2.4: a foreign generated map (e.g. legacy `rgistr` output
+    // dropped under smoke-runs/**) carries a FRONTMATTER generation marker
+    // (`generated_by: rgistr`), NOT the current rmap first-line HTML marker. It must be
+    // classified generated (→ excluded downstream) by that content marker — never listed
+    // as authored `architecture`. An explicit `generated: false` still wins (authored).
+    let dir = tempdir().unwrap();
+    create_file(
+        dir.path(),
+        "smoke-runs/foreign/mod_c_MAP.md",
+        "---\ngenerated_by: rgistr\ngenerator_version: 0.2.0\nscope: file\n---\n# Purpose\nForeign LLM map.\n",
+    );
+    create_file(
+        dir.path(),
+        "smoke-runs/foreign/synth_MAP.md",
+        "---\nkind: synthesized_summary\n---\n# Summary\n",
+    );
+    create_file(
+        dir.path(),
+        "docs/authored_MAP.md",
+        "---\ngenerated: false\ntitle: Hand map\n---\n# Authored\n",
+    );
+
+    let result = discover_doc_inventory(dir.path(), false).unwrap();
+    let find = |p: &str| {
+        result
+            .entries
+            .iter()
+            .find(|e| e.path == p)
+            .unwrap_or_else(|| panic!("{p} present"))
+    };
+    assert!(
+        find("smoke-runs/foreign/mod_c_MAP.md").generated,
+        "rgistr frontmatter map is generated (excluded from the listing)"
+    );
+    assert!(
+        find("smoke-runs/foreign/synth_MAP.md").generated,
+        "synthesized_summary map is generated"
+    );
+    assert!(
+        !find("docs/authored_MAP.md").generated,
+        "explicit generated:false stays authored"
+    );
+    assert_eq!(result.generated_count, 2);
+}
+
+#[test]
 #[cfg(unix)]
 fn inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated() {
     // operator RULING 3 / review-5 finding 3: a sidecar-NAMED file we cannot READ

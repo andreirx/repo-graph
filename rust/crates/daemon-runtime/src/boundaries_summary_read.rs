@@ -38,6 +38,8 @@ use repo_graph_boundary_interaction::{
 use repo_graph_storage::StorageConnection;
 
 use crate::http_boundary_read::unified_http_surfaces;
+use crate::http_surface_union::UnifiedHttpSurface;
+use crate::test_composition::TestComposition;
 
 /// Build the `boundaries summary` response with its COUNT breakdowns reconciled
 /// to the unified HTTP aggregation (§2.3). `base` is the boundary-interaction
@@ -65,6 +67,20 @@ pub(crate) fn summary_response_json(
         unified.iter().filter(|r| r.direction == "consumer").count(),
     );
     let u_total = unified.len();
+
+    // FIXTURE-POLLUTION-1 §2.2 + binding direction rule + review-1 #2b / review-2 #1: the
+    // tri-state test-composition of the reconciled set (the stored `is_test` fact, never a
+    // name), split into TWO additive disclosures of the SAME breakdown shape:
+    //   - `test_only`     — the POSITIVELY test-only portion the presentation SUBTRACTS from
+    //                       the headline and renders as a trailing demoted section.
+    //   - `unknown`       — the surfaces with NO reachable `is_test` evidence. These are
+    //                       NEVER demoted (binding direction rule): they STAY in the headline
+    //                       counts, disclosed with their reason so a reader knows the headline
+    //                       is production+unknown, not confirmed-production.
+    // `summary` itself stays the FULL reconciled object (byte-identical to the pre-slice
+    // payload — the subtraction is a display concern), so a repo with neither test-only nor
+    // unknown surfaces emits neither key and is unchanged.
+    let partition = build_composition_partition(repo_uid, snapshot_uid, storage, &unified)?;
 
     let mut summary = serde_json::to_value(base).map_err(|e| degraded("summary", e))?;
     if let serde_json::Value::Object(map) = &mut summary {
@@ -118,7 +134,7 @@ pub(crate) fn summary_response_json(
         merge_files(map, unified.iter().map(|r| r.source_file.as_str()));
     }
 
-    let response = serde_json::json!({
+    let mut response = serde_json::json!({
         "command": "boundaries summary",
         "repo": repo_uid,
         "snapshot": snapshot_uid,
@@ -127,10 +143,209 @@ pub(crate) fn summary_response_json(
         "http_surface_providers": u_providers,
         "http_surface_consumers": u_consumers,
     });
+    // FIXTURE-POLLUTION-1 §2.2/§2.4 (review-1 #2b, review-2 #1): each disclosure is emitted
+    // ONLY when its portion is non-empty, so a repo with neither (leveldb, glamCRM's
+    // production routes) stays byte-identical to the pre-slice payload (no keys). The
+    // presentation subtracts `test_only_summary` for the headline and renders it trailing; it
+    // discloses `unknown_composition` WITHOUT subtracting (unknown stays in the headline).
+    if let serde_json::Value::Object(ref mut map) = response {
+        if let Some(test_only) = partition.test_only {
+            map.insert("test_only_summary".to_string(), test_only);
+        }
+        if let Some(unknown) = partition.unknown {
+            map.insert("unknown_composition".to_string(), unknown);
+        }
+    }
     // The reconciled `by_direction` and the labelled callout agree by
     // construction — both are the union's (u_providers, u_consumers).
     debug_assert_eq!(u_providers + u_consumers, u_total);
     Ok(response)
+}
+
+/// The two additive test-composition disclosures the reconciled row set produces. Each is
+/// `None` when its portion is empty, so the caller omits the key and the payload stays
+/// byte-identical for a repo with neither test-only nor unknown surfaces.
+struct CompositionPartition {
+    /// The POSITIVELY test-only sub-summary the presentation subtracts from the headline.
+    test_only: Option<serde_json::Value>,
+    /// The UNKNOWN-composition disclosure (count + reasons) the presentation shows WITHOUT
+    /// subtracting — unknown surfaces stay in the headline (binding direction rule).
+    unknown: Option<serde_json::Value>,
+}
+
+/// FIXTURE-POLLUTION-1 §2.2/§2.4 + binding direction rule (review-2 #1): classify every
+/// reconciled row — `(non-HTTP boundary rows) + (unified HTTP rows)` — by the shared
+/// tri-state `TestComposition` (the stored `is_test` fact, never a name) and split it into
+/// two same-shaped additive disclosures:
+///
+/// - `TestOnly` rows accumulate into the `test_only` sub-summary the presentation SUBTRACTS
+///   from the headline (a demoted trailing section).
+/// - `Unknown` rows (no reachable `is_test` evidence) accumulate into the `unknown`
+///   disclosure — a surface count plus the DISTINCT reader-framed reasons. They are NEVER
+///   subtracted: they stay in the headline, disclosed so the reader knows those surfaces are
+///   unprovable, not confirmed production.
+/// - `Production` rows contribute to neither (they are the conservative headline default,
+///   reached only with positive evidence).
+///
+/// Files are classified CONSERVATIVELY for the test-only file demotion: a file appears in the
+/// test-only file list only when EVERY reconciled row on it is `TestOnly` (any
+/// production/unknown row keeps it in the headline — never hide a real file).
+///
+/// `Err` only on a failed required read (reader-framed).
+fn build_composition_partition(
+    repo_uid: &str,
+    snapshot_uid: &str,
+    storage: &StorageConnection,
+    unified: &[UnifiedHttpSurface],
+) -> Result<CompositionPartition, String> {
+    let files = storage
+        .get_files_by_repo(repo_uid)
+        .map_err(|e| degraded("tracked files", e))?;
+    let is_test_by_path: BTreeMap<&str, bool> =
+        files.iter().map(|f| (f.path.as_str(), f.is_test)).collect();
+    let all = storage
+        .list_boundary_interactions(snapshot_uid, &BoundaryInteractionFilter::new())
+        .map_err(|e| degraded("boundary rows", e))?;
+
+    let mut acc = CompositionAcc::default();
+    // Non-HTTP boundary rows (the HTTP boundary rows are replaced by the unified set).
+    for it in all.iter().filter(|it| it.channel_kind.as_str() != "http") {
+        let comp = TestComposition::from_is_test_fact(
+            is_test_by_path.get(it.source_file.as_str()).copied(),
+            &it.source_file,
+        );
+        acc.note_file(&it.source_file, matches!(comp, TestComposition::TestOnly));
+        match comp {
+            TestComposition::TestOnly => {
+                acc.total_surfaces += 1;
+                acc.total_channels += it.channel_count as usize;
+                *acc.by_kind
+                    .entry(it.channel_kind.as_str().to_string())
+                    .or_default() += 1;
+                *acc.by_scope
+                    .entry(it.boundary_scope.as_str().to_string())
+                    .or_default() += 1;
+                *acc.by_direction
+                    .entry(it.direction.as_str().to_string())
+                    .or_default() += 1;
+                *acc.by_family
+                    .entry(it.protocol_family.as_str().to_string())
+                    .or_default() += 1;
+                *acc.by_basis
+                    .entry(it.basis.as_str().to_string())
+                    .or_default() += 1;
+            }
+            TestComposition::Unknown(reason) => acc.note_unknown(reason),
+            TestComposition::Production => {}
+        }
+    }
+    // Unified HTTP rows bucket EXACTLY as the reconciliation added them: kind/family = http,
+    // scope/basis = unknown, direction = the row's real direction.
+    for r in unified {
+        let comp = TestComposition::from_is_test_fact(r.is_test, &r.source_file);
+        acc.note_file(&r.source_file, matches!(comp, TestComposition::TestOnly));
+        match comp {
+            TestComposition::TestOnly => {
+                acc.total_surfaces += 1;
+                *acc.by_kind.entry("http".to_string()).or_default() += 1;
+                *acc.by_family.entry("http".to_string()).or_default() += 1;
+                *acc.by_scope.entry("unknown".to_string()).or_default() += 1;
+                *acc.by_basis.entry("unknown".to_string()).or_default() += 1;
+                *acc.by_direction.entry(r.direction.clone()).or_default() += 1;
+                if r.direction == "provider" {
+                    acc.http_providers += 1;
+                } else if r.direction == "consumer" {
+                    acc.http_consumers += 1;
+                }
+            }
+            TestComposition::Unknown(reason) => acc.note_unknown(reason),
+            TestComposition::Production => {}
+        }
+    }
+
+    Ok(acc.finish())
+}
+
+/// Accumulator for [`build_composition_partition`]: the test-only sub-breakdowns, the
+/// unknown-composition tally, plus a per-file "has a non-test-only reconciled row" flag for
+/// the conservative file rule.
+#[derive(Default)]
+struct CompositionAcc {
+    total_surfaces: usize,
+    total_channels: usize,
+    by_kind: BTreeMap<String, i64>,
+    by_scope: BTreeMap<String, i64>,
+    by_direction: BTreeMap<String, i64>,
+    by_family: BTreeMap<String, i64>,
+    by_basis: BTreeMap<String, i64>,
+    http_providers: usize,
+    http_consumers: usize,
+    /// path -> saw a NON-test-only reconciled row (⇒ keep in the headline file list). An
+    /// UNKNOWN row counts as non-test-only here: an unprovable surface never demotes a file.
+    file_has_non_test_only: BTreeMap<String, bool>,
+    /// Count of reconciled rows whose composition is UNKNOWN (no reachable `is_test` fact).
+    unknown_surfaces: usize,
+    /// The DISTINCT reader-framed reasons behind those unknown rows (sorted; deduped).
+    unknown_reasons: std::collections::BTreeSet<String>,
+}
+
+impl CompositionAcc {
+    fn note_file(&mut self, path: &str, is_test_only: bool) {
+        let e = self
+            .file_has_non_test_only
+            .entry(path.to_string())
+            .or_insert(false);
+        *e = *e || !is_test_only;
+    }
+
+    fn note_unknown(&mut self, reason: String) {
+        self.unknown_surfaces += 1;
+        self.unknown_reasons.insert(reason);
+    }
+
+    fn finish(self) -> CompositionPartition {
+        let unknown = (self.unknown_surfaces > 0).then(|| {
+            serde_json::json!({
+                "surfaces": self.unknown_surfaces,
+                "reasons": self.unknown_reasons.iter().cloned().collect::<Vec<_>>(),
+            })
+        });
+        let test_only = (self.total_surfaces > 0).then(|| self.test_only_json());
+        CompositionPartition { test_only, unknown }
+    }
+
+    fn test_only_json(&self) -> serde_json::Value {
+        // A file is test-only ONLY if it appeared AND every reconciled row on it was
+        // test-only (conservative: any production/unknown row keeps it in the headline).
+        let files: Vec<&String> = self
+            .file_has_non_test_only
+            .iter()
+            .filter(|(_, has_non)| !**has_non)
+            .map(|(path, _)| path)
+            .collect();
+        serde_json::json!({
+            "totalSurfaces": self.total_surfaces,
+            "totalChannels": self.total_channels,
+            "byChannelKind": bucket_array(&self.by_kind, "channelKind"),
+            "byBoundaryScope": bucket_array(&self.by_scope, "boundaryScope"),
+            "byDirection": bucket_array(&self.by_direction, "direction"),
+            "byProtocolFamily": bucket_array(&self.by_family, "protocolFamily"),
+            "byBasis": bucket_array(&self.by_basis, "basis"),
+            "filesWithBoundaries": files,
+            "http_surface_providers": self.http_providers,
+            "http_surface_consumers": self.http_consumers,
+        })
+    }
+}
+
+/// A `[{ <label_field>: k, count: n }, …]` array from a positive-count map, in the base
+/// summary's shape (positive counts only; a zero never appears — we only ever incremented).
+fn bucket_array(counts: &BTreeMap<String, i64>, label_field: &str) -> Vec<serde_json::Value> {
+    counts
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .map(|(k, n)| serde_json::json!({ label_field: k, "count": n }))
+        .collect()
 }
 
 /// A single-key delta map.
@@ -237,85 +452,5 @@ fn degraded(context: &str, err: impl std::fmt::Display) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn base_summary() -> serde_json::Value {
-        // FRAKTAG-shaped base: 52 boundary-http consumers, 0 providers.
-        serde_json::json!({
-            "totalSurfaces": 52,
-            "totalChannels": 0,
-            "byChannelKind": [{"channelKind": "http", "count": 52}],
-            "byBoundaryScope": [{"boundaryScope": "unknown", "count": 52}],
-            "byDirection": [{"direction": "consumer", "count": 52}],
-            "byProtocolFamily": [{"protocolFamily": "http", "count": 52}],
-            "byBasis": [{"basis": "api_call", "count": 52}],
-            "filesWithBoundaries": ["web/a.ts"]
-        })
-    }
-
-    #[test]
-    fn adjust_scalar_clamps_and_adds() {
-        let mut m = serde_json::Map::new();
-        m.insert("totalSurfaces".to_string(), serde_json::json!(52));
-        adjust_scalar(&mut m, "totalSurfaces", 41); // 52 - 52(bh) + 93(union) = 93
-        assert_eq!(m["totalSurfaces"], serde_json::json!(93));
-    }
-
-    #[test]
-    fn adjust_bucket_replaces_direction_split() {
-        // The FRAKTAG contradiction: base says 52 consumer / 0 provider; the
-        // reconciled split must be 47 provider / 46 consumer.
-        let serde_json::Value::Object(mut map) = base_summary() else {
-            unreachable!()
-        };
-        let mut dir: BTreeMap<String, i64> = BTreeMap::new();
-        dir.insert("consumer".to_string(), -52 + 46);
-        dir.insert("provider".to_string(), 47);
-        adjust_bucket(&mut map, "byDirection", "direction", &dir);
-        let arr = map["byDirection"].as_array().unwrap();
-        let get = |k: &str| {
-            arr.iter()
-                .find(|e| e["direction"] == serde_json::json!(k))
-                .map(|e| e["count"].as_i64().unwrap())
-                .unwrap_or(0)
-        };
-        assert_eq!(get("provider"), 47);
-        assert_eq!(get("consumer"), 46);
-    }
-
-    #[test]
-    fn empty_deltas_leave_arrays_untouched() {
-        // No HTTP in either family → every delta is zero → the summary is
-        // byte-identical (the leveldb byte-parity guarantee, in miniature).
-        let serde_json::Value::Object(mut map) = base_summary() else {
-            unreachable!()
-        };
-        let snapshot = serde_json::Value::Object(map.clone());
-        adjust_bucket(&mut map, "byDirection", "direction", &BTreeMap::new());
-        adjust_scalar(&mut map, "totalSurfaces", 0);
-        assert_eq!(serde_json::Value::Object(map), snapshot);
-    }
-
-    #[test]
-    fn bucket_drops_zeroed_entries() {
-        let serde_json::Value::Object(mut map) = base_summary() else {
-            unreachable!()
-        };
-        // Remove all 52 api_call, add 93 unknown → api_call gone, unknown present.
-        let mut basis: BTreeMap<String, i64> = BTreeMap::new();
-        basis.insert("api_call".to_string(), -52);
-        basis.insert("unknown".to_string(), 93);
-        adjust_bucket(&mut map, "byBasis", "basis", &basis);
-        let arr = map["byBasis"].as_array().unwrap();
-        assert!(arr
-            .iter()
-            .all(|e| e["basis"] != serde_json::json!("api_call")));
-        assert_eq!(
-            arr.iter()
-                .find(|e| e["basis"] == serde_json::json!("unknown"))
-                .unwrap()["count"],
-            serde_json::json!(93)
-        );
-    }
-}
+#[path = "boundaries_summary_read_tests.rs"]
+mod tests;

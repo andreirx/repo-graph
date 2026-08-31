@@ -32,18 +32,22 @@
 //!
 //! # Module layout
 //!
-//! The CYCLE-HONESTY-1 additive intra-SCC edge attachment (the "cycles draw only real arrows" contract) lives
-//! in the crate-private sibling [`edges`], split out to keep BOTH files under the 500-line guardrail and to
-//! separate the certified member-set canonicalization (here) from the additive edge post-pass (there). The one
-//! cross-module entry point, [`sqlite_module_cycles_json_with_edges`], is re-exported so its call sites are
-//! unchanged.
+//! Two crate-private siblings hold the additive post-passes, each split out to keep every file under the
+//! 500-line guardrail and to separate concerns from the certified member-set canonicalization (here):
+//! - [`edges`] — the CYCLE-HONESTY-1 intra-SCC edge attachment (the "cycles draw only real arrows" contract).
+//! - [`composition`] — the FIXTURE-POLLUTION-1 per-cycle test-composition labeling.
+//!
+//! Their cross-module entry points, [`sqlite_module_cycles_json_with_edges`] and [`label_test_only_cycles`],
+//! are re-exported so their call sites are unchanged.
 
 use std::collections::{BTreeMap, HashMap};
 
 use repo_graph_storage::queries::CycleResult;
 use serde_json::{json, Value};
 
+mod composition;
 mod edges;
+pub(crate) use composition::label_test_only_cycles;
 pub(crate) use edges::sqlite_module_cycles_json_with_edges;
 
 /// A module-cycle node normalized for the canonical output: the backend-native `node_id`, the SHORT display

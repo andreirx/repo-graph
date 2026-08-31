@@ -179,6 +179,8 @@ mod tests {
             nodes,
             edges: None,
             edges_truncated: None,
+            test_composition: None,
+            test_composition_unknown_reason: None,
         }
     }
 
@@ -196,6 +198,8 @@ mod tests {
                     .collect(),
             ),
             edges_truncated: None,
+            test_composition: None,
+            test_composition_unknown_reason: None,
         }
     }
 

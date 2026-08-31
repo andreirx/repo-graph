@@ -1143,6 +1143,17 @@ fn default_scope_json() -> Value {
     })
 }
 
+/// FIXTURE-POLLUTION-1 §2.3 — the honest asymmetry disclosure carried by the LiveGraph MODULE-cycle
+/// serving paths: the default fastpath [`serve_cycles_fastpath`] and the explicit `--kind module-import`
+/// route [`module_import_cycles_response`]. Both serve from the in-memory LiveGraph IR, which lacks the
+/// stored `is_test` fact (test-only classification deferred to CYCLE-FACTS-2), so neither can split
+/// test-only cycles out of the headline the way the SQLite route does. State it rather than pretend
+/// uniformity; the `--engine sqlite` MODULE-cycle route IS the classified equivalent to point at.
+/// (File-import cycles have no classified sqlite equivalent, so that route uses its own inline note.)
+const LIVEGRAPH_MODULE_CYCLE_TEST_COMPOSITION_NOTE: &str =
+    "test-only cycles not evaluated on this serving path (LiveGraph lacks the is_test fact); \
+     run `rmap cycles --engine sqlite` to classify test-only cycles";
+
 /// CYCLES-LIVEGRAPH-CLI-1: build the `--engine livegraph --kind file-import` cycles response. Calls the
 /// headless `file_import_cycles()` and maps it into the cycles shape + trust metadata. NO SQLite fallback
 /// (D7): the trust class/scope are surfaced; the answer never silently becomes the SQLite MODULE graph.
@@ -1216,6 +1227,14 @@ pub fn file_import_cycles_response(
         "missing_partitions": missing,
         "degradation_reasons": reasons,
         "ts_type_only_caveat": has_ts && count > 0,
+        // FIXTURE-POLLUTION-1 §2.3: the LiveGraph IR lacks the `is_test` fact (deferred to
+        // CYCLE-FACTS-2), so this FILE-import serving path CANNOT classify test-only cycles.
+        // State the asymmetry honestly rather than pretend uniformity. No `--engine sqlite`
+        // hint here: that route serves MODULE cycles, not FILE cycles — pointing at it would
+        // be a false claim of an equivalent classified answer.
+        "test_composition_note":
+            "test composition not evaluated on this serving path (the LiveGraph IR lacks the \
+             is_test fact); FILE-import cycles are not classified test-only vs production",
     }))
 }
 
@@ -1329,6 +1348,10 @@ pub fn module_import_cycles_response(
         "missing_partitions": missing,
         "degradation_reasons": reasons,
         "ts_type_only_caveat": has_ts && count > 0,
+        // FIXTURE-POLLUTION-1 §2.3: same asymmetry as the default fastpath — this MODULE-cycle
+        // LiveGraph route lacks the `is_test` fact, so it cannot classify test-only cycles. The
+        // `--engine sqlite` MODULE-cycle route is the classified equivalent to point at.
+        "test_composition_note": LIVEGRAPH_MODULE_CYCLE_TEST_COMPOSITION_NOTE,
     }))
 }
 
@@ -2484,6 +2507,11 @@ fn serve_cycles_fastpath(
         "backend_used": "livegraph",
         "fallback_reason": Value::Null,
         "ts_type_only_caveat": repo_has_ts_js && count > 0,
+        // FIXTURE-POLLUTION-1 §2.3: the LiveGraph IR lacks the `is_test` fact (deferred to
+        // CYCLE-FACTS-2), so this serving path CANNOT classify test-only cycles. State the
+        // asymmetry honestly rather than pretend uniformity — never a silent "no fixtures".
+        // The SQLite route (`--engine sqlite`) carries the per-cycle classification.
+        "test_composition_note": LIVEGRAPH_MODULE_CYCLE_TEST_COMPOSITION_NOTE,
     })
 }
 
@@ -2511,11 +2539,23 @@ fn serve_cycles_sqlite(
     // a verified walk. These are the SAME edges `find_cycles` loaded for its SCC pass; the renderer draws an
     // arrow ONLY for a pair present here.
     let module_edges = conn.module_import_edges(snapshot_uid)?;
-    let cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
+    let mut cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
         &sqlite_cycles,
         &qualified,
         &module_edges,
     );
+    // FIXTURE-POLLUTION-1 §2.2/§2.3: classify test-only cycles (e.g. the xpart-monorepo
+    // fixture) so the renderer demotes them below the real cycles. The SQLite route reaches
+    // the stored `is_test` fact (the LiveGraph fastpath does not — §2.3 asymmetry).
+    // Conservative aggregation: a cycle is test-only iff EVERY member module is wholly
+    // test-owned; an unclassifiable member ⇒ unknown (not demoted). CLASSIFIED read → a
+    // genuine error PROPAGATES.
+    let tracked = conn.get_files_by_repo(repo_uid)?;
+    let files: Vec<(&str, bool)> = tracked
+        .iter()
+        .map(|f| (f.path.as_str(), f.is_test))
+        .collect();
+    crate::cycle_output::label_test_only_cycles(&mut cycles, &files);
     let count = cycles.len();
     // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): stored per-language file facts, ≥10% materiality
     // gate — the SAME basis the fastpath now reads, so the caveat is route-consistent. This path already
@@ -4028,6 +4068,93 @@ mod tests {
                     "the {label} route must derive the SAME caveat as the LiveGraph fastpath (same stored basis)"
                 );
             }
+        }
+
+        /// FIXTURE-POLLUTION-1 §2.3 (review-3 finding 1): every LiveGraph cycle serving path
+        /// carries the honest `test_composition_note` (it lacks the stored `is_test` fact, so it
+        /// CANNOT classify test-only cycles), and the SQLite route — which DOES classify per cycle
+        /// — does NOT (its per-cycle `test_composition` discriminant is the disclosure there). The
+        /// file-import note deliberately omits the `--engine sqlite` hint: that route serves MODULE
+        /// cycles, so pointing at it from the FILE route would be a false equivalence claim.
+        #[test]
+        fn cycles_livegraph_routes_disclose_test_composition_asymmetry() {
+            let f = test_fixture::build_fixture(false);
+            let mut never = || std::ops::ControlFlow::Continue(());
+
+            // DEFAULT (`auto`) route serving the LiveGraph module-cycle fastpath.
+            let fingerprint = cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
+                .expect("eligibility never errors here");
+            let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
+            let auto =
+                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
+                    .unwrap();
+            assert_eq!(auto["backend_used"], "livegraph");
+            let auto_note = auto["test_composition_note"]
+                .as_str()
+                .expect("LiveGraph fastpath carries the §2.3 asymmetry note");
+            assert!(
+                auto_note.contains("not evaluated on this serving path"),
+                "{auto_note}"
+            );
+            assert!(
+                auto_note.contains("rmap cycles --engine sqlite"),
+                "{auto_note}"
+            );
+
+            // Explicit `--kind file-import`: asymmetry stated, NO misleading sqlite hint.
+            let file_import = file_import_cycles_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &f.snapshot_uid,
+                &mut never,
+            )
+            .unwrap();
+            let file_note = file_import["test_composition_note"]
+                .as_str()
+                .expect("FILE-import LiveGraph route carries the §2.3 asymmetry note");
+            assert!(
+                file_note.contains("not evaluated on this serving path"),
+                "{file_note}"
+            );
+            assert!(
+                !file_note.contains("--engine sqlite"),
+                "FILE route must NOT claim a classified sqlite equivalent (it serves MODULE cycles): {file_note}"
+            );
+
+            // Explicit `--kind module-import`: asymmetry stated, sqlite hint accurate.
+            let module_import = module_import_cycles_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &f.snapshot_uid,
+                &mut never,
+            )
+            .unwrap();
+            let module_note = module_import["test_composition_note"]
+                .as_str()
+                .expect("MODULE-import LiveGraph route carries the §2.3 asymmetry note");
+            assert!(
+                module_note.contains("not evaluated on this serving path"),
+                "{module_note}"
+            );
+            assert!(
+                module_note.contains("rmap cycles --engine sqlite"),
+                "{module_note}"
+            );
+
+            // SQLite route (auto after a swap moves the resident fingerprint): it classifies per
+            // cycle, so the top-level asymmetry note is ABSENT — never a false "not evaluated".
+            swap_livegraph(&f.state);
+            let sqlite =
+                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
+                    .unwrap();
+            assert_eq!(sqlite["backend_used"], "sqlite");
+            assert!(
+                sqlite["test_composition_note"].is_null(),
+                "the classifying SQLite route carries no asymmetry note: {}",
+                sqlite["test_composition_note"]
+            );
         }
 
         // ── W-B-EPOCH-IMPL-2B: `stats` build-then-peek eligibility + EV-A ─────────────────────────

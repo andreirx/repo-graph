@@ -311,6 +311,7 @@ mod tests {
 #[cfg(test)]
 mod http_count_coherence {
     use super::boundaries_list::{BoundariesListResponse, BoundaryListEntry};
+    use super::boundaries_summary::partition::Additive;
     use super::boundaries_summary::{BoundariesSummaryResponse, BoundarySummary};
     use super::http_boundary::{render_surfaces, HttpBoundarySurfaceEntry};
 
@@ -405,6 +406,8 @@ mod http_count_coherence {
                     basis: None,
                     surface_uid: None,
                     surface_display_name: Some(format!("{} {}", r.method, route)),
+                    test_composition: "production".to_string(),
+                    test_composition_unknown_reason: None,
                 }
             })
             .collect()
@@ -466,6 +469,8 @@ mod http_count_coherence {
             http_providers: Some(p),
             http_consumers: Some(c),
             http_degraded: None,
+            test_only: Additive::Absent,
+            unknown: Additive::Absent,
         };
         let summary_out = summary.render_human();
         let http_line = summary_out

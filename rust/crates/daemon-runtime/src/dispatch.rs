@@ -2442,11 +2442,30 @@ impl ServiceDispatcher {
                 );
             }
         };
-        let canonical_cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
+        let mut canonical_cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
             &cycles,
             &qualified,
             &module_edges,
         );
+        // FIXTURE-POLLUTION-1 §2.2/§2.3: the forced `--engine sqlite` route reaches the
+        // stored `is_test` fact, so it classifies test-only cycles (the renderer demotes
+        // them below the real cycles). Conservative aggregation: a cycle is test-only iff
+        // every member module is wholly test-owned; an unclassifiable member ⇒ unknown (not
+        // demoted). CLASSIFIED read → a genuine error PROPAGATES (never a silent cycle).
+        let tracked_files = match storage.get_files_by_repo(&repo_uid) {
+            Ok(f) => f,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        let files: Vec<(&str, bool)> = tracked_files
+            .iter()
+            .map(|f| (f.path.as_str(), f.is_test))
+            .collect();
+        crate::cycle_output::label_test_only_cycles(&mut canonical_cycles, &files);
         let cycle_count = canonical_cycles.len();
         // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): the type-only caveat basis — stored per-language
         // file facts under the ≥10% materiality gate, the SAME basis every other cycles route reads.

@@ -157,7 +157,7 @@ impl DocsListResponse {
                 "maps"
             };
             out.push_str(&format!(
-                "{} generated {} excluded (rmap's own; use --include-generated to show)\n",
+                "{} generated {} excluded (tool-generated map summaries; use --include-generated to show)\n",
                 excluded_generated, map_word
             ));
         }
@@ -177,7 +177,7 @@ impl DocsListResponse {
                 // Docs DO exist — they are all rmap's own maps, now hidden. Do NOT
                 // claim "no documentation": that would misrepresent the repo.
                 out.push_str(
-                    "\nhint: all documentation here is rmap-generated; \
+                    "\nhint: all documentation here is tool-generated maps; \
                      use --include-generated to list it.\n",
                 );
             } else {

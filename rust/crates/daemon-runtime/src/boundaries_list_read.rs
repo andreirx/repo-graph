@@ -22,11 +22,14 @@
 //! boundary-interaction items inline in dispatch (the review-2 finding — legacy
 //! HTTP rows omitted, dispatch grown).
 
+use std::collections::BTreeMap;
+
 use repo_graph_boundary_interaction::{BoundaryInteractionFilter, BoundaryInteractionListItem};
 use repo_graph_storage::StorageConnection;
 
 use crate::http_boundary_read::{http_surface_display_by_uid, unified_http_surfaces};
 use crate::http_surface_union::UnifiedHttpSurface;
+use crate::test_composition::TestComposition;
 
 /// Build the full `boundaries list` response (command, repo, snapshot, results,
 /// count, and the filter echo). `items` are the boundary-interaction rows the DB
@@ -42,9 +45,27 @@ pub(crate) fn boundaries_list_response_json(
     items: Vec<BoundaryInteractionListItem>,
     storage: &StorageConnection,
 ) -> Result<serde_json::Value, String> {
+    // FIXTURE-POLLUTION-1 §2.1: one read of the tracked files → path→is_test, the SAME
+    // parity source the HTTP union uses (`http_boundary_read`). A failed read degrades
+    // honestly (never a silent "no test rows"). ABSENT path = no `files` row = no
+    // reachable evidence → `test_composition=unknown` (binding direction rule: unknown is
+    // NEVER demoted, stays in the main listing WITH a reason — never a production default).
+    let files = storage
+        .get_files_by_repo(repo_uid)
+        .map_err(|e| degraded("tracked files", e))?;
+    let is_test_by_path: BTreeMap<&str, bool> =
+        files.iter().map(|f| (f.path.as_str(), f.is_test)).collect();
+
     let mut filtered_out_note: Option<String> = None;
     let results = if union_applies(filter) {
-        build_union_results(repo_uid, snapshot_uid, filter, items, storage)?
+        build_union_results(
+            repo_uid,
+            snapshot_uid,
+            filter,
+            items,
+            &is_test_by_path,
+            storage,
+        )?
     } else {
         // A scope/family/symbol/min-confidence filter is active — dimensions the
         // legacy `project_surfaces` and unified rows genuinely do NOT carry, so
@@ -61,7 +82,7 @@ pub(crate) fn boundaries_list_response_json(
                 "{legacy_only} HTTP surface(s) from the project-surfaces family do not carry the                  filtered dimension and are omitted from this filtered view — run without                  scope/family/symbol/confidence filters for the full set"
             ));
         }
-        enrich_boundary_items(snapshot_uid, &items, storage)?
+        enrich_boundary_items(snapshot_uid, &items, &is_test_by_path, storage)?
     };
 
     let count = results.len();
@@ -104,6 +125,7 @@ fn build_union_results(
     snapshot_uid: &str,
     filter: &BoundaryInteractionFilter,
     items: Vec<BoundaryInteractionListItem>,
+    is_test_by_path: &BTreeMap<&str, bool>,
     storage: &StorageConnection,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut results: Vec<serde_json::Value> = Vec::new();
@@ -111,7 +133,9 @@ fn build_union_results(
         if it.channel_kind.as_str() == "http" {
             continue; // replaced by the unified HTTP rows below
         }
-        results.push(serde_json::to_value(it).map_err(|e| degraded("boundary row", e))?);
+        let mut v = serde_json::to_value(it).map_err(|e| degraded("boundary row", e))?;
+        classify_path(is_test_by_path, &it.source_file).write_json(&mut v);
+        results.push(v);
     }
 
     let unified = unified_http_surfaces(storage, repo_uid, snapshot_uid)?;
@@ -123,11 +147,20 @@ fn build_union_results(
     Ok(results)
 }
 
+/// FIXTURE-POLLUTION-1 §2.1 + binding direction rule: classify a source file's
+/// test-composition from the stored `is_test` fact ONLY (never the path string). `Some(true)`
+/// ⇒ `TestOnly` (demote); `Some(false)` ⇒ `Production`; ABSENT (no tracked-files row) ⇒
+/// `Unknown` with a reason — NEVER collapsed to production.
+fn classify_path(is_test_by_path: &BTreeMap<&str, bool>, source_file: &str) -> TestComposition {
+    TestComposition::from_is_test_fact(is_test_by_path.get(source_file).copied(), source_file)
+}
+
 /// Pre-slice path: serialize every already-filtered boundary item, enriching HTTP
 /// rows with a `surface_display_name` = "METHOD route" via the surface-uid join.
 fn enrich_boundary_items(
     snapshot_uid: &str,
     items: &[BoundaryInteractionListItem],
+    is_test_by_path: &BTreeMap<&str, bool>,
     storage: &StorageConnection,
 ) -> Result<Vec<serde_json::Value>, String> {
     let route_by_uid = http_surface_display_by_uid(storage, snapshot_uid)?;
@@ -143,6 +176,7 @@ fn enrich_boundary_items(
                 obj.insert("surface_display_name".to_string(), serde_json::json!(disp));
             }
         }
+        classify_path(is_test_by_path, &it.source_file).write_json(&mut v);
         results.push(v);
     }
     Ok(results)
@@ -184,7 +218,11 @@ fn unified_row_to_entry_json(r: &UnifiedHttpSurface) -> serde_json::Value {
     let display = format!("{} {}", r.http_method, route);
     // A stable synthetic uid (the grouped view keys on file×direction, not this).
     let uid = format!("http:{}:{}:{}", r.direction, r.http_method, r.source_file);
-    serde_json::json!({
+    // FIXTURE-POLLUTION-1 §2.1: the unified HTTP row already carries the stored `is_test`
+    // fact (its own LEFT JOIN / project-family parity). `Some(true)` ⇒ TestOnly (demote);
+    // `Some(false)` ⇒ Production; `None` ⇒ UNKNOWN with a reason (binding direction rule —
+    // never a production default). Written additively by the shared classifier.
+    let mut entry = serde_json::json!({
         "surfaceUid": uid,
         "channelKind": "http",
         "boundaryScope": "unknown",
@@ -192,7 +230,9 @@ fn unified_row_to_entry_json(r: &UnifiedHttpSurface) -> serde_json::Value {
         "protocolFamily": "http",
         "sourceFile": r.source_file,
         "surface_display_name": display,
-    })
+    });
+    TestComposition::from_is_test_fact(r.is_test, &r.source_file).write_json(&mut entry);
+    entry
 }
 
 /// Echo the active filters into the response (verbatim from the pre-slice dispatch
@@ -312,6 +352,54 @@ mod tests {
             !unified_matches_filter(&other_file, &g),
             "wrong file excluded"
         );
+    }
+
+    #[test]
+    fn unified_row_carries_test_composition_from_stored_fact() {
+        // FIXTURE-POLLUTION-1 §2.1: the additive per-row discriminant is driven by the
+        // stored is_test fact the unified row carries, never a path string.
+        let mut test_row = unified("provider", "GET", Some("/a"), "tests/fixtures/api.ts");
+        test_row.is_test = Some(true);
+        let v = unified_row_to_entry_json(&test_row);
+        assert_eq!(v["test_composition"], serde_json::json!("test_only"));
+
+        let mut prod_row = unified("provider", "GET", Some("/b"), "src/api.ts");
+        prod_row.is_test = Some(false);
+        assert_eq!(
+            unified_row_to_entry_json(&prod_row)["test_composition"],
+            serde_json::json!("production")
+        );
+
+        // Unknown (None) is NOT demoted AND NOT production — it renders as unknown WITH a
+        // reason (binding direction rule; never a false/production default).
+        let mut unknown_row = unified("provider", "GET", Some("/c"), "vendor/x.ts");
+        unknown_row.is_test = None;
+        let uv = unified_row_to_entry_json(&unknown_row);
+        assert_eq!(uv["test_composition"], serde_json::json!("unknown"));
+        assert!(
+            uv["test_composition_unknown_reason"]
+                .as_str()
+                .expect("unknown reason present")
+                .contains("vendor/x.ts"),
+            "{uv}"
+        );
+    }
+
+    #[test]
+    fn classify_path_uses_stored_fact_three_states() {
+        let mut m: BTreeMap<&str, bool> = BTreeMap::new();
+        m.insert("rust/crates/x/tests/fixtures/a.rs", true);
+        m.insert("src/a.rs", false);
+        assert_eq!(
+            classify_path(&m, "rust/crates/x/tests/fixtures/a.rs"),
+            TestComposition::TestOnly
+        );
+        assert_eq!(classify_path(&m, "src/a.rs"), TestComposition::Production);
+        // Absent path ⇒ Unknown with a reason (never a production default; never demoted).
+        match classify_path(&m, "unknown/file.rs") {
+            TestComposition::Unknown(r) => assert!(r.contains("unknown/file.rs"), "{r}"),
+            other => panic!("absent path must be Unknown, got {other:?}"),
+        }
     }
 
     #[test]
