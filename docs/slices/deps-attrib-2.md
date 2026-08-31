@@ -10,8 +10,9 @@ slice. Maturity: MATURE (deps rewrite shipped as DEPS-LIST-REWRITE-1).
   SAME run indexed 188 serverless + 168 frontend files under exactly those manifests.
 - "4336/4336 refs unattributed" with no statement of why.
 - ZERO mention of Java/Gradle on a repo whose backend half is Java with a `build.gradle`
-  (VERIFIED: no java/gradle token anywhere in the capture) — the audited house rule is that a
-  missing reader gets an honest no-reader sentence (leveldb's C/C++ line is the model).
+  (VERIFIED: no java/gradle token anywhere in the capture) — and a Gradle reader EXISTS
+  (`resolve_gradle_deps`; the original no-reader reading of this symptom was wrong — see §2.4),
+  so the reader's results vanish before the render somewhere.
 The manifests-to-module attribution worked on every other repo (django, FRAKTAG, repo-graph)
 — the failure is specific to glamCRM's shape (nested workspaces: `serverless/packages/*`,
 `frontend/*` — monorepo sub-packages, likely npm workspaces).
@@ -53,16 +54,19 @@ state root. Do NOT commit.
 - Reproducing fixture FIRST: a nested-workspace fixture reproducing the zero-attribution
   (fails pre-fix, passes post-fix); the false-excuse predicate test (excuse only when truly
   zero indexed files under the manifest).
-- Unit: attribution for nested manifests; true-excuse gating; Gradle/Maven no-reader line
-  materiality; per-ecosystem tables unchanged on the already-working repos.
+- Unit: attribution for nested manifests; true-excuse gating; Java default-view truth
+  (attributed renders / failed read renders unknown-with-reason — never silent absence);
+  per-ecosystem tables unchanged on the already-working repos.
 - Live proof (isolated state root, registry sha unchanged): glamCRM — deps list shows real
-  npm attribution for serverless/frontend packages AND the Gradle no-reader sentence;
+  npm attribution for serverless/frontend packages AND the Java ecosystem's truth in the
+  default view (per the §2.4 diagnosis);
   byte-parity spot check on django + FRAKTAG deps output vs the audit captures (no
   regression). Captures in the report.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done
 
-glamCRM's deps surface tells the truth twice over: real attribution for the npm halves, an
-honest no-reader sentence for the Java half; the "governs no indexed source" excuse can only
-render when it is computed true; other repos byte-stable; gates green.
+glamCRM's deps surface tells the truth twice over: real attribution for the npm halves and
+the Java half's actual state in the default view (attributed deps, or unknown-with-reason);
+the "governs no indexed source" excuse can only render when it is computed true; other repos
+byte-stable; gates green.
