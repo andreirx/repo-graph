@@ -32,6 +32,25 @@ pub(crate) fn token_enrichment_language(token: &str) -> Option<EnrichmentLanguag
     EnrichmentLanguage::from_extension(representative_ext)
 }
 
+/// ORIENT-SMALL-ENRICH-1 / HONEST-DEGRADATION-IMPL-2 (D5): is a materially-present code-language `token`
+/// ENRICHABLE NOW — does THIS build have a CONFIGURED resolver for it? The ONE definition of "enrichable
+/// now": the language has a resolver at all ([`token_enrichment_language`] `Some`) AND that resolver is in
+/// the daemon's `configured` set (`handle_enrich` registers EXACTLY this set;
+/// `dispatch::configured_resolver_languages` is its single source). C / C++ / Python / … have no resolver on
+/// ANY build → never enrichable; Java is enrichable ONLY when JDTLS is configured; Rust / TS / JS always.
+///
+/// Sole consumers: [`relationship_next_action_line`] (the D5 CTA — whose inline `is_enrichable` closure this
+/// REPLACES, so "enrichable now" has one home) and [`in_flight_pass_can_apply`]. Axis: none — a shared
+/// predicate over the existing resolver-family × configured facts, not a new seam. Rejected simpler: keep the
+/// closure inline AND re-spell the same `match` at the in-flight gate — rejected because the slice forbids
+/// re-deriving the enrichable definition away from one home.
+pub(crate) fn token_is_enrichable_now(token: &str, configured: &[EnrichmentLanguage]) -> bool {
+    match token_enrichment_language(token) {
+        Some(lang) => configured.contains(&lang),
+        None => false,
+    }
+}
+
 /// Reader-facing display name for an indexer language token (`None` for a token with no stable display
 /// name, so a raw internal token is never shown to the reader). Used by the D2 deps note and the D5
 /// no-resolution-path line.
@@ -207,8 +226,11 @@ pub(crate) fn material_code_languages(language_counts: &[(String, u64)]) -> Vec<
 /// breakdown becomes `Unknown { reason }` there, never reaching this pure function). This function is
 /// consulted ONLY on a successful read, so it models just the two affirmative capability outcomes.
 ///
-/// Sole consumers: the daemon's `handle_check` (which wraps + injects this into `CheckInput`) and this
-/// module's tests. Axis: the resolver-path capability — a demonstrated volatile per-language mechanism
+/// Consumers: the daemon's `handle_check` (which wraps + injects this into `CheckInput`);
+/// [`relationship_next_action_line`] in this module (ORIENT-SMALL-ENRICH-1 §3 — the orient/stats
+/// no-resolution CTA CONSUMES this same set instead of re-deriving its own, so the two surfaces render
+/// ONE phrasing and cannot drift); and this module's tests. Axis: the resolver-path capability — a
+/// demonstrated volatile per-language mechanism
 /// (the C/C++/Python-no-resolver reality vs the TS/Rust/Java-resolver reality). Rejected simpler: inline
 /// the `all(token_enrichment_language(..).is_none())` check in `handle_check` — rejected because it would
 /// re-derive the materiality gate + the resolver-family vocabulary away from their one home here, the
@@ -231,6 +253,45 @@ pub(crate) fn call_graph_ceiling_languages(
     } else {
         None
     }
+}
+
+/// ORIENT-SMALL-ENRICH-1 (§1a/§2.1): can the in-flight AUTO enrichment pass raise THIS repo's resolution
+/// figures? The daemon's `enrichment_in_flight_for_db` is repo-scoped but capability-BLIND —
+/// `spawn_auto_enrich` calls `enter_flight` for EVERY repo the instant a pass spawns, BEFORE the
+/// per-language skip decision — so on a repo the pass will skip, "in flight" is a true-but-irrelevant
+/// daemon fact. Rendering "resolution figures may rise" from it is the false promise this slice removes.
+///
+/// `Ok(true)` iff ≥1 materially-present code language ([`material_code_languages`] — the ONE materiality
+/// gate) is ENRICHABLE NOW ([`token_is_enrichable_now`] — the SAME configured-resolver predicate the D5 CTA
+/// uses). This is EXACTLY slice §2.1's "≥1 materially-present enrichable language", and it is deliberately
+/// STRICTER than the `NoCeiling` ceiling verdict: that verdict also covers (a) a repo with NO
+/// materially-present code language at all (config-only → `material_code_languages` empty → `any` is `false`)
+/// and (b) a repo whose only resolver-bearing language is NOT configured on this build (Java without JDTLS).
+/// In BOTH the running pass raises nothing, so neither may render the promise. Pass-applicability is a
+/// DISTINCT fact from the ceiling verdict, not a re-spelling of it (reviewer review-0).
+///
+/// A FAILED count read (`Err`) is PRESERVED and handed BACK to the caller, NEVER collapsed to a boolean:
+/// the applicability of an in-flight pass CANNOT be classified from a read that did not happen (STANDING
+/// HONESTY RULE #1 — a classified fallible read is unknown-WITH-REASON, never swallowed to a sentinel;
+/// reviewer review-1 F1). Each surface then surfaces the reason honestly: `handle_orient` /
+/// `handle_reliability` return the established structured handler error (they have no unknown-enrichment
+/// render channel — the frozen [`EnrichmentState`](repo_graph_agent::EnrichmentState) sum carries no
+/// `Unknown`), while `handle_check` maps the SAME read's failure to the rendered `CeilingFact::Unknown`
+/// it already computes (CHECK-SIGNAL-1 ratified `ceiling-read-unknown`) and leaves the override off — the
+/// reason is surfaced either way, never hidden.
+///
+/// Sole consumers: `dispatch::handle_orient` + `dispatch::handle_check` + `handlers::reliability` + this
+/// module's tests. Axis: none — composes the existing materiality gate × enrichable predicate. Rejected
+/// simpler: return a bare `bool` mapping `Err → false` (build-1) — rejected because it CLASSIFIES the
+/// applicability from a failed read, hiding the reason (reviewer review-1 F1).
+pub(crate) fn in_flight_pass_can_apply(
+    counts: Result<Vec<(String, u64)>, String>,
+    configured: &[EnrichmentLanguage],
+) -> Result<bool, String> {
+    let counts = counts?;
+    Ok(material_code_languages(&counts)
+        .iter()
+        .any(|m| token_is_enrichable_now(&m.token, configured)))
 }
 
 /// RESOURCE-HONESTY-1 (§2.1/§2.2): the repo's MATERIALLY-present code languages (the SAME
@@ -319,10 +380,8 @@ pub(crate) fn relationship_next_action_line(
         return None; // unknown-only / config-only — no honest statement applies.
     }
 
-    let is_enrichable = |token: &str| match token_enrichment_language(token) {
-        Some(lang) => configured.contains(&lang),
-        None => false,
-    };
+    // The ONE home of "enrichable now" (configured resolver present) — shared with the in-flight gate.
+    let is_enrichable = |token: &str| token_is_enrichable_now(token, configured);
 
     // The enrichable languages present now (display names, sorted + deduped so the TS/JS family reads as
     // its two present member names, not a repeated resolver identity).
@@ -346,7 +405,7 @@ pub(crate) fn relationship_next_action_line(
         return Some(line);
     }
 
-    // CS1-5 §5.2: nothing enrichable is materially present → no CTA; speak the dominant language's truth.
+    // CS1-5 §5.2: nothing enrichable is materially present → no CTA; speak the no-resolution truth.
     let dominant = &material[0];
     if token_enrichment_language(&dominant.token) == Some(EnrichmentLanguage::Java) {
         // Java has a resolver, but it is JDTLS-gated and not configured on this build.
@@ -356,10 +415,25 @@ pub(crate) fn relationship_next_action_line(
                 .to_string(),
         );
     }
+    // ORIENT-SMALL-ENRICH-1 (§3): name the no-resolution set by CONSUMING the SAME source check/dead
+    // read — `call_graph_ceiling_languages` — instead of re-deriving a second display set here (the
+    // drift the slice removes: orient/stats said "C" on a `.h`-plurality C/C++ repo while check/dead
+    // said "C/C++"). `Some(langs)` IS that gate's own sorted+deduped display-name list — structurally
+    // one source, one phrasing, so the two surfaces cannot drift again. This is the reported bug's repo
+    // whenever it is a PURE permanent ceiling (every material language no-resolver: leveldb's C/C++,
+    // django's Python), which is exactly the case §3 targets. `None` here is only the exotic residue —
+    // a resolver-bearing language materially co-present but unconfigured (only Java is possible at §5.2:
+    // TS/JS/Rust are always configured and would have taken the enrichable branch above) — so the repo
+    // is NOT a pure ceiling; fall back to the dominant no-resolver language's name (the pre-slice
+    // baseline), NOT a re-derived multi-language set. Widening that residual mixed case is out of this
+    // slice's scope (§3 is the pure-ceiling drift only).
+    let named = match call_graph_ceiling_languages(language_counts) {
+        Some(langs) => langs.join("/"),
+        None => dominant.display.to_string(),
+    };
     Some(format!(
-        "no semantic-resolution path exists for {} on this build; these relationship facts remain \
-         low-confidence",
-        dominant.display
+        "no semantic-resolution path exists for {named} on this build; these relationship facts remain \
+         low-confidence"
     ))
 }
 
@@ -519,6 +593,22 @@ mod honest_degradation_tests {
         assert_eq!(token_enrichment_language("c"), None);
         assert_eq!(token_enrichment_language("cpp"), None);
         assert_eq!(token_enrichment_language("python"), None);
+    }
+
+    // ── ORIENT-SMALL-ENRICH-1: "enrichable now" = has a CONFIGURED resolver (one home) ──
+    #[test]
+    fn token_is_enrichable_now_is_configured_gated() {
+        // Built-in resolvers (Rust / TS / JS family) are always enrichable-now.
+        assert!(token_is_enrichable_now("typescript", &builtin_only()));
+        assert!(token_is_enrichable_now("rust", &builtin_only()));
+        assert!(token_is_enrichable_now("jsx", &builtin_only()));
+        // No resolver on any build → never enrichable, regardless of the configured set.
+        assert!(!token_is_enrichable_now("c", &with_jdtls()));
+        assert!(!token_is_enrichable_now("python", &with_jdtls()));
+        // Java is enrichable ONLY when JDTLS is configured (the configured-gating that separates
+        // pass-applicability from the build-independent ceiling fact).
+        assert!(!token_is_enrichable_now("java", &builtin_only()));
+        assert!(token_is_enrichable_now("java", &with_jdtls()));
     }
 
     // ── §2.2 dominant-language ecosystem selection ──────────────
@@ -840,6 +930,122 @@ mod honest_degradation_tests {
         assert!(call_graph_ceiling_languages(&[]).is_none());
         // Config-file tokens never establish materiality on their own.
         assert!(call_graph_ceiling_languages(&counts(&[("json", 9999)])).is_none());
+    }
+
+    // ── ORIENT-SMALL-ENRICH-1 (§3): the no-path line names the FULL no-resolver set, one source ──
+
+    #[test]
+    fn no_path_line_names_full_ceiling_set_not_just_dominant() {
+        // A C++ repo whose `.h` headers (→ token "c") outnumber its `.cpp` (→ token "cpp"): the DOMINANT
+        // language is C, so the pre-fix line said "…for C". check/dead name the full ceiling set "C/C++"
+        // (the CeilingFact.languages the gate hands them). The line must now agree: "C/C++", one phrasing.
+        let line = relationship_next_action_line(
+            &call_low(),
+            &counts(&[("c", 60), ("cpp", 40)]),
+            &builtin_only(),
+        )
+        .expect("a LOW pure-C/C++ repo yields the no-path line");
+        assert!(
+            line.contains("no semantic-resolution path exists for C/C++ on this build"),
+            "the no-path line must name the full C/C++ set (not the single dominant): {line}"
+        );
+        // Cross-check: the ceiling gate names the SAME set for the SAME counts — proving one source.
+        assert_eq!(
+            call_graph_ceiling_languages(&counts(&[("c", 60), ("cpp", 40)])),
+            Some(vec!["C".to_string(), "C++".to_string()]),
+        );
+    }
+
+    #[test]
+    fn no_path_line_single_language_unchanged() {
+        // A single no-resolver language still reads as just that language (no spurious separator).
+        let line = relationship_next_action_line(
+            &call_low(),
+            &counts(&[("python", 500)]),
+            &builtin_only(),
+        )
+        .expect("a LOW Python repo yields the no-path line");
+        assert!(
+            line.contains("no semantic-resolution path exists for Python on this build"),
+            "single-language no-path line is unchanged: {line}"
+        );
+        assert!(
+            !line.contains("Python/"),
+            "no trailing separator for a single language: {line}"
+        );
+    }
+
+    // ── ORIENT-SMALL-ENRICH-1 (§1a): the in-flight applicability gate across the capability cells ──
+
+    #[test]
+    fn in_flight_gate_across_capability_cells() {
+        // Ceiling repo (C / C++ / Python — no resolver on ANY build): the pass CANNOT raise figures.
+        assert_eq!(
+            in_flight_pass_can_apply(Ok(counts(&[("c", 80), ("cpp", 60)])), &builtin_only()),
+            Ok(false),
+            "a permanent C/C++ ceiling must NOT admit the in-flight 'may rise' promise"
+        );
+        assert_eq!(
+            in_flight_pass_can_apply(
+                Ok(counts(&[("python", 2904), ("javascript", 111)])),
+                &builtin_only()
+            ),
+            Ok(false),
+            "a Python-dominant ceiling (incidental JS below the gate) must NOT admit it"
+        );
+        // ENRICHABLE-NOW repo (a materially-present CONFIGURED-resolver language): the pass CAN raise.
+        assert_eq!(
+            in_flight_pass_can_apply(Ok(counts(&[("typescript", 500)])), &builtin_only()),
+            Ok(true),
+            "a TS repo has a configured resolver → the in-flight posture applies"
+        );
+        assert_eq!(
+            in_flight_pass_can_apply(
+                Ok(counts(&[("javascript", 1658), ("typescript", 699), ("java", 273)])),
+                &builtin_only()
+            ),
+            Ok(true),
+            "a material TS/JS half (TS resolver configured) makes the repo enrichable → in-flight applies"
+        );
+        // CELL 4a — config-only / no materially-present code language (reviewer review-0): `NoCeiling`
+        // by the CeilingFact source, but NOTHING is enrichable, so the pass raises nothing → NEVER admit.
+        assert_eq!(
+            in_flight_pass_can_apply(Ok(counts(&[("json", 9999)])), &builtin_only()),
+            Ok(false),
+            "a config-only repo (no material code language) must NOT admit the promise"
+        );
+        assert_eq!(
+            in_flight_pass_can_apply(Ok(vec![]), &builtin_only()),
+            Ok(false),
+            "an empty count set must NOT admit the promise"
+        );
+        // CELL 4b — Java present but JDTLS NOT configured on this build: `NoCeiling` (Java HAS a resolver
+        // on some build), but the running pass has no Java resolver wired, so it raises nothing → NEVER
+        // admit. WITH JDTLS configured it becomes enrichable-now → admits. This is the configured-gating
+        // that distinguishes pass-applicability from the build-independent `NoCeiling`.
+        assert_eq!(
+            in_flight_pass_can_apply(Ok(counts(&[("java", 500)])), &builtin_only()),
+            Ok(false),
+            "a Java repo without JDTLS configured must NOT admit the promise (pass has no Java resolver)"
+        );
+        assert_eq!(
+            in_flight_pass_can_apply(Ok(counts(&[("java", 500)])), &with_jdtls()),
+            Ok(true),
+            "the SAME Java repo WITH JDTLS configured admits the promise (the pass can raise Java figures)"
+        );
+    }
+
+    /// reviewer review-1 F1: a FAILED count read is PRESERVED — the gate hands the reason BACK (never
+    /// collapses it to `Ok(false)`, which would classify "pass does not apply" from a read that never
+    /// happened). The three surfaces then surface that reason honestly (orient/reliability error, check via
+    /// its `CeilingFact::Unknown` from the same read).
+    #[test]
+    fn in_flight_gate_preserves_the_read_failure_reason() {
+        assert_eq!(
+            in_flight_pass_can_apply(Err("db locked".to_string()), &builtin_only()),
+            Err("db locked".to_string()),
+            "a failed count read must hand back its reason, not collapse to Ok(false)"
+        );
     }
 
     // ── RESOURCE-HONESTY-1 (§2.1/§2.2): materially-present languages with no resource detector ──

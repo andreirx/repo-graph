@@ -494,3 +494,331 @@ fn explicit_enrich_in_flight_one_story() {
         "after the explicit enrich clears, the honest enrich CTA returns: {cta_after}"
     );
 }
+
+// ── ORIENT-SMALL-ENRICH-1 — the in-flight promise must be per-repo APPLICABLE before it renders ──
+//
+// The daemon's `enrichment_in_flight_for_db` is repo-scoped but capability-BLIND: the AUTO pass calls
+// `enter_flight(db_path)` the moment it spawns, BEFORE the per-language skip decision, so on a repo with
+// no enrichable language (C / C++ / Python) it reads in-flight for a pass that will skip. Pre-fix orient
+// (every tier) / check / reliability rendered that as "resolution figures may rise" — a promise that
+// CANNOT be kept. The two proofs below drive the REAL reader handlers with the in-flight mark held via a
+// `FlightGuard` (hermetic — no resolver batch needed, and faithful to the spawn→skip window the defect
+// lives in): a CEILING repo renders its honest no-path posture on every tier + check + reliability, and
+// an ENRICHABLE repo still keeps the in-flight line on every tier (the gate does not over-suppress).
+
+/// A pure-C repo — no enrichable language, so `call_graph_ceiling_languages` classifies it a permanent
+/// ceiling and an in-flight pass cannot raise its figures. The unresolved `#include` drives the import
+/// graph LOW, so the honest no-path next-action ("no semantic-resolution path exists for C") is exactly
+/// what every tier must render instead of the may-rise promise.
+fn write_ceiling_c(repo_dir: &Path) {
+    std::fs::create_dir_all(repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("main.c"),
+        "#include <stdio.h>\n\nint helper(int x) { return x + 1; }\n\nint main(void) {\n    return helper(0);\n}\n",
+    )
+    .unwrap();
+}
+
+/// The may-rise clause the in-flight accessor emits — asserted ABSENT on a ceiling repo (belt-and-braces
+/// beside the `IN_FLIGHT_PHRASE` "in progress" check). Kept in sync with
+/// `agent::check::ENRICHMENT_SUMMARY_IN_FLIGHT`.
+const MAY_RISE_CLAUSE: &str = "figures may rise";
+
+/// Proof 3 — a CEILING repo with a pass genuinely in flight must NEVER be promised rising figures, and
+/// all tiers + check + reliability must agree for ONE instant (slice §2). The flight guard reproduces the
+/// exact pre-skip window; pre-fix every tier rendered the in-flight line (test FAILS), post-fix the
+/// capability gate suppresses it and the honest no-path posture stands.
+#[test]
+fn ceiling_repo_in_flight_never_promises_rising_figures() {
+    let _g = serial();
+    test_overrides();
+    let (dispatcher, state, _root) = isolated();
+
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("crepo");
+    write_ceiling_c(&repo_dir);
+
+    let indexed = ok(run(
+        &dispatcher,
+        "i",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_param = repo_dir.to_string_lossy().to_string();
+
+    // Hold the repo-scoped in-flight mark exactly as a freshly-spawned auto pass would. `activity_state`
+    // is the PUBLIC confirmation that the guard is live — "queued" means an auto pass is entered-in-flight
+    // (the pre-skip window this defect lives in); without it the ceiling assertions could false-green on a
+    // repo that simply is not in flight.
+    let _flight = state.enrich_coord().enter_flight(Path::new(&db_path));
+    assert_eq!(
+        state.enrich_coord().activity_state(),
+        "queued",
+        "the flight guard must make the repo read in-flight (the pre-gate daemon fact)"
+    );
+
+    // Every budget tier renders ONE honest posture: the no-path line, NEVER the may-rise promise.
+    for budget in ["small", "medium", "full"] {
+        let orient = ok(run(
+            &dispatcher,
+            &format!("o-{budget}"),
+            "orient",
+            json!({ "repo": repo_param, "budget": budget }),
+        ));
+        let cta = orient["value"]["relationship_next_action"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            !cta.contains(IN_FLIGHT_PHRASE),
+            "{budget}: a ceiling repo must NOT be promised rising figures: {cta}"
+        );
+        assert!(
+            cta.contains("no semantic-resolution path exists for C"),
+            "{budget}: a ceiling repo renders its honest no-path posture: {cta}"
+        );
+        assert!(
+            !orient.to_string().contains(MAY_RISE_CLAUSE),
+            "{budget}: no '{MAY_RISE_CLAUSE}' anywhere in the ceiling repo's orient output"
+        );
+    }
+
+    // check + reliability tell the SAME story (no in-flight form) for the same instant.
+    let check_s = ok(run(
+        &dispatcher,
+        "c",
+        "check",
+        json!({ "repo": repo_param }),
+    ))
+    .to_string();
+    assert!(
+        !check_s.contains(IN_FLIGHT_PHRASE) && !check_s.contains(MAY_RISE_CLAUSE),
+        "check must not render the in-flight form on a ceiling repo: {check_s}"
+    );
+    let rel = ok(run(
+        &dispatcher,
+        "r",
+        "reliability",
+        json!({ "repo": repo_param }),
+    ));
+    assert_ne!(
+        rel["enrichment_state"].as_str(),
+        Some("in_flight"),
+        "reliability must not report in_flight on a ceiling repo"
+    );
+}
+
+/// Proof 4 — regression guard: the capability gate must NOT over-suppress. An ENRICHABLE (TS) repo with a
+/// pass in flight keeps the in-flight posture on EVERY tier (a resolver exists → the pass CAN raise
+/// figures), so the OFC-1 in-flight coherence is preserved for the repos it was built for.
+#[test]
+fn enrichable_repo_in_flight_keeps_the_line_on_every_tier() {
+    let _g = serial();
+    test_overrides();
+    let (dispatcher, state, _root) = isolated();
+
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("tsrepo");
+    write_eligible_ts(&repo_dir);
+
+    let indexed = ok(run(
+        &dispatcher,
+        "i",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_param = repo_dir.to_string_lossy().to_string();
+
+    let _flight = state.enrich_coord().enter_flight(Path::new(&db_path));
+    for budget in ["small", "medium", "full"] {
+        let orient = ok(run(
+            &dispatcher,
+            &format!("o-{budget}"),
+            "orient",
+            json!({ "repo": repo_param, "budget": budget }),
+        ));
+        let cta = orient["value"]["relationship_next_action"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            cta.contains(IN_FLIGHT_PHRASE),
+            "{budget}: an enrichable repo mid-pass keeps the in-flight line: {cta}"
+        );
+        assert!(
+            !cta.contains("rmap enrich"),
+            "{budget}: the stale enrich CTA stays suppressed while the pass runs: {cta}"
+        );
+    }
+    let rel = ok(run(
+        &dispatcher,
+        "r",
+        "reliability",
+        json!({ "repo": repo_param }),
+    ));
+    assert_eq!(
+        rel["enrichment_state"].as_str(),
+        Some("in_flight"),
+        "reliability keeps the in-flight token for an enrichable repo"
+    );
+}
+
+/// A CONFIG-ONLY repo — no code file at all, so `detect_language` records no language and
+/// `material_code_languages` is EMPTY. `call_graph_ceiling_languages` maps that to `NoCeiling` (it cannot
+/// distinguish "no material code" from "has a resolver"), which is why the build-0 `NoCeiling`-keyed gate
+/// wrongly admitted the promise here (reviewer review-0). There is nothing enrichable → the pass raises
+/// nothing → the promise must never render.
+fn write_config_only(repo_dir: &Path) {
+    std::fs::create_dir_all(repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("package.json"),
+        "{\n  \"name\": \"cfg-only\",\n  \"version\": \"1.0.0\"\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("README.md"),
+        "# Config only\n\nThis repo has no source code — only configuration and docs.\n",
+    )
+    .unwrap();
+}
+
+/// Proof 5 — reviewer review-0: a CONFIG-ONLY repo (empty materially-present language set) with a pass
+/// genuinely in flight must NEVER be promised rising figures, on ANY tier + check + reliability. This is
+/// the fourth capability cell the build-0 `NoCeiling`-keyed gate missed: `material_code_languages` is empty
+/// → nothing is enrichable-now → the running pass raises nothing. Same held-`FlightGuard` harness as the
+/// ceiling proof; the assertion is the ABSENCE of the in-flight / may-rise promise (there is no material
+/// code language to name a no-path line for).
+#[test]
+fn config_only_repo_in_flight_never_promises_rising_figures() {
+    let _g = serial();
+    test_overrides();
+    let (dispatcher, state, _root) = isolated();
+
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("cfgrepo");
+    write_config_only(&repo_dir);
+
+    let indexed = ok(run(
+        &dispatcher,
+        "i",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_param = repo_dir.to_string_lossy().to_string();
+
+    // Hold the repo-scoped in-flight mark exactly as a freshly-spawned auto pass would (the pre-skip window).
+    let _flight = state.enrich_coord().enter_flight(Path::new(&db_path));
+    assert_eq!(
+        state.enrich_coord().activity_state(),
+        "queued",
+        "the flight guard must make the repo read in-flight (the pre-gate daemon fact)"
+    );
+
+    // Every budget tier: NO in-flight / may-rise promise anywhere in the output.
+    for budget in ["small", "medium", "full"] {
+        let orient = ok(run(
+            &dispatcher,
+            &format!("o-{budget}"),
+            "orient",
+            json!({ "repo": repo_param, "budget": budget }),
+        ));
+        let s = orient.to_string();
+        assert!(
+            !s.contains(IN_FLIGHT_PHRASE) && !s.contains(MAY_RISE_CLAUSE),
+            "{budget}: a config-only repo must NOT be promised rising figures anywhere: {s}"
+        );
+    }
+
+    // check + reliability tell the SAME story (no in-flight form) for the same instant.
+    let check_s = ok(run(
+        &dispatcher,
+        "c",
+        "check",
+        json!({ "repo": repo_param }),
+    ))
+    .to_string();
+    assert!(
+        !check_s.contains(IN_FLIGHT_PHRASE) && !check_s.contains(MAY_RISE_CLAUSE),
+        "check must not render the in-flight form on a config-only repo: {check_s}"
+    );
+    let rel = ok(run(
+        &dispatcher,
+        "r",
+        "reliability",
+        json!({ "repo": repo_param }),
+    ));
+    assert_ne!(
+        rel["enrichment_state"].as_str(),
+        Some("in_flight"),
+        "reliability must not report in_flight on a config-only repo"
+    );
+}
+
+/// Proof 6 — reviewer review-1 F1: a FAILED count read while a pass is in flight must be SURFACED, never
+/// swallowed to a `false` that manufactures a "pass does not apply" classification from a read that never
+/// happened. The gate now hands the failure BACK (`Result<bool, String>`); orient has no unknown-enrichment
+/// render channel (the frozen `EnrichmentState` sum carries no `Unknown`), so it returns the established
+/// structured handler error naming the reason. We force a GENUINE read failure by poisoning the data the
+/// count read decodes: `query_file_count_by_language` does `row.get::<String>(f.language)`, so a BLOB in
+/// that TEXT column (TEXT affinity coerces numbers to text but leaves BLOBs as-is) makes the decode fail —
+/// a real `Err` that (unlike a dropped table, which the storage layer's idempotent open-time migrations
+/// silently recreate) survives. Pre-fix (`Err → false`) orient SUCCEEDS here (in-flight silently
+/// suppressed); post-fix it ERRORS naming the reason. (reliability takes the SAME gate through
+/// `read_or_error!`; check DELIBERATELY does not error — its ratified `ceiling-read-unknown` renders the
+/// failure as `CeilingFact::Unknown` from the same read — so this proof pins the orient surface, and the
+/// gate's fail-preserving contract itself is pinned by the `reader_context` unit test.)
+#[test]
+fn in_flight_failed_count_read_surfaces_on_orient_not_swallowed() {
+    let _g = serial();
+    test_overrides();
+    let (dispatcher, state, _root) = isolated();
+
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("tsrepo");
+    write_eligible_ts(&repo_dir);
+
+    let indexed = ok(run(
+        &dispatcher,
+        "i",
+        "index",
+        json!({ "repo_path": repo_dir.to_string_lossy() }),
+    ));
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_param = repo_dir.to_string_lossy().to_string();
+
+    // Poison the language column with a BLOB so the count read's `row.get::<String>` decode fails — a
+    // genuine `Err` on a separate committed connection, visible to the handler's own connection.
+    // `get_latest_snapshot` (READY snapshot) reads `snapshots`, untouched.
+    {
+        let conn = StorageConnection::open(&db_path).unwrap();
+        conn.execute_raw("UPDATE files SET language = x'00ff'")
+            .expect("poison files.language with a BLOB to break the count read decode");
+    }
+
+    // Hold the repo-scoped in-flight mark exactly as a freshly-spawned auto pass would (the pre-skip window).
+    let _flight = state.enrich_coord().enter_flight(Path::new(&db_path));
+    assert_eq!(
+        state.enrich_coord().activity_state(),
+        "queued",
+        "the flight guard must make the repo read in-flight (the pre-gate daemon fact)"
+    );
+
+    match run(
+        &dispatcher,
+        "o",
+        "orient",
+        json!({ "repo": repo_param, "budget": "small" }),
+    ) {
+        DispatchResult::Error(e) => assert!(
+            e.error.message.contains("resolution figures"),
+            "orient must SURFACE the failed count read (its reason), not swallow it: {}",
+            e.error.message
+        ),
+        DispatchResult::Success(s) => panic!(
+            "orient must ERROR on a failed count read while a pass is in flight, not silently succeed \
+             with a manufactured posture: {}",
+            s.result
+        ),
+    }
+}

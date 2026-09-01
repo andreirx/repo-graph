@@ -162,7 +162,30 @@ pub fn handle_reliability(state: &DaemonState, request: &Request) -> DispatchRes
     // error (the SAME `read_or_error!` the three grouped reads above use) — NEVER `.ok()`-collapsed to a
     // silent "unavailable" (STANDING HONESTY RULE 1, review-1 F2). `get_trust_summary` returns the
     // summary or an error (not an Option), so there is no "absent" case to distinguish here.
-    let enrich_in_flight = state.enrichment_in_flight_for_db(repo_state.db_path());
+    // ORIENT-SMALL-ENRICH-1 (§1a/§2): GATE the repo-scoped in-flight fact on the SAME per-language
+    // pass-applicability orient/check consult (`in_flight_pass_can_apply`) — render the in-flight posture
+    // ONLY when the running pass can raise THIS repo's figures (≥1 materially-present CONFIGURED-enrichable
+    // language). On a permanent ceiling, a config-only or Java-without-JDTLS repo the persisted enrichment
+    // state stands, so this breakdown never reports `in_flight` / "figures may rise" on a repo the pass
+    // cannot help, and orient/check/reliability tell ONE story. The count read runs ONLY while a pass is
+    // actually in flight (the `if` guards it off the hot path). reviewer review-1 F1: a FAILED count read is
+    // NOT collapsed to `false` (that would classify "pass does not apply" from a read that never happened,
+    // hiding the reason); it is surfaced as the established handler error via `read_or_error!` — the SAME
+    // posture this breakdown's other RENDERED fallible reads (including the persisted enrichment state below)
+    // already take (STANDING HONESTY RULE 1).
+    let enrich_in_flight = if state.enrichment_in_flight_for_db(repo_state.db_path()) {
+        read_or_error!(
+            crate::reader_context::in_flight_pass_can_apply(
+                storage
+                    .query_file_count_by_language(&snapshot_uid)
+                    .map_err(|e| e.to_string()),
+                &crate::dispatch::configured_resolver_languages_from_env(),
+            ),
+            "in-flight enrichment pass applicability (per-language file counts)"
+        )
+    } else {
+        false
+    };
     let enrichment_state: Option<EnrichmentState> = if enrich_in_flight {
         Some(EnrichmentState::InFlight)
     } else {

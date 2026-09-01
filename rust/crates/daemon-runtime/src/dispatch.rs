@@ -4288,12 +4288,52 @@ impl ServiceDispatcher {
         // this window is real for both kinds. Repo-scoped so a second repo's concurrent pass never
         // mislabels this one. Threaded into the trust aggregator (the enrichment posture / CTA-suppression
         // source) and the envelope CTA.
-        let enrich_in_flight = self.state.enrichment_in_flight_for_db(repo_state.db_path());
-        // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): lift the in-flight bool into the
-        // enum-typed lifecycle override the agent use case now takes. `Some(InFlight)` is the authoritative
-        // daemon truth for a queued/running pass; `None` means "no override — derive from storage" (the
-        // agent then reads the persisted enrichment state exactly as before). The daemon injects only
-        // `InFlight` today; the enum is the single representation of the enrichment state end-to-end.
+        // ORIENT-SMALL-ENRICH-1 (§1a/§2.1): the in-flight fact is repo-scoped but capability-BLIND — a pass
+        // is entered-in-flight for a repo before the per-language skip decision, so on a repo the pass will
+        // skip it is a true-but-irrelevant daemon fact that must NOT render "figures may rise". GATE it on
+        // `in_flight_pass_can_apply`: apply the in-flight posture ONLY when ≥1 materially-present language is
+        // ENRICHABLE NOW (has a CONFIGURED resolver — the SAME predicate the D5 CTA reads), which the running
+        // pass can actually raise. The count read runs ONLY while a pass is actually in flight (the `if`
+        // guards it off the hot path). reviewer review-1 F1: a FAILED count read is NOT collapsed to `false`
+        // (that would classify "pass does not apply" from a read that never happened, hiding the reason and
+        // silently rendering the persisted posture). Orient has no unknown-enrichment render channel (the
+        // frozen `EnrichmentState` sum carries no `Unknown`), so the honest surface is the established
+        // structured handler error — the SAME `InternalError` orient already returns for an internal read
+        // failure — naming the reason. This only fires in the rare window where a pass IS in flight AND a
+        // genuine storage read fails (empty repos read `Ok(vec![])`, never `Err`).
+        let enrich_in_flight = if self.state.enrichment_in_flight_for_db(repo_state.db_path()) {
+            match crate::reader_context::in_flight_pass_can_apply(
+                repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+                    &storage,
+                    &epoch.snapshot.snapshot_uid,
+                )
+                .map_err(|e| e.to_string()),
+                &configured_resolver_languages_from_env(),
+            ) {
+                Ok(applies) => applies,
+                Err(reason) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            format!(
+                                "orient: an enrichment pass is in flight but the per-language \
+                                 file-count read failed, so whether it can raise this repo's \
+                                 resolution figures is unknown: {reason}"
+                            ),
+                        ),
+                    );
+                }
+            }
+        } else {
+            false
+        };
+        // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): lift the (now capability-gated)
+        // in-flight bool into the enum-typed lifecycle override the agent use case takes. `Some(InFlight)`
+        // is the authoritative daemon truth for a queued/running pass that CAN apply here; `None` means "no
+        // override — derive from storage" (the agent reads the persisted enrichment state exactly as
+        // before). The daemon injects only `InFlight` today; the enum is the single representation of the
+        // enrichment state end-to-end.
         let enrich_state_override =
             enrich_in_flight.then_some(repo_graph_agent::EnrichmentState::InFlight);
 
@@ -4544,48 +4584,69 @@ impl ServiceDispatcher {
         // `Unknown { reason }` — carried in-band as the RECORD (never a stderr-only log), rendering
         // unknown-with-reason on the affected condition and contributing to the verdict exactly as
         // NoCeiling (failing) — a read failure may never mint a false passing ceiling.
-        let (index_drift, ceiling_fact) =
+        let (index_drift, ceiling_fact, pass_can_apply) =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snap)) => {
                     let drift = self.compute_query_drift(&storage, &repo_state, &repo_uid, &snap);
-                    let ceiling_fact =
-                        match repo_graph_agent::AgentStorageRead::query_file_count_by_language(
-                            &storage,
-                            &snap.snapshot_uid,
-                        ) {
-                            // Successful read: `reader_context` owns the WHICH-languages
-                            // computation (one source, never re-derived); map its Option into the
-                            // exhaustive capability sum at this composition root — the same
-                            // daemon→agent injected-fact pattern as `IndexDrift`. `Some(langs)` =
-                            // permanent ceiling; `None` = ≥1 materially-present language HAS a
-                            // resolver → affirmatively actionable.
-                            Ok(counts) => Some(match call_graph_ceiling_languages(&counts) {
+                    // `reader_context` owns the WHICH-languages computation (one source, never
+                    // re-derived); one count read feeds BOTH the reducer's ceiling verdict AND the
+                    // in-flight applicability gate. The fallible read maps into the exhaustive capability
+                    // sum `CeilingFact` INLINE at this composition root — the same daemon→agent injected-fact
+                    // pattern as `IndexDrift` (successful read → `Ceiling`/`NoCeiling`; FAILED read →
+                    // `Unknown { reason }`, unknown-with-reason on the affected condition, never swallowed to
+                    // a sentinel, never a false Pass). The mapping is inlined (not a `reader_context` helper)
+                    // because this is its SOLE production caller — the pre-slice shape, restored per reviewer
+                    // review-1 F2. ORIENT-SMALL-ENRICH-1 (§1a/§2.1): `in_flight_pass_can_apply` — the STRICTER
+                    // pass-applicability fact (≥1 materially-present CONFIGURED-enrichable language) distinct
+                    // from `NoCeiling`, computed from the SAME counts (no second read) so the override below
+                    // renders the in-flight posture ONLY where the running pass can raise figures.
+                    let counts = repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+                        &storage,
+                        &snap.snapshot_uid,
+                    )
+                    .map_err(|e| e.to_string());
+                    let ceiling_fact = Some(match &counts {
+                        Ok(counts) => {
+                            match crate::reader_context::call_graph_ceiling_languages(counts) {
                                 Some(languages) => {
                                     repo_graph_agent::dto::ceiling_fact::CeilingFact::Ceiling {
                                         languages,
                                     }
                                 }
                                 None => repo_graph_agent::dto::ceiling_fact::CeilingFact::NoCeiling,
-                            }),
-                            // FAILED read → the capability is UNKNOWN. Record the reason IN the fact
-                            // so the check condition renders unknown-with-reason (never swallowed to
-                            // a sentinel, never a false Pass).
-                            Err(e) => {
-                                Some(repo_graph_agent::dto::ceiling_fact::CeilingFact::Unknown {
-                                    reason: e.to_string(),
-                                })
                             }
-                        };
-                    (Some(drift), ceiling_fact)
+                        }
+                        Err(reason) => repo_graph_agent::dto::ceiling_fact::CeilingFact::Unknown {
+                            reason: reason.clone(),
+                        },
+                    });
+                    // ORIENT-SMALL-ENRICH-1 (reviewer review-1 F1): the gate now PRESERVES a count-read
+                    // failure instead of collapsing it to `false`. The in-flight override applies ONLY on an
+                    // affirmative `Ok(true)`; a gate `Err` does NOT apply it. That is honest here because the
+                    // SAME read's failure is ALREADY rendered as `ceiling_fact = Unknown { reason }` above
+                    // (CHECK-SIGNAL-1 ratified `ceiling-read-unknown` — this read degrades to
+                    // unknown-with-reason, NEVER a hard error), so check renders its persisted posture
+                    // ALONGSIDE the unknown ceiling: the reason is surfaced, not swallowed. `matches!` is a
+                    // pattern match, NOT the `unwrap_or*`/`.ok()` collapse the STANDING HONESTY RULE forbids —
+                    // the failure reason is retained (in `ceiling_fact`), only the override decision is bool.
+                    let pass_can_apply = matches!(
+                        crate::reader_context::in_flight_pass_can_apply(
+                            counts,
+                            &configured_resolver_languages_from_env(),
+                        ),
+                        Ok(true)
+                    );
+                    (Some(drift), ceiling_fact, pass_can_apply)
                 }
-                // No snapshot → the call-graph condition is not evaluated; no ceiling analysis.
-                Ok(None) => (None, None),
+                // No snapshot → the call-graph condition is not evaluated; no ceiling analysis, and no
+                // pass can apply (nothing to raise).
+                Ok(None) => (None, None, false),
                 Err(e) => {
                     // Snapshot read failed here; the check reducer re-reads it and will
                     // surface the failure. Omit the drift condition (never a false value); no
                     // ceiling analysis is attempted without a snapshot to anchor to.
                     eprintln!("warning: index-drift snapshot read failed for {repo_uid}: {e}");
-                    (None, None)
+                    (None, None, false)
                 }
             };
 
@@ -4596,9 +4657,14 @@ impl ServiceDispatcher {
         // lifecycle override `run_check_cancellable` now takes — `Some(InFlight)` = authoritative daemon
         // truth, `None` = derive from storage. `Option<EnrichmentState>` is `Copy`, so it moves into the
         // worker closure like the bool it replaces.
-        let enrich_state_override = self
-            .state
-            .enrichment_in_flight_for_db(repo_state.db_path())
+        // ORIENT-SMALL-ENRICH-1 (§1a/§2): GATE the override on `pass_can_apply` (the STRICTER
+        // pass-applicability fact computed above from the same count read) — apply the in-flight posture
+        // ONLY when the running pass can raise THIS repo's figures (≥1 materially-present CONFIGURED-enrichable
+        // language). On a permanent ceiling, a config-only repo, a Java-without-JDTLS repo, or an `Unknown`
+        // capability the persisted state stands, so check renders its honest ceiling/no-eligible-edges posture
+        // instead of "figures may rise", and orient/check/reliability agree for one snapshot.
+        let enrich_state_override = (self.state.enrichment_in_flight_for_db(repo_state.db_path())
+            && pass_can_apply)
             .then_some(repo_graph_agent::EnrichmentState::InFlight);
 
         let check_start = Instant::now();
@@ -9602,10 +9668,13 @@ pub(crate) fn configured_resolver_languages_from_env() -> Vec<EnrichmentLanguage
 // wrapper (which owns the LOW-axis check and the unknown-with-reason failure line); the bare
 // `relationship_next_action_line` is called only inside `reader_context` (by that wrapper), so it no
 // longer needs re-exporting here. (`deps_reader_context_note` is consumed directly by `deps_headline`.)
+// ORIENT-SMALL-ENRICH-1: `call_graph_ceiling_languages` is no longer re-exported here — `handle_check`
+// maps counts into `CeilingFact` INLINE (its sole production caller; reviewer review-1 F2) calling the
+// bare `reader_context::call_graph_ceiling_languages` by its full path, and the helper's other callers
+// live inside `reader_context`, so it no longer needs a `crate::dispatch::…` alias.
 pub(crate) use crate::reader_context::{
-    call_graph_ceiling_languages, dominant_deps_ecosystem,
-    relationship_next_action_line_or_read_error, relationship_reliability_is_low,
-    resource_uncovered_material_languages,
+    dominant_deps_ecosystem, relationship_next_action_line_or_read_error,
+    relationship_reliability_is_low, resource_uncovered_material_languages,
 };
 
 #[cfg(test)]
