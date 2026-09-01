@@ -48,14 +48,9 @@ pub fn handle_dead_causes(state: &DaemonState, request: &Request) -> DispatchRes
 
     // Pin the snapshot for the whole request under the read guard (epoch coherence).
     let _read_guard = repo_state.coordinator.acquire_read();
-    let storage = match repo_state.storage() {
+    let storage = match state.open_repo_storage_for_request(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            )
-        }
+        Err(e) => return DispatchResult::error(&request.id, e),
     };
 
     // READY snapshot (get_latest_snapshot is READY-only). No READY snapshot → honest F2

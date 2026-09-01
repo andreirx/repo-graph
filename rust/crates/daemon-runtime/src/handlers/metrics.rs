@@ -80,14 +80,9 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
 
     // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
     // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
-    let storage = match repo_state.storage() {
+    let storage = match state.open_repo_storage_for_request(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            )
-        }
+        Err(e) => return DispatchResult::error(&request.id, e),
     };
 
     // Collect database metrics

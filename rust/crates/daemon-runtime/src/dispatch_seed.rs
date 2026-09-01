@@ -234,14 +234,13 @@ impl ServiceDispatcher {
         let repo_root = self.canonical_root(&request.params);
 
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        // FOREGROUND-LOCK-1 (§1.2, §2.2): `find` is the exact foreground read the flake family
+        // root-caused (retention pass held the DB while this open failed fast). Route it through the
+        // shared bounded-patience + honest-Busy choke, not the zero-patience `storage()` +
+        // `InternalError` wrap that surfaced a routine transient as an internal fault.
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Resolve the READY snapshot (freshness scope). No READY snapshot ⇒ the

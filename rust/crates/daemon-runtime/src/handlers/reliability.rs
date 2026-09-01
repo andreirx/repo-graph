@@ -86,14 +86,9 @@ pub fn handle_reliability(state: &DaemonState, request: &Request) -> DispatchRes
 
     let _read_guard = repo_state.coordinator.acquire_read();
 
-    let storage = match repo_state.storage() {
+    let storage = match state.open_repo_storage_for_request(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            )
-        }
+        Err(e) => return DispatchResult::error(&request.id, e),
     };
 
     // READY snapshot only (get_latest_snapshot excludes BUILDING/STALE/FAILED) —

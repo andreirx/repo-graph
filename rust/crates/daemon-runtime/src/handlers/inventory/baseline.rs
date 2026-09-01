@@ -133,14 +133,9 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
 
     // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
     // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
-    let storage = match repo_state.storage() {
+    let storage = match state.open_repo_storage_for_request(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            )
-        }
+        Err(e) => return DispatchResult::error(&request.id, e),
     };
 
     // Resolve the snapshot — the FULL row, not just the uid: the row-retention
@@ -578,14 +573,9 @@ pub fn handle_unmark_baseline(state: &DaemonState, request: &Request) -> Dispatc
 
     // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
     // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
-    let storage = match repo_state.storage() {
+    let storage = match state.open_repo_storage_for_request(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            )
-        }
+        Err(e) => return DispatchResult::error(&request.id, e),
     };
 
     // Verify snapshot exists and is marked as user baseline

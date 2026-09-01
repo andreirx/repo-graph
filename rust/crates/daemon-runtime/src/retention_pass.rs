@@ -425,7 +425,10 @@ pub fn try_retention_attempt(
     // resurrected as an empty orphan.
     // Bounded busy-retry (2026-08-31): same transient-lock patience as the seed pass — see
     // `open_existing_with_busy_retry`. NO-CREATE semantics preserved (it wraps open_existing).
-    let storage = match crate::state::open_existing_with_busy_retry(db_path) {
+    let storage = match crate::state::open_existing_with_busy_retry(
+        db_path,
+        crate::state::OpenPatience::Background,
+    ) {
         Ok(s) => s,
         Err(e) => return RetentionAttempt::Failed(format!("could not open storage: {e}")),
     };

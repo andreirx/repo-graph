@@ -67,6 +67,7 @@ pub mod explain_coherence;
 pub mod explain_lg_identity;
 pub mod explain_lg_serve;
 pub mod focus_resolution_cert;
+mod foreground_open; // FOREGROUND-LOCK-1: honest Busy re-code + holder naming for a transient foreground storage-open lock (crate-private)
 pub mod handlers;
 mod http_boundary_read; // HTTP-BOUNDARY-1: read-time HTTP boundary render helpers (crate-private)
 mod http_surface_union; // HTTP-SURFACE-COHERENCE-1 §2.3: read-time union of the two HTTP families

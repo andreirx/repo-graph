@@ -389,46 +389,151 @@ impl RepoState {
     /// Writers are unaffected: they already open their own connection in the compose
     /// pipeline (`index_path_with_progress`/`refresh_path_with_progress`).
     pub fn storage(&self) -> Result<StorageConnection, String> {
-        StorageConnection::open_existing(&self.key.db_path)
-            .map_err(|e| format!("failed to open storage connection: {}", e))
+        // FOREGROUND-LOCK-1: foreground opens now carry SHORT bounded patience (was ZERO) so a
+        // transient `SQLITE_BUSY` from a concurrent background pass's lock-upgrade clears within a
+        // sub-half-second wait instead of failing the request outright (the audit + test-flake
+        // family, root-caused 5535092). Non-lock faults still surface immediately (see
+        // [`OpenPatience`] / [`open_existing_with_busy_retry`]). The SIGNATURE is unchanged: the
+        // ~140 internal/secondary callers keep the flat `String` error; the honest `Busy`
+        // holder-naming re-code (§2.2) lives in [`crate::foreground_open`], which the dispatch
+        // handlers call in place of the bare `storage()` + `InternalError` wrap.
+        open_existing_with_busy_retry(&self.key.db_path, OpenPatience::Foreground)
+            .map_err(|e| e.to_string())
     }
 
-    /// [`storage`](Self::storage) with a BOUNDED busy retry for BACKGROUND passes (seed /
-    /// retention). SQLite returns `SQLITE_BUSY` IMMEDIATELY — bypassing the 5s busy handler —
-    /// on transaction lock-upgrade conflicts (the migration check's write colliding with a
-    /// concurrent read transaction), so a background pass using plain `storage()` could
-    /// permanently SKIP on a transient lock (bitten 2026-08-31: `op seed skipped: could not
-    /// open storage: database is locked` killed the v0.12.0 cut's seed_seam run). Retries the
-    /// open up to 4× at 250ms ONLY when the error text names a lock; any other error (missing
-    /// DB, corruption) surfaces immediately and honestly. Foreground request paths keep plain
-    /// `storage()` — a request should fail fast, not stall; only detached passes may wait.
-    /// (Abstraction: one helper, two callers — seed_pass + retention_pass; axis: background
-    /// vs foreground open patience; rejected simpler: retry loops duplicated at both call
-    /// sites.)
+    /// [`storage`](Self::storage) with the LONGER [`OpenPatience::Background`] busy budget for
+    /// BACKGROUND passes (seed / retention). SQLite returns `SQLITE_BUSY` IMMEDIATELY — bypassing
+    /// the 5s busy handler — on transaction lock-upgrade conflicts (the migration check's write
+    /// colliding with a concurrent read transaction), so an open using zero patience could SKIP on
+    /// a transient lock (bitten 2026-08-31: `op seed skipped: could not open storage: database is
+    /// locked` killed the v0.12.0 cut's seed_seam run). Retries the open up to 4× at 250ms ONLY
+    /// when the error text names a lock; any other error (missing DB, corruption) surfaces
+    /// immediately and honestly.
+    ///
+    /// FOREGROUND-LOCK-1: foreground request paths ([`storage`](Self::storage)) now also retry, but
+    /// on the SHORT [`OpenPatience::Foreground`] budget (450ms) — responsiveness preserved — and the
+    /// dispatch handlers re-code an exhausted foreground lock as `Busy` (see
+    /// [`crate::foreground_open`]); background passes keep this longer budget since a detached pass
+    /// may wait without harming a client.
     pub fn storage_with_busy_retry(&self) -> Result<StorageConnection, String> {
-        open_existing_with_busy_retry(&self.key.db_path)
+        open_existing_with_busy_retry(&self.key.db_path, OpenPatience::Background)
+            .map_err(|e| e.to_string())
     }
 }
 
-/// The bounded-busy-retry open shared by the background passes (seed via
-/// [`RepoState::storage_with_busy_retry`], retention directly by `db_path`). See that
-/// method's doc for the SQLITE_BUSY lock-upgrade rationale. Retries ONLY lock/busy
-/// errors; everything else (missing DB, corruption) surfaces immediately.
-pub(crate) fn open_existing_with_busy_retry(db_path: &Path) -> Result<StorageConnection, String> {
-    let mut last_err = String::new();
-    for attempt in 0..5 {
-        if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-        }
-        match StorageConnection::open_existing(db_path)
-            .map_err(|e| format!("failed to open storage connection: {}", e))
-        {
-            Ok(s) => return Ok(s),
-            Err(e) if e.contains("locked") || e.contains("busy") => last_err = e,
-            Err(e) => return Err(e),
+/// FOREGROUND-LOCK-1: the open-patience budget for [`open_existing_with_busy_retry`]. Two ratified
+/// budgets, chosen by caller class — foreground dispatch opens stay responsive; detached background
+/// passes may wait longer without harming a client.
+///
+/// Abstraction ledger:
+/// - **what:** a two-variant sum naming the ratified open-patience budgets.
+/// - **concrete current users:** [`RepoState::storage`] (Foreground) +
+///   [`RepoState::storage_with_busy_retry`] and `retention_pass` (Background).
+/// - **named axis:** open patience by caller class — variants FIXED, ONE shared retry body
+///   dispatches on the variant (operations-fixed / variants-fixed → sum type + exhaustive match).
+/// - **rejected simpler:** bare `(attempts, delay)` args — rejected because it scatters the two
+///   FROZEN budgets (§3) as magic numbers across call sites, where a drifted number is invisible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenPatience {
+    /// Foreground request open: 3 retries × 150ms = 450ms max (sub-half-second; responsiveness).
+    Foreground,
+    /// Background pass open (seed / retention): 4 retries × 250ms = 1s (the pre-existing budget,
+    /// FROZEN by §3).
+    Background,
+}
+
+impl OpenPatience {
+    /// Total open attempts (initial attempt + retries).
+    fn attempts(self) -> u32 {
+        match self {
+            OpenPatience::Foreground => 4,
+            OpenPatience::Background => 5,
         }
     }
-    Err(format!("{last_err} (after 5 bounded busy-retry attempts)"))
+
+    /// Delay slept between attempts (never before the first).
+    fn delay(self) -> std::time::Duration {
+        match self {
+            OpenPatience::Foreground => std::time::Duration::from_millis(150),
+            OpenPatience::Background => std::time::Duration::from_millis(250),
+        }
+    }
+}
+
+/// FOREGROUND-LOCK-1: a bounded-busy-retry open failure, TYPED so the foreground dispatch path can
+/// re-code a transient lock honestly (`Busy` + holder naming, §2.2) instead of the flat
+/// `InternalError` a `String` forced. Variants are FIXED and matched exhaustively in
+/// [`crate::foreground_open`].
+///
+/// - `LockedAfterRetries`: the retry budget expired with the DB busy/locked the whole time — a
+///   transient the reader can retry.
+/// - `Other`: any non-lock fault (missing DB, corruption, I/O), surfaced immediately and unchanged.
+///
+/// Both variants carry the RAW storage error text (no prefix). The shared render paths — [`Display`]
+/// (the `String` callers via `.to_string()`) and the foreground `InternalError` render in
+/// [`crate::foreground_open::open_repo_storage_for_request`] — re-apply the historical
+/// `"failed to open storage connection: "` prefix, so their text is byte-identical to pre-slice. A
+/// secondary open with a DISTINCT pre-existing non-lock message (assess/coverage/enrich/docs-extract:
+/// "storage open failed: …" / "failed to open storage for enrichment: …") reads the raw text out of
+/// `Other` and renders it under its OWN prefix, so §2.3 keeps those messages unchanged too. Carrying
+/// the prefix in `Other` instead would double-prefix those callers.
+///
+/// [`Display`]: std::fmt::Display
+#[derive(Debug)]
+pub(crate) enum OpenError {
+    LockedAfterRetries { attempts: u32, last: String },
+    Other(String),
+}
+
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // Preserves the pre-existing exhausted-retry text verbatim for the `String` callers
+            // (Background attempts == 5 → "failed to open storage connection: … (after 5 bounded
+            // busy-retry attempts)", unchanged — the prefix now lives here, not in the raw `last`).
+            OpenError::LockedAfterRetries { attempts, last } => {
+                write!(
+                    f,
+                    "failed to open storage connection: {last} (after {attempts} bounded busy-retry attempts)"
+                )
+            }
+            OpenError::Other(msg) => write!(f, "failed to open storage connection: {msg}"),
+        }
+    }
+}
+
+/// The bounded-busy-retry open shared by every patience class (foreground dispatch via
+/// [`RepoState::storage`], background seed via [`RepoState::storage_with_busy_retry`], retention
+/// directly by `db_path`). SQLite returns `SQLITE_BUSY` IMMEDIATELY — bypassing its 5s busy handler
+/// — on a transaction lock-upgrade conflict (the migration check's write colliding with a
+/// concurrent read transaction), so a single-shot open SKIPS on a transient lock. Retries ONLY
+/// lock/busy errors up to the [`OpenPatience`] budget; everything else (missing DB, corruption) is
+/// returned immediately as [`OpenError::Other`].
+pub(crate) fn open_existing_with_busy_retry(
+    db_path: &Path,
+    patience: OpenPatience,
+) -> Result<StorageConnection, OpenError> {
+    let mut last_err = String::new();
+    for attempt in 0..patience.attempts() {
+        if attempt > 0 {
+            std::thread::sleep(patience.delay());
+        }
+        // The RAW storage error (no prefix) — carried in `OpenError` so a caller with a distinct
+        // pre-existing non-lock message renders it under its own prefix (§2.3). The shared paths
+        // (Display / foreground `InternalError`) re-apply the historical prefix.
+        match StorageConnection::open_existing(db_path).map_err(|e| e.to_string()) {
+            Ok(s) => return Ok(s),
+            // SQLite's OWN busy/locked signal (the mechanism's error text, not a semantic guess
+            // from a path/module name) — the only class we wait on. The prefix we no longer add
+            // never contained "locked"/"busy", so detecting on the raw text is equivalent.
+            Err(e) if e.contains("locked") || e.contains("busy") => last_err = e,
+            Err(e) => return Err(OpenError::Other(e)),
+        }
+    }
+    Err(OpenError::LockedAfterRetries {
+        attempts: patience.attempts(),
+        last: last_err,
+    })
 }
 
 /// Daemon state holding all loaded repos, database runtimes, and the registry.
@@ -570,6 +675,44 @@ impl DaemonState {
     /// drop); the visibility surfaces call `activity().snapshot()` / `active_for_db(..)`.
     pub fn activity(&self) -> &crate::activity::ActivityRegistry {
         &self.activity
+    }
+
+    /// FOREGROUND-LOCK-1 (§2.2): the ONE foreground-open choke for the EXTRACTED request handlers
+    /// (`handlers/*`), the peer of `ServiceDispatcher::open_storage` for the handlers still inline
+    /// in `dispatch.rs`. Opens `repo_state`'s storage with the SHORT foreground patience budget and
+    /// re-codes an exhausted transient lock as `Busy` + holder naming — never the flat
+    /// `InternalError` the bare `repo_state.storage()` + call-site wrap produced.
+    ///
+    /// Abstraction ledger:
+    /// - **what:** a thin `DaemonState` method binding `self.activity()` to the
+    ///   [`crate::foreground_open::open_repo_storage_for_request`] classification seam.
+    /// - **concrete current users:** the extracted foreground handlers (assess, map, reliability,
+    ///   violations, coverage, churn, risk, hotspots, dead_causes, policy, classify_retention,
+    ///   mark/unmark_baseline, perf) + `ServiceDispatcher::open_storage` (delegates here).
+    /// - **named axis:** none new — same FIXED two-way classification as the free fn; the method
+    ///   only removes the `state.activity()` plumbing repeated at 15 call sites.
+    /// - **rejected simpler:** call the free fn directly at each site with `state.activity()` —
+    ///   rejected: repeats the activity-registry coupling across 15 handlers and diverges from the
+    ///   dispatcher seam, so a future budget/holder change would have to be found at 16 places.
+    pub(crate) fn open_repo_storage_for_request(
+        &self,
+        repo_state: &RepoState,
+    ) -> Result<StorageConnection, repo_graph_daemon_transport::ErrorDetail> {
+        crate::foreground_open::open_repo_storage_for_request(repo_state, self.activity())
+    }
+
+    /// FOREGROUND-LOCK-1 (§2.2/§2.3): the SPLIT foreground-open choke for the EXTRACTED handlers
+    /// whose SECONDARY open has a DISTINCT pre-existing non-lock error message (assess/coverage:
+    /// "storage open failed: …"). Same bounded patience + honest `Busy` re-code as
+    /// [`Self::open_repo_storage_for_request`], but on a genuine NON-lock fault it hands the caller
+    /// the RAW error via [`crate::foreground_open::ForegroundOpenFault::Other`] so the caller can
+    /// preserve its own §2.3 message verbatim — never the shared "failed to open storage
+    /// connection: …" the flat choke renders. Peer of `ServiceDispatcher::open_storage_split`.
+    pub(crate) fn open_repo_storage_for_request_split(
+        &self,
+        repo_state: &RepoState,
+    ) -> Result<StorageConnection, crate::foreground_open::ForegroundOpenFault> {
+        crate::foreground_open::open_repo_storage_for_request_split(repo_state, self.activity())
     }
 
     /// SNAPSHOT-RETENTION-1: record the outcome of a completed background retention pass. Most-recent

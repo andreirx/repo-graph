@@ -126,6 +126,32 @@ impl ServiceDispatcher {
         Self { state }
     }
 
+    /// FOREGROUND-LOCK-1 (spec 2.2): open a repo's storage for a FOREGROUND request with bounded
+    /// lock patience, re-coding an exhausted transient lock as `Busy` + holder naming (never
+    /// `InternalError`). The single choke the foreground read handlers use in place of the bare
+    /// `repo_state.storage()` + `ErrorDetail::new(ErrorCode::InternalError, e)` wrap. Delegates to
+    /// `crate::foreground_open`, passing the daemon's activity registry so the exhausted-patience
+    /// message can name the holder class from a stored fact.
+    fn open_storage(
+        &self,
+        repo_state: &crate::state::RepoState,
+    ) -> Result<StorageConnection, ErrorDetail> {
+        self.state.open_repo_storage_for_request(repo_state)
+    }
+
+    /// FOREGROUND-LOCK-1 (§2.2/§2.3): the SPLIT peer of [`Self::open_storage`], for the write
+    /// handlers whose SECONDARY open (`handle_enrich`, `handle_docs_extract`) has a DISTINCT
+    /// pre-existing non-lock error message. Same bounded patience + honest `Busy` re-code, but a
+    /// genuine non-lock fault comes back RAW so the caller preserves its own §2.3 message verbatim
+    /// (never the shared "failed to open storage connection: …"). Delegates to
+    /// `crate::foreground_open` with the daemon's activity registry.
+    fn open_storage_split(
+        &self,
+        repo_state: &crate::state::RepoState,
+    ) -> Result<StorageConnection, crate::foreground_open::ForegroundOpenFault> {
+        self.state.open_repo_storage_for_request_split(repo_state)
+    }
+
     /// Get a required string parameter.
     fn get_string_param<'a>(params: &'a Value, key: &str) -> Result<&'a str, ErrorDetail> {
         params.get(key).and_then(|v| v.as_str()).ok_or_else(|| {
@@ -1138,14 +1164,9 @@ impl ServiceDispatcher {
         // stays coherent once IMPL-3 relaxes W-B — it verifies the identity did not move across the whole
         // audit, else honest-degrades (never a false incompleteness from SQLite@N vs LiveGraph@N+1).
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
         let snapshot = match storage.get_latest_snapshot(&repo_uid) {
             Ok(Some(snap)) => snap,
@@ -1214,14 +1235,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // RECON-M-R2 (flag-gated, non-default): union serving rides the `Auto` engine arm ONLY.
@@ -1396,14 +1412,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // RECON-M-R2 (flag-gated): engine parse above the capture; the flag-ON `Auto` arm captures
@@ -1549,14 +1560,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot. W-B-EPOCH-IMPL-2A: resolve the AGENT `AgentSnapshot` DTO (the
@@ -1734,14 +1740,9 @@ impl ServiceDispatcher {
         // Acquire read lock
         let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
@@ -2196,14 +2197,9 @@ impl ServiceDispatcher {
         // Acquire read lock
         let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
@@ -2527,14 +2523,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot. W-B-EPOCH-IMPL-2A (§14 D-CC refined): capture the request epoch — the pinned
@@ -3280,14 +3271,9 @@ impl ServiceDispatcher {
 
         // Then acquire repo refresh lock (blocks new readers, waits for active readers)
         let _refresh_guard = repo_state.coordinator.acquire_refresh();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Resolve repo_path from stored root_path
@@ -3654,14 +3640,9 @@ impl ServiceDispatcher {
             repo_state.db_path().to_path_buf(),
         );
 
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Parse optional parameters
@@ -3920,10 +3901,17 @@ impl ServiceDispatcher {
         // We acquire a separate connection since the pipeline consumes it. This is safe under
         // the coordinator's refresh lock. NO-CREATE (FORGET-REPO-1): enrich writes an EXISTING,
         // already-indexed DB; it must never create — a stale enrich after a forget would otherwise
-        // resurrect the removed DB as an unregistered orphan.
-        let storage = match StorageConnection::open_existing(repo_state.db_path()) {
+        // resurrect the removed DB as an unregistered orphan (the SPLIT choke wraps the same
+        // NO-CREATE `open_existing`).
+        // FOREGROUND-LOCK-1 (§2.2/§2.3): route this second foreground open through the bounded-
+        // patience choke so a transient lock is the honest `Busy` transient (never `InternalError`),
+        // while a genuine non-lock fault keeps this handler's pre-existing message verbatim.
+        let storage = match self.open_storage_split(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
+            Err(crate::foreground_open::ForegroundOpenFault::Busy(detail)) => {
+                return DispatchResult::error(&request.id, detail);
+            }
+            Err(crate::foreground_open::ForegroundOpenFault::Other(e)) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(
@@ -4170,14 +4158,9 @@ impl ServiceDispatcher {
         // Acquire read lock
         let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
@@ -4531,14 +4514,9 @@ impl ServiceDispatcher {
         // Acquire read lock
         let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
@@ -4793,14 +4771,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get wall-clock timestamp for waiver expiry evaluation
@@ -5072,14 +5045,9 @@ impl ServiceDispatcher {
         // Acquire read lock
         let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
         let lock_ms = lock_start.elapsed().as_millis();
 
@@ -5311,14 +5279,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -5425,14 +5388,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get repo to find root_path
@@ -5549,14 +5507,9 @@ impl ServiceDispatcher {
 
         // Then acquire repo refresh lock (blocks new readers, waits for active readers)
         let _refresh_guard = repo_state.coordinator.acquire_refresh();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get repo to find root_path
@@ -5612,10 +5565,17 @@ impl ServiceDispatcher {
         // Open fresh storage connection for write (under coordination). NO-CREATE
         // (FORGET-REPO-1): this replaces semantic facts on an EXISTING, already-indexed repo; it
         // must never create the DB — a stale request after a forget would otherwise resurrect the
-        // removed DB as an unregistered orphan.
-        let mut storage = match StorageConnection::open_existing(&db_path) {
+        // removed DB as an unregistered orphan (the SPLIT choke wraps the same NO-CREATE
+        // `open_existing`).
+        // FOREGROUND-LOCK-1 (§2.2/§2.3): route this second foreground open through the bounded-
+        // patience choke — a transient lock is the honest `Busy` transient (never `InternalError`),
+        // while a genuine non-lock fault keeps this handler's pre-existing message verbatim.
+        let mut storage = match self.open_storage_split(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
+            Err(crate::foreground_open::ForegroundOpenFault::Busy(detail)) => {
+                return DispatchResult::error(&request.id, detail);
+            }
+            Err(crate::foreground_open::ForegroundOpenFault::Other(e)) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(
@@ -5701,14 +5661,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -5809,14 +5764,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -5905,14 +5855,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6001,14 +5946,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6090,14 +6030,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6204,14 +6139,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6330,14 +6260,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6436,14 +6361,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6533,14 +6453,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -6809,14 +6724,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7059,14 +6969,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7194,14 +7099,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7392,14 +7292,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7562,14 +7457,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7643,14 +7533,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot for envelope
@@ -7728,14 +7613,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7810,14 +7690,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -7914,14 +7789,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -8086,14 +7956,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -8220,14 +8085,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -8361,14 +8221,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -8539,14 +8394,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot
@@ -8925,14 +8775,9 @@ impl ServiceDispatcher {
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
-        let storage = match repo_state.storage() {
+        let storage = match self.open_storage(&repo_state) {
             Ok(s) => s,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e),
-                )
-            }
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Get latest snapshot

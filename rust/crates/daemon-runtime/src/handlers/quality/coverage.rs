@@ -66,14 +66,9 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
 
     // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
     // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.
-    let storage = match repo_state.storage() {
+    let storage = match state.open_repo_storage_for_request(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            )
-        }
+        Err(e) => return DispatchResult::error(&request.id, e),
     };
 
     // Get snapshot
@@ -207,19 +202,24 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
         })
         .collect();
 
-    // Open fresh storage connection for write (under coordination). NO-CREATE (FORGET-REPO-1):
+    // Open a fresh storage connection for the write (under coordination). NO-CREATE (FORGET-REPO-1):
     // writes an EXISTING indexed DB; a missing file fails honestly, never resurrected as an orphan.
-    use repo_graph_storage::StorageConnection;
-    let mut storage = match StorageConnection::open_existing(&db_path) {
+    // FOREGROUND-LOCK-1 (§2.2/§2.3): route through the SPLIT bounded-patience choke so a transient
+    // lock becomes the honest `Busy` transient (never `InternalError`), while a genuine non-lock
+    // fault keeps this open's pre-existing "storage open failed: …" message verbatim (§2.3).
+    let mut storage = match state.open_repo_storage_for_request_split(&repo_state) {
         Ok(s) => s,
-        Err(e) => {
+        Err(crate::foreground_open::ForegroundOpenFault::Busy(detail)) => {
+            return DispatchResult::error(&request.id, detail)
+        }
+        Err(crate::foreground_open::ForegroundOpenFault::Other(e)) => {
             return DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(
                     ErrorCode::InternalError,
                     format!("storage open failed: {}", e),
                 ),
-            );
+            )
         }
     };
 
