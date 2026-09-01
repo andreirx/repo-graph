@@ -100,6 +100,39 @@ sidecars), and cross-command contradictions. Ranked queue (operator, pending hum
    quartet collapse. 10. churn sort + budgets, stats de-dup. Seeding corpus levers (boilerplate
    skip, symbol names, config/test exclusion) fold into the symbol-granularity milestone.
 
+## Diverse-codebase verification — OpenXcom + VCMI (2026-09-01)
+
+Operator-directed spot audit on two game engines (smoke `2026-09-01T15-01-04Z`, --retain;
+grading agents with tree-verification). VERDICT: rmap genuinely orients on both — OpenXcom's
+structure story verifies true edge-by-edge (its strongest legacy-C++ honesty showing); VCMI's
+16 inferred modules ARE the real top level, every spot-checked cycle arrow is a real #include
+(including a true lib→AI seam violation via AIFactory.cpp), and the C++ ceiling posture holds
+at 2000-file scale. The seams-and-history rim does not: the client↔server↔lib DEPENDENCY
+STORY is never told directly (boundaries returns zero; "14 cross-module dependencies" is a
+bare count; the story survives only in stats' fan_in/I numbers).
+
+NEW findings (merge into the active queue):
+- **SMOKE-MAP-WRITE — FIXED same day (be5459d):** bare `map` in the smoke wrote 79,325 MAP.md
+  files across the corpus incl. FRAKTAG's tracked ones (restored). Script now uses --dry-run.
+- **TS-LINGUIST-1** (high): Qt Linguist `.ts` (XML, `<!DOCTYPE TS>`) classified as TypeScript
+  — cascades into churn's whole top-25, dead/inferences applicability, deps, stats. Content
+  sniffing, not extension.
+- **CHURN-SHALLOW-1** (high): depth-1 clone → churn asserts "2072 files changed (90 days)"
+  from one commit; hotspots ranks on it. The degenerate-history case MISLEADS (vs the known
+  zero-state hedge which under-informs): single-commit/shallow history must be stated.
+- **MODULE-EDGES-1** (the acid-test gap): "N cross-module dependencies detected" renders as a
+  bare count — no default surface shows client→lib/server→lib. The VISION's "where the
+  boundaries and seams are" needs the edge list rendered (modules deps rollup or boundaries).
+- **RESOURCE-CPP-INERT-1**: resource coverage line claims C/C++ while the detector sees only
+  fopen-style calls — std::ofstream/ifstream invisible → "0 reads" on file-driven engines
+  (OpenXcom saves, VCMI lib/filesystem). Narrow the claim or teach the detector streams.
+- **TRUST-CEILING-1**: trust renders "below 50% target" with no ceiling statement where check
+  says the ceiling is reached; also "C" vs "C/C++" naming drift on ALL orient tiers + stats.
+- Minors: trust edges-100% vs 944-unresolved-imports juxtaposition; stats I/D/A prints
+  confident nonsense on C++ (Menu A=1.00); docs kinds (CMakeLists as architecture, CHANGELOG
+  missed); three unreconciled file totals (2072/2069/2065); vendored code blends into
+  complexity centers.
+
 ## Usefulness audit v0.13.0 — the fix queue (2026-09-01)
 
 Post-release audit of v0.13.0 (all nine v0.11.0 fixes field-verified, no regressions; matrix
