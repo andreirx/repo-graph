@@ -251,7 +251,11 @@ if [[ $# -eq 0 ]]; then
         "dead" "violations" "gate" "assess"
         "surfaces list" "boundaries list" "boundaries summary" "resource list"
         "docs list" "inferences list" "deps list"
-        "map" "doctor"
+        # "map --dry-run", NEVER bare "map": bare map WRITES MAP.md sidecars into the target
+        # tree (bitten 2026-09-01: 79,325 generated files across the whole validation corpus,
+        # including overwriting FRAKTAG's own TRACKED MAP.md — the smoke's read-only posture
+        # was violated by its own default command set on every prior run).
+        "map --dry-run" "doctor"
     )
 else
     COMMANDS=("$@")
