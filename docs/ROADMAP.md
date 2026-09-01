@@ -133,6 +133,21 @@ NEW findings (merge into the active queue):
   missed); three unreconciled file totals (2072/2069/2065); vendored code blends into
   complexity centers.
 
+## v0.13.0 + diverse-verification merged queue — high tier COMPLETE (2026-09-02)
+
+Shipped: ORIENT-SMALL-ENRICH-1 c56d298 (in-flight promise gates on per-repo applicability;
+C/C++ naming unified) · TS-LINGUIST-1 b716f77 (content-sniffed .ts; Qt Linguist never
+TypeScript; churn keeps real translation activity by ruling) · flake family root-caused +
+closed test-side 5535092 (retention pass vs zero-patience opens) · FOREGROUND-LOCK-1 795f82d
+(half-second open patience; Busy + holder-named message; 20 raced calls clean; flaky binaries
+0/10) · CHURN-SHALLOW-1 f7c57aa (shallow/single-commit history stated; the either/or hedge
+dead) · MODULE-EDGES-1 2db7335 (the acid test: cross-module edges rendered on modules-list +
+orient line 2; one-read count — exposed the old count as wrong, 14 vs 29 true).
+
+Remaining tail: ZEROSTATE-SCOPE-1, FUNNEL-VOCAB-1, CHECK-LANG-SPLIT-1, SURFACES-DEDUP-1,
+FIND-TEST-RANK-2 (verify the is_test fact on in-crate test modules first), DEPS-SELF-1,
+RESOURCE-CPP-INERT-1, TRUST-CEILING-1, governance polish, docs residual-bucket taxonomy.
+
 ## Usefulness audit v0.13.0 — the fix queue (2026-09-01)
 
 Post-release audit of v0.13.0 (all nine v0.11.0 fixes field-verified, no regressions; matrix
