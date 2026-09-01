@@ -5407,7 +5407,7 @@ impl ServiceDispatcher {
         }
 
         // Discover documentation inventory (live filesystem, not semantic_facts)
-        let inventory = match repo_graph_doc_facts::discover_doc_inventory(&repo_path, true) {
+        let mut inventory = match repo_graph_doc_facts::discover_doc_inventory(&repo_path, true) {
             Ok(r) => r,
             Err(e) => {
                 return DispatchResult::error(
@@ -5417,14 +5417,33 @@ impl ServiceDispatcher {
             }
         };
 
+        // DOCS-LIST-2 §2: overlay the `vendored` kind using the index's EXISTING vendor
+        // classification fact (`is_vendored_path` / `VENDORED_SEGMENTS`, quality/support.rs) — the
+        // same predicate `hotspots --exclude-vendored` reads, never a second definition. This is a
+        // DAEMON-layer overlay (not in `doc-facts`) because the vendor fact lives in daemon-runtime
+        // and the dependency rule forbids `doc-facts`, a lower crate, from reaching up to it.
+        // Vendored takes PRECEDENCE over every content/location kind: a vendored release-note or
+        // license is still demoted as vendored (the reader's docs are what the headline is for), and
+        // the overlay CLEARS `release_family` on the overridden entry so the DTO invariant holds
+        // (review-3 finding 2). Extracted to `docs_list_overlay` for a unit-test seam.
+        // `counts_by_kind` / `generated_count` are recomputed AFTER the overlay so the daemon's
+        // complete JSON stays internally consistent; the human-render demotion is presentation's job.
+        crate::docs_list_overlay::overlay_vendored_kind(&mut inventory.entries);
+        let mut counts_by_kind: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for entry in &inventory.entries {
+            *counts_by_kind.entry(entry.kind.clone()).or_insert(0) += 1;
+        }
+        let generated_count = inventory.entries.iter().filter(|e| e.generated).count();
+
         let mut payload = serde_json::json!({
             "command": "docs list",
             "repo": repo_uid,
             "repo_path": repo.root_path,
             "entries": inventory.entries,
             "count": inventory.entries.len(),
-            "counts_by_kind": inventory.counts_by_kind,
-            "generated_count": inventory.generated_count
+            "counts_by_kind": counts_by_kind,
+            "generated_count": generated_count
         });
         // SELF-POLLUTION-1 / operator RULING 3: surface sidecar-named files we could
         // not read to check the marker ("unreadable" — UNKNOWN, admitted but not

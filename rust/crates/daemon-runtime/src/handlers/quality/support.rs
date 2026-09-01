@@ -24,6 +24,13 @@ pub fn resolve_root_path(db_path: &Path, relative_root_path: &str) -> PathBuf {
 }
 
 /// Vendored directory segments (exact match only).
+///
+/// DOCS-LIST-2 (2026-09-01): added `site-packages` / `dist-packages` — the pip/virtualenv install
+/// target, the Python structural equivalent of the `node_modules` already listed here. The list was
+/// authored TS-first and under-covered Python; FRAKTAG's `fraktag-env/lib/pythonX.Y/site-packages/**`
+/// docs proved the gap (they are vendored dependency content, not the reader's code). Shared with
+/// `hotspots --exclude-vendored` (strictly more correct there too: a site-packages hotspot IS
+/// vendored). One-line revert if the reviewer wants the pre-Python list.
 pub const VENDORED_SEGMENTS: &[&str] = &[
     "vendor",
     "vendors",
@@ -32,6 +39,8 @@ pub const VENDORED_SEGMENTS: &[&str] = &[
     "external",
     "deps",
     "node_modules",
+    "site-packages",
+    "dist-packages",
 ];
 
 /// Check if path contains a vendored directory segment.

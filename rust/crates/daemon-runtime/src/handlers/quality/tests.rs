@@ -215,11 +215,57 @@ mod support_tests {
         assert!(is_vendored_path("deps/library.rs"));
     }
 
+    // DOCS-LIST-2: the Python packaging install target is vendored (FRAKTAG's virtualenv docs).
+    #[test]
+    fn is_vendored_path_detects_python_site_packages() {
+        assert!(is_vendored_path(
+            "packages/engine/fraktag-env/lib/python3.11/site-packages/tqdm/README.md"
+        ));
+        assert!(is_vendored_path(
+            "venv/lib/python3.9/dist-packages/foo/x.py"
+        ));
+    }
+
     #[test]
     fn is_vendored_path_rejects_non_vendored() {
         assert!(!is_vendored_path("src/lib.js"));
         assert!(!is_vendored_path("src/vendors_list.js")); // substring not segment
         assert!(!is_vendored_path("myvendor/lib.js")); // prefix not segment
+    }
+
+    // DOCS-LIST-2 VENDOR-BASIS (operator ruling 2026-09-01, Option A): extending the SHARED
+    // `VENDORED_SEGMENTS` with `site-packages`/`dist-packages` is an INTENTIONAL cross-command change —
+    // `hotspots --exclude-vendored` now excludes a Python virtualenv hotspot exactly as it already
+    // excludes a `node_modules` one (strictly more correct: a site-packages hotspot IS vendored). This
+    // asserts the SECOND consumer's decision (`exclude_vendored && is_vendored_path(path)` — the exact
+    // predicate `handle_hotspots` applies inline) on a site-packages fixture path; the FIRST consumer
+    // (docs demotion) is covered by `presentation::docs` tests. The handler-level end-to-end exclusion
+    // is `#[ignore]`d in `rgr/tests/hotspots_command.rs` (needs a daemon+indexed-repo harness); this
+    // pins the shared fact both consumers read.
+    #[test]
+    fn hotspots_exclude_vendored_drops_python_site_packages_keeps_source() {
+        let exclude_vendored = true;
+        // The site-packages hotspot is excluded; the reader's own source hotspot is kept.
+        assert!(
+            exclude_vendored
+                && is_vendored_path(
+                    "packages/engine/fraktag-env/lib/python3.11/site-packages/tqdm/_utils.py"
+                ),
+            "a site-packages hotspot is excluded under --exclude-vendored"
+        );
+        assert!(
+            !is_vendored_path("packages/engine/src/core/model.py"),
+            "the reader's own source is NOT vendored → kept"
+        );
+        // With the flag OFF the same path is retained (the change is gated on the flag, as before).
+        let exclude_off = false;
+        assert!(
+            !(exclude_off
+                && is_vendored_path(
+                    "packages/engine/fraktag-env/lib/python3.11/site-packages/tqdm/_utils.py"
+                )),
+            "without --exclude-vendored nothing is excluded"
+        );
     }
 
     #[test]

@@ -13,11 +13,25 @@
 //! # Output Contract
 //!
 //! - Deterministic ordering (by path for list)
-//! - Full output, no truncation
-//! - `--json` preserved for machine mode
+//! - **Human render is BOUNDED** (DOCS-LIST-2 §2–3): vendored docs demoted to a stated count line,
+//!   release notes grouped one line per family, and ALL default inventory rows (the family group
+//!   lines + the reader's individual docs) capped together at [`HUMAN_ROW_BUDGET`] with one truthful
+//!   "(+N more — --full)" remainder. `--full` uncaps and lists every doc individually.
+//! - **`--json` stays COMPLETE** — budgets/demotion/grouping are a human-render concern only; the
+//!   machine view carries every entry (`filtered_json_view` only drops rmap's own generated maps,
+//!   and states how many).
 
+use super::{budget_remainder_line, HUMAN_ROW_BUDGET};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+/// DOCS-LIST-2 §2: the daemon-overlaid kind marking a doc as vendored dependency content (set in
+/// `handle_docs_list` from the shared `is_vendored_path` fact). The presentation layer DEMOTES these
+/// from the headline. Kept as a named constant so the daemon's write and this read agree on the token.
+const VENDORED_KIND: &str = "vendored";
+/// DOCS-LIST-2 §2: the location-classified kind for release/changelog docs — GROUPED one line per
+/// family on the human render (django ships 190 under `docs/releases/`). Matches `DocKind::as_str`.
+const RELEASE_NOTES_KIND: &str = "release-notes";
 
 // ── docs list ────────────────────────────────────────────────────────────────
 
@@ -50,6 +64,17 @@ pub struct DocEntry {
     pub kind: String,
     pub generated: bool,
     pub content_hash: String,
+    /// DOCS-LIST-2 §2 (DOC_FACTS_PUBLIC_API review-0, Option B): the CONFIRMED release/changelog
+    /// subtree the daemon attached, or `None` for a non-release doc. STRUCTURAL basis, not location:
+    /// the subtree is confirmed only when its `index.{txt,rst,md}` manifest's INSPECTED CONTENT carries
+    /// a Sphinx `toctree` directive (doc-facts' crate-private `release_notes` module — `is_manifest_
+    /// index_content` + `release_subtree_of`, review-2 item 1). Set ONLY on `release-notes` entries;
+    /// the daemon's vendored overlay CLEARS it when it demotes an entry to `vendored`, so a present
+    /// value always means release-notes. Grouping reads THIS instead of re-deriving the subtree rule in
+    /// `rgr`. `#[serde(default)]` keeps pre-slice / non-release payloads (no key) parsing as `None`, and
+    /// `skip_serializing_if` keeps `filtered_json_view` byte-identical when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_family: Option<String>,
 }
 
 impl DocsListResponse {
@@ -128,12 +153,23 @@ impl DocsListResponse {
 
     /// Render human-readable output.
     ///
-    /// SELF-POLLUTION-1 §3: rmap's OWN `map` sidecars (the `generated` entries) are
-    /// EXCLUDED from the listing by default so `docs list` shows the reader's docs,
-    /// not rmap's exhaust. `include_generated` (the `--include-generated` flag) opts
-    /// them back in; either way the excluded count is stated so nothing is silently
-    /// hidden. `--json` applies the SAME filter (see `filtered_json_view`).
-    pub fn render_human(&self, include_generated: bool) -> String {
+    /// SELF-POLLUTION-1 §3: rmap's OWN `map` sidecars (the `generated` entries) are EXCLUDED from the
+    /// listing by default so `docs list` shows the reader's docs, not rmap's exhaust.
+    /// `include_generated` (the `--include-generated` flag) opts them back in.
+    ///
+    /// DOCS-LIST-2 §2–3 layers three more HUMAN-render concerns on top (the daemon JSON stays
+    /// COMPLETE — budgets/demotion/grouping are a human concern only):
+    /// - **vendored demoted** — entries the daemon marked `vendored` (from the shared vendor fact) are
+    ///   dropped from the headline + the listing, replaced by one honest "N vendored docs (excluded)"
+    ///   line. Never silently hidden; the complete set rides `--json`.
+    /// - **release-notes grouped** — `release-notes` entries collapse to ONE line per family subtree
+    ///   ("<repo> release notes: N files under docs/releases/ — --full to list"), so django's 190
+    ///   release files do not flood the surface. `--full` lists them individually.
+    /// - **budget** — ALL default display rows (the release-family group lines AND the reader's
+    ///   individual docs) cap TOGETHER at [`HUMAN_ROW_BUDGET`] with one truthful "(+N more — --full)"
+    ///   remainder (review-2 item 2: many release families can never emit unbounded group lines);
+    ///   `--full` uncaps and lists every doc individually.
+    pub fn render_human(&self, include_generated: bool, full: bool) -> String {
         let mut out = String::new();
 
         // Header
@@ -141,13 +177,26 @@ impl DocsListResponse {
 
         let (visible, excluded_generated) = self.visible_view(include_generated);
 
-        // Count line (visible set).
-        let doc_word = if visible.len() == 1 {
+        // DOCS-LIST-2 §2: partition the visible set — vendored (demoted from the headline),
+        // release-notes (grouped), and the rest (the reader's docs the headline is for).
+        let vendored: Vec<&DocEntry> = visible.iter().filter(|e| e.kind == VENDORED_KIND).collect();
+        let release: Vec<&DocEntry> = visible
+            .iter()
+            .filter(|e| e.kind == RELEASE_NOTES_KIND)
+            .collect();
+        let others: Vec<&DocEntry> = visible
+            .iter()
+            .filter(|e| e.kind != VENDORED_KIND && e.kind != RELEASE_NOTES_KIND)
+            .collect();
+
+        // Headline count = the reader's docs (vendored excluded; release-notes counted, grouped).
+        let headline_count = others.len() + release.len();
+        let doc_word = if headline_count == 1 {
             "document"
         } else {
             "documents"
         };
-        out.push_str(&format!("{} {}\n", visible.len(), doc_word));
+        out.push_str(&format!("{} {}\n", headline_count, doc_word));
 
         // What we ignored, said out loud (honesty — never silently hidden).
         if excluded_generated > 0 {
@@ -162,17 +211,30 @@ impl DocsListResponse {
             ));
         }
 
+        // DOCS-LIST-2 §2: vendored dependency docs demoted from the headline — stated, never hidden
+        // (the complete set is in `--json`). Basis: the shared vendor-path fact (node_modules /
+        // site-packages / vendor / …), applied by the daemon.
+        if !vendored.is_empty() {
+            let doc_word = if vendored.len() == 1 { "doc" } else { "docs" };
+            // Contract form (DOCS-LIST-2 §2.2, review-0 F5): "+N vendored docs (excluded)".
+            out.push_str(&format!(
+                "+{} vendored {} (excluded; third-party/dependency directories — see --json for the full set)\n",
+                vendored.len(),
+                doc_word
+            ));
+        }
+
         // Sidecar-named files the daemon could not read to check the marker: admitted
         // (shown, conservative) but UNKNOWN — said out loud, never silently asserted
-        // authored (operator RULING 3). Surfaced regardless of the exclusion above.
+        // authored (operator RULING 3). Surfaced regardless of the exclusions above.
         if self.unreadable > 0 {
             out.push_str(&format!(
-                "+{} unreadable, counted (sidecar-named; rmap marker unverifiable)\n",
+                "+{} unreadable, counted (content unreadable — kind refinement unverifiable)\n",
                 self.unreadable
             ));
         }
 
-        if visible.is_empty() {
+        if headline_count == 0 {
             if excluded_generated > 0 {
                 // Docs DO exist — they are all rmap's own maps, now hidden. Do NOT
                 // claim "no documentation": that would misrepresent the repo.
@@ -180,15 +242,22 @@ impl DocsListResponse {
                     "\nhint: all documentation here is tool-generated maps; \
                      use --include-generated to list it.\n",
                 );
+            } else if !vendored.is_empty() {
+                // Docs exist but are all vendored dependency docs — do not claim "no documentation".
+                out.push_str(
+                    "\nhint: all documentation here is vendored dependency docs; \
+                     see --json for the full set.\n",
+                );
             } else {
                 out.push_str("\nhint: no documentation files detected in this repository.\n");
             }
             return out;
         }
 
-        // By kind breakdown over the VISIBLE set (sorted by count desc, then kind asc).
+        // By kind breakdown over the reader's docs (vendored excluded — it has its own line above;
+        // release-notes counted here so the reader sees the family exists).
         let mut counts_by_kind: BTreeMap<&str, usize> = BTreeMap::new();
-        for e in &visible {
+        for e in others.iter().chain(release.iter()) {
             *counts_by_kind.entry(e.kind.as_str()).or_insert(0) += 1;
         }
         if !counts_by_kind.is_empty() {
@@ -200,20 +269,71 @@ impl DocsListResponse {
             }
         }
 
-        // Generated count among the VISIBLE set (only when opted in — else 0).
-        let visible_generated = visible.iter().filter(|e| e.generated).count();
+        // Generated count among the reader's docs (only when opted in — else 0).
+        let visible_generated = others.iter().filter(|e| e.generated).count();
         if visible_generated > 0 {
             out.push_str(&format!("\n{} generated\n", visible_generated));
         }
 
-        // Entry list.
+        // DOCS-LIST-2 §2–3: the default inventory listing. Under `--full` every doc is listed flat
+        // (release notes folded in), uncapped. By default the display rows are (1) one grouped line
+        // per release family — the family comes from the daemon-attached `release_family` field
+        // (doc-facts' single manifest-confirmed source), so grouping and classification agree without
+        // a cross-crate call — followed by (2) the reader's individual non-release docs. Review-2
+        // item 2: ALL default rows (family lines + entries) are budgeted TOGETHER to
+        // [`HUMAN_ROW_BUDGET`] with ONE truthful remainder, so a repo with many release families can
+        // never emit unbounded group lines. `--full` renders the COMPLETE set; `--json` always does.
         out.push('\n');
-        for entry in &visible {
-            let generated_marker = if entry.generated { "  [generated]" } else { "" };
-            out.push_str(&format!(
-                "  {}  {}{}\n",
-                entry.path, entry.kind, generated_marker
-            ));
+        if full {
+            // Every doc, listed individually (release notes are not grouped under --full), uncapped.
+            let mut listed: Vec<&DocEntry> = others.iter().chain(release.iter()).copied().collect();
+            listed.sort_by(|a, b| a.path.cmp(&b.path));
+            for entry in &listed {
+                let generated_marker = if entry.generated { "  [generated]" } else { "" };
+                out.push_str(&format!(
+                    "  {}  {}{}\n",
+                    entry.path, entry.kind, generated_marker
+                ));
+            }
+        } else {
+            // Build ALL default display rows, then apply ONE combined budget. Release-family group
+            // lines come first (each stands in for a whole family), then the reader's individual docs
+            // sorted by path.
+            let mut rows: Vec<String> = Vec::new();
+
+            let mut by_family: BTreeMap<&str, usize> = BTreeMap::new();
+            for e in &release {
+                // A release-notes entry always carries its release subtree (that is why it is one);
+                // fall back to the whole path only if the daemon omitted it (never silently mislabel —
+                // show the path rather than an empty family).
+                let family = e.release_family.as_deref().unwrap_or(e.path.as_str());
+                *by_family.entry(family).or_insert(0) += 1;
+            }
+            for (family, n) in &by_family {
+                let file_word = if *n == 1 { "file" } else { "files" };
+                rows.push(format!(
+                    "  {} release notes: {} {} under {}/ — --full to list\n",
+                    self.repo, n, file_word, family
+                ));
+            }
+
+            let mut others_sorted = others.clone();
+            others_sorted.sort_by(|a, b| a.path.cmp(&b.path));
+            for entry in &others_sorted {
+                let generated_marker = if entry.generated { "  [generated]" } else { "" };
+                rows.push(format!(
+                    "  {}  {}{}\n",
+                    entry.path, entry.kind, generated_marker
+                ));
+            }
+
+            let shown = rows.len().min(HUMAN_ROW_BUDGET);
+            for row in rows.iter().take(shown) {
+                out.push_str(row);
+            }
+            if let Some(remainder) = budget_remainder_line(rows.len(), shown) {
+                out.push_str(&remainder);
+            }
         }
 
         // Hint

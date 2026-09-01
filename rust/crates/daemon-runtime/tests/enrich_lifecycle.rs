@@ -145,6 +145,28 @@ fn write_multi_eligible(repo_dir: &Path) {
     .unwrap();
 }
 
+/// DOCS-LIST-2 §2.4 fixture: a Python-DOMINANT repo (12 `.py` files) with ONE incidental TypeScript
+/// file carrying an eligible untyped `x.method()` edge (~7.7% TS, below the 10% materiality gate). The
+/// doctor skip-materiality gate must DROP the incidental TS skip and speak Python's no-semantic-path
+/// sentence — never `npm i -D typescript`. This is django's measured shape in miniature (2904 Python /
+/// 111 JavaScript), reproduced hermetically so the gate runs through the REAL pass.
+fn write_python_dominant_with_incidental_ts(repo_dir: &Path) {
+    std::fs::create_dir_all(repo_dir).unwrap();
+    for i in 0..12 {
+        std::fs::write(
+            repo_dir.join(format!("mod_{i}.py")),
+            format!("def f_{i}(x):\n    return x + {i}\n"),
+        )
+        .unwrap();
+    }
+    // The lone incidental TypeScript file with an eligible edge (untyped receiver method call).
+    std::fs::write(
+        repo_dir.join("widget.ts"),
+        "export function run(x): void {\n    x.doThing();\n}\n",
+    )
+    .unwrap();
+}
+
 /// TSSERVER-LOCATE-1 mixed-availability fixture: TWO TypeScript project contexts, each an owning
 /// `tsconfig.json` (explicit `include` so ownership routes the file to a tsserver session instead of
 /// failing it Unowned) plus a source file with untyped `x.method()` calls (the eligible
@@ -1110,5 +1132,99 @@ fn mixed_context_available_enriches_missing_is_skipped_and_named() {
     assert_eq!(
         app_after, 0,
         "the enriched context's edges carry the enrichment marker now → no longer eligible (was {app_before})"
+    );
+}
+
+// ── DOCS-LIST-2 §2.4 (review-1 item 3) — doctor never prescribes another ecosystem's remedy ────────
+//
+// The END-TO-END proof for the enrichment-skip materiality gate, through the REAL `run_enrich_pass` +
+// `EnrichmentReport::to_json()` doctor path (the shape `rmap doctor` reads). A materially-Python repo
+// with ONE incidental TypeScript eligible edge, TS toolchain forced absent: the raw pass skips TS with
+// `npm i -D typescript`; the gate reads the (Python-dominant) language breakdown, DROPS that immaterial
+// skip, and states Python's no-semantic-path sentence instead. The pure-seam
+// `enrichment_skip_gate::tests` prove the transform in isolation (incl. the read-failure branch); THIS
+// proves it fires through the real pass against a real indexed DB — the coverage review-1 item 3
+// required (the build-1 live proof could not, because the host's `tsserver` on PATH meant django's TS
+// never actually skipped). Hermetic + host-independent: `available = |_, _| false` vetoes the toolchain
+// so no resolver ever starts, regardless of what the host has installed.
+#[test]
+fn python_dominant_repo_doctor_skip_names_python_never_npm() {
+    let _serial = serial_guard();
+    set_overrides(false); // drive the ONE pass directly; no background auto pass competes
+
+    let (dispatcher, _state, _root) = isolated();
+    let repo_root = tempdir().unwrap();
+    let repo_dir = repo_root.path().join("repo");
+    write_python_dominant_with_incidental_ts(&repo_dir);
+    let indexed = index(&dispatcher, "idx", &repo_dir);
+    let db_path = indexed["db_path"].as_str().unwrap().to_string();
+    let repo_uid = indexed["repo_uid"].as_str().unwrap().to_string();
+
+    // Precondition: the fixture really produced a TypeScript eligible edge (else the skip — and thus
+    // the gate that drops it — is vacuous).
+    let ts_eligible = {
+        let storage = StorageConnection::open(&db_path).unwrap();
+        let snap = storage.get_latest_snapshot(&repo_uid).unwrap().unwrap();
+        storage
+            .query_eligible_edges(&EligibilityQuery::new(&snap.snapshot_uid))
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.language == EnrichmentLanguage::TypeScript)
+            .count()
+    };
+    assert!(
+        ts_eligible > 0,
+        "fixture must produce >=1 TypeScript eligible edge for the skip to mean something (got {ts_eligible})"
+    );
+
+    // TS toolchain forced absent → the raw pass skips TypeScript with `npm i -D typescript`; the gate
+    // then reads the Python-dominant breakdown and drops it, stating Python's no-path sentence.
+    let outcome = run_enrich_pass(
+        Path::new(&db_path),
+        &repo_uid,
+        &repo_dir,
+        None,
+        &|_, _| false,
+        &|| false,
+    )
+    .expect("a missing toolchain is an honest skip, not a pass failure");
+
+    // (a) No `npm` — and no TypeScript entry — survives on a materially-Python repo.
+    assert!(
+        !outcome.skipped.iter().any(|s| s.reason.contains("npm")),
+        "doctor must not prescribe npm on a Python repo: {:?}",
+        outcome.skipped
+    );
+    assert!(
+        !outcome.skipped.iter().any(|s| s.language == "typescript"),
+        "the incidental (~7.7%) TypeScript skip is dropped as immaterial: {:?}",
+        outcome.skipped
+    );
+    // (b) The dominant material language's honest no-semantic-path sentence stands in its place.
+    assert!(
+        outcome.skipped.iter().any(|s| s.language == "Python"
+            && s.reason
+                .contains("no semantic-resolution path exists for Python")),
+        "doctor states Python's no-semantic-path sentence: {:?}",
+        outcome.skipped
+    );
+
+    // (c) The doctor-facing JSON (`EnrichmentReport::to_json`) preserves the gated result exactly.
+    let doctor_json = EnrichmentReport::new("repo-display".to_string(), outcome.clone()).to_json();
+    let skipped_json = doctor_json["skipped"].as_array().unwrap();
+    assert!(
+        skipped_json
+            .iter()
+            .all(|s| !s["reason"].as_str().unwrap_or("").contains("npm")),
+        "the doctor JSON is free of npm advice: {doctor_json}"
+    );
+    assert!(
+        skipped_json.iter().any(|s| {
+            s["language"] == "Python"
+                && s["reason"]
+                    .as_str()
+                    .is_some_and(|r| r.contains("no semantic-resolution path exists for Python"))
+        }),
+        "the doctor JSON states Python's no-semantic-path sentence: {doctor_json}"
     );
 }

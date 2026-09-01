@@ -60,7 +60,9 @@ pub mod dispatch;
 // two-gate contention), spawned after every successful index/refresh — mirrors `retention_pass`.
 mod boundaries_list_read; // HTTP-SURFACE-COHERENCE-1 §2.4: boundaries-list response assembly (crate-private)
 mod boundaries_summary_read; // HTTP-SURFACE-COHERENCE-1 §2.3: summary counts reconciled to the union (crate-private)
+mod docs_list_overlay; // DOCS-LIST-2 §2: docs_list vendored-kind overlay (crate-private; test seam per review-3 finding 2)
 pub mod enrich_pass;
+mod enrichment_skip_gate; // DOCS-LIST-2 §2.4: doctor enrichment-skip materiality gate (extracted per review-1 item 2)
 pub mod explain_coherence;
 pub mod explain_lg_identity;
 pub mod explain_lg_serve;

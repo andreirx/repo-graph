@@ -24,6 +24,7 @@
 pub mod classification;
 pub mod discovery;
 pub mod extractors;
+pub(crate) mod release_notes; // DOCS-LIST-2 §2: `release-notes` STRUCTURAL subtree confirmation (extracted per review-1 item 2)
 pub mod self_generated;
 pub mod types;
 
@@ -66,6 +67,15 @@ pub struct DocInventoryEntry {
     /// SHA-256 hash of content (optional, computed on demand).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    /// DOCS-LIST-2 §2 (DOC_FACTS_PUBLIC_API review-0, Option B): the CONFIRMED release/changelog
+    /// subtree this doc lives under (e.g. `docs/releases`), or `None` for a non-release doc. Set ONLY
+    /// on `release-notes` entries (STRUCTURAL basis — the subtree carries a manifest index, review-1
+    /// item 1), from the crate-private [`release_notes`] module, so the renderer GROUPS release notes
+    /// by family WITHOUT re-deriving the subtree rule across crates. ADDITIVE + optional:
+    /// `skip_serializing_if = None` keeps the `docs list` JSON byte-identical for every non-release
+    /// doc (and every pre-slice consumer).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_family: Option<String>,
 }
 
 /// Result of documentation inventory discovery.
@@ -77,13 +87,22 @@ pub struct DocInventoryResult {
     pub counts_by_kind: HashMap<String, usize>,
     /// Generated docs encountered.
     pub generated_count: usize,
-    /// Sidecar-NAMED entries (`MAP.md` / `*_MAP.md`) that could NOT be read to check
-    /// the `rmap map` marker (a genuine read failure — permission/IO — NOT a
-    /// `NotFound`). Such an entry is ADMITTED to the inventory (conservative: never
-    /// silently excluded) and left `generated = false` — but we do NOT assert it is
-    /// authored: it is UNKNOWN, counted here so the surface can say so out loud
-    /// ("+N unreadable, counted"), never a silent "not generated" (operator RULING 3,
-    /// honesty rule #1). ⊆ the entry count.
+    /// Entries whose CONTENT could not be read (a genuine read failure — permission/IO — NOT a
+    /// `NotFound`), so a CONTENT-BASED kind refinement is UNVERIFIABLE. Two disjoint contributors,
+    /// one honest meaning ("we could not read N docs, so their content-based classification is
+    /// unknown"):
+    /// - **sidecar-NAMED** (`MAP.md` / `*_MAP.md`) whose `rmap map` generated-marker could not be
+    ///   read (counted in the sidecar pass, works even when `compute_hashes == false`);
+    /// - **non-sidecar** docs whose content read failed during the hashing pass (DOCS-LIST-2 review-0
+    ///   F4), so the `license` marker check below could not run — a failed license read must NOT be
+    ///   silently indistinguishable from "no license marker" (honesty rule #1). Counted only when
+    ///   `compute_hashes` (the only path that reads non-sidecar content).
+    ///
+    /// Such an entry is ADMITTED to the inventory (conservative: never silently excluded) and left at
+    /// its location/name-based kind + `generated = false` — but we do NOT assert authorship OR
+    /// "not a license": it is UNKNOWN, counted here so the surface can say so out loud
+    /// ("+N unreadable, counted"), never a silent claim (operator RULING 3, honesty rule #1). ⊆ the
+    /// entry count.
     pub unreadable_count: usize,
 }
 
@@ -134,16 +153,34 @@ pub fn discover_doc_inventory(
         .filter(|d| !is_env_path(&d.relative_path))
         .collect();
 
-    // Optionally read and hash content (for staleness detection)
+    // Count of docs whose content could not be read → content-based kind refinement UNVERIFIABLE.
+    // The sidecar generated-marker pass below adds to it too (disjoint sets, no double count).
+    let mut unreadable_count = 0usize;
+
+    // Optionally read and hash content (for staleness detection). DOCS-LIST-2 review-0 F4: do NOT
+    // discard the fallible read (`let _ = …`) — its result FEEDS the `license` content classification
+    // below. Only `NotFound` is genuine absence (silent); any other IO error means the file EXISTS
+    // but is unreadable, so the license-marker check cannot run and the doc must be surfaced as
+    // UNKNOWN, never silently treated as "no license marker" (honesty rule #1). Sidecar-named docs
+    // are counted by the sidecar pass instead (they get a marker check there), so we exclude them
+    // here to keep the two contributors disjoint.
     if compute_hashes {
         for doc in &mut doc_files {
-            let _ = read_and_hash(doc);
+            match read_and_hash(doc) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    if !self_generated::has_map_sidecar_name(&doc.relative_path) {
+                        unreadable_count += 1;
+                    }
+                }
+            }
         }
     }
 
     // SELF-POLLUTION-1 §2.1 + FIXTURE-POLLUTION-1 §2.4: the `generated` flag is
     // EVIDENCE-based, shared with drift + seed via `is_self_generated`. For a
-    // sidecar-NAMED file we read the file's COMPLETE content (`sidecar_content`) and
+    // sidecar-NAMED file we read the file's COMPLETE content (`read_doc_content`) and
     // classify generated by EITHER stamped marker (`sidecar_is_generated`): the current
     // `rmap map` first-line HTML marker (rmap's own exhaust) OR any generator's YAML
     // frontmatter generation marker (`generated_by` / `generated: true` /
@@ -152,10 +189,9 @@ pub fn discover_doc_inventory(
     // `generated = false` and is NOT excluded. A read that FAILS (permission/IO, not
     // `NotFound`) is UNKNOWN — admitted (conservative) but counted in `unreadable_count`,
     // never silently asserted authored (operator RULING 3).
-    let mut unreadable_count = 0usize;
     for doc in &mut doc_files {
         if self_generated::has_map_sidecar_name(&doc.relative_path) {
-            match sidecar_content(doc) {
+            match read_doc_content(doc) {
                 MarkerRead::Content(content) => {
                     doc.generated = sidecar_is_generated(&doc.relative_path, &content);
                 }
@@ -176,6 +212,62 @@ pub fn discover_doc_inventory(
         }
     }
 
+    // DOCS-LIST-2 §2 (review-1 item 1 + review-2 item 1): the `release-notes` kind's STRUCTURAL basis.
+    // A doc under a release-family-named subtree is `release-notes` ONLY when that subtree's own
+    // `index.{txt,rst,md}` manifest is present in THIS doc set AND that index's CONTENT is INSPECTED
+    // and carries a Sphinx `toctree` directive — the manifest relationship that makes it a real
+    // documentation section. The file's NAME (directory named `releases`, file named `index.*`) is not
+    // evidence (review-2 item 1); the toctree directive is. A release-named directory whose index lacks
+    // a toctree — or that has no index — keeps `architecture` (no deterministic basis → old kind).
+    //
+    // The candidate index's CONTENT is consulted here only when the `compute_hashes` pass already
+    // loaded it (the `docs list` path) — the SAME no-read discipline the `license` kind uses below
+    // (review-4 item 1: an on-demand read on the `compute_hashes == false` path silently swallowed
+    // `Unreadable` as "not confirmed", leaving docs `architecture` with no unknown rendered — the
+    // zero-collapse class). With no loaded content there is NO BASIS, so the kind is unchanged
+    // ("no basis keeps the old kind"); a genuine read failure at `compute_hashes == true` is already
+    // surfaced via `unreadable_count` (the `read_and_hash` pass counted it), never double-counted.
+    // Determined over the whole doc set because a single path cannot see the manifest
+    // (why `classify_doc_kind` does not emit this kind). Precedence: upgrades only the catch-all kinds
+    // (`architecture` / `config`); a `readme` / `map` under the subtree stays intact.
+    let mut confirmed_release_subtrees: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for doc in &doc_files {
+        if let Some(dir) = release_notes::manifest_index_subtree(&doc.relative_path) {
+            if let Some(content) = &doc.content {
+                if release_notes::is_manifest_index_content(content) {
+                    confirmed_release_subtrees.insert(dir.to_string());
+                }
+            }
+        }
+    }
+    for doc in &mut doc_files {
+        if matches!(doc.kind, DocKind::Architecture | DocKind::Config)
+            && release_notes::release_subtree_of(&doc.relative_path, &confirmed_release_subtrees)
+                .is_some()
+        {
+            doc.kind = DocKind::ReleaseNotes;
+        }
+    }
+
+    // DOCS-LIST-2 §2: the `license` kind is a CONTENT basis (SPDX / license-header marker), so it
+    // is decided HERE where content is in hand (the `compute_hashes` pass above already read it),
+    // never from the `LICENSE` filename. Precedence: it upgrades only the catch-all kinds
+    // (`architecture` / `config`) — a `readme`, `map`, or `release-notes` classification (each a
+    // stronger, location/structure-stable signal) is left intact (a release note already moved off
+    // `architecture` above, so it is never re-labeled `license`). When content is absent
+    // (compute_hashes == false) there is no basis, so the kind is unchanged — "no basis keeps the old
+    // kind" (STANDING HONESTY RULE). This never re-reads: it consults `doc.content` already loaded.
+    for doc in &mut doc_files {
+        if matches!(doc.kind, DocKind::Architecture | DocKind::Config) {
+            if let Some(content) = &doc.content {
+                if classification::has_license_marker(content) {
+                    doc.kind = DocKind::License;
+                }
+            }
+        }
+    }
+
     // Build entries
     let entries: Vec<DocInventoryEntry> = doc_files
         .iter()
@@ -184,6 +276,15 @@ pub fn discover_doc_inventory(
             kind: f.kind.as_str().to_string(),
             generated: f.generated,
             content_hash: f.content_hash.clone(),
+            // DOCS-LIST-2 §2: attach the CONFIRMED release subtree so the renderer groups release
+            // notes by family from this DTO field, not a cross-crate call. Set only on `release-notes`
+            // entries (`None` otherwise, skipped in JSON). Single source of truth = `release_notes`.
+            release_family: (f.kind == DocKind::ReleaseNotes)
+                .then(|| {
+                    release_notes::release_subtree_of(&f.relative_path, &confirmed_release_subtrees)
+                })
+                .flatten()
+                .map(str::to_string),
         })
         .collect();
 
@@ -343,13 +444,15 @@ fn sidecar_is_generated(relative_path: &str, content: &str) -> bool {
     )
 }
 
-/// A sidecar candidate's full content, for the generated-marker check. Uses already-
-/// loaded content when present (hash pass); otherwise reads the file, distinguishing
-/// genuinely-absent (`NotFound`) from unreadable (permission/IO). The `NotFound`-vs-
-/// unreadable split is the honesty distinction operator RULING 3 requires (a bare
-/// `.ok()`/`Err => None` collapse would erase it and silently assert "not generated").
-/// Bounded to sidecar-NAMED candidates only (a large doc tree is never fully read here).
-fn sidecar_content(doc: &DocFile) -> MarkerRead {
+/// A single doc's full content, for a content-marker check (renamed from `sidecar_content` —
+/// review-2 broadened it to a SECOND caller, the release-notes manifest inspection, so the old
+/// `sidecar_` name would mislead). Uses already-loaded content when present (the hash pass);
+/// otherwise reads the file, distinguishing genuinely-absent (`NotFound`) from unreadable
+/// (permission/IO). The `NotFound`-vs-unreadable split is the honesty distinction operator RULING 3
+/// requires (a bare `.ok()`/`Err => None` collapse would erase it and silently assert absence).
+/// Each caller gates it to a BOUNDED candidate set (sidecar-NAMED files, or release-named
+/// `<dir>/index.*` manifests), so a large doc tree is never fully read here.
+fn read_doc_content(doc: &DocFile) -> MarkerRead {
     if let Some(content) = &doc.content {
         return MarkerRead::Content(content.clone());
     }

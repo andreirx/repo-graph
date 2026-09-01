@@ -312,6 +312,190 @@ fn inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated
 }
 
 #[test]
+fn inventory_upgrades_license_from_content_marker_not_name() {
+    // DOCS-LIST-2 §2: a doc under the architecture catch-all whose CONTENT carries a license marker
+    // is re-kinded `license` (named, not folded into `architecture`) — a CONTENT basis, needing the
+    // hashing pass (`compute_hashes = true`). A LICENSE-named file with no marker content is NOT
+    // upgraded (classify from structural evidence, never the name).
+    let dir = tempdir().unwrap();
+    create_file(
+        dir.path(),
+        "docs/legal/terms.txt",
+        "MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy",
+    );
+    create_file(
+        dir.path(),
+        "docs/NOTLICENSE.txt",
+        "# Just a guide, no license text here.\n",
+    );
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+    let find = |p: &str| {
+        result
+            .entries
+            .iter()
+            .find(|e| e.path == p)
+            .unwrap_or_else(|| panic!("{p} present"))
+    };
+    assert_eq!(
+        find("docs/legal/terms.txt").kind,
+        "license",
+        "marker → license"
+    );
+    assert_eq!(
+        find("docs/NOTLICENSE.txt").kind,
+        "architecture",
+        "no marker content → NOT license by name"
+    );
+    assert_eq!(
+        result.unreadable_count, 0,
+        "all content read → nothing unknown"
+    );
+}
+
+#[test]
+fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_name() {
+    // DOCS-LIST-2 §2 (review-1 item 1 + review-2 item 1): the `release-notes` kind's STRUCTURAL basis.
+    // Three repos with the SAME `docs/releases/1.4.x.txt` path differ only by the subtree's manifest
+    // evidence:
+    //   (A) index.txt whose CONTENT carries a `.. toctree::` directive → release-notes (grouped);
+    //   (B) index.txt present but its CONTENT is just a heading (NO toctree) → stays `architecture`
+    //       (review-2 item 1: a file merely NAMED index.* is not structural evidence);
+    //   (C) no index.* at all → stays `architecture`.
+    // `compute_hashes == false` throughout, proving the BOUNDED on-demand manifest read (the orient
+    // path) confirms without reading the whole tree — the file's NAME is never the basis.
+    let find = |r: &DocInventoryResult, p: &str| {
+        r.entries
+            .iter()
+            .find(|e| e.path == p)
+            .unwrap_or_else(|| panic!("{p} present"))
+            .clone()
+    };
+
+    // (A) A genuine Sphinx manifest: the index enumerates releases with a toctree directive.
+    let with_toctree = tempdir().unwrap();
+    create_file(
+        with_toctree.path(),
+        "docs/releases/index.txt",
+        "Release notes\n=============\n\n.. toctree::\n   :maxdepth: 1\n\n   1.4.x\n",
+    );
+    create_file(
+        with_toctree.path(),
+        "docs/releases/1.4.x.txt",
+        "Django 1.4 release notes\n",
+    );
+    create_file(with_toctree.path(), "docs/design.md", "# Architecture\n");
+    // review-4 item 1: the `compute_hashes == false` (orient) path performs NO on-demand
+    // manifest read — no loaded content is NO BASIS, so the kind stays `architecture` (the
+    // license-kind discipline). Confirmation happens only on the content-loading path below.
+    let unconfirmed = discover_doc_inventory(with_toctree.path(), false).unwrap();
+    let note = find(&unconfirmed, "docs/releases/1.4.x.txt");
+    assert_eq!(
+        note.kind, "architecture",
+        "no loaded content (compute_hashes=false) → no basis → old kind"
+    );
+    let confirmed = discover_doc_inventory(with_toctree.path(), true).unwrap();
+    let note = find(&confirmed, "docs/releases/1.4.x.txt");
+    assert_eq!(
+        note.kind, "release-notes",
+        "inspected toctree manifest present (content loaded) → release-notes"
+    );
+    assert_eq!(
+        note.release_family.as_deref(),
+        Some("docs/releases"),
+        "the grouping family is the confirmed subtree"
+    );
+    assert_eq!(
+        find(&confirmed, "docs/design.md").kind,
+        "architecture",
+        "a non-release doc is untouched"
+    );
+
+    // (B) review-2 item 1 negative: an index.* WITHOUT a toctree directive is not a manifest — the
+    // release-named dir + a file named index.txt is still just NAMES. The doc keeps `architecture`.
+    let non_manifest_index = tempdir().unwrap();
+    create_file(
+        non_manifest_index.path(),
+        "docs/releases/index.txt",
+        "Releases\n========\n",
+    );
+    create_file(
+        non_manifest_index.path(),
+        "docs/releases/1.4.x.txt",
+        "Django 1.4 release notes\n",
+    );
+    let unconfirmed_by_content = discover_doc_inventory(non_manifest_index.path(), false).unwrap();
+    let not_a_note = find(&unconfirmed_by_content, "docs/releases/1.4.x.txt");
+    assert_eq!(
+        not_a_note.kind, "architecture",
+        "index.* without a toctree directive → NOT release-notes (name is not evidence)"
+    );
+    assert_eq!(
+        not_a_note.release_family, None,
+        "unconfirmed by content → no grouping family"
+    );
+
+    // (C) No manifest index in the subtree at all → structural evidence absent → keeps architecture.
+    let no_index = tempdir().unwrap();
+    create_file(
+        no_index.path(),
+        "docs/releases/1.4.x.txt",
+        "Django 1.4 release notes\n",
+    );
+    let unconfirmed = discover_doc_inventory(no_index.path(), false).unwrap();
+    let bare = find(&unconfirmed, "docs/releases/1.4.x.txt");
+    assert_eq!(
+        bare.kind, "architecture",
+        "no manifest index → release-named dir alone is NOT release-notes"
+    );
+    assert_eq!(
+        bare.release_family, None,
+        "unconfirmed → no grouping family"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn inventory_unreadable_non_sidecar_doc_is_counted_never_silently_no_license() {
+    // DOCS-LIST-2 review-0 F4: a NON-sidecar doc whose content read FAILS (permission denied — a
+    // genuine failure, NOT `NotFound`) leaves the CONTENT-based `license` classification UNVERIFIABLE.
+    // It must be ADMITTED (kept at its location kind) but COUNTED as unreadable — never silently
+    // treated as "no license marker" (honesty rule #1). Only `compute_hashes` reads its content.
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    create_file(dir.path(), "README.md", "# Readme");
+    let blocked = dir.path().join("docs/legal/LICENSE.txt");
+    create_file(
+        dir.path(),
+        "docs/legal/LICENSE.txt",
+        "Apache License\nVersion 2.0",
+    );
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+
+    // Restore permissions so tempdir cleanup can remove the file.
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let blocked_entry = result
+        .entries
+        .iter()
+        .find(|e| e.path == "docs/legal/LICENSE.txt")
+        .expect("unreadable doc still admitted to inventory");
+    // Admitted at its location kind (architecture), NOT silently classified license OR "definitely
+    // not a license" — the read failure is surfaced through the count instead.
+    assert_eq!(
+        blocked_entry.kind, "architecture",
+        "unreadable → kept at location kind, not a fabricated license claim"
+    );
+    assert_eq!(
+        result.unreadable_count, 1,
+        "the unreadable non-sidecar doc is counted UNKNOWN, never a silent no-marker"
+    );
+}
+
+#[test]
 fn nested_env_file_has_module_scope() {
     // P1 fix: nested .env files use parent directory as subject, not repo root
     let dir = tempdir().unwrap();

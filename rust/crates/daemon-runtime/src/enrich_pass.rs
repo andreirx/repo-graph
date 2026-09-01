@@ -314,7 +314,11 @@ fn ts_missing_context_reason(repo_root: &Path, missing: &[&PathBuf]) -> String {
 }
 
 /// The stable lowercase language token used in the doctor JSON + skip lines.
-fn language_token(lang: EnrichmentLanguage) -> &'static str {
+///
+/// `pub(crate)` so `enrichment_skip_gate::gated_enrichment_skips` (DOCS-LIST-2 §2.4) maps its material
+/// enrichment languages to the SAME token `SkippedLanguage.language` carries — one token vocabulary,
+/// so the doctor materiality gate and the skip lines cannot disagree on a language's spelling.
+pub(crate) fn language_token(lang: EnrichmentLanguage) -> &'static str {
     match lang {
         EnrichmentLanguage::Rust => "rust",
         EnrichmentLanguage::TypeScript => "typescript",
@@ -778,7 +782,7 @@ pub fn run_enrich_pass(
 ) -> Result<EnrichPassOutcome, String> {
     // Resolve the latest READY snapshot + the repo root (the pipeline uses the same root). A fresh
     // connection scoped to this probe; the pipeline opens its own (it takes ownership).
-    let (snapshot_uid, present, ts_contexts) = {
+    let (snapshot_uid, present, ts_contexts, language_counts) = {
         // NO-CREATE (FORGET-REPO-1): auto-enrich probes an EXISTING indexed DB; never create.
         let storage = StorageConnection::open_existing(db_path).map_err(|e| e.to_string())?;
         let snapshot = storage
@@ -822,7 +826,17 @@ pub fn run_enrich_pass(
                 .into_keys()
                 .collect()
         };
-        (snapshot.snapshot_uid, present, ts_contexts)
+        // DOCS-LIST-2 §2.4 (review-0 F3): the repo's per-language file counts, for the doctor skip
+        // materiality gate (see below). Kept as a `Result`, NOT `.ok()`-collapsed: this read CLASSIFIES
+        // the remediation lines, so a failure must render unknown-with-reason (never silently keep the
+        // ungated remedies, which would leak `npm i -D typescript` into a Python repo). The honest
+        // Ok/Err handling lives in `enrichment_skip_gate::gated_enrichment_skips`.
+        let language_counts = repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+            &storage,
+            &snapshot.snapshot_uid,
+        )
+        .map_err(|e| e.to_string());
+        (snapshot.snapshot_uid, present, ts_contexts, language_counts)
     };
 
     // Toolchain plan (which languages RUN vs are honestly skipped) + the resolver registry. A test
@@ -870,6 +884,14 @@ pub fn run_enrich_pass(
             }
         }
     }
+
+    // DOCS-LIST-2 §2.4: route the doctor skip remediation through the SAME per-language capability
+    // gate the CTA uses, so doctor never prescribes another ecosystem's remedy. On a materially-Python
+    // repo an incidental (<10%) TypeScript skip is DROPPED (no `npm i -D typescript`); when no material
+    // code language is enrichable on any build, the no-semantic-path sentence for the dominant language
+    // replaces it. On a language-breakdown READ FAILURE the raw remedies are replaced by a single
+    // unknown-with-reason skip (review-0 F3) — never silently kept (which would leak npm advice).
+    skipped = crate::enrichment_skip_gate::gated_enrichment_skips(&skipped, language_counts);
 
     // Nothing runnable — either no eligible edges at all (present empty → skipped empty → a clean
     // "nothing to enrich") or every eligible language lacks a toolchain (skipped populated → the

@@ -19,7 +19,7 @@ use enrichment::EnrichmentLanguage;
 /// to the enrichment crate's own [`EnrichmentLanguage::from_extension`] (the single source for
 /// `ts|tsx|js|jsx → TypeScript` etc.) by mapping each language token to a representative file extension —
 /// so the family definition is never duplicated here, only the indexer's word-token spelling is named.
-fn token_enrichment_language(token: &str) -> Option<EnrichmentLanguage> {
+pub(crate) fn token_enrichment_language(token: &str) -> Option<EnrichmentLanguage> {
     let representative_ext = match token {
         // Word-tokens whose spelling differs from any file extension:
         "typescript" => "ts",
@@ -158,16 +158,16 @@ pub(crate) const MATERIAL_LANGUAGE_SHARE_NUM: u64 = 10;
 /// A CODE language materially present in the repo (a token with a reader display name AND a file share
 /// at or above [`MATERIAL_LANGUAGE_SHARE_NUM`]%), with its display name. `total_code_files` is the sum
 /// of file counts over CODE languages only (config-file tokens like json/yaml never dilute the share).
-struct MaterialLanguage {
-    token: String,
-    display: &'static str,
+pub(crate) struct MaterialLanguage {
+    pub(crate) token: String,
+    pub(crate) display: &'static str,
 }
 
 /// The materially-present CODE languages of `language_counts` (count-DESC as
 /// `query_file_count_by_language` returns), each ≥ the [`MATERIAL_LANGUAGE_SHARE_NUM`]% code-file gate,
 /// in the same count-DESC order. Config-file tokens (no display name) are excluded from BOTH the share
 /// denominator and the result.
-fn material_code_languages(language_counts: &[(String, u64)]) -> Vec<MaterialLanguage> {
+pub(crate) fn material_code_languages(language_counts: &[(String, u64)]) -> Vec<MaterialLanguage> {
     let total_code: u64 = language_counts
         .iter()
         .filter(|(l, _)| language_display_name(l).is_some())

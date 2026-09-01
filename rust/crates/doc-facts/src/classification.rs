@@ -5,6 +5,43 @@
 
 use crate::types::DocKind;
 
+/// DOCS-LIST-2 §2 — does `content` carry a license marker (SPDX identifier or a license-header
+/// phrase)? CONTENT basis — never the `LICENSE` filename (honesty: classify from structural
+/// evidence, not a name). Checks the head of the file only (license text leads the document), so a
+/// large doc that merely mentions "license" deep in prose does not trip it.
+///
+/// `pub(crate)` (DOC_FACTS_PUBLIC_API review-0): consumed only by [`crate::discover_doc_inventory`]
+/// inside this crate — never a public cross-crate API.
+pub(crate) fn has_license_marker(content: &str) -> bool {
+    // Bound the scan to the document head — license identifiers/headers lead the file.
+    let head_len = content
+        .char_indices()
+        .nth(2000)
+        .map(|(i, _)| i)
+        .unwrap_or(content.len());
+    let head = content[..head_len].to_lowercase();
+    // SPDX identifier — the machine-readable license marker.
+    if head.contains("spdx-license-identifier") {
+        return true;
+    }
+    // Canonical license-header phrases (structural, present at the head of license texts).
+    const LICENSE_MARKERS: &[&str] = &[
+        "permission is hereby granted, free of charge", // MIT
+        "apache license",
+        "gnu general public license",
+        "gnu lesser general public license",
+        "mozilla public license",
+        "bsd 3-clause",
+        "bsd 2-clause",
+        "redistribution and use in source and binary forms", // BSD
+        "the mit license",
+        "boost software license",
+        "isc license",
+        "creative commons",
+    ];
+    LICENSE_MARKERS.iter().any(|m| head.contains(m))
+}
+
 /// Classify a document by its relative path.
 pub fn classify_doc_kind(relative_path: &str) -> DocKind {
     let lower = relative_path.to_lowercase();
@@ -23,6 +60,10 @@ pub fn classify_doc_kind(relative_path: &str) -> DocKind {
     if file_name == "readme.md" || file_name == "readme" {
         return DocKind::Readme;
     }
+
+    // DOCS-LIST-2 §2: the `release-notes` kind is NOT decided here — it needs the whole doc set (the
+    // subtree's manifest index must be PRESENT for structural confirmation, review-1 item 1), which a
+    // single path cannot see. It is assigned in `crate::discover_doc_inventory` via `crate::release_notes`.
 
     // Architecture docs
     if file_name == "architecture.md"
@@ -271,6 +312,33 @@ mod tests {
             classify_doc_kind("frontend/web/.env.local"),
             DocKind::Config
         );
+    }
+
+    #[test]
+    fn classify_release_dir_stays_architecture_without_the_doc_set() {
+        // review-1 item 1: path-only classification NEVER emits release-notes (it cannot see the
+        // subtree's manifest index). A doc under docs/releases/ is the docs/ architecture default
+        // here; the release-notes upgrade happens in `discover_doc_inventory` (see lib_tests).
+        assert_eq!(
+            classify_doc_kind("docs/releases/1.4.x.txt"),
+            DocKind::Architecture
+        );
+        assert_eq!(classify_doc_kind("docs/design.md"), DocKind::Architecture);
+    }
+
+    #[test]
+    fn license_marker_from_content_not_name() {
+        assert!(has_license_marker(
+            "MIT License\n\nPermission is hereby granted, free of charge, to any person"
+        ));
+        assert!(has_license_marker("SPDX-License-Identifier: Apache-2.0\n"));
+        assert!(has_license_marker(
+            "Redistribution and use in source and binary forms, with or without modification"
+        ));
+        // A prose doc that merely mentions the word license is NOT a license doc.
+        assert!(!has_license_marker(
+            "# Guide\n\nSee the license file for terms. This section covers configuration."
+        ));
     }
 
     #[test]

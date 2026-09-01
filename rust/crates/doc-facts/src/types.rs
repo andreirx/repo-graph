@@ -33,6 +33,17 @@ pub enum DocKind {
     Config,
     /// Generated MAP.md files (lower confidence)
     Map,
+    /// DOCS-LIST-2 §2: a doc under a release/changelog subtree. Deterministic basis: STRUCTURAL —
+    /// an ancestor directory names a release family AND that subtree carries its own manifest index
+    /// (`index.{txt,rst,md}`), the toctree root confirming it is a real documentation section (see
+    /// [`crate::release_notes`]); a bare release-named directory with no manifest keeps `architecture`.
+    /// Assigned in [`crate::discover_doc_inventory`] (needs the whole doc set), not from a single path.
+    /// Grouped one line per family on the human render.
+    ReleaseNotes,
+    /// DOCS-LIST-2 §2: a license document. Deterministic basis: CONTENT — the file carries an
+    /// SPDX identifier or a license-header marker (see [`crate::classification::has_license_marker`]),
+    /// never its `LICENSE` filename. Named on the human render, not folded into `architecture`.
+    License,
 }
 
 impl DocKind {
@@ -43,6 +54,8 @@ impl DocKind {
             DocKind::Architecture => "architecture",
             DocKind::Config => "config",
             DocKind::Map => "map",
+            DocKind::ReleaseNotes => "release-notes",
+            DocKind::License => "license",
         }
     }
 }
@@ -249,6 +262,8 @@ mod tests {
         assert_eq!(DocKind::Architecture.as_str(), "architecture");
         assert_eq!(DocKind::Config.as_str(), "config");
         assert_eq!(DocKind::Map.as_str(), "map");
+        assert_eq!(DocKind::ReleaseNotes.as_str(), "release-notes");
+        assert_eq!(DocKind::License.as_str(), "license");
     }
 
     #[test]

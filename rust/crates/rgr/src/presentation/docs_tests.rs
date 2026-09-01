@@ -19,18 +19,21 @@ fn sample_list_response() -> DocsListResponse {
                 kind: "readme".to_string(),
                 generated: false,
                 content_hash: "abc123".to_string(),
+                release_family: None,
             },
             DocEntry {
                 path: "docs/README.md".to_string(),
                 kind: "readme".to_string(),
                 generated: false,
                 content_hash: "def456".to_string(),
+                release_family: None,
             },
             DocEntry {
                 path: "CHANGELOG.md".to_string(),
                 kind: "changelog".to_string(),
                 generated: true,
                 content_hash: "ghi789".to_string(),
+                release_family: None,
             },
         ],
         count: 3,
@@ -54,6 +57,7 @@ fn sample_list_response_no_generated() -> DocsListResponse {
             kind: "readme".to_string(),
             generated: false,
             content_hash: "abc".to_string(),
+            release_family: None,
         }],
         count: 1,
         counts_by_kind,
@@ -68,7 +72,7 @@ fn list_render_surfaces_unreadable_count() {
     // ("+N unreadable, counted"), never silently folded as authored.
     let mut resp = sample_list_response_no_generated();
     resp.unreadable = 3;
-    let out = resp.render_human(false);
+    let out = resp.render_human(false, false);
     assert!(
         out.contains("+3 unreadable, counted"),
         "unreadable surfaced in human render: {out}"
@@ -76,7 +80,7 @@ fn list_render_surfaces_unreadable_count() {
     // Zero unreadable → no such line (no "+0 unreadable" noise).
     let clean = sample_list_response_no_generated();
     assert!(
-        !clean.render_human(false).contains("unreadable"),
+        !clean.render_human(false, false).contains("unreadable"),
         "no unreadable line when zero"
     );
 }
@@ -84,21 +88,21 @@ fn list_render_surfaces_unreadable_count() {
 #[test]
 fn list_render_shows_header() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.starts_with("Documentation\n"));
 }
 
 #[test]
 fn list_render_shows_count() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("3 documents"));
 }
 
 #[test]
 fn list_render_shows_by_kind() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("By kind:"));
     assert!(out.contains("readme  2"));
     assert!(out.contains("changelog  1"));
@@ -107,14 +111,14 @@ fn list_render_shows_by_kind() {
 #[test]
 fn list_render_shows_generated_count() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("1 generated"));
 }
 
 #[test]
 fn list_render_shows_entries_sorted_by_path() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     // Entries should be sorted: CHANGELOG.md, README.md, docs/README.md
     let changelog_pos = out.find("CHANGELOG.md").unwrap();
     let readme_pos = out.find("README.md").unwrap();
@@ -126,14 +130,14 @@ fn list_render_shows_entries_sorted_by_path() {
 #[test]
 fn list_render_shows_generated_marker() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("CHANGELOG.md  changelog  [generated]"));
 }
 
 #[test]
 fn list_render_shows_hint() {
     let resp = sample_list_response();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("hint: run 'rmap docs extract' to scan for explicit rg: markers"));
 }
 
@@ -149,7 +153,7 @@ fn list_render_empty_shows_hint() {
         generated_count: 0,
         unreadable: 0,
     };
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("0 documents"));
     assert!(out.contains("hint: no documentation files detected"));
 }
@@ -168,13 +172,14 @@ fn list_render_singular_document() {
             kind: "readme".to_string(),
             generated: false,
             content_hash: "abc".to_string(),
+            release_family: None,
         }],
         count: 1,
         counts_by_kind,
         generated_count: 0,
         unreadable: 0,
     };
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("1 document\n")); // singular
 }
 
@@ -192,18 +197,21 @@ fn response_with_generated_maps() -> DocsListResponse {
                 kind: "readme".to_string(),
                 generated: false,
                 content_hash: "a".to_string(),
+                release_family: None,
             },
             DocEntry {
                 path: "src/MAP.md".to_string(),
                 kind: "map".to_string(),
                 generated: true,
                 content_hash: "b".to_string(),
+                release_family: None,
             },
             DocEntry {
                 path: "src/core/MAP.md".to_string(),
                 kind: "map".to_string(),
                 generated: true,
                 content_hash: "c".to_string(),
+                release_family: None,
             },
         ],
         count: 3,
@@ -218,7 +226,7 @@ fn list_default_excludes_generated_maps_and_states_the_count() {
     // Default (include_generated = false): rmap's own maps are hidden, only the
     // reader's doc is shown, and the excluded count is stated (never silently hidden).
     let resp = response_with_generated_maps();
-    let out = resp.render_human(false);
+    let out = resp.render_human(false, false);
     assert!(
         out.contains("1 document\n"),
         "only the reader's doc counts: {out}"
@@ -245,7 +253,7 @@ fn list_default_excludes_generated_maps_and_states_the_count() {
 fn list_include_generated_shows_maps_and_no_exclusion_line() {
     // Opt-in: all entries render, and NO "excluded" line is printed.
     let resp = response_with_generated_maps();
-    let out = resp.render_human(true);
+    let out = resp.render_human(true, false);
     assert!(out.contains("3 documents"), "{out}");
     assert!(
         out.contains("src/MAP.md"),
@@ -275,13 +283,14 @@ fn list_all_generated_does_not_claim_no_docs() {
             kind: "map".to_string(),
             generated: true,
             content_hash: "a".to_string(),
+            release_family: None,
         }],
         count: 1,
         counts_by_kind: BTreeMap::new(),
         generated_count: 1,
         unreadable: 0,
     };
-    let out = resp.render_human(false);
+    let out = resp.render_human(false, false);
     assert!(out.contains("0 documents"), "{out}");
     assert!(
         out.contains("1 generated map excluded"),
@@ -294,6 +303,218 @@ fn list_all_generated_does_not_claim_no_docs() {
     assert!(
         !out.contains("no documentation files detected"),
         "must not claim the repo has no docs when it has generated maps: {out}"
+    );
+}
+
+// ── DOCS-LIST-2 §2: vendored demotion / release-notes grouping / budget ───────
+
+fn entry(path: &str, kind: &str) -> DocEntry {
+    DocEntry {
+        path: path.to_string(),
+        kind: kind.to_string(),
+        generated: false,
+        content_hash: "h".to_string(),
+        release_family: None,
+    }
+}
+
+/// A `release-notes` entry carrying the daemon-attached family subtree the renderer groups by
+/// (DOCS-LIST-2 §2 — the `release_family` DTO field replaces the old cross-crate `release_subtree`).
+fn release_entry(path: &str, family: &str) -> DocEntry {
+    DocEntry {
+        path: path.to_string(),
+        kind: "release-notes".to_string(),
+        generated: false,
+        content_hash: "h".to_string(),
+        release_family: Some(family.to_string()),
+    }
+}
+
+fn response_with(entries: Vec<DocEntry>) -> DocsListResponse {
+    let count = entries.len();
+    DocsListResponse {
+        command: "docs list".to_string(),
+        repo: "repo_test".to_string(),
+        repo_path: "/test/repo".to_string(),
+        entries,
+        count,
+        counts_by_kind: BTreeMap::new(),
+        generated_count: 0,
+        unreadable: 0,
+    }
+}
+
+#[test]
+fn vendored_demoted_from_headline_and_listing_but_stated() {
+    let resp = response_with(vec![
+        entry("README.md", "readme"),
+        entry(
+            "packages/engine/fraktag-env/lib/python3.11/site-packages/tqdm/README.md",
+            "vendored",
+        ),
+        entry(
+            "packages/engine/fraktag-env/lib/python3.11/site-packages/numpy/README.md",
+            "vendored",
+        ),
+    ]);
+    let out = resp.render_human(false, false);
+    // Headline counts only the reader's doc, not the two vendored ones.
+    assert!(
+        out.contains("1 document\n"),
+        "vendored excluded from headline: {out}"
+    );
+    // Stated, never silently hidden — contract form "+N vendored docs (excluded)" (review-0 F5).
+    assert!(
+        out.contains("+2 vendored docs (excluded"),
+        "vendored count line present in contract form: {out}"
+    );
+    // Not listed individually.
+    assert!(
+        !out.contains("site-packages/tqdm"),
+        "vendored not listed: {out}"
+    );
+    assert!(out.contains("README.md"), "reader's doc listed: {out}");
+}
+
+#[test]
+fn all_vendored_does_not_claim_no_docs() {
+    let resp = response_with(vec![entry(
+        "venv/lib/python3.11/site-packages/a/README.md",
+        "vendored",
+    )]);
+    let out = resp.render_human(false, false);
+    assert!(out.contains("0 documents"), "{out}");
+    assert!(
+        out.contains("all documentation here is vendored dependency docs"),
+        "honest hint, never a false 'no documentation': {out}"
+    );
+    assert!(!out.contains("no documentation files detected"), "{out}");
+}
+
+#[test]
+fn release_notes_grouped_one_line_per_family() {
+    let mut entries = vec![entry("README.md", "readme")];
+    for v in ["1.4.x", "1.5.x", "2.0"] {
+        entries.push(release_entry(
+            &format!("docs/releases/{v}.txt"),
+            "docs/releases",
+        ));
+    }
+    let resp = response_with(entries);
+    let out = resp.render_human(false, false);
+    // Headline counts release notes (3) + readme (1) = 4.
+    assert!(out.contains("4 documents"), "release notes counted: {out}");
+    // Grouped to ONE family line, not three entry rows.
+    assert!(
+        out.contains("repo_test release notes: 3 files under docs/releases/ — --full to list"),
+        "release notes grouped: {out}"
+    );
+    assert!(
+        !out.contains("1.4.x.txt"),
+        "not listed individually by default: {out}"
+    );
+}
+
+#[test]
+fn release_notes_full_lists_them() {
+    let mut entries = vec![entry("README.md", "readme")];
+    entries.push(release_entry("docs/releases/1.4.x.txt", "docs/releases"));
+    let resp = response_with(entries);
+    let out = resp.render_human(false, true);
+    // --full folds them into the flat list; no grouping line.
+    assert!(
+        out.contains("docs/releases/1.4.x.txt"),
+        "listed under --full: {out}"
+    );
+    assert!(
+        !out.contains("— --full to list"),
+        "no grouping pointer under --full: {out}"
+    );
+}
+
+#[test]
+fn entry_list_budgeted_with_remainder() {
+    let mut entries = Vec::new();
+    for i in 0..40 {
+        entries.push(entry(&format!("docs/page{i:02}.md"), "architecture"));
+    }
+    let resp = response_with(entries);
+    let out = resp.render_human(false, false);
+    // Default caps at HUMAN_ROW_BUDGET (25) with an honest remainder.
+    assert!(
+        out.contains("(+15 more — --full)"),
+        "budget remainder present: {out}"
+    );
+    // --full uncaps: no remainder line, last entry present.
+    let full = resp.render_human(false, true);
+    assert!(
+        !full.contains("more — --full"),
+        "no remainder under --full: {full}"
+    );
+    assert!(
+        full.contains("docs/page39.md"),
+        "all rows under --full: {full}"
+    );
+}
+
+#[test]
+fn release_family_group_lines_are_budgeted() {
+    // DOCS-LIST-2 review-2 item 2: the release-family GROUP lines are default display rows too, so
+    // many families must NOT emit unbounded group lines — they share the same HUMAN_ROW_BUDGET as the
+    // flat entries, with one truthful remainder. 40 distinct families → 25 shown, 15 in the remainder.
+    let mut entries = Vec::new();
+    for i in 0..40 {
+        entries.push(release_entry(
+            &format!("docs/rel{i:02}/1.0.txt"),
+            &format!("docs/rel{i:02}"),
+        ));
+    }
+    let resp = response_with(entries);
+    let out = resp.render_human(false, false);
+    let shown_group_lines = out.matches(" release notes: ").count();
+    assert_eq!(
+        shown_group_lines, HUMAN_ROW_BUDGET,
+        "family group lines capped at the row budget: {out}"
+    );
+    assert!(
+        out.contains("(+15 more — --full)"),
+        "one truthful remainder over the omitted family rows: {out}"
+    );
+    // --full uncaps: every family's file is listed individually, no remainder.
+    let full = resp.render_human(false, true);
+    assert!(
+        !full.contains("more — --full"),
+        "no remainder under --full: {full}"
+    );
+    assert!(
+        full.contains("docs/rel39/1.0.txt"),
+        "every release note listed under --full: {full}"
+    );
+}
+
+#[test]
+fn family_lines_and_entries_share_one_budget() {
+    // The combined budget covers BOTH row kinds: 20 families + 20 reader docs = 40 rows → 25 shown
+    // (all 20 family lines come first, then 5 docs), remainder 15.
+    let mut entries = Vec::new();
+    for i in 0..20 {
+        entries.push(release_entry(
+            &format!("docs/rel{i:02}/1.0.txt"),
+            &format!("docs/rel{i:02}"),
+        ));
+    }
+    for i in 0..20 {
+        entries.push(entry(&format!("docs/guide{i:02}.md"), "architecture"));
+    }
+    let resp = response_with(entries);
+    let out = resp.render_human(false, false);
+    let group_lines = out.matches(" release notes: ").count();
+    let doc_lines = out.matches("  architecture\n").count();
+    assert_eq!(group_lines, 20, "all 20 family lines fit: {out}");
+    assert_eq!(doc_lines, 5, "then 5 docs fill the budget of 25: {out}");
+    assert!(
+        out.contains("(+15 more — --full)"),
+        "one remainder over the combined omitted rows: {out}"
     );
 }
 

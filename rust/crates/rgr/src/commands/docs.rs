@@ -13,10 +13,14 @@
 //!
 //! # CLI-OUT-5 Output Contract
 //!
-//! - Human output by default
-//! - `--json` for machine mode (raw daemon response)
-//! - Deterministic ordering
-//! - Full output, no truncation
+//! - Human output by default; `--json` for machine mode
+//! - Deterministic ordering (by path)
+//! - **`docs list` human render is BOUNDED** (DOCS-LIST-2 §2–3): vendored docs demoted to a stated
+//!   count line, release notes grouped one line per family, and all default rows capped together with
+//!   one truthful "(+N more — --full)" remainder. `--full` uncaps and lists every doc individually.
+//! - **`docs list --json` stays COMPLETE** — every entry, never truncated (budget/demotion/grouping
+//!   are a human-render concern only; `--json` only drops rmap's OWN generated maps, stating how many).
+//! - `docs extract` output is unbounded.
 //!
 //! # Boundary rules
 //!
@@ -54,7 +58,7 @@ pub fn run_docs(args: &[String]) -> ExitCode {
 fn print_docs_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  rmap docs list [--json] [--include-generated]  — documentation inventory (run from repo)"
+        "  rmap docs list [--json] [--include-generated] [--full]  — documentation inventory (run from repo)"
     );
     eprintln!(
         "  rmap docs extract [--json]                     — extract semantic hints (run from repo)"
@@ -77,23 +81,26 @@ fn parse_json_flag(args: &[String]) -> (bool, Vec<&String>) {
     (json_mode, remaining)
 }
 
-/// Parse `docs list` flags: `--json` and `--include-generated` (SELF-POLLUTION-1
-/// §3). Returns `(json_mode, include_generated, unrecognized_args)`; any leftover
-/// arg is a usage error at the call site.
-fn parse_docs_list_flags(args: &[String]) -> (bool, bool, Vec<&String>) {
+/// Parse `docs list` flags: `--json`, `--include-generated` (SELF-POLLUTION-1 §3), and `--full`
+/// (DOCS-LIST-2 §3 — uncap the budgeted human render + list every grouped release note). Returns
+/// `(json_mode, include_generated, full, unrecognized_args)`; any leftover arg is a usage error at
+/// the call site. `--full` is a HUMAN-render concern only — `--json` always carries the complete set.
+fn parse_docs_list_flags(args: &[String]) -> (bool, bool, bool, Vec<&String>) {
     let mut json_mode = false;
     let mut include_generated = false;
+    let mut full = false;
     let mut remaining = Vec::new();
 
     for arg in args {
         match arg.as_str() {
             "--json" => json_mode = true,
             "--include-generated" => include_generated = true,
+            "--full" => full = true,
             _ => remaining.push(arg),
         }
     }
 
-    (json_mode, include_generated, remaining)
+    (json_mode, include_generated, full, remaining)
 }
 
 /// List documentation inventory (primary documentation surface).
@@ -108,10 +115,10 @@ fn parse_docs_list_flags(args: &[String]) -> (bool, bool, Vec<&String>) {
 /// excluded count as a machine-readable `excluded_generated` field, or passes the raw
 /// daemon value through unchanged when nothing is filtered — byte-parity).
 fn run_docs_list(args: &[String]) -> ExitCode {
-    let (json_mode, include_generated, remaining) = parse_docs_list_flags(args);
+    let (json_mode, include_generated, full, remaining) = parse_docs_list_flags(args);
 
     if !remaining.is_empty() {
-        eprintln!("usage: rmap docs list [--json] [--include-generated]");
+        eprintln!("usage: rmap docs list [--json] [--include-generated] [--full]");
         eprintln!("       (run from within a repo directory)");
         return ExitCode::from(1);
     }
@@ -170,7 +177,7 @@ fn run_docs_list(args: &[String]) -> ExitCode {
                             }
                         }
                     } else {
-                        print!("{}", response.render_human(include_generated));
+                        print!("{}", response.render_human(include_generated, full));
                         ExitCode::SUCCESS
                     }
                 }
