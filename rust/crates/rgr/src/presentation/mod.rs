@@ -48,6 +48,10 @@ pub mod explain_sections;
 pub mod graph_edges;
 pub mod imports;
 pub mod map;
+// MODULES-IDENTITY-2 §2.1: crate-local — all items are `pub(crate)`; its only users
+// (`orient_seg2`, `modules_list`) are in this crate, so the module is not part of the
+// crate's public API (review-0: `pub(crate)` is the ratified visibility).
+pub(crate) mod module_disambiguation;
 pub mod module_inventory;
 pub mod module_shared;
 pub mod modules_deps;

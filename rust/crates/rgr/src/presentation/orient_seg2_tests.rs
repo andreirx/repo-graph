@@ -452,7 +452,7 @@ fn dir_group_row_missing_numeric_is_not_false_zero() {
 
 // ── §2.2 Module identity: name [manifest] on collision / divergence ────────────
 
-use super::ModuleRow;
+use crate::presentation::module_disambiguation::ModuleRow;
 
 /// Build `top_modules`-shaped rows: `(path, name, manifest)`.
 fn module_rows<'a>(rows: &'a [(&'a str, Option<&'a str>, Option<&'a str>)]) -> Vec<ModuleRow<'a>> {

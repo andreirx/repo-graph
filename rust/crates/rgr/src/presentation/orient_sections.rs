@@ -424,9 +424,9 @@ impl OrientResponse {
         // `canonical_root_path`: django declares TWO `Django` modules both rooted at
         // `.`). Pre-compute paths, per-row names/manifests, and the effective display
         // name (declared name, else path) so a name COLLISION can be detected.
-        let rows: Vec<super::orient_seg2::ModuleRow> = modules
+        let rows: Vec<super::module_disambiguation::ModuleRow> = modules
             .iter()
-            .map(super::orient_seg2::ModuleRow::from_json)
+            .map(super::module_disambiguation::ModuleRow::from_json)
             .collect();
         let effective_names: Vec<&str> = rows.iter().map(|r| r.effective_name()).collect();
 

@@ -40,6 +40,63 @@ pub struct DegradationInfo {
     pub recommendation: String,
 }
 
+/// MODULES-IDENTITY-2 §2.2: the HTTP surface-detector coverage statement (additive).
+///
+/// Build-static, sourced from the ONE http_boundary detector set on the daemon side
+/// (`repo_graph_repo_index::surface_coverage`): `http_detector_families` are the HTTP
+/// surface detectors this build ships; `named_uncovered` names a materially-present
+/// framework it has NO detector for (django URLconf). The zero-state renders these so
+/// the empty answer states the TOOL's coverage instead of blaming the repo — never a
+/// totality claim (the renderer always appends "other surface kinds may exist without
+/// detectors"). See [`SurfaceCoverage::coverage_line`].
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SurfaceCoverage {
+    /// Reader display names of the HTTP surface-detector families this build ships,
+    /// sorted (e.g. `["AWS CDK API Gateway v2", "Java Spring …", …]`).
+    #[serde(default)]
+    pub http_detector_families: Vec<String>,
+    /// Known HTTP frameworks with NO detector on this build, named for a concrete
+    /// zero-state (e.g. `["Django URLconf routes"]`). Build-static, not per-repo.
+    #[serde(default)]
+    pub named_uncovered: Vec<String>,
+}
+
+impl SurfaceCoverage {
+    /// The zero-state coverage sentence (operator ruling 2026-09-01, Option A):
+    /// `"HTTP surface detectors on this build: <families> — no HTTP detector for <gaps>;
+    /// other surface kinds may exist without detectors."`.
+    ///
+    /// `http_detector_families` is build-static and infallible on a matching daemon; an
+    /// EMPTY list therefore means the response predates §2.2 (version skew) — we say so
+    /// rather than fabricate a family list or reprint the old repo-blaming hint. The gap
+    /// clause is dropped when `named_uncovered` is empty; the non-totality clause always
+    /// stays.
+    fn coverage_line(&self) -> String {
+        if self.http_detector_families.is_empty() {
+            return "HTTP surface-detector coverage is unavailable (this response predates \
+                    the coverage report)."
+                .to_string();
+        }
+        let families = self.http_detector_families.join(", ");
+        let gap = if self.named_uncovered.is_empty() {
+            String::new()
+        } else {
+            // "no HTTP detector for …" (operator ruling 2026-09-01): the gap clause is
+            // scoped to HTTP so it never asserts django has NO surfaces at all — only
+            // that this build has no HTTP detector for its URLconf routes.
+            format!(
+                " — no HTTP detector for {}",
+                self.named_uncovered.join(", ")
+            )
+        };
+        format!(
+            "HTTP surface detectors on this build: {}{}; other surface kinds may exist \
+             without detectors.",
+            families, gap
+        )
+    }
+}
+
 // =============================================================================
 // SURFACES LIST RESPONSE
 // =============================================================================
@@ -103,6 +160,11 @@ pub struct SurfacesListResponse {
     pub filter_module: Option<String>,
     #[serde(default)]
     pub degradation: Option<DegradationInfo>,
+    /// MODULES-IDENTITY-2 §2.2: HTTP surface-detector coverage, rendered in the
+    /// zero-state so the empty answer states the tool's coverage. Additive; a response
+    /// without it deserializes to the empty default (handled honestly by the renderer).
+    #[serde(default)]
+    pub surface_coverage: SurfaceCoverage,
 }
 
 impl SurfacesListResponse {
@@ -167,8 +229,16 @@ impl SurfacesListResponse {
             && self.http_boundary_surfaces.is_empty()
             && self.http_boundary_surfaces_degraded.is_none()
         {
+            // MODULES-IDENTITY-2 §2.2: state the TOOL's coverage, never blame the repo.
+            // The old "No recognized patterns found in this codebase." line implied the
+            // repo had nothing when in fact this build has no detector for its framework
+            // (django URLconf, the audit case). Now the zero-state names the shipped HTTP
+            // surface detectors and a known gap, with an explicit non-totality clause.
             out.push_str("\nhint: surfaces are extracted from code patterns (HTTP routes, CLI handlers, etc.).\n");
-            out.push_str("      No recognized patterns found in this codebase.\n");
+            out.push_str(&format!(
+                "      {}\n",
+                self.surface_coverage.coverage_line()
+            ));
             return out;
         }
 
@@ -444,6 +514,20 @@ mod tests {
             filter_source: None,
             filter_module: None,
             degradation: None,
+            surface_coverage: sample_coverage(),
+        }
+    }
+
+    /// A representative build-static coverage payload (the shape the daemon emits from
+    /// `repo_graph_repo_index::surface_coverage`), for the zero-state renderer tests.
+    fn sample_coverage() -> SurfaceCoverage {
+        SurfaceCoverage {
+            http_detector_families: vec![
+                "AWS CDK API Gateway v2".to_string(),
+                "Java Spring (@RestController/@Controller)".to_string(),
+                "Next.js App Router".to_string(),
+            ],
+            named_uncovered: vec!["Django URLconf routes".to_string()],
         }
     }
 
@@ -466,6 +550,7 @@ mod tests {
                 message: "project_surfaces not populated".to_string(),
                 recommendation: "use TypeScript indexer".to_string(),
             }),
+            surface_coverage: sample_coverage(),
         }
     }
 
@@ -593,6 +678,78 @@ mod tests {
         let output = resp.render_human();
         assert!(output.contains("hint:"));
         assert!(output.contains("surfaces are extracted from code patterns"));
+    }
+
+    /// §2.2: the zero-state states the TOOL's coverage — names the shipped HTTP
+    /// surface detectors and a known gap (django URLconf) with an explicit non-totality
+    /// clause — and NO LONGER blames the repo ("No recognized patterns …").
+    #[test]
+    fn list_render_empty_states_detector_coverage_not_repo_blame() {
+        let resp = sample_empty_list_response();
+        let output = resp.render_human();
+        assert!(
+            output.contains("HTTP surface detectors on this build:"),
+            "zero-state must state coverage:\n{output}"
+        );
+        // Shipped families are named.
+        assert!(
+            output.contains("Java Spring (@RestController/@Controller)"),
+            "{output}"
+        );
+        assert!(output.contains("Next.js App Router"), "{output}");
+        // The motivating gap is named, HTTP-scoped.
+        assert!(
+            output.contains("no HTTP detector for Django URLconf routes"),
+            "{output}"
+        );
+        // Never a totality claim.
+        assert!(
+            output.contains("other surface kinds may exist without detectors"),
+            "{output}"
+        );
+        // The old repo-blaming line is gone.
+        assert!(
+            !output.contains("No recognized patterns"),
+            "zero-state must not blame the repo:\n{output}"
+        );
+    }
+
+    /// §2.2 honesty: a response WITHOUT coverage (version skew — empty families) states
+    /// coverage is unavailable rather than fabricating a family list or reprinting the
+    /// old repo-blaming hint.
+    #[test]
+    fn list_render_empty_with_absent_coverage_says_unavailable_not_blame() {
+        let mut resp = sample_empty_list_response();
+        resp.surface_coverage = SurfaceCoverage::default();
+        let output = resp.render_human();
+        assert!(
+            output.contains("HTTP surface-detector coverage is unavailable"),
+            "{output}"
+        );
+        assert!(!output.contains("No recognized patterns"), "{output}");
+        // No fabricated family list.
+        assert!(
+            !output.contains("HTTP surface detectors on this build:"),
+            "{output}"
+        );
+    }
+
+    /// §2.2: with families present but NO named gap, the sentence drops the gap clause
+    /// yet keeps the non-totality clause (never implies full coverage).
+    #[test]
+    fn list_render_empty_coverage_without_named_gap_keeps_non_totality_clause() {
+        let mut resp = sample_empty_list_response();
+        resp.surface_coverage.named_uncovered = vec![];
+        let output = resp.render_human();
+        assert!(
+            output.contains("HTTP surface detectors on this build:"),
+            "{output}"
+        );
+        assert!(!output.contains("no HTTP detector for"), "{output}");
+        assert!(
+            output.contains("other surface kinds may exist without detectors"),
+            "{output}"
+        );
     }
 
     #[test]

@@ -70,6 +70,10 @@ pub mod refresh_policy;
 pub mod resource_coverage;
 pub mod scanner;
 pub mod state_boundary_hook;
+// MODULES-IDENTITY-2 §2.2: the HTTP surface-detector coverage accessor (shipped
+// detector families + named gaps), a build-static read of the http_boundary detector
+// set so the `surfaces list` zero-state states the tool's coverage, never blames the repo.
+pub mod surface_coverage;
 
 /// Iterative AST-walk helper shared by the in-crate re-parse detectors
 /// (PERSIST-RECURSION-1).

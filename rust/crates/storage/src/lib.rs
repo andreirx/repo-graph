@@ -161,6 +161,9 @@
 
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
 mod agent_orient_reads; // ORIENT-DENSITY-1: dense-orient discovery reads (module sizes + doc inventory)
+                        // MODULES-IDENTITY-2 §2.1: the module_key→manifest derivation, shared (one implementation)
+                        // between the orient data path (`module_sizes`) and the daemon's `handle_modules_list`.
+pub use agent_orient_reads::manifest_for_module_key;
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 mod call_resolution_reads; // RESOLUTION-BREAKDOWN-CLI-1: per-language/module call-resolution grouping reads

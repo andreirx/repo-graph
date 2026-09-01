@@ -7219,6 +7219,19 @@ impl ServiceDispatcher {
                 Err(reason) => (Vec::new(), Some(reason)),
             };
 
+        // MODULES-IDENTITY-2 §2.2: the HTTP surface-detector coverage statement
+        // (additive). Build-static and infallible — the shipped detector families +
+        // named gaps from the ONE http_boundary detector set (`surface_coverage`), NOT a
+        // per-repo read — so the `surfaces list` zero-state states the TOOL's coverage
+        // instead of blaming the repo ("No recognized patterns"). Emitted on every
+        // response; the presenter renders it only in the empty case.
+        let surface_coverage = serde_json::json!({
+            "http_detector_families":
+                repo_graph_repo_index::surface_coverage::http_surface_detector_families(),
+            "named_uncovered":
+                repo_graph_repo_index::surface_coverage::http_surface_named_gaps(),
+        });
+
         let mut response = serde_json::json!({
             "command": "surfaces list",
             "repo": repo_uid,
@@ -7226,6 +7239,7 @@ impl ServiceDispatcher {
             "results": results,
             "count": count,
             "http_boundary_surfaces": http_boundary_surfaces,
+            "surface_coverage": surface_coverage,
         });
 
         // Add filter info
@@ -8976,6 +8990,14 @@ impl ServiceDispatcher {
                     "canonical_root_path": m.canonical_root_path,
                     "module_kind": m.module_kind,
                     "display_name": m.display_name,
+                    // MODULES-IDENTITY-2 §2.1: the owning manifest filename, derived from
+                    // the module_key source prefix via the SAME shared helper `orient`'s
+                    // data path uses (`repo_graph_storage::manifest_for_module_key`) — so
+                    // the presenter can disambiguate twin display names (django's two
+                    // `Django` modules, both rooted at `.`) without a second derivation.
+                    // `None` (→ JSON null) for inferred/directory modules — honest, never
+                    // a guessed file.
+                    "manifest": repo_graph_storage::manifest_for_module_key(&m.module_key),
                     "confidence": m.confidence,
                     "owned_file_count": rollup.map_or(0, |r| r.owned_file_count),
                     "owned_test_file_count": rollup.map_or(0, |r| r.owned_test_file_count),

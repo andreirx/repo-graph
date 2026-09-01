@@ -33,6 +33,33 @@ mod java_consumer;
 mod spring;
 mod typescript;
 
+/// MODULES-IDENTITY-2 §2.2: the HTTP surface-detector families this build ships, as
+/// reader display names. This is the single build-static enumeration of the detector
+/// set composed in [`persist_http_boundary_interactions`] — one entry per shipped
+/// framework the `drafts.extend(<detector>::…)` calls below produce — and it is what
+/// `surface_coverage` renders in the `surfaces list` zero-state so the empty answer
+/// states the TOOL's coverage instead of blaming the repo ("No recognized patterns").
+///
+/// KEEP IN SYNC with the detector composition in `persist_http_boundary_interactions`:
+/// adding or removing a `detect_*` framework there must add or remove its family here.
+/// Pinned by `crate::surface_coverage` tests so drift fails the build. Option A
+/// (operator ruling 2026-09-01): this is a build-static list, deliberately NOT a
+/// runtime registry — a cross-path all-detector registry was rejected as unearned for
+/// one sentence; if a second consumer of an all-detector registry ever appears, THAT
+/// earns it.
+pub(crate) const HTTP_SURFACE_DETECTOR_FAMILIES: &[&str] = &[
+    // spring::detect_spring_http_providers — @RestController (REST) + @Controller (MVC)
+    "Java Spring (@RestController/@Controller)",
+    // typescript::detect_ts_http — AWS CDK apigatewayv2 serverless providers
+    "AWS CDK API Gateway v2",
+    // typescript::detect_ts_http — axios/fetch consumer calls
+    "TS/JS HTTP client calls (axios/fetch)",
+    // app_router::detect_app_router_providers — Next.js App Router route handlers
+    "Next.js App Router",
+    // java_consumer::detect_java_http_consumers — RestTemplate/WebClient/HttpClient
+    "Java HTTP client calls (RestTemplate/WebClient/HttpClient)",
+];
+
 use repo_graph_boundary_interaction::surface::SurfaceBuilder;
 use repo_graph_boundary_interaction::{
     BoundaryInteractionSurface, BoundaryScope, ChannelKind, Direction, EndpointLocality,
@@ -448,6 +475,61 @@ mod tests {
         let mut d = app_router::detect_app_router_providers(std::slice::from_ref(file));
         d.extend(typescript::detect_ts_http(std::slice::from_ref(file)));
         d
+    }
+
+    /// MODULES-IDENTITY-2 §2.2 drift guard (operator ruling 2026-09-01): the coverage
+    /// families the `surfaces list` zero-state renders MUST stay in lockstep with the
+    /// detector composition in [`persist_http_boundary_interactions`]. Rust cannot
+    /// reflect over the `spring::…` init + four `drafts.extend(<detector>::…)` calls, so
+    /// this test mirrors that exact arm list HERE — adjacent to the dispatch — as
+    /// `(detector, families it yields)`, flattens it, and asserts it equals
+    /// [`HTTP_SURFACE_DETECTOR_FAMILIES`]. Adding/removing a `detect_*` framework in the
+    /// persist path without updating its arm here (or the const) fails the build. This
+    /// hardcoded-in-one-place mirror + drift test IS the single source of truth available
+    /// today; a runtime all-detector registry stays deliberately unearned (Option A).
+    #[test]
+    fn detector_families_const_matches_persist_dispatch_arms() {
+        // One tuple per arm of `persist_http_boundary_interactions`'s composition, in
+        // dispatch order. `typescript::detect_ts_http` yields TWO families (a CDK
+        // provider path + an axios/fetch consumer path — see typescript.rs), so its arm
+        // carries both.
+        let arms: &[(&str, &[&str])] = &[
+            (
+                "spring::detect_spring_http_providers",
+                &["Java Spring (@RestController/@Controller)"],
+            ),
+            (
+                "typescript::detect_ts_http",
+                &[
+                    "AWS CDK API Gateway v2",
+                    "TS/JS HTTP client calls (axios/fetch)",
+                ],
+            ),
+            (
+                "app_router::detect_app_router_providers",
+                &["Next.js App Router"],
+            ),
+            (
+                "java_consumer::detect_java_http_consumers",
+                &["Java HTTP client calls (RestTemplate/WebClient/HttpClient)"],
+            ),
+        ];
+        let mut from_arms: Vec<&str> = arms
+            .iter()
+            .flat_map(|(_, fams)| fams.iter().copied())
+            .collect();
+        from_arms.sort_unstable();
+        from_arms.dedup();
+
+        let mut from_const: Vec<&str> = HTTP_SURFACE_DETECTOR_FAMILIES.to_vec();
+        from_const.sort_unstable();
+        from_const.dedup();
+
+        assert_eq!(
+            from_const, from_arms,
+            "HTTP_SURFACE_DETECTOR_FAMILIES drifted from the \
+             persist_http_boundary_interactions detector arms — update whichever is stale"
+        );
     }
 
     #[test]

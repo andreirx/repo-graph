@@ -148,12 +148,18 @@ pub(crate) fn module_sizes(
         .map_err(map_err("list_module_sizes"))
 }
 
-/// ORIENT-SEGMENT-2 §2.2: map a `module_key` (`<source>:<repo_uid>:<root>`) to the
-/// owning manifest filename. The source prefix is the indexer's own deterministic
-/// tag (each `indexer::*::generate_module_key`), so this is a total, typo-proof
-/// mapping — an unknown / inferred prefix returns `None` (no manifest), never a
-/// guessed file.
-fn manifest_for_module_key(module_key: &str) -> Option<&'static str> {
+/// ORIENT-SEGMENT-2 §2.2 / MODULES-IDENTITY-2 §2.1: map a `module_key`
+/// (`<source>:<repo_uid>:<root>`) to the owning manifest filename. The source
+/// prefix is the indexer's own deterministic tag (each
+/// `indexer::*::generate_module_key`), so this is a total, typo-proof mapping — an
+/// unknown / inferred prefix returns `None` (no manifest), never a guessed file.
+///
+/// `pub` + re-exported at the crate root (`repo_graph_storage::manifest_for_module_key`)
+/// so `modules list` disambiguates twin display names from the SAME derivation
+/// `orient` uses (one implementation, never a second copy — MODULES-IDENTITY-2 §2.1).
+/// It is consumed by `module_sizes` here (the orient data path) and by the daemon's
+/// `handle_modules_list` (the modules-list data path).
+pub fn manifest_for_module_key(module_key: &str) -> Option<&'static str> {
     match module_key.split(':').next() {
         Some("cargo") => Some("Cargo.toml"),
         Some("pyproject") => Some("pyproject.toml"),

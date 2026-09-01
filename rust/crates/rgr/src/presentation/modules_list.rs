@@ -16,6 +16,7 @@
 
 use serde::Deserialize;
 
+use super::module_disambiguation::{collision_disambiguator, ModuleRow};
 use super::module_shared::{
     format_count, format_dead_compact, format_files_compact, format_kind_confidence,
 };
@@ -33,6 +34,15 @@ pub struct ModuleListEntry {
     pub module_kind: String,
     #[serde(default)]
     pub display_name: String,
+    /// MODULES-IDENTITY-2 §2.1: the owning manifest filename (`pyproject.toml`,
+    /// `package.json`, `Cargo.toml`, …), derived by the daemon from the
+    /// `module_key` source prefix via the SAME shared helper `orient` uses
+    /// (`repo_graph_storage::manifest_for_module_key`). `None` for
+    /// inferred/directory modules (no manifest declared them) — honest, never
+    /// guessed. Used ONLY to disambiguate twin display names; additive and
+    /// otherwise byte-compatible for existing consumers.
+    #[serde(default)]
+    pub manifest: Option<String>,
     #[serde(default)]
     pub confidence: f64,
     #[serde(default)]
@@ -109,18 +119,43 @@ impl ModulesListResponse {
 
         out.push('\n');
 
-        // ── Module rows ────────────────────────────────────────────
-        // Calculate column widths for alignment
-        let max_name_len = self
+        // ── Twin-name disambiguation (MODULES-IDENTITY-2 §2.1) ──────
+        // Two modules can share a display name (django declares TWO `Django`
+        // modules, both rooted at `.`) — indistinguishable rows mislead the
+        // reader. Append the owning manifest suffix (`Django [pyproject.toml]` /
+        // `Django [package.json]`) ONLY on a genuine collision, via the SAME
+        // shared helper `orient` uses — one implementation, never a second copy.
+        // A UNIQUE display name gets NO suffix, so unique-name repos (glamCRM's
+        // modules are unique) stay byte-identical to today.
+        let rows: Vec<ModuleRow> = self
             .results
             .iter()
-            .map(|m| m.display_name.len())
-            .max()
-            .unwrap_or(10)
-            .max(10);
+            .map(|m| ModuleRow {
+                path: &m.canonical_root_path,
+                name: Some(m.display_name.as_str()).filter(|n| !n.is_empty()),
+                manifest: m.manifest.as_deref(),
+            })
+            .collect();
+        let effective_names: Vec<&str> = rows.iter().map(|r| r.effective_name()).collect();
+        let labels: Vec<String> = self
+            .results
+            .iter()
+            .enumerate()
+            .map(
+                |(i, m)| match collision_disambiguator(&rows, &effective_names, i) {
+                    Some(token) => format!("{} [{token}]", m.display_name),
+                    None => m.display_name.clone(),
+                },
+            )
+            .collect();
 
-        for module in &self.results {
-            let name = &module.display_name;
+        // ── Module rows ────────────────────────────────────────────
+        // Column width is computed over the FINAL rendered labels (which include
+        // any disambiguation suffix), so an added suffix never breaks alignment;
+        // with no collisions the labels equal the display names → byte-identical.
+        let max_name_len = labels.iter().map(|l| l.len()).max().unwrap_or(10).max(10);
+
+        for (module, name) in self.results.iter().zip(labels.iter()) {
             let files = format_files_compact(module.owned_file_count, module.owned_test_file_count);
             let dead = format_dead_compact(module.dead_symbol_count);
             let violations = format_count(module.violation_count, "violation", "violations");
@@ -238,6 +273,7 @@ mod tests {
                     canonical_root_path: "src".to_string(),
                     module_kind: "inferred".to_string(),
                     display_name: "src".to_string(),
+                    manifest: None,
                     confidence: 0.7,
                     owned_file_count: 100,
                     owned_test_file_count: 10,
@@ -256,6 +292,7 @@ mod tests {
                     canonical_root_path: "lib".to_string(),
                     module_kind: "manifest".to_string(),
                     display_name: "lib".to_string(),
+                    manifest: None,
                     confidence: 1.0,
                     owned_file_count: 20,
                     owned_test_file_count: 0,
@@ -511,5 +548,144 @@ mod tests {
             output.contains("run `rmap trust` for reliability."),
             "caveat routes to the reliability surface:\n{output}"
         );
+    }
+
+    // ── MODULES-IDENTITY-2 §2.1: twin-name disambiguation ──────────────────────
+
+    /// Build a minimal entry carrying only the identity fields disambiguation
+    /// reads (display name / canonical path / owning manifest); everything else is
+    /// a benign default.
+    fn identity_entry(display_name: &str, path: &str, manifest: Option<&str>) -> ModuleListEntry {
+        ModuleListEntry {
+            module_uid: format!("uid-{path}"),
+            module_key: format!("k:repo:{path}"),
+            canonical_root_path: path.to_string(),
+            module_kind: "manifest".to_string(),
+            display_name: display_name.to_string(),
+            manifest: manifest.map(str::to_string),
+            confidence: 1.0,
+            owned_file_count: 1,
+            owned_test_file_count: 0,
+            unref_reduction: None,
+            outbound_dependency_count: 0,
+            outbound_import_count: 0,
+            inbound_dependency_count: 0,
+            inbound_import_count: 0,
+            violation_count: 0,
+            dead_symbol_count: 0,
+            dead_test_symbol_count: 0,
+        }
+    }
+
+    fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
+        ModulesListResponse {
+            command: "modules list".to_string(),
+            repo: "repo_123".to_string(),
+            snapshot: "snap_456".to_string(),
+            results,
+            http_boundary_link_count: Some(0),
+            http_boundary_link_degraded: None,
+        }
+    }
+
+    /// The measured django defect: two modules both named `Django` (one
+    /// `pyproject.toml`, one `package.json`), both rendered as a bare `Django` with
+    /// nothing to tell them apart. Each must now carry its owning manifest suffix —
+    /// from the SAME derivation `orient` uses (proven by `shared_derivation_*`).
+    #[test]
+    fn list_render_disambiguates_twin_names_by_manifest() {
+        let resp = identity_response(vec![
+            identity_entry("Django", ".", Some("pyproject.toml")),
+            identity_entry("Django", "packages/js", Some("package.json")),
+        ]);
+        let output = resp.render_human();
+        assert!(
+            output.contains("Django [pyproject.toml]"),
+            "python twin disambiguated by manifest:\n{output}"
+        );
+        assert!(
+            output.contains("Django [package.json]"),
+            "js twin disambiguated by manifest:\n{output}"
+        );
+        // The bare, indistinguishable `Django  ` row (name followed by column
+        // padding, no suffix) must be gone.
+        assert!(
+            !output.contains("Django  "),
+            "no bare indistinguishable row remains:\n{output}"
+        );
+    }
+
+    /// django's REAL shape: two `Django` modules BOTH declared via `pyproject.toml`,
+    /// both rooted at `.` in the module_candidates surface — the manifest cannot
+    /// disambiguate them, so the unique canonical path is the honest tie-break
+    /// (never two label-identical `Django [pyproject.toml]` rows).
+    #[test]
+    fn list_render_twin_same_manifest_falls_back_to_path() {
+        let resp = identity_response(vec![
+            identity_entry("Django", ".", Some("pyproject.toml")),
+            identity_entry("Django", "django/other", Some("pyproject.toml")),
+        ]);
+        let output = resp.render_human();
+        assert!(output.contains("Django [.]"), "{output}");
+        assert!(output.contains("Django [django/other]"), "{output}");
+    }
+
+    /// Unique display names get NO suffix — the glamCRM spot-check case (its module
+    /// names are unique). No suffix noise; byte-stable versus pre-slice output.
+    #[test]
+    fn list_render_unique_names_carry_no_suffix() {
+        let resp = identity_response(vec![
+            identity_entry("api", "src/api", Some("package.json")),
+            identity_entry("core", "src/core", Some("Cargo.toml")),
+        ]);
+        let output = resp.render_human();
+        assert!(
+            !output.contains('['),
+            "no disambiguation suffix on unique names:\n{output}"
+        );
+        assert!(output.contains("api"), "{output}");
+        assert!(output.contains("core"), "{output}");
+    }
+
+    /// The disambiguation is the SAME implementation `orient` uses: modules-list and
+    /// orient both call `module_disambiguation::collision_disambiguator`, so the SAME
+    /// twin rows resolve to the SAME manifest/path tokens (one implementation, never
+    /// a second copy — the identity-divergence this slice kills cannot recur).
+    #[test]
+    fn shared_derivation_matches_orient() {
+        use crate::presentation::module_disambiguation::{collision_disambiguator, ModuleRow};
+
+        // Same twin shape orient's `orient_seg2` tests assert
+        // (`module_label_disambiguates_name_collision_by_manifest`).
+        let rows = vec![
+            ModuleRow {
+                path: "django",
+                name: Some("Django"),
+                manifest: Some("pyproject.toml"),
+            },
+            ModuleRow {
+                path: "django-js",
+                name: Some("Django"),
+                manifest: Some("package.json"),
+            },
+        ];
+        let names: Vec<&str> = rows.iter().map(|r| r.effective_name()).collect();
+        assert_eq!(
+            collision_disambiguator(&rows, &names, 0),
+            Some("pyproject.toml")
+        );
+        assert_eq!(
+            collision_disambiguator(&rows, &names, 1),
+            Some("package.json")
+        );
+
+        // And that exact helper is what modules-list renders through.
+        let resp = identity_response(vec![
+            identity_entry("Django", "django", Some("pyproject.toml")),
+            identity_entry("Django", "django-js", Some("package.json")),
+        ]);
+        let output = resp.render_human();
+        assert!(output.contains("Django [pyproject.toml]"), "{output}");
+        assert!(output.contains("Django [package.json]"), "{output}");
     }
 }

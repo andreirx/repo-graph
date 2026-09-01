@@ -16,44 +16,10 @@
 
 use serde::Deserialize;
 
+use super::module_disambiguation::{collision_disambiguator, ModuleRow};
 use super::orient::{OrientDepth, OrientResponse};
 use super::orient_sections::plural;
 use super::{bullet, heading};
-
-/// ORIENT-SEGMENT-2 §2.2: one module breakdown row, projected from the agent's
-/// `top_modules` evidence. Each row is SELF-DESCRIBING (carries its own declared
-/// `name` + owning `manifest`) — NOT keyed by path — because two modules can share
-/// a `canonical_root_path` (django declares two `Django` modules both rooted at `.`).
-pub(super) struct ModuleRow<'a> {
-    pub path: &'a str,
-    pub name: Option<&'a str>,
-    pub manifest: Option<&'a str>,
-}
-
-impl<'a> ModuleRow<'a> {
-    /// Project a row from one `top_modules[i]` JSON object.
-    pub(super) fn from_json(m: &'a serde_json::Value) -> Self {
-        let path = m
-            .get("path")
-            .and_then(|p| p.as_str())
-            .unwrap_or("(unknown)");
-        let name = m
-            .get("name")
-            .and_then(|v| v.as_str())
-            .filter(|n| !n.is_empty());
-        let manifest = m.get("manifest").and_then(|v| v.as_str());
-        Self {
-            path,
-            name,
-            manifest,
-        }
-    }
-
-    /// The name a collision is detected on: the declared name, else the path.
-    pub(super) fn effective_name(&self) -> &'a str {
-        self.name.unwrap_or(self.path)
-    }
-}
 
 /// ORIENT-SEGMENT-2 §2.1: reader-side mirror of the daemon's
 /// `orient_topology_fallback::DirectoryGroupFallback`. The producer emits exactly one
@@ -395,37 +361,27 @@ impl OrientResponse {
     ) -> String {
         let row = &rows[idx];
         let path = row.path;
-        let this_name = effective_names[idx];
-        let colliders: Vec<usize> = (0..effective_names.len())
-            .filter(|&j| j != idx && effective_names[j] == this_name)
-            .collect();
-        let collision = !colliders.is_empty();
         let diverges = row.name.is_some_and(|n| n != path);
 
-        // Declared module (has a manifest) with a real divergence/collision, OR any
-        // collision at all (a manifest-less collision still needs disambiguating).
-        if !(collision || (row.manifest.is_some() && diverges)) {
-            return path.to_string();
+        // The shared collision→token decision (MODULES-IDENTITY-2 §2.1): `Some` iff
+        // this row's effective name collides with another shown row. `modules list`
+        // consumes the SAME helper — one implementation, never a second copy.
+        if let Some(token) = collision_disambiguator(rows, effective_names, idx) {
+            let base = row.name.unwrap_or(path);
+            return format!("{base} [{token}]");
         }
-        let base = row.name.unwrap_or(path);
 
-        if collision {
-            // Does the manifest distinguish this row from EVERY collider? Only then is
-            // it a valid disambiguator; else two same-manifest namesakes (django's two
-            // `Django [pyproject.toml]`) stay label-identical — fall back to the path.
-            let manifest_disambiguates = row.manifest.is_some()
-                && colliders.iter().all(|&j| rows[j].manifest != row.manifest);
-            return if manifest_disambiguates {
-                format!("{base} [{}]", row.manifest.unwrap())
-            } else {
-                format!("{base} [{path}]")
-            };
+        // No collision: orient renders the PATH by default (leveldb's inferred C++
+        // dirs, which carry no manifest, stay byte-identical) — UNLESS a
+        // manifest-DECLARED module's name diverges from its path, which surfaces
+        // `name [manifest]` so the declared identity is visible.
+        if diverges {
+            if let Some(m) = row.manifest {
+                let base = row.name.unwrap_or(path);
+                return format!("{base} [{m}]");
+            }
         }
-        // Divergence only (manifest present, no collision): surface name + manifest.
-        match row.manifest {
-            Some(m) => format!("{base} [{m}]"),
-            None => base.to_string(),
-        }
+        path.to_string()
     }
 }
 
