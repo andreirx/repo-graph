@@ -71,6 +71,12 @@ impl SeedEnv<'_> {
         // enrich/retention seam tests use (common/mod.rs, forget_repo, …).
         repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
         repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+        // Retention too (2026-09-01): the chained retention pass held the DB open while a
+        // foreground `find` dispatched — "database is locked" InternalError, the 1-in-5
+        // find_facts_seam flake (and the mechanism behind the earlier "unnamed" full-suite
+        // flakes). The FOREGROUND-LOCK-1 product fix adds open patience; tests stay hermetic
+        // regardless: no incidental background writer.
+        repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
         std::env::set_var("RMAP_SEED_ENDPOINT", endpoint);
         std::env::set_var("RMAP_SEED_MODEL_ID", TEST_MODEL);
         std::env::set_var("RMAP_SEED_DIM", TEST_DIM.to_string());
@@ -103,6 +109,7 @@ pub fn isolated() -> (ServiceDispatcher, TempDir) {
 pub fn isolated_quiet() -> (ServiceDispatcher, TempDir) {
     repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
     repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+    repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
     isolated()
 }
 
