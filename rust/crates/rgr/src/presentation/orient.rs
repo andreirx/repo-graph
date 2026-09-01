@@ -313,6 +313,13 @@ impl OrientResponse {
             out.push_str(&line);
             out.push('\n');
         }
+        // MODULE-EDGES-1 §2.3: the top cross-module edges join the headline (the VISION
+        // primary use case — "how modules relate / where the boundaries are" — on the
+        // first-60-seconds surface). Present only where the repo HAS cross-module edges.
+        if let Some(line) = self.top_module_edges_line(depth) {
+            out.push_str(&line);
+            out.push('\n');
+        }
         if let Some(line) = self.complexity_line(depth) {
             out.push_str(&line);
             out.push('\n');

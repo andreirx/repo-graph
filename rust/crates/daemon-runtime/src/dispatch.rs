@@ -8961,6 +8961,31 @@ impl ServiceDispatcher {
 
         let count = results.len();
 
+        // MODULE-EDGES-1 §2.1: project the SAME module dependency graph the rollups
+        // above were computed from (`facts.edges` — the ONE `load_module_graph_facts`
+        // read) into an additive `edges` array. The presenter renders the edge list AND
+        // derives its count from this SAME array, so the count can never disagree with
+        // its own list (the acid test). No new computation, no new fact class — the
+        // exact projection `modules deps` already serves. `facts` succeeded above (a
+        // failed load returned a labeled degradation before here), so `edges` is
+        // authoritative, never a false-zero from a failed read.
+        let edges: Vec<serde_json::Value> = facts
+            .edges
+            .iter()
+            .map(|e| {
+                // §2.1 row = `source → target (N imports)`; the presenter models exactly
+                // these three scalars as REQUIRED (no serde default → a missing field
+                // fails the parse with its reason, never a fabricated blank/zero —
+                // review-0 item 3). `source_file_count` is not part of the row, so it is
+                // deliberately not projected here.
+                serde_json::json!({
+                    "source": e.source_canonical_path,
+                    "target": e.target_canonical_path,
+                    "import_count": e.import_count,
+                })
+            })
+            .collect();
+
         // Compute sanity metrics (Phase 3.1)
         let sanity_metrics = compute_sanity_metrics_for_list(
             &results,
@@ -9024,6 +9049,11 @@ impl ServiceDispatcher {
             "snapshot": snapshot.snapshot_uid,
             "results": results,
             "count": count,
+            // MODULE-EDGES-1 §2.1: additive cross-module edge list (see above). Always
+            // emitted when `facts` loaded (possibly empty = KNOWN zero cross-module deps);
+            // the presenter treats its presence as authoritative and its absence (older
+            // daemon) as UNKNOWN, never a false zero.
+            "edges": edges,
             "rollups_degraded": !violations_available,
             "sanity_metrics": sanity_metrics,
             "warnings": warnings,

@@ -69,6 +69,62 @@ fn http_headline_partial_counts_are_malformed_not_silent() {
     assert!(!full.contains("HTTP surface ("), "{full}");
 }
 
+// ── MODULE-EDGES-1 §2.3 top cross-module edges headline ────────────────────────
+
+#[test]
+fn module_edges_headline_renders_when_present() {
+    // VCMI-shaped: client → lib, server → lib. The top-3 join the headline at EVERY
+    // depth (a load-bearing architecture fact), in the daemon's ref-count-DESC order.
+    let r = response(json!({
+        "top_module_edges": {"edges": [
+            {"source": "client", "target": "lib", "import_count": 14},
+            {"source": "server", "target": "lib", "import_count": 9}
+        ]}
+    }));
+    let line = r.top_module_edges_line(OrientDepth::Small).unwrap();
+    assert_eq!(
+        line,
+        "Module edges: client \u{2192} lib (14), server \u{2192} lib (9)"
+    );
+}
+
+#[test]
+fn module_edges_headline_absent_when_field_missing() {
+    // Repo without cross-module edges: the daemon attached nothing → no line.
+    let r = response(json!({}));
+    assert!(r.top_module_edges_line(OrientDepth::Full).is_none());
+}
+
+#[test]
+fn module_edges_headline_unavailable_only_at_full_detail() {
+    let r = response(json!({
+        "top_module_edges": {"unavailable": "duplicate ownership: a.ts"}
+    }));
+    // Failed graph read: unknown-with-reason on the detail tiers, clean headline.
+    assert!(r.top_module_edges_line(OrientDepth::Small).is_none());
+    assert!(r.top_module_edges_line(OrientDepth::Medium).is_none());
+    let full = r.top_module_edges_line(OrientDepth::Full).unwrap();
+    assert!(full.contains("unavailable"), "{full}");
+    assert!(full.contains("duplicate ownership: a.ts"), "{full}");
+}
+
+#[test]
+fn module_edges_headline_malformed_row_is_unknown_not_fabricated() {
+    // A row missing an endpoint is UNKNOWN — never a fabricated `→ (unknown)` edge.
+    let r = response(json!({
+        "top_module_edges": {"edges": [
+            {"source": "client", "import_count": 14}
+        ]}
+    }));
+    assert!(r.top_module_edges_line(OrientDepth::Small).is_none());
+    let full = r.top_module_edges_line(OrientDepth::Full).unwrap();
+    assert!(full.contains("unavailable (malformed edge row)"), "{full}");
+    assert!(
+        !full.contains("\u{2192}"),
+        "no fabricated edge arrow:\n{full}"
+    );
+}
+
 // ── §2.1 Directory-group topology fallback ─────────────────────────────────────
 
 #[test]

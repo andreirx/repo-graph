@@ -35,7 +35,10 @@ path                   = FC1, FC2a, FC2b
 imports                = FC1, FC2b
 cycles                 = FC1, FC2b
 stats                  = FC1, FC2a-agg, FC2b, FC3, FC4, FC5
-orient                 = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
+# MODULE-EDGES-1 §2.3: orient's headline now reads the derived module dependency graph
+# (FC6) for the top-3 cross-module edges, via the SAME `load_module_graph_facts`
+# `modules_deps`/`modules_list` serve (which already declare FC6).
+orient                 = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC6, FC8
 explain                = FC1, FC2a, FC2a-agg, FC2b, FC3, FC4, FC5, FC8
 # FIND-FACTS-1: `rmap find` answers FIRST from a deterministic lexical match over the
 # fact tables — symbols/files (FC1), declared modules + HTTP surfaces + framework

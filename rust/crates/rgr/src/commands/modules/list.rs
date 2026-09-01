@@ -35,8 +35,12 @@ use crate::daemon_client::DaemonClient;
 // Machine mode (--json): full envelope.
 
 pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
-    // ── Parse args (filter out --json) ──────────────────────────
+    // ── Parse args (filter out --json / --full) ─────────────────
     let mut json_mode = false;
+    // MODULE-EDGES-1 §2.1: `--full` uncaps the cross-module edge list (default
+    // budgets it with an honest "(+N more — --full)"); the COMPLETE set always rides
+    // `--json`.
+    let mut full = false;
     let mut unexpected: Option<&String> = None;
 
     for arg in args {
@@ -44,9 +48,12 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
             "--json" => {
                 json_mode = true;
             }
+            "--full" => {
+                full = true;
+            }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
-                eprintln!("usage: rmap modules list [--json]");
+                eprintln!("usage: rmap modules list [--json] [--full]");
                 return ExitCode::from(1);
             }
             _ => {
@@ -59,7 +66,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
 
     if let Some(arg) = unexpected {
         eprintln!("error: unexpected argument: {}", arg);
-        eprintln!("usage: rmap modules list [--json]");
+        eprintln!("usage: rmap modules list [--json] [--full]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
         return ExitCode::from(1);
@@ -115,7 +122,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
                 use crate::presentation::modules_list::ModulesListResponse;
                 match serde_json::from_value::<ModulesListResponse>(result) {
                     Ok(response) => {
-                        print!("{}", response.render_human());
+                        print!("{}", response.render_human_budgeted(full));
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

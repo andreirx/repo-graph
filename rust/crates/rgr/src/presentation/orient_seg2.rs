@@ -74,6 +74,37 @@ pub struct HttpSurfaces {
     pub unavailable: Option<String>,
 }
 
+/// MODULE-EDGES-1 §2.3: reader-side mirror of the daemon's injected top cross-module
+/// edges. The producer emits exactly one valid shape: SUCCESS (`edges`, non-empty) or
+/// FAILURE (`unavailable` with the graph read's reason). Every field is a lenient
+/// `Option` (an attached-but-malformed block never fails the whole orient parse — the
+/// `http_surfaces` idiom, not the `DirGroupRow` hard-scalar idiom), and
+/// `top_module_edges_line` VALIDATES the shape at render time: a failed/malformed block
+/// renders as unknown-WITH-REASON at the detail tiers, never a silent drop nor a
+/// fabricated edge (standing honesty rule #1). Absent on the wire (no cross-module
+/// edges) → no line, byte-identical.
+#[derive(Debug, Deserialize)]
+pub struct TopModuleEdges {
+    #[serde(default)]
+    pub edges: Option<Vec<TopModuleEdgeRow>>,
+    #[serde(default)]
+    pub unavailable: Option<String>,
+}
+
+/// One row of [`TopModuleEdges`]. Fields are lenient `Option`s: a row missing any of
+/// them is UNKNOWN (the daemon always serializes all three as scalars), so the render
+/// treats a malformed row as unknown-with-reason rather than fabricate a `0`/empty
+/// endpoint.
+#[derive(Debug, Deserialize)]
+pub struct TopModuleEdgeRow {
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub import_count: Option<u64>,
+}
+
 /// ORIENT-SEGMENT-2 §2.6: how many docs the headline Docs line names. A headline is
 /// a one-liner; the full ranked set stays on `documentation` (JSON) and `rmap docs`
 /// lists it whole, so this cap never overclaims. README / architecture rank first
@@ -179,6 +210,49 @@ impl OrientResponse {
         depth
             .shows_full_detail()
             .then(|| "HTTP surfaces: unavailable (malformed surface counts)".to_string())
+    }
+
+    /// MODULE-EDGES-1 §2.3: the top cross-module edges headline — `a → b (N), c → d (M)`
+    /// (top 3 by reference count), from the daemon's injected `top_module_edges`. This
+    /// is the VISION primary use case ("how modules relate / where the boundaries are")
+    /// on the first-60-seconds surface. Rendered at EVERY depth when edges exist (a
+    /// load-bearing architecture fact at any budget). A FAILED graph read is
+    /// unknown-with-reason at the detail tiers only (never a fabricated line, never a
+    /// small/medium-headline pollutant); an attached-but-malformed block is likewise
+    /// unknown-with-reason (standing honesty rule #1). `None` when the daemon attached
+    /// nothing (no cross-module edges → byte-identical).
+    pub(super) fn top_module_edges_line(&self, depth: OrientDepth) -> Option<String> {
+        let block = self.top_module_edges.as_ref()?;
+        // Stated FAILURE shape: unknown-with-reason at the detail tiers only.
+        if let Some(reason) = &block.unavailable {
+            return depth
+                .shows_full_detail()
+                .then(|| format!("Module edges: unavailable ({reason})"));
+        }
+        // SUCCESS shape: a non-empty, fully-formed edge list. A malformed row (any
+        // missing endpoint/count) is unknown-with-reason at the detail tiers — never a
+        // fabricated endpoint.
+        let Some(edges) = &block.edges else {
+            return depth
+                .shows_full_detail()
+                .then(|| "Module edges: unavailable (malformed edge block)".to_string());
+        };
+        let mut parts = Vec::with_capacity(edges.len());
+        for e in edges {
+            match (e.source.as_deref(), e.target.as_deref(), e.import_count) {
+                (Some(s), Some(t), Some(n)) => parts.push(format!("{s} \u{2192} {t} ({n})")),
+                _ => {
+                    return depth
+                        .shows_full_detail()
+                        .then(|| "Module edges: unavailable (malformed edge row)".to_string())
+                }
+            }
+        }
+        // Empty success shape is not injected by the producer; guard keeps that honest.
+        if parts.is_empty() {
+            return None;
+        }
+        Some(format!("Module edges: {}", parts.join(", ")))
     }
 
     /// ORIENT-SEGMENT-2 §2.1: the PROMOTED directory-group fan-in view, rendered only

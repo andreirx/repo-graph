@@ -20,6 +20,31 @@ use super::module_disambiguation::{collision_disambiguator, ModuleRow};
 use super::module_shared::{
     format_count, format_dead_compact, format_files_compact, format_kind_confidence,
 };
+use super::{budget_remainder_line, HUMAN_ROW_BUDGET};
+
+/// MODULE-EDGES-1 §2.1: one cross-module dependency edge, projected by the daemon
+/// from the SAME module dependency graph (`module-queries`) the module rows and the
+/// count come from. The presenter renders the edge list AND derives its count from
+/// the SAME array (`ModulesListResponse::edges`), so a count that disagrees with its
+/// own list is impossible by construction. Additive; the whole array is `Option` on
+/// the response so an OLDER daemon (no `edges` key) reads as UNKNOWN and is labelled
+/// unavailable — never a false zero from an absent field (honesty rule #1).
+///
+/// review-0 item 3 (honesty): the three RENDERED scalars carry NO `#[serde(default)]`.
+/// A malformed edge (missing `source`/`target`/`import_count`) therefore FAILS the
+/// response parse with the concrete serde reason (surfaced by `commands/modules/list.rs`
+/// as `error: failed to parse modules list response: missing field \`source\``), never a
+/// fabricated blank endpoint or `0 file-level imports`. The daemon (same version) emits
+/// all three for every edge from the frozen graph, so this only trips on genuine wire
+/// corruption / version skew — the honest outcome. `source_file_count` is intentionally
+/// NOT modelled here: it is not part of the §2.1 row (`source → target (N imports)`), so
+/// carrying it would be an unrendered, unearned field.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModuleEdgeEntry {
+    pub source: String,
+    pub target: String,
+    pub import_count: u64,
+}
 
 /// A module entry in the list response.
 #[derive(Debug, Clone, Deserialize)]
@@ -92,11 +117,33 @@ pub struct ModulesListResponse {
     /// (unknown, not "meaningless") and this is shown instead.
     #[serde(default)]
     pub http_boundary_link_degraded: Option<String>,
+    /// MODULE-EDGES-1 §2.1: the cross-module dependency edge list, from the daemon's
+    /// SAME `load_module_graph_facts` read the rollups/count come from. `Some` (even
+    /// empty) = authoritative single-read fact; `None` = older daemon (UNKNOWN) → the
+    /// pre-slice rollup-derived count line is preserved, never a false zero.
+    #[serde(default)]
+    pub edges: Option<Vec<ModuleEdgeEntry>>,
 }
 
 impl ModulesListResponse {
-    /// Render as human-readable text.
+    /// Render as human-readable text at the default (budgeted) presentation.
+    ///
+    /// review-0 item 1: this is the PRE-SLICE public signature (`pub fn
+    /// render_human(&self)`), preserved because `rgr` re-exports `presentation`
+    /// (`pub mod presentation` in `lib.rs`) — changing it is a public API break beyond
+    /// the ratified additive DTO field. The `--full` budget lever lives on the
+    /// crate-private [`render_human_budgeted`](Self::render_human_budgeted).
     pub fn render_human(&self) -> String {
+        self.render_human_budgeted(false)
+    }
+
+    /// Budget-aware human render. `full` uncaps the cross-module edge list (default
+    /// budgets it to [`HUMAN_ROW_BUDGET`] with an honest "(+N more — --full)").
+    ///
+    /// `pub(crate)`: the sole caller is `commands/modules/list.rs` (which parses
+    /// `--full`); the `--full` lever is a CLI concern, not part of the public renderer
+    /// contract (review-0 item 1).
+    pub(crate) fn render_human_budgeted(&self, full: bool) -> String {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
@@ -221,7 +268,82 @@ impl ModulesListResponse {
             ));
         }
 
-        // ── Cross-module dependency summary ────────────────────────
+        // ── Cross-module dependency edges (MODULE-EDGES-1 §2.1) ─────
+        // The count line and the edge list below come from ONE array (`self.edges`),
+        // so they can never disagree. An OLDER daemon omits the field (UNKNOWN) → the
+        // edge list is labelled unavailable-with-reason, never a false zero.
+        match &self.edges {
+            Some(edges) => self.render_edge_list(&mut out, edges, full),
+            None => self.render_edges_unavailable(&mut out),
+        }
+
+        out
+    }
+
+    /// MODULE-EDGES-1 §2.1: render the cross-module edge list under a count line
+    /// derived from the SAME array. Sorted by reference count DESC then (source,
+    /// target) ASC (deterministic); budgeted to [`HUMAN_ROW_BUDGET`] with an honest
+    /// remainder unless `full`. Zero-state keeps the pre-slice honest handling
+    /// (the "boundaries may not be meaningful" / HTTP-link note).
+    fn render_edge_list(&self, out: &mut String, edges: &[ModuleEdgeEntry], full: bool) {
+        out.push('\n');
+        if edges.is_empty() {
+            out.push_str("No cross-module dependencies detected.\n");
+            if self.results.len() > 1 {
+                // HTTP-BOUNDARY-1: the Layer-3 boundary note (heuristic-HTTP-link
+                // vs meaningless-boundaries vs failed-read-unknown) is decided in
+                // the crate-private `http_boundary` presenter — kept off this file.
+                out.push_str(&super::http_boundary::render_modules_note(
+                    self.http_boundary_link_count,
+                    self.http_boundary_link_degraded.as_deref(),
+                ));
+            }
+            return;
+        }
+
+        // Count == list length, from the SAME array → disagreement impossible.
+        out.push_str(&format_count(
+            edges.len(),
+            "cross-module dependency",
+            "cross-module dependencies",
+        ));
+        out.push_str(" detected.\n");
+
+        let mut sorted: Vec<&ModuleEdgeEntry> = edges.iter().collect();
+        sorted.sort_by(|a, b| {
+            b.import_count
+                .cmp(&a.import_count)
+                .then_with(|| a.source.cmp(&b.source))
+                .then_with(|| a.target.cmp(&b.target))
+        });
+
+        let shown = if full {
+            sorted.len()
+        } else {
+            sorted.len().min(HUMAN_ROW_BUDGET)
+        };
+        for e in &sorted[..shown] {
+            out.push_str(&format!(
+                "  {} \u{2192} {} ({} file-level import{})\n",
+                e.source,
+                e.target,
+                e.import_count,
+                if e.import_count == 1 { "" } else { "s" },
+            ));
+        }
+        if let Some(remainder) = budget_remainder_line(sorted.len(), shown) {
+            out.push_str(&remainder);
+        }
+    }
+
+    /// MODULE-EDGES-1 §2.1 (review-0 item 4): honest degradation for an OLDER daemon
+    /// that sent NO `edges` array. The authoritative edge list is UNAVAILABLE — say so,
+    /// and WHY (the connected daemon predates the field). We do NOT mint a false zero
+    /// from the absent field, and we do NOT present the pre-slice rollup-derived count
+    /// as an authoritative edge-list count (standing honesty rule #1): the rough rollup
+    /// figure is surfaced only when nonzero and is LABELLED a rough estimate, distinct
+    /// from the edge-list count it cannot stand in for.
+    fn render_edges_unavailable(&self, out: &mut String) {
         let total_outbound: usize = self
             .results
             .iter()
@@ -234,458 +356,34 @@ impl ModulesListResponse {
             .sum();
 
         out.push('\n');
+        out.push_str(
+            "Cross-module edge list unavailable — the connected daemon did not provide it \
+             (older daemon predating MODULE-EDGES-1; upgrade the daemon to see the named edges).\n",
+        );
         if total_outbound == 0 && total_inbound == 0 {
-            out.push_str("No cross-module dependencies detected.\n");
+            // The rollups the older daemon DID compute report no cross-module deps — a
+            // rollup-derived fact, labelled as such (never re-cast as the edge list).
+            out.push_str("Module rollups report no cross-module dependencies.\n");
             if self.results.len() > 1 {
-                // HTTP-BOUNDARY-1: the Layer-3 boundary note (heuristic-HTTP-link
-                // vs meaningless-boundaries vs failed-read-unknown) is decided in
-                // the crate-private `http_boundary` presenter — kept off this file.
                 out.push_str(&super::http_boundary::render_modules_note(
                     self.http_boundary_link_count,
                     self.http_boundary_link_degraded.as_deref(),
                 ));
             }
         } else {
-            let dep_count = total_outbound.max(total_inbound) / 2; // rough dedup
+            let rough = total_outbound.max(total_inbound) / 2; // rough rollup dedup
             out.push_str(&format!(
-                "{} cross-module dependencies detected.\n",
-                dep_count
+                "Module rollups suggest ~{rough} cross-module dependencies \
+                 (rough rollup estimate, not the authoritative edge-list count).\n",
             ));
         }
-
-        out
     }
 }
 
+// review-0 item 2: the test body lives in a sibling file (via `#[path]`, the
+// `orient_tests.rs` idiom) so this renderer file stays under the >500-line structural
+// guardrail. Still a child module of `modules_list` — `use super::*` reaches the
+// response structs and `HUMAN_ROW_BUDGET` exactly as an inline `mod tests` would.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_list_response() -> ModulesListResponse {
-        ModulesListResponse {
-            command: "modules list".to_string(),
-            repo: "repo_123".to_string(),
-            snapshot: "snap_456".to_string(),
-            results: vec![
-                ModuleListEntry {
-                    module_uid: "mod-1".to_string(),
-                    module_key: "inferred:repo_123:src".to_string(),
-                    canonical_root_path: "src".to_string(),
-                    module_kind: "inferred".to_string(),
-                    display_name: "src".to_string(),
-                    manifest: None,
-                    confidence: 0.7,
-                    owned_file_count: 100,
-                    owned_test_file_count: 10,
-                    unref_reduction: None,
-                    outbound_dependency_count: 0,
-                    outbound_import_count: 50,
-                    inbound_dependency_count: 0,
-                    inbound_import_count: 20,
-                    violation_count: 0,
-                    dead_symbol_count: 25,
-                    dead_test_symbol_count: 5,
-                },
-                ModuleListEntry {
-                    module_uid: "mod-2".to_string(),
-                    module_key: "inferred:repo_123:lib".to_string(),
-                    canonical_root_path: "lib".to_string(),
-                    module_kind: "manifest".to_string(),
-                    display_name: "lib".to_string(),
-                    manifest: None,
-                    confidence: 1.0,
-                    owned_file_count: 20,
-                    owned_test_file_count: 0,
-                    unref_reduction: None,
-                    outbound_dependency_count: 1,
-                    outbound_import_count: 5,
-                    inbound_dependency_count: 1,
-                    inbound_import_count: 10,
-                    violation_count: 2,
-                    dead_symbol_count: 3,
-                    dead_test_symbol_count: 0,
-                },
-            ],
-            http_boundary_link_count: Some(0),
-            http_boundary_link_degraded: None,
-        }
-    }
-
-    fn sample_empty_list_response() -> ModulesListResponse {
-        ModulesListResponse {
-            command: "modules list".to_string(),
-            repo: "repo_123".to_string(),
-            snapshot: "snap_456".to_string(),
-            results: vec![],
-            http_boundary_link_count: Some(0),
-            http_boundary_link_degraded: None,
-        }
-    }
-
-    /// review-0 item 2: two modules, zero cross-module IMPORTS, but HTTP links
-    /// exist → the "boundaries may not be meaningful" hint MUST be suppressed and
-    /// replaced with an honest pointer to `rmap boundaries links`.
-    #[test]
-    fn list_render_http_links_suppress_meaningless_hint() {
-        let mut resp = sample_list_response();
-        // Zero the import-derived cross-module deps on both rows.
-        resp.results[0].outbound_dependency_count = 0;
-        resp.results[0].inbound_dependency_count = 0;
-        resp.results[1].outbound_dependency_count = 0;
-        resp.results[1].inbound_dependency_count = 0;
-        resp.http_boundary_link_count = Some(3);
-        let output = resp.render_human();
-        assert!(
-            !output.contains("Module boundaries may not be meaningful"),
-            "misleading hint must be gone when HTTP links exist:\n{output}"
-        );
-        // Layer-3 honesty (review-1): a heuristic route-match discovery, NOT a
-        // runtime-proven connection. The wording must not overstate.
-        assert!(
-            output.contains("likely connected via HTTP route match")
-                && output.contains("heuristic, 3 links")
-                && output.contains("not runtime-proven")
-                && output.contains("rmap boundaries links"),
-            "honest Layer-3 pointer present:\n{output}"
-        );
-        assert!(
-            !output.contains("at runtime") && !output.contains("ARE meaningful"),
-            "must not claim runtime connection or assert meaningfulness:\n{output}"
-        );
-    }
-
-    /// The misleading hint STILL fires when there are no HTTP links (no regression).
-    #[test]
-    fn list_render_no_http_links_keeps_meaningless_hint() {
-        let mut resp = sample_list_response();
-        resp.results[0].outbound_dependency_count = 0;
-        resp.results[0].inbound_dependency_count = 0;
-        resp.results[1].outbound_dependency_count = 0;
-        resp.results[1].inbound_dependency_count = 0;
-        resp.http_boundary_link_count = Some(0);
-        let output = resp.render_human();
-        assert!(
-            output.contains("Module boundaries may not be meaningful"),
-            "hint fires when there are genuinely no boundaries:\n{output}"
-        );
-    }
-
-    /// review-4 item 2: a FAILED HTTP-link read is UNKNOWN — the "boundaries may
-    /// not be meaningful" claim must be SUPPRESSED (a read error must not render
-    /// as a zero fact), replaced with an honest unknown/degraded note.
-    #[test]
-    fn list_render_http_link_read_degraded_suppresses_meaningless_hint() {
-        let mut resp = sample_list_response();
-        resp.results[0].outbound_dependency_count = 0;
-        resp.results[0].inbound_dependency_count = 0;
-        resp.results[1].outbound_dependency_count = 0;
-        resp.results[1].inbound_dependency_count = 0;
-        resp.http_boundary_link_count = None;
-        resp.http_boundary_link_degraded =
-            Some("HTTP boundary link count read failed (degraded): db locked".to_string());
-        let output = resp.render_human();
-        assert!(
-            !output.contains("Module boundaries may not be meaningful"),
-            "a degraded read must NOT restore the meaningless claim:\n{output}"
-        );
-        assert!(
-            output.contains("UNKNOWN") && output.contains("degraded"),
-            "degraded read shown honestly as unknown:\n{output}"
-        );
-    }
-
-    #[test]
-    fn list_render_shows_header() {
-        let resp = sample_list_response();
-        let output = resp.render_human();
-        assert!(output.starts_with("Modules\n"));
-    }
-
-    /// Review-1 item 3: the NONZERO g2u aggregate through final human rendering — the
-    /// reconciled footnote sums the per-module reductions beside the untouched `unref?`
-    /// column figures.
-    #[test]
-    fn list_render_nonzero_reduction_renders_the_reconciled_footnote() {
-        let mut resp = sample_list_response();
-        resp.results[0].unref_reduction = Some(serde_json::json!({
-            "accounting": "union",
-            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
-            "fewer_flagged": 2,
-            "basis": "compiler-verified references found",
-        }));
-        let output = resp.render_human();
-        // Review-2 item 1: the coverage basis renders beside the reconciled aggregate.
-        assert!(
-            output.contains(
-                "reconciled: 2 fewer flagged across 1 module — compiler-verified \
-                 references found — combined analyses (coverage: TypeScript (1 partition))."
-            ),
-            "{output}"
-        );
-        assert!(
-            output.contains("25 unref?"),
-            "the pipeline column stays untouched: {output}"
-        );
-    }
-
-    /// Review-2 item 1 (negative): a row whose reduction block fails the §5.3.0 labeling
-    /// gate — missing `accounting: "union"`, or missing/malformed coverage — contributes
-    /// NOTHING: with no passing row the footnote is entirely absent, never an unlabeled
-    /// reconciled figure.
-    #[test]
-    fn list_render_unlabeled_reduction_rows_render_no_footnote() {
-        // Accounting marker absent (coverage well-formed).
-        let mut resp = sample_list_response();
-        resp.results[0].unref_reduction = Some(serde_json::json!({
-            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
-            "fewer_flagged": 2,
-        }));
-        let output = resp.render_human();
-        assert!(!output.contains("reconciled"), "{output}");
-        assert!(!output.contains("fewer flagged"), "{output}");
-
-        // Accounting present, coverage malformed (empty languages).
-        resp.results[0].unref_reduction = Some(serde_json::json!({
-            "accounting": "union",
-            "coverage": {"languages": [], "partitions": ["p"], "fingerprint": "fp"},
-            "fewer_flagged": 2,
-        }));
-        let output = resp.render_human();
-        assert!(!output.contains("reconciled"), "{output}");
-        assert!(!output.contains("fewer flagged"), "{output}");
-
-        // Mixed: one labeled row + one unlabeled row → the gate is PER ROW: only the
-        // labeled row's reduction aggregates; the unlabeled row's value is suppressed.
-        resp.results[0].unref_reduction = Some(serde_json::json!({
-            "accounting": "union",
-            "coverage": {"languages": ["TypeScript"], "partitions": ["p"], "fingerprint": "fp"},
-            "fewer_flagged": 2,
-        }));
-        resp.results[1].unref_reduction = Some(serde_json::json!({"fewer_flagged": 5}));
-        let output = resp.render_human();
-        assert!(
-            output.contains(
-                "reconciled: 2 fewer flagged across 1 module — compiler-verified \
-                 references found — combined analyses (coverage: TypeScript (1 partition))."
-            ),
-            "{output}"
-        );
-        assert!(!output.contains("7 fewer"), "{output}");
-    }
-
-    #[test]
-    fn list_render_shows_count() {
-        let resp = sample_list_response();
-        let output = resp.render_human();
-        assert!(output.contains("2 modules"));
-    }
-
-    #[test]
-    fn list_render_shows_module_names() {
-        let resp = sample_list_response();
-        let output = resp.render_human();
-        assert!(output.contains("src"));
-        assert!(output.contains("lib"));
-    }
-
-    #[test]
-    fn list_render_shows_kind_confidence() {
-        let resp = sample_list_response();
-        let output = resp.render_human();
-        assert!(output.contains("inferred (0.7)"));
-        assert!(output.contains("manifest")); // 1.0 hides decimal
-    }
-
-    #[test]
-    fn list_render_shows_violations() {
-        let resp = sample_list_response();
-        let output = resp.render_human();
-        assert!(output.contains("2 violations"));
-    }
-
-    #[test]
-    fn list_render_shows_cross_module_deps() {
-        let resp = sample_list_response();
-        let output = resp.render_human();
-        assert!(output.contains("cross-module dependencies detected"));
-    }
-
-    #[test]
-    fn list_render_empty_shows_hint() {
-        let resp = sample_empty_list_response();
-        let output = resp.render_human();
-        assert!(output.contains("No modules detected"));
-        assert!(output.contains("hint:"));
-    }
-
-    #[test]
-    fn list_render_relabels_dead_as_unref_with_caveat() {
-        // OUTPUT-DOC-TRUTH-AUDIT-1: dead_symbol_count is a low-reliability Layer-2
-        // graph-orphan inference, not a Layer-0 fact. The column must read `unref?`
-        // (never the overclaiming bare `dead`) and carry a caveat that points at the
-        // reliability surface and never claims the count is safe-to-delete.
-        let resp = sample_list_response();
-        let output = resp.render_human();
-
-        // Honest relabel present on the rows (25 -> "25 unref?", 3 -> "3 unref?").
-        assert!(
-            output.contains("unref?"),
-            "honest column label present:\n{output}"
-        );
-
-        // The overclaiming bare label is GONE from the whole surface.
-        assert!(
-            !output.contains("dead"),
-            "the overclaiming `dead` label must be absent:\n{output}"
-        );
-
-        // Caveat footnote present, scoped honestly, and routes to `rmap trust`.
-        assert!(
-            output.contains("note: unref? = symbols with no inbound reference"),
-            "caveat footnote present:\n{output}"
-        );
-        assert!(
-            output.contains("run `rmap trust` for reliability."),
-            "caveat routes to the reliability surface:\n{output}"
-        );
-    }
-
-    // ── MODULES-IDENTITY-2 §2.1: twin-name disambiguation ──────────────────────
-
-    /// Build a minimal entry carrying only the identity fields disambiguation
-    /// reads (display name / canonical path / owning manifest); everything else is
-    /// a benign default.
-    fn identity_entry(display_name: &str, path: &str, manifest: Option<&str>) -> ModuleListEntry {
-        ModuleListEntry {
-            module_uid: format!("uid-{path}"),
-            module_key: format!("k:repo:{path}"),
-            canonical_root_path: path.to_string(),
-            module_kind: "manifest".to_string(),
-            display_name: display_name.to_string(),
-            manifest: manifest.map(str::to_string),
-            confidence: 1.0,
-            owned_file_count: 1,
-            owned_test_file_count: 0,
-            unref_reduction: None,
-            outbound_dependency_count: 0,
-            outbound_import_count: 0,
-            inbound_dependency_count: 0,
-            inbound_import_count: 0,
-            violation_count: 0,
-            dead_symbol_count: 0,
-            dead_test_symbol_count: 0,
-        }
-    }
-
-    fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
-        ModulesListResponse {
-            command: "modules list".to_string(),
-            repo: "repo_123".to_string(),
-            snapshot: "snap_456".to_string(),
-            results,
-            http_boundary_link_count: Some(0),
-            http_boundary_link_degraded: None,
-        }
-    }
-
-    /// The measured django defect: two modules both named `Django` (one
-    /// `pyproject.toml`, one `package.json`), both rendered as a bare `Django` with
-    /// nothing to tell them apart. Each must now carry its owning manifest suffix —
-    /// from the SAME derivation `orient` uses (proven by `shared_derivation_*`).
-    #[test]
-    fn list_render_disambiguates_twin_names_by_manifest() {
-        let resp = identity_response(vec![
-            identity_entry("Django", ".", Some("pyproject.toml")),
-            identity_entry("Django", "packages/js", Some("package.json")),
-        ]);
-        let output = resp.render_human();
-        assert!(
-            output.contains("Django [pyproject.toml]"),
-            "python twin disambiguated by manifest:\n{output}"
-        );
-        assert!(
-            output.contains("Django [package.json]"),
-            "js twin disambiguated by manifest:\n{output}"
-        );
-        // The bare, indistinguishable `Django  ` row (name followed by column
-        // padding, no suffix) must be gone.
-        assert!(
-            !output.contains("Django  "),
-            "no bare indistinguishable row remains:\n{output}"
-        );
-    }
-
-    /// django's REAL shape: two `Django` modules BOTH declared via `pyproject.toml`,
-    /// both rooted at `.` in the module_candidates surface — the manifest cannot
-    /// disambiguate them, so the unique canonical path is the honest tie-break
-    /// (never two label-identical `Django [pyproject.toml]` rows).
-    #[test]
-    fn list_render_twin_same_manifest_falls_back_to_path() {
-        let resp = identity_response(vec![
-            identity_entry("Django", ".", Some("pyproject.toml")),
-            identity_entry("Django", "django/other", Some("pyproject.toml")),
-        ]);
-        let output = resp.render_human();
-        assert!(output.contains("Django [.]"), "{output}");
-        assert!(output.contains("Django [django/other]"), "{output}");
-    }
-
-    /// Unique display names get NO suffix — the glamCRM spot-check case (its module
-    /// names are unique). No suffix noise; byte-stable versus pre-slice output.
-    #[test]
-    fn list_render_unique_names_carry_no_suffix() {
-        let resp = identity_response(vec![
-            identity_entry("api", "src/api", Some("package.json")),
-            identity_entry("core", "src/core", Some("Cargo.toml")),
-        ]);
-        let output = resp.render_human();
-        assert!(
-            !output.contains('['),
-            "no disambiguation suffix on unique names:\n{output}"
-        );
-        assert!(output.contains("api"), "{output}");
-        assert!(output.contains("core"), "{output}");
-    }
-
-    /// The disambiguation is the SAME implementation `orient` uses: modules-list and
-    /// orient both call `module_disambiguation::collision_disambiguator`, so the SAME
-    /// twin rows resolve to the SAME manifest/path tokens (one implementation, never
-    /// a second copy — the identity-divergence this slice kills cannot recur).
-    #[test]
-    fn shared_derivation_matches_orient() {
-        use crate::presentation::module_disambiguation::{collision_disambiguator, ModuleRow};
-
-        // Same twin shape orient's `orient_seg2` tests assert
-        // (`module_label_disambiguates_name_collision_by_manifest`).
-        let rows = vec![
-            ModuleRow {
-                path: "django",
-                name: Some("Django"),
-                manifest: Some("pyproject.toml"),
-            },
-            ModuleRow {
-                path: "django-js",
-                name: Some("Django"),
-                manifest: Some("package.json"),
-            },
-        ];
-        let names: Vec<&str> = rows.iter().map(|r| r.effective_name()).collect();
-        assert_eq!(
-            collision_disambiguator(&rows, &names, 0),
-            Some("pyproject.toml")
-        );
-        assert_eq!(
-            collision_disambiguator(&rows, &names, 1),
-            Some("package.json")
-        );
-
-        // And that exact helper is what modules-list renders through.
-        let resp = identity_response(vec![
-            identity_entry("Django", "django", Some("pyproject.toml")),
-            identity_entry("Django", "django-js", Some("package.json")),
-        ]);
-        let output = resp.render_human();
-        assert!(output.contains("Django [pyproject.toml]"), "{output}");
-        assert!(output.contains("Django [package.json]"), "{output}");
-    }
-}
+#[path = "modules_list_tests.rs"]
+mod tests;

@@ -97,6 +97,14 @@ pub struct OrientResponse {
     // `pub(crate)`: see `directory_group_fallback` — crate-internal `orient_seg2` type.
     #[serde(default)]
     pub(crate) http_surfaces: Option<super::orient_seg2::HttpSurfaces>,
+    /// MODULE-EDGES-1 §2.3: the top-3 cross-module dependency edges the daemon injects
+    /// from the SAME module dependency graph `modules deps`/`modules list` serve.
+    /// Present only when the repo HAS cross-module edges (or the graph read failed →
+    /// `unavailable`). Absent on the wire for a repo without them — no headline line,
+    /// byte-identical.
+    // `pub(crate)`: see `directory_group_fallback` — crate-internal `orient_seg2` type.
+    #[serde(default)]
+    pub(crate) top_module_edges: Option<super::orient_seg2::TopModuleEdges>,
 }
 
 #[derive(Debug, Deserialize)]
