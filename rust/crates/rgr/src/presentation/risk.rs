@@ -19,6 +19,8 @@
 
 use serde::Deserialize;
 
+use crate::presentation::history::HistoryDiagnosis;
+
 // ── Response Types ───────────────────────────────────────────────────────────
 
 /// Response DTO for `risk` command.
@@ -38,6 +40,11 @@ pub struct RiskResponse {
     pub joined_files: usize,
     pub results: Vec<RiskEntry>,
     pub count: usize,
+    /// CHURN-SHALLOW-1 §2.2: the churn history diagnosis this risk ranking inherits
+    /// (churn → hotspots → risk). Named on the ranking when degenerate. `None` = older
+    /// daemon (no caveat).
+    #[serde(default)]
+    pub history: Option<HistoryDiagnosis>,
 }
 
 /// Individual risk entry.
@@ -92,6 +99,17 @@ impl RiskResponse {
             "  {} {} with both (shown below)\n",
             self.joined_files, shown_word
         ));
+
+        // CHURN-SHALLOW-1 §2.2: name the inherited churn diagnosis on the risk ranking
+        // (one sentence, same fact as churn) so a shallow / zero-in-window / no-history
+        // input is explained, not silently reflected in an empty or thin ranking.
+        if let Some(line) = self
+            .history
+            .as_ref()
+            .and_then(|h| h.cascade_line(&format_since(&self.since)))
+        {
+            out.push_str(&format!("\n{}\n", line));
+        }
 
         if self.count == 0 {
             out.push_str("\nhint: no files have both hotspot and coverage data.\n");
@@ -192,6 +210,7 @@ mod tests {
             joined_files: entries.len(),
             results: entries.clone(),
             count: entries.len(),
+            history: None,
         }
     }
 
@@ -228,6 +247,20 @@ mod tests {
         assert!(out.contains("0 files with hotspot data"));
         assert!(out.contains("30 files with coverage data"));
         assert!(out.contains("No hotspot data"));
+    }
+
+    #[test]
+    fn render_names_inherited_zero_in_window_diagnosis() {
+        // CHURN-SHALLOW-1 §2.2: an empty risk ranking from a stale clone names the
+        // inherited churn cause + the --since nudge, not a bare "no data" hint.
+        let mut resp = make_response(vec![], 0, 30);
+        resp.history = Some(HistoryDiagnosis::ZeroInWindow {
+            head_commit_date: "2024-03-15".to_string(),
+            suggested_since: "2024-03-15".to_string(),
+        });
+        let out = resp.render_human();
+        assert!(out.contains("HEAD commit: 2024-03-15"), "{out}");
+        assert!(out.contains("try --since 2024-03-15"), "{out}");
     }
 
     #[test]

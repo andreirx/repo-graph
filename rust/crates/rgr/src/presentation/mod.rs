@@ -102,6 +102,10 @@ pub mod resources;
 // CLI-OUT-6: Quality/Risk
 pub mod churn;
 pub mod coverage;
+// CHURN-SHALLOW-1: shared history-diagnosis DTO + framing for churn/hotspots/risk.
+// `pub(crate)` — consumed only by the sibling quantity presenters in this crate;
+// the packet freezes new PUBLIC APIs beyond the additive JSON field.
+pub(crate) mod history;
 pub mod hotspots;
 pub mod risk;
 

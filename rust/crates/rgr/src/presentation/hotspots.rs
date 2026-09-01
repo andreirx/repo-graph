@@ -20,6 +20,7 @@
 use repo_graph_classification::measurement_coverage::MeasurementCoverageBlock;
 use serde::Deserialize;
 
+use crate::presentation::history::HistoryDiagnosis;
 use crate::presentation::{budget_remainder_line, HUMAN_ROW_BUDGET};
 
 // ── Response Types ───────────────────────────────────────────────────────────
@@ -47,6 +48,11 @@ pub struct HotspotsResponse {
     /// is only `#[serde(default)]` robustness for an older/absent field.
     #[serde(default)]
     pub measurement_coverage: Option<MeasurementCoverageBlock>,
+    /// CHURN-SHALLOW-1 §2.2: the churn history diagnosis this ranking inherits. When
+    /// the history is shallow / zero-in-window / absent, [`HistoryDiagnosis::cascade_line`]
+    /// names it in one sentence on the ranking. `None` = older daemon (no caveat).
+    #[serde(default)]
+    pub history: Option<HistoryDiagnosis>,
 }
 
 /// Filtering metadata when exclusion flags are active.
@@ -89,6 +95,17 @@ impl HotspotsResponse {
         // Count line
         let file_word = if self.count == 1 { "file" } else { "files" };
         out.push_str(&format!("{} {} scored\n", self.count, file_word));
+
+        // CHURN-SHALLOW-1 §2.2: name the inherited churn diagnosis on the ranking — a
+        // shallow / zero-in-window / no-history churn input degrades this ranking, and
+        // the reader must see WHY (one sentence, consuming the same fact churn does).
+        if let Some(line) = self
+            .history
+            .as_ref()
+            .and_then(|h| h.cascade_line(&format_since(&self.since)))
+        {
+            out.push_str(&format!("\n{}\n", line));
+        }
 
         // METRIC-LANG-COVERAGE-1 (part A): state which languages are unmeasured — they
         // contribute complexity 0 and drop out of the churn×complexity ranking, so the
@@ -238,6 +255,7 @@ mod tests {
             results: entries.clone(),
             count: entries.len(),
             measurement_coverage: None,
+            history: None,
         }
     }
 
@@ -260,6 +278,26 @@ mod tests {
         assert!(out.contains("Formula: lines_changed * sum_complexity"));
         assert!(out.contains("0 files scored"));
         assert!(out.contains("hint:"));
+    }
+
+    #[test]
+    fn render_names_inherited_shallow_diagnosis() {
+        // CHURN-SHALLOW-1 §2.2: a shallow churn input degrades the ranking; the
+        // reader sees WHY, on the ranking, in one sentence.
+        let mut resp = make_response(
+            vec![make_entry("src/main.cpp", 400, 50, 20000)],
+            "90.days.ago",
+            None,
+        );
+        resp.history = Some(HistoryDiagnosis::ShallowOrSingle {
+            commits_available: 1,
+            is_shallow: true,
+            head_commit_date: "2026-08-01".to_string(),
+            commits_in_window: 1,
+        });
+        let out = resp.render_human(false);
+        assert!(out.contains("history is shallow"), "{out}");
+        assert!(out.contains("1 commit available"), "{out}");
     }
 
     #[test]

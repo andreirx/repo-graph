@@ -15,6 +15,8 @@
 //! # Current Surfaces
 //!
 //! - [`get_file_churn`]: Per-file commit count and line change totals
+//! - [`diagnose_history`]: History-shape diagnosis that FRAMES the churn count
+//!   (shallow / single-commit / zero-in-window / no-history / healthy)
 //!
 //! # Example
 //!
@@ -37,7 +39,9 @@
 mod basis;
 mod churn;
 mod error;
+mod history;
 
 pub use basis::{head_commit, is_git_repo, is_unborn_head, working_tree_drift, WorkingTreeDrift};
 pub use churn::{get_file_churn, ChurnWindow, FileChurnEntry};
 pub use error::GitError;
+pub use history::{diagnose_history, HistoryShape};

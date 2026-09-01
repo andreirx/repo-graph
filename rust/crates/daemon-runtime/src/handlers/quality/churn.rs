@@ -9,7 +9,9 @@ use repo_graph_storage::types::RepoRef;
 
 use crate::state::DaemonState;
 
-use super::support::{get_optional_string_param, resolve_and_load_repo, resolve_root_path};
+use super::support::{
+    diagnose_history_json, get_optional_string_param, resolve_and_load_repo, resolve_root_path,
+};
 
 /// Compute file churn metrics from git history.
 ///
@@ -126,6 +128,12 @@ pub fn handle_churn(state: &DaemonState, request: &Request) -> DispatchResult {
 
     let count = results.len();
 
+    // CHURN-SHALLOW-1 §2.1: diagnose the history shape at query time so the CLI can
+    // FRAME the count honestly (a shallow depth-1 clone's whole-tree import must not
+    // read as 90-day churn; a stale clone's zero-in-window cause must be stated, not
+    // hedged). Additive `history` block; a failed git read renders unknown-with-reason.
+    let history = diagnose_history_json(&root_path, &window);
+
     // Build envelope
     let toolchain: serde_json::Value = snapshot
         .toolchain_json
@@ -141,6 +149,7 @@ pub fn handle_churn(state: &DaemonState, request: &Request) -> DispatchResult {
         "since": since,
         "count": count,
         "results": results,
+        "history": history,
     });
 
     DispatchResult::success(&request.id, response)

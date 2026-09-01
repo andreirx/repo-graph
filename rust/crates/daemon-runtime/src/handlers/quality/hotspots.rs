@@ -10,7 +10,8 @@ use repo_graph_storage::types::RepoRef;
 use crate::state::DaemonState;
 
 use super::support::{
-    get_optional_string_param, is_vendored_path, resolve_and_load_repo, resolve_root_path,
+    diagnose_history_json, get_optional_string_param, is_vendored_path, resolve_and_load_repo,
+    resolve_root_path,
 };
 
 /// Compute hotspot analysis (churn × complexity).
@@ -215,6 +216,12 @@ pub fn handle_hotspots(state: &DaemonState, request: &Request) -> DispatchResult
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or(serde_json::Value::Null);
 
+    // CHURN-SHALLOW-1 §2.2: hotspots inherits the churn diagnosis and names it on
+    // its ranking (a shallow/zero/no-history churn input degrades the ranking; the
+    // reader must see WHY). Same fact class as churn — same `diagnose_history` over
+    // the same repo/window, so the surfaces agree.
+    let history = diagnose_history_json(&root_path, &window);
+
     let mut response = serde_json::json!({
         "command": "hotspots",
         "repo": repo_uid,
@@ -224,6 +231,7 @@ pub fn handle_hotspots(state: &DaemonState, request: &Request) -> DispatchResult
         "formula": "lines_changed * sum_complexity",
         "count": count,
         "results": results,
+        "history": history,
     });
 
     // Add filtering metadata only when filters are active

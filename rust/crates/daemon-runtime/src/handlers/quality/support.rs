@@ -50,3 +50,57 @@ pub fn is_vendored_path(path: &str) -> bool {
         VENDORED_SEGMENTS.contains(&lower.as_str())
     })
 }
+
+/// CHURN-SHALLOW-1 §2: diagnose the repo's history shape and serialize it as the
+/// additive `history` block shared by the churn/hotspots/risk responses.
+///
+/// This is the daemon→CLI boundary DTO: a raw tagged-union JSON object (`kind` +
+/// per-variant fields), NOT the `repo_graph_git::HistoryShape` domain enum (the git
+/// crate carries no serde). Three concrete callers (churn/hotspots/risk handlers)
+/// share it so the wire shape can never drift between the three surfaces.
+///
+/// Honesty rule #1: a FAILED git read is `kind: "unknown"` WITH its reason — never a
+/// guessed shape. The four known cells map to their own tags; `head_commit_date`
+/// additionally derives a concrete `suggested_since` (`--since <date>` inclusive of
+/// the last commit).
+pub fn diagnose_history_json(
+    root_path: &Path,
+    window: &repo_graph_git::ChurnWindow,
+) -> serde_json::Value {
+    match repo_graph_git::diagnose_history(root_path, window) {
+        Ok(shape) => history_shape_json(&shape),
+        Err(e) => serde_json::json!({
+            "kind": "unknown",
+            "reason": format!("history diagnosis failed: {e}"),
+        }),
+    }
+}
+
+/// Map a known [`repo_graph_git::HistoryShape`] to its wire DTO. Exhaustive — a new
+/// cell must break this match (and every renderer's).
+fn history_shape_json(shape: &repo_graph_git::HistoryShape) -> serde_json::Value {
+    use repo_graph_git::HistoryShape;
+    match shape {
+        HistoryShape::NoHistory => serde_json::json!({ "kind": "no_history" }),
+        HistoryShape::ShallowOrSingle {
+            commits_available,
+            is_shallow,
+            head_commit_date,
+            commits_in_window,
+        } => serde_json::json!({
+            "kind": "shallow_or_single",
+            "commits_available": commits_available,
+            "is_shallow": is_shallow,
+            "head_commit_date": head_commit_date,
+            "commits_in_window": commits_in_window,
+        }),
+        HistoryShape::ZeroInWindow { head_commit_date } => serde_json::json!({
+            "kind": "zero_in_window",
+            "head_commit_date": head_commit_date,
+            // `--since <head-date>` is inclusive at day granularity, so it captures
+            // the most recent commit — the concrete widening the reader should try.
+            "suggested_since": head_commit_date,
+        }),
+        HistoryShape::Healthy => serde_json::json!({ "kind": "healthy" }),
+    }
+}

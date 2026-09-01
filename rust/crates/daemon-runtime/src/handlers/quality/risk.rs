@@ -9,7 +9,9 @@ use repo_graph_storage::types::RepoRef;
 
 use crate::state::DaemonState;
 
-use super::support::{get_optional_string_param, resolve_and_load_repo, resolve_root_path};
+use super::support::{
+    diagnose_history_json, get_optional_string_param, resolve_and_load_repo, resolve_root_path,
+};
 
 /// Compute risk analysis (hotspot × coverage gap).
 ///
@@ -224,6 +226,10 @@ pub fn handle_risk(state: &DaemonState, request: &Request) -> DispatchResult {
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or(serde_json::Value::Null);
 
+    // CHURN-SHALLOW-1 §2.2: risk inherits the churn diagnosis (churn feeds hotspots
+    // feeds risk) and names it when the surface degenerates. Same fact class as churn.
+    let history = diagnose_history_json(&root_path, &window);
+
     let response = serde_json::json!({
         "command": "risk",
         "repo": repo_uid,
@@ -236,6 +242,7 @@ pub fn handle_risk(state: &DaemonState, request: &Request) -> DispatchResult {
         "joined_files": count,
         "count": count,
         "results": results,
+        "history": history,
     });
 
     DispatchResult::success(&request.id, response)

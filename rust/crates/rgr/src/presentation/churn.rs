@@ -17,6 +17,7 @@
 
 use serde::Deserialize;
 
+use crate::presentation::history::HistoryDiagnosis;
 use crate::presentation::{budget_remainder_line, HUMAN_ROW_BUDGET};
 
 // ── Response Types ───────────────────────────────────────────────────────────
@@ -34,6 +35,13 @@ pub struct ChurnResponse {
     pub since: String,
     pub results: Vec<ChurnEntry>,
     pub count: usize,
+    /// CHURN-SHALLOW-1 §2.1: the daemon's history-shape diagnosis, framing the count
+    /// (shallow/single import, zero-in-window cause, no-history, or unknown-with-reason).
+    /// ALWAYS present from the current daemon; `Option` + `#[serde(default)]` is
+    /// forward/back-compat robustness — `None` (an older daemon) falls back to the
+    /// prior either/or hedge.
+    #[serde(default)]
+    pub history: Option<HistoryDiagnosis>,
 }
 
 /// Individual file churn entry.
@@ -56,17 +64,31 @@ impl ChurnResponse {
         let mut out = String::new();
 
         // Header with time window
-        out.push_str(&format!("File Churn ({})\n\n", format_since(&self.since)));
+        let window_label = format_since(&self.since);
+        out.push_str(&format!("File Churn ({})\n\n", window_label));
 
-        // Count line — the COMPLETE count, never the displayed subset.
-        let file_word = if self.count == 1 { "file" } else { "files" };
-        out.push_str(&format!("{} {} changed\n", self.count, file_word));
+        // CHURN-SHALLOW-1 §2.1: the count region is FRAMED by the history diagnosis —
+        // a shallow/single-commit import is never presented as recent churn, and a
+        // zero-in-window / no-history cause is stated instead of the either/or hedge.
+        // `None` (an older daemon that predates the `history` block) preserves the
+        // prior behaviour.
+        match &self.history {
+            Some(diag) => out.push_str(&diag.churn_summary(self.count, &window_label)),
+            None => {
+                let file_word = if self.count == 1 { "file" } else { "files" };
+                out.push_str(&format!("{} {} changed\n", self.count, file_word));
+                if self.count == 0 {
+                    out.push_str(&format!(
+                        "\nhint: no files changed in the {} window, or no git history available.\n",
+                        window_label
+                    ));
+                }
+            }
+        }
 
+        // No file table when nothing was counted (holds for every diagnosis cell:
+        // the zero-in-window / no-history cells are count==0; shallow/single is count>0).
         if self.count == 0 {
-            out.push_str(&format!(
-                "\nhint: no files changed in the {} window, or no git history available.\n",
-                format_since(&self.since)
-            ));
             return out;
         }
 
@@ -143,6 +165,14 @@ mod tests {
     use super::*;
 
     fn make_response(entries: Vec<ChurnEntry>, since: &str) -> ChurnResponse {
+        make_response_with_history(entries, since, None)
+    }
+
+    fn make_response_with_history(
+        entries: Vec<ChurnEntry>,
+        since: &str,
+        history: Option<HistoryDiagnosis>,
+    ) -> ChurnResponse {
         ChurnResponse {
             command: "churn".to_string(),
             repo: "test-repo".to_string(),
@@ -150,6 +180,7 @@ mod tests {
             since: since.to_string(),
             results: entries.clone(),
             count: entries.len(),
+            history,
         }
     }
 
@@ -161,6 +192,50 @@ mod tests {
         assert!(out.contains("File Churn (last 90 days)"));
         assert!(out.contains("0 files changed"));
         assert!(out.contains("hint:"));
+    }
+
+    #[test]
+    fn render_shallow_reframes_and_still_shows_table() {
+        // VCMI shape: the whole-tree import is reframed AND its files still listed
+        // (under the honest frame), not presented as 90-day churn.
+        let resp = make_response_with_history(
+            vec![ChurnEntry {
+                file_path: "src/main.cpp".to_string(),
+                commit_count: 1,
+                lines_changed: 400,
+            }],
+            "90.days.ago",
+            Some(HistoryDiagnosis::ShallowOrSingle {
+                commits_available: 1,
+                is_shallow: true,
+                head_commit_date: "2026-08-01".to_string(),
+                commits_in_window: 1,
+            }),
+        );
+        let out = resp.render_human(false);
+        assert!(out.contains("history is shallow"), "{out}");
+        assert!(out.contains("1 file in the imported snapshot"), "{out}");
+        assert!(!out.contains("1 file changed"), "{out}");
+        // The import file is still rendered in the table.
+        assert!(out.contains("src/main.cpp"), "{out}");
+    }
+
+    #[test]
+    fn render_zero_in_window_states_cause_not_hedge() {
+        // django shape: determinable cause replaces the either/or hedge.
+        let resp = make_response_with_history(
+            vec![],
+            "90.days.ago",
+            Some(HistoryDiagnosis::ZeroInWindow {
+                head_commit_date: "2024-03-15".to_string(),
+                suggested_since: "2024-03-15".to_string(),
+            }),
+        );
+        let out = resp.render_human(false);
+        assert!(out.contains("0 files changed"), "{out}");
+        assert!(out.contains("HEAD commit: 2024-03-15"), "{out}");
+        assert!(out.contains("try --since 2024-03-15"), "{out}");
+        assert!(!out.contains("or no git history available"), "{out}");
     }
 
     #[test]
