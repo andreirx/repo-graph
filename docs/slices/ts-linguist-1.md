@@ -45,14 +45,18 @@ operator's real state root. Do NOT commit.
   pre-fix both classify TypeScript (FAILS); post-fix the XML one carries the non-code token,
   the real one unchanged.
 - Unit: sniff boundary cases (BOM, leading whitespace/comments, empty file, unreadable).
-- Live proof (isolated state root, registry sha unchanged): VCMI — churn's top-25 free of
-  `.ts` translation files; dead/inferences no longer claim TypeScript applicability;
-  stats' translation rows honest. FRAKTAG byte-parity spot-check vs the 15-01-04Z captures
+- Live proof (isolated state root, registry sha unchanged): VCMI — dead/inferences no
+  longer claim TypeScript applicability; deps' ecosystem header free of TypeScript; stats'
+  translation rows honest. CHURN CRITERION AMENDED (ruling TSLING1-CHURN-HEAL, 2026-09-01):
+  churn measures git activity and translation files genuinely churn — they REMAIN visible;
+  the defect was the TypeScript label, which the fact-fix cures. Three surfaces heal, not
+  four. FRAKTAG byte-parity spot-check vs the 15-01-04Z captures
   (allowing only lines the enrichment epoch legitimately moves).
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done
 
-Qt Linguist files never masquerade as TypeScript; four surfaces heal through the one fact;
+Qt Linguist files never masquerade as TypeScript; the language-derived surfaces heal through
+the one fact (churn honestly keeps real translation activity);
 genuine TS repos byte-stable; sniffing is bounded content evidence with honest fallbacks;
 gates green.
