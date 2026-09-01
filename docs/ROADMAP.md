@@ -100,6 +100,20 @@ sidecars), and cross-command contradictions. Ranked queue (operator, pending hum
    quartet collapse. 10. churn sort + budgets, stats de-dup. Seeding corpus levers (boilerplate
    skip, symbol names, config/test exclusion) fold into the symbol-granularity milestone.
 
+## Usefulness audit v0.13.0 — the fix queue (2026-09-01)
+
+Post-release audit of v0.13.0 (all nine v0.11.0 fixes field-verified, no regressions; matrix
+mostly A-band; zero new zero-collapse instances — the class is dead; Codex second opinion
+adopted: remaining defects are narrower but several still honesty-class). Artifact + local
+doc `docs/audits/2026-09-01-per-command-usefulness-v0.13.0.md`. Ranked queue: 1.
+**ORIENT-SMALL-ENRICH-1** (small tier renders daemon-global in-flight on no-path repos).
+2. **FOREGROUND-LOCK-1** (foreground open lock patience + honest lock message). 3.
+**ZEROSTATE-SCOPE-1** (per-repo-scoped detector rosters; boundaries zero-state; any-TS cycle
+caveat). 4. **FUNNEL-VOCAB-1**. 5. **CHURN-DIAGNOSE-1**. 6. **CHECK-LANG-SPLIT-1**. 7.
+**SURFACES-DEDUP-1**. 8. **FIND-TEST-RANK-2** (verify the is_test fact on in-crate test
+modules first). 9. **DEPS-SELF-1**. 10. governance polish + protocol items (post-enrichment
+re-capture; firing-boundary arm; linux timeout override).
+
 ## Usefulness audit v0.11.0 — the fix queue (2026-08-31)
 
 **Top tier COMPLETE (2026-08-31/09-01):** #1 ORIENT-FACT-COHERENCE-1 5b0a6b2 (re-scoped:
