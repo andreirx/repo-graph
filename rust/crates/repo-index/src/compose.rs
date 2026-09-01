@@ -51,6 +51,7 @@ use repo_graph_indexer::cargo_manifest::{
 };
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::inferred_modules::{self, InferredModule};
+use repo_graph_indexer::language_sniff::classify_file_language;
 use repo_graph_indexer::orchestrator::{self, FileInput, IndexError};
 use repo_graph_indexer::package_json::{self, NpmModule};
 use repo_graph_indexer::proto_indexer::ProtoFileInput;
@@ -570,7 +571,14 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                 // manifest — this prevents mixed-repo contamination where a nearby
                 // package.json would wrongly appear as dependency context for a
                 // C or C++ file.
-                let language = routing::detect_language(&ok.rel_path);
+                // TS-LINGUIST-1 (review-2 item 2): classify from the SAME
+                // content-aware fact the index write uses. `ok.content` is in
+                // hand here, so a Qt Linguist `.ts` (XML) is `None`, not the
+                // false `"typescript"` — it therefore never enters the JS/TS arm
+                // below and acquires NO package.json / tsconfig file signals.
+                // Using the extension-only `detect_language` here was the
+                // second, drifting classification of one fact.
+                let language = classify_file_language(&ok.rel_path, Some(ok.content.as_bytes()));
                 let empty_deps = PackageDependencySet { names: vec![] };
                 let empty_tsconfig = TsconfigAliases { entries: vec![] };
                 let (pkg_deps, tsconfig) = match language {
@@ -1274,7 +1282,15 @@ fn persist_read_failures(
             file_uid: format!("{}:{}", repo_uid, path),
             repo_uid: repo_uid.into(),
             path: path.clone(),
-            language: routing::detect_language(path).map(|s| s.to_string()),
+            // TS-LINGUIST-1 §2.4: a read-failed file has no content to sniff.
+            // The extension-only table would stamp every `.ts`/`.mts`/`.cts` as
+            // `"typescript"` — the extension-as-evidence defect this slice
+            // removes — even though such a file could be a Qt Linguist / XML
+            // catalog. With no content there is no evidence, so we must NOT
+            // silently default to TypeScript; `classify_file_language(_, None)`
+            // returns `None` ("unknown") for that ambiguous family while keeping
+            // every unambiguous extension's classification.
+            language: classify_file_language(path, None).map(|s| s.to_string()),
             is_test: routing::is_test_file(path),
             is_generated: false,
             is_excluded: false,

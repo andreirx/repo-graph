@@ -34,6 +34,7 @@ use repo_graph_classification::types::{
 
 use crate::extractor_port::{ExtractorError, ExtractorPort};
 use crate::include_resolver::{build_include_resolution_map, IncludeResolverConfig};
+use crate::language_sniff::classify_file_language;
 use crate::resolver::{
     build_file_resolution_map, build_per_file_include_resolution, get_module_path, resolve_edges,
     ResolverIndex,
@@ -532,7 +533,11 @@ fn run_pipeline<S: IndexerStoragePort>(
             Some(file.rel_path.clone()),
         )?;
         let file_uid = format!("{}:{}", repo_uid, file.rel_path);
-        let language = detect_language(&file.rel_path);
+        // TS-LINGUIST-1: content-aware classification. A `.ts`/`.mts`/`.cts` whose
+        // content is a Qt Linguist / XML document is classified `None`, not the
+        // false `"typescript"`. `file.content` is already in hand here, so the
+        // sniff adds no I/O. Genuine TypeScript is byte-identical.
+        let language = classify_file_language(&file.rel_path, Some(file.content.as_bytes()));
         let is_test = is_test_file(&file.rel_path);
 
         tracked_files.push(TrackedFile {
@@ -1697,6 +1702,25 @@ pub fn refresh_repo<
     }
 
     // Register copied files as tracked.
+    //
+    // TS-LINGUIST-1: a copied file is UNCHANGED, so its language must not change.
+    // Re-deriving from the path would REGRESS a Qt Linguist `.ts` (correctly
+    // stored as `None` when it was extracted) back to the false `"typescript"`,
+    // because we have no content in hand to re-sniff. Instead, preserve the
+    // classification already stored in the mutable `files` table (the parent
+    // snapshot's value, computed by the content-aware path). This is value-
+    // preserving for every code language too (their stored value equals the
+    // path derivation) and only differs for the sniffed non-code case.
+    //
+    // Fallible read is propagated, never swallowed (unknown is never silently
+    // treated as absent). The path fallback applies only to a copied file with
+    // no prior `files` row — which cannot happen for a carried-forward file, but
+    // is the honest best-effort when no content and no stored fact exist.
+    let existing_languages: std::collections::HashMap<String, Option<String>> =
+        match storage.get_files_by_repo(repo_uid) {
+            Ok(files) => files.into_iter().map(|f| (f.path, f.language)).collect(),
+            Err(e) => return Err(IndexError::Storage(e)),
+        };
     let copied_tracked: Vec<TrackedFile> = plan
         .files_to_copy
         .iter()
@@ -1704,7 +1728,14 @@ pub fn refresh_repo<
             file_uid: format!("{}:{}", repo_uid, path),
             repo_uid: repo_uid.into(),
             path: path.clone(),
-            language: detect_language(path).map(|s| s.to_string()),
+            language: existing_languages.get(path).cloned().unwrap_or_else(|| {
+                // No stored fact for a copied file (cannot happen for a genuine
+                // carry-forward). No content in hand → §2.4: do not assert the
+                // ambiguous TS family; `classify_file_language(_, None)` yields
+                // `None` for `.ts`/`.mts`/`.cts` and the extension language
+                // otherwise.
+                classify_file_language(path, None).map(|s| s.to_string())
+            }),
             is_test: is_test_file(path),
             is_generated: false,
             is_excluded: false,

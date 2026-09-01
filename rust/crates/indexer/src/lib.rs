@@ -104,6 +104,7 @@ pub mod inferred_modules;
 pub mod invalidation;
 pub mod java_code_mapper;
 pub mod jsts_extensions;
+pub mod language_sniff;
 pub mod orchestrator;
 pub mod package_json;
 pub mod proto_indexer;
