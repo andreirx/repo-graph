@@ -82,6 +82,7 @@ fn seed_many_signals() -> FakeAgentStorage {
         vec![AgentCycle {
             length: 2,
             modules: vec!["m1".into(), "m2".into()],
+            test_composition: None,
         }],
     );
     // Dead code surface withdrawn — no dead_nodes seeding.

@@ -114,6 +114,7 @@ fn explain_symbol_module_context_on_inherited_signals() {
         vec![repo_graph_agent::AgentCycle {
             length: 2,
             modules: vec!["src/core".into(), "src/adapters".into()],
+            test_composition: None,
         }],
     );
 

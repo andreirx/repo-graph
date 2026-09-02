@@ -64,6 +64,7 @@ fn seed_with_all_signals() -> FakeAgentStorage {
         vec![AgentCycle {
             length: 2,
             modules: vec!["m1".into(), "m2".into()],
+            test_composition: None,
         }],
     );
 

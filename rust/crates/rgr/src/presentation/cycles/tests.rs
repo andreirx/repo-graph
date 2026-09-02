@@ -72,9 +72,12 @@ fn render_demotes_test_only_cycles_below_main() {
         ]),
     ];
     let out = r.render_human();
-    // Headline main-only.
-    assert!(out.contains("1 module-level cycle found"), "{out}");
-    assert!(out.contains("+1 test-only cycle"), "{out}");
+    // Headline main-only, with the SHARED combined parenthetical (review-4 #3): the exclusion
+    // disclosure is inline, phrased identically to `orient`, not a separate line.
+    assert!(
+        out.contains("1 module-level cycle found (+1 test-only excluded)"),
+        "{out}"
+    );
     // Demoted section present, labeled, and BELOW the production cycle.
     let prod = out.find("src/a").expect("production cycle shown");
     let section = out
@@ -107,13 +110,68 @@ fn render_unknown_cycle_stays_in_main_with_marker() {
         ),
     ];
     let out = r.render_human();
-    // BOTH cycles are in the main headline (unknown is not demoted).
-    assert!(out.contains("2 module-level cycles found"), "{out}");
-    assert!(!out.contains("test-only cycle"), "no demotion:\n{out}");
+    // BOTH cycles are in the main headline (unknown is not demoted), and the unknown subset is
+    // disclosed inline in the SAME combined form `orient` renders (review-4 #3 assertion).
+    assert!(
+        out.contains("2 module-level cycles found (test-composition unknown for 1)"),
+        "{out}"
+    );
+    assert!(!out.contains("test-only"), "no demotion:\n{out}");
     // The unknown marker with its reason is present in the main listing.
     assert!(
         out.contains("[test-composition unknown: member module `vendor/x` owns no tracked file"),
         "unknown marker present:\n{out}"
+    );
+}
+
+#[test]
+fn headline_counts_come_from_the_shared_partition() {
+    // ORIENT-CYCLES-DISAGREE-1 (review-4 #1): the headline integers are produced by the shared
+    // `repo_graph_agent::partition_counts` (via `headline_partition`), and the body GROUPING
+    // (`main` / `fixtures`) reads the SAME per-cycle `composition()`. This pins the two to agree —
+    // if a future edit skews either, `main.len()`/`fixtures.len()` would diverge from the shared
+    // partition and this fails. Set: 1 production + 1 unknown (both in main) + 1 test-only (demoted).
+    let mut r = minimal_response();
+    r.count = 3;
+    r.cycles = vec![
+        cyc_classified(
+            vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+            "production",
+            None,
+        ),
+        cyc_classified(
+            vec![cnode("u1", "vendor/x"), cnode("u2", "vendor/y")],
+            "unknown",
+            Some("member module `vendor/x` owns no tracked file (is_test unknown)"),
+        ),
+        cyc_fixture(vec![
+            cnode("t1", "tests/fixtures/mono/pkg-a"),
+            cnode("t2", "tests/fixtures/mono/pkg-b"),
+        ]),
+    ];
+    let partition = headline_partition(&r.cycles).expect("all classified ⇒ split present");
+    let (fixtures, main): (Vec<&Cycle>, Vec<&Cycle>) = r
+        .cycles
+        .iter()
+        .partition(|c| c.composition() == CycleComposition::TestOnly);
+    assert_eq!(
+        partition.production_count as usize,
+        main.len(),
+        "shared production_count == body main grouping"
+    );
+    assert_eq!(
+        partition.test_only_count as usize,
+        fixtures.len(),
+        "shared test_only_count == body demoted grouping"
+    );
+    assert_eq!(partition.unknown_count, 1, "one unknown in the headline");
+    // And the rendered headline reflects those shared integers (production 2, +1 test-only, 1 unknown).
+    let out = r.render_human();
+    assert!(
+        out.contains(
+            "2 module-level cycles found (+1 test-only excluded; test-composition unknown for 1)"
+        ),
+        "{out}"
     );
 }
 

@@ -247,6 +247,7 @@ mod tests {
         AgentCycle {
             length: len,
             modules: modules.iter().map(|m| m.to_string()).collect(),
+            test_composition: None,
         }
     }
 

@@ -329,6 +329,12 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
 
     let evidence = ImportCyclesEvidence {
         cycle_count,
+        // ORIENT-CYCLES-DISAGREE-1: module-focus cycles (`find_cycles_involving_module`) are a
+        // focus surface, not the repo headline this slice unifies; the adapter does not
+        // test-composition-label them, so no split is claimed here (raw total only).
+        production_count: None,
+        test_only_count: None,
+        unknown_count: None,
         cycles: top,
     };
 

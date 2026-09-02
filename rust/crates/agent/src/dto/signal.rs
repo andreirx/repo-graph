@@ -467,7 +467,37 @@ pub struct GateIncompleteEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportCyclesEvidence {
+    /// The RAW total cycle count (every module cycle, test-only included). Preserved
+    /// unchanged for back-compat; the headline now PREFERS [`Self::production_count`] when
+    /// present.
     pub cycle_count: u64,
+    /// ORIENT-CYCLES-DISAGREE-1: the FIXTURE-POLLUTION-1 non-test-only headline count — the
+    /// SAME integer `cycles` renders as "N module-level cycle(s) found", derived from the
+    /// shared [`crate::cycle_composition`] classifier over the SAME cycle set. `Some` on the
+    /// SQLite-served path (where the stored `is_test` fact is reachable); `None` where it is
+    /// not (LiveGraph module-cycle serve — §2.3 asymmetry — and focus/path-scoped reads),
+    /// in which case the renderer falls back to [`Self::cycle_count`], matching `cycles` on
+    /// those same paths. Additive: `None` is omitted from JSON (byte-identical for existing
+    /// consumers). NEVER 0-as-unknown — absence is `None`, not zero (Fact Certainty Model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub production_count: Option<u64>,
+    /// ORIENT-CYCLES-DISAGREE-1: the count of positively test-only cycles EXCLUDED from the
+    /// headline — the SAME integer `cycles` renders as "+M test-only cycle(s) (excluded ...)".
+    /// Paired with [`Self::production_count`] (both `Some` or both `None` from one
+    /// classification). Additive; omitted from JSON when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_only_count: Option<u64>,
+    /// ORIENT-CYCLES-DISAGREE-1 (operator ruling review-3, 2026-09-03 #2): the SUBSET of
+    /// [`Self::production_count`] whose test-composition is UNPROVABLE (a member owns no tracked
+    /// file, or a malformed node). Unknown cycles are NEVER demoted — they stay counted in
+    /// `production_count` (the headline) — but must also never be counted INVISIBLY, so this
+    /// discloses how many of the headline cycles are unknown. The renderer appends
+    /// "; test-composition unknown for K" when this is `> 0`. Derived from the SAME classification
+    /// as the other two counts: `Some` (possibly `Some(0)`) on the SQLite path, `None` where the
+    /// split is not computed (LiveGraph/focus). Additive; omitted from JSON when `None`. NEVER
+    /// 0-as-unknown — absence is `None`, a known-zero is `Some(0)` (Fact Certainty Model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unknown_count: Option<u64>,
     pub cycles: Vec<CycleEvidence>,
 }
 
@@ -1317,11 +1347,46 @@ impl Signal {
     }
 
     pub fn import_cycles(evidence: ImportCyclesEvidence) -> Self {
-        let summary = format!(
-            "{} import cycle{} detected at the module level.",
-            evidence.cycle_count,
-            if evidence.cycle_count == 1 { "" } else { "s" }
-        );
+        // ORIENT-CYCLES-DISAGREE-1: the descriptor uses the SAME exclusion-aware count the
+        // human headline and `cycles` render — the production count (+ test-only disclosure)
+        // when the serving computation labeled the split, else the raw total (LiveGraph/focus
+        // path). So no field of orient's own output states a different cycle count.
+        let plural = |n: u64| if n == 1 { "" } else { "s" };
+        // ORIENT-CYCLES-DISAGREE-1 (operator ruling review-3 #2): the disclosure clause carries
+        // BOTH the excluded test-only count AND the unknown subset (when > 0) — an unknown cycle
+        // stays counted in `prod` (never demoted) but is never invisible. Absent counts (the
+        // LiveGraph/focus fallback) render nothing.
+        let disclose = |test_only: Option<u64>, unknown: Option<u64>| -> String {
+            let mut clauses: Vec<String> = Vec::new();
+            if let Some(t) = test_only {
+                if t > 0 {
+                    clauses.push(format!("+{t} test-only excluded"));
+                }
+            }
+            if let Some(k) = unknown {
+                if k > 0 {
+                    clauses.push(format!("test-composition unknown for {k}"));
+                }
+            }
+            if clauses.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", clauses.join("; "))
+            }
+        };
+        let summary = match evidence.production_count {
+            Some(prod) => format!(
+                "{} import cycle{} detected at the module level{}.",
+                prod,
+                plural(prod),
+                disclose(evidence.test_only_count, evidence.unknown_count)
+            ),
+            None => format!(
+                "{} import cycle{} detected at the module level.",
+                evidence.cycle_count,
+                plural(evidence.cycle_count)
+            ),
+        };
         Self::build(
             SignalCode::ImportCycles,
             summary,
@@ -1803,6 +1868,9 @@ mod tests {
     fn constructor_invariant_import_cycles() {
         let s = Signal::import_cycles(ImportCyclesEvidence {
             cycle_count: 2,
+            production_count: None,
+            test_only_count: None,
+            unknown_count: None,
             cycles: vec![],
         });
         assert_eq!(s.code, SignalCode::ImportCycles);
@@ -2030,6 +2098,9 @@ mod tests {
     fn signal_serializes_with_flat_evidence_object() {
         let s = Signal::import_cycles(ImportCyclesEvidence {
             cycle_count: 1,
+            production_count: None,
+            test_only_count: None,
+            unknown_count: None,
             cycles: vec![CycleEvidence {
                 length: 2,
                 modules: vec!["m1".into(), "m2".into()],

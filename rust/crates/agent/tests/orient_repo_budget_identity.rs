@@ -128,6 +128,7 @@ fn seed_depth_repo() -> FakeAgentStorage {
         vec![AgentCycle {
             length: 2,
             modules: vec!["src/mod00".into(), "src/mod01".into()],
+            test_composition: None,
         }],
     );
 

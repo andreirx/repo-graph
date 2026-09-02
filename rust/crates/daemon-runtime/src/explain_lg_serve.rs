@@ -174,6 +174,9 @@ pub(crate) fn serve_cycles(
             .map(|c| repo_graph_agent::AgentCycle {
                 length: c.members.len(),
                 modules: c.members,
+                // ORIENT-CYCLES-DISAGREE-1: explain's focus-scoped LiveGraph cycle serve — no
+                // is_test reach (§2.3) and not the repo headline; no test-only split claimed.
+                test_composition: None,
             })
             .collect();
         repo_graph_agent::ordering::canonicalize_cycles(&mut agent_cycles);

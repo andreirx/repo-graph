@@ -172,6 +172,45 @@ pub fn next_steps(commands: &[&str]) -> String {
     out
 }
 
+/// ORIENT-CYCLES-DISAGREE-1 (review-4 #3): the ONE test-only/unknown disclosure clause BOTH
+/// the `cycles` headline and the `orient` cycle leaf append after their production count, so the
+/// two surfaces phrase the SAME two integers identically — the whole point of the slice. Each
+/// clause appears only when its count is a KNOWN positive; an ABSENT count (`None` — the
+/// LiveGraph/focus path, or a leaf that did not split) contributes nothing and is NEVER rendered
+/// as zero (STANDING HONESTY RULE #1: absence ≠ zero). Returns the clause body without the
+/// surrounding parentheses (`+M test-only excluded; test-composition unknown for K`), or `None`
+/// when neither clause applies.
+///
+/// Abstraction record — helper: `cycle_exclusion_clause`; concrete current users:
+/// [`orient_sections`]'s `cycles_docs_line` and [`cycles`]'s `CyclesResponse::render_human`;
+/// axis: the exclusion/unknown disclosure WORDING must be byte-identical across the two cycle
+/// headlines (before this slice `cycles` used a multi-line form while `orient` used this
+/// parenthetical — the exact drift the slice removes); rejected simpler: each renderer building
+/// its own clause string (what caused the divergence). The agent-side `Signal::import_cycles`
+/// summary keeps its own copy — it lives in the `agent` core crate (which cannot depend on this
+/// presentation crate), so unifying it would invert the dependency / put CLI wording in the core.
+pub(crate) fn cycle_exclusion_clause(
+    test_only: Option<u64>,
+    unknown: Option<u64>,
+) -> Option<String> {
+    let mut clauses: Vec<String> = Vec::new();
+    if let Some(t) = test_only {
+        if t > 0 {
+            clauses.push(format!("+{t} test-only excluded"));
+        }
+    }
+    if let Some(k) = unknown {
+        if k > 0 {
+            clauses.push(format!("test-composition unknown for {k}"));
+        }
+    }
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join("; "))
+    }
+}
+
 /// GOV-ARMED-1: the shared "unknown" degradation line for the governance
 /// quartet (`gate` / `assess` / `violations` / `modules violations`).
 ///

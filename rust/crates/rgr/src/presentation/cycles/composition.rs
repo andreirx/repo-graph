@@ -14,6 +14,8 @@
 //! over-guardrail state review-1 flagged). Accesses the parent's private [`super::Cycle`]
 //! directly (descendant visibility) — no wider `pub` leak.
 
+use repo_graph_agent::CycleTestComposition;
+
 use super::Cycle;
 
 /// FIXTURE-POLLUTION-1 binding direction rule: a cycle's test-composition as seen by the
@@ -42,6 +44,24 @@ impl Cycle {
                 Some(reason) => reason.clone(),
                 None => "test-composition could not be evaluated".to_string(),
             }),
+        }
+    }
+}
+
+impl CycleComposition {
+    /// ORIENT-CYCLES-DISAGREE-1 (review-4 #1): project the renderer's 4-state view onto the shared
+    /// agent 3-state [`CycleTestComposition`] that the ONE partition function
+    /// (`repo_graph_agent::partition_counts`) counts — so the `cycles` headline derives its
+    /// integers from the SAME function `orient`'s leaf uses, never a count local to this renderer.
+    /// `NotEvaluated` (the LiveGraph route, which lacks the `is_test` fact) has NO agent equivalent:
+    /// it maps to `None`, collapsing the whole set's split to absent (the raw-count + asymmetry-note
+    /// fallback), NEVER a silent `Production`. The three evaluated states map 1:1.
+    pub(super) fn into_agent(self) -> Option<CycleTestComposition> {
+        match self {
+            CycleComposition::TestOnly => Some(CycleTestComposition::TestOnly),
+            CycleComposition::Production => Some(CycleTestComposition::Production),
+            CycleComposition::Unknown(reason) => Some(CycleTestComposition::Unknown(reason)),
+            CycleComposition::NotEvaluated => None,
         }
     }
 }

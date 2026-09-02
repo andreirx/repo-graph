@@ -89,18 +89,22 @@ fn import_cycles_emitted_with_top_3_evidence() {
             AgentCycle {
                 length: 2,
                 modules: vec!["m1".into(), "m2".into()],
+                test_composition: None,
             },
             AgentCycle {
                 length: 3,
                 modules: vec!["m3".into(), "m4".into(), "m5".into()],
+                test_composition: None,
             },
             AgentCycle {
                 length: 2,
                 modules: vec!["m6".into(), "m7".into()],
+                test_composition: None,
             },
             AgentCycle {
                 length: 4,
                 modules: vec!["m8".into(), "m9".into(), "m10".into(), "m11".into()],
+                test_composition: None,
             },
         ],
     );
@@ -111,6 +115,130 @@ fn import_cycles_emitted_with_top_3_evidence() {
         SignalEvidence::ImportCycles(ev) => {
             assert_eq!(ev.cycle_count, 4, "count is the full cycle total");
             assert_eq!(ev.cycles.len(), 3, "evidence exposes top 3 only");
+        }
+        other => panic!("wrong evidence variant: {:?}", other),
+    }
+}
+
+#[test]
+fn import_cycles_evidence_carries_exclusion_aware_split_when_labeled() {
+    // ORIENT-CYCLES-DISAGREE-1: when the serving computation labeled test-only cycles (the
+    // SQLite path sets `test_composition`), the emitted evidence carries the SAME
+    // production/test-only split `cycles` renders — so orient's headline stops disagreeing.
+    use repo_graph_agent::CycleTestComposition;
+    let mut fake = seeded();
+    fake.cycles.insert(
+        "snap-1".into(),
+        vec![
+            AgentCycle {
+                length: 2,
+                modules: vec!["core".into(), "graph".into()],
+                test_composition: Some(CycleTestComposition::Production),
+            },
+            AgentCycle {
+                length: 2,
+                modules: vec!["fixtures/a".into(), "fixtures/b".into()],
+                test_composition: Some(CycleTestComposition::TestOnly),
+            },
+        ],
+    );
+    let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();
+    let sig = find_signal(&result, SignalCode::ImportCycles).expect("IMPORT_CYCLES emitted");
+    match sig.evidence() {
+        SignalEvidence::ImportCycles(ev) => {
+            assert_eq!(ev.cycle_count, 2, "raw total preserved");
+            assert_eq!(
+                ev.production_count,
+                Some(1),
+                "production headline count = non-test-only cycles (matches `cycles`)"
+            );
+            assert_eq!(ev.test_only_count, Some(1), "one test-only cycle excluded");
+            assert_eq!(
+                ev.unknown_count,
+                Some(0),
+                "split present, no unknown cycles ⇒ known zero (not absent)"
+            );
+        }
+        other => panic!("wrong evidence variant: {:?}", other),
+    }
+}
+
+#[test]
+fn import_cycles_evidence_discloses_unknown_subset_in_the_split() {
+    // ORIENT-CYCLES-DISAGREE-1 (operator ruling review-3 #2): an Unknown cycle (a member with no
+    // reachable `is_test` fact) is NOT demoted — it stays counted in `production_count` (the
+    // headline) — but it must ALSO be disclosed via `unknown_count`, never counted invisibly.
+    use repo_graph_agent::CycleTestComposition;
+    let mut fake = seeded();
+    fake.cycles.insert(
+        "snap-1".into(),
+        vec![
+            AgentCycle {
+                length: 2,
+                modules: vec!["core".into(), "graph".into()],
+                test_composition: Some(CycleTestComposition::Production),
+            },
+            AgentCycle {
+                length: 2,
+                modules: vec!["vendor/x".into(), "vendor/y".into()],
+                test_composition: Some(CycleTestComposition::Unknown(
+                    "owns no tracked file".into(),
+                )),
+            },
+            AgentCycle {
+                length: 2,
+                modules: vec!["fixtures/a".into(), "fixtures/b".into()],
+                test_composition: Some(CycleTestComposition::TestOnly),
+            },
+        ],
+    );
+    let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();
+    let sig = find_signal(&result, SignalCode::ImportCycles).expect("IMPORT_CYCLES emitted");
+    match sig.evidence() {
+        SignalEvidence::ImportCycles(ev) => {
+            assert_eq!(ev.cycle_count, 3, "raw total preserved");
+            assert_eq!(
+                ev.production_count,
+                Some(2),
+                "headline = Production + Unknown (unknown never demoted)"
+            );
+            assert_eq!(ev.test_only_count, Some(1), "one test-only cycle excluded");
+            assert_eq!(
+                ev.unknown_count,
+                Some(1),
+                "the unknown subset is disclosed (never invisible)"
+            );
+        }
+        other => panic!("wrong evidence variant: {:?}", other),
+    }
+}
+
+#[test]
+fn import_cycles_split_absent_when_serving_path_did_not_label() {
+    // On a serving path that cannot reach `is_test` (LiveGraph module-cycle serve, or a
+    // focus/path read) every cycle's `test_composition` is None → the split is UNKNOWN (None),
+    // NOT a false zero — the renderer then falls back to the raw total, exactly as `cycles`
+    // does on those same paths (STANDING HONESTY RULE #1 / Fact Certainty Model).
+    let mut fake = seeded();
+    fake.cycles.insert(
+        "snap-1".into(),
+        vec![AgentCycle {
+            length: 2,
+            modules: vec!["core".into(), "graph".into()],
+            test_composition: None,
+        }],
+    );
+    let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();
+    let sig = find_signal(&result, SignalCode::ImportCycles).expect("IMPORT_CYCLES emitted");
+    match sig.evidence() {
+        SignalEvidence::ImportCycles(ev) => {
+            assert_eq!(ev.cycle_count, 1);
+            assert_eq!(
+                ev.production_count, None,
+                "no split claimed → None, never 0"
+            );
+            assert_eq!(ev.test_only_count, None);
+            assert_eq!(ev.unknown_count, None, "no split ⇒ unknown absent, never 0");
         }
         other => panic!("wrong evidence variant: {:?}", other),
     }

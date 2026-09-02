@@ -123,6 +123,7 @@ fn file_focus_does_not_emit_import_cycles() {
         vec![AgentCycle {
             length: 2,
             modules: vec!["src/core".into(), "src/adapters".into()],
+            test_composition: None,
         }],
     );
     let result = orient(

@@ -502,6 +502,9 @@ fn build_orient_envelope_repo_focus_cycles_leaf_is_livegraph() {
         Focus::repo(),
         vec![Signal::import_cycles(ImportCyclesEvidence {
             cycle_count: 0,
+            production_count: None,
+            test_only_count: None,
+            unknown_count: None,
             cycles: Vec::new(),
         })],
     );
@@ -537,6 +540,9 @@ fn build_orient_envelope_emits_producer_unavailable_limit_without_livegraph() {
         Focus::repo(),
         vec![Signal::import_cycles(ImportCyclesEvidence {
             cycle_count: 1,
+            production_count: None,
+            test_only_count: None,
+            unknown_count: None,
             cycles: Vec::new(),
         })],
     );

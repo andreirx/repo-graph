@@ -35,6 +35,7 @@
 //!      types and keeps the trust crate's own trait surface
 //!      untouched by agent concerns.
 
+use crate::cycle_composition::CycleTestComposition;
 use crate::errors::AgentStorageError;
 use crate::package_groups::ManifestRoot;
 
@@ -102,6 +103,26 @@ pub struct AgentStaleFile {
 pub struct AgentCycle {
     pub length: usize,
     pub modules: Vec<String>,
+    /// ORIENT-CYCLES-DISAGREE-1: the FIXTURE-POLLUTION-1 test-only classification of this
+    /// cycle, computed at the SERVING computation from the stored `is_test` fact (the shared
+    /// [`crate::cycle_composition`] classifier). `Some` on the SQLite-served path (the storage
+    /// adapter reaches `is_test`), which lets `orient`'s cycle leaf report the SAME
+    /// production/test-only split `cycles` renders. `None` where the serving computation
+    /// cannot reach `is_test` (the LiveGraph module-cycle serve — FIXTURE-POLLUTION-1 §2.3
+    /// asymmetry — and the focus/path-scoped cycle reads): the headline then falls back to the
+    /// raw total, exactly as `cycles` does on those same paths. Additive: NEVER demote or
+    /// classify from a `None` (STANDING HONESTY RULE #2).
+    ///
+    /// Why this rides the port (operator ruling cycle-count-derivation-placement, 2026-09-02):
+    /// the ratified boundary crossing is the two integers on `ImportCyclesEvidence`; a
+    /// storage-port contribution is permitted "only if the leaf genuinely cannot carry two
+    /// integers." It cannot — the `agent` aggregator that builds that leaf is pure and reaches
+    /// `is_test` ONLY through this port. This additive per-cycle field is the minimal
+    /// contribution, and riding `find_module_cycles` (which the LiveGraph decorator overrides)
+    /// makes the §2.3 route-conditionality automatic — no separate route check. NOT serialized
+    /// (only `ImportCyclesEvidence`/`CycleEvidence` reach the JSON); it is an internal carrier,
+    /// not a new query method.
+    pub test_composition: Option<CycleTestComposition>,
 }
 
 // ── Dead node ────────────────────────────────────────────────────

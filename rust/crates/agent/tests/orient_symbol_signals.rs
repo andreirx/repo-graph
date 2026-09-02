@@ -282,6 +282,7 @@ fn inherited_import_cycles_have_module_context_scope() {
         vec![AgentCycle {
             length: 2,
             modules: vec!["src/core".into(), "src/adapters".into()],
+            test_composition: None,
         }],
     );
 
@@ -356,6 +357,7 @@ fn no_inherited_signals_when_module_context_missing() {
         vec![AgentCycle {
             length: 2,
             modules: vec!["src/standalone".into(), "src/other".into()],
+            test_composition: None,
         }],
     );
 

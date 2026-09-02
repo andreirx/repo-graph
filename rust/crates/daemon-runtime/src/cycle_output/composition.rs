@@ -2,130 +2,86 @@
 //! SQLite-served module cycles (the only route that reaches the stored `is_test` fact;
 //! the LiveGraph fastpath renders unchanged and states the asymmetry — §2.3).
 //!
-//! Split out of the sibling [`super`] canonicalization module so the certified member-set
-//! canonicalization (there) and this additive classification post-pass (here) each stay
-//! well under the 500-line structural guardrail.
+//! ORIENT-CYCLES-DISAGREE-1: the classification itself is NO LONGER duplicated here — it moved
+//! to the shared `repo_graph_agent::cycle_composition` classifier, which the `orient` serving
+//! computation (the `storage` adapter's `find_module_cycles`) ALSO calls. One classifier, two
+//! serving computations ⇒ the `cycles` headline and the `orient` cycle leaf cannot disagree.
+//! This module is now the thin JSON WRAPPER: it extracts each cycle's member qualified paths
+//! from the canonical cycles JSON, calls the shared classifier, and writes the daemon's
+//! [`TestComposition`] discriminant (+ reason). Only the "node list absent/malformed" case is
+//! daemon-framed here (the shared classifier speaks in terms of member lists, not raw JSON).
 //!
 //! Abstraction record — module: `cycle_output::composition`; concrete current users:
 //! `dispatch::handle_cycles` and `livegraph_feed::serve_cycles_sqlite` (both via the
-//! [`super::label_test_only_cycles`] re-export); axis: the per-cycle test-composition
-//! classification (conservative module aggregation) kept OFF the canonicalization file to
-//! hold the guardrail; rejected simpler alternative: inlining it in `cycle_output/mod.rs`
-//! (pushed that file to 546 lines, over the guardrail — the review-1 finding).
-
-use std::collections::HashMap;
+//! [`super::label_test_only_cycles`] re-export); axis: the JSON emission of the shared
+//! per-cycle classification onto the SQLite cycles output; rejected simpler alternative:
+//! keeping a second copy of the classifier here (the drift risk ORIENT-CYCLES-DISAGREE-1 exists
+//! to remove — `orient` and `cycles` would classify from two implementations).
 
 use serde_json::Value;
 
 use crate::test_composition::TestComposition;
 
-/// The test-composition of a single MODULE, under the conservative aggregation
-/// (CONTRADICTION-SWEEP-1 §2.3): the module owns the tracked files under its directory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ModuleComposition {
-    /// Owns ≥1 file and EVERY owned file carries the stored `is_test` fact.
-    TestOnly,
-    /// Owns ≥1 production (non-test) file.
-    Production,
-    /// Owns NO tracked file — no reachable `is_test` evidence for this module.
-    Unknown,
-}
-
-/// FIXTURE-POLLUTION-1 §2.1/§2.3 + binding direction rule: classify a MODULE (whose
-/// canonical path is the directory `qualified`) from the stored `is_test` fact ONLY —
-/// never the path string (`tests/` as text is not evidence; the fact is). Ownership is by
-/// directory containment (the module IS the directory `packages/a/src`). ANY production
-/// owned file ⇒ `Production`; ≥1 owned file all-test ⇒ `TestOnly`; NO owned file ⇒
-/// `Unknown` (distinct from production — the review-0 collapse this fixes).
-fn classify_module(qualified: &str, files: &[(&str, bool)]) -> ModuleComposition {
-    let prefix = format!("{qualified}/");
-    let mut owned_any = false;
-    for (path, is_test) in files {
-        let owned = *path == qualified || path.starts_with(&prefix);
-        if owned {
-            owned_any = true;
-            if !*is_test {
-                return ModuleComposition::Production; // a production owned file ⇒ production
-            }
-        }
-    }
-    if owned_any {
-        ModuleComposition::TestOnly
-    } else {
-        ModuleComposition::Unknown
-    }
-}
-
 /// FIXTURE-POLLUTION-1 §2.2/§2.3 + binding direction rule: attach the additive per-cycle
-/// `test_composition` (tri-state) to the SQLite-served cycles JSON (the ONLY route that
-/// reaches the stored `is_test` fact; the LiveGraph fastpath renders unchanged and states
-/// the asymmetry — §2.3). `files` are the repo's tracked `(path, is_test)` rows; module
-/// classification is memoized per distinct member (cost O(distinct members × files)).
+/// `test_composition` (tri-state) to the SQLite-served cycles JSON (the ONLY route that reaches
+/// the stored `is_test` fact; the LiveGraph fastpath renders unchanged and states the asymmetry
+/// — §2.3). `files` are the repo's tracked `(path, is_test)` rows.
 ///
-/// Conservative aggregation over a cycle's members:
-/// - ANY member is `Production` ⇒ the cycle is `Production` (a real cycle);
-/// - else ANY member is `Unknown` (owns no tracked file, or a malformed node with no
-///   `qualified_name`) ⇒ the cycle is `Unknown` WITH a reason — it is NOT demoted (we
-///   cannot prove it is wholly test-only);
-/// - else (every member `TestOnly`) ⇒ `TestOnly` (demoted).
-///
-/// A cycle whose `nodes` are absent/malformed is `Unknown` with a reason — NEVER a silent
-/// `false`/production default (the review-0 `unwrap_or_default()` collapse this fixes).
+/// The classification is the shared `repo_graph_agent::classify_cycles` (the SAME function the
+/// `orient` serving computation uses). A cycle whose `nodes` are absent/malformed is `Unknown`
+/// with a daemon-framed reason — NEVER a silent `false`/production default.
 pub(crate) fn label_test_only_cycles(cycles_json: &mut [Value], files: &[(&str, bool)]) {
-    let mut memo: HashMap<String, ModuleComposition> = HashMap::new();
-    for cycle in cycles_json.iter_mut() {
-        classify_cycle(cycle, files, &mut memo).write_json(cycle);
+    // Two phases: classify under an IMMUTABLE borrow of the JSON (the member `&str`s borrow it),
+    // then write under a MUTABLE borrow. The borrows cannot overlap, so this cannot be one pass.
+    let comps = classify_all(cycles_json, files);
+    for (cycle, comp) in cycles_json.iter_mut().zip(comps) {
+        comp.write_json(cycle);
     }
 }
 
-/// Classify one cycle's test-composition from its member modules (see
-/// [`label_test_only_cycles`] for the aggregation rule). Kept separate so the borrow of
-/// `cycle` ends before [`TestComposition::write_json`] mutates it.
-fn classify_cycle(
-    cycle: &Value,
-    files: &[(&str, bool)],
-    memo: &mut HashMap<String, ModuleComposition>,
-) -> TestComposition {
-    let Some(nodes) = cycle["nodes"].as_array() else {
-        return TestComposition::Unknown(
-            "cycle node list absent or malformed (cannot evaluate test-composition)".to_string(),
-        );
-    };
-    if nodes.is_empty() {
-        return TestComposition::Unknown("cycle has no members".to_string());
-    }
-
-    let mut any_production = false;
-    let mut unknown_reason: Option<String> = None;
-    for n in nodes {
-        match n["qualified_name"].as_str() {
+/// Classify every cycle in the canonical JSON via the shared classifier. A cycle whose `nodes`
+/// field is absent/malformed is classified `Unknown` here (the shared classifier receives member
+/// LISTS, not raw JSON); every other reason (`no members`, `member has no qualified path`,
+/// `member owns no tracked file`) comes verbatim from the shared classifier — so `cycles` and
+/// `orient` cannot diverge on what a given cycle is.
+fn classify_all(cycles_json: &[Value], files: &[(&str, bool)]) -> Vec<TestComposition> {
+    // Per-cycle member qualified paths (a member with no `qualified_name` is `None`), plus a
+    // parallel daemon-framed override for the absent/malformed-`nodes` case.
+    let mut member_lists: Vec<Vec<Option<&str>>> = Vec::with_capacity(cycles_json.len());
+    let mut malformed: Vec<Option<&'static str>> = Vec::with_capacity(cycles_json.len());
+    for cycle in cycles_json {
+        match cycle["nodes"].as_array() {
             None => {
-                // A node with no qualified module path — unclassifiable member.
-                unknown_reason.get_or_insert_with(|| {
-                    "a cycle member has no qualified module path".to_string()
-                });
+                malformed.push(Some(
+                    "cycle node list absent or malformed (cannot evaluate test-composition)",
+                ));
+                member_lists.push(Vec::new());
             }
-            Some(q) => match *memo
-                .entry(q.to_string())
-                .or_insert_with(|| classify_module(q, files))
-            {
-                ModuleComposition::Production => any_production = true,
-                ModuleComposition::Unknown => {
-                    unknown_reason.get_or_insert_with(|| {
-                        format!("member module `{q}` owns no tracked file (is_test unknown)")
-                    });
-                }
-                ModuleComposition::TestOnly => {}
-            },
+            Some(nodes) => {
+                malformed.push(None);
+                member_lists.push(nodes.iter().map(|n| n["qualified_name"].as_str()).collect());
+            }
         }
     }
+    let agent_comps = repo_graph_agent::classify_cycles(&member_lists, files);
+    agent_comps
+        .into_iter()
+        .zip(malformed)
+        .map(|(agent, override_reason)| match override_reason {
+            Some(reason) => TestComposition::Unknown(reason.to_string()),
+            None => map_agent_composition(agent),
+        })
+        .collect()
+}
 
-    if any_production {
-        TestComposition::Production
-    } else if let Some(reason) = unknown_reason {
-        TestComposition::Unknown(reason)
-    } else {
-        TestComposition::TestOnly
+/// Map the shared classifier's result into the daemon's [`TestComposition`] JSON-emitter type.
+/// A straight 1:1 mapping — the reason strings are preserved verbatim (the `orient` and `cycles`
+/// surfaces read the SAME reason for the SAME cycle).
+fn map_agent_composition(c: repo_graph_agent::CycleTestComposition) -> TestComposition {
+    match c {
+        repo_graph_agent::CycleTestComposition::TestOnly => TestComposition::TestOnly,
+        repo_graph_agent::CycleTestComposition::Production => TestComposition::Production,
+        repo_graph_agent::CycleTestComposition::Unknown(reason) => TestComposition::Unknown(reason),
     }
 }
 
@@ -136,37 +92,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn classify_module_conservative_aggregation() {
-        // §2.3 conservative rule: any production owned file ⇒ Production; wholly test-
-        // owned ⇒ TestOnly; no owned file ⇒ Unknown (distinct from Production).
-        let files = [
-            ("tests/fixtures/mono/pkg/a.rs", true),
-            ("tests/fixtures/mono/pkg/b.rs", true),
-            ("src/core/x.rs", false),
-            ("src/core/y_test.rs", true), // a lone test file in a production module
-        ];
-        // Wholly test-owned directory ⇒ TestOnly.
-        assert_eq!(
-            classify_module("tests/fixtures/mono/pkg", &files),
-            ModuleComposition::TestOnly
-        );
-        // Mixed module (a production file present) ⇒ Production.
-        assert_eq!(
-            classify_module("src/core", &files),
-            ModuleComposition::Production
-        );
-        // Owns no tracked file ⇒ Unknown (NOT production, NOT test — never demoted).
-        assert_eq!(
-            classify_module("vendor/lib", &files),
-            ModuleComposition::Unknown
-        );
-    }
-
-    #[test]
     fn label_cycles_writes_tristate_composition() {
         // A wholly-test cycle ⇒ test_only (demoted); a cycle touching a production module
         // ⇒ production; a cycle with an unclassifiable member ⇒ unknown WITH a reason
-        // (never collapsed to production — the binding direction rule).
+        // (never collapsed to production — the binding direction rule). The classification is
+        // the shared classifier; this test guards the JSON emission wrapper end-to-end.
         let mut out = canonical_module_cycles_json(&[
             vec![
                 super::super::CanonModuleCycleNode {

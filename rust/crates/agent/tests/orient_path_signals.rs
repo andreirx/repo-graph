@@ -95,6 +95,7 @@ fn path_focus_import_cycles_includes_descendant_modules() {
         vec![AgentCycle {
             length: 2,
             modules: vec!["src/core".into(), "src/core/sub".into()],
+            test_composition: None,
         }],
     );
     let result = orient(

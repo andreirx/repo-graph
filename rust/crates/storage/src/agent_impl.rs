@@ -160,13 +160,10 @@ impl AgentStorageRead for StorageConnection {
         let cycles = self
             .find_cycles(snapshot_uid, "module")
             .map_err(map_err("find_module_cycles"))?;
-        Ok(cycles
-            .into_iter()
-            .map(|c| AgentCycle {
-                length: c.length,
-                modules: c.nodes.into_iter().map(|n| n.name).collect(),
-            })
-            .collect())
+        // ORIENT-CYCLES-DISAGREE-1: this is the SQLite SERVING computation for `orient`'s
+        // cycles — label each with the shared test-only classification here so the headline
+        // matches `cycles` (which labels at ITS serving computation via the same classifier).
+        crate::agent_cycle_labeling::label_module_cycles(self, snapshot_uid, cycles)
     }
 
     fn find_module_cycles_cancellable(
@@ -184,13 +181,8 @@ impl AgentStorageRead for StorageConnection {
         let cycles = self
             .find_cycles_cancellable(snapshot_uid, "module", cancel)
             .map_err(map_err("find_module_cycles"))?;
-        Ok(cycles
-            .into_iter()
-            .map(|c| AgentCycle {
-                length: c.length,
-                modules: c.nodes.into_iter().map(|n| n.name).collect(),
-            })
-            .collect())
+        // ORIENT-CYCLES-DISAGREE-1: label at the serving computation (see `find_module_cycles`).
+        crate::agent_cycle_labeling::label_module_cycles(self, snapshot_uid, cycles)
     }
 
     fn find_dead_nodes(
@@ -877,6 +869,9 @@ impl AgentStorageRead for StorageConnection {
                     Some(AgentCycle {
                         length: c.length,
                         modules: qualified_names,
+                        // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
+                        // headline this slice unifies — no test-only split is claimed here.
+                        test_composition: None,
                     })
                 } else {
                     None
@@ -936,6 +931,9 @@ impl AgentStorageRead for StorageConnection {
                 filtered.push(AgentCycle {
                     length: c.length,
                     modules: qualified_names,
+                    // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
+                    // headline this slice unifies — no test-only split is claimed here.
+                    test_composition: None,
                 });
             }
         }
@@ -1170,6 +1168,9 @@ impl AgentStorageRead for StorageConnection {
                     Some(AgentCycle {
                         length: c.length,
                         modules: qualified_names,
+                        // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
+                        // headline this slice unifies — no test-only split is claimed here.
+                        test_composition: None,
                     })
                 } else {
                     None
@@ -1224,6 +1225,9 @@ impl AgentStorageRead for StorageConnection {
                 filtered.push(AgentCycle {
                     length: c.length,
                     modules: qualified_names,
+                    // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
+                    // headline this slice unifies — no test-only split is claimed here.
+                    test_composition: None,
                 });
             }
         }

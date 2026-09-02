@@ -159,6 +159,7 @@
 //! R22:  `get_active_boundary_declarations` + `find_imports_between_paths`.
 //! R24:  `get_active_requirement_declarations`.
 
+mod agent_cycle_labeling; // ORIENT-CYCLES-DISAGREE-1: SQLite serving-computation test-only cycle labeling (guardrail split from agent_impl)
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
 mod agent_orient_reads; // ORIENT-DENSITY-1: dense-orient discovery reads (module sizes + doc inventory)
                         // MODULES-IDENTITY-2 §2.1: the module_key→manifest derivation, shared (one implementation)

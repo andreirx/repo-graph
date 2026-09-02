@@ -29,6 +29,74 @@ use repo_graph_gate::{
     GateWaiver,
 };
 
+/// ORIENT-CYCLES-DISAGREE-1 (operator ruling cycle-split-parity-and-source, 2026-09-02):
+/// project a serialized orient result onto the CYCLES-B **canonical served shape** — the whole
+/// answer with the IMPORT_CYCLES evidence reduced to its CERTIFIED fields (`cycle_count` + the
+/// canonical `cycles` member rings) by dropping ONLY the additive exclusion-aware split
+/// (`production_count`/`test_only_count`/`unknown_count`). This is a PRECISE projection of the
+/// single certified leaf's decoration keys — NOT the review-1 tree-wide key strip — so the certified
+/// equality below is over the canonical fields exactly. The split's route-conditional presence
+/// is asserted SEPARATELY and explicitly by [`cycle_leaf_split`] (RULING 2(5): "assert the
+/// decoration's route-conditionality explicitly, not by stripping in the certified assertion").
+fn canonical_cycle_shape(mut v: serde_json::Value) -> serde_json::Value {
+    if let Some(signals) = v.get_mut("signals").and_then(|s| s.as_array_mut()) {
+        for sig in signals.iter_mut() {
+            if sig
+                .get("code")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c == "IMPORT_CYCLES")
+            {
+                if let Some(ev) = sig.get_mut("evidence").and_then(|e| e.as_object_mut()) {
+                    ev.remove("production_count");
+                    ev.remove("test_only_count");
+                    ev.remove("unknown_count");
+                }
+            }
+        }
+    }
+    v
+}
+
+/// The exclusion-aware split's status on the orient result's IMPORT_CYCLES leaf — a THREE-state
+/// answer (review-5 #3) so the M-2 route-conditionality assertions cannot pass VACUOUSLY. The
+/// LiveGraph-absence proof (`SplitAbsent`) REQUIRES the cycle leaf + its evidence object to exist;
+/// a missing `signals` array / missing IMPORT_CYCLES leaf / missing evidence is `NoCycleLeaf`, a
+/// DISTINCT outcome the tests reject — never silently collapsed into "no split". No `unwrap_or` /
+/// `flatten` on a classified read (RULE #1): every fallible step is an explicit `else` arm.
+#[derive(Debug, PartialEq, Eq)]
+enum CycleLeafSplit {
+    /// IMPORT_CYCLES leaf present, evidence present, `production_count` present — the SQLite serve
+    /// classified `is_test` (FIXTURE-POLLUTION-1).
+    SplitPresent,
+    /// IMPORT_CYCLES leaf present, evidence present, `production_count` EXPLICITLY absent — the
+    /// honest LiveGraph route (no `is_test` reach, §2.3). An explicit absence, NOT a malformed leaf.
+    SplitAbsent,
+    /// No `signals` array, no IMPORT_CYCLES leaf, or no evidence object — the leaf under test is not
+    /// present at all, so "does it carry a split?" has NO valid answer (would be a vacuous absence).
+    NoCycleLeaf,
+}
+
+fn cycle_leaf_split(v: &serde_json::Value) -> CycleLeafSplit {
+    let Some(signals) = v.get("signals").and_then(|s| s.as_array()) else {
+        return CycleLeafSplit::NoCycleLeaf;
+    };
+    let Some(leaf) = signals.iter().find(|sig| {
+        sig.get("code")
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| c == "IMPORT_CYCLES")
+    }) else {
+        return CycleLeafSplit::NoCycleLeaf;
+    };
+    let Some(ev) = leaf.get("evidence").and_then(|e| e.as_object()) else {
+        return CycleLeafSplit::NoCycleLeaf;
+    };
+    if ev.contains_key("production_count") {
+        CycleLeafSplit::SplitPresent
+    } else {
+        CycleLeafSplit::SplitAbsent
+    }
+}
+
 // ── PURE focus-resolution native -> agent-DTO mapper tests ──────────────────────────────────────
 
 #[test]
@@ -1219,10 +1287,35 @@ fn m2_parity_full_serve_equals_sqlite_repo_focus() {
         now,
     )
     .expect("sqlite orient ok");
+    let served_json = serde_json::to_value(&served).unwrap();
+    let plain_json = serde_json::to_value(&plain).unwrap();
+    // ORIENT-CYCLES-DISAGREE-1 (RULING 2(1), 2(5)): CYCLES-B parity is UNTOUCHED — it governs
+    // the CANONICAL served shape. Restore the exact-equality parity test over that shape: the
+    // LiveGraph M-2 cycle serve is byte/value-identical to the SQLite serve once the additive
+    // exclusion-aware split (which is NOT part of the certified shape) is projected off the ONE
+    // certified leaf. Everything else in the answer is compared verbatim.
     assert_eq!(
-        serde_json::to_value(&served).unwrap(),
-        serde_json::to_value(&plain).unwrap(),
-        "M-2 GREEN serve is byte/value-identical to the SQLite serve (repo focus)"
+        canonical_cycle_shape(served_json.clone()),
+        canonical_cycle_shape(plain_json.clone()),
+        "M-2 GREEN serve is byte/value-identical to the SQLite serve on the CYCLES-B canonical \
+         shape (repo focus)"
+    );
+    // ORIENT-CYCLES-DISAGREE-1 + FIXTURE-POLLUTION-1 §2.3 (RULING 2(3), 2(5)): the decoration's
+    // route-conditionality, asserted EXPLICITLY (not by stripping in the certified assertion).
+    // The SQLite serve classifies test-only cycles (the split is present); the LiveGraph serve
+    // cannot reach `is_test`, so it omits the split and the headline falls back to the raw total
+    // — the SAME asymmetry the `cycles` command's LiveGraph serve already has. `SplitAbsent`
+    // (not merely `!= SplitPresent`) REQUIRES the leaf+evidence to exist, so the absence proof is
+    // non-vacuous — a dropped IMPORT_CYCLES leaf would be `NoCycleLeaf` and fail here (review-5 #3).
+    assert_eq!(
+        cycle_leaf_split(&plain_json),
+        CycleLeafSplit::SplitPresent,
+        "the SQLite serve classifies the exclusion-aware split"
+    );
+    assert_eq!(
+        cycle_leaf_split(&served_json),
+        CycleLeafSplit::SplitAbsent,
+        "the LiveGraph M-2 cycle serve has the leaf+evidence but omits the split (no is_test, §2.3)"
     );
     // Not vacuous: the repo-focus answer carries the REAL module cycle (canonical SHORT names).
     let cycles = served
@@ -1436,10 +1529,26 @@ fn m2_leaves_serve_independently_when_unrelated_bounded_cert_red() {
         now,
     )
     .expect("REPO orient over the M2Spy completes — no SQLite summary/cycle read on the RED fold");
+    let served_repo_json = serde_json::to_value(&served_repo).unwrap();
+    let plain_repo_json = serde_json::to_value(&plain_repo).unwrap();
+    // ORIENT-CYCLES-DISAGREE-1 (RULING 2(1), 2(5)): exact-equality over the CYCLES-B canonical
+    // shape (the split projected off the one certified leaf), route-conditionality asserted
+    // explicitly below.
     assert_eq!(
-        serde_json::to_value(&served_repo).unwrap(),
-        serde_json::to_value(&plain_repo).unwrap(),
-        "the M-2-only serve is byte/value-identical to the SQLite serve"
+        canonical_cycle_shape(served_repo_json.clone()),
+        canonical_cycle_shape(plain_repo_json.clone()),
+        "the M-2-only serve is byte/value-identical to the SQLite serve on the CYCLES-B \
+         canonical shape"
+    );
+    // ORIENT-CYCLES-DISAGREE-1 + §2.3: SQLite classifies the split; the LiveGraph serve has the
+    // leaf but omits it. `SplitAbsent` requires the leaf+evidence to exist — non-vacuous (review-5 #3).
+    assert_eq!(
+        cycle_leaf_split(&plain_repo_json),
+        CycleLeafSplit::SplitPresent
+    );
+    assert_eq!(
+        cycle_leaf_split(&served_repo_json),
+        CycleLeafSplit::SplitAbsent
     );
 
     // Phase B: the six (b) methods DELEGATE. Diverge the stores (SQLite loses its CALLS edge; the

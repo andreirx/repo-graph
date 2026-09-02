@@ -2334,6 +2334,9 @@ fn module_cycle_compare_data_cancellable(
             .map(|c| AgentCycle {
                 length: c.length,
                 modules: c.nodes.iter().map(|n| n.name.clone()).collect(),
+                // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (cycle membership),
+                // not a served value; test-composition is not part of the equivalence.
+                test_composition: None,
             })
             .collect();
         let mut lg_repo: Vec<AgentCycle> = lg_cycles
@@ -2344,6 +2347,8 @@ fn module_cycle_compare_data_cancellable(
                     .iter()
                     .map(|m| crate::cycle_output::module_basename(m).to_string())
                     .collect(),
+                // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
+                test_composition: None,
             })
             .collect();
         let mut sq_qual: Vec<AgentCycle> = sqlite_qualified
@@ -2352,6 +2357,8 @@ fn module_cycle_compare_data_cancellable(
             .map(|(quals, c)| AgentCycle {
                 length: c.length,
                 modules: quals.clone(),
+                // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
+                test_composition: None,
             })
             .collect();
         let mut lg_qual: Vec<AgentCycle> = lg_cycles
@@ -2359,6 +2366,8 @@ fn module_cycle_compare_data_cancellable(
             .map(|members| AgentCycle {
                 length: members.len(),
                 modules: members.clone(),
+                // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
+                test_composition: None,
             })
             .collect();
         canonicalize_cycles(&mut sq_repo);

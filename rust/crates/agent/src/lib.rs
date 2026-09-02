@@ -61,6 +61,7 @@ pub mod aggregators;
 pub mod attribution;
 pub mod check;
 pub mod confidence;
+pub mod cycle_composition;
 pub mod doc_relevance;
 pub mod dto;
 pub mod errors;
@@ -78,6 +79,9 @@ pub mod storage_port;
 pub use check::{
     check_to_coherent, run_check, run_check_cancellable, CheckInput, CheckResult, CheckVerdict,
     ConditionCode, ConditionResult, ConditionStatus, GateOutcomeForCheck,
+};
+pub use cycle_composition::{
+    classify_cycles, partition_counts, CyclePartition, CycleTestComposition,
 };
 pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
 pub use dto::coherent::{

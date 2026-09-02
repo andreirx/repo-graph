@@ -33,14 +33,31 @@
 //!
 //! This file owns the response DTOs, the three response renderers, and the repo-level type-only caveat footer.
 
+use repo_graph_agent::{partition_counts, CyclePartition, CycleTestComposition};
 use serde::Deserialize;
 
-use crate::presentation::kv_line;
+use crate::presentation::{cycle_exclusion_clause, kv_line};
 
 mod composition;
 mod walk;
 use composition::CycleComposition;
 use walk::render_cycle_body;
+
+/// ORIENT-CYCLES-DISAGREE-1 (review-4 #1): the exclusion-aware split of the RENDERED module cycles,
+/// produced by the SHARED `repo_graph_agent::partition_counts` — the ONE partition function
+/// `orient`'s cycle leaf also uses. No count arithmetic lives in this renderer, so the two surfaces
+/// cannot state different numbers for one snapshot (the slice's DoD). `Some` iff EVERY cycle
+/// carries a decoded test-composition (the SQLite route, where the stored `is_test` fact is
+/// reachable); a single `NotEvaluated` cycle (the LiveGraph route — §2.3 asymmetry) ⇒ `None`, and
+/// the renderer falls back to the raw main count + the asymmetry note, exactly as `orient`'s
+/// `headline_split` returns `None` there.
+fn headline_partition(cycles: &[Cycle]) -> Option<CyclePartition> {
+    let comps = cycles
+        .iter()
+        .map(|c| c.composition().into_agent())
+        .collect::<Option<Vec<CycleTestComposition>>>()?;
+    Some(partition_counts(&comps))
+}
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -150,6 +167,14 @@ impl CyclesResponse {
         // listing carrying a marker — never demoted. The LiveGraph serving path does not
         // classify (§2.3) — every cycle is `NotEvaluated` there and the asymmetry note is
         // printed instead.
+        //
+        // ORIENT-CYCLES-DISAGREE-1 (review-4 #1): the headline INTEGERS come from the shared
+        // `partition_counts` (via `headline_partition`) — the SAME function `orient` uses — never a
+        // count local to this renderer. The `(fixtures, main)` split below is only the BODY
+        // GROUPING (which cycles lead vs are demoted); it reads the SAME per-cycle `composition()`,
+        // so `partition.production_count == main.len()` and `partition.test_only_count ==
+        // fixtures.len()` by construction (pinned by `headline_counts_come_from_the_shared_partition`).
+        let partition = headline_partition(&self.cycles);
         let (fixtures, main): (Vec<&Cycle>, Vec<&Cycle>) = self
             .cycles
             .iter()
@@ -161,18 +186,31 @@ impl CyclesResponse {
             return out.trim_end().to_string();
         }
 
+        // Headline count: the shared production count on the split (SQLite) route; the raw main
+        // count on the unsplit (LiveGraph) route — where `partition` is `None` and no cycle is
+        // demoted, so `main.len()` is the whole rendered set.
+        let main_count = match partition {
+            Some(p) => p.production_count,
+            None => main.len() as u64,
+        };
         out.push_str(&format!(
-            "{} module-level cycle{} found\n",
-            main.len(),
-            if main.len() == 1 { "" } else { "s" }
+            "{} module-level cycle{} found",
+            main_count,
+            if main_count == 1 { "" } else { "s" }
         ));
-        if !fixtures.is_empty() {
-            out.push_str(&format!(
-                "+{} test-only cycle{} (excluded from the headline)\n",
-                fixtures.len(),
-                if fixtures.len() == 1 { "" } else { "s" }
-            ));
+        // ORIENT-CYCLES-DISAGREE-1 (operator ruling review-3 #2 + review-4 #3): the SAME combined
+        // parenthetical `orient` renders — "(+M test-only excluded; test-composition unknown for
+        // K)" — built by the ONE shared clause helper from the SAME shared partition, so the two
+        // surfaces phrase the same integers identically. Present only on the split (SQLite) route;
+        // the unsplit route states its asymmetry via `push_test_composition_note` instead.
+        if let Some(p) = partition {
+            if let Some(clause) =
+                cycle_exclusion_clause(Some(p.test_only_count), Some(p.unknown_count))
+            {
+                out.push_str(&format!(" ({clause})"));
+            }
         }
+        out.push('\n');
         out.push('\n');
 
         // ── Main-listing cycles (production + unknown) ─────────────

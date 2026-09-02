@@ -208,6 +208,9 @@ mod tests {
             }),
             Signal::import_cycles(ImportCyclesEvidence {
                 cycle_count: 1,
+                production_count: None,
+                test_only_count: None,
+                unknown_count: None,
                 cycles: vec![],
             }),
         ]

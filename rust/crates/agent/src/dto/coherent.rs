@@ -719,6 +719,9 @@ mod tests {
     fn import_cycles_signal() -> Signal {
         Signal::import_cycles(crate::dto::signal::ImportCyclesEvidence {
             cycle_count: 1,
+            production_count: None,
+            test_only_count: None,
+            unknown_count: None,
             cycles: vec![crate::dto::signal::CycleEvidence {
                 length: 2,
                 modules: vec!["a".to_string(), "b".to_string()],

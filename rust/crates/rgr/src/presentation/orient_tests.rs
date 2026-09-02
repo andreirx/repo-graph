@@ -957,6 +957,118 @@ fn cycle_anchor_full_chain_for_small_cycle() {
 }
 
 #[test]
+fn cycle_headline_uses_exclusion_aware_split_when_present() {
+    // ORIENT-CYCLES-DISAGREE-1: when the evidence carries the exclusion-aware split (SQLite
+    // path), orient's headline shows the PRODUCTION count + the "+N test-only excluded" note —
+    // the SAME figures `cycles` renders — NOT the raw total. The example anchor is dropped
+    // because `cycles[]` (top-3) carries no per-cycle composition, so its first entry may be a
+    // demoted test-only cycle (anchor honesty).
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 2,
+            "production_count": 1,
+            "test_only_count": 1,
+            "cycles": [{ "length": 2, "modules": ["core", "graph"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("1 import cycle (+1 test-only excluded)"),
+        "headline shows the production count + test-only disclosure, not the raw total 2:\n{out}"
+    );
+    assert!(
+        !out.contains("import cycles"),
+        "must not render the raw plural total (2 import cycles):\n{out}"
+    );
+    // Anchor dropped when a test-only split exists (cannot prove the shown cycle is production).
+    assert!(
+        !out.contains("->"),
+        "no example walk beside the split headline:\n{out}"
+    );
+}
+
+#[test]
+fn cycle_headline_discloses_unknown_subset_when_present() {
+    // ORIENT-CYCLES-DISAGREE-1 (operator ruling review-3 #2): an Unknown cycle stays counted in
+    // the headline (production_count) but is disclosed as "test-composition unknown for K" — both
+    // clauses in a single parenthetical, sharing the numbers `cycles` renders.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 3,
+            "production_count": 2,
+            "test_only_count": 1,
+            "unknown_count": 1,
+            "cycles": [{ "length": 2, "modules": ["core", "graph"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("2 import cycles (+1 test-only excluded; test-composition unknown for 1)"),
+        "headline shows production count + BOTH the test-only and unknown disclosures:\n{out}"
+    );
+}
+
+#[test]
+fn cycle_headline_unknown_only_when_no_test_only() {
+    // Unknown present, no test-only excluded ⇒ the parenthetical carries ONLY the unknown clause.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 2,
+            "production_count": 2,
+            "test_only_count": 0,
+            "unknown_count": 1,
+            "cycles": [{ "length": 2, "modules": ["core", "graph"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("2 import cycles (test-composition unknown for 1)"),
+        "unknown-only disclosure, no test-only clause:\n{out}"
+    );
+    assert!(
+        !out.contains("test-only"),
+        "no test-only clause when none excluded:\n{out}"
+    );
+}
+
+#[test]
+fn cycle_headline_falls_back_to_raw_total_without_split() {
+    // On a serving path with no exclusion-aware split (LiveGraph/focus — `production_count`
+    // absent), orient renders the raw total exactly as before, WITH the example anchor.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 2,
+            "cycles": [{ "length": 2, "modules": ["core", "graph"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("2 import cycles (core -> graph -> core)"),
+        "no split ⇒ raw total + anchor (unchanged):\n{out}"
+    );
+    assert!(
+        !out.contains("test-only"),
+        "no test-only disclosure without a split:\n{out}"
+    );
+}
+
+#[test]
 fn cycle_anchor_truncates_large_cycle() {
     let mut r = minimal_response();
     r.signals = vec![sig(
@@ -1602,4 +1714,172 @@ fn one_shared_projection_reaches_orient_trust_and_check() {
             "{name} must NOT use the external-inclusive rate (21%):\n{out}"
         );
     }
+}
+
+// ── ORIENT-CYCLES-DISAGREE-1 (review-4 #2): cross-surface cycle-headline seam ──────────────────
+//
+// The two REAL renderers — the `cycles` command's `CyclesResponse::render_human` and the `orient`
+// leaf's `render_human` cycle line — MUST state the SAME three integers for one classified cycle
+// set. Both now derive their headline from the ONE shared `repo_graph_agent::partition_counts`
+// (cycles via `headline_partition`; orient via the aggregator's `headline_split`, whose result the
+// evidence carries). This seam drives BOTH renderers from a SINGLE `Vec<CycleTestComposition>` and
+// asserts their headlines encode the same production count + the same shared exclusion clause. If
+// EITHER renderer stops consuming the shared partition (rolls its own count), its numbers or
+// wording diverge and this fails — the disagreement the slice exists to remove is otherwise
+// unrepresentable, since there is exactly one partition function.
+
+use repo_graph_agent::{partition_counts, CyclePartition, CycleTestComposition};
+
+/// Build a real `CyclesResponse` (the `cycles` command's input) whose per-cycle `test_composition`
+/// labels match `comps` — exactly what the daemon's SQLite serve attaches. The renderer will
+/// re-derive the headline via the shared `partition_counts`, so this exercises the true code path.
+fn seam_cycles_response(
+    comps: &[CycleTestComposition],
+) -> crate::presentation::cycles::CyclesResponse {
+    use crate::presentation::cycles::{Cycle, CycleNode, CyclesResponse};
+    let cycles = comps
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let (disc, reason) = match c {
+                CycleTestComposition::Production => ("production", None),
+                CycleTestComposition::TestOnly => ("test_only", None),
+                CycleTestComposition::Unknown(r) => ("unknown", Some(r.clone())),
+            };
+            Cycle {
+                nodes: vec![
+                    CycleNode {
+                        node_id: format!("m{i}a"),
+                        name: format!("mod{i}a"),
+                        qualified_name: Some(format!("src/mod{i}a")),
+                        file: None,
+                    },
+                    CycleNode {
+                        node_id: format!("m{i}b"),
+                        name: format!("mod{i}b"),
+                        qualified_name: Some(format!("src/mod{i}b")),
+                        file: None,
+                    },
+                ],
+                edges: None,
+                edges_truncated: None,
+                test_composition: Some(disc.to_string()),
+                test_composition_unknown_reason: reason,
+            }
+        })
+        .collect::<Vec<_>>();
+    CyclesResponse {
+        repo_uid: "repo_seam".to_string(),
+        display_name: Some("seam".to_string()),
+        snapshot_uid: "snap_seam".to_string(),
+        count: comps.len(),
+        cycles,
+        ts_type_only_caveat: false,
+        test_composition_note: None,
+    }
+}
+
+/// Build a real `OrientResponse` carrying the SAME shared partition on its IMPORT_CYCLES evidence —
+/// exactly what the aggregator's `headline_split` serializes.
+fn seam_orient_response(part: CyclePartition) -> OrientResponse {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": part.production_count + part.test_only_count,
+            "production_count": part.production_count,
+            "test_only_count": part.test_only_count,
+            "unknown_count": part.unknown_count,
+            "cycles": [{ "length": 2, "modules": ["src/mod0a", "src/mod0b"] }]
+        }),
+    )];
+    r
+}
+
+fn assert_cycle_surfaces_agree(comps: Vec<CycleTestComposition>) {
+    let part = partition_counts(&comps);
+    let cycles_out = seam_cycles_response(&comps).render_human();
+    let orient_out = seam_orient_response(part).render_human(OrientDepth::Small);
+
+    // Same production count, in each surface's own headline phrasing.
+    let s = if part.production_count == 1 { "" } else { "s" };
+    assert!(
+        cycles_out.contains(&format!(
+            "{} module-level cycle{s} found",
+            part.production_count
+        )),
+        "cycles headline production count:\n{cycles_out}"
+    );
+    assert!(
+        orient_out.contains(&format!("{} import cycle{s}", part.production_count)),
+        "orient headline production count:\n{orient_out}"
+    );
+
+    // Same shared exclusion/unknown clause — or neither surface renders one when none applies.
+    match crate::presentation::cycle_exclusion_clause(
+        Some(part.test_only_count),
+        Some(part.unknown_count),
+    ) {
+        Some(clause) => {
+            assert!(
+                cycles_out.contains(&format!("({clause})")),
+                "cycles clause `{clause}`:\n{cycles_out}"
+            );
+            assert!(
+                orient_out.contains(&format!("({clause})")),
+                "orient clause `{clause}`:\n{orient_out}"
+            );
+        }
+        None => {
+            for (name, out) in [("cycles", &cycles_out), ("orient", &orient_out)] {
+                assert!(
+                    !out.contains("test-only excluded")
+                        && !out.contains("test-composition unknown for"),
+                    "{name} must render NO exclusion clause when none applies:\n{out}"
+                );
+            }
+        }
+    }
+}
+
+/// review-6 #2 (operator closeout): the ALL-test-only shape — production 0, test-only N.
+/// cycles renders "0 … (+N test-only excluded)"; orient must render the SAME partitioned
+/// integers, never suppress the line (the zero headline still carries a disclosure).
+#[test]
+fn cross_surface_cycle_headlines_agree_all_test_only() {
+    // The ALL-test-only shape: production 0, test-only 2 — orient may not suppress the
+    // line while cycles discloses "+2 test-only excluded" (review-6 #1).
+    assert_cycle_surfaces_agree(vec![
+        CycleTestComposition::TestOnly,
+        CycleTestComposition::TestOnly,
+    ]);
+}
+
+#[test]
+fn cross_surface_cycle_headlines_agree_test_only_present() {
+    assert_cycle_surfaces_agree(vec![
+        CycleTestComposition::Production,
+        CycleTestComposition::TestOnly,
+    ]);
+}
+
+#[test]
+fn cross_surface_cycle_headlines_agree_none_present() {
+    assert_cycle_surfaces_agree(vec![
+        CycleTestComposition::Production,
+        CycleTestComposition::Production,
+    ]);
+}
+
+#[test]
+fn cross_surface_cycle_headlines_agree_unknown_present() {
+    assert_cycle_surfaces_agree(vec![
+        CycleTestComposition::Production,
+        CycleTestComposition::TestOnly,
+        CycleTestComposition::Unknown(
+            "member module `vendor/x` owns no tracked file (is_test unknown)".to_string(),
+        ),
+    ]);
 }

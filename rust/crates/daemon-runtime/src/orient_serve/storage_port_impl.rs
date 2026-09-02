@@ -116,6 +116,11 @@ fn cycles_repo_shape(cycles: &[Vec<String>]) -> Vec<AgentCycle> {
                 .iter()
                 .map(|m| crate::cycle_output::module_basename(m).to_string())
                 .collect(),
+            // ORIENT-CYCLES-DISAGREE-1: the LiveGraph module-cycle serve cannot reach the
+            // stored `is_test` fact (FIXTURE-POLLUTION-1 §2.3 asymmetry), so it claims NO
+            // test-only split — orient's headline then falls back to the raw total, matching
+            // `cycles` on this same LiveGraph-served path.
+            test_composition: None,
         })
         .collect()
 }
@@ -144,6 +149,9 @@ fn cycles_qualified_filtered(
         .map(|members| AgentCycle {
             length: members.len(),
             modules: members.clone(),
+            // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped LiveGraph serve — no is_test reach
+            // (§2.3) and not the repo headline; no test-only split claimed.
+            test_composition: None,
         })
         .collect()
 }

@@ -269,21 +269,62 @@ impl OrientResponse {
 
         if let Some(ev) = self.signal_evidence("IMPORT_CYCLES") {
             if let Some(cycles) = ev.get("cycles").and_then(|v| v.as_array()) {
-                let count = ev
+                let raw_total = ev
                     .get("cycle_count")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(cycles.len() as u64);
-                if count > 0 {
-                    let anchor = cycles
-                        .first()
-                        .and_then(|c| c.get("modules").and_then(|m| m.as_array()))
-                        .map(|mods| self.format_cycle_anchor(mods, 0));
-                    match anchor {
-                        Some(a) => {
-                            parts.push(format!("{} import cycle{} ({})", count, plural(count), a))
-                        }
-                        None => parts.push(format!("{} import cycle{}", count, plural(count))),
+                // ORIENT-CYCLES-DISAGREE-1: PREFER the exclusion-aware `production_count` — the
+                // SAME integer `cycles` renders as "N module-level cycle(s) found" (both derive
+                // from the shared classifier over the same cycle set). It is present ONLY when
+                // the serving computation reached the stored `is_test` fact (the SQLite path);
+                // ABSENT (LiveGraph/focus path) ⇒ fall back to the raw total, exactly as `cycles`
+                // does there. `production_count` is optional — its absence means "not split",
+                // NEVER "zero production cycles" (Fact Certainty Model).
+                let production = ev.get("production_count").and_then(|v| v.as_u64());
+                let test_only = ev.get("test_only_count").and_then(|v| v.as_u64());
+                // ORIENT-CYCLES-DISAGREE-1 (operator ruling review-3 #2): the unknown subset kept in
+                // `headline` (never demoted), disclosed so it is not counted invisibly. Present only
+                // with the split (SQLite path); absent ⇒ no clause.
+                let unknown = ev.get("unknown_count").and_then(|v| v.as_u64());
+                let headline = production.unwrap_or(raw_total);
+                // review-6 #1: a zero production headline must STILL render when a split
+                // disclosure exists (all-test-only cycles: cycles says "0 … (+N test-only
+                // excluded)" — orient may not silently drop the same fact). Suppress only
+                // the truly-empty case: no cycles AND nothing disclosed.
+                let has_disclosure =
+                    matches!(test_only, Some(n) if n > 0) || matches!(unknown, Some(n) if n > 0);
+                if headline > 0 || has_disclosure {
+                    // Anchor honesty: `cycles[]` carries no per-cycle composition, so with a split
+                    // its first entry may be a demoted test-only/unknown ring — misrepresenting the
+                    // example beside a production headline. Draw ONLY when there is no split
+                    // (`production` absent = unsplit LiveGraph/focus path) OR the split POSITIVELY
+                    // confirms zero test-only AND zero unknown; explicit `Option` match (review-4 #4:
+                    // never `unwrap_or(0)`, which reads an ABSENT count as known-zero — RULE #1).
+                    let draw_anchor = match production {
+                        None => true,
+                        Some(_) => test_only == Some(0) && unknown == Some(0),
+                    };
+                    let anchor = if draw_anchor {
+                        cycles
+                            .first()
+                            .and_then(|c| c.get("modules").and_then(|m| m.as_array()))
+                            .map(|mods| self.format_cycle_anchor(mods, 0))
+                    } else {
+                        None
+                    };
+                    let mut line = match anchor {
+                        Some(a) => format!("{} import cycle{} ({})", headline, plural(headline), a),
+                        None => format!("{} import cycle{}", headline, plural(headline)),
+                    };
+                    // Mirror `cycles`' "+M test-only (excluded)" AND unknown disclosures so the two
+                    // surfaces tell ONE story about the same snapshot — via the SHARED clause helper
+                    // (review-4 #3), so the wording cannot drift between the two headlines.
+                    if let Some(clause) =
+                        crate::presentation::cycle_exclusion_clause(test_only, unknown)
+                    {
+                        line.push_str(&format!(" ({clause})"));
                     }
+                    parts.push(line);
                 }
             }
         }
