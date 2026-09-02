@@ -5169,6 +5169,36 @@ impl ServiceDispatcher {
             fingerprint,
         };
 
+        // COHERENCE-POLISH-1 §2 (operator ruling 2026-09-02, answers review-0): trust CONSUMES the same
+        // capability fact `check` does. The daemon constructs the exhaustive capability sum `CeilingFact`
+        // INLINE at this composition root — byte-for-byte the same route as `handle_check` (one
+        // `query_file_count_by_language` → `reader_context::call_graph_ceiling_languages` → `CeilingFact`,
+        // the ratified daemon→agent injected-fact precedent) — and then converts it to the serializable
+        // wire mirror via the ONE production `From<&CeilingFact> for CeilingReport` impl. There is no
+        // second derivation of the ceiling classification: `CeilingReport` is a pure mechanical mirror of
+        // the `CeilingFact` this build already produced, never an independent re-classification.
+        // Read HERE, before `storage` is moved into the worker below. The fallible read maps to
+        // `Unknown { reason }` (STANDING HONESTY RULE 1: a classified fallible read is never swallowed to
+        // a sentinel), not a false "no ceiling". Trust renders the ceiling posture + suppresses
+        // "below N% target" for an at-ceiling repo.
+        let ceiling_fact: repo_graph_agent::dto::ceiling_fact::CeilingFact =
+            match repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+                &storage,
+                &snapshot.snapshot_uid,
+            ) {
+                Ok(counts) => match crate::reader_context::call_graph_ceiling_languages(&counts) {
+                    Some(languages) => {
+                        repo_graph_agent::dto::ceiling_fact::CeilingFact::Ceiling { languages }
+                    }
+                    None => repo_graph_agent::dto::ceiling_fact::CeilingFact::NoCeiling,
+                },
+                Err(e) => repo_graph_agent::dto::ceiling_fact::CeilingFact::Unknown {
+                    reason: e.to_string(),
+                },
+            };
+        let call_graph_ceiling =
+            repo_graph_agent::dto::ceiling_fact::CeilingReport::from(&ceiling_fact);
+
         // Compute the trust report on a WORKER thread, supervised from this (transport)
         // thread (DAEMON-CANCEL-3, reusing CANCEL-2's `run_interruptible`). Trust's
         // heavy work is two shapes that need two cancel mechanisms, both fired on
@@ -5276,7 +5306,16 @@ impl ServiceDispatcher {
         // and labels the multi-source downgrade leaf `{sqlite, declaration}`. The v1 computation above is
         // UNCHANGED; the wrapper adds labels + the posture, it never re-judges (F5: no axis is presented as
         // current-state unless its leaf is source=livegraph).
-        let envelope = crate::trust_coherence::build_trust_envelope(&repo_state, &epoch, report);
+        let mut envelope =
+            crate::trust_coherence::build_trust_envelope(&repo_state, &epoch, report);
+        // COHERENCE-POLISH-1 §2: attach the ceiling capability fact AFTER the pure fold (a capability
+        // posture never downgrades the v1 report's freshness), exactly like `witnesses` /
+        // `layer2_resolution`. `to_value` over a plain 3-variant enum of String/Vec<String> is
+        // infallible — the `expect` documents an unreachable serialization error, not a swallowed read.
+        envelope.value.call_graph_ceiling = Some(
+            serde_json::to_value(&call_graph_ceiling)
+                .expect("CeilingReport (plain enum) always serializes"),
+        );
         match serde_json::to_value(&envelope) {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => DispatchResult::error(

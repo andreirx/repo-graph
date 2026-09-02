@@ -63,7 +63,9 @@ pub enum RejectionClass {
     OptionalOrElementAccess,
     /// Gate 8 — the call chain is deeper than `receiver.method` / `this.field.method`.
     NotSimpleReceiverMethod,
-    /// Gate 5 — the receiver type is not a type defined in this repo.
+    /// Gate 5 — the receiver type name matched NO class or enum symbol we can see (the unique-class
+    /// lookup found zero candidates). Its reader label speaks gate 5's own "class or enum" vocabulary,
+    /// NOT gate 4's "defined in this repo" — those two used to collide (COHERENCE-POLISH-1 §2.1).
     TypeNotInGraph,
     /// Gate 5 — the receiver type resolves to a symbol that is neither a class nor an enum (EY1-D
     /// widened the usable-type predicate to `Class | Enum`), so there is no type body owning methods
@@ -147,7 +149,15 @@ impl RejectionClass {
                 "call uses optional-chaining or index access, not a plain method call"
             }
             Self::NotSimpleReceiverMethod => "call chain is deeper than receiver.method",
-            Self::TypeNotInGraph => "receiver type isn't a type defined in this repo",
+            // COHERENCE-POLISH-1 §2.1: this rejection FIRST-fires at gate 5 (the unique-class lookup
+            // found zero candidates), so its label must speak gate 5's "class or enum we can see"
+            // vocabulary — NOT gate 4's "defined in this repo". The prior wording ("isn't a type
+            // defined in this repo") negated gate 4's stage label, so an agent reading the funnel
+            // ("gate 4 …is defined in this repo: 0 filtered" beside "…isn't a type defined in this
+            // repo: 758") could not tell which gate rejected. The 758 were gate 5's, not gate 4's.
+            Self::TypeNotInGraph => {
+                "receiver type matches no class or enum we can see in this repo"
+            }
             // EY1-D widened the usable-type predicate to class OR enum, so a rejection here means the
             // resolved symbol is NEITHER — e.g. a trait/interface, type alias, or value symbol that
             // owns no methods we can anchor a call to. The label must not imply "any non-class",
@@ -199,10 +209,12 @@ const GATE_STAGES_IN_EVAL_ORDER: [(u8, &str); 8] = [
     (1, "call is a method call whose receiver type we resolve"),
     (2, "resolving this kind of call is enabled"),
     (3, "receiver type was resolved by the compiler"),
-    (
-        4,
-        "receiver type is defined in this repo (not a library type)",
-    ),
+    // COHERENCE-POLISH-1 §2.1: gate 4's predicate is `is_external_type == false` — passing it means
+    // the receiver is NOT a std/library type or primitive, NOT "defined in this repo" (a non-external
+    // type absent from the graph passes gate 4 and fails gate 5). The old "…is defined in this repo"
+    // wording claimed gate 5's territory and collided with the gate-5 `type_not_in_graph` reason; the
+    // label now states gate 4's actual predicate, in the reader's frame.
+    (4, "receiver type is not a std/library type or primitive"),
     (
         7,
         "receiver type is a single type (not a union/intersection)",
@@ -430,6 +442,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    // COHERENCE-POLISH-1 §2.1: the gate-5 "type not in graph" rejection reason speaks its OWN gate's
+    // vocabulary ("class or enum we can see"), NOT gate 4's "defined in this repo". These two used to
+    // collide: gate 4's PASS stage said "…is defined in this repo … 0 filtered out here" beside a
+    // gate-5 rejection worded "…isn't a type defined in this repo: 758", so an agent could not tell
+    // which gate rejected the 758 (they were gate 5's — the unique-class lookup, evaluated AFTER gate
+    // 4). The attribution (`gate()`) was already correct; this pins the WORDING so it can't drift back.
+    #[test]
+    fn gate5_not_in_graph_reason_speaks_gate5_vocabulary_not_gate4() {
+        let stage = |n: u8| {
+            GATE_STAGES_IN_EVAL_ORDER
+                .iter()
+                .find(|(g, _)| *g == n)
+                .expect("stage present")
+                .1
+        };
+        let not_in_graph = RejectionClass::TypeNotInGraph;
+        // Attribution is (and stays) gate 5 — the unique-class graph lookup.
+        assert_eq!(not_in_graph.gate(), 5);
+        // Gate 4's stage no longer claims the "defined in this repo" territory (its predicate is only
+        // "not external"), so it cannot collide with a gate-5 reason.
+        assert!(
+            !stage(4).contains("defined in this repo"),
+            "gate 4 stage must not claim 'defined in this repo': {}",
+            stage(4)
+        );
+        // The gate-5 reason no longer borrows gate 4's words; it speaks gate 5's "class or enum".
+        let label = not_in_graph.reader_label();
+        assert!(
+            !label.contains("defined in this repo"),
+            "gate-5 reason still collides with gate 4's vocabulary: {label}"
+        );
+        assert!(
+            label.contains("class or enum"),
+            "gate-5 reason must speak gate 5's 'class or enum' vocabulary: {label}"
+        );
+        assert!(
+            stage(5).contains("class or enum"),
+            "gate 5 stage anchors the shared vocabulary: {}",
+            stage(5)
+        );
     }
 
     // Codes are unique (no two variants share a machine key) and gates are all in the 1..=8 range.

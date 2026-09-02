@@ -497,6 +497,24 @@ pub fn band_label(b: AgentReliabilityLevel) -> &'static str {
 /// the SAME [`resolved_phrase_pct`] wording; the other tokens (imports / alias /
 /// entrypoints / registry) keep their existing prose.
 pub fn humanize_reason(reason: &str) -> String {
+    humanize_reason_impl(reason, false)
+}
+
+/// COHERENCE-POLISH-1 §2: the reader-frame reason humanizer for an AT-CEILING repo — identical to
+/// [`humanize_reason`] EXCEPT it DROPS the "(below N% target)" clause from the `call_resolution_rate`
+/// reason. On a permanent no-resolver ceiling the rate cannot approach that target (there is no
+/// resolver to close the gap), so naming a target the reader can never meet implies an unimprovable
+/// number can improve. The ceiling sentence ([`call_graph_ceiling_note`]) carries the WHY beside it.
+/// Only the Call-graph axis carries a `call_resolution_rate` reason, so the caller applies this only
+/// there; every other reason renders byte-identically to [`humanize_reason`].
+pub fn humanize_reason_at_ceiling(reason: &str) -> String {
+    humanize_reason_impl(reason, true)
+}
+
+/// The shared body of [`humanize_reason`] / [`humanize_reason_at_ceiling`]. `suppress_target` drops
+/// the "(below N% target)" clause on the `call_resolution_rate` reason (the ONLY reason that carries
+/// one) — nothing else differs, so the two public entry points cannot fork.
+fn humanize_reason_impl(reason: &str, suppress_target: bool) -> String {
     // "call_resolution_rate=33.5%_below_50%" → the in-scope rate, reader-framed.
     if let Some(rest) = reason.strip_prefix("call_resolution_rate=") {
         let parts: Vec<&str> = rest.split("_below_").collect();
@@ -504,6 +522,10 @@ pub fn humanize_reason(reason: &str) -> String {
             let rate = parts[0].trim_end_matches('%');
             let threshold = parts[1].trim_end_matches('%');
             if let (Ok(r), Ok(t)) = (rate.parse::<f64>(), threshold.parse::<f64>()) {
+                if suppress_target {
+                    // At-ceiling: state the rate, never a target the reader cannot approach.
+                    return resolved_phrase_pct(r);
+                }
                 return format!("{} (below {t}% target)", resolved_phrase_pct(r));
             }
         }
@@ -523,6 +545,32 @@ pub fn humanize_reason(reason: &str) -> String {
         // Unknown token — clean up underscores rather than leak a raw machine code.
         other => other.replace('_', " "),
     }
+}
+
+/// COHERENCE-POLISH-1 §2: the reader-frame ceiling sentence for a repo whose call-graph resolution is
+/// at a PERMANENT no-resolver ceiling (`CeilingReport::Ceiling`). `languages` are the ceilinged
+/// languages; they are joined with `/` (the SAME separator `check`'s `ceiling_language_list` uses, so
+/// the two surfaces name the set identically). States, in the reader's frame, that the resolved share
+/// is a CAPABILITY limit — not a fixable gap — so an agent does not chase a target it can never meet.
+/// Lives here beside the reader-frame call-graph vocabulary (`resolved_phrase_pct`, the humanizers) so
+/// trust's ceiling wording cannot fork.
+pub fn call_graph_ceiling_note(languages: &[String]) -> String {
+    format!(
+        "call-graph resolution is at this build's ceiling for {} (no resolver exists) — the resolved \
+         share reflects a capability limit, not a fixable gap; verify call/dead claims against source",
+        languages.join("/")
+    )
+}
+
+/// COHERENCE-POLISH-1 §2 (STANDING HONESTY RULE 1): the reader-frame line for the case where the
+/// ceiling capability read FAILED (`CeilingReport::Unknown`) — whether the resolved share is at a
+/// permanent limit could not be determined, surfaced WITH its reason (never swallowed, never a false
+/// "not a ceiling"). The "below N% target" clause is NOT suppressed in this case: a read failure may
+/// never soften the posture.
+pub fn call_graph_ceiling_unknown_note(reason: &str) -> String {
+    format!(
+        "whether call-graph resolution is at a permanent capability ceiling is unknown ({reason})"
+    )
 }
 
 #[cfg(test)]

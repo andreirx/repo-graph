@@ -47,9 +47,10 @@
 //! and `check`), so no surface can re-derive a divergent number.
 
 use repo_graph_agent::attribution;
+use repo_graph_agent::dto::ceiling_fact::CeilingReport;
 use repo_graph_agent::reliability::{self, CallReliabilityView, ExternalTarget};
 use repo_graph_coherence::{AnswerClass, CoherenceEnvelope, FreshnessState, Provenance, Source};
-use repo_graph_trust::types::ReliabilityAxisScore;
+use repo_graph_trust::types::{ReliabilityAxisScore, ReliabilityLevel};
 use repo_graph_trust::{CoherentTrustReport, LiveGraphPosture};
 
 use crate::presentation::{bullet, heading, kv_line};
@@ -408,18 +409,71 @@ fn render_reliability(v: &CoherentTrustReport) -> String {
         Vec::new(),
         None,
     );
+    // COHERENCE-POLISH-1 §2: the daemon-injected call-graph ceiling capability fact modulates ONLY a
+    // DEGRADING call-graph condition — the SAME gate `check`'s `evaluate_call_graph_reliability` uses
+    // (`view.resolution.is_none() || band == LOW`). This is the coherence the slice demands: trust
+    // renders the ceiling posture in exactly the cases "check says the ceiling is reached", never on a
+    // MEDIUM/HIGH band (where check passes on the figure and says nothing about a ceiling — the
+    // homegrown extractor still resolved the calls it saw). On a degrading condition, a permanent
+    // no-resolver ceiling suppresses "below N% target" (a target the reader can never approach) and a
+    // ceiling sentence states WHY; a failed/unreadable capability fact renders unknown-WITH-REASON
+    // (STANDING HONESTY RULE 1), never a softened posture and never silently swallowed.
+    let ceiling = parse_call_graph_ceiling(v);
+    let is_degrading =
+        view.resolution.is_none() || matches!(r.call_graph.level, ReliabilityLevel::LOW);
+    let at_ceiling = is_degrading && matches!(ceiling, Some(Ok(CeilingReport::Ceiling { .. })));
+
     if view.resolution.is_none() {
         out.push_str(&bullet(&format!(
             "Call-graph: {}",
             reliability::NO_IN_SCOPE_CALLS
         )));
     } else {
-        out.push_str(&bullet(&format_axis("Call-graph", &r.call_graph)));
+        out.push_str(&bullet(&format_axis_maybe_ceiling(
+            "Call-graph",
+            &r.call_graph,
+            at_ceiling,
+        )));
     }
     out.push_str(&bullet(&format_axis("Import-graph", &r.import_graph)));
     out.push_str(&bullet(&format_axis("Change-impact", &r.change_impact)));
 
+    // The ceiling posture rides BELOW the axes so it frames the whole call-graph section — but ONLY on
+    // a degrading condition (coherent with check; a MEDIUM/HIGH band passes on its own figure).
+    if is_degrading {
+        match ceiling {
+            Some(Ok(CeilingReport::Ceiling { languages })) => {
+                out.push_str(&bullet(&reliability::call_graph_ceiling_note(&languages)));
+            }
+            Some(Ok(CeilingReport::Unknown { reason })) => {
+                out.push_str(&bullet(&reliability::call_graph_ceiling_unknown_note(
+                    &reason,
+                )));
+            }
+            // A PRESENT but unparseable field is a fact we HAVE yet cannot read — unknown-with-reason,
+            // never swallowed (STANDING HONESTY RULE 1).
+            Some(Err(reason)) => {
+                out.push_str(&bullet(&reliability::call_graph_ceiling_unknown_note(
+                    &reason,
+                )));
+            }
+            // NoCeiling (or the field absent on an older daemon) → no ceiling posture, byte-identical.
+            Some(Ok(CeilingReport::NoCeiling)) | None => {}
+        }
+    }
+
     out
+}
+
+/// COHERENCE-POLISH-1 §2: read the daemon-injected `call_graph_ceiling` field (the serialized
+/// `CeilingReport`). `None` = the field is ABSENT (older daemon / the pure fold never attached it) —
+/// legitimate absence, byte-identical existing output. `Some(Ok(_))` = the parsed capability fact.
+/// `Some(Err(reason))` = the field is PRESENT but does not deserialize (a daemon↔CLI shape skew) — a
+/// fact we have yet cannot read, surfaced unknown-WITH-REASON by the caller rather than swallowed
+/// (STANDING HONESTY RULE 1: never `.ok()` a classified fallible parse whose result is rendered).
+fn parse_call_graph_ceiling(v: &CoherentTrustReport) -> Option<Result<CeilingReport, String>> {
+    let raw = v.call_graph_ceiling.as_ref()?;
+    Some(serde_json::from_value::<CeilingReport>(raw.clone()).map_err(|e| e.to_string()))
 }
 
 // RELIABILITY-REFRAME-1 (review-1 §3): `render_unresolved_breakdown` + `render_classification`
@@ -723,6 +777,15 @@ fn render_downgrades(v: &CoherentTrustReport) -> String {
 }
 
 fn format_axis(name: &str, axis: &ReliabilityAxisScore) -> String {
+    format_axis_maybe_ceiling(name, axis, false)
+}
+
+/// Render one reliability axis. COHERENCE-POLISH-1 §2: when `at_ceiling`, the reason humanizer DROPS
+/// the "(below N% target)" clause from the `call_resolution_rate` reason — on a permanent no-resolver
+/// ceiling that target can never be approached, so naming it would imply an unimprovable number can
+/// improve. The ceiling sentence (rendered by the caller) carries the WHY. `at_ceiling` is passed only
+/// for the Call-graph axis (the only axis that carries a `call_resolution_rate` reason).
+fn format_axis_maybe_ceiling(name: &str, axis: &ReliabilityAxisScore, at_ceiling: bool) -> String {
     let level = format!("{:?}", axis.level);
     if axis.reasons.is_empty() {
         format!("{}: {}", name, level)
@@ -732,7 +795,13 @@ fn format_axis(name: &str, axis: &ReliabilityAxisScore) -> String {
         let humanized: Vec<String> = axis
             .reasons
             .iter()
-            .map(|r| reliability::humanize_reason(r))
+            .map(|r| {
+                if at_ceiling {
+                    reliability::humanize_reason_at_ceiling(r)
+                } else {
+                    reliability::humanize_reason(r)
+                }
+            })
             .collect();
         format!("{}: {} ({})", name, level, humanized.join("; "))
     }

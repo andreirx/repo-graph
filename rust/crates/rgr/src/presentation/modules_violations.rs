@@ -136,9 +136,18 @@ impl ModulesViolationsResponse {
         }
 
         // -- Counts --
+        // COHERENCE-POLISH-1 §3(b): this surface reports discovered-module (module-graph-derived)
+        // violations ONLY (same fact class the top-level `rmap violations` renders as its
+        // "discovered module violation(s)" section). Share that one noun phrase across the two
+        // surfaces so an agent reads one vocabulary, not "0 violations" here vs "0 discovered module
+        // violations" there for the same fact.
         out.push_str(&format!(
             "{}\n",
-            format_count(self.count as usize, "violation", "violations")
+            format_count(
+                self.count as usize,
+                "discovered module violation",
+                "discovered module violations"
+            )
         ));
         out.push_str(&format!(
             "{}\n",
@@ -310,7 +319,7 @@ mod tests {
     fn violations_render_shows_counts() {
         let resp = sample_violations_response();
         let output = resp.render_human();
-        assert!(output.contains("2 violations"));
+        assert!(output.contains("2 discovered module violations"));
         assert!(output.contains("1 stale declaration"));
     }
 
@@ -372,7 +381,7 @@ mod tests {
         ));
         assert!(output.contains("rmap declare boundary"));
         assert!(!output.contains("Import analysis:"));
-        assert!(!output.contains("0 violations"));
+        assert!(!output.contains("0 discovered module violations"));
     }
 
     // GOV-ARMED-1: determination fact absent → unknown-with-reason.

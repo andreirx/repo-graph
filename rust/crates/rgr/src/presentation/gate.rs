@@ -183,6 +183,13 @@ impl GateResponse {
                     self.gate.outcome
                 ));
                 out.push_str(&format!("Exit code: {}\n", self.gate.exit_code));
+                // COHERENCE-POLISH-1 §3(a): state the arming DIVISION so an agent does not read this
+                // gate as covering architectural boundaries. Boundaries are a SEPARATE surface
+                // (`rmap violations`); only requirements and quality policies arm THIS gate.
+                out.push_str(
+                    "Scope: this gate is armed by requirements and quality policies; \
+                     architectural boundaries are checked separately by `rmap violations`.\n",
+                );
                 out.push_str(
                     "To arm: declare a requirement (`rmap declare requirement ...`) \
                      or a quality policy (`rmap declare quality-policy ...`).\n",
@@ -465,6 +472,12 @@ mod tests {
         ));
         assert!(out.contains("Outcome: pass (vacuous — nothing was evaluated)"));
         assert!(out.contains("Exit code: 0"));
+        // COHERENCE-POLISH-1 §3(a): the not-armed line states the arming DIVISION — this gate is
+        // armed by requirements/quality policies; boundaries are checked by `rmap violations`.
+        assert!(out.contains(
+            "this gate is armed by requirements and quality policies; \
+             architectural boundaries are checked separately by `rmap violations`."
+        ));
         // Names the real arming paths (verified against `rmap declare` usage).
         assert!(out.contains("rmap declare requirement"));
         assert!(out.contains("rmap declare quality-policy"));

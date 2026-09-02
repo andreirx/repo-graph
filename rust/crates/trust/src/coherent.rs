@@ -238,6 +238,18 @@ pub struct CoherentTrustReport {
     /// absent on the wire when `None` (R-0: zero-SCIP + no-hint repos byte-identical).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub layer2_resolution: Option<Value>,
+
+    /// COHERENCE-POLISH-1 §2: the daemon-injected call-graph-resolution CEILING capability fact — the
+    /// serialized `repo_graph_agent::dto::ceiling_fact::CeilingReport` (ceiling / no-ceiling /
+    /// unknown), computed from the SAME materiality × resolver read `check` consumes. The rgr `trust`
+    /// presentation reads it to render the ceiling posture in the Reliability section and to suppress
+    /// the "below N% target" clause on an at-ceiling repo (a target that cannot be approached is not a
+    /// target). A plain `Option<Value>` OUTSIDE the coherence MEET fold and attached by the daemon
+    /// adapter AFTER the pure fold — exactly like `witnesses` / `layer2_resolution` (a capability
+    /// posture never downgrades the v1 report's freshness). Absent on the wire when `None`, so an
+    /// older daemon / the pure fold stays byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub call_graph_ceiling: Option<Value>,
 }
 
 // ── Posture helpers ────────────────────────────────────────────────────────────────────────────────
@@ -455,9 +467,11 @@ pub fn trust_to_coherent(
         modules: modules_leaf,
         caveats: caveats_leaf,
         current_state_posture: posture,
-        // RECON-M-R3a / M-R4: attached by the daemon adapter AFTER this pure fold (never part of it).
+        // RECON-M-R3a / M-R4 / COHERENCE-POLISH-1 §2: attached by the daemon adapter AFTER this pure
+        // fold (never part of it).
         witnesses: None,
         layer2_resolution: None,
+        call_graph_ceiling: None,
     };
 
     CoherenceEnvelope::new(value, provenance, trust, freshness)

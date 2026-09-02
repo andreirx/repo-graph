@@ -1489,7 +1489,7 @@ mod tests {
                         {"gate":1,"label":"call is a method call whose receiver type we resolve","entered":78,"rejected":0},
                         {"gate":2,"label":"resolving this kind of call is enabled","entered":78,"rejected":0},
                         {"gate":3,"label":"receiver type was resolved by the compiler","entered":78,"rejected":0},
-                        {"gate":4,"label":"receiver type is defined in this repo (not a library type)","entered":78,"rejected":30},
+                        {"gate":4,"label":"receiver type is not a std/library type or primitive","entered":78,"rejected":30},
                         {"gate":7,"label":"receiver type is a single type (not a union/intersection)","entered":48,"rejected":0},
                         {"gate":8,"label":"call is a direct receiver.method (no chaining or indexing)","entered":48,"rejected":0},
                         {"gate":5,"label":"receiver type maps to exactly one class we can see","entered":48,"rejected":0},
@@ -1552,7 +1552,7 @@ mod tests {
         );
         assert!(
             details.contains(
-                "receiver type is defined in this repo (not a library type): 78 reached → 30 filtered out here (38%)"
+                "receiver type is not a std/library type or primitive: 78 reached → 30 filtered out here (38%)"
             ),
             "per-gate entering+rejected line present: {details}"
         );

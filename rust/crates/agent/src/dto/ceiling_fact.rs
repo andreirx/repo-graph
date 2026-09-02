@@ -98,3 +98,48 @@ pub enum CeilingFact {
         reason: String,
     },
 }
+
+/// COHERENCE-POLISH-1 §2: the SERIALIZABLE wire mirror of [`CeilingFact`], for the `trust` JSON
+/// surface (the daemon injects it into `CoherentTrustReport.call_graph_ceiling`; the rgr `trust`
+/// presentation reads it to render the ceiling posture + suppress the "below N% target" clause on an
+/// at-ceiling repo).
+///
+/// [`CeilingFact`] itself stays serde-FREE — its module doc ratifies it as a reducer INPUT fact that
+/// is never serialized (only the additive `CheckConditionEvidence.ceiling: bool` marker crosses the
+/// `check` wire). This separate wire DTO preserves that invariant while giving `trust` a boundary
+/// shape to carry the SAME three-outcome fact. Three variants 1:1 with [`CeilingFact`].
+///
+/// Abstraction one-liner (architecture rule):
+///   - WHAT: a raw boundary DTO — the serializable 3-variant mirror of the call-graph capability sum
+///     — on the daemon→rgr `trust` JSON boundary.
+///   - CURRENT USERS: `daemon-runtime::dispatch::handle_trust` (builds it from `CeilingFact` and
+///     injects it into the trust report); `rgr::presentation::trust` (reads + renders it).
+///   - AXIS: variants FIXED (three capability outcomes), operations GROWING (daemon write + rgr
+///     render) → sum + serde; a fourth outcome must break both sites.
+///   - REJECTED SIMPLER: (a) add serde to `CeilingFact` — rejected, its module doc ratifies it stays
+///     serde-free (reducer input); (b) an ad-hoc `serde_json::json!` built in the daemon + `.get()`
+///     parsing in rgr — rejected, it forks the shape across two sites with no compile-time link.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CeilingReport {
+    /// Permanent no-resolver ceiling — the reader-facing ceilinged languages (non-empty).
+    Ceiling { languages: Vec<String> },
+    /// Affirmatively not a ceiling (at least one material language has a resolution path).
+    NoCeiling,
+    /// The capability read failed — whether this repo is at a ceiling is unknown, with its reason.
+    Unknown { reason: String },
+}
+
+impl From<&CeilingFact> for CeilingReport {
+    fn from(fact: &CeilingFact) -> Self {
+        match fact {
+            CeilingFact::Ceiling { languages } => CeilingReport::Ceiling {
+                languages: languages.clone(),
+            },
+            CeilingFact::NoCeiling => CeilingReport::NoCeiling,
+            CeilingFact::Unknown { reason } => CeilingReport::Unknown {
+                reason: reason.clone(),
+            },
+        }
+    }
+}

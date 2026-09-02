@@ -1469,3 +1469,122 @@ fn persisted_signals_render_named_dependencies_for_all_three_bases_end_to_end() 
         "the corrected three-path provenance sentence renders on the reader surface:\n{out}"
     );
 }
+
+// ── COHERENCE-POLISH-1 §2: call-graph ceiling posture in the Reliability section ────────────────────
+
+/// Build the low-in-scope report + LOW call-graph band whose reason carries the "below N% target"
+/// clause (the exact shape `render_resolution_in_scope_low_still_reads_low` pins), then inject a
+/// ceiling capability fact so the ceiling behaviour can be exercised.
+fn low_report_with_below_target() -> TrustReport {
+    let mut r = report();
+    r.summary.resolved_calls = 10;
+    r.summary.unresolved_calls = 90;
+    r.summary.unresolved_calls_external = 10;
+    r.summary.unresolved_calls_internal_like = 80;
+    r.summary.call_resolution_rate = 10.0 / 90.0;
+    r.summary.reliability.call_graph = axis(
+        ReliabilityLevel::LOW,
+        vec!["call_resolution_rate=11.1%_below_50%"],
+    );
+    r
+}
+
+#[test]
+fn at_ceiling_suppresses_below_target_and_states_the_ceiling() {
+    use repo_graph_agent::dto::ceiling_fact::CeilingReport;
+    let mut env = trust_to_coherent(low_report_with_below_target(), warm_posture(), false);
+    // The daemon injects the ceiling fact after the fold; here we set it directly.
+    env.value.call_graph_ceiling = Some(
+        serde_json::to_value(CeilingReport::Ceiling {
+            languages: vec!["C".to_string(), "C++".to_string()],
+        })
+        .unwrap(),
+    );
+    let out = render_trust_envelope(&env);
+
+    // The band still reads LOW and states the rate — the FIGURE is unchanged.
+    assert!(out.contains("Call-graph: LOW"), "band still LOW:\n{out}");
+    assert!(
+        out.contains("your code's calls 11% resolved"),
+        "the rate figure is unchanged:\n{out}"
+    );
+    // But the "(below N% target)" clause is SUPPRESSED — a target that cannot be approached is not a
+    // target (a permanent no-resolver ceiling cannot close the gap).
+    assert!(
+        !out.contains("below 50% target"),
+        "at a permanent ceiling the below-target clause must be suppressed:\n{out}"
+    );
+    // And the ceiling sentence states WHY, naming the ceilinged languages with `/` (as check does).
+    assert!(
+        out.contains(
+            "call-graph resolution is at this build's ceiling for C/C++ (no resolver exists)"
+        ),
+        "the ceiling posture is stated:\n{out}"
+    );
+}
+
+#[test]
+fn no_ceiling_is_byte_identical_below_target_still_shown() {
+    use repo_graph_agent::dto::ceiling_fact::CeilingReport;
+    let mut env = trust_to_coherent(low_report_with_below_target(), warm_posture(), false);
+    env.value.call_graph_ceiling = Some(serde_json::to_value(CeilingReport::NoCeiling).unwrap());
+    let out = render_trust_envelope(&env);
+    // NoCeiling → the pre-slice output: the target IS named (the gap is actionable) and no ceiling
+    // sentence appears.
+    assert!(
+        out.contains("your code's calls 11% resolved (below 50% target)"),
+        "an actionable (non-ceiling) repo still names the target:\n{out}"
+    );
+    assert!(
+        !out.contains("capability limit"),
+        "no ceiling sentence on a non-ceiling repo:\n{out}"
+    );
+}
+
+#[test]
+fn unknown_ceiling_surfaces_reason_and_keeps_below_target() {
+    use repo_graph_agent::dto::ceiling_fact::CeilingReport;
+    let mut env = trust_to_coherent(low_report_with_below_target(), warm_posture(), false);
+    env.value.call_graph_ceiling = Some(
+        serde_json::to_value(CeilingReport::Unknown {
+            reason: "language read failed".to_string(),
+        })
+        .unwrap(),
+    );
+    let out = render_trust_envelope(&env);
+    // A failed capability read may NEVER soften the posture: the target stays, and the unknown is
+    // surfaced WITH its reason (STANDING HONESTY RULE 1).
+    assert!(
+        out.contains("your code's calls 11% resolved (below 50% target)"),
+        "an unknown ceiling must not suppress the target:\n{out}"
+    );
+    assert!(
+        out.contains("whether call-graph resolution is at a permanent capability ceiling is unknown (language read failed)"),
+        "the unknown-with-reason line is surfaced:\n{out}"
+    );
+}
+
+#[test]
+fn ceiling_posture_not_shown_on_non_degrading_band_coherent_with_check() {
+    // COHERENCE-POLISH-1 §2: the ceiling posture renders ONLY where "check says the ceiling is
+    // reached" — a DEGRADING condition. `report()` has a MEDIUM call-graph band with resolution
+    // present (NOT degrading); check passes on that figure and says nothing about a ceiling, so trust
+    // must NOT render a ceiling note beside a MEDIUM/HIGH band (the contradiction this slice fights).
+    use repo_graph_agent::dto::ceiling_fact::CeilingReport;
+    let mut env = trust_to_coherent(report(), warm_posture(), false);
+    env.value.call_graph_ceiling = Some(
+        serde_json::to_value(CeilingReport::Ceiling {
+            languages: vec!["C++".to_string()],
+        })
+        .unwrap(),
+    );
+    let out = render_trust_envelope(&env);
+    assert!(
+        out.contains("Call-graph: MEDIUM"),
+        "band is MEDIUM (non-degrading):\n{out}"
+    );
+    assert!(
+        !out.contains("capability limit") && !out.contains("no resolver exists"),
+        "no ceiling note beside a non-degrading band:\n{out}"
+    );
+}
