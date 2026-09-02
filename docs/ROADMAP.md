@@ -133,6 +133,22 @@ NEW findings (merge into the active queue):
   missed); three unreconciled file totals (2072/2069/2065); vendored code blends into
   complexity centers.
 
+## Queue tail COMPLETE (2026-09-02) — the v0.13.0 + diverse queues fully cleared
+
+ZEROSTATE-SCOPE-1 62995e6+4e3eb2c (per-repo gap sentences; any-TS cycle caveat; + the
+committed-past-red-gate repair) · CHECK-LANG-SPLIT-1 6ed99ec (per-language confidence under
+the blended figure) · COHERENCE-POLISH-1 3d2d6c9 (funnel gate-anchored reasons; trust
+ceiling echo — 9th two-computations kill; gate arming scope) · FINAL-POLISH-1 d9ff6b7
+(surfaces ×N dedup; deps self-import first-party; resource claim measured true — BOTH
+premises refuted: fstream delivered for literal paths only; RESOURCE-DYNAMIC-PATH-1 is the
+re-scoped follow-up: the extractor's arg0 string-literal gate drops every computed path,
+cross-language) · IS-TEST-RUST-1 ba68535 (cfg(test) inclusion-chain fact; find/demotion/
+counts heal).
+
+Open follow-ups awaiting ratification/scheduling: CYCLE-FACTS-2 (human), RESOURCE-DYNAMIC-
+PATH-1, docs residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux
+per-repo timeout override.
+
 ## v0.13.0 + diverse-verification merged queue — high tier COMPLETE (2026-09-02)
 
 Shipped: ORIENT-SMALL-ENRICH-1 c56d298 (in-flight promise gates on per-repo applicability;
