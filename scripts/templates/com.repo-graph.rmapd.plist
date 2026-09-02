@@ -48,6 +48,10 @@
              exit-127 under launchd — enrichment silently resolved 0 on every repo. -->
         <key>PATH</key>
         <string>@RMAP_TOOLCHAIN_PATH@</string>
+        <!-- The next line's placeholder becomes a JDTLS_PATH entry at install time when a
+             jdtls launcher is found (brew opt path or PATH), else empty with a LOUD
+             warning — Java enrichment needs it (wired 2026-09-02). -->
+        @RMAP_JDTLS_BLOCK@
     </dict>
 
     <!-- Background process, not user-interactive -->

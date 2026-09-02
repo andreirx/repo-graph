@@ -49,12 +49,31 @@ rmap_toolchain_path() {
     printf '%s' "${base}${extra:+:${extra}}"
 }
 
+# The jdtls launcher for Java enrichment (JDTLS_PATH env). Resolved at install time:
+# brew's version-independent opt symlink first, then PATH. Missing = LOUD warning (Java
+# enrichment silently unavailable without it), never a silent omission.
+rmap_jdtls_block() {
+    local jdtls=""
+    if [[ -x /opt/homebrew/opt/jdtls/bin/jdtls ]]; then
+        jdtls=/opt/homebrew/opt/jdtls/bin/jdtls
+    else
+        jdtls="$(command -v jdtls 2>/dev/null || true)"
+    fi
+    if [[ -n "${jdtls}" ]]; then
+        printf '<key>JDTLS_PATH</key><string>%s</string>' "${jdtls}"
+    else
+        echo "WARNING: no jdtls launcher found (brew install jdtls) — Java enrichment (JDTLS) will be unavailable to the daemon." >&2
+        printf ''
+    fi
+}
+
 emit_macos_plist() {
-    local toolchain_path
+    local toolchain_path jdtls_block
     toolchain_path="$(rmap_toolchain_path)"
+    jdtls_block="$(rmap_jdtls_block)"
     # Try template file first (modular mode)
     if [[ -n "${SCRIPT_DIR:-}" ]] && [[ -f "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}" ]]; then
-        sed "s|@RMAP_TOOLCHAIN_PATH@|${toolchain_path}|" "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}"
+        sed -e "s|@RMAP_TOOLCHAIN_PATH@|${toolchain_path}|" -e "s|@RMAP_JDTLS_BLOCK@|${jdtls_block}|" "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}"
         return
     fi
 
