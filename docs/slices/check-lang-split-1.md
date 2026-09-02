@@ -42,8 +42,9 @@ operator's real state root. Do NOT commit.
   the CTA's language set; failed by-language read → unknown-with-reason breakdown, blended
   line intact.
 - Live proof (isolated state root, registry sha unchanged): glamCRM — blended line + "by
-  language: TypeScript …% · Java …%" agreeing with `reliability --by-language`; leveldb —
-  no breakdown line. Captures.
+  language: TypeScript …% · Java …%" agreeing with `reliability --by-language`; leveldb — renders its C/C++ split (ruling
+  leveldb-breakdown-contract = A, 2026-09-02: it IS materially mixed; uniform gate); a
+  genuinely single-language fixture shows no breakdown. Captures.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done
