@@ -156,7 +156,11 @@ re-scoped follow-up: the extractor's arg0 string-literal gate drops every comput
 cross-language) · IS-TEST-RUST-1 ba68535 (cfg(test) inclusion-chain fact; find/demotion/
 counts heal).
 
-Open follow-ups awaiting ratification/scheduling: CYCLE-FACTS-2 (human), RESOURCE-DYNAMIC-
+Open follow-ups awaiting ratification/scheduling: CYCLE-FACTS-2 (human ruling 2026-09-02:
+DEFERRED until after ENGINE-CONSOLIDATION-1 — the consolidation may change what needs
+certifying; the OPERATOR MUST re-present it to the human when the consolidation SPEC is
+ratified, framed in PRODUCT-IMPACT terms: what an agent sees/gains per option, not
+machinery), RESOURCE-DYNAMIC-
 PATH-1, docs residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux
 per-repo timeout override.
 
