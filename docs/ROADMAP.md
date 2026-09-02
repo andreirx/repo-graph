@@ -60,8 +60,8 @@ hypotheses until that run speaks.
 
 **The active work queue (operator-ratified 2026-07-16):**
 
-1. **TS-PROTOTYPE-RETIREMENT-1** — bury the 90k-LOC TS prototype (spec ready;
-   strengthened: `rmap map` superseded rgistr's LLM structure path).
+1. ~~TS-PROTOTYPE-RETIREMENT-1~~ **SHIPPED** (800d78e — tree verified clean of src/;
+   this block was stale from 2026-07-16 until 2026-09-02).
 2. **ENGINE-CONSOLIDATION-1** (SPEC relay) — name the two-read-engines end-state;
    primary candidate: SQLite keeps the slow-moving structure skeleton, LiveGraph owns
    function internals (operator direction §2b, incl. the RED-floor collision).
