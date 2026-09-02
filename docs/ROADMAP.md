@@ -62,9 +62,10 @@ hypotheses until that run speaks.
 
 1. ~~TS-PROTOTYPE-RETIREMENT-1~~ **SHIPPED** (800d78e — tree verified clean of src/;
    this block was stale from 2026-07-16 until 2026-09-02).
-2. **ENGINE-CONSOLIDATION-1** (SPEC relay) — name the two-read-engines end-state;
-   primary candidate: SQLite keeps the slow-moving structure skeleton, LiveGraph owns
-   function internals (operator direction §2b, incl. the RED-floor collision).
+2. ~~ENGINE-CONSOLIDATION-1 (SPEC)~~ **RATIFIED 2026-07-16** (spec doc §8: six D-EC
+   decisions as written; D-EC-1/7 superseded by reconciliation-over-adjudication;
+   RECON-DESIGN-1 §8 ratified 2026-07-17). Remaining: the M-1..M-6 milestone EXECUTION
+   (status audit vs shipped code opened 2026-09-03 — this block was stale since July).
 3. **DAEMON-CONCURRENCY-1** — serial → concurrent (the multi-agent gap; TECH-DEBT #1).
 4. **Scale chain** — POSTPASS-PROFILE-1 → delta-indexing completion → sharding
    (monorepo reindex cost).
