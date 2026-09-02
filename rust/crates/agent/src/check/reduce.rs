@@ -86,6 +86,8 @@ mod tests {
             }),
             // CHECK-SIGNAL-1: default not-a-ceiling (actionable) → pre-slice call-graph behavior.
             ceiling_fact: None,
+            // CHECK-LANG-SPLIT-1: no daemon-computed breakdown in the pure-reducer tests.
+            reliability_by_language: None,
         }
     }
 
@@ -134,6 +136,92 @@ mod tests {
             cg.summary
         );
         assert!(!cg.summary.contains("Call graph reliability"));
+    }
+
+    // ── CHECK-LANG-SPLIT-1 (§2 + ruling A): the per-language breakdown rides any blended figure ──
+
+    #[test]
+    fn per_language_breakdown_appends_under_the_low_call_graph_figure() {
+        // A daemon-computed breakdown line for a MIXED repo renders UNDER the blended figure on a LOW
+        // verdict (which language carries the unresolved mass), sentence-cased + period-terminated, AFTER
+        // the figure.
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 42;
+        input.unresolved_calls_internal_like = 58;
+        input.unresolved_calls = 58;
+        input.reliability_by_language =
+            Some("by language: TypeScript 24% of 100 calls · Java 11% of 113 calls".to_string());
+        let cg = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| matches!(c.code, ConditionCode::CallGraphReliability))
+            .unwrap();
+        assert!(
+            cg.summary
+                .contains("By language: TypeScript 24% of 100 calls · Java 11% of 113 calls."),
+            "breakdown appended under the figure, sentence-cased + period: {}",
+            cg.summary
+        );
+        // It follows the blended figure, not precedes it.
+        assert!(
+            cg.summary.find("42% resolved (LOW)").unwrap()
+                < cg.summary.find("By language:").unwrap()
+        );
+    }
+
+    #[test]
+    fn per_language_breakdown_renders_on_every_band_with_a_call_figure() {
+        // Operator ruling A (`leveldb-breakdown-contract`, 2026-09-02): the split is a UNIFORM materiality
+        // gate — it renders wherever there IS a blended call-resolution figure to decompose, on ANY band
+        // (HIGH / MEDIUM / LOW), NOT only LOW. review-0 §3: a mixed MEDIUM repo's blended figure is still
+        // rendered, so suppressing its breakdown would re-hide the per-language confidence difference (§1).
+        for band in [
+            AgentReliabilityLevel::Low,
+            AgentReliabilityLevel::Medium,
+            AgentReliabilityLevel::High,
+        ] {
+            let mut input = all_pass_input(); // resolved 95 / total 100 → resolution present on every band
+            input.call_graph_reliability = Some(band);
+            input.reliability_by_language = Some(
+                "by language: TypeScript 90% of 100 calls · Java 40% of 113 calls".to_string(),
+            );
+            let cg = check(&input)
+                .conditions
+                .into_iter()
+                .find(|c| matches!(c.code, ConditionCode::CallGraphReliability))
+                .unwrap();
+            assert!(
+                cg.summary
+                    .contains("By language: TypeScript 90% of 100 calls · Java 40% of 113 calls."),
+                "breakdown renders on {band:?} (a figure is present to split): {}",
+                cg.summary
+            );
+        }
+    }
+
+    #[test]
+    fn per_language_breakdown_silent_when_no_call_figure() {
+        // No in-scope calls to resolve → `resolution` is None → no blended figure to decompose, so no
+        // breakdown even when the daemon supplied a line (each cell would be a vacuous "unknown"). This is
+        // the ONLY suppression that survives ruling A (it is "no figure", not a band gate).
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 0;
+        input.unresolved_calls_internal_like = 0;
+        input.unresolved_calls = 0; // total_calls == 0 → resolution None
+        input.reliability_by_language =
+            Some("by language: TypeScript no in-scope calls measured".to_string());
+        let cg = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| matches!(c.code, ConditionCode::CallGraphReliability))
+            .unwrap();
+        assert!(
+            !cg.summary.to_lowercase().contains("by language"),
+            "no figure to split → no breakdown: {}",
+            cg.summary
+        );
     }
 
     // ── 1b'. check carries the FULL external projection (review-3 §1) ──
@@ -588,6 +676,7 @@ mod tests {
             gate_outcome: None,
             index_drift: None,
             ceiling_fact: None,
+            reliability_by_language: None,
         };
         let result = check(&input);
         assert_eq!(result.verdict, CheckVerdict::Incomplete);
@@ -781,6 +870,7 @@ mod tests {
             gate_outcome: None,
             index_drift: None,
             ceiling_fact: None,
+            reliability_by_language: None,
         };
         let result = check(&input);
         assert_eq!(result.conditions.len(), 1);

@@ -157,7 +157,7 @@ pub(crate) fn build_orient_envelope(
         }
     }
 
-    let (trust_briefing, relationship_next_action) =
+    let (trust_briefing, relationship_next_action, reliability_by_language) =
         compute_briefing_and_remedy(repo_state, repo_uid, &snapshot_uid, enrich_in_flight);
 
     let mut envelope = to_coherent(result, &decisions, trust_briefing, stale);
@@ -165,6 +165,12 @@ pub(crate) fn build_orient_envelope(
     // post-fold, like `display_name`). It rides the value as a reader hint, NOT a coherence leaf, so it
     // does not participate in the MEET fold.
     envelope.value.relationship_next_action = relationship_next_action;
+    // CHECK-LANG-SPLIT-1 (§2 + ruling A): the per-language reliability breakdown rides the value beside the
+    // CTA (same post-fold reader-hint placement, NOT a coherence leaf). Present for a mixed repo whenever the
+    // CALL-GRAPH axis is non-HIGH (LOW *or* MEDIUM — the caveat gate it decomposes, see
+    // `compute_briefing_and_remedy`), DECOUPLED from the LOW-gated CTA; `None` (absent on the wire) otherwise
+    // — single-language output byte-identical.
+    envelope.value.reliability_by_language = reliability_by_language;
 
     // METRIC-LANG-COVERAGE-1 (part A): when orient emits a complexity ranking (HIGH_COMPLEXITY present),
     // attach the per-language measurement-coverage block so the ranking never reads as repo-wide while a
@@ -313,51 +319,77 @@ fn compute_briefing_and_remedy(
     repo_uid: &str,
     snapshot_uid: &str,
     enrich_in_flight: bool,
-) -> (Option<serde_json::Value>, Option<String>) {
+) -> (Option<serde_json::Value>, Option<String>, Option<String>) {
     let Ok(storage) = repo_state.storage() else {
-        return (None, None);
+        return (None, None, None);
     };
     let Some(snapshot) = storage.get_snapshot(snapshot_uid).ok().flatten() else {
-        return (None, None);
+        return (None, None, None);
     };
     let Some(overlay) =
         compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS")
     else {
-        return (None, None);
+        return (None, None, None);
     };
     let briefing = briefing_json(&overlay);
-    // ORIENT-FACT-COHERENCE-1: while a pass is in flight for this repo, the honest next-action is NOT
-    // "run `rmap enrich`" (it is already running) — render the in-flight truth through the ONE shared
-    // enrichment accessor `check::enrichment_state_summary`, the SAME wording check/reliability render,
-    // and skip the per-language enrich CTA entirely. This is the CTA suppression + positive in-flight
-    // rendering §2.1 requires, routed through the accessor §2.2 names (no new wording minted here).
-    if enrich_in_flight {
-        let in_flight = repo_graph_agent::check::enrichment_state_summary(Some(
-            repo_graph_agent::storage_port::EnrichmentState::InFlight,
-        ))
-        .to_string();
-        return (briefing, Some(in_flight));
-    }
-    // Only fetch the per-language file COUNTS when a relationship axis is actually LOW — this guards the
-    // count query off the healthy-repo hot path. (The shared helper re-checks LOW for safety.)
-    // CONTRADICTION-SWEEP-1 §5: counts (not the distinct-language list) feed the ≥10% material-share gate
-    // so an incidental tooling language cannot trip a false enrich CTA. review-1 #1: a counts-read FAILURE
-    // renders an UNKNOWN-WITH-REASON next-action (via the SAME shared wrapper `stats`/deps use), NOT a
-    // silent omission — the reader is owed a remedy on a LOW axis, and the two surfaces stay coherent on
-    // the failure path just as they do on success.
-    let remedy = if crate::dispatch::relationship_reliability_is_low(&overlay.reliability) {
-        let language_counts = repo_graph_agent::AgentStorageRead::query_file_count_by_language(
-            &storage,
-            snapshot_uid,
-        )
-        .map_err(|e| e.to_string());
-        crate::dispatch::relationship_next_action_line_or_read_error(
-            &overlay.reliability,
-            language_counts,
-            &crate::dispatch::configured_resolver_languages_from_env(),
-        )
-    } else {
-        None
-    };
-    (briefing, remedy)
+
+    // CHECK-LANG-SPLIT-1 (§2 + operator ruling A `leveldb-breakdown-contract`, 2026-09-02): the per-language
+    // breakdown DECOMPOSES the blended CALL-resolution figure and rides wherever that figure's CAVEAT renders
+    // — whenever the CALL-GRAPH axis is non-HIGH (LOW *or* MEDIUM). An import-graph-only LOW (call-graph HIGH,
+    // relationship LOW) has no call figure to split, and a vacuous-HIGH zero-in-scope repo has no caveat and
+    // no figure — both excluded by this gate. Ruling A is a UNIFORM materiality gate (a MEDIUM blend that
+    // hides a low-confidence language is the exact defect the slice removes, §1), so the split is NOT
+    // band-suppressed to LOW.
+    //
+    // review-3: the breakdown is DECOUPLED not only from the LOW-gated CTA but ALSO from enrichment freshness.
+    // An in-flight pass is a CAVEAT on these facts, NOT a reason to hide the split — `check` computes and
+    // renders the SAME split in this state (dispatch.rs, independent of its enrich-state override), so orient
+    // MUST render it too or the two CI-facing surfaces disagree. The routing is extracted into the pure seam
+    // `orient_remedy_and_breakdown` so this in-flight/breakdown decoupling is unit-tested without a live
+    // `RepoState`. CONTRADICTION-SWEEP-1 §5 + review-1/2 (STANDING HONESTY RULE 1) still hold there: counts
+    // (not the distinct-language list) feed the ≥10% material-share gate, and every read outcome on the
+    // breakdown surface renders unknown-with-reason (never a silent `None`) via the ONE orient read seam.
+    let call_graph_has_caveat =
+        overlay.reliability.call_graph.level != repo_graph_trust::types::ReliabilityLevel::HIGH;
+    let remedy_is_low = crate::dispatch::relationship_reliability_is_low(&overlay.reliability);
+    let reliability = &overlay.reliability;
+    let (remedy, reliability_by_language) =
+        crate::reliability_breakdown_line::orient_remedy_and_breakdown(
+            call_graph_has_caveat,
+            remedy_is_low,
+            enrich_in_flight,
+            // ORIENT-FACT-COHERENCE-1: the in-flight truth via the ONE shared enrichment accessor — the SAME
+            // wording check/reliability render (no new wording minted here). Supersedes the per-language CTA.
+            || {
+                repo_graph_agent::check::enrichment_state_summary(Some(
+                    repo_graph_agent::storage_port::EnrichmentState::InFlight,
+                ))
+                .to_string()
+            },
+            // The materiality FILE-count read (decides mixed-ness), issued at most once.
+            || {
+                repo_graph_agent::AgentStorageRead::query_file_count_by_language(
+                    &storage,
+                    snapshot_uid,
+                )
+                .map_err(|e| e.to_string())
+            },
+            // The per-language CALL read (the `reliability` handler's exact read), issued lazily for a
+            // decidably-mixed repo only.
+            || {
+                storage
+                    .query_call_resolution_by_language(snapshot_uid)
+                    .map_err(|e| e.to_string())
+            },
+            // The LOW-gated per-language CTA (same shared wrapper `stats`/deps use; a counts-read failure
+            // renders unknown-with-reason, not a silent omission). Consumes the shared count read.
+            |language_counts| {
+                crate::dispatch::relationship_next_action_line_or_read_error(
+                    reliability,
+                    language_counts,
+                    &crate::dispatch::configured_resolver_languages_from_env(),
+                )
+            },
+        );
+    (briefing, remedy, reliability_by_language)
 }

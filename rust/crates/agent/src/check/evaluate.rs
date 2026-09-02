@@ -148,10 +148,10 @@ fn evaluate_call_graph_reliability(
                 return ConditionResult {
                     code: ConditionCode::CallGraphReliability,
                     status: ConditionStatus::Pass,
-                    summary: append_call_graph_coverage(
-                        verdict,
-                        view,
-                        input.unresolved_calls_unknown,
+                    summary: append_by_language(
+                        append_call_graph_coverage(verdict, view, input.unresolved_calls_unknown),
+                        input,
+                        view.resolution.is_some(),
                     ),
                     ceiling: true,
                 };
@@ -203,12 +203,41 @@ fn evaluate_call_graph_reliability(
     if let Some(reason) = unknown_reason {
         summary = append_ceiling_unknown(summary, reason);
     }
+    // CHECK-LANG-SPLIT-1 (§2 + ruling A): the per-language breakdown rides UNDER this blended figure on
+    // ANY band that HAS a call-resolution figure (which language carries the unresolved mass); silent
+    // only when there is no figure to split (no in-scope calls → `resolution` is None).
+    summary = append_by_language(summary, input, view.resolution.is_some());
     ConditionResult {
         code: ConditionCode::CallGraphReliability,
         status,
         summary,
         ceiling: false,
     }
+}
+
+/// CHECK-LANG-SPLIT-1 (§2 + operator ruling A `leveldb-breakdown-contract`, 2026-09-02): append the
+/// daemon-computed per-language reliability breakdown line UNDER the blended CALL_GRAPH_RELIABILITY figure
+/// for EVERY materially-mixed repo whose blended figure is a real call-resolution figure
+/// (`has_call_figure` — `view.resolution.is_some()`), on ANY band (HIGH / MEDIUM / LOW / ceiling), NOT
+/// only LOW. Ruling A is a UNIFORM materiality gate: the split is true information (which language carries
+/// the unresolved mass) wherever there IS a blended figure to decompose. A LOW-only band gate (build-0)
+/// re-introduced the exact defect the slice removes (§1: "the blend hides per-language confidence
+/// differences") for a mixed MEDIUM repo — a MEDIUM blend can hide a LOW language — so it is gone.
+/// Silent only when there is NO call figure to split (`view.resolution.is_none()` — no in-scope calls, so
+/// every cell would be a vacuous "unknown"; nothing to decompose) or the repo is single-language (`None`
+/// breakdown — §2.4, byte-identical — also the `None` a non-daemon caller like `run_check` / tests
+/// leaves). Its own sentence (capitalised, period-terminated), like the other appended coverage clauses.
+fn append_by_language(mut summary: String, input: &CheckInput, has_call_figure: bool) -> String {
+    if has_call_figure {
+        if let Some(line) = &input.reliability_by_language {
+            summary.push(' ');
+            summary.push_str(&sentence_case(line));
+            if !summary.ends_with('.') {
+                summary.push('.');
+            }
+        }
+    }
+    summary
 }
 
 /// Evaluate all applicable conditions from the pre-fetched input.

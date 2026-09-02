@@ -137,6 +137,9 @@ pub fn check_to_coherent(
         trust_briefing: None,
         // D5 (IMPL-2) next-action is an orient/stats surface; check never renders it.
         relationship_next_action: None,
+        // CHECK-LANG-SPLIT-1: check renders the breakdown in the CALL_GRAPH_RELIABILITY condition
+        // summary (via `CheckInput.reliability_by_language`), not on this orient value field.
+        reliability_by_language: None,
         // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; check never renders it.
         measurement_coverage: None,
         // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.

@@ -31,6 +31,7 @@ fn minimal_response() -> OrientResponse {
         truncated: false,
         trust_briefing: None,
         relationship_next_action: None,
+        reliability_by_language: None,
         measurement_coverage: None,
         witnesses: None,
         index_drift: None,
@@ -1229,6 +1230,29 @@ fn relationship_next_action_absent_renders_nothing() {
     assert!(!out.contains("rmap enrich"), "{out}");
 }
 
+#[test]
+fn reliability_by_language_breakdown_renders_in_headline() {
+    // CHECK-LANG-SPLIT-1 (§2 + ruling A): the daemon-supplied per-language breakdown renders verbatim in the
+    // dense headline (the daemon gates it on a mixed non-HIGH-call-graph repo). Present at every budget.
+    let mut resp = minimal_response();
+    resp.reliability_by_language =
+        Some("by language: TypeScript 24% of 99 calls · Java 11% of 113 calls".to_string());
+    let out = resp.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("by language: TypeScript 24% of 99 calls · Java 11% of 113 calls"),
+        "{out}"
+    );
+}
+
+#[test]
+fn reliability_by_language_absent_renders_nothing() {
+    // None (single-language repo, or a HIGH call-graph figure with nothing to caveat) → no breakdown line
+    // (byte-identical).
+    let resp = minimal_response(); // reliability_by_language: None
+    let out = resp.render_human(OrientDepth::Small);
+    assert!(!out.contains("by language:"), "{out}");
+}
+
 // ── ORIENT-DENSITY-1 review-1 #1: docs are a load-bearing headline fact ──
 
 #[test]
@@ -1546,6 +1570,7 @@ fn one_shared_projection_reaches_orient_trust_and_check() {
         gate_outcome: None,
         index_drift: None,
         ceiling_fact: None,
+        reliability_by_language: None,
     })
     .into_iter()
     .find(|c| c.code == ConditionCode::CallGraphReliability)

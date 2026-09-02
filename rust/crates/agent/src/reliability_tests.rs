@@ -258,3 +258,28 @@ fn band_from_wire_maps_serialized_levels_case_insensitively() {
     // Unknown token → None (unknown is never a fabricated band).
     assert_eq!(band_from_wire("BOGUS"), None);
 }
+
+#[test]
+fn language_reliability_cell_renders_the_in_scope_rate_of_m_calls() {
+    // CHECK-LANG-SPLIT-1 (§2): one breakdown cell. resolved / (resolved + internal_like), M = the
+    // denominator. 12 / (12 + 101) = 10.6% → "11% of 113 calls" (0-decimal, matching the aggregate).
+    assert_eq!(
+        language_reliability_cell("Java", 12, 101),
+        "Java 11% of 113 calls"
+    );
+    // A measured 0% (in-scope calls exist, none resolved) is REAL, distinct from unknown.
+    assert_eq!(
+        language_reliability_cell("Python", 0, 5),
+        "Python 0% of 5 calls"
+    );
+}
+
+#[test]
+fn language_reliability_cell_no_in_scope_calls_is_unknown_never_a_fabricated_percent() {
+    // Zero in-scope calls → the shared UNKNOWN phrase, never "0%"/"100%" (VISION: null = unknown).
+    assert_eq!(
+        language_reliability_cell("Go", 0, 0),
+        format!("Go {NO_IN_SCOPE_CALLS}")
+    );
+    assert!(language_reliability_cell("Go", 0, 0).contains("no in-scope calls measured"));
+}

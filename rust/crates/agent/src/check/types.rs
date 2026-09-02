@@ -160,6 +160,17 @@ pub struct CheckInput {
     /// `Option<IndexDrift>` fact (`None` = not computed by this caller). It is NOT a read failure —
     /// that is `Some(Unknown)` — so no honesty conflation remains.
     pub ceiling_fact: Option<CeilingFact>,
+    /// CHECK-LANG-SPLIT-1 (§2): the daemon-computed per-language reliability breakdown line for a MIXED
+    /// repo (`"by language: TypeScript 24% of 99 calls · Java 11% of 113 calls"`, or its
+    /// unknown-with-reason form on a failed per-language read). Rendered UNDER the blended
+    /// CALL_GRAPH_RELIABILITY figure on ANY band that HAS a call-resolution figure (ruling A's uniform
+    /// materiality gate — HIGH / MEDIUM / LOW / ceiling; silent only when there is no figure to split), so
+    /// it names which language carries the unresolved mass wherever there is a blended figure to decompose.
+    /// Carried as plain text — the daemon owns the display-name / materiality vocabulary; the pure reducer only
+    /// appends it. `None` (the daemon supplies none) for a single-language repo (nothing to split, §2.4)
+    /// or a non-daemon caller (`run_check` wrapper / tests) → byte-identical. Daemon→agent injected fact,
+    /// same pattern as `ceiling_fact` / `index_drift`.
+    pub reliability_by_language: Option<String>,
 }
 
 // ── Gate outcome projection ─────────────────────────────────────

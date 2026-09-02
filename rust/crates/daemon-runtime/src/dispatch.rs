@@ -4563,7 +4563,7 @@ impl ServiceDispatcher {
         // `Unknown { reason }` — carried in-band as the RECORD (never a stderr-only log), rendering
         // unknown-with-reason on the affected condition and contributing to the verdict exactly as
         // NoCeiling (failing) — a read failure may never mint a false passing ceiling.
-        let (index_drift, ceiling_fact, pass_can_apply) =
+        let (index_drift, ceiling_fact, pass_can_apply, reliability_by_language) =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snap)) => {
                     let drift = self.compute_query_drift(&storage, &repo_state, &repo_uid, &snap);
@@ -4608,6 +4608,29 @@ impl ServiceDispatcher {
                     // ALONGSIDE the unknown ceiling: the reason is surfaced, not swallowed. `matches!` is a
                     // pattern match, NOT the `unwrap_or*`/`.ok()` collapse the STANDING HONESTY RULE forbids —
                     // the failure reason is retained (in `ceiling_fact`), only the override decision is bool.
+                    // CHECK-LANG-SPLIT-1 (§2): for a MIXED repo, compute the per-language breakdown line
+                    // from the SAME `reader_context` materiality gate × the `reliability` per-language read
+                    // the `reliability` handler serves. Gate on mixed-ness FIRST (over the file counts we
+                    // already hold) so a single-language repo issues NO extra read and stays byte-identical
+                    // (§2.4). A FAILED per-language read renders unknown-with-reason (STANDING HONESTY RULE
+                    // 1). On a failed COUNT read mixed-ness is undecidable, so no breakdown — the count
+                    // failure is already surfaced with its reason via `ceiling_fact = Unknown`. Computed
+                    // BEFORE the `pass_can_apply` line below, which MOVES `counts`.
+                    let reliability_by_language = match &counts {
+                        Ok(c)
+                            if crate::reliability_breakdown_line::is_mixed_material_code_repo(
+                                c,
+                            ) =>
+                        {
+                            let by_lang = storage
+                                .query_call_resolution_by_language(&snap.snapshot_uid)
+                                .map_err(|e| e.to_string());
+                            crate::reliability_breakdown_line::reliability_by_language_line_or_read_error(
+                                c, by_lang,
+                            )
+                        }
+                        _ => None,
+                    };
                     let pass_can_apply = matches!(
                         crate::reader_context::in_flight_pass_can_apply(
                             counts,
@@ -4615,17 +4638,22 @@ impl ServiceDispatcher {
                         ),
                         Ok(true)
                     );
-                    (Some(drift), ceiling_fact, pass_can_apply)
+                    (
+                        Some(drift),
+                        ceiling_fact,
+                        pass_can_apply,
+                        reliability_by_language,
+                    )
                 }
                 // No snapshot → the call-graph condition is not evaluated; no ceiling analysis, and no
                 // pass can apply (nothing to raise).
-                Ok(None) => (None, None, false),
+                Ok(None) => (None, None, false, None),
                 Err(e) => {
                     // Snapshot read failed here; the check reducer re-reads it and will
                     // surface the failure. Omit the drift condition (never a false value); no
                     // ceiling analysis is attempted without a snapshot to anchor to.
                     eprintln!("warning: index-drift snapshot read failed for {repo_uid}: {e}");
-                    (None, None, false)
+                    (None, None, false, None)
                 }
             };
 
@@ -4655,6 +4683,7 @@ impl ServiceDispatcher {
             let now_w = now.clone();
             let drift_w = index_drift.clone();
             let ceiling_fact_w = ceiling_fact.clone();
+            let reliability_by_language_w = reliability_by_language.clone();
             match crate::cancel::run_interruptible(
                 emitter,
                 "running_check",
@@ -4668,6 +4697,7 @@ impl ServiceDispatcher {
                         drift_w.clone(),
                         enrich_state_override,
                         ceiling_fact_w.clone(),
+                        reliability_by_language_w.clone(),
                         &mut checkpoint,
                     )
                     .map_err(|e| e.to_string())

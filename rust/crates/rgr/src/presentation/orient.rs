@@ -339,6 +339,14 @@ impl OrientResponse {
             out.push_str(&line);
             out.push('\n');
         }
+        // CHECK-LANG-SPLIT-1 (§2 + ruling A): the per-language breakdown rides directly UNDER the blended
+        // reliability caveat, so a mixed repo's reader sees which language carries the unresolved mass. The
+        // daemon sets it whenever that call-graph caveat is present — a non-HIGH call-graph figure (LOW OR
+        // MEDIUM) — and the repo is mixed; absent otherwise (HIGH / single-language output byte-identical).
+        if let Some(line) = &self.reliability_by_language {
+            out.push_str(line);
+            out.push('\n');
+        }
         // RECON-M-R3a (g1u, §5.3.2): the ADDITIVE reconciled union-call line beside the
         // pipeline reliability figures — rendered ONLY when the daemon attached the
         // coverage-labeled block (W-BOTH with a current measured ledger); absent otherwise

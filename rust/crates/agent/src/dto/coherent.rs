@@ -203,6 +203,21 @@ pub struct CoherentOrientResult {
     /// daemon adapter, like `display_name` / `trust_briefing`; `None` (absent on the wire) unless rendered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relationship_next_action: Option<String>,
+    /// CHECK-LANG-SPLIT-1 (§2 + ruling A, 2026-09-02): the daemon's per-language reliability breakdown line
+    /// for a MIXED repo (`"by language: TypeScript 24% of 99 calls · Java 11% of 113 calls"`), rendered UNDER
+    /// the headline blended reliability caveat so the reader sees which language carries the risk. Present
+    /// when the call-graph reliability is non-HIGH (LOW *or* MEDIUM — the caveat it decomposes) and ≥2 code
+    /// languages are materially present. This is DECOUPLED from `relationship_next_action` (which stays
+    /// LOW-only): a MEDIUM blend that hides a low-confidence language is the exact defect the split removes,
+    /// so it must render on MEDIUM too even though no CTA fires there. A failed underlying read (the
+    /// materiality file-count read, or the per-language call read) renders `"by language: unavailable — …"`
+    /// unknown-WITH-REASON, never a silent omission (STANDING HONESTY RULE 1); the blended line is
+    /// independent and stands. `None` (absent on the wire) only when call-graph is HIGH, or the repo is
+    /// decidably single-language — single-language output is byte-identical. Carried as plain text (the
+    /// daemon owns the display-name / materiality vocabulary), populated post-fold like
+    /// `relationship_next_action` / `trust_briefing`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reliability_by_language: Option<String>,
     /// METRIC-LANG-COVERAGE-1 (part A): orient's per-language measurement-coverage
     /// block, surfaced beside the complexity centers so the ranking never reads as
     /// repo-wide when a whole language is unmeasured. Carried as opaque
@@ -568,6 +583,8 @@ pub fn to_coherent(
             trust_briefing,
             // D5 (IMPL-2) next-action is populated post-fold by the daemon adapter (build_orient_envelope).
             relationship_next_action: None,
+            // CHECK-LANG-SPLIT-1: the per-language breakdown is populated post-fold by build_orient_envelope.
+            reliability_by_language: None,
             // METRIC-LANG-COVERAGE-1: also populated post-fold; a zero-signal
             // (ambiguous / no-match) orient has no complexity surface to caveat.
             measurement_coverage: None,
@@ -644,6 +661,8 @@ pub fn to_coherent(
         trust_briefing,
         // D5 (IMPL-2) next-action is populated post-fold by the daemon adapter (build_orient_envelope).
         relationship_next_action: None,
+        // CHECK-LANG-SPLIT-1: the per-language breakdown is populated post-fold by build_orient_envelope.
+        reliability_by_language: None,
         // METRIC-LANG-COVERAGE-1: populated post-fold by build_orient_envelope
         // when the HIGH_COMPLEXITY signal is present.
         measurement_coverage: None,

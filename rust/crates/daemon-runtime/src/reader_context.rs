@@ -1221,4 +1221,30 @@ mod honest_degradation_tests {
             vec!["Rust".to_string()]
         );
     }
+
+    // ── CHECK-LANG-SPLIT-1 (§2.2): the breakdown (extracted to `reliability_breakdown_line`) and the
+    //    CTA (this module's `relationship_next_action_line`) name the SAME language set. This cross-module
+    //    agreement test stays HERE, next to the CTA + its reliability builders; the breakdown-only unit
+    //    tests live in `reliability_breakdown_line`. The breakdown's display-name set is a function of
+    //    `language_counts` ALONE (a material language with no call rows still appears, as
+    //    "…no in-scope calls measured"), so passing `&[]` rows exercises the name set the §2.2 invariant is
+    //    about without duplicating the call-row helper here. ──
+    #[test]
+    fn breakdown_display_names_agree_with_the_cta_language_set() {
+        // glamCRM's rough shape — a material TS/JS half + material Java.
+        let language_counts = counts(&[("javascript", 1658), ("typescript", 699), ("java", 273)]);
+        let breakdown =
+            crate::reliability_breakdown_line::reliability_by_language_line(&language_counts, &[])
+                .unwrap();
+        let cta =
+            relationship_next_action_line(&call_low(), &language_counts, &builtin_only()).unwrap();
+        // Every display name the CTA speaks to appears in the breakdown, and vice-versa.
+        for name in ["JavaScript", "TypeScript", "Java"] {
+            assert!(
+                breakdown.contains(name),
+                "breakdown missing {name}: {breakdown}"
+            );
+            assert!(cta.contains(name), "CTA missing {name}: {cta}");
+        }
+    }
 }

@@ -346,6 +346,8 @@ pub fn explain_to_coherent(
             trust_briefing,
             // D5 (IMPL-2) next-action is an orient/stats surface; explain never renders it.
             relationship_next_action: None,
+            // CHECK-LANG-SPLIT-1 breakdown is an orient/check surface; explain never renders it.
+            reliability_by_language: None,
             // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; explain never renders it.
             measurement_coverage: None,
             // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.
@@ -410,6 +412,8 @@ pub fn explain_to_coherent(
         trust_briefing,
         // D5 (IMPL-2) next-action is an orient/stats surface; explain never renders it.
         relationship_next_action: None,
+        // CHECK-LANG-SPLIT-1 breakdown is an orient/check surface; explain never renders it.
+        reliability_by_language: None,
         // METRIC-LANG-COVERAGE-1 coverage is an orient complexity surface; explain never renders it.
         measurement_coverage: None,
         // RECON-M-R3a: attached post-fold by the daemon adapter (orient only), never here.

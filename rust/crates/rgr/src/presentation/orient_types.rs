@@ -52,6 +52,12 @@ pub struct OrientResponse {
     /// (absent on the wire) on a resolved repo or when no honest statement applies.
     #[serde(default)]
     pub relationship_next_action: Option<String>,
+    /// CHECK-LANG-SPLIT-1 (§2 + ruling A): the daemon's per-language reliability breakdown line, present for
+    /// a MIXED repo with a non-HIGH call-graph figure (LOW OR MEDIUM — wherever the blended reliability
+    /// caveat renders). Rendered directly UNDER that caveat so the reader sees which language carries the
+    /// unresolved mass. `None` (absent on the wire) otherwise — HIGH / single-language byte-identical.
+    #[serde(default)]
+    pub reliability_by_language: Option<String>,
     /// METRIC-LANG-COVERAGE-1 (part A): per-language complexity measurement coverage,
     /// present when orient renders complexity centers. Its honesty line (`caveat_line`)
     /// renders beside the complexity headline so the ranking never reads as repo-wide

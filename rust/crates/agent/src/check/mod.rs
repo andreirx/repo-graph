@@ -58,7 +58,9 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // this layer). The `INDEX_DRIFT` condition is omitted, not fabricated. The
     // daemon uses `run_check_cancellable` with a computed `IndexDrift`.
     // The trailing `None` is `ceiling_fact`: the simple entry performs no ceiling analysis.
-    run_check_cancellable(storage, repo_uid, now, None, None, None, &mut || {
+    // The trailing `None`s are `ceiling_fact` + `reliability_by_language`: the simple entry
+    // performs no ceiling analysis and computes no per-language breakdown.
+    run_check_cancellable(storage, repo_uid, now, None, None, None, None, &mut || {
         std::ops::ControlFlow::Continue(())
     })
 }
@@ -75,6 +77,12 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
 /// mechanisms compose. [`run_check`] passes a no-op, preserving byte-identical
 /// behavior for every other caller. The small gate-evidence parsing loops are left
 /// alone (NARROW scope; bounded by matching obligations, and SQL-interruptible).
+// The parameter list is a growing set of daemon→agent INJECTED FACTS the pure reducer cannot derive from
+// storage (`index_drift`, `enrich_state_override`, `ceiling_fact`, `reliability_by_language`) plus the
+// storage handle / identity / clock / cancel checkpoint. Each is a distinct fact with a distinct source;
+// bundling them into a params struct is a broader refactor (every caller + test) not earned by THIS slice
+// — deferred. The one-added-arg over the 7-arg lint threshold is the CHECK-LANG-SPLIT-1 breakdown line.
+#[allow(clippy::too_many_arguments)]
 pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
@@ -101,6 +109,12 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // OUTER `None` (the `run_check` wrapper / tests) = caller performed no ceiling analysis →
     // pre-slice behavior, byte-identical (mirrors the sibling `Option<IndexDrift>`).
     ceiling_fact: Option<CeilingFact>,
+    // CHECK-LANG-SPLIT-1 (§2): the daemon-computed per-language reliability breakdown line for a MIXED
+    // repo, threaded verbatim into `CheckInput.reliability_by_language` (the pure reducer performs no
+    // I/O and owns no display-name / materiality vocabulary — the daemon computes the line from the same
+    // `reader_context` materiality gate × the `reliability` per-language read). `None` on the `run_check`
+    // wrapper / tests, and on a single-language repo where the daemon supplies none → byte-identical.
+    reliability_by_language: Option<String>,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<OrientResult, CheckError> {
     // ── Phase 1: Gather ─────────────────────────────────────────
@@ -136,6 +150,8 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 index_drift: None,
                 // No snapshot → the call-graph condition is not evaluated; the ceiling fact is moot.
                 ceiling_fact: None,
+                // No snapshot → no call-graph figure to break down.
+                reliability_by_language: None,
             };
             (input, String::new(), Confidence::Low)
         }
@@ -185,6 +201,11 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 // verbatim (the pure reducer performs no I/O). `None` on the `run_check` wrapper /
                 // tests → pre-slice behavior; `Some(Ceiling|NoCeiling|Unknown)` from the daemon.
                 ceiling_fact: ceiling_fact.clone(),
+                // CHECK-LANG-SPLIT-1 (§2 + ruling A): the daemon-computed breakdown line, threaded verbatim;
+                // rendered under the CALL_GRAPH_RELIABILITY figure on ANY band that HAS a call-resolution
+                // figure (uniform materiality gate — not LOW-only). `None` on the simple entry / tests / a
+                // single-language repo.
+                reliability_by_language: reliability_by_language.clone(),
             };
 
             (input, snap_uid, conf)

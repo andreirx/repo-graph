@@ -333,6 +333,37 @@ pub fn band_from_wire(level: &str) -> Option<AgentReliabilityLevel> {
     }
 }
 
+/// CHECK-LANG-SPLIT-1 (§2): ONE cell of the per-language reliability breakdown line —
+/// "TypeScript 24% of 99 calls", or the shared UNKNOWN phrase ("TypeScript no in-scope
+/// calls measured") when the language has no in-scope calls to measure. `resolved` /
+/// `internal_like` are that language's summed CALLS counts (the SAME quantities
+/// `reliability --by-language` feeds through [`ResolvedRate::derive`]); the "% of M
+/// calls" is the in-scope resolved rate over its `in_scope_or_unclassified_total`
+/// denominator, so the figure agrees with what `reliability --by-language` renders for
+/// the same facts. Lives HERE (not in the daemon) so the "% of M calls" reader-frame
+/// wording and the UNKNOWN decision have ONE home beside `resolved_phrase_pct` — the
+/// same anti-fork reason those helpers co-live here. `display` is the reader display
+/// name the caller (daemon) supplies from its language vocabulary (this crate stays
+/// toolchain-agnostic).
+///
+/// `pub` (review-0 `public-language-cell-api`, operator ruling 2026-09-02): its sole cross-crate caller,
+/// `daemon-runtime::reliability_breakdown_line::reliability_by_language_line`, genuinely needs it — the private
+/// `ResolvedRate::derive` rate math + the "% of M calls" / UNKNOWN reader-frame wording live HERE, and the
+/// rejected alternative (compose the cell in the daemon) would have to publicize `ResolvedRate::derive` +
+/// its fields AND fork that wording into the daemon: strictly MORE surface, not less. RATIFIED under the
+/// read-only reader-frame-wording precedent chain (8th instance) — the sibling `resolved_phrase_pct` /
+/// `resolved_phrase_with_band` / `sentence_case` / `band_from_wire` helpers in this module are already
+/// `pub` and consumed cross-crate (daemon + rgr) for the identical anti-fork reason.
+pub fn language_reliability_cell(display: &str, resolved: u64, internal_like: u64) -> String {
+    match ResolvedRate::derive(resolved, internal_like) {
+        Some(r) => format!(
+            "{display} {:.0}% of {} calls",
+            r.pct, r.in_scope_or_unclassified_total
+        ),
+        None => format!("{display} {NO_IN_SCOPE_CALLS}"),
+    }
+}
+
 /// The reader-frame text rendered when there are no in-scope calls to measure —
 /// unknown, NOT a fabricated 100% (slice §3).
 pub const NO_IN_SCOPE_CALLS: &str = "no in-scope calls measured";

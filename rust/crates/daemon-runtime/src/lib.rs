@@ -109,6 +109,10 @@ pub mod partition_discovery;
 // from the oversized `dispatch.rs`. Crate-internal (all public items are `pub(crate)`); `dispatch`
 // re-exports them so existing call sites resolve unchanged.
 pub(crate) mod reader_context;
+// CHECK-LANG-SPLIT-1 (§2): the mixed-repo per-language reliability breakdown line, ONE source shared by
+// the `check` and `orient` handlers (see the module-level abstraction one-liner). Extracted from
+// `reader_context` to keep that oversized file from taking on this new responsibility (500-line guardrail).
+pub(crate) mod reliability_breakdown_line;
 // DAEMON-CRASH-RECOVERY-1 (F7/F11): boot + repo-load reconciliation of crash-orphaned `building`
 // snapshots (flip to terminal `failed` + log; the non-READY prune reclaims them and F12 stats name
 // them). Two callers: `load_repo` + the boot sweep.
