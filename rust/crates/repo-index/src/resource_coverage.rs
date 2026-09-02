@@ -65,6 +65,25 @@ pub fn resource_detector_language_names() -> Vec<&'static str> {
     names
 }
 
+/// RESOURCE-CPP-INERT-1 (FINAL-POLISH-1 §2.3): each covered language paired with the reader-frame
+/// MECHANISM its detector actually recognizes (`[("C", "fopen/open/sqlite3 calls"), …]`), sorted by
+/// display name for deterministic rendering. Derived from the SAME detector registry as
+/// [`resource_detector_language_names`] (each adapter's `mechanism()`), so a registry change
+/// propagates here untouched.
+///
+/// `resource list` renders this so its coverage line describes what the detector DOES per language
+/// (specific access CALLS) instead of claiming full-language coverage — the original "covers C, C++"
+/// defect (a bare-language claim wider than the specific calls recognized).
+pub fn resource_detector_mechanisms() -> Vec<(&'static str, &'static str)> {
+    let mut pairs: Vec<(&'static str, &'static str)> = default_registry()
+        .language_mechanisms()
+        .into_iter()
+        .map(|(lang, mechanism)| (detector_language_display(lang), mechanism))
+        .collect();
+    pairs.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    pairs
+}
+
 /// Whether this build detects resource access in the given indexer language token
 /// (`indexer::routing::detect_language`'s output — `"typescript"`, `"rust"`, `"c"`,
 /// …).
@@ -95,6 +114,31 @@ mod tests {
             resource_detector_language_names(),
             vec!["C", "C++", "Java", "Python", "TypeScript/JavaScript"]
         );
+    }
+
+    #[test]
+    fn mechanisms_name_what_each_detector_does_not_the_language() {
+        // RESOURCE-CPP-INERT-1 §2.3: every covered language is paired with the MECHANISM its
+        // detector recognizes (specific access calls), sorted by display name — the same five
+        // registered adapters as the languages list. This pins the CURRENT registry; a new adapter
+        // grows this list from its own `mechanism()` with no edit to the resource surface.
+        assert_eq!(
+            resource_detector_mechanisms(),
+            vec![
+                ("C", "fopen/open/sqlite3 calls"),
+                ("C++", "fopen/open/sqlite3 and std::fstream calls"),
+                ("Java", "JDBC DriverManager.getConnection calls"),
+                ("Python", "open() and sqlite3/psycopg2 calls"),
+                ("TypeScript/JavaScript", "Node fs read/write calls"),
+            ]
+        );
+        // The mechanism strings NEVER claim bare language coverage ("covers C++") — they name calls.
+        for (_lang, mech) in resource_detector_mechanisms() {
+            assert!(
+                mech.contains("call"),
+                "mechanism must name access calls, not the language: {mech}"
+            );
+        }
     }
 
     #[test]

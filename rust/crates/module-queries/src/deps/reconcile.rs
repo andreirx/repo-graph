@@ -33,6 +33,12 @@ pub struct ReconcileInput {
     /// Observed references the assembly (`compose`) already dropped as non-import call targets
     /// (bare unbound identifiers, §2.1) — folded into `rejected_non_specifier` for honest totals.
     pub pre_rejected_non_specifier: usize,
+    /// DEPS-SELF-1 (FINAL-POLISH-1 §2.2): the package names THIS repo's parsed manifests declare as
+    /// their OWN (`module_candidates.module_kind='declared'`, `display_name` — the same fact
+    /// TRUST-FIRSTPARTY-1 uses, NEVER a directory name). An observed specifier equal to one of these
+    /// (under ecosystem-aware normalization) is a first-party self-reference, not an undeclared
+    /// external. Empty (no parsed manifests) → nothing reclassified (byte-identical pre-slice output).
+    pub own_manifest_names: HashSet<String>,
 }
 
 /// Reconcile declared and observed dependencies for a module.
@@ -52,6 +58,19 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
         .iter()
         .map(|s| s.as_str())
         .collect();
+
+    // DEPS-SELF-1: the repo's own manifest names, normalized once per the ecosystem's package-name
+    // semantics, for the self-reference check below. Normalization is a real domain rule (Python
+    // PEP 503 case/`-_.` folding; Cargo `_`↔`-`) — the same class of equivalence
+    // TRUST-FIRSTPARTY-1 applies to Cargo — NEVER a fuzzy prefix match.
+    let own_names_normalized: HashSet<String> = input
+        .own_manifest_names
+        .iter()
+        .map(|n| normalize_self_name(n, &input.ecosystem))
+        .collect();
+    let is_self = |package: &str| -> bool {
+        own_names_normalized.contains(&normalize_self_name(package, &input.ecosystem))
+    };
 
     // Classify observed references through the specifier-only gate (DEPS-LIST-REWRITE-1
     // §2.1). Only import-specifier-shaped values reach the package namespace; language
@@ -111,6 +130,19 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
                 category: DependencyCategory::DeclaredAndUsed,
                 import_count: observed.import_count,
                 dependency_class: None, // TODO: extract from manifest
+                confidence: 1.0,
+                raw_specifiers: observed.raw_specifiers.clone(),
+            });
+        } else if is_self(package) {
+            // DEPS-SELF-1 (§2.2): a self-import — the specifier is THIS repo's own manifest name.
+            // Checked AFTER `declared_set` so a genuinely-declared dependency of the same name keeps
+            // its `DeclaredAndUsed` classification; only the otherwise-undeclared self-import lands
+            // here (django importing `django`), so it never renders as a third-party external.
+            entries.push(DependencyEntry {
+                package: package.clone(),
+                category: DependencyCategory::FirstPartySelf,
+                import_count: observed.import_count,
+                dependency_class: None,
                 confidence: 1.0,
                 raw_specifiers: observed.raw_specifiers.clone(),
             });
@@ -186,8 +218,41 @@ fn category_order(cat: DependencyCategory) -> u8 {
         DependencyCategory::DeclaredAndUsed => 0,
         DependencyCategory::DeclaredButUnobserved => 1,
         DependencyCategory::ObservedButUndeclared => 2,
-        DependencyCategory::RuntimeBuiltin => 3,
-        DependencyCategory::UnknownExternalLike => 4,
+        DependencyCategory::FirstPartySelf => 3,
+        DependencyCategory::RuntimeBuiltin => 4,
+        DependencyCategory::UnknownExternalLike => 5,
+    }
+}
+
+/// DEPS-SELF-1 (§2.2): normalize a package name for the self-reference equality check, per the
+/// ecosystem's package-name semantics. This is a domain equivalence, not a heuristic:
+/// - **Python** — PEP 503: names are case-insensitive and runs of `-`, `_`, `.` are equivalent, so
+///   the distribution name `Django` and the import package `django` are the SAME package.
+/// - **Cargo** — `_` and `-` are equivalent (the same rule TRUST-FIRSTPARTY-1 applies).
+/// - **npm / java / other** — names are literal; compared exactly (normalizing them would risk
+///   matching two genuinely-distinct packages).
+fn normalize_self_name(name: &str, ecosystem: &str) -> String {
+    match ecosystem {
+        "python" => {
+            // PEP 503: lowercase, then collapse any run of `-`, `_`, `.` into a single `-`.
+            let lowered = name.to_ascii_lowercase();
+            let mut out = String::with_capacity(lowered.len());
+            let mut prev_sep = false;
+            for ch in lowered.chars() {
+                if matches!(ch, '-' | '_' | '.') {
+                    if !prev_sep {
+                        out.push('-');
+                        prev_sep = true;
+                    }
+                } else {
+                    out.push(ch);
+                    prev_sep = false;
+                }
+            }
+            out
+        }
+        "cargo" => name.replace('_', "-"),
+        _ => name.to_string(),
     }
 }
 
@@ -228,6 +293,7 @@ mod tests {
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -265,6 +331,7 @@ mod tests {
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -296,6 +363,7 @@ mod tests {
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -328,6 +396,7 @@ mod tests {
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -336,6 +405,99 @@ mod tests {
         let leftpad = &summary.entries[0];
         assert_eq!(leftpad.package, "leftpad");
         assert_eq!(leftpad.category, DependencyCategory::ObservedButUndeclared);
+    }
+
+    #[test]
+    fn self_import_is_first_party_not_undeclared() {
+        // DEPS-SELF-1 (§2.2): django's shape — the `django` package imports `django.*`. The
+        // manifest declares its OWN name `Django` (PyPI distribution spelling); the import
+        // specifier is `django`. PEP 503 normalization makes them equal, so it classifies as a
+        // first-party self-reference, NEVER `observed_but_undeclared`.
+        let mut own = HashSet::new();
+        own.insert("Django".to_string()); // the manifest's own declared name (capitalized)
+        let input = ReconcileInput {
+            module: ".".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "pyproject.toml".to_string(),
+            },
+            declared_dependencies: vec!["asgiref".to_string()],
+            manifest_scope_available: true,
+            observed_external_imports: vec!["django".to_string(), "asgiref".to_string()],
+            runtime_builtins: HashSet::new(),
+            ecosystem: "python".to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: own,
+        };
+        let summary = reconcile_module_dependencies(input);
+        // `django` is self, not undeclared.
+        assert_eq!(summary.first_party_self_count(), 1);
+        assert_eq!(summary.observed_but_undeclared_count(), 0);
+        let django = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "django")
+            .unwrap();
+        assert_eq!(django.category, DependencyCategory::FirstPartySelf);
+        // A declared dependency is unaffected.
+        assert_eq!(summary.declared_and_used_count(), 1);
+    }
+
+    #[test]
+    fn declared_dependency_named_like_self_stays_declared() {
+        // Ordering rule: `declared_set` wins over the self-check. A workspace sibling that IS a
+        // declared dependency keeps `DeclaredAndUsed` even though its name is also a repo-own
+        // manifest name — only the otherwise-undeclared self-import is reclassified.
+        let mut own = HashSet::new();
+        own.insert("widgets".to_string());
+        let input = ReconcileInput {
+            module: "app".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "app/Cargo.toml".to_string(),
+            },
+            declared_dependencies: vec!["widgets".to_string()],
+            manifest_scope_available: true,
+            observed_external_imports: vec!["widgets::thing".to_string()],
+            runtime_builtins: HashSet::new(),
+            ecosystem: "cargo".to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: own,
+        };
+        let summary = reconcile_module_dependencies(input);
+        assert_eq!(summary.declared_and_used_count(), 1);
+        assert_eq!(summary.first_party_self_count(), 0);
+    }
+
+    #[test]
+    fn directory_named_like_package_is_not_self() {
+        // DEPS-SELF-1 (§45) NEGATIVE witness + byte-parity: self classification keys on the stored
+        // manifest-name FACT (`own_manifest_names`), NEVER on the module/directory name. Here the
+        // module PATH is literally "django" and the imported specifier is `django`, but the
+        // own-name set is EMPTY (no parsed manifest name) — so `django` must stay
+        // `observed_but_undeclared`, proving a directory coincidentally named like a package does
+        // NOT trigger self classification. Empty own-name set also preserves the pre-slice
+        // observed_but_undeclared behaviour exactly (byte-parity).
+        let input = ReconcileInput {
+            module: "django".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "pyproject.toml".to_string(),
+            },
+            declared_dependencies: vec![],
+            manifest_scope_available: true,
+            observed_external_imports: vec!["django".to_string()],
+            runtime_builtins: HashSet::new(),
+            ecosystem: "python".to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
+        };
+        let summary = reconcile_module_dependencies(input);
+        assert_eq!(summary.first_party_self_count(), 0);
+        assert_eq!(summary.observed_but_undeclared_count(), 1);
+        let django = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "django")
+            .unwrap();
+        assert_eq!(django.category, DependencyCategory::ObservedButUndeclared);
     }
 
     #[test]
@@ -351,6 +513,7 @@ mod tests {
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -379,6 +542,7 @@ mod tests {
             runtime_builtins: HashSet::new(),
             ecosystem: "npm".to_string(), // doesn't matter
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -409,6 +573,7 @@ mod tests {
             runtime_builtins: HashSet::new(),
             ecosystem: "cargo".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -447,6 +612,7 @@ mod tests {
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);

@@ -43,6 +43,11 @@ pub struct DepModule {
     pub declared_but_unobserved: u64,
     #[serde(default)]
     pub observed_but_undeclared: u64,
+    /// DEPS-SELF-1 (FINAL-POLISH-1 §2.2): observed specifiers equal to THIS repo's own parsed
+    /// manifest package name — first-party self-references, excluded from `observed_but_undeclared`.
+    /// Additive; an older daemon omits it (defaults to 0 → no `self` note, byte-identical output).
+    #[serde(default)]
+    pub first_party_self: u64,
     #[serde(default)]
     pub runtime_builtins: u64,
     /// External-looking specifiers with no manifest scope to classify against (none-detected).
@@ -349,12 +354,21 @@ impl DepsListResponse {
             } else {
                 String::new()
             };
+            // DEPS-SELF-1 (§2.2): first-party self-references are noted as `self N` — never folded
+            // into `undeclared` (django importing `django` was the false "undeclared: django"). The
+            // clause is omitted when there are none (byte-identical to the pre-slice row).
+            let self_suffix = if m.first_party_self > 0 {
+                format!(" · self {}", m.first_party_self)
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
-                "  used {} · declared-unused {}{} · undeclared {} · builtins {}{}\n",
+                "  used {} · declared-unused {}{} · undeclared {}{} · builtins {}{}\n",
                 m.declared_and_used,
                 m.declared_but_unobserved,
                 unused_suffix,
                 m.observed_but_undeclared,
+                self_suffix,
                 m.runtime_builtins,
                 unknown_suffix,
             ));
@@ -715,6 +729,58 @@ mod tests {
         );
         // 3 modules rolled up, 3 declared deps each = 9 total — printed, not silent.
         assert!(out.contains("+3 more modules: 9 declared deps"), "{out}");
+    }
+
+    #[test]
+    fn self_import_renders_as_self_note_not_undeclared() {
+        // DEPS-SELF-1 (§2.2): django's shape — `django` self-import counted as first-party self,
+        // rendered `· self 1`, and NOT in the undeclared count/examples.
+        let r = resp(serde_json::json!({
+            "ecosystem": "python",
+            "total_external_imports": 50,
+            "count": 1,
+            "results": [{
+                "module": ".",
+                "manifest_path": "pyproject.toml",
+                "manifest_scope_available": true,
+                "declared_and_used": 3,
+                "declared_but_unobserved": 0,
+                "observed_but_undeclared": 0,
+                "first_party_self": 1,
+                "runtime_builtins": 0,
+                "entries": [
+                    {"package": "django", "category": "first_party_self", "import_count": 42}
+                ]
+            }]
+        }));
+        let out = r.render_human();
+        assert!(out.contains("· self 1"), "self note missing: {out}");
+        assert!(out.contains("undeclared 0"), "undeclared must be 0: {out}");
+        // The self package is NOT listed under an `undeclared:` example.
+        assert!(
+            !out.contains("undeclared: django"),
+            "self-import must not render as undeclared: {out}"
+        );
+    }
+
+    #[test]
+    fn no_self_imports_omits_the_self_clause() {
+        // Byte-parity: a module with zero self-references renders no `self` clause.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 5,
+            "count": 1,
+            "results": [{
+                "module": "app",
+                "manifest_path": "app/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 2,
+                "observed_but_undeclared": 1,
+                "entries": []
+            }]
+        }));
+        let out = r.render_human();
+        assert!(!out.contains("· self"), "no self clause expected: {out}");
     }
 
     #[test]

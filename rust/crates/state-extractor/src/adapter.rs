@@ -47,6 +47,24 @@ pub trait LanguageStateAdapter: Send + Sync {
     /// Language this adapter handles.
     fn language(&self) -> Language;
 
+    /// RESOURCE-CPP-INERT-1 (FINAL-POLISH-1 §2.3): a reader-frame phrase naming the resource-access
+    /// MECHANISM this adapter's language actually detects — the specific access CALLS it recognizes,
+    /// NOT the language it parses. `resource list` renders this so its coverage statement describes
+    /// what the detector DOES (e.g. "fopen/open/sqlite3 calls") instead of overclaiming full-language
+    /// coverage (the original "covers C, C++" defect: a bare-language claim wider than the specific
+    /// access calls actually recognized). Static per adapter — the mechanism is a property of the
+    /// detector, not of any repo.
+    ///
+    /// Ratified as a public API addition (FINAL-POLISH-1 operator ruling 2026-09-02, precedent
+    /// chain 9th instance). Carries a DEFAULT so the addition is **non-breaking in form**: an
+    /// existing/external implementer that does not override it still compiles, and — per the honesty
+    /// mission — renders unknown-with-reason ("mechanism not declared") rather than a fabricated
+    /// coverage claim. Every built-in adapter (`default_registry`) overrides it with its true
+    /// detected call-family; the default is unreachable in the shipped registry.
+    fn mechanism(&self) -> &'static str {
+        "resource-access detection (mechanism not declared by this adapter)"
+    }
+
     /// Convert resolved callsites to state-boundary callsites.
     ///
     /// Returns a vector of DTOs. The caller (hook) feeds these to
@@ -107,6 +125,17 @@ impl AdapterRegistry {
     pub fn registered_languages(&self) -> Vec<Language> {
         self.adapters.keys().copied().collect()
     }
+
+    /// RESOURCE-CPP-INERT-1 (§2.3): each registered adapter's `(language, mechanism)` — the ONE
+    /// registry the coverage statement reads so the per-language mechanism naming can never drift
+    /// from what actually runs. Order is unspecified (HashMap iteration); the caller imposes a
+    /// deterministic order (repo-index's `resource_detector_mechanisms`).
+    pub fn language_mechanisms(&self) -> Vec<(Language, &'static str)> {
+        self.adapters
+            .iter()
+            .map(|(lang, adapter)| (*lang, adapter.mechanism()))
+            .collect()
+    }
 }
 
 impl Default for AdapterRegistry {
@@ -148,6 +177,10 @@ mod tests {
             self.lang
         }
 
+        fn mechanism(&self) -> &'static str {
+            "mock calls"
+        }
+
         fn adapt_callsites(
             &self,
             _ctx: &AdapterContext<'_>,
@@ -176,5 +209,38 @@ mod tests {
     fn registry_missing_language_returns_none() {
         let registry = AdapterRegistry::new();
         assert!(registry.get(Language::Python).is_none());
+    }
+
+    /// An adapter that does NOT override `mechanism()` — proves the trait addition is
+    /// non-breaking in form (this compiles without the method) and that the default is
+    /// honest degradation, not a fabricated call-family claim (FINAL-POLISH-1 §2.3).
+    struct MechanismlessAdapter;
+
+    impl LanguageStateAdapter for MechanismlessAdapter {
+        fn language(&self) -> Language {
+            Language::Rust
+        }
+
+        fn adapt_callsites(
+            &self,
+            _ctx: &AdapterContext<'_>,
+            _callsites: &[ResolvedCallsite],
+        ) -> Vec<StateBoundaryCallsite> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn default_mechanism_is_honest_unknown_not_an_overclaim() {
+        let m = MechanismlessAdapter.mechanism();
+        // Reads as unknown-with-reason, never as a specific detected call family.
+        assert!(
+            m.contains("not declared"),
+            "default must state it is unknown: {m}"
+        );
+        assert!(
+            !m.contains("fopen") && !m.contains("open()") && !m.contains("JDBC"),
+            "default must not fabricate a mechanism it does not detect: {m}"
+        );
     }
 }

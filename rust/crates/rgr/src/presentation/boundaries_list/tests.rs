@@ -283,17 +283,18 @@ fn list_render_demotes_test_only_groups_below_main() {
     resp.count = 3;
     let output = resp.render_human();
 
-    // Headline count is main-only (1 group), with the demoted test-only surfaces noted.
+    // Headline count is main-only (1 group), with the demoted test-only GROUPS noted (unit-label
+    // alignment: the count is groups, so the noun is "group", never "surface").
     assert!(output.contains("1 boundary\n"), "{output}");
-    assert!(output.contains("+2 test-only surfaces"), "{output}");
+    assert!(output.contains("+2 test-only groups"), "{output}");
     // The demoted section is present, labeled, and excluded from the headline.
     assert!(
-        output.contains("test-only surfaces (2 groups — excluded from the headline counts"),
+        output.contains("test-only (2 file×direction groups — excluded from the headline counts"),
         "{output}"
     );
     // Production file leads; test-only render below (never hidden).
     let prod_pos = output.find("src/broker/publish.rs").expect("prod row");
-    let section_pos = output.find("test-only surfaces (2").expect("section");
+    let section_pos = output.find("test-only (2 file×direction").expect("section");
     let fixture_pos = output
         .find("rust/crates/x/tests/fixtures/amqp.rs")
         .expect("test-only row shown, not hidden");
@@ -323,13 +324,13 @@ fn list_render_unknown_rows_stay_in_main_with_marker() {
     resp.count = 3;
     let output = resp.render_human();
 
-    // Unknown is NOT a demoted surface: only the 1 test-only group is excluded.
-    assert!(output.contains("+1 test-only surface"), "{output}");
+    // Unknown is NOT a demoted group: only the 1 test-only group is excluded.
+    assert!(output.contains("+1 test-only group"), "{output}");
     // The unknown row is in the MAIN listing carrying its marker with the reason.
     let marker_pos = output
         .find("[test-composition unknown:")
         .expect("unknown marker present in main listing");
-    let section_pos = output.find("test-only surfaces (1").expect("section");
+    let section_pos = output.find("test-only (1 file×direction").expect("section");
     assert!(
         output.contains("vendor/opaque/x.rs"),
         "unknown row shown in main:\n{output}"
@@ -356,7 +357,7 @@ fn list_render_all_test_only_shows_empty_main_headline() {
     resp.count = 1;
     let output = resp.render_human();
     assert!(output.contains("0 boundaries"), "{output}");
-    assert!(output.contains("+1 test-only surface"), "{output}");
+    assert!(output.contains("+1 test-only group"), "{output}");
     assert!(
         output.contains("rust/crates/x/tests/fixtures/amqp.rs"),
         "test-only shown:\n{output}"

@@ -76,6 +76,12 @@ impl LanguageStateAdapter for TypeScriptAdapter {
         Language::Typescript
     }
 
+    fn mechanism(&self) -> &'static str {
+        // TS/JS: the Node `fs` family (`fs`, `node:fs`, `fs/promises`) read/write calls — the only
+        // resource modules in the binding table for this language today.
+        "Node fs read/write calls"
+    }
+
     fn adapt_callsites(
         &self,
         _ctx: &AdapterContext<'_>,

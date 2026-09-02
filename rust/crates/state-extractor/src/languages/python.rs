@@ -51,6 +51,11 @@ impl LanguageStateAdapter for PythonAdapter {
         Language::Python
     }
 
+    fn mechanism(&self) -> &'static str {
+        // Python: the builtin `open()` (mode → read/write) plus the sqlite3/psycopg2 connect calls.
+        "open() and sqlite3/psycopg2 calls"
+    }
+
     fn adapt_callsites(
         &self,
         _ctx: &AdapterContext<'_>,

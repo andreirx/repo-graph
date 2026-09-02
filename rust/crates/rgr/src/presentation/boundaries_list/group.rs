@@ -69,8 +69,12 @@ pub(super) fn group_and_render(rows: &[BoundaryListEntry]) -> GroupedRender {
     ));
 
     if !test_only.is_empty() {
+        // SURFACES-DEDUP-1 §2.1 unit-label alignment: this section counts file×direction GROUPS
+        // (the `boundaries list` unit), matching the headline noun — "surface" is reserved for
+        // `boundaries summary`'s raw reconciled-surface count, so the two commands never spell the
+        // same word with different meanings.
         body.push_str(&format!(
-            "\ntest-only surfaces ({} group{} — excluded from the headline counts):\n",
+            "\ntest-only ({} file×direction group{} — excluded from the headline counts):\n",
             test_only.len(),
             if test_only.len() == 1 { "" } else { "s" }
         ));

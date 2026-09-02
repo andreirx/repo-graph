@@ -112,27 +112,25 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
     let mut out = String::new();
     out.push_str(&format!("\nHTTP/REST API surfaces: {}\n", agg.phrase()));
 
-    let mut entries = surfaces.to_vec();
-    entries.sort_by(|a, b| {
-        (&a.direction, &a.http_method, &a.route, &a.source_file).cmp(&(
-            &b.direction,
-            &b.http_method,
-            &b.route,
-            &b.source_file,
-        ))
-    });
-
     // §2.5 dual-implementation (review-3 item 3): a (method, route) served by ≥2
     // DISTINCT real owning MODULES is a stated dual implementation, noted ONCE.
     // When ownership is unavailable for a provider file, duality across modules
     // cannot be confirmed — the note states that honestly instead of asserting two
-    // modules. Computed before the loop so the note attaches to the first
-    // occurrence.
-    let dual = dual_providers(&entries);
+    // modules. Computed over the FULL entry set (before the display collapse) so a
+    // dual across two files is still detected.
+    let dual = dual_providers(surfaces);
+
+    // SURFACES-DEDUP-1 (§2.1): collapse rows identical in every rendered field to a
+    // single `×N` row (the `boundaries list` pattern) — amodx prints 46 verbatim
+    // `GET <dynamic — …> …/index.ts [consumer]` rows otherwise. HUMAN-render only:
+    // the `--json` path serializes the daemon envelope directly (every row kept), so
+    // no machine consumer loses a row. The headline/footer aggregation still counts
+    // every surface (`agg` is over all `surfaces`), so ×N sums back to the totals.
+    let groups = collapse_identical(surfaces);
 
     let mut noted_dual: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
-    for s in &entries {
+    for (s, count) in &groups {
         let route = match &s.route {
             Some(r) => r.clone(),
             // §3: an unknown route shows its recorded reason, never a bare
@@ -159,6 +157,11 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
         // labeled inline — the union surfaces divergence, never a silent drop.
         if let Some(conflict) = &s.conflict {
             line.push_str(&format!(" [conflict: {}]", conflict));
+        }
+        // SURFACES-DEDUP-1: the ×N collapse count (only when >1, so a single row is
+        // byte-identical to the pre-slice output).
+        if *count > 1 {
+            line.push_str(&format!("  ×{}", count));
         }
         out.push_str(&line);
         out.push('\n');
@@ -190,6 +193,64 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
         agg.phrase(),
     ));
     out
+}
+
+/// SURFACES-DEDUP-1 (§2.1): collapse surfaces that are IDENTICAL in every field the
+/// human row renders — `(direction, method, route, file, is_test, framework,
+/// route_unknown_reason, conflict)` — into `(representative, count)` pairs, in the same
+/// deterministic `(direction, method, route, file)` order the pre-slice loop used.
+///
+/// `module` is deliberately NOT part of the collapse key: it never appears on the row (it
+/// feeds only the per-route dual note, computed over the FULL entry set), and a single file
+/// belongs to a single module — so two rows sharing `source_file` share it, and collapsing
+/// them loses nothing. The JSON path is untouched (every row kept there).
+///
+/// - what: the human-render row de-duplicator for the HTTP-surface section.
+/// - concrete current user: [`render_surfaces`] (sole caller).
+/// - axis: FIXED collapse operation over a growing row set — a pure fold, not an interface.
+/// - rejected simpler: printing one line per entry (the amodx 46-verbatim-row wall this fixes).
+fn collapse_identical(
+    surfaces: &[HttpBoundarySurfaceEntry],
+) -> Vec<(&HttpBoundarySurfaceEntry, usize)> {
+    let mut refs: Vec<&HttpBoundarySurfaceEntry> = surfaces.iter().collect();
+    refs.sort_by(|a, b| line_key(a).cmp(&line_key(b)));
+
+    let mut groups: Vec<(&HttpBoundarySurfaceEntry, usize)> = Vec::new();
+    for s in refs {
+        match groups.last_mut() {
+            Some((rep, count)) if line_key(rep) == line_key(s) => *count += 1,
+            _ => groups.push((s, 1)),
+        }
+    }
+    groups
+}
+
+/// A borrowed identity of every field a surface row renders, for the SURFACES-DEDUP-1 collapse
+/// (deterministic sort + adjacency fold). Everything the human line prints is included, so two
+/// rows collapse ONLY when their rendered lines would be byte-identical. `module` is excluded —
+/// it never appears on the row (see [`collapse_identical`]).
+type LineKey<'a> = (
+    &'a str,         // direction
+    &'a str,         // http_method
+    Option<&'a str>, // route
+    &'a str,         // source_file
+    Option<bool>,    // is_test
+    Option<&'a str>, // framework
+    Option<&'a str>, // route_unknown_reason
+    Option<&'a str>, // conflict
+);
+
+fn line_key(s: &HttpBoundarySurfaceEntry) -> LineKey<'_> {
+    (
+        s.direction.as_str(),
+        s.http_method.as_str(),
+        s.route.as_deref(),
+        s.source_file.as_str(),
+        s.is_test,
+        s.framework.as_deref(),
+        s.route_unknown_reason.as_deref(),
+        s.conflict.as_deref(),
+    )
 }
 
 /// The Spring REST-vs-MVC basis note (§2.1). Only the Spring stereotypes carry a
@@ -564,6 +625,65 @@ mod tests {
     #[test]
     fn render_surfaces_empty_is_empty_string() {
         assert!(render_surfaces(&[]).is_empty());
+    }
+
+    #[test]
+    fn identical_rows_collapse_to_one_with_count() {
+        // SURFACES-DEDUP-1 (§2.1): amodx's shape — 46 verbatim-identical consumer rows for the
+        // same (method, dynamic-route, file). They collapse to ONE row with `×46`, yet the
+        // headline/footer still count all 46 (the collapse is display-only).
+        let surfaces: Vec<HttpBoundarySurfaceEntry> = (0..46)
+            .map(|_| entry("consumer", "GET", None, "tools/mcp-server/src/index.ts"))
+            .collect();
+        let out = render_surfaces(&surfaces);
+        // Exactly one indented surface row is printed.
+        let row_lines: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("  ") && l.contains('['))
+            .collect();
+        assert_eq!(row_lines.len(), 1, "rows not collapsed:\n{out}");
+        assert!(row_lines[0].contains("×46"), "missing ×N count:\n{out}");
+        // The footer still counts every collapsed surface.
+        assert!(
+            out.contains("46 HTTP surfaces: 0 providers, 46 consumers"),
+            "footer must count all rows:\n{out}"
+        );
+    }
+
+    #[test]
+    fn distinct_rows_do_not_collapse_and_single_row_has_no_count() {
+        // Rows differing in any rendered field stay distinct; a lone row carries NO ×N (byte-
+        // identical to the pre-slice output for non-duplicated surfaces).
+        let surfaces = vec![
+            entry("consumer", "GET", Some("/a"), "web/a.ts"),
+            entry("consumer", "GET", Some("/b"), "web/a.ts"),
+        ];
+        let out = render_surfaces(&surfaces);
+        let row_lines: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("  ") && l.contains('['))
+            .collect();
+        assert_eq!(
+            row_lines.len(),
+            2,
+            "distinct rows must not collapse:\n{out}"
+        );
+        assert!(!out.contains('×'), "single rows must carry no ×N:\n{out}");
+    }
+
+    #[test]
+    fn rows_differing_only_in_test_flag_stay_separate() {
+        // The collapse key includes every rendered field: a `[test]` row must NOT merge with a
+        // non-test row of the same (method, route, file) — that would hide the test/prod split.
+        let mut a = entry("consumer", "GET", Some("/a"), "web/a.ts");
+        a.is_test = Some(true);
+        let b = entry("consumer", "GET", Some("/a"), "web/a.ts"); // is_test None
+        let out = render_surfaces(&[a, b]);
+        let row_lines: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("  ") && l.contains('['))
+            .collect();
+        assert_eq!(row_lines.len(), 2, "test/prod rows must not merge:\n{out}");
     }
 
     #[test]

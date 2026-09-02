@@ -74,6 +74,17 @@ pub fn compose_dependency_summaries(
         .map(|m| (m.module_candidate_uid.as_str(), m))
         .collect();
 
+    // DEPS-SELF-1 (FINAL-POLISH-1 §2.2): the package names THIS repo's parsed manifests declare as
+    // their OWN — the `module_kind = 'declared'` `display_name` fact (the SAME structural fact
+    // TRUST-FIRSTPARTY-1 reads), never a directory name. An observed specifier equal to one of these
+    // is a first-party self-reference, not an undeclared external. Built once from the already-loaded
+    // `module_candidates` (no new storage read) and shared into each module's reconciliation.
+    let own_manifest_names: HashSet<String> = modules
+        .iter()
+        .filter(|m| m.module_kind == "declared")
+        .filter_map(|m| m.display_name.clone())
+        .collect();
+
     // 2. Load file ownership to map files to module UIDs.
     let ownership = storage.get_file_ownership_for_snapshot(input.snapshot_uid)?;
     let file_to_module_uid: HashMap<&str, &str> = ownership
@@ -268,6 +279,7 @@ pub fn compose_dependency_summaries(
             runtime_builtins: input.runtime_builtins.clone(),
             ecosystem: input.ecosystem.clone(),
             pre_rejected_non_specifier: module_rejected.get(canonical_path).copied().unwrap_or(0),
+            own_manifest_names: own_manifest_names.clone(),
         };
 
         let summary = reconcile_module_dependencies(reconcile_input);

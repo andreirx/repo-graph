@@ -43,9 +43,25 @@ pub struct ResourceCoverage {
     /// Reader display names of the languages this build detects resource access in,
     /// sorted (e.g. `["C", "C++", "Java", "Python", "TypeScript/JavaScript"]`).
     pub detected_languages: Vec<String>,
+    /// RESOURCE-CPP-INERT-1 (FINAL-POLISH-1 §2.3): each covered language paired with the reader-frame
+    /// MECHANISM its detector actually recognizes (the specific access calls), so the coverage line
+    /// describes what the detector DOES, not the language it parses (the "covers C, C++" overclaim
+    /// where std::fstream file I/O is uncounted). Additive: an older daemon omits it (empty default)
+    /// and the renderer falls back to the plain languages line.
+    #[serde(default)]
+    pub detected_mechanisms: Vec<MechanismEntry>,
     /// This repo's materially-present languages with no detector, or the read-failure
     /// reason.
     pub material_gap: MaterialGap,
+}
+
+/// RESOURCE-CPP-INERT-1: one covered language and the mechanism its detector recognizes.
+#[derive(Debug, Deserialize, Clone)]
+pub struct MechanismEntry {
+    /// Reader display name of the language (e.g. `"C++"`).
+    pub language: String,
+    /// The reader-frame mechanism (e.g. `"fopen/open/sqlite3 calls"`).
+    pub mechanism: String,
 }
 
 /// The materiality-gap arm of [`ResourceCoverage`]: either the (possibly empty) set of
@@ -99,9 +115,12 @@ impl ResourceListResponse {
             // which languages (from the detector registry), plus the honest no-detector sentence
             // for materially-present languages this build cannot see.
             out.push_str("\nNo resource-access patterns detected.\n");
+            // §2.3: name the per-language MECHANISM (what the detector DOES), not bare language
+            // coverage — so a C/C++ repo whose file I/O goes through std::fstream reads the honest
+            // "fopen/open/sqlite3 calls" claim rather than an implied "covers C++".
             out.push_str(&format!(
-                "Resource-access detection on this build covers {}.\n",
-                self.coverage.detected_languages_line()
+                "Resource-access detection on this build detects: {}.\n",
+                self.coverage.detected_mechanisms_line()
             ));
             if let Some(gap) = self.coverage.gap_line() {
                 out.push_str(&format!("{}\n", gap));
@@ -113,9 +132,9 @@ impl ResourceListResponse {
         // (coverage: <langs>)" — so a lone result reads against a KNOWN-partial lens, never as the
         // repo's resource inventory. Families are the reader-frame kinds actually among the results.
         out.push_str(&format!(
-            "\nvia {} access-call detection (coverage: {})\n",
+            "\nvia {} access-call detection (detects: {})\n",
             self.detector_families_line(),
-            self.coverage.detected_languages_line()
+            self.coverage.detected_mechanisms_line()
         ));
         if let Some(gap) = self.coverage.gap_line() {
             out.push_str(&format!("{}\n", gap));
@@ -211,6 +230,33 @@ impl ResourceCoverage {
         } else {
             self.detected_languages.join(", ")
         }
+    }
+
+    /// RESOURCE-CPP-INERT-1 (§2.3): the coverage detail naming, per language, the MECHANISM the
+    /// detector recognizes — `"C — fopen/open/sqlite3 calls; C++ — …; …"`. Describes what the
+    /// detector DOES (specific access calls), so "covers C++" can no longer be read as full-language
+    /// coverage while std::fstream file I/O goes uncounted.
+    ///
+    /// When `detected_mechanisms` is absent — an older daemon that predates per-language mechanism
+    /// reporting — renders the covered languages WITH an explicit unavailable-with-reason note, never
+    /// the bare language list. On the current build the mechanism list derives from the SAME detector
+    /// registry as `detected_languages` (`resource_detector_mechanisms`), so non-empty languages with
+    /// an empty mechanism list can ONLY be that older daemon, never a current-build gap. STANDING
+    /// HONESTY RULE 1: the per-mechanism detail is the unknown here, so it renders unknown-WITH-REASON
+    /// rather than letting bare language names pose as mechanism coverage (the exact overclaim this
+    /// slice removes) — never a fabricated mechanism.
+    fn detected_mechanisms_line(&self) -> String {
+        if self.detected_mechanisms.is_empty() {
+            return format!(
+                "{} (per-language access-call detail unavailable: this daemon predates mechanism reporting)",
+                self.detected_languages_line()
+            );
+        }
+        self.detected_mechanisms
+            .iter()
+            .map(|e| format!("{} — {}", e.language, e.mechanism))
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 
     /// The honest coverage-gap sentence, or `None` when there is nothing to add (every material
@@ -379,9 +425,23 @@ mod tests {
                 "Python".to_string(),
                 "TypeScript/JavaScript".to_string(),
             ],
+            detected_mechanisms: vec![
+                mech("C", "fopen/open/sqlite3 calls"),
+                mech("C++", "fopen/open/sqlite3 and std::fstream calls"),
+                mech("Java", "JDBC DriverManager.getConnection calls"),
+                mech("Python", "open() and sqlite3/psycopg2 calls"),
+                mech("TypeScript/JavaScript", "Node fs read/write calls"),
+            ],
             material_gap: MaterialGap::Known {
                 uncovered_languages: vec![],
             },
+        }
+    }
+
+    fn mech(language: &str, mechanism: &str) -> MechanismEntry {
+        MechanismEntry {
+            language: language.to_string(),
+            mechanism: mechanism.to_string(),
         }
     }
 
@@ -501,9 +561,24 @@ mod tests {
         let out = resp.render_human();
         assert!(out.contains("0 resources"));
         assert!(out.contains("No resource-access patterns detected."));
+        // §2.3: the line now names the per-language MECHANISM (what the detector does), not bare
+        // language coverage — so "covers C++" cannot be read as full-language coverage.
         assert!(
-            out.contains("Resource-access detection on this build covers C, C++, Java, Python, TypeScript/JavaScript."),
+            out.contains("Resource-access detection on this build detects: "),
             "{out}"
+        );
+        assert!(
+            out.contains("C++ — fopen/open/sqlite3 and std::fstream calls"),
+            "{out}"
+        );
+        assert!(
+            out.contains("Java — JDBC DriverManager.getConnection calls"),
+            "{out}"
+        );
+        // The bare-language overclaim wording is GONE.
+        assert!(
+            !out.contains("on this build covers C, C++, Java"),
+            "must not claim bare language coverage: {out}"
         );
         // The blaming sentence is GONE.
         assert!(
@@ -522,6 +597,7 @@ mod tests {
             snapshot: "repo_test/snapshot".to_string(),
             coverage: ResourceCoverage {
                 detected_languages: covered_no_gap().detected_languages,
+                detected_mechanisms: covered_no_gap().detected_mechanisms,
                 material_gap: MaterialGap::Known {
                     uncovered_languages: vec!["Rust".to_string()],
                 },
@@ -552,6 +628,7 @@ mod tests {
             snapshot: "repo_test/snapshot".to_string(),
             coverage: ResourceCoverage {
                 detected_languages: covered_no_gap().detected_languages,
+                detected_mechanisms: covered_no_gap().detected_mechanisms,
                 material_gap: MaterialGap::Unknown {
                     reason: "db locked".to_string(),
                 },
@@ -578,6 +655,7 @@ mod tests {
             snapshot: "repo_test/snapshot".to_string(),
             coverage: ResourceCoverage {
                 detected_languages: covered_no_gap().detected_languages,
+                detected_mechanisms: covered_no_gap().detected_mechanisms,
                 material_gap: MaterialGap::Known {
                     uncovered_languages: vec!["Rust".to_string()],
                 },
@@ -597,14 +675,59 @@ mod tests {
         let out = resp.render_human();
         assert!(out.contains("1 resource\n")); // singular
         assert!(out.contains("1 reader  1 writer")); // singular
-                                                     // The anti-inventory header: family + language coverage + the uncovered-language note.
+                                                     // The anti-inventory header: family + per-language MECHANISM detail + the uncovered note.
         assert!(
-            out.contains("via filesystem access-call detection (coverage: C, C++, Java, Python, TypeScript/JavaScript)"),
+            out.contains("via filesystem access-call detection (detects: "),
+            "{out}"
+        );
+        assert!(
+            out.contains("C++ — fopen/open/sqlite3 and std::fstream calls"),
             "{out}"
         );
         assert!(
             out.contains("Rust code is present but has no resource-access detector"),
             "{out}"
+        );
+    }
+
+    /// §2.3 honest degradation (STANDING HONESTY RULE 1): an older daemon omits
+    /// `detected_mechanisms` → the coverage line names the covered languages WITH an explicit
+    /// unavailable-with-reason note for the missing per-mechanism detail — never the bare
+    /// language list posing as mechanism coverage (the overclaim this slice removes), never a
+    /// fabricated mechanism.
+    #[test]
+    fn list_render_absent_mechanisms_marks_detail_unavailable_with_reason() {
+        let resp = ResourceListResponse {
+            command: "resource list".to_string(),
+            repo: "repo_test".to_string(),
+            snapshot: "repo_test/snapshot".to_string(),
+            coverage: ResourceCoverage {
+                detected_languages: vec!["C".to_string(), "C++".to_string()],
+                detected_mechanisms: vec![], // older daemon
+                material_gap: MaterialGap::Known {
+                    uncovered_languages: vec![],
+                },
+            },
+            results: vec![],
+            count: 0,
+            total_reads: 0,
+            total_writes: 0,
+        };
+        let out = resp.render_human();
+        // The languages are still named …
+        assert!(out.contains("C, C++"), "{out}");
+        // … but the missing mechanism detail is marked unavailable WITH its reason.
+        assert!(
+            out.contains(
+                "per-language access-call detail unavailable: this daemon predates mechanism reporting"
+            ),
+            "{out}"
+        );
+        // The bare-language overclaim ("detects: C, C++." with nothing qualifying it) is GONE —
+        // the language list must NOT read as mechanism coverage.
+        assert!(
+            !out.contains("detects: C, C++."),
+            "must not present bare language names as mechanism coverage: {out}"
         );
     }
 
@@ -614,7 +737,7 @@ mod tests {
         let resp = sample_list_response(); // FS_PATH + DB_RESOURCE present
         let out = resp.render_human();
         assert!(
-            out.contains("via database/filesystem access-call detection (coverage:"),
+            out.contains("via database/filesystem access-call detection (detects:"),
             "{out}"
         );
     }

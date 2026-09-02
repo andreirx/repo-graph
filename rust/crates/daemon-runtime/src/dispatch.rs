@@ -5778,6 +5778,16 @@ impl ServiceDispatcher {
         // failed read renders `unknown`-with-reason, NEVER a silent empty (STANDING HONESTY RULE 1).
         let detected_languages =
             repo_graph_repo_index::resource_coverage::resource_detector_language_names();
+        // RESOURCE-CPP-INERT-1 (§2.3): the per-language MECHANISM (specific access calls), so the
+        // coverage line describes what the detector DOES, not the language it parses. Additive — an
+        // older rgr ignores it and falls back to `detected_languages`; a current rgr renders it.
+        let detected_mechanisms: Vec<serde_json::Value> =
+            repo_graph_repo_index::resource_coverage::resource_detector_mechanisms()
+                .into_iter()
+                .map(|(language, mechanism)| {
+                    serde_json::json!({ "language": language, "mechanism": mechanism })
+                })
+                .collect();
         let material_gap = match repo_graph_agent::AgentStorageRead::query_file_count_by_language(
             &storage,
             &snapshot.snapshot_uid,
@@ -5804,6 +5814,7 @@ impl ServiceDispatcher {
             "total_writes": total_writes,
             "coverage": {
                 "detected_languages": detected_languages,
+                "detected_mechanisms": detected_mechanisms,
                 "material_gap": material_gap,
             },
         });
@@ -6822,6 +6833,7 @@ impl ServiceDispatcher {
                 DependencyCategory::DeclaredAndUsed => "declared_and_used",
                 DependencyCategory::DeclaredButUnobserved => "declared_but_unobserved",
                 DependencyCategory::ObservedButUndeclared => "observed_but_undeclared",
+                DependencyCategory::FirstPartySelf => "first_party_self",
                 DependencyCategory::RuntimeBuiltin => "runtime_builtin",
                 DependencyCategory::UnknownExternalLike => "unknown_external_like",
             }

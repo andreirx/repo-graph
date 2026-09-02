@@ -53,3 +53,31 @@ DECISION_REQUIRED. Never touch the operator's real state root. Do NOT commit.
 
 No verbatim row walls; no self-imports as externals; no coverage claim wider than its
 mechanism; unit labels agree; RESOURCE-STREAMS-1 recorded; gates green.
+
+## 6. Measurement correction (build-2, 2026-09-02) — §1.3 premise refuted, follow-up re-scoped
+
+§1.3 stated as measured that "std::ofstream/ifstream [are] invisible". **End-to-end measurement
+(operator ruling 2026-09-02 answering review-1) refutes that premise.** Two isolated indexes on
+this build, each `index` → `resource list`:
+
+- **OpenXcom** (`../legacy-codebases/OpenXcom`) → `resource list`: **1 resource** (`opllog.opl`, a
+  write). `SavedGame.cpp:567/696` (`std::ofstream tmp(tmpPath.c_str())` / `sav(savPath.c_str())`)
+  do **NOT** appear — the operator's branch (b) trigger.
+- **Purpose-built C++ fixture** (three writes) → `resource list`: `std::ofstream out("literal_stream.log")`
+  (string-literal path) → **DELIVERED** as an FS_PATH write; `std::ofstream sav(p.c_str())`
+  (non-literal) → **DROPPED**; `fopen("literal_fopen.txt","w")` → DELIVERED.
+
+**Conclusion:** `std::fstream` IS counted end-to-end when the path is a **string literal** (so the
+"not yet counted" claim was false — neither branch premise held; the coverage sentence follows the
+measurement per the operator's overriding rule). The C++ coverage line now reads
+`fopen/open/sqlite3 and std::fstream calls`.
+
+**RESOURCE-STREAMS-1 re-scoped** (name now a misnomer — recommend renaming to
+`RESOURCE-DYNAMIC-PATH-1`; not renamed here to avoid touching a cross-referenced id): the real,
+**measured** gap is that **only string-literal path arguments resolve to resource keys**. A computed
+path (`.c_str()`, a variable, any non-literal arg0) is dropped at the extractor's arg0 gate
+(`cpp-extractor/src/extractor.rs` `extract_arg0_string_literal`: "Not a string literal → dynamic
+path, skip"; the `.open()`/constructor paths share it). This is **cross-detector and cross-language**
+(fopen/open/Python `open()`/Node `fs` all require a literal arg0), **not fstream-specific** — hence
+it is deliberately not carried in any per-language call-family string. It is why file-driven engines
+(OpenXcom) under-report. Locating = done (above); resolving non-literal paths = the follow-up slice.

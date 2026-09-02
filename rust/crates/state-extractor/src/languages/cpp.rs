@@ -52,6 +52,24 @@ impl LanguageStateAdapter for CppAdapter {
         Language::Cpp
     }
 
+    fn mechanism(&self) -> &'static str {
+        // MEASURED end-to-end (FINAL-POLISH-1 build-2, 2026-09-02, isolated index → `resource list`):
+        // C++ resource access is detected through the C-style libc APIs (fopen/open) + sqlite3 AND
+        // std::fstream constructor/`.open()` calls. A purpose-built fixture proved a
+        // `std::ofstream out("literal_stream.log")` produces an FS_PATH write edge through the real
+        // pipeline — std::fstream IS counted, so an earlier "not yet counted" claim was false.
+        //
+        // The real, shared limitation (named as the re-scoped RESOURCE-STREAMS-1 follow-up, NOT this
+        // slice): only STRING-LITERAL path arguments resolve. A computed path — e.g. OpenXcom's
+        // `std::ofstream sav(savPath.c_str())` (SavedGame.cpp:696) — is dropped at the extractor's
+        // arg0 string-literal gate (`extract_arg0_string_literal`: "Not a string literal → dynamic
+        // path, skip"), exactly like `fopen(var, ...)` would be. This is why file-driven engines
+        // under-report; it is a cross-detector arg-resolution gap, not an fstream-specific one, so it
+        // is deliberately NOT carried in this per-language call-family string (no other language line
+        // carries it either — the constraint is universal).
+        "fopen/open/sqlite3 and std::fstream calls"
+    }
+
     fn adapt_callsites(
         &self,
         _ctx: &AdapterContext<'_>,

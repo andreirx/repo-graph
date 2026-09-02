@@ -47,6 +47,11 @@ impl LanguageStateAdapter for CAdapter {
         Language::C
     }
 
+    fn mechanism(&self) -> &'static str {
+        // What this build actually detects for C: the libc file APIs (fopen/open) + sqlite3 open.
+        "fopen/open/sqlite3 calls"
+    }
+
     fn adapt_callsites(
         &self,
         _ctx: &AdapterContext<'_>,

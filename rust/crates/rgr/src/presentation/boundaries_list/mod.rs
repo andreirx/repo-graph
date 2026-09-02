@@ -159,8 +159,12 @@ impl BoundariesListResponse {
             format_count(grouped.main_group_count, "boundary", "boundaries")
         ));
         if grouped.test_only_group_count > 0 {
+            // SURFACES-DEDUP-1 §2.1 unit-label alignment: this count is file×direction GROUPS
+            // (the unit `boundaries list` reports), so it says "group" — never "surface" (which
+            // `boundaries summary` reserves for the raw reconciled-surface count). Same word →
+            // same meaning across the two commands.
             out.push_str(&format!(
-                "+{} test-only surface{} (excluded from the headline)\n",
+                "+{} test-only group{} (excluded from the headline)\n",
                 grouped.test_only_group_count,
                 if grouped.test_only_group_count == 1 {
                     ""

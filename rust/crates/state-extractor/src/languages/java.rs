@@ -42,6 +42,12 @@ impl LanguageStateAdapter for JavaAdapter {
         Language::Java
     }
 
+    fn mechanism(&self) -> &'static str {
+        // Java's resource detection is JDBC-only today (DriverManager.getConnection) — NO file I/O
+        // detector. Naming it plainly stops "covers Java" from implying file-access coverage.
+        "JDBC DriverManager.getConnection calls"
+    }
+
     fn adapt_callsites(
         &self,
         _ctx: &AdapterContext<'_>,

@@ -15,6 +15,13 @@ pub enum DependencyCategory {
     DeclaredButUnobserved,
     /// Source imports exist but not in manifest.
     ObservedButUndeclared,
+    /// DEPS-SELF-1 (FINAL-POLISH-1 §2.2): the observed specifier equals THIS repo's OWN parsed
+    /// manifest package name (from the `module_kind='declared'` `display_name` fact — never a
+    /// directory name), so it is a first-party self-reference, not a third-party external. django
+    /// importing `django` lands here instead of `ObservedButUndeclared`. A DECLARED dependency of
+    /// the same name wins over this (a real declared dep stays `DeclaredAndUsed`), so this is
+    /// reached only for the otherwise-undeclared self-import.
+    FirstPartySelf,
     /// Runtime builtin module (fs, path, std::*).
     RuntimeBuiltin,
     /// External-looking specifier, classification unclear.
@@ -193,6 +200,12 @@ impl ModuleDependencySummary {
     /// Count of runtime builtin usages.
     pub fn runtime_builtins_count(&self) -> usize {
         self.by_category(DependencyCategory::RuntimeBuiltin).len()
+    }
+
+    /// DEPS-SELF-1: count of first-party self-references (observed specifier equal to this repo's
+    /// own parsed-manifest package name). Rendered as a `self` note, never counted as undeclared.
+    pub fn first_party_self_count(&self) -> usize {
+        self.by_category(DependencyCategory::FirstPartySelf).len()
     }
 
     /// Count of external-looking specifiers that could not be classified declared/undeclared

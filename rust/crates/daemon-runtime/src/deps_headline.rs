@@ -551,6 +551,7 @@ fn module_json(s: &ModuleDependencySummary, resolution: &ResolutionState) -> ser
         "declared_and_used": s.declared_and_used_count(),
         "declared_but_unobserved": s.declared_but_unobserved_count(),
         "observed_but_undeclared": s.observed_but_undeclared_count(),
+        "first_party_self": s.first_party_self_count(),
         "runtime_builtins": s.runtime_builtins_count(),
         "unknown_external_like": s.unknown_external_like_count(),
         "rejected_non_specifier": s.rejected_non_specifier,
@@ -570,6 +571,7 @@ fn format_category(cat: DependencyCategory) -> &'static str {
         DependencyCategory::DeclaredAndUsed => "declared_and_used",
         DependencyCategory::DeclaredButUnobserved => "declared_but_unobserved",
         DependencyCategory::ObservedButUndeclared => "observed_but_undeclared",
+        DependencyCategory::FirstPartySelf => "first_party_self",
         DependencyCategory::RuntimeBuiltin => "runtime_builtin",
         DependencyCategory::UnknownExternalLike => "unknown_external_like",
     }
