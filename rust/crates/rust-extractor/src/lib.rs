@@ -70,5 +70,10 @@
 mod builtins;
 mod extractor;
 mod metrics;
+mod mod_decls;
 
 pub use extractor::RustExtractor;
+// IS-TEST-RUST-1: `mod_decls` (RustModDecl / MOD_DECLS_METADATA_KEY / collectors)
+// is crate-PRIVATE. Its facts cross the extractor→compose boundary only as raw
+// JSON on the FILE node's `metadata_json`; repo-index owns its own consumer DTO
+// that deserializes that shape. No shared public type (review-1 item 1).

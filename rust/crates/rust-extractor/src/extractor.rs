@@ -190,6 +190,19 @@ impl ExtractorPort for RustExtractor {
             visit_top_level(&child, source, &mut ctx);
         }
 
+        // IS-TEST-RUST-1: emit the file's `mod <name>;` inclusion facts (with
+        // their #[cfg(test)] gating) onto the FILE node's metadata_json. The
+        // compose-side resolver walks these cross-file to reclassify is_test.
+        // ctx.nodes[0] is the FILE node created above; files with no `mod`
+        // declarations leave its metadata_json as None (byte-stable output).
+        let mod_decls = crate::mod_decls::collect_mod_decls(&root, source);
+        if let Some(file_node) = ctx.nodes.first_mut() {
+            // The FILE node was created with metadata_json = None above and
+            // nothing else writes it before here, so this is a fresh object.
+            debug_assert!(file_node.metadata_json.is_none());
+            file_node.metadata_json = crate::mod_decls::mod_decls_metadata_json(&mod_decls);
+        }
+
         Ok(ExtractionResult {
             nodes: ctx.nodes,
             edges: ctx.edges,

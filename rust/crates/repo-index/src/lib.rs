@@ -68,6 +68,17 @@ pub mod refresh_policy;
 // languages + per-token coverage), derived from `state-extractor`'s registry so a
 // coverage statement never drifts from what detection actually runs.
 pub mod resource_coverage;
+// IS-TEST-RUST-1: the compose-side resolver that walks the Rust `#[cfg(test)]`
+// mod-inclusion chain (facts emitted by rust-extractor onto FILE-node metadata)
+// to reclassify `is_test` structurally. `pub(crate)` — only the compose index /
+// refresh postpass calls it (no cross-crate consumer).
+pub(crate) mod rust_test_classifier;
+// IS-TEST-RUST-1: the compose-side STORAGE postpass that reads the snapshot's
+// FILE-node inclusion facts, runs `rust_test_classifier`, and promotes `is_test`.
+// Split from `compose.rs` (review-2 item 3) so the storage postpass + its tests
+// do not grow the >500-line orchestration file. `pub(crate)` — only compose's
+// index / refresh call sites invoke it (no cross-crate consumer).
+pub(crate) mod rust_test_reclassify;
 pub mod scanner;
 pub mod state_boundary_hook;
 // MODULES-IDENTITY-2 §2.2: the HTTP surface-detector coverage accessor (shipped

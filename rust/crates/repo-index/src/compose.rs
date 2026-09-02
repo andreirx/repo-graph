@@ -87,6 +87,7 @@ use crate::react_detector::{
 use crate::refresh_policy::{
     FamilyRefreshResult, RefreshAction, RefreshDiagnostics, COPY_FORWARD_FAMILIES,
 };
+use crate::rust_test_reclassify::reclassify_rust_test_files;
 use crate::scanner::{self, ScannedFile};
 use artifact_contracts::{get_contract, ArtifactFamily, RefreshPolicy};
 
@@ -1681,7 +1682,7 @@ use crate::walk::{tree_exceeds_depth, MAX_POSTPASS_TREE_DEPTH};
 /// `UPDATE` lands. On the NON-pathological path this fn is never called (both callers
 /// gate on `count > 0` or the postpass-error arm), so making it fallible cannot change
 /// byte-for-byte output on existing fixtures.
-fn merge_extraction_diagnostics(
+pub(crate) fn merge_extraction_diagnostics(
     storage: &mut StorageConnection,
     snapshot_uid: &str,
     mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
@@ -1866,7 +1867,7 @@ fn record_files_skipped_deep_nesting(
 /// best-effort (if it too fails the DB is unwritable); the original infra error still
 /// propagates. This path triggers ONLY on a compounded infra failure, never the
 /// normal postpass-failure path.
-fn isolate_postpass(
+pub(crate) fn isolate_postpass(
     storage: &mut StorageConnection,
     snapshot_uid: &str,
     postpass: &str,
@@ -3394,6 +3395,30 @@ pub fn index_into_storage_with_progress(
         &mut result,
     )?;
 
+    // IS-TEST-RUST-1: promote in-crate Rust test-module files to is_test=true by
+    // structural #[cfg(test)] inclusion evidence (overriding the orchestrator's
+    // path-based stamp). Full recomputation over all Rust FILE nodes in the
+    // snapshot; runs before module/count postpasses so any is_test consumer sees
+    // the corrected value. Wrapped in `isolate_postpass` (review-1 item 4): the
+    // snapshot is already READY here, so a bare `?` failure would return an error
+    // yet still SERVE a snapshot with path-derived is_test. `isolate_postpass`
+    // instead records the failure as a diagnostic and, if that honest-degradation
+    // channel itself fails, DEMOTES the snapshot out of READY.
+    let rust_test_outcome = reclassify_rust_test_files(storage, repo_uid, &result.snapshot_uid);
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "rust-test-classify",
+        "rust_test_classify_postpass_error",
+        rust_test_outcome,
+        // No compensating cleanup: the promotion is promote-only and atomic
+        // (`upsert_files` is one transaction), so a failure never leaves a partial
+        // mix, and every landed promotion is an individually-TRUE structural fact
+        // that must not be reverted. Reverting would also be unsound — a copied-
+        // forward `is_test=true` cannot be told apart from a this-run promotion.
+        |_s| Ok(()),
+    )?;
+
     emit_progress(&mut progress, "persisting", 1, 8)?; // about to persist config file versions
                                                        // Persist config file versions for refresh invalidation tracking.
                                                        // Config files are NOT extracted — only tracked for hash comparison.
@@ -4085,6 +4110,24 @@ pub fn refresh_into_storage_with_progress(
         &result.snapshot_uid.clone(),
         &prepared.read_failed_paths,
         &mut result,
+    )?;
+
+    // IS-TEST-RUST-1: refresh recomputes Rust structural is_test over the WHOLE
+    // snapshot's FILE nodes — fresh (re-extracted) files plus copied-forward FILE
+    // nodes (metadata_json is preserved by the schema copy-forward). The chain is
+    // cross-file, so a parent's #[cfg(test)] toggle on a changed file correctly
+    // re-promotes/settles its unchanged children; no incremental shortcut. Wrapped
+    // in `isolate_postpass` for the same READY-snapshot honesty contract as index.
+    let rust_test_outcome = reclassify_rust_test_files(storage, repo_uid, &result.snapshot_uid);
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "rust-test-classify",
+        "rust_test_classify_postpass_error",
+        rust_test_outcome,
+        // No compensating cleanup — see the index call site for the rationale
+        // (promote-only + atomic upsert = no revertible partial state).
+        |_s| Ok(()),
     )?;
 
     emit_progress(&mut progress, "persisting", 1, 8)?; // about to persist config file versions
