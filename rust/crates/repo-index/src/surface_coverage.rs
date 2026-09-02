@@ -156,12 +156,10 @@ mod tests {
     fn named_gap_is_django_for_python_only() {
         // Python — the audit's motivating framework gap — names Django URLconf; every
         // other uncovered language falls back to its own display name (caller-supplied).
-        for tok in ["python"] {
-            assert_eq!(
-                http_surface_named_gap_for(tok),
-                Some("Django URLconf routes")
-            );
-        }
+        assert_eq!(
+            http_surface_named_gap_for("python"),
+            Some("Django URLconf routes")
+        );
         for tok in ["c", "cpp", "rust", "go", "java", "typescript", ""] {
             assert_eq!(
                 http_surface_named_gap_for(tok),
