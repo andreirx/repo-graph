@@ -133,6 +133,17 @@ NEW findings (merge into the active queue):
   missed); three unreconciled file totals (2072/2069/2065); vendored code blends into
   complexity centers.
 
+## Usefulness audit v0.15.0 — round three (2026-09-02)
+
+All six tail fixes field-verified (CHECK-LANG-SPLIT's one grader FAIL refuted by the
+materiality-gate measurement: repo-graph TS+JS 5.3% < 10%); nothing regressed; honesty
+architecture holds under vcmi/OpenXcom stress. Artifact + `docs/audits/2026-09-02-…v0.15.0.md`.
+New queue: 1. ORIENT-CYCLES-DISAGREE (verified) 2. RESOURCE-RECALL-1 (zero-states cite the
+arg0 literal-path gate) 3. FIND-KIND-MISLABEL (C++ kinds) 4. MODULE-VOCAB-DRIFT 5.
+NODE-BUILTIN-AS-UNDECLARED 6. SURFACES-HEADLINE-BLEND + minors (TRUST-ROUND-1,
+DEAD-FIXTURE-WEIGHT, skip-line stacking) + carried protocol (firing boundary, risk coverage
+import, linux timeout, capture-after-settle).
+
 ## Queue tail COMPLETE (2026-09-02) — the v0.13.0 + diverse queues fully cleared
 
 ZEROSTATE-SCOPE-1 62995e6+4e3eb2c (per-repo gap sentences; any-TS cycle caveat; + the
