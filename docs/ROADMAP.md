@@ -145,7 +145,7 @@ dead) · MODULE-EDGES-1 2db7335 (the acid test: cross-module edges rendered on m
 orient line 2; one-read count — exposed the old count as wrong, 14 vs 29 true).
 
 Remaining tail: ZEROSTATE-SCOPE-1, FUNNEL-VOCAB-1, CHECK-LANG-SPLIT-1, SURFACES-DEDUP-1,
-FIND-TEST-RANK-2 (verify the is_test fact on in-crate test modules first), DEPS-SELF-1,
+IS-TEST-RUST-1 (VERIFIED 2026-09-02: src/**/tests.rs & *_tests/ carry is_test=0 — an INDEXER gap; honest basis is the #[cfg(test)] inclusion chain, never the filename; supersedes FIND-TEST-RANK-2's ranking premise), DEPS-SELF-1,
 RESOURCE-CPP-INERT-1, TRUST-CEILING-1, governance polish, docs residual-bucket taxonomy.
 
 ## Usefulness audit v0.13.0 — the fix queue (2026-09-01)
