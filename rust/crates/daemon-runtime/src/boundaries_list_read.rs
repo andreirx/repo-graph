@@ -92,6 +92,11 @@ pub(crate) fn boundaries_list_response_json(
         "snapshot": snapshot_uid,
         "results": results,
         "count": count,
+        // ZEROSTATE-SCOPE-1 §2.2: boundaries adopt the SAME per-repo coverage roster as
+        // `surfaces list` (no second roster). The presenter renders it in the zero-state so
+        // boundaries stops blaming the codebase.
+        "surface_coverage":
+            crate::surface_coverage_read::surface_coverage_json(storage, snapshot_uid),
     });
     if let Some(note) = filtered_out_note {
         if let serde_json::Value::Object(ref mut map) = response {

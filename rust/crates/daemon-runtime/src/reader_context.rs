@@ -338,12 +338,56 @@ pub(crate) fn resource_uncovered_material_languages(
 /// no axis of variation, the rejected simpler alternative (inline the `matches!` at each call site) would
 /// duplicate the TS/JS token vocabulary across five routes.
 pub(crate) fn repo_has_material_ts_js(language_counts: &[(String, u64)]) -> bool {
-    material_code_languages(language_counts).iter().any(|m| {
-        matches!(
-            m.token.as_str(),
-            "typescript" | "tsx" | "javascript" | "jsx"
-        )
-    })
+    material_code_languages(language_counts)
+        .iter()
+        .any(|m| is_ts_js_language_token(&m.token))
+}
+
+/// Is an indexer `files.language` token a member of the TypeScript/JavaScript family
+/// (`typescript` | `tsx` | `javascript` | `jsx`)? The ONE home of that token vocabulary,
+/// so the repo-level cycles caveat gate ([`repo_has_material_ts_js`]) and the per-cycle-
+/// membership gate ([`crate::cycle_output::any_cycle_member_is_ts_js`], ZEROSTATE-SCOPE-1
+/// §2.3) never re-spell it. `pub(crate)` for the cycle-membership caller.
+pub(crate) fn is_ts_js_language_token(token: &str) -> bool {
+    matches!(token, "typescript" | "tsx" | "javascript" | "jsx")
+}
+
+/// ZEROSTATE-SCOPE-1 (§2.1): the repo's MATERIALLY-present code languages (the SAME
+/// ≥10%-of-code-files gate [`material_code_languages`] — REUSED so the surfaces/boundaries
+/// roster reads ONE materiality definition, never a re-derived one) that this build has NO
+/// HTTP SURFACE detector for, rendered as reader-frame gap names. This is the PER-REPO
+/// "no detector for X" clause that replaces the build-static blob: leveldb (C/C++) names
+/// its C/C++ truth, a materially-Python repo names "Django URLconf routes", a covered-only
+/// repo (Java / TS/JS) names nothing → the caller omits the clause. No repo wears another's
+/// sentence.
+///
+/// `covers` is the registry-adjacent coverage predicate
+/// (`repo_graph_repo_index::surface_coverage::http_surface_detection_covers`); `gap_name`
+/// is the framework-specific display override
+/// (`…::http_surface_named_gap_for` — `Some("Django URLconf routes")` for Python, `None`
+/// otherwise). Both injected so this stays pure + testable, the SAME daemon→pure shape as
+/// [`resource_uncovered_material_languages`]. `language_counts` MUST arrive count-DESC (as
+/// `query_file_count_by_language` returns). Returns sorted + deduped names (empty when every
+/// material language is HTTP-surface-covered, or no code language is materially present); a
+/// FAILED counts read is the caller's `Unknown`-with-reason branch, never a silent empty here.
+///
+/// Sole consumers: `surface_coverage_read::surface_coverage_json` and this module's tests.
+/// Axis: the HTTP-surface-detector coverage capability (the Python/C/C++-no-detector reality
+/// vs the Java/TS-JS-detector reality). Rejected simpler: inline the filter at the read site —
+/// rejected because it would re-derive the materiality gate away from its one home here.
+pub(crate) fn surface_uncovered_material_gaps(
+    language_counts: &[(String, u64)],
+    covers: impl Fn(&str) -> bool,
+    gap_name: impl Fn(&str) -> Option<&'static str>,
+) -> Vec<String> {
+    let mut names: Vec<String> = material_code_languages(language_counts)
+        .iter()
+        .filter(|m| !covers(&m.token))
+        .map(|m| gap_name(&m.token).unwrap_or(m.display).to_string())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// HONEST-DEGRADATION-IMPL-2 (D5) + CONTRADICTION-SWEEP-1 §5: the honest next-action line for a
@@ -1125,5 +1169,56 @@ mod honest_degradation_tests {
         // The full TS/JS family vocabulary is recognized (jsx here dominates).
         let jsx = vec![("jsx".to_string(), 50u64), ("python".to_string(), 50u64)];
         assert!(repo_has_material_ts_js(&jsx));
+    }
+
+    // ── ZEROSTATE-SCOPE-1 (§2.1): the per-repo surfaces/boundaries gap clause ──
+
+    /// The gap helper composed with the REAL build-static repo-index accessors — proving the
+    /// per-repo sentence: leveldb (C/C++) names C/C++, django (Python) names Django URLconf, a
+    /// covered-only repo names nothing, and no code language → nothing. No repo wears another's.
+    #[test]
+    fn surface_gap_is_per_repo_never_anothers_sentence() {
+        let covers = repo_graph_repo_index::surface_coverage::http_surface_detection_covers;
+        let gap_name = repo_graph_repo_index::surface_coverage::http_surface_named_gap_for;
+
+        // leveldb: a pure C/C++ repo names ITS OWN languages, not django's URLconf.
+        let leveldb = vec![("cpp".to_string(), 800u64), ("c".to_string(), 200u64)];
+        assert_eq!(
+            surface_uncovered_material_gaps(&leveldb, covers, gap_name),
+            vec!["C".to_string(), "C++".to_string()]
+        );
+
+        // django: a materially-Python repo keeps the URLconf framework name. Its ~3.7% JS is
+        // below the materiality gate and is covered anyway, so it never appears.
+        let django = vec![
+            ("python".to_string(), 2904u64),
+            ("javascript".to_string(), 111u64),
+        ];
+        assert_eq!(
+            surface_uncovered_material_gaps(&django, covers, gap_name),
+            vec!["Django URLconf routes".to_string()]
+        );
+
+        // A covered-only repo (Java + TS/JS) → every material language covered → no clause.
+        let covered = vec![
+            ("java".to_string(), 500u64),
+            ("typescript".to_string(), 500u64),
+        ];
+        assert!(surface_uncovered_material_gaps(&covered, covers, gap_name).is_empty());
+
+        // No materially-present CODE language (config-only) → nothing to name.
+        let config_only = vec![("json".to_string(), 100u64)];
+        assert!(surface_uncovered_material_gaps(&config_only, covers, gap_name).is_empty());
+
+        // A mixed repo names BOTH the covered-language's absence-of-clause AND the uncovered
+        // languages: Rust (dominant, uncovered) + a material TS half (covered) → only Rust.
+        let mixed = vec![
+            ("rust".to_string(), 600u64),
+            ("typescript".to_string(), 400u64),
+        ];
+        assert_eq!(
+            surface_uncovered_material_gaps(&mixed, covers, gap_name),
+            vec!["Rust".to_string()]
+        );
     }
 }

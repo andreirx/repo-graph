@@ -2,6 +2,21 @@
 //! for the 500-line guardrail; see the module-layout note there).
 
 use super::*;
+use crate::presentation::surfaces::{SurfaceCoverage, SurfaceGap};
+
+/// A representative build-static coverage payload for the zero-state coverage-form tests.
+fn sample_coverage() -> SurfaceCoverage {
+    SurfaceCoverage {
+        http_detector_families: vec![
+            "Java Spring (@RestController/@Controller)".to_string(),
+            "Next.js App Router".to_string(),
+        ],
+        named_uncovered: vec!["C".to_string(), "C++".to_string()],
+        material_gap: Some(SurfaceGap::Known {
+            named_uncovered: vec!["C".to_string(), "C++".to_string()],
+        }),
+    }
+}
 
 fn sample_summary_response() -> BoundariesSummaryResponse {
     BoundariesSummaryResponse {
@@ -65,6 +80,7 @@ fn sample_summary_response() -> BoundariesSummaryResponse {
         http_degraded: None,
         test_only: partition::Additive::Absent,
         unknown: partition::Additive::Absent,
+        surface_coverage: sample_coverage(),
     }
 }
 
@@ -78,6 +94,7 @@ fn sample_empty_summary_response() -> BoundariesSummaryResponse {
         http_degraded: None,
         test_only: partition::Additive::Absent,
         unknown: partition::Additive::Absent,
+        surface_coverage: sample_coverage(),
         summary: Some(BoundarySummary {
             total_surfaces: 0,
             total_channels: 0,
@@ -332,8 +349,30 @@ fn summary_render_shows_files() {
 fn summary_render_empty_shows_hint() {
     let resp = sample_empty_summary_response();
     let output = resp.render_human();
-    assert!(output.contains("No architectural boundaries detected"));
+    // ZEROSTATE-SCOPE-1 §2.2: the coverage form replaces the old "No architectural
+    // boundaries detected" headline; the hint stays.
+    assert!(output.contains("No boundary patterns detected."));
     assert!(output.contains("hint:"));
+}
+
+/// ZEROSTATE-SCOPE-1 §2.2: the summary zero-state adopts the coverage form (states the
+/// tool's coverage + this repo's per-repo gap) and NO LONGER blames the codebase.
+#[test]
+fn summary_render_empty_states_coverage_not_codebase_blame() {
+    let resp = sample_empty_summary_response();
+    let output = resp.render_human();
+    assert!(
+        output.contains("Boundary detection on this build covers Java Spring (@RestController/@Controller), Next.js App Router."),
+        "{output}"
+    );
+    assert!(
+        output.contains("No detector for C, C++ on this build"),
+        "{output}"
+    );
+    assert!(
+        !output.contains("in this codebase"),
+        "must not blame the codebase:\n{output}"
+    );
 }
 
 #[test]

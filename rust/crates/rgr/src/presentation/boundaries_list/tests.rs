@@ -2,6 +2,22 @@
 //! for the 500-line guardrail; see the module-layout note there).
 
 use super::*;
+use crate::presentation::surfaces::SurfaceGap;
+
+/// A representative build-static coverage payload (the shape the daemon emits) for the
+/// zero-state coverage-form tests.
+fn sample_coverage() -> SurfaceCoverage {
+    SurfaceCoverage {
+        http_detector_families: vec![
+            "Java Spring (@RestController/@Controller)".to_string(),
+            "Next.js App Router".to_string(),
+        ],
+        named_uncovered: vec!["C".to_string(), "C++".to_string()],
+        material_gap: Some(SurfaceGap::Known {
+            named_uncovered: vec!["C".to_string(), "C++".to_string()],
+        }),
+    }
+}
 
 fn sample_list_response() -> BoundariesListResponse {
     BoundariesListResponse {
@@ -50,6 +66,7 @@ fn sample_list_response() -> BoundariesListResponse {
         filter_file: None,
         filter_file_prefix: None,
         filter_symbol: None,
+        surface_coverage: sample_coverage(),
     }
 }
 
@@ -67,6 +84,7 @@ fn sample_empty_response() -> BoundariesListResponse {
         filter_file: None,
         filter_file_prefix: None,
         filter_symbol: None,
+        surface_coverage: sample_coverage(),
     }
 }
 
@@ -359,6 +377,49 @@ fn list_render_empty_shows_hint() {
     let output = resp.render_human();
     assert!(output.contains("hint:"));
     assert!(output.contains("boundaries are interactions"));
+}
+
+/// ZEROSTATE-SCOPE-1 §2.2: the zero-state adopts the coverage form (states the tool's
+/// coverage + this repo's per-repo gap) and NO LONGER blames the codebase.
+#[test]
+fn list_render_empty_states_coverage_not_codebase_blame() {
+    let resp = sample_empty_response();
+    let output = resp.render_human();
+    assert!(
+        output.contains("No boundary patterns detected."),
+        "{output}"
+    );
+    assert!(
+        output.contains("Boundary detection on this build covers Java Spring (@RestController/@Controller), Next.js App Router."),
+        "{output}"
+    );
+    // The per-repo gap names THIS repo's uncovered languages (leveldb's C/C++ shape).
+    assert!(
+        output.contains("No detector for C, C++ on this build"),
+        "{output}"
+    );
+    // The blaming line is GONE.
+    assert!(
+        !output.contains("No recognized boundary patterns found in this codebase"),
+        "must not blame the codebase:\n{output}"
+    );
+    assert!(!output.contains("in this codebase"), "{output}");
+}
+
+/// STANDING HONESTY RULE 1: a FAILED per-repo language read renders unknown-with-reason in
+/// the boundaries zero-state, never a silent omission.
+#[test]
+fn list_render_empty_gap_unknown_renders_reason() {
+    let mut resp = sample_empty_response();
+    resp.surface_coverage.material_gap = Some(SurfaceGap::Unknown {
+        reason: "db locked".to_string(),
+    });
+    let output = resp.render_human();
+    assert!(
+        output
+            .contains("could not determine this repo's uncovered frameworks/languages: db locked"),
+        "{output}"
+    );
 }
 
 #[test]

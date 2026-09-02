@@ -142,6 +142,11 @@ pub(crate) fn summary_response_json(
         // The explicit labelled HTTP callout (same union the surfaces footer prints).
         "http_surface_providers": u_providers,
         "http_surface_consumers": u_consumers,
+        // ZEROSTATE-SCOPE-1 §2.2: the SAME per-repo coverage roster as `surfaces list` /
+        // `boundaries list` (no second roster), rendered in the summary zero-state so it
+        // states the tool's coverage instead of blaming the codebase.
+        "surface_coverage":
+            crate::surface_coverage_read::surface_coverage_json(storage, snapshot_uid),
     });
     // FIXTURE-POLLUTION-1 §2.2/§2.4 (review-1 #2b, review-2 #1): each disclosure is emitted
     // ONLY when its portion is non-empty, so a repo with neither (leveldb, glamCRM's

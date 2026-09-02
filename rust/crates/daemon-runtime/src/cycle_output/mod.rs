@@ -47,8 +47,11 @@ use serde_json::{json, Value};
 
 mod composition;
 mod edges;
+mod ts_caveat;
 pub(crate) use composition::label_test_only_cycles;
 pub(crate) use edges::sqlite_module_cycles_json_with_edges;
+// ZEROSTATE-SCOPE-1 §2.3: the per-cycle-membership TS/JS caveat helpers (SQLite routes only).
+pub(crate) use ts_caveat::{any_cycle_member_is_ts_js, rendered_cycle_member_dirs};
 
 /// A module-cycle node normalized for the canonical output: the backend-native `node_id`, the SHORT display
 /// `name` (preserved for back-compat), and the QUALIFIED module path — the deterministic sort key AND the

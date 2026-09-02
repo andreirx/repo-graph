@@ -194,6 +194,11 @@ struct BoundariesSummaryResponseDto {
     /// reconciled surface has unknown test-composition.
     #[serde(default)]
     unknown_composition: Option<serde_json::Value>,
+    /// ZEROSTATE-SCOPE-1 §2.2 — the SAME per-repo coverage roster `surfaces list` renders (no
+    /// second roster), rendered in the summary zero-state so it states the tool's coverage
+    /// instead of blaming the codebase.
+    #[serde(default)]
+    surface_coverage: super::surfaces::SurfaceCoverage,
 }
 
 /// Response structure for boundaries summary command (normalized).
@@ -217,6 +222,8 @@ pub struct BoundariesSummaryResponse {
     /// composition disclosure. Unknown surfaces are NEVER subtracted from the headline; this
     /// annotates them so the headline reads as production+unknown, not confirmed production.
     pub(crate) unknown: partition::Additive<partition::UnknownComposition>,
+    /// ZEROSTATE-SCOPE-1 §2.2 — the per-repo coverage roster, rendered in the zero-state.
+    pub(crate) surface_coverage: super::surfaces::SurfaceCoverage,
 }
 
 impl BoundariesSummaryResponse {
@@ -235,6 +242,7 @@ impl BoundariesSummaryResponse {
             // `Degraded`, disclosed rather than silently zero-filled.
             test_only: partition::Additive::parse(dto.test_only_summary, "test-only"),
             unknown: partition::Additive::parse(dto.unknown_composition, "unknown-composition"),
+            surface_coverage: dto.surface_coverage,
         })
     }
 }
@@ -299,7 +307,11 @@ impl BoundariesSummaryResponse {
             && !self.test_only.has_content()
             && !self.unknown.has_content()
         {
-            out.push_str("\nNo architectural boundaries detected.\n");
+            // ZEROSTATE-SCOPE-1 §2.2: adopt the coverage form (states the tool's coverage +
+            // this repo's per-repo gap), never the codebase-blaming form. Same roster as
+            // `surfaces list` / `boundaries list`.
+            out.push_str("\nNo boundary patterns detected.\n");
+            out.push_str(&self.surface_coverage.boundaries_zero_state());
             out.push_str(
                 "\nhint: boundaries connect surfaces to resources. Without detected surfaces,\n",
             );

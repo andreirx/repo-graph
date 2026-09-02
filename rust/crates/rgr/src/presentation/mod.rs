@@ -479,6 +479,7 @@ mod http_count_coherence {
             http_degraded: None,
             test_only: Additive::Absent,
             unknown: Additive::Absent,
+            surface_coverage: Default::default(),
         };
         let summary_out = summary.render_human();
         let http_line = summary_out
@@ -506,6 +507,7 @@ mod http_count_coherence {
             filter_file: None,
             filter_file_prefix: None,
             filter_symbol: None,
+            surface_coverage: Default::default(),
         };
         let list_out = list.render_human();
         let (mut lp, mut lc) = (0usize, 0usize);

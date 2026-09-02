@@ -40,60 +40,164 @@ pub struct DegradationInfo {
     pub recommendation: String,
 }
 
-/// MODULES-IDENTITY-2 §2.2: the HTTP surface-detector coverage statement (additive).
+/// ZEROSTATE-SCOPE-1 §2.1/§2.2: the HTTP surface-detector coverage roster (additive) — the
+/// ONE source for the `surfaces list`, `boundaries list`, and `boundaries summary`
+/// zero-states (no second roster).
 ///
-/// Build-static, sourced from the ONE http_boundary detector set on the daemon side
-/// (`repo_graph_repo_index::surface_coverage`): `http_detector_families` are the HTTP
-/// surface detectors this build ships; `named_uncovered` names a materially-present
-/// framework it has NO detector for (django URLconf). The zero-state renders these so
-/// the empty answer states the TOOL's coverage instead of blaming the repo — never a
-/// totality claim (the renderer always appends "other surface kinds may exist without
-/// detectors"). See [`SurfaceCoverage::coverage_line`].
+/// `http_detector_families` is BUILD-STATIC (the detectors this build ships, from
+/// `repo_graph_repo_index::surface_coverage`). `material_gap` is PER-REPO: the daemon
+/// (`surface_coverage_read`) names only THIS repo's materially-present languages/frameworks
+/// the detectors cannot see — leveldb says its C/C++ truth, django keeps URLconf — so no
+/// repo wears another's sentence. The zero-state renders these so the empty answer states
+/// the TOOL's coverage instead of blaming the repo, never a totality claim. See
+/// [`SurfaceCoverage::coverage_line`] (surfaces) and [`SurfaceCoverage::boundaries_zero_state`]
+/// (boundaries).
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct SurfaceCoverage {
     /// Reader display names of the HTTP surface-detector families this build ships,
     /// sorted (e.g. `["AWS CDK API Gateway v2", "Java Spring …", …]`).
     #[serde(default)]
     pub http_detector_families: Vec<String>,
-    /// Known HTTP frameworks with NO detector on this build, named for a concrete
-    /// zero-state (e.g. `["Django URLconf routes"]`). Build-static, not per-repo.
+    /// LEGACY flat field (MODULES-IDENTITY-2 wire), retained for byte-additivity so consumers
+    /// that read `surface_coverage.named_uncovered` directly keep parsing (review-1 item 1). A
+    /// CURRENT daemon fills it with the PER-REPO known gap names (identical to
+    /// `material_gap.Known.named_uncovered`). The renderer consumes it ONLY as the fallback
+    /// when `material_gap` is ABSENT (a response predating this slice) — see
+    /// [`SurfaceCoverage::resolved_gap`].
     #[serde(default)]
     pub named_uncovered: Vec<String>,
+    /// The per-repo gap (this slice): which materially-present languages/frameworks of THIS
+    /// repo the detectors have no coverage for, or an unknown-with-reason when the language
+    /// read failed (STANDING HONESTY RULE 1 — never a silent empty that would read as full
+    /// coverage). `None` ONLY when the field is ABSENT (a response predating this slice —
+    /// daemon/rgr version skew); the renderer then falls back to the legacy `named_uncovered`
+    /// field rather than assuming "no gap" (review-1 item 2).
+    #[serde(default)]
+    pub material_gap: Option<SurfaceGap>,
+}
+
+/// ZEROSTATE-SCOPE-1: the per-repo gap arm — a positively-known (possibly-empty) set of
+/// uncovered names, or an unknown-with-reason when the per-language read failed. Two
+/// mutually-exclusive states, so "no gap clause" (Known empty) is never confused with
+/// "gap undetermined" (Unknown). Mirrors `resource`'s `MaterialGap` shape.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum SurfaceGap {
+    /// The per-language read succeeded. `named_uncovered` are this repo's materially-present
+    /// languages/frameworks with no detector (empty = every material language covered → the
+    /// clause is omitted).
+    Known {
+        #[serde(default)]
+        named_uncovered: Vec<String>,
+    },
+    /// The per-language read failed; the gap is unknown, with the reason preserved.
+    Unknown { reason: String },
 }
 
 impl SurfaceCoverage {
-    /// The zero-state coverage sentence (operator ruling 2026-09-01, Option A):
+    /// The effective per-repo gap the renderer reads. When `material_gap` is present (a current
+    /// daemon) it is authoritative. When it is ABSENT (a response predating this slice) we do
+    /// NOT invent a `Known { empty }` — that would render an affirmative "no gap" from an
+    /// unknown arm (the review-1 item-2 defect). Instead we consume the LEGACY flat
+    /// `named_uncovered` field exactly as the pre-slice renderer did: it was build-static and
+    /// infallible, so an empty legacy list genuinely meant "no gap", and a populated one names
+    /// the gap. This never fabricates a NEW claim — it faithfully reproduces old behavior for
+    /// old data.
+    fn resolved_gap(&self) -> SurfaceGap {
+        match &self.material_gap {
+            Some(gap) => gap.clone(),
+            None => SurfaceGap::Known {
+                named_uncovered: self.named_uncovered.clone(),
+            },
+        }
+    }
+
+    /// Whether the build-static family list is present. An EMPTY list means the response
+    /// predates the coverage report (version skew) — the callers say so rather than fabricate
+    /// a family list or reprint the old repo-blaming hint.
+    fn families_available(&self) -> bool {
+        !self.http_detector_families.is_empty()
+    }
+
+    /// The named-gap fragment for the per-repo clause: `Some(reader names)` for a positively-
+    /// known non-empty gap, `None` when every material language is covered (Known empty). The
+    /// unknown arm is handled separately by [`Self::gap_unknown_reason`]. Operates on
+    /// [`Self::resolved_gap`] so the legacy-field fallback is transparent to callers.
+    fn gap_names(&self) -> Option<Vec<String>> {
+        match self.resolved_gap() {
+            SurfaceGap::Known { named_uncovered } if !named_uncovered.is_empty() => {
+                Some(named_uncovered)
+            }
+            _ => None,
+        }
+    }
+
+    /// The read-failure reason when the per-repo gap could not be determined, else `None`.
+    fn gap_unknown_reason(&self) -> Option<String> {
+        match self.resolved_gap() {
+            SurfaceGap::Unknown { reason } => Some(reason),
+            SurfaceGap::Known { .. } => None,
+        }
+    }
+
+    /// The `surfaces list` zero-state coverage sentence:
     /// `"HTTP surface detectors on this build: <families> — no HTTP detector for <gaps>;
-    /// other surface kinds may exist without detectors."`.
-    ///
-    /// `http_detector_families` is build-static and infallible on a matching daemon; an
-    /// EMPTY list therefore means the response predates §2.2 (version skew) — we say so
-    /// rather than fabricate a family list or reprint the old repo-blaming hint. The gap
-    /// clause is dropped when `named_uncovered` is empty; the non-totality clause always
-    /// stays.
+    /// other surface kinds may exist without detectors."`. The gap clause is dropped when the
+    /// gap is empty, and renders unknown-with-reason when the per-repo read failed; the
+    /// non-totality clause always stays.
     fn coverage_line(&self) -> String {
-        if self.http_detector_families.is_empty() {
+        if !self.families_available() {
             return "HTTP surface-detector coverage is unavailable (this response predates \
                     the coverage report)."
                 .to_string();
         }
         let families = self.http_detector_families.join(", ");
-        let gap = if self.named_uncovered.is_empty() {
-            String::new()
-        } else {
-            // "no HTTP detector for …" (operator ruling 2026-09-01): the gap clause is
-            // scoped to HTTP so it never asserts django has NO surfaces at all — only
-            // that this build has no HTTP detector for its URLconf routes.
+        let gap = if let Some(names) = self.gap_names() {
+            // "no HTTP detector for …": the gap clause is scoped to HTTP so it never asserts
+            // the language has NO surfaces at all — only that this build has no HTTP detector
+            // for them.
+            format!(" — no HTTP detector for {}", names.join(", "))
+        } else if let Some(reason) = self.gap_unknown_reason() {
             format!(
-                " — no HTTP detector for {}",
-                self.named_uncovered.join(", ")
+                " — this repo's uncovered frameworks/languages could not be determined ({})",
+                reason
             )
+        } else {
+            String::new()
         };
         format!(
             "HTTP surface detectors on this build: {}{}; other surface kinds may exist \
              without detectors.",
             families, gap
         )
+    }
+
+    /// ZEROSTATE-SCOPE-1 §2.2: the `boundaries list`/`boundaries summary` zero-state, adopting
+    /// the coverage form (resource's proven shape) from this SAME roster — never the old
+    /// "…in this codebase" blame. Renders (under the caller's headline):
+    /// `"Boundary detection on this build covers <families>."` plus the per-repo gap line.
+    pub(crate) fn boundaries_zero_state(&self) -> String {
+        if !self.families_available() {
+            return "Boundary-detector coverage is unavailable (this response predates the \
+                    coverage report).\n"
+                .to_string();
+        }
+        let mut out = format!(
+            "Boundary detection on this build covers {}.\n",
+            self.http_detector_families.join(", ")
+        );
+        if let Some(names) = self.gap_names() {
+            out.push_str(&format!(
+                "No detector for {} on this build — their boundaries are not counted.\n",
+                names.join(", ")
+            ));
+        } else if let Some(reason) = self.gap_unknown_reason() {
+            out.push_str(&format!(
+                "(could not determine this repo's uncovered frameworks/languages: {})\n",
+                reason
+            ));
+        }
+        out
     }
 }
 
@@ -528,6 +632,9 @@ mod tests {
                 "Next.js App Router".to_string(),
             ],
             named_uncovered: vec!["Django URLconf routes".to_string()],
+            material_gap: Some(SurfaceGap::Known {
+                named_uncovered: vec!["Django URLconf routes".to_string()],
+            }),
         }
     }
 
@@ -739,7 +846,9 @@ mod tests {
     #[test]
     fn list_render_empty_coverage_without_named_gap_keeps_non_totality_clause() {
         let mut resp = sample_empty_list_response();
-        resp.surface_coverage.named_uncovered = vec![];
+        resp.surface_coverage.material_gap = Some(SurfaceGap::Known {
+            named_uncovered: vec![],
+        });
         let output = resp.render_human();
         assert!(
             output.contains("HTTP surface detectors on this build:"),
@@ -750,6 +859,127 @@ mod tests {
             output.contains("other surface kinds may exist without detectors"),
             "{output}"
         );
+    }
+
+    /// §2.1: leveldb's shape — a materially C/C++ repo names its OWN C/C++ truth in the gap,
+    /// NOT django's URLconf sentence. No repo wears another's.
+    #[test]
+    fn list_render_empty_gap_is_this_repos_languages_not_djangos() {
+        let mut resp = sample_empty_list_response();
+        resp.surface_coverage.material_gap = Some(SurfaceGap::Known {
+            named_uncovered: vec!["C".to_string(), "C++".to_string()],
+        });
+        let output = resp.render_human();
+        assert!(
+            output.contains("no HTTP detector for C, C++"),
+            "leveldb must say its C/C++ truth:\n{output}"
+        );
+        assert!(
+            !output.contains("Django"),
+            "leveldb must NOT wear django's sentence:\n{output}"
+        );
+    }
+
+    /// §2.1 + STANDING HONESTY RULE 1: a FAILED per-repo language read renders
+    /// unknown-with-reason, never a silent omission that would read as full coverage.
+    #[test]
+    fn list_render_empty_gap_unknown_renders_reason() {
+        let mut resp = sample_empty_list_response();
+        resp.surface_coverage.material_gap = Some(SurfaceGap::Unknown {
+            reason: "db locked".to_string(),
+        });
+        let output = resp.render_human();
+        assert!(
+            output.contains("could not be determined (db locked)"),
+            "{output}"
+        );
+        // The families line still renders; only the gap arm is unknown.
+        assert!(
+            output.contains("HTTP surface detectors on this build:"),
+            "{output}"
+        );
+    }
+
+    // -- review-1 raw-JSON wire-compatibility tests --
+    //
+    // The daemon builds the `surface_coverage` object as raw JSON (never via this struct), and
+    // cross-version consumers may too, so these parse RAW JSON (not struct literals) to pin the
+    // additive contract: the legacy flat `named_uncovered` field is still accepted, `material_gap`
+    // is authoritative when present, and an ABSENT `material_gap` never renders an affirmative
+    // "no gap" (STANDING HONESTY RULE 1 / review-1 item 2).
+
+    /// A current daemon emits BOTH the flat `named_uncovered` and the tagged `material_gap`.
+    /// `material_gap` is authoritative; the flat field is ignored when the tag is present (here
+    /// they agree, as a real daemon guarantees).
+    #[test]
+    fn coverage_wire_material_gap_present_is_authoritative() {
+        let cov: SurfaceCoverage = serde_json::from_str(
+            r#"{
+                "http_detector_families": ["Java Spring (@RestController/@Controller)"],
+                "named_uncovered": ["C", "C++"],
+                "material_gap": {"status": "known", "named_uncovered": ["C", "C++"]}
+            }"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            cov.gap_names(),
+            Some(vec!["C".to_string(), "C++".to_string()])
+        );
+        assert_eq!(cov.gap_unknown_reason(), None);
+    }
+
+    /// review-1 item 2: a response predating this slice carries the flat `named_uncovered` but
+    /// NO `material_gap`. The renderer must FALL BACK to the legacy field — never treat the
+    /// absent arm as an affirmative "no gap".
+    #[test]
+    fn coverage_wire_absent_material_gap_falls_back_to_legacy_named_uncovered() {
+        let cov: SurfaceCoverage = serde_json::from_str(
+            r#"{
+                "http_detector_families": ["Next.js App Router"],
+                "named_uncovered": ["Django URLconf routes"]
+            }"#,
+        )
+        .expect("parse");
+        // The legacy field is consumed, so the gap still renders — not silently dropped.
+        assert_eq!(
+            cov.gap_names(),
+            Some(vec!["Django URLconf routes".to_string()])
+        );
+        assert_eq!(cov.gap_unknown_reason(), None);
+    }
+
+    /// A pre-slice response with families present but an EMPTY legacy `named_uncovered` and no
+    /// `material_gap` renders no gap clause — byte-identical to the pre-slice renderer (the old
+    /// field was build-static/infallible, so empty genuinely meant "no gap"). This is NOT a new
+    /// false claim; it faithfully reproduces old behavior for old data.
+    #[test]
+    fn coverage_wire_absent_material_gap_empty_legacy_is_no_gap() {
+        let cov: SurfaceCoverage = serde_json::from_str(
+            r#"{
+                "http_detector_families": ["Next.js App Router"],
+                "named_uncovered": []
+            }"#,
+        )
+        .expect("parse");
+        assert_eq!(cov.gap_names(), None);
+        assert_eq!(cov.gap_unknown_reason(), None);
+    }
+
+    /// A current daemon's failed per-repo read: `material_gap` is `unknown`-with-reason while the
+    /// legacy flat field is empty. The tagged arm wins → unknown is preserved (never masked as
+    /// "no gap" by the empty legacy field).
+    #[test]
+    fn coverage_wire_unknown_material_gap_wins_over_empty_legacy() {
+        let cov: SurfaceCoverage = serde_json::from_str(
+            r#"{
+                "http_detector_families": ["Next.js App Router"],
+                "named_uncovered": [],
+                "material_gap": {"status": "unknown", "reason": "db locked"}
+            }"#,
+        )
+        .expect("parse");
+        assert_eq!(cov.gap_names(), None);
+        assert_eq!(cov.gap_unknown_reason(), Some("db locked".to_string()));
     }
 
     #[test]

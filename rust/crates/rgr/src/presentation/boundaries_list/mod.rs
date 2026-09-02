@@ -25,6 +25,7 @@
 use serde::Deserialize;
 
 use super::module_shared::format_count;
+use super::surfaces::SurfaceCoverage;
 
 mod group;
 
@@ -130,6 +131,12 @@ pub struct BoundariesListResponse {
     pub filter_file_prefix: Option<String>,
     #[serde(default)]
     pub filter_symbol: Option<String>,
+    /// ZEROSTATE-SCOPE-1 §2.2: the SAME per-repo coverage roster `surfaces list` renders (no
+    /// second roster). Rendered in the zero-state so boundaries states the tool's coverage
+    /// instead of blaming the codebase. Additive; a response without it deserializes to the
+    /// empty default (handled honestly by the renderer).
+    #[serde(default)]
+    pub surface_coverage: SurfaceCoverage,
 }
 
 impl BoundariesListResponse {
@@ -191,11 +198,14 @@ impl BoundariesListResponse {
         }
 
         // -- Empty case --
+        // ZEROSTATE-SCOPE-1 §2.2: the coverage form (from the SAME roster `surfaces list`
+        // uses), never the old "No recognized boundary patterns found in this codebase" blame.
         if self.results.is_empty() {
             out.push_str(
                 "\nhint: boundaries are interactions between code and external systems.\n",
             );
-            out.push_str("      No recognized boundary patterns found in this codebase.\n");
+            out.push_str("\nNo boundary patterns detected.\n");
+            out.push_str(&self.surface_coverage.boundaries_zero_state());
             return out;
         }
 

@@ -2557,11 +2557,22 @@ fn serve_cycles_sqlite(
         .collect();
     crate::cycle_output::label_test_only_cycles(&mut cycles, &files);
     let count = cycles.len();
-    // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): stored per-language file facts, ≥10% materiality
-    // gate — the SAME basis the fastpath now reads, so the caveat is route-consistent. This path already
-    // reads SQLite. The read is CLASSIFIED (it drives the caveat), so a read error PROPAGATES (standing
-    // honesty rule 1) — never a silent `false` that would be an unproven "no material TS/JS" claim.
-    let repo_has_ts_js = snapshot_has_material_ts_js(&conn, snapshot_uid)?;
+    // ZEROSTATE-SCOPE-1 §2.3: on this SQLite MODULE-cycle route the member languages ARE reachable
+    // (tracked-files `language` + `module_qualified_names`), so the type-only caveat gates on cycle
+    // MEMBERSHIP, not the repo-level ≥10% gate — repo-graph (dominant Rust, one TS `tools/rgistr`
+    // cycle below the repo share) now gets its caveat. Reuses the already-read `tracked`/`qualified`
+    // (both already CLASSIFIED reads whose errors propagated above) — no new fallible read.
+    let all_module_dirs: Vec<String> = qualified.values().cloned().collect();
+    let member_dirs = crate::cycle_output::rendered_cycle_member_dirs(&cycles);
+    let files_by_lang: Vec<(&str, Option<&str>)> = tracked
+        .iter()
+        .map(|f| (f.path.as_str(), f.language.as_deref()))
+        .collect();
+    let ts_type_only_caveat = crate::cycle_output::any_cycle_member_is_ts_js(
+        &member_dirs,
+        &all_module_dirs,
+        &files_by_lang,
+    ) && count > 0;
     Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
@@ -2570,7 +2581,7 @@ fn serve_cycles_sqlite(
         "count": count,
         "backend_used": "sqlite",
         "fallback_reason": fallback_reason.as_str(),
-        "ts_type_only_caveat": repo_has_ts_js && count > 0,
+        "ts_type_only_caveat": ts_type_only_caveat,
     }))
 }
 
@@ -4054,9 +4065,12 @@ mod tests {
             assert_eq!(sqlite["backend_used"], "sqlite");
             assert!(sqlite["count"].as_u64().unwrap() >= 1);
 
-            // The invariant: ALL routes derive the caveat from the SAME repo-level stored facts, so with a
-            // rendered cycle on every route the value is identically TRUE. A route reading a DIFFERENT basis
-            // (the review-2 `contributing_languages` divergence) would break this equality.
+            // The invariant: with a rendered cycle on every route the caveat is identically TRUE here. The
+            // LiveGraph routes derive it from the repo-level ≥10% gate; the SQLite fallback derives it from
+            // cycle MEMBERSHIP (ZEROSTATE-SCOPE-1 §2.3) — on this 100%-TypeScript fixture the two bases
+            // coincide (every cycle member IS TypeScript, and the repo is materially TypeScript), so the
+            // values still agree. A route reading a DIFFERENT basis (the review-2 `contributing_languages`
+            // divergence) would break this equality.
             for (label, v) in [
                 ("file-import", &file_import),
                 ("module-import", &module_import),

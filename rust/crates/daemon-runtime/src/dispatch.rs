@@ -2463,21 +2463,22 @@ impl ServiceDispatcher {
             .collect();
         crate::cycle_output::label_test_only_cycles(&mut canonical_cycles, &files);
         let cycle_count = canonical_cycles.len();
-        // CYCLE-HONESTY-1 (§2.4, C1 repo-level + review-2): the type-only caveat basis — stored per-language
-        // file facts under the ≥10% materiality gate, the SAME basis every other cycles route reads.
-        // CLASSIFIED read -> a genuine error propagates (never a silent false claim).
-        let ts_type_only_caveat = match crate::livegraph_feed::snapshot_has_material_ts_js(
-            &storage,
-            &snapshot.snapshot_uid,
-        ) {
-            Ok(has) => has && cycle_count > 0,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        // ZEROSTATE-SCOPE-1 §2.3: this forced `--engine sqlite` MODULE-cycle route reaches the member
+        // languages (tracked-files `language` + `module_qualified_names`), so the type-only caveat gates
+        // on cycle MEMBERSHIP, not the repo-level ≥10% gate — an any-TS-member cycle carries the caveat on
+        // a dominant-non-TS repo. Reuses `tracked_files`/`qualified` (already-CLASSIFIED reads whose errors
+        // propagated above) — no new fallible read.
+        let all_module_dirs: Vec<String> = qualified.values().cloned().collect();
+        let member_dirs = crate::cycle_output::rendered_cycle_member_dirs(&canonical_cycles);
+        let files_by_lang: Vec<(&str, Option<&str>)> = tracked_files
+            .iter()
+            .map(|f| (f.path.as_str(), f.language.as_deref()))
+            .collect();
+        let ts_type_only_caveat = crate::cycle_output::any_cycle_member_is_ts_js(
+            &member_dirs,
+            &all_module_dirs,
+            &files_by_lang,
+        ) && cycle_count > 0;
         let query_ms = query_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -7204,18 +7205,15 @@ impl ServiceDispatcher {
                 Err(reason) => (Vec::new(), Some(reason)),
             };
 
-        // MODULES-IDENTITY-2 §2.2: the HTTP surface-detector coverage statement
-        // (additive). Build-static and infallible — the shipped detector families +
-        // named gaps from the ONE http_boundary detector set (`surface_coverage`), NOT a
-        // per-repo read — so the `surfaces list` zero-state states the TOOL's coverage
-        // instead of blaming the repo ("No recognized patterns"). Emitted on every
-        // response; the presenter renders it only in the empty case.
-        let surface_coverage = serde_json::json!({
-            "http_detector_families":
-                repo_graph_repo_index::surface_coverage::http_surface_detector_families(),
-            "named_uncovered":
-                repo_graph_repo_index::surface_coverage::http_surface_named_gaps(),
-        });
+        // ZEROSTATE-SCOPE-1 §2.1: the HTTP surface-detector coverage statement (additive).
+        // The shipped detector families are build-static; the "no detector for X" clause is
+        // now PER-REPO (`surface_coverage_read`) — it names only THIS repo's materially-
+        // present languages/frameworks the HTTP surface detectors cannot see, so leveldb
+        // says its C/C++ truth and django keeps URLconf. No repo wears another's sentence.
+        // The presenter renders it only in the empty case. A failed per-language read
+        // becomes an unknown-with-reason gap arm, never a silent full-coverage claim.
+        let surface_coverage =
+            crate::surface_coverage_read::surface_coverage_json(&storage, &snapshot.snapshot_uid);
 
         let mut response = serde_json::json!({
             "command": "surfaces list",
