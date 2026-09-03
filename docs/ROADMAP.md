@@ -185,6 +185,12 @@ literal probes, all false). Proposed queue (awaiting scheduling): FIND-GREP-1 (r
 grep direction + false-sentence retirement + enclosing-symbol annotation), FIND-ANCHOR-1
 (line numbers + snippet on fact rows), FIND-ECONOMY-1 (cursor boilerplate 39–52% of
 bytes), SEED-CHUNK-1 (candidate: sub-file embedding granularity).
+SEED-CHUNK-SPIKE-1 MEASURED (2026-09-03, docs/audits/2026-09-03-seed-chunk-spike-1.md):
+chunk granularity fixes the dilution class (4/4 queries absent→top-3-or-better);
+potion-code-16M-v2 static (model2vec-rs) wins 3/4 vs nomic at equal granularity, <1min
+vs ~20min, offline; is_test demotion compounds (obsolete-files → rank 1) — facts×seeds
+is the differentiator. FACT GAP: is_test=0 for all C++ (IS-TEST-CPP-1 candidate, gtest
+structural basis). SEED-CHUNK-1 + IS-TEST-CPP-1 await human ratification.
 
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
