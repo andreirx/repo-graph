@@ -2462,23 +2462,22 @@ impl ServiceDispatcher {
             .map(|f| (f.path.as_str(), f.is_test))
             .collect();
         crate::cycle_output::label_test_only_cycles(&mut canonical_cycles, &files);
-        let cycle_count = canonical_cycles.len();
-        // ZEROSTATE-SCOPE-1 §2.3: this forced `--engine sqlite` MODULE-cycle route reaches the member
-        // languages (tracked-files `language` + `module_qualified_names`), so the type-only caveat gates
-        // on cycle MEMBERSHIP, not the repo-level ≥10% gate — an any-TS-member cycle carries the caveat on
-        // a dominant-non-TS repo. Reuses `tracked_files`/`qualified` (already-CLASSIFIED reads whose errors
-        // propagated above) — no new fallible read.
+        // TYPE-ONLY-IMPORTS-1: this forced `--engine sqlite` MODULE-cycle route reaches the stored
+        // per-module-edge `is_type_only` fact, so it attaches the PER-CYCLE type-only verdict (the precise
+        // successor of the blanket caveat) — only on TS/JS-member cycles (§5). Reuses `tracked_files`/
+        // `qualified` (already-CLASSIFIED reads whose errors propagated above) — no new fallible read.
         let all_module_dirs: Vec<String> = qualified.values().cloned().collect();
-        let member_dirs = crate::cycle_output::rendered_cycle_member_dirs(&canonical_cycles);
         let files_by_lang: Vec<(&str, Option<&str>)> = tracked_files
             .iter()
             .map(|f| (f.path.as_str(), f.language.as_deref()))
             .collect();
-        let ts_type_only_caveat = crate::cycle_output::any_cycle_member_is_ts_js(
-            &member_dirs,
-            &all_module_dirs,
+        crate::cycle_output::attach_type_only_labels(
+            &mut canonical_cycles,
+            &module_edges,
             &files_by_lang,
-        ) && cycle_count > 0;
+            &all_module_dirs,
+        );
+        let cycle_count = canonical_cycles.len();
         let query_ms = query_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -2501,7 +2500,9 @@ impl ServiceDispatcher {
                 "snapshot_uid": snapshot.snapshot_uid,
                 "cycles": canonical_cycles,
                 "count": cycle_count,
-                "ts_type_only_caveat": ts_type_only_caveat,
+                // Blanket caveat RETIRED on the SQLite route — the fact is now per-cycle (`type_only`);
+                // the renderer derives any residual hedge from those verdicts.
+                "ts_type_only_caveat": false,
             }),
         )
     }

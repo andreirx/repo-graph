@@ -90,21 +90,25 @@ fn import_cycles_emitted_with_top_3_evidence() {
                 length: 2,
                 modules: vec!["m1".into(), "m2".into()],
                 test_composition: None,
+                type_only: None,
             },
             AgentCycle {
                 length: 3,
                 modules: vec!["m3".into(), "m4".into(), "m5".into()],
                 test_composition: None,
+                type_only: None,
             },
             AgentCycle {
                 length: 2,
                 modules: vec!["m6".into(), "m7".into()],
                 test_composition: None,
+                type_only: None,
             },
             AgentCycle {
                 length: 4,
                 modules: vec!["m8".into(), "m9".into(), "m10".into(), "m11".into()],
                 test_composition: None,
+                type_only: None,
             },
         ],
     );
@@ -134,11 +138,13 @@ fn import_cycles_evidence_carries_exclusion_aware_split_when_labeled() {
                 length: 2,
                 modules: vec!["core".into(), "graph".into()],
                 test_composition: Some(CycleTestComposition::Production),
+                type_only: None,
             },
             AgentCycle {
                 length: 2,
                 modules: vec!["fixtures/a".into(), "fixtures/b".into()],
                 test_composition: Some(CycleTestComposition::TestOnly),
+                type_only: None,
             },
         ],
     );
@@ -177,6 +183,7 @@ fn import_cycles_evidence_discloses_unknown_subset_in_the_split() {
                 length: 2,
                 modules: vec!["core".into(), "graph".into()],
                 test_composition: Some(CycleTestComposition::Production),
+                type_only: None,
             },
             AgentCycle {
                 length: 2,
@@ -184,11 +191,13 @@ fn import_cycles_evidence_discloses_unknown_subset_in_the_split() {
                 test_composition: Some(CycleTestComposition::Unknown(
                     "owns no tracked file".into(),
                 )),
+                type_only: None,
             },
             AgentCycle {
                 length: 2,
                 modules: vec!["fixtures/a".into(), "fixtures/b".into()],
                 test_composition: Some(CycleTestComposition::TestOnly),
+                type_only: None,
             },
         ],
     );
@@ -226,6 +235,7 @@ fn import_cycles_split_absent_when_serving_path_did_not_label() {
             length: 2,
             modules: vec!["core".into(), "graph".into()],
             test_composition: None,
+            type_only: None,
         }],
     );
     let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();

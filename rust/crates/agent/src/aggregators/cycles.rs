@@ -73,6 +73,10 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
         .map(|c| CycleEvidence {
             length: c.length,
             modules: c.modules,
+            // TYPE-ONLY-IMPORTS-1: carry the per-cycle verdict into `orient`'s leaf. `Some` on the
+            // SQLite path (the storage adapter computed it via the shared kernel); `None` on the
+            // LiveGraph/focus paths and non-TS cycles (§5) — omitted from JSON there.
+            type_only: c.type_only,
         })
         .collect();
 
@@ -133,6 +137,10 @@ pub fn aggregate_path_cancellable<S: AgentStorageRead + ?Sized>(
         .map(|c| CycleEvidence {
             length: c.length,
             modules: c.modules,
+            // TYPE-ONLY-IMPORTS-1: carry the per-cycle verdict into `orient`'s leaf. `Some` on the
+            // SQLite path (the storage adapter computed it via the shared kernel); `None` on the
+            // LiveGraph/focus paths and non-TS cycles (§5) — omitted from JSON there.
+            type_only: c.type_only,
         })
         .collect();
 
@@ -159,6 +167,7 @@ mod tests {
             length: 2,
             modules: vec!["a".into(), "b".into()],
             test_composition: comp,
+            type_only: None,
         }
     }
 

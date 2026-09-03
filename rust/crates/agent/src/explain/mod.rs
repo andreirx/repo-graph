@@ -391,6 +391,7 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 .map(|c| CycleEvidence {
                     length: c.length,
                     modules: c.modules,
+                    type_only: c.type_only,
                 })
                 .collect();
             let (trunc, omitted) = truncate_items(&mut items, cap);
@@ -709,6 +710,7 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
             .map(|c| CycleEvidence {
                 length: c.length,
                 modules: c.modules,
+                type_only: c.type_only,
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);

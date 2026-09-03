@@ -115,6 +115,7 @@ fn explain_symbol_module_context_on_inherited_signals() {
             length: 2,
             modules: vec!["src/core".into(), "src/adapters".into()],
             test_composition: None,
+            type_only: None,
         }],
     );
 

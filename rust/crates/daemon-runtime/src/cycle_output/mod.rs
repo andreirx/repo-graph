@@ -47,11 +47,15 @@ use serde_json::{json, Value};
 
 mod composition;
 mod edges;
-mod ts_caveat;
+mod type_only;
 pub(crate) use composition::label_test_only_cycles;
 pub(crate) use edges::sqlite_module_cycles_json_with_edges;
-// ZEROSTATE-SCOPE-1 §2.3: the per-cycle-membership TS/JS caveat helpers (SQLite routes only).
-pub(crate) use ts_caveat::{any_cycle_member_is_ts_js, rendered_cycle_member_dirs};
+// TYPE-ONLY-IMPORTS-1: `attach_type_only_labels` stamps the per-cycle type-only verdict on the SQLite
+// routes via the SHARED `repo_graph_agent::classify_cycles_type_only` kernel (the §5 TS/JS membership
+// gate + the conjunctive verdict + the disposition vocabulary now live ONCE in `agent`, reachable by
+// BOTH this route and the `orient` storage-adapter route — one derivation, no per-surface drift). This
+// supersedes the former repo/membership blanket caveat (ZEROSTATE-SCOPE-1 §2.3) on the SQLite route.
+pub(crate) use type_only::attach_type_only_labels;
 
 /// A module-cycle node normalized for the canonical output: the backend-native `node_id`, the SHORT display
 /// `name` (preserved for back-compat), and the QUALIFIED module path — the deterministic sort key AND the

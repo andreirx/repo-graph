@@ -177,6 +177,7 @@ pub(crate) fn serve_cycles(
                 // ORIENT-CYCLES-DISAGREE-1: explain's focus-scoped LiveGraph cycle serve — no
                 // is_test reach (§2.3) and not the repo headline; no test-only split claimed.
                 test_composition: None,
+                type_only: None,
             })
             .collect();
         repo_graph_agent::ordering::canonicalize_cycles(&mut agent_cycles);
@@ -185,6 +186,9 @@ pub(crate) fn serve_cycles(
             .map(|c| CycleEvidence {
                 length: c.length,
                 modules: c.modules,
+                // TYPE-ONLY-IMPORTS-1: LiveGraph explain serve — the fact is not reachable here
+                // (`None`), carried through honestly (the packet forbids the warm path).
+                type_only: c.type_only,
             })
             .collect()
     };

@@ -505,6 +505,16 @@ pub struct ImportCyclesEvidence {
 pub struct CycleEvidence {
     pub length: usize,
     pub modules: Vec<String>,
+    /// TYPE-ONLY-IMPORTS-1: the per-cycle runtime-vs-type-only verdict, carried into `orient`'s
+    /// cycle leaf so BOTH surfaces that render cycle info consume the SAME route-decorated result
+    /// (the packet's route rule). Populated from [`crate::AgentCycle::type_only`] on the
+    /// SQLite-served path (via the SHARED [`crate::cycle_type_only`] kernel — the SAME verdict
+    /// `cycles` emits, so the two cannot disagree); `None` on the LiveGraph/focus paths and for
+    /// non-TS cycles (§5). Additive: `None` is omitted from JSON (byte-identical for existing
+    /// consumers). Serialized as `{ "kind": <snake_case>[, "reason": …] }`, the SAME shape the
+    /// `cycles` route emits and the renderer deserializes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_only: Option<crate::cycle_type_only::CycleTypeOnly>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -2104,6 +2114,7 @@ mod tests {
             cycles: vec![CycleEvidence {
                 length: 2,
                 modules: vec!["m1".into(), "m2".into()],
+                type_only: None,
             }],
         });
         let json = serde_json::to_value(&s).unwrap();
@@ -2117,6 +2128,42 @@ mod tests {
         // No stray "type" or "variant" fields leaked in.
         assert!(ev.get("type").is_none());
         assert!(ev.get("variant").is_none());
+    }
+
+    /// TYPE-ONLY-IMPORTS-1 (review-0 item 1): the per-cycle `type_only` verdict is carried into
+    /// `orient`'s cycle leaf JSON, in the SAME `{kind[, reason]}` shape the `cycles` route emits —
+    /// so both surfaces consume the same route-decorated result. Absent verdicts (LiveGraph/focus,
+    /// §5 non-TS) are OMITTED, byte-identical to before.
+    #[test]
+    fn orient_cycle_leaf_carries_type_only_verdict_and_omits_none() {
+        use crate::cycle_type_only::CycleTypeOnly;
+        let s = Signal::import_cycles(ImportCyclesEvidence {
+            cycle_count: 2,
+            production_count: Some(2),
+            test_only_count: Some(0),
+            unknown_count: Some(0),
+            cycles: vec![
+                CycleEvidence {
+                    length: 2,
+                    modules: vec!["a".into(), "b".into()],
+                    type_only: Some(CycleTypeOnly::TypeOnly),
+                },
+                CycleEvidence {
+                    length: 2,
+                    modules: vec!["c".into(), "d".into()],
+                    type_only: None,
+                },
+            ],
+        });
+        let json = serde_json::to_value(&s).unwrap();
+        let cycles = json["evidence"]["cycles"].as_array().unwrap();
+        // The TS type-only cycle carries the verdict in the shared shape.
+        assert_eq!(
+            cycles[0]["type_only"],
+            serde_json::json!({ "kind": "type_only" })
+        );
+        // The `None` cycle omits the field entirely (byte-stable).
+        assert!(cycles[1].get("type_only").is_none());
     }
 
     // ── Freshness tests (ACR-6) ──────────────────────────────────

@@ -31,7 +31,9 @@
 //! - [`composition`] — the FIXTURE-POLLUTION-1 §2.2 test-composition decode (`CycleComposition`).
 //! - [`tests`] — the renderer unit tests.
 //!
-//! This file owns the response DTOs, the three response renderers, and the repo-level type-only caveat footer.
+//! This file owns the response DTOs, the three response renderers, the per-cycle type-only verdict
+//! ([`CycleTypeOnly`], TYPE-ONLY-IMPORTS-1) + its narrowed Unknown footer, and the LiveGraph-route blanket
+//! type-only caveat footer (retained where the per-module-edge fact is not reachable).
 
 use repo_graph_agent::{partition_counts, CyclePartition, CycleTestComposition};
 use serde::Deserialize;
@@ -71,10 +73,12 @@ pub struct CyclesResponse {
     pub snapshot_uid: String,
     pub cycles: Vec<Cycle>,
     pub count: usize,
-    /// CYCLE-HONESTY-1 (§2.4, operator ruling C1 repo-level): the daemon set this true iff the repo's
-    /// stored language facts show material TS/JS presence AND at least one cycle renders. Import edges do
-    /// not distinguish `import type`, so a type-only import can create a cycle that vanishes at runtime;
-    /// the renderer prints ONE repo-scoped footer when true. Absent/false on non-TS repos.
+    /// CYCLE-HONESTY-1 (§2.4) — the BLANKET repo-level `import type` caveat, now ROUTE-CONDITIONAL
+    /// (TYPE-ONLY-IMPORTS-1): true ONLY on the LiveGraph serving route, which cannot reach the stored
+    /// per-module-edge `is_type_only` fact and so falls back to the coarse "some cycles may vanish at
+    /// runtime" hedge. The SQLite route sets this FALSE and instead carries the precise per-cycle
+    /// [`Cycle::type_only`] verdict (with a narrowed footer only where genuine Unknown remains). The
+    /// renderer prints the blanket footer only when this is true. Absent/false on non-TS repos.
     #[serde(default)]
     pub ts_type_only_caveat: bool,
     /// FIXTURE-POLLUTION-1 §2.3: set ONLY on the LiveGraph serving path (which lacks the
@@ -114,6 +118,27 @@ pub struct Cycle {
     /// The reader-framed reason present ONLY when `test_composition == "unknown"`.
     #[serde(default)]
     pub test_composition_unknown_reason: Option<String>,
+    /// TYPE-ONLY-IMPORTS-1: the per-cycle runtime-vs-type-only verdict, computed by the SQLite route
+    /// from the stored per-module-edge `is_type_only` fact (a cycle is type-only iff EVERY edge in its
+    /// walk is type-only). ABSENT (`None`) when the fact is not reachable on this serving route (the
+    /// LiveGraph cache route — it states the asymmetry via the blanket caveat instead) OR the cycle has
+    /// no TS/JS member (§5: other languages' import edges are runtime by definition, label absent).
+    #[serde(default)]
+    pub type_only: Option<CycleTypeOnly>,
+}
+
+/// TYPE-ONLY-IMPORTS-1: the per-cycle type-only verdict sum type (mirrors the daemon `type_only` JSON —
+/// `{kind[, reason]}`). Exhaustively matched by the renderer; no boolean+nullable.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CycleTypeOnly {
+    /// EVERY edge in the cycle's walk is a TS/JS `import type` — the whole cycle vanishes at runtime.
+    TypeOnly,
+    /// At least one edge is a confirmed runtime import — a real runtime cycle (rendered WITHOUT a label).
+    HasRuntimeEdges,
+    /// The verdict could not be computed (e.g. the snapshot was indexed before type-only tracking). The
+    /// `reason` is reader-framed; the cycle is counted into the narrowed footer, NEVER demoted to runtime.
+    Unknown { reason: String },
 }
 
 /// CYCLE-HONESTY-1 (§2.1): one REAL directed import edge inside a cycle. A 2-field DTO mirroring the daemon
@@ -222,6 +247,7 @@ impl CyclesResponse {
             if let CycleComposition::Unknown(reason) = cycle.composition() {
                 out.push_str(&format!("  [test-composition unknown: {reason}]\n"));
             }
+            push_type_only_label(&mut out, cycle);
             // CYCLE-HONESTY-1: a REAL walk over carried edges, else `members (unordered)` — never a
             // fabricated ring drawn from the (canonically-sorted, edge-less) member set.
             out.push_str(&render_cycle_body(cycle));
@@ -242,14 +268,51 @@ impl CyclesResponse {
             for (i, cycle) in fixtures.iter().enumerate() {
                 let size = cycle.nodes.len();
                 out.push_str(&format!("Test-only cycle {} ({} modules):\n", i + 1, size));
+                // TYPE-ONLY-IMPORTS-1 (review-0 item 2): a demoted test-only cycle can ALSO be
+                // type-only — a fixture cycle of pure `import type` edges vanishes at runtime just as
+                // a production one does. Label it here too, so no type-only cycle goes unlabeled
+                // regardless of which section renders it (the DoD: EACH type-only cycle labeled).
+                push_type_only_label(&mut out, cycle);
                 out.push_str(&render_cycle_body(cycle));
                 out.push('\n');
             }
         }
 
+        self.push_type_only_unknown_note(&mut out);
         self.push_ts_caveat(&mut out);
         self.push_test_composition_note(&mut out);
         out.trim_end().to_string()
+    }
+
+    /// TYPE-ONLY-IMPORTS-1: the NARROWED successor to the blanket `import type` caveat. On the SQLite
+    /// route each cycle carries a per-cycle `type_only` verdict, so the blanket hedge is RETIRED and this
+    /// footer is printed ONLY when genuine Unknown verdicts remain — naming HOW MANY, and grouped by the
+    /// CARRIED reason. When every cycle carries a computed verdict (the fresh-index case) NOTHING is
+    /// printed: an unlabeled cycle is then a confirmed runtime cycle, and a labeled one vanishes at
+    /// runtime. Absent on the LiveGraph route (no per-cycle verdicts there — the blanket
+    /// [`Self::push_ts_caveat`] states that asymmetry instead).
+    ///
+    /// Operator ruling 2026-09-03 item 2b: this renders the reason the `Unknown` sum type CARRIES, never
+    /// a hard-coded string. A cycle whose verdict is `Unknown{"cycle import edges unavailable"}` and one
+    /// whose verdict is `Unknown{"indexed before type-only tracking"}` (or `"type-only fact unreadable"`)
+    /// are DISTINCT truths and render as distinct notes — no reason invention at the render site.
+    fn push_type_only_unknown_note(&self, out: &mut String) {
+        // Group the Unknown cycles by their carried reason (BTreeMap ⇒ deterministic note order).
+        let mut by_reason: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for c in &self.cycles {
+            if let Some(CycleTypeOnly::Unknown { reason }) = &c.type_only {
+                *by_reason.entry(reason.as_str()).or_insert(0) += 1;
+            }
+        }
+        for (reason, n) in by_reason {
+            out.push_str(&format!(
+                "\nNote: {n} cycle{} could not be evaluated for `import type` ({reason}) — {} may \
+                 vanish at runtime.\n",
+                if n == 1 { "" } else { "s" },
+                if n == 1 { "it" } else { "some" },
+            ));
+        }
     }
 
     /// FIXTURE-POLLUTION-1 §2.3: print the LiveGraph-route asymmetry note when present
@@ -365,6 +428,21 @@ impl CyclesResponse {
                  `import type` — some cycles may vanish at runtime.\n",
             );
         }
+    }
+}
+
+/// TYPE-ONLY-IMPORTS-1: render the per-cycle type-only label for ONE cycle, shared by the
+/// production-listing loop AND the demoted test-only loop (review-0 item 2 — a test-only cycle can
+/// itself be type-only). The verdict is a sum type matched EXHAUSTIVELY: only `TypeOnly` gets a
+/// visible label; `HasRuntimeEdges` is a real runtime cycle (no label); `Unknown` is surfaced in the
+/// narrowed footer, not per-cycle here; `None` is the route/§5 absence (no field). A new variant
+/// deliberately breaks this match.
+fn push_type_only_label(out: &mut String, cycle: &Cycle) {
+    match &cycle.type_only {
+        Some(CycleTypeOnly::TypeOnly) => {
+            out.push_str("  type-only (vanishes at runtime)\n");
+        }
+        Some(CycleTypeOnly::HasRuntimeEdges) | Some(CycleTypeOnly::Unknown { .. }) | None => {}
     }
 }
 

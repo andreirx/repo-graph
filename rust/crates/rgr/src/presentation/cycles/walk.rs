@@ -181,6 +181,7 @@ mod tests {
             edges_truncated: None,
             test_composition: None,
             test_composition_unknown_reason: None,
+            type_only: None,
         }
     }
 
@@ -200,6 +201,7 @@ mod tests {
             edges_truncated: None,
             test_composition: None,
             test_composition_unknown_reason: None,
+            type_only: None,
         }
     }
 

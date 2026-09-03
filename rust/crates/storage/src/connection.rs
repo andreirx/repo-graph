@@ -36,7 +36,7 @@
 //!
 //! 1. `open(path)` or `open_in_memory()` → opens the SQLite
 //!    connection, applies WAL + foreign_keys pragmas via the
-//!    migration runner, applies all 31 migrations. Returns
+//!    migration runner, applies all 32 migrations. Returns
 //!    `Ok(StorageConnection)` on success.
 //!
 //! 2. The migration runner is called via
@@ -109,7 +109,7 @@ fn set_busy_timeout(conn: &Connection) -> Result<(), StorageError> {
 /// Owned, fully-initialized connection to a storage database.
 ///
 /// Construction via `open(path)` or `open_in_memory()` opens the
-/// underlying SQLite connection AND runs all 31 migrations
+/// underlying SQLite connection AND runs all 32 migrations
 /// before returning. A successfully-constructed
 /// `StorageConnection` is guaranteed to be backed by a database
 /// at the latest schema version. There is no uninitialized
@@ -459,7 +459,7 @@ mod tests {
     fn open_in_memory_returns_a_fully_initialized_connection() {
         let storage = StorageConnection::open_in_memory().expect("open_in_memory must succeed");
 
-        // Verify all 31 migrations have been applied by checking
+        // Verify all 32 migrations have been applied by checking
         // the schema_migrations table count.
         let count: i64 = storage
             .connection()
@@ -468,8 +468,8 @@ mod tests {
             })
             .expect("query schema_migrations");
         assert_eq!(
-            count, 31,
-            "open_in_memory must run all 31 migrations before returning"
+            count, 32,
+            "open_in_memory must run all 32 migrations before returning"
         );
     }
 
@@ -548,7 +548,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 31);
+        assert_eq!(count, 32);
     }
 
     #[test]
@@ -590,7 +590,7 @@ mod tests {
             "row written in first session must persist across re-open"
         );
 
-        // Verify schema_migrations still has exactly 31 rows
+        // Verify schema_migrations still has exactly 32 rows
         // (re-open did not duplicate any).
         let migration_count: i64 = storage_again
             .connection()
@@ -599,7 +599,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            migration_count, 31,
+            migration_count, 32,
             "re-open must not duplicate schema_migrations rows"
         );
     }
@@ -678,7 +678,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 31);
+        assert_eq!(count, 32);
     }
 
     // ── Connection accessor tests ─────────────────────────────
@@ -693,7 +693,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 31);
+        assert_eq!(count, 32);
     }
 
     #[test]

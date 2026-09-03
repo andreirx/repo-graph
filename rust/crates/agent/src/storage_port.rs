@@ -36,6 +36,7 @@
 //!      untouched by agent concerns.
 
 use crate::cycle_composition::CycleTestComposition;
+use crate::cycle_type_only::CycleTypeOnly;
 use crate::errors::AgentStorageError;
 use crate::package_groups::ManifestRoot;
 
@@ -123,6 +124,20 @@ pub struct AgentCycle {
     /// (only `ImportCyclesEvidence`/`CycleEvidence` reach the JSON); it is an internal carrier,
     /// not a new query method.
     pub test_composition: Option<CycleTestComposition>,
+    /// TYPE-ONLY-IMPORTS-1: the per-cycle runtime-vs-type-only verdict, computed at the SQLite
+    /// SERVING computation (`agent_cycle_labeling::label_module_cycles`) from the stored
+    /// per-module-edge `is_type_only` fact via the SHARED
+    /// [`crate::cycle_type_only::classify_cycles_type_only`] — the SAME kernel the `cycles`
+    /// command's serving computation calls, so `orient`'s cycle leaf and `cycles` cannot state a
+    /// different verdict (route-agreement DoD; ORIENT-CYCLES-DISAGREE-1 "one derivation").
+    ///
+    /// `Some` on the SQLite-served path where the fact is reachable AND the cycle has a TS/JS
+    /// member (§5); `None` where the fact is NOT reachable (the LiveGraph module-cycle serve —
+    /// the packet forbids pushing `is_type_only` into the warm path — and focus/path-scoped
+    /// reads) OR the cycle has no TS/JS member (§5: other languages' import edges are runtime by
+    /// definition, label ABSENT not Unknown). Additive; the `None` case reaches the JSON leaf as
+    /// an omitted field, byte-identical to before. NEVER classify from a `None` (RULE #2).
+    pub type_only: Option<CycleTypeOnly>,
 }
 
 // ── Dead node ────────────────────────────────────────────────────

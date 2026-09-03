@@ -21,7 +21,7 @@ use repo_graph_indexer::resolver::ResolverNode;
 use repo_graph_indexer::storage_port::{
     self as ixp, CopyForwardInput, CopyForwardResult, DeltaCopyPort, EdgeStorePort,
     ExtractionEdgeRow, FileCatalogPort, FileSignalPort, FileSignalRow, NodeStorePort,
-    PersistedUnresolvedEdge, SnapshotLifecyclePort, UnresolvedEdgePort,
+    PersistedUnresolvedEdge, SnapshotLifecyclePort, TypeOnlyDisposition, UnresolvedEdgePort,
 };
 use repo_graph_indexer::types::{SnapshotKind, SnapshotStatus};
 
@@ -572,6 +572,25 @@ impl EdgeStorePort for StorageConnection {
 
     fn delete_edges_by_uids(&mut self, edge_uids: &[String]) -> Result<(), StorageError> {
         <StorageConnection>::delete_edges_by_uids(self, edge_uids)
+    }
+
+    fn set_edge_type_only(
+        &mut self,
+        updates: &[(String, TypeOnlyDisposition)],
+    ) -> Result<(), StorageError> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let tx = self.connection_mut().transaction()?;
+        {
+            let mut stmt = tx.prepare("UPDATE edges SET is_type_only = ? WHERE edge_uid = ?")?;
+            for (edge_uid, disposition) in updates {
+                // The column stores the disposition's code (0 runtime / 1 type-only / 2 unreadable).
+                stmt.execute(rusqlite::params![disposition.to_column_code(), edge_uid])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 }
 

@@ -34,6 +34,7 @@ fn cyc(nodes: Vec<CycleNode>) -> Cycle {
         edges_truncated: None,
         test_composition: None,
         test_composition_unknown_reason: None,
+        type_only: None,
     }
 }
 
@@ -45,6 +46,19 @@ fn cyc_classified(nodes: Vec<CycleNode>, composition: &str, reason: Option<&str>
         edges_truncated: None,
         test_composition: Some(composition.to_string()),
         test_composition_unknown_reason: reason.map(str::to_string),
+        type_only: None,
+    }
+}
+
+/// TYPE-ONLY-IMPORTS-1: a cycle carrying an explicit per-cycle type-only verdict (the SQLite route).
+fn cyc_type_only(nodes: Vec<CycleNode>, verdict: super::CycleTypeOnly) -> Cycle {
+    Cycle {
+        nodes,
+        edges: None,
+        edges_truncated: None,
+        test_composition: None,
+        test_composition_unknown_reason: None,
+        type_only: Some(verdict),
     }
 }
 
@@ -442,5 +456,148 @@ fn module_import_render_states_test_composition_asymmetry_empty() {
     assert!(
         out.contains("Note: test-only cycles not evaluated on this serving path"),
         "asymmetry stated even with zero MODULE cycles:\n{out}"
+    );
+}
+
+// ── TYPE-ONLY-IMPORTS-1 (slice §4 rendering proof) ────────────────────────────
+
+#[test]
+fn type_only_cycle_is_labeled_vanishes_at_runtime() {
+    // §4(a): a purely type-only cycle carries the "type-only (vanishes at runtime)" label.
+    let mut r = minimal_response();
+    r.count = 1;
+    r.cycles = vec![cyc_type_only(
+        vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+        CycleTypeOnly::TypeOnly,
+    )];
+    let out = r.render_human();
+    assert!(
+        out.contains("type-only (vanishes at runtime)"),
+        "a pure type-only cycle must be labeled:\n{out}"
+    );
+    // §4(c): no genuine Unknown ⇒ the blanket/narrowed caveat is ABSENT.
+    assert!(
+        !out.contains("could not be evaluated"),
+        "no Unknown cycles ⇒ no narrowed caveat:\n{out}"
+    );
+    assert!(
+        !out.contains("some cycles may vanish at runtime"),
+        "the blanket caveat is retired on the SQLite route:\n{out}"
+    );
+}
+
+#[test]
+fn test_only_cycle_that_is_type_only_is_labeled_in_the_demoted_section() {
+    // review-0 item 2: a DEMOTED test-only cycle can ALSO be type-only — a fixture cycle of pure
+    // `import type` edges vanishes at runtime just as a production one does. It must carry the label
+    // in the trailing test-only section, not go unlabeled there.
+    let mut r = minimal_response();
+    r.count = 0; // headline production count is 0 (the only cycle is test-only)
+    r.cycles = vec![Cycle {
+        nodes: vec![cnode("n1", "tests/a"), cnode("n2", "tests/b")],
+        edges: None,
+        edges_truncated: None,
+        test_composition: Some("test_only".to_string()),
+        test_composition_unknown_reason: None,
+        type_only: Some(CycleTypeOnly::TypeOnly),
+    }];
+    let out = r.render_human();
+    assert!(
+        out.contains("test-only cycles ("),
+        "the demoted section renders:\n{out}"
+    );
+    assert!(
+        out.contains("type-only (vanishes at runtime)"),
+        "a type-only cycle in the demoted test-only section must STILL be labeled:\n{out}"
+    );
+}
+
+#[test]
+fn has_runtime_edges_cycle_is_not_labeled() {
+    // §4(b): a mixed cycle (≥1 runtime edge) is a real runtime cycle — NO label, no caveat.
+    let mut r = minimal_response();
+    r.count = 1;
+    r.cycles = vec![cyc_type_only(
+        vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+        CycleTypeOnly::HasRuntimeEdges,
+    )];
+    let out = r.render_human();
+    assert!(
+        !out.contains("type-only"),
+        "a runtime cycle must NOT be labeled type-only:\n{out}"
+    );
+    assert!(
+        !out.contains("could not be evaluated"),
+        "a confirmed runtime cycle raises no Unknown caveat:\n{out}"
+    );
+}
+
+#[test]
+fn unknown_cycles_narrow_the_caveat_and_name_the_count() {
+    // The blanket hedge survives ONLY as a narrowed footer naming how many cycles are Unknown.
+    let mut r = minimal_response();
+    r.count = 2;
+    r.cycles = vec![
+        cyc_type_only(
+            vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+            CycleTypeOnly::TypeOnly,
+        ),
+        cyc_type_only(
+            vec![cnode("n3", "src/c"), cnode("n4", "src/d")],
+            CycleTypeOnly::Unknown {
+                reason: "indexed before type-only tracking".to_string(),
+            },
+        ),
+    ];
+    let out = r.render_human();
+    assert!(
+        out.contains("type-only (vanishes at runtime)"),
+        "the evaluated type-only cycle is still labeled:\n{out}"
+    );
+    assert!(
+        out.contains("1 cycle could not be evaluated for `import type`"),
+        "the narrowed footer names the Unknown count:\n{out}"
+    );
+    // Operator ruling 2b: the CARRIED reason is what renders.
+    assert!(
+        out.contains("(indexed before type-only tracking)"),
+        "the footer renders the reason the verdict carries:\n{out}"
+    );
+}
+
+#[test]
+fn unknown_footer_renders_the_carried_reason_not_a_hardcoded_string() {
+    // Operator ruling 2026-09-03 item 2b: the footer must render whatever reason the `Unknown` sum type
+    // CARRIES — never a hard-coded "indexed before type-only tracking". Two cycles with DIFFERENT reasons
+    // must produce two distinct notes; a cycle whose reason is "cycle import edges unavailable" must NOT
+    // be mislabeled as pre-tracking.
+    let mut r = minimal_response();
+    r.count = 2;
+    r.cycles = vec![
+        cyc_type_only(
+            vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+            CycleTypeOnly::Unknown {
+                reason: "cycle import edges unavailable".to_string(),
+            },
+        ),
+        cyc_type_only(
+            vec![cnode("n3", "src/c"), cnode("n4", "src/d")],
+            CycleTypeOnly::Unknown {
+                reason: "type-only fact unreadable".to_string(),
+            },
+        ),
+    ];
+    let out = r.render_human();
+    assert!(
+        out.contains("(cycle import edges unavailable)"),
+        "the verdict's OWN reason renders (not a hard-coded pre-tracking string):\n{out}"
+    );
+    assert!(
+        out.contains("(type-only fact unreadable)"),
+        "the corrupt-carrier reason renders distinctly:\n{out}"
+    );
+    assert!(
+        !out.contains("indexed before type-only tracking"),
+        "no cycle carried that reason, so it must NOT appear (no reason invention):\n{out}"
     );
 }

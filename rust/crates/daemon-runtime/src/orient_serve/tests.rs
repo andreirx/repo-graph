@@ -50,6 +50,20 @@ fn canonical_cycle_shape(mut v: serde_json::Value) -> serde_json::Value {
                     ev.remove("production_count");
                     ev.remove("test_only_count");
                     ev.remove("unknown_count");
+                    // TYPE-ONLY-IMPORTS-1: the per-cycle `type_only` verdict is the SAME kind of
+                    // ROUTE-CONDITIONAL additive decoration as the split — present on the SQLite
+                    // serve (the fact is reachable), absent on the M-2 LiveGraph serve (the warm
+                    // path does not carry `is_type_only`, by ruling). It is OUTSIDE the CYCLES-B
+                    // certified shape (packet route rule), so project it off before the byte-parity
+                    // compare, exactly as the split is projected. Its route-conditionality is
+                    // asserted SEPARATELY by `cycle_leaf_type_only` below.
+                    if let Some(cycles) = ev.get_mut("cycles").and_then(|c| c.as_array_mut()) {
+                        for cyc in cycles.iter_mut() {
+                            if let Some(obj) = cyc.as_object_mut() {
+                                obj.remove("type_only");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -94,6 +108,47 @@ fn cycle_leaf_split(v: &serde_json::Value) -> CycleLeafSplit {
         CycleLeafSplit::SplitPresent
     } else {
         CycleLeafSplit::SplitAbsent
+    }
+}
+
+/// TYPE-ONLY-IMPORTS-1: the per-cycle `type_only` decoration's status on the orient IMPORT_CYCLES
+/// leaf — the ANALOGUE of [`CycleLeafSplit`] for the route-conditional type-only verdict. Non-vacuous
+/// (requires the leaf + evidence + ≥1 cycle), so a dropped leaf is `NoCycleLeaf`, never a silent
+/// "no decoration". `DecorationPresent` iff ≥1 rendered cycle carries a `type_only` field (the SQLite
+/// serve — the fact is reachable); `DecorationAbsent` iff the cycles exist but NONE carries it (the
+/// M-2 LiveGraph serve — the warm path does not carry `is_type_only`, by ruling).
+#[derive(Debug, PartialEq, Eq)]
+enum CycleLeafTypeOnly {
+    DecorationPresent,
+    DecorationAbsent,
+    NoCycleLeaf,
+}
+
+fn cycle_leaf_type_only(v: &serde_json::Value) -> CycleLeafTypeOnly {
+    let Some(signals) = v.get("signals").and_then(|s| s.as_array()) else {
+        return CycleLeafTypeOnly::NoCycleLeaf;
+    };
+    let Some(leaf) = signals.iter().find(|sig| {
+        sig.get("code")
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| c == "IMPORT_CYCLES")
+    }) else {
+        return CycleLeafTypeOnly::NoCycleLeaf;
+    };
+    let Some(cycles) = leaf
+        .get("evidence")
+        .and_then(|e| e.get("cycles"))
+        .and_then(|c| c.as_array())
+    else {
+        return CycleLeafTypeOnly::NoCycleLeaf;
+    };
+    if cycles.is_empty() {
+        return CycleLeafTypeOnly::NoCycleLeaf;
+    }
+    if cycles.iter().any(|c| c.get("type_only").is_some()) {
+        CycleLeafTypeOnly::DecorationPresent
+    } else {
+        CycleLeafTypeOnly::DecorationAbsent
     }
 }
 
@@ -1316,6 +1371,21 @@ fn m2_parity_full_serve_equals_sqlite_repo_focus() {
         cycle_leaf_split(&served_json),
         CycleLeafSplit::SplitAbsent,
         "the LiveGraph M-2 cycle serve has the leaf+evidence but omits the split (no is_test, §2.3)"
+    );
+    // TYPE-ONLY-IMPORTS-1 (review-0 item 1): the SAME route-conditionality for the per-cycle
+    // type-only verdict — present on the SQLite serve (the `is_type_only` fact is reachable),
+    // absent on the M-2 LiveGraph serve (the warm path does not carry it, by ruling). Asserted
+    // explicitly (non-vacuously) so the two orient routes' decoration asymmetry is proven, not
+    // hidden by the strip in the certified-shape compare above.
+    assert_eq!(
+        cycle_leaf_type_only(&plain_json),
+        CycleLeafTypeOnly::DecorationPresent,
+        "the SQLite orient serve carries the per-cycle type-only verdict"
+    );
+    assert_eq!(
+        cycle_leaf_type_only(&served_json),
+        CycleLeafTypeOnly::DecorationAbsent,
+        "the LiveGraph M-2 cycle serve omits the type-only verdict (no is_type_only in the warm path)"
     );
     // Not vacuous: the repo-focus answer carries the REAL module cycle (canonical SHORT names).
     let cycles = served

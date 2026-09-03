@@ -178,7 +178,8 @@ pub use storage_port::{
     GrpcClientSurfaceInput, GrpcImplContractInput, GrpcImplHintReadPort, GrpcImplHintStorePort,
     GrpcImplSurfaceInput, GrpcImplSurfaceMatch, GrpcRegistrationProofPort, GrpcServiceMappingInput,
     IndexerStoragePort, NodeStorePort, ProtoElementInput, ProtoSchemaInput, ProtoSchemaStorePort,
-    RegistrationSiteInput, SnapshotLifecyclePort, StubCreationInput, UnresolvedEdgePort,
+    RegistrationSiteInput, SnapshotLifecyclePort, StubCreationInput, TypeOnlyDisposition,
+    UnresolvedEdgePort,
 };
 pub use storage_port::{
     BoundaryInteractionLinkInput, GrpcLinkReadPort, GrpcLinkStorePort, SurfaceWithContract,

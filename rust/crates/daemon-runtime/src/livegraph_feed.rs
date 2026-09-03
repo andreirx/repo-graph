@@ -2337,6 +2337,7 @@ fn module_cycle_compare_data_cancellable(
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (cycle membership),
                 // not a served value; test-composition is not part of the equivalence.
                 test_composition: None,
+                type_only: None,
             })
             .collect();
         let mut lg_repo: Vec<AgentCycle> = lg_cycles
@@ -2349,6 +2350,7 @@ fn module_cycle_compare_data_cancellable(
                     .collect(),
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
                 test_composition: None,
+                type_only: None,
             })
             .collect();
         let mut sq_qual: Vec<AgentCycle> = sqlite_qualified
@@ -2359,6 +2361,7 @@ fn module_cycle_compare_data_cancellable(
                 modules: quals.clone(),
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
                 test_composition: None,
+                type_only: None,
             })
             .collect();
         let mut lg_qual: Vec<AgentCycle> = lg_cycles
@@ -2368,6 +2371,7 @@ fn module_cycle_compare_data_cancellable(
                 modules: members.clone(),
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
                 test_composition: None,
+                type_only: None,
             })
             .collect();
         canonicalize_cycles(&mut sq_repo);
@@ -2565,23 +2569,24 @@ fn serve_cycles_sqlite(
         .map(|f| (f.path.as_str(), f.is_test))
         .collect();
     crate::cycle_output::label_test_only_cycles(&mut cycles, &files);
-    let count = cycles.len();
-    // ZEROSTATE-SCOPE-1 §2.3: on this SQLite MODULE-cycle route the member languages ARE reachable
-    // (tracked-files `language` + `module_qualified_names`), so the type-only caveat gates on cycle
-    // MEMBERSHIP, not the repo-level ≥10% gate — repo-graph (dominant Rust, one TS `tools/rgistr`
-    // cycle below the repo share) now gets its caveat. Reuses the already-read `tracked`/`qualified`
-    // (both already CLASSIFIED reads whose errors propagated above) — no new fallible read.
+    // TYPE-ONLY-IMPORTS-1: on this SQLite MODULE-cycle route the stored per-module-edge `is_type_only`
+    // fact IS reachable, so we attach the PER-CYCLE type-only verdict (the precise successor of the
+    // blanket caveat). The verdict is attached only to TS/JS-member cycles (§5 — non-TS cycles' import
+    // edges are runtime by definition, label absent, byte-stable). Deepest-ownership TS membership reuses
+    // the already-read `tracked`/`qualified` (both already CLASSIFIED reads whose errors propagated
+    // above) — no new fallible read.
     let all_module_dirs: Vec<String> = qualified.values().cloned().collect();
-    let member_dirs = crate::cycle_output::rendered_cycle_member_dirs(&cycles);
     let files_by_lang: Vec<(&str, Option<&str>)> = tracked
         .iter()
         .map(|f| (f.path.as_str(), f.language.as_deref()))
         .collect();
-    let ts_type_only_caveat = crate::cycle_output::any_cycle_member_is_ts_js(
-        &member_dirs,
-        &all_module_dirs,
+    crate::cycle_output::attach_type_only_labels(
+        &mut cycles,
+        &module_edges,
         &files_by_lang,
-    ) && count > 0;
+        &all_module_dirs,
+    );
+    let count = cycles.len();
     Ok(json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
@@ -2590,7 +2595,10 @@ fn serve_cycles_sqlite(
         "count": count,
         "backend_used": "sqlite",
         "fallback_reason": fallback_reason.as_str(),
-        "ts_type_only_caveat": ts_type_only_caveat,
+        // The blanket repo-level caveat is RETIRED on the SQLite route (the fact is now computed
+        // per cycle); the renderer derives any residual hedge from the per-cycle `type_only` verdicts
+        // (a narrowed footer only where genuine Unknown remains).
+        "ts_type_only_caveat": false,
     }))
 }
 
@@ -4074,23 +4082,38 @@ mod tests {
             assert_eq!(sqlite["backend_used"], "sqlite");
             assert!(sqlite["count"].as_u64().unwrap() >= 1);
 
-            // The invariant: with a rendered cycle on every route the caveat is identically TRUE here. The
-            // LiveGraph routes derive it from the repo-level ≥10% gate; the SQLite fallback derives it from
-            // cycle MEMBERSHIP (ZEROSTATE-SCOPE-1 §2.3) — on this 100%-TypeScript fixture the two bases
-            // coincide (every cycle member IS TypeScript, and the repo is materially TypeScript), so the
-            // values still agree. A route reading a DIFFERENT basis (the review-2 `contributing_languages`
-            // divergence) would break this equality.
+            // TYPE-ONLY-IMPORTS-1 (route-conditional decoration): the LiveGraph routes CANNOT reach the
+            // per-module-edge `is_type_only` fact, so they retain the coarse blanket caveat (TRUE here —
+            // material TS + a rendered cycle). The SQLite route CAN reach the fact, so it RETIRES the
+            // blanket caveat (`ts_type_only_caveat == false`) and instead carries the precise PER-CYCLE
+            // `type_only` verdict. This is not a contradiction: the SQLite route is strictly more precise;
+            // a residual hedge, where genuine Unknown remains, is carried per cycle (the renderer's
+            // narrowed footer), not by the blanket bool.
             for (label, v) in [
                 ("file-import", &file_import),
                 ("module-import", &module_import),
-                ("sqlite-fallback", &sqlite),
             ] {
                 assert_eq!(
                     v["ts_type_only_caveat"].as_bool().unwrap(),
                     auto_caveat,
-                    "the {label} route must derive the SAME caveat as the LiveGraph fastpath (same stored basis)"
+                    "the {label} LiveGraph route keeps the same blanket caveat as the fastpath"
                 );
             }
+            assert!(
+                !sqlite["ts_type_only_caveat"].as_bool().unwrap(),
+                "the SQLite route RETIRES the blanket caveat in favor of the per-cycle `type_only` verdict"
+            );
+            // The per-cycle successor IS present on the SQLite route's TS cycles (the fixture's hand-built
+            // edges predate the fact, so the honest verdict here is Unknown — carried per cycle, never a
+            // silent runtime claim).
+            assert!(
+                sqlite["cycles"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|c| c.get("type_only").is_some()),
+                "the SQLite route carries the per-cycle type-only verdict (the blanket caveat's successor)"
+            );
         }
 
         /// FIXTURE-POLLUTION-1 §2.3 (review-3 finding 1): every LiveGraph cycle serving path

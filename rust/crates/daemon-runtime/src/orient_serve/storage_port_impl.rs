@@ -121,6 +121,7 @@ fn cycles_repo_shape(cycles: &[Vec<String>]) -> Vec<AgentCycle> {
             // test-only split — orient's headline then falls back to the raw total, matching
             // `cycles` on this same LiveGraph-served path.
             test_composition: None,
+            type_only: None,
         })
         .collect()
 }
@@ -152,6 +153,7 @@ fn cycles_qualified_filtered(
             // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped LiveGraph serve — no is_test reach
             // (§2.3) and not the repo headline; no test-only split claimed.
             test_composition: None,
+            type_only: None,
         })
         .collect()
 }

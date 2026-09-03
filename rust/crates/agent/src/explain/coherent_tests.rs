@@ -81,6 +81,7 @@ pub(super) fn cycles_signal() -> Signal {
         items: vec![CycleEvidence {
             length: 2,
             modules: vec!["a".to_string(), "b".to_string()],
+            type_only: None,
         }],
         items_truncated: None,
         items_omitted_count: None,

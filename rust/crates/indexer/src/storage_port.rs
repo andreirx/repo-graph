@@ -351,6 +351,55 @@ pub trait NodeStorePort {
     ) -> Result<(), Self::Error>;
 }
 
+/// TYPE-ONLY-IMPORTS-1: the `import type` disposition of an IMPORTS edge — carried through the write
+/// path and stored in the additive `edges.is_type_only` column (migration 032).
+///
+/// A SUM TYPE, not `bool` + nullable, so that a CORRUPT fact ([`Unreadable`]) is a DISTINCT state from a
+/// CONFIRMED one and from an ABSENT one — the honesty rule the review-0 defect violated: a malformed
+/// carrier must not collapse into the same "unknown" as a pre-tracking snapshot (operator ruling
+/// 2026-09-03 item 2a; a corrupt fact and a pre-migration row are different truths).
+///
+/// ABSENCE of the fact entirely (a snapshot indexed before type-only tracking, or a module edge whose
+/// conjunctive aggregate could not be confirmed) is represented by `Option::None` around this enum / SQL
+/// `NULL` — NOT a variant here (Option is the one representation of absence).
+///
+/// [`Unreadable`]: TypeOnlyDisposition::Unreadable
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeOnlyDisposition {
+    /// A TS/JS `import type` / `export type … from` — the edge VANISHES at runtime. Column code `1`.
+    TypeOnly,
+    /// A confirmed runtime import edge (every non-TS/JS import is runtime by definition). Column code `0`.
+    Runtime,
+    /// The carrier was PRESENT but UNREADABLE — `metadata_json` did not parse as JSON, or its
+    /// `isTypeOnly` value was not a boolean. A corrupt fact, DISTINCT from an absent one (`None`).
+    /// Column code `2`. Rendered as its own Unknown reason, never demoted to `Runtime`.
+    Unreadable,
+}
+
+impl TypeOnlyDisposition {
+    /// The `edges.is_type_only` column code for this disposition (migration 032 value domain).
+    pub fn to_column_code(self) -> i64 {
+        match self {
+            TypeOnlyDisposition::Runtime => 0,
+            TypeOnlyDisposition::TypeOnly => 1,
+            TypeOnlyDisposition::Unreadable => 2,
+        }
+    }
+
+    /// Decode a stored `edges.is_type_only` column value into a disposition. `None` (SQL `NULL`) ⇒ the
+    /// fact is ABSENT (not measured) ⇒ returns `None`. `0`/`1`/`2` map to the variants. Any UNEXPECTED
+    /// non-null code ⇒ [`Unreadable`](TypeOnlyDisposition::Unreadable): a corrupt stored value is itself a
+    /// corrupt fact — never silently demoted to a measured disposition.
+    pub fn from_column_code(code: Option<i64>) -> Option<TypeOnlyDisposition> {
+        match code {
+            None => None,
+            Some(0) => Some(TypeOnlyDisposition::Runtime),
+            Some(1) => Some(TypeOnlyDisposition::TypeOnly),
+            _ => Some(TypeOnlyDisposition::Unreadable),
+        }
+    }
+}
+
 /// Resolved edge persistence operations.
 pub trait EdgeStorePort {
     type Error: std::fmt::Debug + std::fmt::Display;
@@ -374,6 +423,27 @@ pub trait EdgeStorePort {
 
     /// Delete resolved edges by their UIDs.
     fn delete_edges_by_uids(&mut self, edge_uids: &[String]) -> Result<(), Self::Error>;
+
+    /// TYPE-ONLY-IMPORTS-1: set the `is_type_only` disposition on already-inserted resolved edges,
+    /// keyed by `edge_uid`. Each `(edge_uid, disposition)` sets that edge's column to the disposition's
+    /// code (`0` runtime / `1` type-only / `2` unreadable — see [`TypeOnlyDisposition`]).
+    ///
+    /// Abstraction one-liner (operator-ratified 2026-09-03, item 1) — WHAT: a targeted post-insert UPDATE
+    /// of the additive `edges.is_type_only` column. CONCRETE CURRENT USER: `create_module_edges` (the
+    /// orchestrator), immediately after inserting the derived MODULE→MODULE IMPORTS edges, to stamp each
+    /// with the conjunctive type-only aggregate. AXIS: per-edge-kind facts stamped post-aggregation.
+    /// REJECTED SIMPLER: a `type_only` field on the universal `GraphEdge`/`ResolvedEdge` DTO — the fact is
+    /// valid only for MODULE→MODULE IMPORTS edges, so a universal field would be `None`-invalid for every
+    /// other edge kind (a defect-shaped type), plus ~40 mechanical construction-site edits with no
+    /// semantic content; a keyed UPDATE confines the change to the one writer and the one edge kind.
+    ///
+    /// Edges left out of `updates` keep their existing value (`NULL` = unknown for a fresh row), which is
+    /// the correct representation for a module edge whose aggregate could not be confirmed and for every
+    /// non-IMPORTS / file-level edge. Empty input is a no-op.
+    fn set_edge_type_only(
+        &mut self,
+        updates: &[(String, TypeOnlyDisposition)],
+    ) -> Result<(), Self::Error>;
 }
 
 /// Classified unresolved edge persistence.

@@ -1765,6 +1765,7 @@ fn seam_cycles_response(
                 edges_truncated: None,
                 test_composition: Some(disc.to_string()),
                 test_composition_unknown_reason: reason,
+                type_only: None,
             }
         })
         .collect::<Vec<_>>();

@@ -43,7 +43,7 @@ use crate::routing::{self, detect_language, is_test_file, MAX_FILE_SIZE_BYTES};
 use crate::storage_port::{
     CreateSnapshotInput, ExtractionEdgeRow, FileSignalRow, FileVersion, IndexerStoragePort,
     PersistedUnresolvedEdge, ResolvedCallFilePair, SymbolCallDegree, TrackedFile,
-    UpdateSnapshotStatusInput,
+    TypeOnlyDisposition, UpdateSnapshotStatusInput,
 };
 use crate::types::{
     ContractIndexResult, ContractParseFailure, EdgeType, ExtractedNode, IndexOptions, IndexResult,
@@ -623,7 +623,44 @@ fn run_pipeline<S: IndexerStoragePort>(
         // RS-MS-3c-prereq: Accumulate metrics from this file's extraction.
         all_metrics.extend(result.metrics);
 
+        // TYPE-ONLY-IMPORTS-1: correlate each IMPORTS edge with the parallel `ImportObservation`
+        // (emitted from the SAME AST node with the SAME location) so the extractor's existing
+        // `is_type_only` fact rides into `extraction_edges.metadata_json` — the persisted carrier that
+        // survives copy-forward for free and is re-read in the resolve loop. Built ONCE per file result.
+        let import_type_only_by_location: HashMap<(i64, i64), bool> = result
+            .import_observations
+            .iter()
+            .filter_map(|o| {
+                o.location
+                    .map(|l| ((l.line_start, l.col_start), o.is_type_only))
+            })
+            .collect();
+        // A file whose extractor emits import observations is a TS/JS file (only ts-extractor does);
+        // any IMPORTS edge from a file with NO observations is a non-TS/JS import — runtime by
+        // definition (slice §5), stamped `false`, never left unknown.
+        let file_emits_import_observations = !result.import_observations.is_empty();
+
         for edge in &result.edges {
+            let metadata_json = if edge.edge_type == EdgeType::Imports {
+                let type_only = if file_emits_import_observations {
+                    // A matched observation gives the fact; an unmatched TS IMPORTS edge (should not
+                    // occur — edge + observation share a location) stays UNKNOWN (no key injected),
+                    // never silently `false`.
+                    edge.location
+                        .and_then(|l| {
+                            import_type_only_by_location.get(&(l.line_start, l.col_start))
+                        })
+                        .copied()
+                } else {
+                    Some(false)
+                };
+                match type_only {
+                    Some(b) => inject_import_type_only(&edge.metadata_json, b),
+                    None => edge.metadata_json.clone(),
+                }
+            } else {
+                edge.metadata_json.clone()
+            };
             all_extraction_edges.push(ExtractionEdgeRow {
                 edge_uid: edge.edge_uid.clone(),
                 snapshot_uid: edge.snapshot_uid.clone(),
@@ -637,7 +674,7 @@ fn run_pipeline<S: IndexerStoragePort>(
                 col_start: edge.location.map(|l| l.col_start),
                 line_end: edge.location.map(|l| l.line_end),
                 col_end: edge.location.map(|l| l.col_end),
-                metadata_json: edge.metadata_json.clone(),
+                metadata_json,
                 source_file_uid: Some(file_uid.clone()),
             });
         }
@@ -903,7 +940,10 @@ fn run_pipeline<S: IndexerStoragePort>(
         .collect();
     let mut unresolved_count: u64 = 0;
     let mut unresolved_breakdown: BTreeMap<String, u64> = BTreeMap::new();
-    let mut all_resolved_import_pairs: Vec<(String, String)> = Vec::new();
+    // TYPE-ONLY-IMPORTS-1: (src_file_uid, tgt_file_uid, disposition) — the third element carries the
+    // per-file-import `import type` disposition for the conjunctive module-edge aggregate.
+    let mut all_resolved_import_pairs: Vec<(String, String, Option<TypeOnlyDisposition>)> =
+        Vec::new();
     let mut cursor: Option<String> = None;
     let classification_observed_at = now_iso.clone();
 
@@ -1040,11 +1080,16 @@ fn run_pipeline<S: IndexerStoragePort>(
     }
 
     // ── Phase 4: Module edges ────────────────────────────────
-    let module_edges = create_module_edges(&index, &all_resolved_import_pairs, snap_uid, repo_uid);
+    let (module_edges, module_type_only_updates) =
+        create_module_edges(&index, &all_resolved_import_pairs, snap_uid, repo_uid);
     let module_edges_count = module_edges.len() as u64;
     if !module_edges.is_empty() {
         let store_start = std::time::Instant::now();
         storage.insert_resolved_edges(&module_edges)?;
+        // TYPE-ONLY-IMPORTS-1: stamp the conjunctive type-only aggregate onto the just-inserted
+        // MODULE→MODULE IMPORTS edges (module edges are rebuilt every snapshot, so this is written
+        // fresh each run; unknown aggregates are omitted and left NULL by the migration default).
+        storage.set_edge_type_only(&module_type_only_updates)?;
         timings.store_ms += store_start.elapsed().as_millis() as u64;
     }
 
@@ -1211,15 +1256,70 @@ fn create_module_nodes(
 
 // ── Module edge creation ─────────────────────────────────────────
 
+/// TYPE-ONLY-IMPORTS-1: inject the `isTypeOnly` disposition into an IMPORTS edge's `metadata_json`.
+/// Preserves the extractor's existing keys (`rawPath`/`resolvedPath`) and ADDS the boolean. If the
+/// existing metadata is absent or not a JSON object (a malformed producer output — not expected), a
+/// fresh object carrying only `isTypeOnly` is emitted rather than dropping the fact.
+fn inject_import_type_only(metadata_json: &Option<String>, is_type_only: bool) -> Option<String> {
+    let mut obj = metadata_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    obj.insert(
+        "isTypeOnly".to_string(),
+        serde_json::Value::Bool(is_type_only),
+    );
+    Some(serde_json::Value::Object(obj).to_string())
+}
+
+/// TYPE-ONLY-IMPORTS-1: the conjunctive aggregate for a MODULE→MODULE IMPORTS edge over its contributing
+/// file-level import dispositions. A module edge is type-only iff EVERY contributing import is type-only.
+/// The precedence encodes "runtime dominates; a corrupt fact is louder than an absent one":
+///   - any `Some(Runtime)` present ⇒ `Some(Runtime)` — a confirmed runtime coupling (dominates all),
+///   - else any `Some(Unreadable)` present ⇒ `Some(Unreadable)` — a corrupt contributor blocks a
+///     type-only verdict AND is a distinct truth from an absent one (surfaces its own Unknown reason),
+///   - else any `None` present ⇒ `None` — an absent contributor (can't confirm ALL type-only ⇒ unknown,
+///     left NULL in the store: "indexed before type-only tracking"),
+///   - else (all `Some(TypeOnly)`) ⇒ `Some(TypeOnly)`.
+///
+/// The per-file-specific parse error cannot survive the aggregate + the NULL/int column; `Unreadable`
+/// carries the CATEGORY (corrupt) forward, which the serve renders as its own Unknown reason.
+fn aggregate_module_edge_type_only(
+    contributors: &[Option<TypeOnlyDisposition>],
+) -> Option<TypeOnlyDisposition> {
+    use TypeOnlyDisposition::*;
+    if contributors.is_empty() {
+        // No contributor ⇒ cannot confirm "all type-only" ⇒ unknown (left NULL). Not reachable from
+        // `create_module_edges` (a pair exists only because ≥1 file import fed it), but correct here.
+        None
+    } else if contributors.contains(&Some(Runtime)) {
+        Some(Runtime)
+    } else if contributors.contains(&Some(Unreadable)) {
+        Some(Unreadable)
+    } else if contributors.contains(&None) {
+        None
+    } else {
+        Some(TypeOnly)
+    }
+}
+
+/// Derive the MODULE-level edges. Returns the edges AND — for TYPE-ONLY-IMPORTS-1 — the
+/// `(edge_uid, disposition)` stamps for the MODULE→MODULE IMPORTS edges whose conjunctive aggregate is
+/// KNOWN (`Some`); an unknown (absent) aggregate is omitted so the stored column stays `NULL` (unknown).
 fn create_module_edges(
     index: &ResolverIndex,
-    resolved_import_pairs: &[(String, String)],
+    resolved_import_pairs: &[(String, String, Option<TypeOnlyDisposition>)],
     snapshot_uid: &str,
     repo_uid: &str,
-) -> Vec<crate::resolver::ResolvedEdge> {
+) -> (
+    Vec<crate::resolver::ResolvedEdge>,
+    Vec<(String, TypeOnlyDisposition)>,
+) {
     use crate::resolver::ResolvedEdge;
 
     let mut edges = Vec::new();
+    let mut type_only_updates = Vec::new();
 
     // OWNS edges: MODULE → FILE.
     for (file_node_uid, module_key) in &index.file_to_module {
@@ -1239,10 +1339,16 @@ fn create_module_edges(
         }
     }
 
-    // MODULE→MODULE IMPORTS: derived from file-level IMPORTS.
-    let mut seen_pairs: std::collections::HashSet<(String, String)> =
-        std::collections::HashSet::new();
-    for (src_uid, tgt_uid) in resolved_import_pairs {
+    // MODULE→MODULE IMPORTS: derived from file-level IMPORTS. TYPE-ONLY-IMPORTS-1: gather EVERY
+    // contributing file import's disposition per module pair FIRST (a pair can be fed by many file
+    // imports), then aggregate conjunctively — the module edge is type-only iff ALL contributing
+    // imports are type-only.
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut contributors: std::collections::HashMap<
+        (String, String),
+        Vec<Option<TypeOnlyDisposition>>,
+    > = std::collections::HashMap::new();
+    for (src_uid, tgt_uid, is_type_only) in resolved_import_pairs {
         let src_mod = index.file_to_module.get(src_uid);
         let tgt_mod = index.file_to_module.get(tgt_uid);
         if let (Some(src_key), Some(tgt_key)) = (src_mod, tgt_mod) {
@@ -1250,29 +1356,44 @@ fn create_module_edges(
                 continue;
             }
             let pair = (src_key.clone(), tgt_key.clone());
-            if !seen_pairs.insert(pair) {
-                continue;
+            contributors
+                .entry(pair.clone())
+                .or_insert_with(|| {
+                    order.push(pair);
+                    Vec::new()
+                })
+                .push(*is_type_only);
+        }
+    }
+    // `order` preserves first-seen pair order (matches the prior `seen_pairs` dedup order).
+    for (src_key, tgt_key) in &order {
+        let src_mod_uid = index.stable_key_to_uid.get(src_key);
+        let tgt_mod_uid = index.stable_key_to_uid.get(tgt_key);
+        if let (Some(su), Some(tu)) = (src_mod_uid, tgt_mod_uid) {
+            let edge_uid = uuid::Uuid::new_v4().to_string();
+            let aggregate = contributors
+                .get(&(src_key.clone(), tgt_key.clone()))
+                .map(|c| aggregate_module_edge_type_only(c))
+                .unwrap_or(None);
+            if let Some(b) = aggregate {
+                type_only_updates.push((edge_uid.clone(), b));
             }
-            let src_mod_uid = index.stable_key_to_uid.get(src_key);
-            let tgt_mod_uid = index.stable_key_to_uid.get(tgt_key);
-            if let (Some(su), Some(tu)) = (src_mod_uid, tgt_mod_uid) {
-                edges.push(ResolvedEdge {
-                    edge_uid: uuid::Uuid::new_v4().to_string(),
-                    snapshot_uid: snapshot_uid.into(),
-                    repo_uid: repo_uid.into(),
-                    source_node_uid: su.clone(),
-                    target_node_uid: tu.clone(),
-                    edge_type: EdgeType::Imports,
-                    resolution: Resolution::Static,
-                    extractor: INDEXER_VERSION.into(),
-                    location: None,
-                    metadata_json: None,
-                });
-            }
+            edges.push(ResolvedEdge {
+                edge_uid,
+                snapshot_uid: snapshot_uid.into(),
+                repo_uid: repo_uid.into(),
+                source_node_uid: su.clone(),
+                target_node_uid: tu.clone(),
+                edge_type: EdgeType::Imports,
+                resolution: Resolution::Static,
+                extractor: INDEXER_VERSION.into(),
+                location: None,
+                metadata_json: None,
+            });
         }
     }
 
-    edges
+    (edges, type_only_updates)
 }
 
 // ── Helper functions ─────────────────────────────────────────────
@@ -1998,6 +2119,63 @@ mod tests {
     use crate::storage_port::*;
     use crate::types::*;
 
+    // ── TYPE-ONLY-IMPORTS-1 write-path transforms ────────────
+
+    #[test]
+    fn aggregate_is_conjunctive_runtime_dominates_then_unreadable_then_absent() {
+        use TypeOnlyDisposition::*;
+        // A module edge is type-only iff EVERY contributing file import is type-only.
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(TypeOnly), Some(TypeOnly)]),
+            Some(TypeOnly)
+        );
+        // Any confirmed runtime import ⇒ runtime (dominates all others, incl. unreadable + absent).
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(TypeOnly), Some(Runtime)]),
+            Some(Runtime)
+        );
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(Runtime), None]),
+            Some(Runtime)
+        );
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(Runtime), Some(Unreadable)]),
+            Some(Runtime)
+        );
+        // A corrupt (unreadable) contributor with no runtime ⇒ Unreadable — DISTINCT from absent
+        // (operator ruling 2a: a corrupt fact and a pre-migration row are different truths), and it
+        // dominates a merely-absent contributor.
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(TypeOnly), Some(Unreadable)]),
+            Some(Unreadable)
+        );
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(Unreadable), None]),
+            Some(Unreadable)
+        );
+        // An absent contributor (no runtime, no corruption) blocks a type-only verdict ⇒ absent (NULL).
+        assert_eq!(
+            aggregate_module_edge_type_only(&[Some(TypeOnly), None]),
+            None
+        );
+        // No contributors ⇒ unknown/absent.
+        assert_eq!(aggregate_module_edge_type_only(&[]), None);
+    }
+
+    #[test]
+    fn inject_type_only_preserves_existing_metadata_keys() {
+        let existing = Some(r#"{"rawPath":"./a","resolvedPath":"src/a"}"#.to_string());
+        let out = inject_import_type_only(&existing, true).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["rawPath"], "./a");
+        assert_eq!(v["resolvedPath"], "src/a");
+        assert_eq!(v["isTypeOnly"], true);
+        // A `false` disposition (runtime import) round-trips too.
+        let out2 = inject_import_type_only(&None, false).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(v2["isTypeOnly"], false);
+    }
+
     // ── Mock storage ─────────────────────────────────────────
 
     /// INDEX-BASIS-1 (RULING 4): a finalize-phase storage write, captured in call order so
@@ -2042,6 +2220,10 @@ mod tests {
         /// and the `Ready` flip) so a test can assert the crash-safe ordering — the basis
         /// record is persisted BEFORE the snapshot becomes servable.
         finalize_log: Vec<FinalizeWrite>,
+        /// TYPE-ONLY-IMPORTS-1: the `(edge_uid, is_type_only)` stamps the pipeline SUPPLIED via
+        /// `set_edge_type_only` — recorded verbatim so a test can assert the conjunctive module-edge
+        /// aggregate reaches storage.
+        edge_type_only_updates: Vec<(String, TypeOnlyDisposition)>,
     }
 
     impl SnapshotLifecyclePort for MockStorage {
@@ -2240,6 +2422,13 @@ mod tests {
             Ok(filtered.into_iter().take(limit).cloned().collect())
         }
         fn delete_edges_by_uids(&mut self, _: &[String]) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_edge_type_only(
+            &mut self,
+            updates: &[(String, TypeOnlyDisposition)],
+        ) -> Result<(), String> {
+            self.edge_type_only_updates.extend(updates.iter().cloned());
             Ok(())
         }
     }
@@ -3365,6 +3554,12 @@ mod tests {
             }
             fn delete_edges_by_uids(&mut self, u: &[String]) -> Result<(), String> {
                 self.inner.delete_edges_by_uids(u)
+            }
+            fn set_edge_type_only(
+                &mut self,
+                u: &[(String, TypeOnlyDisposition)],
+            ) -> Result<(), String> {
+                self.inner.set_edge_type_only(u)
             }
         }
         impl UnresolvedEdgePort for FailOnInsertNodes {

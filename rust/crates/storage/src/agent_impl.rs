@@ -872,6 +872,7 @@ impl AgentStorageRead for StorageConnection {
                         // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
                         // headline this slice unifies — no test-only split is claimed here.
                         test_composition: None,
+                        type_only: None,
                     })
                 } else {
                     None
@@ -934,6 +935,7 @@ impl AgentStorageRead for StorageConnection {
                     // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
                     // headline this slice unifies — no test-only split is claimed here.
                     test_composition: None,
+                    type_only: None,
                 });
             }
         }
@@ -1171,6 +1173,7 @@ impl AgentStorageRead for StorageConnection {
                         // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
                         // headline this slice unifies — no test-only split is claimed here.
                         test_composition: None,
+                        type_only: None,
                     })
                 } else {
                     None
@@ -1228,6 +1231,7 @@ impl AgentStorageRead for StorageConnection {
                     // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped cycles are not the repo
                     // headline this slice unifies — no test-only split is claimed here.
                     test_composition: None,
+                    type_only: None,
                 });
             }
         }

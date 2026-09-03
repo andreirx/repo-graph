@@ -324,6 +324,9 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
         .map(|c| CycleEvidence {
             length: c.length,
             modules: c.modules,
+            // TYPE-ONLY-IMPORTS-1: `None` on this symbol/focus-scoped path (the storage adapter
+            // does not label it) — carried through so a future labeling flows without a new field.
+            type_only: c.type_only,
         })
         .collect();
 

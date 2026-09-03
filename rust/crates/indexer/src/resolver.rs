@@ -24,6 +24,7 @@ use repo_graph_classification::types::{
 };
 
 use crate::include_resolver::{IncludeResolutionMap, ResolutionStatus};
+use crate::storage_port::TypeOnlyDisposition;
 use crate::types::{EdgeType, ExtractedEdge, Resolution};
 
 // ── Resolution outcome ───────────────────────────────────────────
@@ -109,17 +110,60 @@ pub struct CategorizedUnresolvedEdge {
 pub struct ResolutionResult {
     pub resolved: Vec<ResolvedEdge>,
     pub still_unresolved: Vec<CategorizedUnresolvedEdge>,
-    /// (source_node_uid, target_node_uid) pairs for resolved
-    /// IMPORTS edges. Used by the orchestrator to derive
-    /// MODULE → MODULE import edges.
-    pub resolved_import_pairs: Vec<(String, String)>,
+    /// TYPE-ONLY-IMPORTS-1: `(source_node_uid, target_node_uid, disposition)` triples for resolved
+    /// IMPORTS edges. Used by the orchestrator to derive MODULE → MODULE import edges AND to compute
+    /// the conjunctive per-module-edge type-only aggregate. `disposition` is the per-file-import
+    /// disposition read back from the edge's `metadata_json` (`isTypeOnly`, injected at extraction from
+    /// the parallel `ImportObservation`): `Some(TypeOnly)` = a TS/JS `import type` that vanishes at
+    /// runtime; `Some(Runtime)` = a runtime import; `Some(Unreadable)` = the carrier was present but
+    /// CORRUPT (distinct from absent); `None` = the fact was not present on the edge (a snapshot indexed
+    /// before type-only tracking) — every non-`Runtime` case is carried through honestly, never demoted
+    /// to runtime.
+    pub resolved_import_pairs: Vec<(String, String, Option<TypeOnlyDisposition>)>,
 }
 
 // ── Subtypes that are type-only (not value-space) ────────────────
 
 /// Mirror of `TYPE_ONLY_SUBTYPES` from `repo-indexer.ts:3028`.
+///
+/// NOTE: this concerns SYMBOL SUBTYPES (type aliases / interfaces are not value-space), a DIFFERENT
+/// concept from an import statement's `import type` disposition ([`import_edge_type_only`] below).
 fn is_type_only_subtype(subtype: Option<&str>) -> bool {
     matches!(subtype, Some("TYPE_ALIAS") | Some("INTERFACE"))
+}
+
+/// TYPE-ONLY-IMPORTS-1: the `import type` disposition of a resolved IMPORTS edge, read from the
+/// `isTypeOnly` key its `metadata_json` carries. The key is injected at extraction
+/// (`orchestrator::inject_import_type_only`) from the parallel `ImportObservation` — the extractor fact
+/// at `ts-extractor:1350` is the single source; this is PLUMBING, not new extraction.
+///
+/// `Some(TypeOnly)` = a TS/JS `import type` / `export type … from` (vanishes at runtime);
+/// `Some(Runtime)` = a runtime import (every non-TS/JS import is runtime by definition, stamped at
+/// injection). `None` = the key is ABSENT (no `metadata_json`, or valid JSON without the key — a snapshot
+/// indexed before type-only tracking, copied forward without the fact) — unknown.
+///
+/// `Some(Unreadable)` = the carrier was PRESENT but could not be read: `metadata_json` did not parse as
+/// JSON, or its `isTypeOnly` value was not a boolean. This is a DISTINCT truth from an absent fact
+/// (operator ruling 2026-09-03 item 2a — a corrupt fact and a pre-migration row are different truths);
+/// the prior `.ok()?` collapsed it into the same `None` as absent, which STANDING HONESTY RULE 1 forbids
+/// (never swallow a fallible read whose result is classified). Every non-`Runtime` case is carried
+/// through as its own state, NEVER demoted to runtime (STANDING HONESTY RULE 2).
+fn import_edge_type_only(edge: &ExtractedEdge) -> Option<TypeOnlyDisposition> {
+    // No carrier at all ⇒ the fact is ABSENT (not present, not corrupt).
+    let raw = edge.metadata_json.as_deref()?;
+    // A carrier that does not parse is CORRUPT, distinct from absent — NOT silently swallowed.
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return Some(TypeOnlyDisposition::Unreadable),
+    };
+    match value.get("isTypeOnly") {
+        // Valid JSON without the key ⇒ the fact was never stamped ⇒ ABSENT (indexed before tracking).
+        None => None,
+        Some(serde_json::Value::Bool(true)) => Some(TypeOnlyDisposition::TypeOnly),
+        Some(serde_json::Value::Bool(false)) => Some(TypeOnlyDisposition::Runtime),
+        // Key present but not a boolean ⇒ a CORRUPT value, distinct from absent.
+        Some(_) => Some(TypeOnlyDisposition::Unreadable),
+    }
 }
 
 // ── Resolution entry point ───────────────────────────────────────
@@ -147,7 +191,11 @@ pub fn resolve_edges(
         match resolution_outcome {
             TargetResolution::Resolved(uid) => {
                 if edge.edge_type == EdgeType::Imports {
-                    resolved_import_pairs.push((edge.source_node_uid.clone(), uid.clone()));
+                    resolved_import_pairs.push((
+                        edge.source_node_uid.clone(),
+                        uid.clone(),
+                        import_edge_type_only(edge),
+                    ));
                 }
                 resolved.push(ResolvedEdge {
                     edge_uid: edge.edge_uid.clone(),
@@ -846,6 +894,40 @@ mod tests {
             location: None,
             metadata_json: None,
         }
+    }
+
+    // ── import_edge_type_only (TYPE-ONLY-IMPORTS-1) ──────────
+
+    #[test]
+    fn import_type_only_reads_injected_metadata() {
+        use TypeOnlyDisposition::*;
+        let mut e = make_edge("e1", "r1:src/a:FILE", EdgeType::Imports);
+        // A type-only import (the `isTypeOnly` key injected at extraction).
+        e.metadata_json = Some(r#"{"resolvedPath":"src/a","isTypeOnly":true}"#.into());
+        assert_eq!(import_edge_type_only(&e), Some(TypeOnly));
+        // A runtime import.
+        e.metadata_json = Some(r#"{"resolvedPath":"src/a","isTypeOnly":false}"#.into());
+        assert_eq!(import_edge_type_only(&e), Some(Runtime));
+        // Absent key (valid JSON, no `isTypeOnly`) ⇒ ABSENT (indexed before tracking), NOT runtime.
+        e.metadata_json = Some(r#"{"resolvedPath":"src/a"}"#.into());
+        assert_eq!(import_edge_type_only(&e), None);
+        // No metadata at all ⇒ ABSENT.
+        e.metadata_json = None;
+        assert_eq!(import_edge_type_only(&e), None);
+    }
+
+    #[test]
+    fn import_type_only_malformed_carrier_is_unreadable_not_absent() {
+        // Operator ruling 2026-09-03 item 2a: a CORRUPT carrier is its own truth, DISTINCT from an
+        // absent one — the prior `.ok()?` collapsed both into the same `None` (honesty rule 1 breach).
+        use TypeOnlyDisposition::*;
+        let mut e = make_edge("e1", "r1:src/a:FILE", EdgeType::Imports);
+        // Present but unparseable JSON ⇒ Unreadable, NOT None (absent).
+        e.metadata_json = Some("not json".into());
+        assert_eq!(import_edge_type_only(&e), Some(Unreadable));
+        // Present, valid JSON, but `isTypeOnly` is the wrong type ⇒ Unreadable (corrupt value).
+        e.metadata_json = Some(r#"{"isTypeOnly":"yes"}"#.into());
+        assert_eq!(import_edge_type_only(&e), Some(Unreadable));
     }
 
     // ── filter_by_edge_affinity ──────────────────────────────

@@ -23,9 +23,28 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use repo_graph_classification::measurement_coverage::LanguageFunctionCount;
+// TYPE-ONLY-IMPORTS-1: re-export the write-port disposition sum type on the storage READ boundary too, so
+// consumers of `module_import_edges` (the daemon cycles serve) name ONE type without a direct dependency
+// on `indexer` (storage already depends on it; the daemon does not, in production). The write path and
+// the read path share a single disposition vocabulary — no parallel enum, no magic-code boundary DTO.
+pub use repo_graph_indexer::storage_port::TypeOnlyDisposition;
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
+
+/// TYPE-ONLY-IMPORTS-1: map the persisted-side [`TypeOnlyDisposition`] (indexer/storage mechanism)
+/// into the pure-domain [`repo_graph_agent::EdgeTypeOnly`] the shared cycle verdict kernel consumes.
+/// The ONE home of this boundary map, called by BOTH serving computations (the `cycles` daemon serve
+/// and the `orient` storage-adapter serve) so they feed the shared classifier identically — the map
+/// itself cannot drift between routes. Total (every variant covered); adding a variant to either enum
+/// breaks this match (the exhaustiveness feature).
+pub fn edge_type_only_of(disposition: TypeOnlyDisposition) -> repo_graph_agent::EdgeTypeOnly {
+    match disposition {
+        TypeOnlyDisposition::TypeOnly => repo_graph_agent::EdgeTypeOnly::TypeOnly,
+        TypeOnlyDisposition::Runtime => repo_graph_agent::EdgeTypeOnly::Runtime,
+        TypeOnlyDisposition::Unreadable => repo_graph_agent::EdgeTypeOnly::Unreadable,
+    }
+}
 
 // ── Display helpers ──────────────────────────────────────────────
 
@@ -1314,19 +1333,30 @@ impl StorageConnection {
         Ok(map)
     }
 
-    /// CYCLE-HONESTY-1: the MODULE→MODULE `IMPORTS` edges of one snapshot as `(source_uid, target_uid)`
-    /// pairs — the SAME edge set `find_cycles_cancellable` loads for its SCC pass (step 1), but returned
-    /// so the SQLite cycles serve can attach the REAL intra-SCC import edges to each rendered cycle (the
-    /// renderer draws an arrow ONLY for a pair present here). `find_cycles` discards these after Tarjan;
-    /// exposing them here keeps that widely-used method's signature untouched. Read-only; no SCC work.
-    /// `DISTINCT` mirrors the `find_cycles` load exactly (one directed edge per ordered pair), so the
-    /// endpoints are precisely the module identities the canonical cycle nodes carry as `node_id`.
+    /// CYCLE-HONESTY-1 + TYPE-ONLY-IMPORTS-1: the MODULE→MODULE `IMPORTS` edges of one snapshot as
+    /// `(source_uid, target_uid, is_type_only)` triples — the SAME edge set `find_cycles_cancellable`
+    /// loads for its SCC pass (step 1), but returned so the SQLite cycles serve can attach the REAL
+    /// intra-SCC import edges to each rendered cycle (the renderer draws an arrow ONLY for a pair present
+    /// here) AND label each cycle type-only-vs-runtime.
+    ///
+    /// `is_type_only` is the stored per-module-edge disposition (TYPE-ONLY-IMPORTS-1 migration 032),
+    /// decoded via [`TypeOnlyDisposition::from_column_code`]: `Some(TypeOnly)` = a TS/JS `import type`
+    /// that vanishes at runtime; `Some(Runtime)` = a runtime import edge; `Some(Unreadable)` = the fact
+    /// was CORRUPT when computed (distinct from absent); `None` (SQL `NULL`) = the fact was NOT computed
+    /// for this edge (a snapshot indexed before type-only tracking, or a module edge whose conjunctive
+    /// aggregate could not be confirmed) — which the serve MUST render as Unknown-with-reason, NEVER
+    /// demote to runtime (honesty rule: unknown is never zero).
+    ///
+    /// `find_cycles` discards these after Tarjan; exposing them here keeps that widely-used method's
+    /// signature untouched. Read-only; no SCC work. `DISTINCT` mirrors the `find_cycles` load exactly
+    /// (one directed edge per ordered pair — `create_module_edges` writes exactly one row per pair, so
+    /// `is_type_only` is functionally determined by the pair and the DISTINCT is lossless).
     pub fn module_import_edges(
         &self,
         snapshot_uid: &str,
-    ) -> Result<Vec<(String, String)>, StorageError> {
+    ) -> Result<Vec<(String, String, Option<TypeOnlyDisposition>)>, StorageError> {
         let mut stmt = self.connection().prepare(
-            "SELECT DISTINCT e.source_node_uid, e.target_node_uid
+            "SELECT DISTINCT e.source_node_uid, e.target_node_uid, e.is_type_only
              FROM edges e
              JOIN nodes src ON e.source_node_uid = src.node_uid
              JOIN nodes tgt ON e.target_node_uid = tgt.node_uid
@@ -1337,7 +1367,12 @@ impl StorageConnection {
         )?;
         let edges = stmt
             .query_map(rusqlite::params![snapshot_uid], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    // Decode the stored code (NULL/0/1/2) into the disposition. NULL ⇒ None (absent).
+                    TypeOnlyDisposition::from_column_code(row.get::<_, Option<i64>>(2)?),
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(edges)

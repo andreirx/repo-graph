@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use repo_graph_storage::queries::CycleResult;
+use repo_graph_storage::queries::{CycleResult, TypeOnlyDisposition};
 use serde_json::{json, Value};
 
 use super::sqlite_module_cycles_json;
@@ -88,10 +88,18 @@ pub(crate) fn attach_intra_cycle_edges(
 pub(crate) fn sqlite_module_cycles_json_with_edges(
     cycles: &[CycleResult],
     qualified: &HashMap<String, String>,
-    module_edges: &[(String, String)],
+    // TYPE-ONLY-IMPORTS-1: module edges now carry the per-edge `is_type_only` disposition (3rd element)
+    // for the separate per-cycle type-only labeling pass; the CYCLE-HONESTY intra-SCC edge attachment
+    // below consumes only the endpoints, so it is projected to pairs (this pass and its byte-identity
+    // contract are UNCHANGED).
+    module_edges: &[(String, String, Option<TypeOnlyDisposition>)],
 ) -> Vec<Value> {
     let mut out = sqlite_module_cycles_json(cycles, qualified);
-    attach_intra_cycle_edges(&mut out, module_edges);
+    let pairs: Vec<(String, String)> = module_edges
+        .iter()
+        .map(|(from, to, _)| (from.clone(), to.clone()))
+        .collect();
+    attach_intra_cycle_edges(&mut out, &pairs);
     out
 }
 
@@ -202,7 +210,11 @@ mod tests {
         let mut qmap: HashMap<String, String> = HashMap::new();
         qmap.insert("u_a".to_string(), "pkg/a".to_string());
         qmap.insert("u_b".to_string(), "pkg/b".to_string());
-        let edges = vec![("u_a".to_string(), "u_b".to_string())];
+        let edges = vec![(
+            "u_a".to_string(),
+            "u_b".to_string(),
+            Some(TypeOnlyDisposition::TypeOnly),
+        )];
 
         let plain = sqlite_module_cycles_json(&sqlite, &qmap);
         let with = sqlite_module_cycles_json_with_edges(&sqlite, &qmap, &edges);

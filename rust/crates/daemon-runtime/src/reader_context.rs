@@ -344,13 +344,12 @@ pub(crate) fn repo_has_material_ts_js(language_counts: &[(String, u64)]) -> bool
 }
 
 /// Is an indexer `files.language` token a member of the TypeScript/JavaScript family
-/// (`typescript` | `tsx` | `javascript` | `jsx`)? The ONE home of that token vocabulary,
-/// so the repo-level cycles caveat gate ([`repo_has_material_ts_js`]) and the per-cycle-
-/// membership gate ([`crate::cycle_output::any_cycle_member_is_ts_js`], ZEROSTATE-SCOPE-1
-/// §2.3) never re-spell it. `pub(crate)` for the cycle-membership caller.
-pub(crate) fn is_ts_js_language_token(token: &str) -> bool {
-    matches!(token, "typescript" | "tsx" | "javascript" | "jsx")
-}
+/// (`typescript` | `tsx` | `javascript` | `jsx`)? TYPE-ONLY-IMPORTS-1 HOISTED this vocabulary to
+/// the pure-domain `agent` crate ([`repo_graph_agent::is_ts_js_language_token`]) so the `orient`
+/// (storage-adapter) and `cycles` (daemon) per-cycle type-only membership gates reach the SAME
+/// one home — required for the two routes to agree on WHICH cycles are TS/JS (§5). Re-exported here
+/// so the repo-level cycles caveat gate ([`repo_has_material_ts_js`]) still names it locally.
+pub(crate) use repo_graph_agent::is_ts_js_language_token;
 
 /// ZEROSTATE-SCOPE-1 (§2.1): the repo's MATERIALLY-present code languages (the SAME
 /// ≥10%-of-code-files gate [`material_code_languages`] — REUSED so the surfaces/boundaries
