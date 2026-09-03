@@ -350,6 +350,47 @@ pub fn route_file(file_path: &str, routing_table: &BTreeMap<String, usize>) -> O
     routing_table.get(ext).copied()
 }
 
+/// Select the extractor for a file, honoring a CONTENT-classified language that
+/// can diverge from the file's extension.
+///
+/// ── Abstraction one-liner ────────────────────────────────────
+/// WHAT: extractor selection for the one *source* extension whose language is
+///   content-ambiguous — `.h`, a C header OR a C++ header. Every other file
+///   routes exactly as [`route_file`] (by extension), so this is a strict,
+///   `.h`-only refinement.
+/// CURRENT USER (1, concrete): `orchestrator::run_pipeline` — the sole
+///   production extraction-routing site (grep-verified: the only non-test caller
+///   of the routing fns). Kept `pub(crate)`, NOT `pub`: it is an internal
+///   refinement of `route_file` for one crate-local caller, not a new public
+///   API (review-1 — no external surface without a decision gate).
+/// AXIS OF VARIATION: `.h` alone. `.c` is unambiguously C, and the C++-only
+///   header extensions (`.hpp`/`.hxx`/`.cc`/`.cxx`) already route to C++ by
+///   extension. Operations fixed (one: select an extractor); a plain function,
+///   not a trait.
+/// REJECTED SIMPLER: routing ALL files by the classified language — rejected
+///   because a Qt-Linguist `.ts` classifies `None` (TS-LINGUIST-1) yet must
+///   still reach the TS extractor by extension; a blanket language-router would
+///   regress that path. This refinement touches only `.h`, confining churn to
+///   exactly the mislabeled headers.
+///
+/// `classified_language` is the [`crate::language_sniff::classify_file_language`]
+/// result for the file — the SAME content-aware fact persisted to
+/// `files.language`, so the extractor and the stored language never diverge.
+pub(crate) fn route_file_content_aware(
+    file_path: &str,
+    classified_language: Option<&str>,
+    routing_table: &BTreeMap<String, usize>,
+) -> Option<usize> {
+    if get_extension(file_path) == ".h" && classified_language == Some("cpp") {
+        // Content promoted this header to C++: route to the C++ extractor via its
+        // canonical extension, rather than the `.h` → C default in the table.
+        return language_to_extensions("cpp")
+            .iter()
+            .find_map(|ext| routing_table.get(*ext).copied());
+    }
+    route_file(file_path, routing_table)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -725,6 +766,43 @@ mod tests {
         assert_eq!(route_file("src/App.jsx", &table), Some(0));
         assert_eq!(route_file("src/main.rs", &table), Some(1));
         assert_eq!(route_file("src/README.md", &table), None);
+    }
+
+    #[test]
+    fn content_aware_routing_promotes_cpp_header_only() {
+        // idx 0 = C extractor (`.c`/`.h`), idx 1 = C++ extractor (`.cpp`/…).
+        let mut table: BTreeMap<String, usize> = BTreeMap::new();
+        for e in language_to_extensions("c") {
+            table.insert((*e).to_string(), 0);
+        }
+        for e in language_to_extensions("cpp") {
+            table.insert((*e).to_string(), 1);
+        }
+
+        // A `.h` classified C++ (content markers) routes to the C++ extractor.
+        assert_eq!(
+            route_file_content_aware("include/foo.h", Some("cpp"), &table),
+            Some(1),
+        );
+        // A `.h` classified C stays on the C extractor.
+        assert_eq!(
+            route_file_content_aware("include/foo.h", Some("c"), &table),
+            Some(0),
+        );
+        // `.c` is never promoted, even if (impossibly) classified C++.
+        assert_eq!(
+            route_file_content_aware("src/impl.c", Some("cpp"), &table),
+            Some(0),
+        );
+        // Non-`.h` files are untouched — identical to `route_file`.
+        assert_eq!(
+            route_file_content_aware("include/foo.hpp", Some("cpp"), &table),
+            Some(1),
+        );
+        assert_eq!(
+            route_file_content_aware("include/foo.h", None, &table),
+            Some(0),
+        );
     }
 
     // ── config file detection ────────────────────────────────

@@ -567,8 +567,13 @@ fn run_pipeline<S: IndexerStoragePort>(
             continue;
         }
 
-        // Route to extractor.
-        let extractor_idx = routing::route_file(&file.rel_path, routing_table);
+        // Route to extractor. Content-aware: a `.h` classified as C++ (a C++
+        // header, per `classify_file_language` above) routes to the C++
+        // extractor, not the `.h` → C default — otherwise the C extractor
+        // misparses the C++ `class` and stamps it `FUNCTION` (FIND-KIND-MISLABEL-
+        // 1). The extractor thus matches the persisted `files.language`.
+        let extractor_idx =
+            routing::route_file_content_aware(&file.rel_path, language, routing_table);
         let extractor = extractor_idx.map(|idx| &*extractors[idx]);
 
         let extractor_name = extractor.map(|e| e.name().to_string());
