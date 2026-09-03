@@ -167,6 +167,8 @@ are OPTIONAL-UNSCHEDULED (like M-5 was): honest asymmetry notes stay; revivable 
 union-flip work ever opens those seams. Rationale: (c) carries the agent-visible value
 (runtime coupling vs compile-time phantom) with zero certification-surface risk; (a)+(b)
 buy route symmetry in transient residency windows at the highest-risk machinery.
+SHIPPED: TYPE-ONLY-IMPORTS-1 bd12f0a (2026-09-03, 2 relay cycles + 1 operator ruling —
+write-port ratified, Unknown-reason honesty enforced end-to-end).
 
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
