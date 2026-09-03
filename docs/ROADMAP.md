@@ -157,13 +157,20 @@ re-scoped follow-up: the extractor's arg0 string-literal gate drops every comput
 cross-language) · IS-TEST-RUST-1 ba68535 (cfg(test) inclusion-chain fact; find/demotion/
 counts heal).
 
-Open follow-ups awaiting ratification/scheduling: CYCLE-FACTS-2 (human ruling 2026-09-02:
-DEFERRED until after ENGINE-CONSOLIDATION-1 — the consolidation may change what needs
-certifying; the OPERATOR MUST re-present it to the human when the consolidation SPEC is
-ratified, framed in PRODUCT-IMPACT terms: what an agent sees/gains per option, not
-machinery), RESOURCE-DYNAMIC-
-PATH-1, docs residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux
-per-repo timeout override.
+CYCLE-FACTS-2 RESOLVED (human ruling 2026-09-03, re-presented in product-impact terms per
+the 2026-09-02 obligation, after ENGINE-CONSOLIDATION-1 was confirmed ratified+shipped):
+the trio is UNBUNDLED. Part (c) — type-only import extraction with per-cycle
+"type-only (vanishes at runtime)" labels — is RATIFIED as its own slice,
+**TYPE-ONLY-IMPORTS-1** (spec: docs/slices/type-only-imports-1.md). Parts (a)
+edge-set certification on the LiveGraph cycle route and (b) is_test in the LiveGraph IR
+are OPTIONAL-UNSCHEDULED (like M-5 was): honest asymmetry notes stay; revivable if M-R2
+union-flip work ever opens those seams. Rationale: (c) carries the agent-visible value
+(runtime coupling vs compile-time phantom) with zero certification-surface risk; (a)+(b)
+buy route symmetry in transient residency windows at the highest-risk machinery.
+
+Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
+residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
+timeout override.
 
 ## v0.13.0 + diverse-verification merged queue — high tier COMPLETE (2026-09-02)
 
