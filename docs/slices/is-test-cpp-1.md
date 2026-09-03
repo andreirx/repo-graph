@@ -15,11 +15,17 @@ from 49 to 10 in the spike.
 
 ## 2. Contract
 
-1. **Basis: structural evidence, never filenames** (IS-TEST-RUST-1 precedent). A C/C++
-   file is test iff it contains a test-framework structural marker: gtest/gmock include
-   (`<gtest/...>`, `"gtest/...`, `<gmock/...>`) or a top-level `TEST(`/`TEST_F(`/
-   `TEST_P(`/`TYPED_TEST(` macro invocation. `*_test.cc` as a NAME is NOT evidence (a
-   production file may be named test-adjacent; the name-trap witness is mandatory).
+1. **Basis: structural evidence PROMOTES; absence preserves** (AMENDED 2026-09-03,
+   operator ruling ISTESTCPP1-STRUCTURAL-SEMANTICS — the original "iff" wording
+   contradicted §2.3 and would have minted false is_test=false facts). A gtest/gmock
+   structural marker — include (`<gtest/...>`, `"gtest/...`, `<gmock/...>`) or top-level
+   `TEST(`/`TEST_F(`/`TEST_P(`/`TYPED_TEST(` macro — is STRONG positive evidence: the
+   file is test. Absence of a marker is WEAK negative evidence and never overrides an
+   existing classification (path-convention or otherwise): no marker → keep current
+   value. A NAME alone still never promotes (a production `src/parser_test.cc` without a
+   marker stays production; the name-trap witness is mandatory). The report must COUNT
+   the residual per corpus repo: path-classified test files carrying no marker (known
+   residual, recorded honestly, not silently demoted).
 2. **Framework scope:** gtest/gmock family only in this slice — the demonstrated corpus
    evidence (leveldb, openxcom, vcmi use it or nothing). Catch2/doctest/CppUnit are named
    FOLLOW-UP candidates in the report if observed in corpus, not built speculatively.
@@ -50,9 +56,10 @@ Do NOT commit.
 
 ## 5. Definition of done
 
-C/C++ test files carry the true fact via structural evidence; the name-trap witness
-proves no filename classification; measured downstream movement reported; other languages
-untouched; gates green.
+C/C++ files with structural test markers carry is_test=1; unmarked files keep their
+existing basis (residual counted and reported, never silently demoted); the name-trap
+witness proves a name alone never promotes; measured downstream movement reported; other
+languages untouched; gates green.
 
 CORPUS PATHS: leveldb at ../legacy-codebases/leveldb; openxcom at
 ../legacy-codebases/openxcom; vcmi at ../legacy-codebases/vcmi; repo-graph is THIS repo.
