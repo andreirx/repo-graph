@@ -169,6 +169,22 @@ union-flip work ever opens those seams. Rationale: (c) carries the agent-visible
 buy route symmetry in transient residency windows at the highest-risk machinery.
 SHIPPED: TYPE-ONLY-IMPORTS-1 bd12f0a (2026-09-03, 2 relay cycles + 1 operator ruling —
 write-port ratified, Unknown-reason honesty enforced end-to-end).
+v0.15.0 queue: RESOURCE-RECALL-1 68a8b08 (zero-state + coverage header cite the arg0
+literal-path gate) · FIND-KIND-MISLABEL-1 5387c6d (root cause: .h routed to the C
+extractor, error-recovered C++ classes stamped FUNCTION; content-evidenced .h promotion
+per TS-LINGUIST-1 mechanism; one-reindex key transition, churn measured).
+
+## zg (zvec-grep) head-to-head — 2026-09-03 (docs/audits/2026-09-03-zg-vs-rmap-find.md)
+
+Human-requested comparison vs Qwen's zvec-grep 0.2.1, 12 ground-truthed tasks × 3 repos.
+rmap wins exact-symbol 3–0 and honesty (B+ vs C-); zg wins literal/regex 3–0 (absent
+capability) and evidence anchors (line spans, enclosing-symbol annotation). Both fail
+dispatch/algorithm concept questions. HONESTY DEFECT FOUND IN FIND: "may not have a
+distinct home in this repo" rendered where the true cause is capability absence (3/3
+literal probes, all false). Proposed queue (awaiting scheduling): FIND-GREP-1 (ratified
+grep direction + false-sentence retirement + enclosing-symbol annotation), FIND-ANCHOR-1
+(line numbers + snippet on fact rows), FIND-ECONOMY-1 (cursor boilerplate 39–52% of
+bytes), SEED-CHUNK-1 (candidate: sub-file embedding granularity).
 
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
