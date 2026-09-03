@@ -190,7 +190,10 @@ chunk granularity fixes the dilution class (4/4 queries absent→top-3-or-better
 potion-code-16M-v2 static (model2vec-rs) wins 3/4 vs nomic at equal granularity, <1min
 vs ~20min, offline; is_test demotion compounds (obsolete-files → rank 1) — facts×seeds
 is the differentiator. FACT GAP: is_test=0 for all C++ (IS-TEST-CPP-1 candidate, gtest
-structural basis). SEED-CHUNK-1 + IS-TEST-CPP-1 await human ratification.
+structural basis). SEED-CHUNK-1 RATIFIED Option 1 (human 2026-09-03: full swap — model2vec-rs +
+potion-code-16M-v2 in-process, per-symbol chunks from the nodes table, is_test-partitioned
+seeds, lmstudio retired from find), sequenced AFTER FIND-EVIDENCE-1 and FIND-GREP-1;
+IS-TEST-CPP-1 slotted before it (small; demotion consumer measured). Then release+audit.
 
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
