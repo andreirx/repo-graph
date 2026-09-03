@@ -149,6 +149,75 @@ pub fn run_find(args: &[String]) -> ExitCode {
     }
 }
 
+/// FIND-EVIDENCE-1 (§2.3): the once-per-output uid header line (with its trailing
+/// newline). The SINGLE source of both the printed text AND its byte length used by the
+/// amortization gate — so the two can never drift.
+fn uid_header_line(uid: &str) -> String {
+    format!("repo-uid {uid} (symbol cursors below are relative to it)\n")
+}
+
+/// FIND-EVIDENCE-1 (§2.3): the cursor-diet eligibility of a `find` response — either an
+/// EXACT count of the symbol rows the diet would shorten, or that the `facts` payload
+/// shape is MALFORMED and so cannot be classified at all. Only SYMBOL hits carry a
+/// `<uid>:`-prefixed `key` (file/module keys are paths; dependency/framework/boundary keys
+/// are names/none), and the symbol class renders via `explain` — so a uid-prefixed key is
+/// EXACTLY the set `fact_hit::relative_cursor` shortens.
+enum DietEligibility {
+    /// `facts` is a well-formed array of well-formed groups: the exact number of
+    /// uid-prefixed symbol rows the diet would shorten.
+    Countable(usize),
+    /// `facts` is absent / not an array, or a group's `hits` is present-but-not-a-list, or
+    /// a hit's `key` is present-but-not-a-string. The count cannot be TRUSTED, so the diet
+    /// is WITHHELD (full self-contained cursors) — never silently classified as "0 dietable
+    /// rows" (STANDING HONESTY RULE 1: a fallible read whose result classifies rendered
+    /// output is never papered over with a default). The malformed shape is itself surfaced
+    /// in the rendered output by `facts_render::render_facts_tier`, which validates the same
+    /// payload right after and emits the honest `(malformed …)` degradation line.
+    Malformed,
+}
+
+/// Classify the response's cursor-diet eligibility (review-1 fix): an EXPLICIT, checked
+/// traversal of `facts` — no `.flatten()`, no `.filter_map()` that would DISCARD a malformed
+/// group, no `.unwrap_or(0)` collapsing an unreadable shape to a fabricated zero. Any
+/// deviation from the ratified array-of-groups-of-hits shape short-circuits to `Malformed`
+/// so a partially-corrupt payload withholds the diet entirely (full cursors for every row)
+/// rather than applying a byte optimization computed off data we could not fully read.
+fn diet_eligibility(result: &serde_json::Value, uid: &str) -> DietEligibility {
+    let prefix = format!("{uid}:");
+    // `facts` is our OWN DTO field, ALWAYS serialized as the per-class group array. Any
+    // other shape (absent / non-array) is malformed — we cannot count, so we do not guess.
+    let groups = match result.get("facts") {
+        Some(serde_json::Value::Array(groups)) => groups,
+        _ => return DietEligibility::Malformed,
+    };
+    let mut count = 0usize;
+    for g in groups {
+        // A group may LEGITIMATELY carry no `hits` (an error/unavailable group renders no
+        // rows — absent key is normal). A `hits` PRESENT but not a list is a malformed
+        // shape we refuse to count around.
+        let hits = match g.get("hits") {
+            None => continue,
+            Some(serde_json::Value::Array(hits)) => hits,
+            Some(_) => return DietEligibility::Malformed,
+        };
+        for h in hits {
+            // `key` is OPTIONAL (only the uid-prefixed argument classes carry one); ABSENT
+            // → not a dietable row. PRESENT but not a string → malformed: the key drives
+            // the diet classification, so a corrupt key must not silently pass as "0".
+            match h.get("key") {
+                None => {}
+                Some(serde_json::Value::String(k)) => {
+                    if k.starts_with(&prefix) {
+                        count += 1;
+                    }
+                }
+                Some(_) => return DietEligibility::Malformed,
+            }
+        }
+    }
+    DietEligibility::Countable(count)
+}
+
 /// Render the `find` response (FIND-FACTS-1 §2): the FACTS tier first, then (unless
 /// `exact`) the demoted semantic-seed tier. `exact` is the CLI's own flag — in exact
 /// mode the seed section is omitted entirely (the endpoint was never consulted).
@@ -158,11 +227,48 @@ fn render_find_human(result: &serde_json::Value, exact: bool) -> String {
     // A missing / non-string value is a MALFORMED response — surfaced as such, never
     // papered over with an empty-string echo (STANDING HONESTY RULE 1).
     match result.get("query").and_then(|v| v.as_str()) {
-        Some(q) => out.push_str(&format!("find \"{q}\"\n\n")),
-        None => out.push_str("find (malformed find response: query missing or not a string)\n\n"),
+        Some(q) => out.push_str(&format!("find \"{q}\"\n")),
+        None => out.push_str("find (malformed find response: query missing or not a string)\n"),
     }
 
-    facts_render::render_facts_tier(result, &mut out);
+    // FIND-EVIDENCE-1 (§2.3) — cursor diet: the repo uid is printed ONCE here so the
+    // per-row symbol cursors below can drop it (`explain <suffix>`, which the daemon's
+    // additive alias resolves). `repo_uid` is our OWN DTO field, always present; an
+    // empty value is the no-snapshot degraded state (nothing to anchor) — the header
+    // line is then omitted and cursors render in full (never a fabricated uid). A
+    // genuinely-absent field (old daemon) degrades the same way: no header, full cursors.
+    let repo_uid = result
+        .get("repo_uid")
+        .and_then(|v| v.as_str())
+        .filter(|u| !u.is_empty());
+    // §2.5 boilerplate economy: the header amortizes only when the once-per-output uid it
+    // adds costs FEWER bytes than the per-row `<uid>:` restatement it removes. On a 0- or
+    // 1-symbol-row result the header cannot pay for itself (measured: the single-row
+    // `witness_epoch` probe would GROW boilerplate ~+51 B), so the diet is WITHHELD there:
+    // no header, full self-contained cursors — boilerplate then never grows. When applied
+    // (break-even ≈ 3 symbol rows for a 26-char uid) it strictly shrinks it. This is a
+    // BYTE-ECONOMY heuristic, not a fact. A MALFORMED `facts` shape (review-1 honesty fix)
+    // withholds the diet the same way — full cursors, no header — but is a DISTINCT
+    // classification, never conflated with "0 dietable rows": the corrupt payload is
+    // surfaced honestly by `render_facts_tier` below, never papered over.
+    let diet_uid = repo_uid.filter(|uid| match diet_eligibility(result, uid) {
+        DietEligibility::Countable(rows) => {
+            let header_bytes = uid_header_line(uid).len();
+            let per_row_saving = uid.len() + 1; // "<uid>:" dropped from each relative cursor
+            rows * per_row_saving > header_bytes
+        }
+        // Unclassifiable payload → withhold the diet (full cursors); the malformed shape
+        // is rendered as an honest degradation by the facts renderer that follows.
+        DietEligibility::Malformed => false,
+    });
+    if let Some(uid) = diet_uid {
+        out.push_str(&uid_header_line(uid));
+    }
+    out.push('\n');
+
+    // Pass `diet_uid`, not `repo_uid`: when the diet is withheld, `None` makes every
+    // cursor render in its full self-contained form (matching the omitted header).
+    facts_render::render_facts_tier(result, diet_uid, &mut out);
 
     if !exact {
         out.push('\n');
@@ -226,6 +332,128 @@ mod tests {
         assert!(
             out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
             "seed candidate below: {out}"
+        );
+    }
+
+    #[test]
+    fn cursor_diet_applies_and_header_prints_when_it_amortizes() {
+        // ≥3 uid-prefixed symbol rows: the once-per-output header pays for itself, so it
+        // prints AND the per-row cursors drop the uid (`explain <suffix>`). Keys carry `#`
+        // (path#name), so the daemon single-quotes the cursor arg — mirrored here.
+        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
+        let hit = |k: &str| {
+            json!({"display": "sym", "path": "src/x.ts", "key": format!("{uid}:{k}"),
+                   "next": format!("explain '{uid}:{k}'")})
+        };
+        let mut facts = empty_facts();
+        facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+            "hits": [hit("a#a:SYMBOL:FUNCTION"), hit("b#b:SYMBOL:FUNCTION"), hit("c#c:SYMBOL:FUNCTION")],
+            "matched": 3, "matched_is_floor": false});
+        let result = json!({
+            "query": "sym", "repo_uid": uid, "facts": facts,
+            "seeds_available": true, "candidates": [],
+        });
+        let out = render_find_human(&result, true);
+        assert!(
+            out.contains("repo-uid repo_01m1kvv00zgrtr3t23xrfe6veg (symbol cursors below are relative to it)"),
+            "header prints when the diet amortizes: {out}"
+        );
+        assert!(
+            out.contains("→ rmap explain 'a#a:SYMBOL:FUNCTION'\n"),
+            "cursor is relative (uid dropped): {out}"
+        );
+        assert!(
+            !out.contains("explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:"),
+            "the uid is not restated per row: {out}"
+        );
+    }
+
+    #[test]
+    fn cursor_diet_is_withheld_on_a_single_row_so_boilerplate_never_grows() {
+        // 1 uid-prefixed symbol row: the header would cost more than the single uid it
+        // saves (§2.5), so the diet is WITHHELD — NO header, and the cursor stays FULL and
+        // self-contained (still runnable without a header to anchor to).
+        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
+        let key = format!("{uid}:src/x.rs#witness_epoch:SYMBOL:FUNCTION");
+        let mut facts = empty_facts();
+        facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+            "hits": [{"display": "witness_epoch", "path": "src/x.rs", "key": key,
+                      "next": format!("explain '{key}'")}],
+            "matched": 1, "matched_is_floor": false});
+        let result = json!({
+            "query": "witness_epoch", "repo_uid": uid, "facts": facts,
+            "seeds_available": true, "candidates": [],
+        });
+        let out = render_find_human(&result, true);
+        assert!(
+            !out.contains("repo-uid "),
+            "no header when the diet cannot amortize: {out}"
+        );
+        assert!(
+            out.contains("→ rmap explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:src/x.rs#witness_epoch:SYMBOL:FUNCTION'\n"),
+            "the single-row cursor stays full and self-contained: {out}"
+        );
+    }
+
+    #[test]
+    fn malformed_top_level_facts_withholds_diet_never_fabricates_header_or_cursor() {
+        // review-1 regression: a `facts` payload that is NOT the ratified array (here an
+        // object) cannot be classified for the cursor diet. The diet is WITHHELD — NO
+        // header line, NO relative cursor selected — and the malformed shape is surfaced
+        // honestly by the facts renderer, never silently classified as "0 dietable rows".
+        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
+        let result = json!({
+            "query": "sym", "repo_uid": uid,
+            "facts": {"not": "an array"},
+            "seeds_available": true, "candidates": [],
+        });
+        let out = render_find_human(&result, true);
+        assert!(
+            !out.contains("repo-uid "),
+            "no diet header on malformed facts: {out}"
+        );
+        assert!(
+            out.contains("malformed find response: facts missing or not a list"),
+            "malformed facts surfaced honestly: {out}"
+        );
+    }
+
+    #[test]
+    fn malformed_group_hits_withholds_diet_keeps_full_self_contained_cursors() {
+        // review-1 regression: three uid-prefixed symbol rows WOULD amortize the header,
+        // but a second group's `hits` is a non-list. The old classifier silently discarded
+        // that group (filter_map) and applied the diet off the survivors; the checked
+        // traversal short-circuits to Malformed, so the diet is WITHHELD ENTIRELY — every
+        // symbol cursor stays FULL and self-contained (uid restated, still runnable), no
+        // header, and the corrupt group is surfaced by the renderer.
+        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
+        let hit = |k: &str| {
+            json!({"display": "sym", "path": "src/x.ts", "key": format!("{uid}:{k}"),
+                   "next": format!("explain '{uid}:{k}'")})
+        };
+        let mut facts = empty_facts();
+        facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+            "hits": [hit("a#a:SYMBOL:FUNCTION"), hit("b#b:SYMBOL:FUNCTION"), hit("c#c:SYMBOL:FUNCTION")],
+            "matched": 3, "matched_is_floor": false});
+        // A malformed second group: `hits` present but not a list.
+        facts[1] = json!({"fact_class": "file", "render_command": "explain", "certainty": "extracted",
+            "hits": {"not": "a list"}, "matched": 0, "matched_is_floor": false});
+        let result = json!({
+            "query": "sym", "repo_uid": uid, "facts": facts,
+            "seeds_available": true, "candidates": [],
+        });
+        let out = render_find_human(&result, true);
+        assert!(
+            !out.contains("repo-uid "),
+            "diet withheld — no header — on a malformed group: {out}"
+        );
+        assert!(
+            out.contains("→ rmap explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:a#a:SYMBOL:FUNCTION'\n"),
+            "symbol cursor stays full and self-contained (no relative cursor fabricated): {out}"
+        );
+        assert!(
+            out.contains("malformed fact group: hits missing or not a list"),
+            "malformed group surfaced honestly: {out}"
         );
     }
 

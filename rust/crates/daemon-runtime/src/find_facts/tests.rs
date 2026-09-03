@@ -14,6 +14,8 @@ fn hit(display: &str, path: HitPath, key: Option<&str>) -> FactHit {
         path,
         key: key.map(str::to_string),
         next_command: None,
+        line: None,
+        evidence: None,
     }
 }
 

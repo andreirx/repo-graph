@@ -15,6 +15,13 @@ pub struct FindResponse {
     pub schema: String,
     pub command: String,
     pub repo: String,
+    /// FIND-EVIDENCE-1 (§2.3) additive: the repo's stable-key UID prefix, printed ONCE
+    /// in the human header so per-row symbol cursors can drop it (the cursor diet). The
+    /// JSON `next`/`key` stay FULL (unchanged), so machine consumers are byte-compatible;
+    /// the header uid is what lets the human renderer show relative `explain <suffix>`
+    /// cursors (which the daemon's additive alias resolves). Empty string only when the
+    /// repo uid is genuinely unknown (never fabricated).
+    pub repo_uid: String,
     pub snapshot: String,
     pub query: String,
     /// The DEMOTED semantic-seed tier's honesty header (FIND-FACTS-1 §2.3 renames it
@@ -82,11 +89,23 @@ pub struct FindFactHit {
     pub path_unknown_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// FIND-EVIDENCE-1 (§2.1) additive: the stored start line for the `path:line` anchor
+    /// (SYMBOL hits). ABSENT (skip-serialized) when the class carries no per-symbol span
+    /// OR the stored span was NULL — the row then renders WITHOUT a line (visibly absent),
+    /// never a fabricated 0/guess. Optional + skip → byte-compatible for existing consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    /// FIND-EVIDENCE-1 (§2.2) additive: the ONE evidence line (doc-comment first line,
+    /// else signature) derived from STORED facts only — never file I/O, never an invented
+    /// preview. ABSENT when neither is stored. Optional + skip → byte-compatible.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
     /// The runnable `rmap` invocation (WITHOUT the `rmap` prefix) that takes the
     /// reader from THIS hit to its rendering — `explain <key>` / `map <path>` for the
     /// argument-taking classes, the whole-listing command for the `… list` classes.
     /// Always present and executable (review-1 item 1): the renderer prints it and
-    /// the e2e proof runs it verbatim, exit 0.
+    /// the e2e proof runs it verbatim, exit 0. FULL form (the JSON stays byte-stable);
+    /// the human renderer derives the relative short cursor from `repo_uid` + `key`.
     pub next: String,
 }
 
@@ -283,6 +302,11 @@ fn fact_groups(facts: &[ClassOutcome]) -> Vec<FindFactGroup> {
                             path,
                             path_unknown_reason,
                             key: h.key.clone(),
+                            // FIND-EVIDENCE-1: the stored anchor line + evidence line,
+                            // carried straight through from the fact hit (symbol class
+                            // only today; `None` elsewhere → skip-serialized).
+                            line: h.line,
+                            evidence: h.evidence.clone(),
                         }
                     })
                     .collect(),
@@ -309,6 +333,7 @@ fn fact_groups(facts: &[ClassOutcome]) -> Vec<FindFactGroup> {
 /// never touched and the seed tier renders as not-consulted.
 pub(crate) fn build_find_response(
     repo: &str,
+    repo_uid: &str,
     snapshot: &str,
     query: &str,
     facts: &[ClassOutcome],
@@ -366,6 +391,7 @@ pub(crate) fn build_find_response(
         schema: "rgr.agent.v1".to_string(),
         command: "find".to_string(),
         repo: repo.to_string(),
+        repo_uid: repo_uid.to_string(),
         snapshot: snapshot.to_string(),
         query: query.to_string(),
         summary,

@@ -47,6 +47,14 @@ use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot,
 #[path = "dispatch_seed.rs"]
 mod seed_dispatch;
 
+/// FIND-EVIDENCE-1 (§2.3): the additive short-cursor alias for `explain`. `find` prints
+/// relative `explain <suffix>` cursors (the repo uid stripped, shown once in the header);
+/// this reattaches the uid prefix so those cursors run verbatim, WITHOUT changing any
+/// input `explain` already resolves. A child module of `dispatch` (its own file for the
+/// ≤500-line guardrail); its `reattach_repo_uid_prefix` is called from `handle_explain`.
+#[path = "dispatch_explain_alias.rs"]
+mod explain_alias;
+
 /// INDEX-BASIS-1: attach a computed serving fact (`index_drift`, `parse_status`)
 /// onto the serialized envelope's `value` object, so rgr's response structs capture
 /// it via one `#[serde(default)]` field. Additive: if `value` is somehow not an
@@ -4874,6 +4882,21 @@ impl ServiceDispatcher {
                     fingerprint: serve_witness.fingerprint.clone(),
                 }
             });
+
+        // FIND-EVIDENCE-1 (§2.3): accept the RELATIVE symbol cursor `find` prints —
+        // `explain <suffix>`, where `<suffix>` is the stable_key with this repo's uid
+        // prefix stripped (the cursor diet prints the uid ONCE in the header). Focus
+        // resolution matches `stable_key` EXACTLY, so a bare suffix would not resolve;
+        // this reattaches the uid prefix, resolving the short cursor to the SAME node the
+        // full key does. PURELY SYNTACTIC (review-0 fix, operator ruling #2): gated on the
+        // printed short-cursor syntax (a `:SYMBOL` stable_key suffix lacking the prefix),
+        // it does NO storage read — so a plain SYMBOL-name / PATH / full-key target is left
+        // byte-identical AND explain SYMBOL-focus stays `nodes`-FREE on green (the earlier
+        // probing draft regressed that property). The reattached key resolves through the
+        // UNCHANGED decorator-served path below; a genuinely-absent target still reports
+        // not-found there, exactly as before.
+        let reattached_target = explain_alias::reattach_repo_uid_prefix(&repo_uid, target);
+        let target = reattached_target.as_deref().unwrap_or(target);
 
         // Call the agent explain use case.
         //

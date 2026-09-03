@@ -274,6 +274,16 @@ pub(crate) struct FactHit {
     /// [`FactClass::hit_command`]. A `&'static str` because every renderer is one of a
     /// fixed, code-defined set — never free-form text crossing to the CLI.
     pub next_command: Option<&'static str>,
+    /// FIND-EVIDENCE-1 (§2.1): the stored start line for the `path:line` anchor, on the
+    /// classes whose hits carry a span (SYMBOL today). `None` = no stored span → the row
+    /// renders WITHOUT a line (visibly absent), never a guessed number. Non-symbol
+    /// classes leave this `None` (file/module rows are file-granular — no invented line).
+    pub line: Option<i64>,
+    /// FIND-EVIDENCE-1 (§2.2): the ONE evidence line (doc-comment first line, else the
+    /// signature) derived from STORED facts only — never file I/O at render, never an
+    /// invented preview (the zg arbitrary-line defect is the anti-pattern). `None` =
+    /// neither stored → no evidence line (visibly absent). Symbol class only today.
+    pub evidence: Option<String>,
 }
 
 /// The hits of ONE fact class after dedup + display cap.

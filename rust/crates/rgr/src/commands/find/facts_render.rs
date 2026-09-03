@@ -93,7 +93,11 @@ fn ratified_for(class: &str) -> Option<&'static RatifiedClass> {
 /// Render the FACTS tier: one block per fact class WITH hits or a per-class
 /// `unavailable (<reason>)`, and a single compact "no matches" line naming the
 /// classes that were searched and found nothing (honest searched set, §2.5).
-pub(super) fn render_facts_tier(result: &serde_json::Value, out: &mut String) {
+pub(super) fn render_facts_tier(
+    result: &serde_json::Value,
+    repo_uid: Option<&str>,
+    out: &mut String,
+) {
     // Deterministic lexical RETRIEVAL — but the CONTENT certainty varies by source
     // layer, so each class is tagged `extracted` / `inferred` / `hint` / `governance`
     // (review-1 honesty defect; VISION § Fact Certainty Model). The retrieval is
@@ -279,6 +283,7 @@ pub(super) fn render_facts_tier(result: &serde_json::Value, out: &mut String) {
                 h,
                 ratified.commands,
                 ratified.folds_key,
+                repo_uid,
             ));
         }
         if matched > shown {

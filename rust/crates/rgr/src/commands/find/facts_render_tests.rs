@@ -11,7 +11,7 @@ use serde_json::json;
 /// Render only the facts tier of `result` to a fresh String.
 fn facts(result: &serde_json::Value) -> String {
     let mut out = String::new();
-    render_facts_tier(result, &mut out);
+    render_facts_tier(result, None, &mut out);
     out
 }
 

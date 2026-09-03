@@ -59,6 +59,19 @@ pub struct FactSymbolRow {
     /// emitted no subtype; the comparator ranks unknown-kind Prominent (never demoted on
     /// unknown). Raw producer string; the daemon owns the kind→weight map.
     pub subtype: Option<String>,
+    /// FIND-EVIDENCE-1 (§2.1): the symbol's stored start line (`nodes.line_start`), the
+    /// `path:line` anchor an agent opens directly. `None` when the span is ABSENT in the
+    /// DB (the row's `line_start` is NULL) — rendered as NO line (visibly absent), NEVER
+    /// a fabricated 0/1/guess (STANDING HONESTY RULE 1). Raw stored value; no coercion.
+    pub line: Option<i64>,
+    /// FIND-EVIDENCE-1 (§2.2): the symbol's stored doc-comment (`nodes.doc_comment`) — the
+    /// evidence line's FIRST choice. `None` when unstored. The stored fact verbatim; the
+    /// daemon derives the single evidence line (first non-empty line) from it — no file
+    /// I/O, no invented preview (the zg arbitrary-line defect is the anti-pattern).
+    pub doc_comment: Option<String>,
+    /// FIND-EVIDENCE-1 (§2.2): the symbol's stored signature (`nodes.signature`) — the
+    /// evidence line's FALLBACK when no doc-comment is stored. `None` when unstored.
+    pub signature: Option<String>,
 }
 
 /// One matched file path (fact class `file`, rendered by `explain`).
@@ -141,7 +154,8 @@ impl StorageConnection {
     ) -> Result<Vec<FactSymbolRow>, StorageError> {
         let needle = like_needle(query);
         let mut stmt = self.connection().prepare(
-            "SELECT n.stable_key, n.name, n.qualified_name, f.path, f.is_test, n.subtype
+            "SELECT n.stable_key, n.name, n.qualified_name, f.path, f.is_test, n.subtype,
+                    n.line_start, n.doc_comment, n.signature
              FROM nodes n
              LEFT JOIN files f ON n.file_uid = f.file_uid
              WHERE n.snapshot_uid = ?1
@@ -165,6 +179,12 @@ impl StorageConnection {
                         // `None` = UNKNOWN, never a fabricated `false`.
                         is_test: row.get::<_, Option<i64>>(4)?.map(|v| v == 1),
                         subtype: row.get(5)?,
+                        // FIND-EVIDENCE-1: raw stored span + evidence facts. A NULL
+                        // `line_start` reads as `None` (span absent → no anchor line),
+                        // never coerced to a number (STANDING HONESTY RULE 1).
+                        line: row.get(6)?,
+                        doc_comment: row.get(7)?,
+                        signature: row.get(8)?,
                     })
                 },
             )?

@@ -53,6 +53,11 @@ pub(super) fn symbols(
             subtype: r.subtype.as_deref(),
             path: r.path.as_deref(),
             stable_key: &r.stable_key,
+            // FIND-EVIDENCE-1: the stored anchor line + the ONE evidence line derived
+            // from stored facts (doc-comment first line, else signature) — computed ONCE
+            // per row here, read only for its PRESENCE by the tie-break comparator.
+            line: r.line,
+            evidence: rank::evidence_line(r.doc_comment.as_deref(), r.signature.as_deref()),
         })
         .collect();
     rank::sort_symbols(&mut views, query);
@@ -78,6 +83,10 @@ pub(super) fn symbols(
             key: Some(v.stable_key.to_string()),
             // Class-level render command (`explain <key>`); no per-hit override.
             next_command: None,
+            // FIND-EVIDENCE-1: the `path:line` anchor + the stored evidence line. The
+            // symbol class is the only one carrying a per-symbol span/doc today.
+            line: v.line,
+            evidence: v.evidence.clone(),
         })
         .collect();
     // Never saturated: the whole matching set was fetched, so `matched` is EXACT.
@@ -102,6 +111,9 @@ pub(super) fn files(
             path: HitPath::Known(r.path.clone()),
             key: Some(r.path),
             next_command: None,
+            // File-granular: no per-symbol span or doc — the path IS the anchor.
+            line: None,
+            evidence: None,
         })
         .collect();
     Ok(finalize(hits, full, saturated))
@@ -130,6 +142,9 @@ pub(super) fn modules(
             path: HitPath::Known(r.canonical_root_path.clone()),
             key: Some(r.canonical_root_path),
             next_command: None,
+            // Module hits are directory/declaration-granular — no per-symbol line/doc.
+            line: None,
+            evidence: None,
         })
         .collect();
     Ok(finalize(hits, full, saturated))
@@ -179,6 +194,9 @@ pub(super) fn http_surfaces(
                 path: HitPath::Known(r.source_file),
                 key: None,
                 next_command: None,
+                // Route hits carry a source file, not a stored symbol span/doc.
+                line: None,
+                evidence: None,
             }
         })
         .collect();
@@ -273,6 +291,9 @@ pub(super) fn dependencies(
             path: HitPath::None,
             key: Some(package),
             next_command: None,
+            // A manifest package name carries no source span or doc-comment.
+            line: None,
+            evidence: None,
         })
         .collect();
     Ok(finalize(hits, full, false))
@@ -307,6 +328,9 @@ pub(super) fn frameworks(
             path: HitPath::None,
             key: Some(kind),
             next_command: None,
+            // A framework inference kind spans many files: no single span/doc.
+            line: None,
+            evidence: None,
         })
         .collect();
     Ok(finalize(hits, full, false))
@@ -368,6 +392,9 @@ pub(super) fn boundary_declarations(
             key: None,
             // The renderer for THIS declaration kind — the per-hit next move.
             next_command: Some(command),
+            // A governance declaration is not anchored to a source span/doc-comment.
+            line: None,
+            evidence: None,
         });
     }
     Ok(finalize(hits, full, saturated))

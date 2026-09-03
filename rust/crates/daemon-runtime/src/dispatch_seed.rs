@@ -265,6 +265,7 @@ impl ServiceDispatcher {
                     };
                     let resp = crate::seed::build_find_response(
                         &display_name,
+                        &repo_uid,
                         "",
                         &query,
                         &facts,
@@ -305,6 +306,7 @@ impl ServiceDispatcher {
         };
         let response = crate::seed::build_find_response(
             &display_name,
+            &repo_uid,
             &snapshot_uid,
             &query,
             &facts,

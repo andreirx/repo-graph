@@ -20,7 +20,12 @@
 /// governance set `{violations, gate}` for boundary — review-6); `folds_key` is whether
 /// the class folds the hit key into an argument (`explain <key>`) or renders a bare
 /// whole-listing command.
-pub(super) fn render_fact_hit(h: &serde_json::Value, commands: &[&str], folds_key: bool) -> String {
+pub(super) fn render_fact_hit(
+    h: &serde_json::Value,
+    commands: &[&str],
+    folds_key: bool,
+    repo_uid: Option<&str>,
+) -> String {
     let display = h.get("display").and_then(|v| v.as_str());
     let Some(display) = display else {
         return "    (malformed fact hit: missing display)\n".to_string();
@@ -46,14 +51,36 @@ pub(super) fn render_fact_hit(h: &serde_json::Value, commands: &[&str], folds_ke
                 .to_string()
         }
     };
+    // FIND-EVIDENCE-1 (§2.1): the stored anchor line. OPTIONAL (skip-serialized when the
+    // class carries no per-symbol span OR the stored span was NULL). ABSENT → the row
+    // renders WITHOUT a `:line` (visibly absent), NEVER a guessed 0/1 (STANDING HONESTY
+    // RULE 1). A present-but-non-integer `line` is MALFORMED — surfaced, never coerced.
+    let anchor_line = match h.get("line") {
+        None => None,
+        Some(v) => match v.as_i64() {
+            Some(n) => Some(n),
+            None => {
+                return "    (malformed fact hit: line present but not an integer)\n".to_string()
+            }
+        },
+    };
+    // The `path:line` anchor for a KNOWN path: append `:<line>` only when a span was
+    // stored (absence stays visible — no fabricated line). No line dimension without a
+    // known path (a line is meaningless without its file).
+    let anchored = |p: &str| -> String {
+        match anchor_line {
+            Some(n) => format!("{p}:{n}"),
+            None => p.to_string(),
+        }
+    };
     let mut line = match (path, path_unknown_reason) {
         (Some(_), Some(_)) => {
             return "    (malformed fact hit: both path and path_unknown_reason present)\n"
                 .to_string()
         }
         // A concrete owning path distinct from the display (the `file` class's path
-        // equals its display, so it is not repeated).
-        (Some(p), None) if p != display => format!("    {display}  — {p}\n"),
+        // equals its display, so it is not repeated), rendered as the `path:line` anchor.
+        (Some(p), None) if p != display => format!("    {display}  — {}\n", anchored(p)),
         (Some(_), None) => format!("    {display}\n"),
         // The class HAS a path dimension but this hit's path is unknown — shown WITH
         // its reason (review-4 item 2), never omitted.
@@ -61,6 +88,22 @@ pub(super) fn render_fact_hit(h: &serde_json::Value, commands: &[&str], folds_ke
         // No path dimension at all (dependency, framework): a clean identity line.
         (None, None) => format!("    {display}\n"),
     };
+    // FIND-EVIDENCE-1 (§2.2): the ONE evidence line, derived by the daemon from STORED
+    // facts only (doc-comment first line, else signature). ABSENT (skip-serialized) →
+    // NO evidence line (visibly absent, never a fabricated preview — the zg arbitrary-
+    // line defect is the anti-pattern). A present-but-non-string evidence is MALFORMED.
+    match h.get("evidence") {
+        None => {}
+        Some(serde_json::Value::String(e)) if !e.is_empty() => {
+            line.push_str(&format!("      {e}\n"));
+        }
+        // An empty evidence string is contradictory (the daemon skip-serializes an
+        // absent evidence line) — render nothing, never an empty quoted line.
+        Some(serde_json::Value::String(_)) => {}
+        Some(_) => {
+            line.push_str("      (malformed fact hit: evidence present but not a string)\n");
+        }
+    }
     // `key` is OPTIONAL (the argument-taking classes carry one; the list classes do
     // not). A present-but-non-string key is MALFORMED — it feeds the `next`
     // validation, so a corrupt key must not silently pass.
@@ -81,7 +124,16 @@ pub(super) fn render_fact_hit(h: &serde_json::Value, commands: &[&str], folds_ke
             line.push_str("      (malformed fact hit: missing or empty next command)\n");
         }
         Some(next) if next_is_ratified(next, commands, folds_key, key) => {
-            line.push_str(&format!("      → rmap {next}\n"));
+            // FIND-EVIDENCE-1 (§2.3) cursor diet: `next` is validated in FULL (proves the
+            // daemon emitted a well-formed runnable cursor, and the JSON keeps that full
+            // form). For the human render we PREFER the relative short cursor when one is
+            // available — the repo uid, printed ONCE in the header, is dropped from the
+            // per-row cursor. The short form is reconstructed from the SAME validated key
+            // and runs verbatim via the daemon's additive `explain` alias; falls back to
+            // the full `next` whenever a runnable short form is not available.
+            let cursor = relative_cursor(commands, folds_key, key, repo_uid)
+                .unwrap_or_else(|| next.to_string());
+            line.push_str(&format!("      → rmap {cursor}\n"));
         }
         Some(_) => {
             line.push_str(
@@ -90,6 +142,43 @@ pub(super) fn render_fact_hit(h: &serde_json::Value, commands: &[&str], folds_ke
         }
     }
     line
+}
+
+/// FIND-EVIDENCE-1 (§2.3): the RELATIVE short cursor for a hit, or `None` when no
+/// runnable short form exists (the caller then prints the full `next`). Emitted ONLY for
+/// `explain` (the sole command with a daemon-side prefix-reattach alias — see
+/// `dispatch::explain_alias`), and ONLY when the hit's stable_key actually carries this
+/// repo's `<repo_uid>:` prefix. Stripping that prefix yields the suffix the daemon
+/// reattaches, so `explain <suffix>` resolves to the SAME node the full key does. Every
+/// gate holds it to a form that runs verbatim: a non-`explain` folding class, an
+/// absent repo uid (no header to anchor to), a key without the prefix (a file/module
+/// path — already short), or an empty suffix all fall back to the full cursor. Mirrors
+/// the daemon emitter's shell quoting via [`shell_quote_arg`], so the printed cursor is
+/// byte-for-byte a runnable invocation.
+fn relative_cursor(
+    commands: &[&str],
+    folds_key: bool,
+    key: Option<&str>,
+    repo_uid: Option<&str>,
+) -> Option<String> {
+    if !folds_key {
+        return None;
+    }
+    let [cmd] = commands else {
+        return None;
+    };
+    // Only `explain` has the daemon-side reattach alias; any other folding command must
+    // keep its full, self-contained cursor.
+    if *cmd != "explain" {
+        return None;
+    }
+    let key = key?;
+    let uid = repo_uid?;
+    let suffix = key.strip_prefix(&format!("{uid}:"))?;
+    if suffix.is_empty() {
+        return None;
+    }
+    Some(format!("explain {}", shell_quote_arg(suffix)))
 }
 
 /// True iff `next` is EXACTLY a ratified runnable form the daemon emits for a hit of
@@ -146,7 +235,7 @@ mod tests {
     #[test]
     fn known_path_distinct_from_display_is_shown() {
         let h = json!({"display": "bnrService", "path": "src/bnr.ts", "key": "k1", "next": "explain k1"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(out.contains("bnrService  — src/bnr.ts"), "{out}");
         assert!(out.contains("→ rmap explain k1"), "{out}");
     }
@@ -155,7 +244,7 @@ mod tests {
     fn path_equal_to_display_is_not_repeated() {
         // The `file` class: path == display, so no `— <path>` suffix.
         let h = json!({"display": "src/f.ts", "path": "src/f.ts", "key": "src/f.ts", "next": "explain src/f.ts"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert_eq!(
             out, "    src/f.ts\n      → rmap explain src/f.ts\n",
             "{out}"
@@ -170,7 +259,7 @@ mod tests {
             "display": "orphanSym", "key": "k9", "next": "explain k9",
             "path_unknown_reason": "owning file unresolved (no files row for this symbol's file_uid)"
         });
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("orphanSym  — path unknown (owning file unresolved"),
             "unknown path shows reason: {out}"
@@ -181,7 +270,7 @@ mod tests {
     fn no_path_dimension_is_a_clean_identity_line() {
         // dependency/framework: neither `path` nor `path_unknown_reason` → clean line.
         let h = json!({"display": "lodash", "key": "lodash", "next": "deps list"});
-        let out = render_fact_hit(&h, &["deps list"], false);
+        let out = render_fact_hit(&h, &["deps list"], false, None);
         assert_eq!(out, "    lodash\n      → rmap deps list\n", "{out}");
     }
 
@@ -191,7 +280,7 @@ mod tests {
             "display": "x", "path": "src/x.ts",
             "path_unknown_reason": "somehow", "key": "k", "next": "explain k"
         });
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("malformed fact hit: both path and path_unknown_reason present"),
             "{out}"
@@ -201,7 +290,7 @@ mod tests {
     #[test]
     fn non_string_path_is_malformed_never_dropped() {
         let h = json!({"display": "x", "path": 42, "key": "k", "next": "explain k"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("malformed fact hit: path present but not a string"),
             "{out}"
@@ -211,7 +300,7 @@ mod tests {
     #[test]
     fn empty_path_unknown_reason_is_malformed() {
         let h = json!({"display": "x", "path_unknown_reason": "", "key": "k", "next": "explain k"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains(
                 "malformed fact hit: path_unknown_reason present but not a non-empty string"
@@ -227,7 +316,7 @@ mod tests {
         // A tampered / old-daemon payload puts arbitrary text in `next`; it must NOT
         // be rendered as `→ rmap <text>` (review-4 item 3).
         let h = json!({"display": "x", "path": "src/x.ts", "key": "k1", "next": "explain k1; rm -rf /"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("malformed fact hit: next command is not a ratified runnable form"),
             "arbitrary next rejected: {out}"
@@ -242,7 +331,7 @@ mod tests {
     fn next_with_wrong_verb_is_rejected() {
         // `next` verb disagrees with the group's ratified render command.
         let h = json!({"display": "x", "path": "src/x.ts", "key": "k1", "next": "callers k1"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("not a ratified runnable form"),
             "wrong verb rejected: {out}"
@@ -254,12 +343,12 @@ mod tests {
         // A list class whose `next` carries a spurious argument is rejected.
         let h =
             json!({"display": "provider GET /x", "path": "src/x.ts", "next": "boundaries list x"});
-        let out = render_fact_hit(&h, &["boundaries list"], false);
+        let out = render_fact_hit(&h, &["boundaries list"], false, None);
         assert!(out.contains("not a ratified runnable form"), "{out}");
         // The valid bare form is accepted.
         let ok =
             json!({"display": "provider GET /x", "path": "src/x.ts", "next": "boundaries list"});
-        let out_ok = render_fact_hit(&ok, &["boundaries list"], false);
+        let out_ok = render_fact_hit(&ok, &["boundaries list"], false, None);
         assert!(out_ok.contains("→ rmap boundaries list\n"), "{out_ok}");
     }
 
@@ -271,19 +360,20 @@ mod tests {
         let viol =
             json!({"display": "boundary declaration · r:src/core:MODULE", "next": "violations"});
         assert!(
-            render_fact_hit(&viol, &["violations", "gate"], false).contains("→ rmap violations\n"),
+            render_fact_hit(&viol, &["violations", "gate"], false, None)
+                .contains("→ rmap violations\n"),
             "violations accepted for a boundary-kind declaration"
         );
         let gate =
             json!({"display": "requirement declaration · r:requirement:REQ-1:1", "next": "gate"});
         assert!(
-            render_fact_hit(&gate, &["violations", "gate"], false).contains("→ rmap gate\n"),
+            render_fact_hit(&gate, &["violations", "gate"], false, None).contains("→ rmap gate\n"),
             "gate accepted for a requirement declaration"
         );
         // The dropped entrypoint renderer is NOT in the set → rejected, never pasted.
         let stale =
             json!({"display": "boundary declaration · r:src/core:MODULE", "next": "surfaces list"});
-        let out = render_fact_hit(&stale, &["violations", "gate"], false);
+        let out = render_fact_hit(&stale, &["violations", "gate"], false, None);
         assert!(out.contains("not a ratified runnable form"), "{out}");
         assert!(
             !out.contains("→ rmap surfaces list"),
@@ -296,7 +386,7 @@ mod tests {
         // `explain`/`map --dry-run` REQUIRE a key; a keyless bare `explain` is
         // non-runnable and must not render (review-4 item 3, "required key").
         let h = json!({"display": "x", "path": "src/x.ts", "next": "explain"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(out.contains("not a ratified runnable form"), "{out}");
     }
 
@@ -305,21 +395,21 @@ mod tests {
         // A key with a space is single-quoted by the daemon; the validator
         // reconstructs the SAME encoding and accepts it.
         let h = json!({"display": "x", "path": "src/my file.ts", "key": "src/my file.ts", "next": "explain 'src/my file.ts'"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(out.contains("→ rmap explain 'src/my file.ts'\n"), "{out}");
     }
 
     #[test]
     fn map_dry_run_next_with_key_is_accepted() {
         let h = json!({"display": "api", "path": "packages/api", "key": "packages/api", "next": "map --dry-run packages/api"});
-        let out = render_fact_hit(&h, &["map --dry-run"], true);
+        let out = render_fact_hit(&h, &["map --dry-run"], true, None);
         assert!(out.contains("→ rmap map --dry-run packages/api\n"), "{out}");
     }
 
     #[test]
     fn missing_next_is_malformed_never_unactionable() {
         let h = json!({"display": "x", "path": "src/x.ts", "key": "k1"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("malformed fact hit: missing or empty next command"),
             "{out}"
@@ -329,7 +419,7 @@ mod tests {
     #[test]
     fn empty_next_is_malformed_never_dangling_command() {
         let h = json!({"display": "x", "path": "src/x.ts", "key": "k1", "next": ""});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("malformed fact hit: missing or empty next command"),
             "{out}"
@@ -340,7 +430,7 @@ mod tests {
     #[test]
     fn non_string_key_is_malformed() {
         let h = json!({"display": "x", "path": "src/x.ts", "key": 7, "next": "explain 7"});
-        let out = render_fact_hit(&h, &["explain"], true);
+        let out = render_fact_hit(&h, &["explain"], true, None);
         assert!(
             out.contains("malformed fact hit: key present but not a string"),
             "{out}"
@@ -357,5 +447,151 @@ mod tests {
         );
         assert_eq!(shell_quote_arg("a b"), "'a b'");
         assert_eq!(shell_quote_arg("a'b"), "'a'\\''b'");
+    }
+
+    // ── FIND-EVIDENCE-1: path:line anchor (§2.1) ────────────────────────────────
+
+    #[test]
+    fn symbol_row_renders_path_colon_line_anchor_from_stored_span() {
+        // A stored span → `path:line`: the agent opens the right line with no second call.
+        let h = json!({
+            "display": "CompactRange", "path": "db/db_impl.cc", "line": 582,
+            "key": "leveldb:db/db_impl.cc:CompactRange:SYMBOL", "next": "explain leveldb:db/db_impl.cc:CompactRange:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(out.contains("CompactRange  — db/db_impl.cc:582"), "{out}");
+    }
+
+    #[test]
+    fn symbol_row_without_stored_span_renders_no_line_never_a_guess() {
+        // STANDING HONESTY RULE 1: absent span → the path with NO `:line`, never `:0`/`:1`.
+        let h = json!({
+            "display": "CompactRange", "path": "db/db_impl.cc",
+            "key": "leveldb:db/db_impl.cc:CompactRange:SYMBOL", "next": "explain leveldb:db/db_impl.cc:CompactRange:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        // The identity line ends at the path — no `:line`, no dangling colon, no `:0`.
+        assert!(
+            out.lines().next() == Some("    CompactRange  — db/db_impl.cc"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn non_integer_line_is_malformed_never_coerced() {
+        let h = json!({
+            "display": "x", "path": "src/x.ts", "line": "582",
+            "key": "r:src/x.ts:x:SYMBOL", "next": "explain r:src/x.ts:x:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("malformed fact hit: line present but not an integer"),
+            "{out}"
+        );
+    }
+
+    // ── FIND-EVIDENCE-1: evidence line (§2.2) ───────────────────────────────────
+
+    #[test]
+    fn evidence_line_is_rendered_when_stored() {
+        // The one stored evidence line (doc-comment first line, computed daemon-side) is
+        // shown between the identity line and the cursor — the concept-answer zg's win.
+        let h = json!({
+            "display": "PruneSnapshots", "path": "db/prune.cc", "line": 40,
+            "evidence": "Prune the READY snapshots marked as prunable",
+            "key": "r:db/prune.cc:PruneSnapshots:SYMBOL", "next": "explain r:db/prune.cc:PruneSnapshots:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("      Prune the READY snapshots marked as prunable\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn absent_evidence_renders_no_line_never_fabricated() {
+        // No stored evidence → NO evidence line (visibly absent, never an invented preview).
+        let h = json!({
+            "display": "x", "path": "src/x.ts", "line": 3,
+            "key": "r:src/x.ts:x:SYMBOL", "next": "explain r:src/x.ts:x:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        // Only the identity line + the cursor line — no third content line.
+        assert_eq!(out.lines().count(), 2, "{out}");
+    }
+
+    #[test]
+    fn non_string_evidence_is_malformed() {
+        let h = json!({
+            "display": "x", "path": "src/x.ts", "evidence": 7,
+            "key": "r:src/x.ts:x:SYMBOL", "next": "explain r:src/x.ts:x:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("malformed fact hit: evidence present but not a string"),
+            "{out}"
+        );
+    }
+
+    // ── FIND-EVIDENCE-1: relative cursor / cursor diet (§2.3) ────────────────────
+
+    #[test]
+    fn explain_cursor_is_relative_when_repo_uid_prefixes_the_key() {
+        // The uid is printed ONCE in the header; the per-row cursor drops it. The printed
+        // short form runs verbatim via the daemon's `explain` reattach alias.
+        let h = json!({
+            "display": "CompactRange", "path": "db/db_impl.cc", "line": 582,
+            "key": "leveldb-abc123:db/db_impl.cc:CompactRange:SYMBOL",
+            "next": "explain leveldb-abc123:db/db_impl.cc:CompactRange:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, Some("leveldb-abc123"));
+        assert!(
+            out.contains("→ rmap explain db/db_impl.cc:CompactRange:SYMBOL\n"),
+            "relative cursor drops the uid prefix: {out}"
+        );
+        assert!(
+            !out.contains("explain leveldb-abc123:"),
+            "full uid not restated per row: {out}"
+        );
+    }
+
+    #[test]
+    fn cursor_stays_full_without_a_header_uid() {
+        // No header uid (degraded / old daemon) → the full self-contained cursor, never a
+        // truncated non-runnable form.
+        let h = json!({
+            "display": "CompactRange", "path": "db/db_impl.cc", "line": 582,
+            "key": "leveldb-abc123:db/db_impl.cc:CompactRange:SYMBOL",
+            "next": "explain leveldb-abc123:db/db_impl.cc:CompactRange:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("→ rmap explain leveldb-abc123:db/db_impl.cc:CompactRange:SYMBOL\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn non_explain_folding_class_keeps_full_cursor_even_with_uid() {
+        // `map --dry-run` has NO daemon-side reattach alias; its cursor must stay full so
+        // it runs verbatim. (A module key never carries the repo uid anyway; the guard is
+        // belt-and-suspenders honesty — only `explain` gets the short form.)
+        let h = json!({
+            "display": "pkg", "path": "packages/pkg", "key": "packages/pkg",
+            "next": "map --dry-run packages/pkg"
+        });
+        let out = render_fact_hit(&h, &["map --dry-run"], true, Some("leveldb-abc123"));
+        assert!(out.contains("→ rmap map --dry-run packages/pkg\n"), "{out}");
+    }
+
+    #[test]
+    fn key_without_the_uid_prefix_keeps_full_cursor() {
+        // A file-class key is a path, not a uid-prefixed stable_key → no strip → full form.
+        let h = json!({
+            "display": "src/f.ts", "path": "src/f.ts", "key": "src/f.ts",
+            "next": "explain src/f.ts"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, Some("leveldb-abc123"));
+        assert!(out.contains("→ rmap explain src/f.ts\n"), "{out}");
     }
 }

@@ -12,6 +12,13 @@
 //!       Prominent (never demoted on unknown).
 //!   (c) match quality — exact name match, then prefix, then substring (over the short
 //!       `name`; a hit that entered only via `qualified_name` is the weakest, substring).
+//!   (c2) evidence presence (FIND-EVIDENCE-1 §2.4, TIE-BREAK ONLY) — among rows that tie
+//!       on the lexical-relevance dimensions above, a row WITH a stored doc-comment/
+//!       signature does not rank below one without one (the rg-t1 scaffolding inversion:
+//!       a documented symbol must not lose to an undocumented re-export/scaffold). This is
+//!       a pure tie-break — it never reorders rows that already differ on (a)–(c), so it
+//!       is NOT a new scoring model (§3). Absence of evidence is never a demotion signal
+//!       on its own; it only decides an otherwise-exact tie.
 //!   (d) shorter qualified name before longer.
 //!   (e) path ASC, then stable_key ASC — the final deterministic tiebreaks (stable_key
 //!       is unique per snapshot, so the order is TOTAL: no pair is ever "equal", which
@@ -40,6 +47,62 @@ pub(super) struct SymbolRank<'a> {
     pub path: Option<&'a str>,
     /// The symbol's stable key — the unique final tiebreak (total order).
     pub stable_key: &'a str,
+    /// FIND-EVIDENCE-1 (§2.1): the stored start line, carried through the sort so the
+    /// post-sort mapper can build the `path:line` anchor without a second pass. Not a
+    /// ranking input.
+    pub line: Option<i64>,
+    /// FIND-EVIDENCE-1 (§2.2): the ONE evidence line derived ONCE from the stored
+    /// doc-comment/signature (see [`evidence_line`]). Owned (computed per row, not a
+    /// borrow); the comparator only reads its PRESENCE (`is_some`) for tie-break (c2) —
+    /// it allocates nothing during the sort. The mapper clones it into the hit.
+    pub evidence: Option<String>,
+}
+
+/// FIND-EVIDENCE-1 (§2.2): derive the single evidence line from STORED facts only — the
+/// doc-comment's first CONTENT line if a doc-comment is stored, else the signature's
+/// first non-empty line, else `None`. No file I/O, no invented preview: the row shows a
+/// line ONLY when one was extracted and stored (the zg arbitrary-line defect is the
+/// anti-pattern). The FIRST choice (doc-comment) is the human-authored intent zg's win
+/// came from — the actual authored prose, NOT the comment delimiter; the signature is
+/// the deterministic fallback.
+pub(super) fn evidence_line(doc_comment: Option<&str>, signature: Option<&str>) -> Option<String> {
+    doc_comment
+        .and_then(doc_comment_first_content_line)
+        .or_else(|| signature.and_then(first_non_empty_line))
+}
+
+/// The first line of authored PROSE in a stored doc-comment — the salient evidence.
+/// `doc_comment` is stored RAW, syntax and all (`/**\n * text\n */`, `/// text`, `//! …`,
+/// `# …`): its literal first non-empty line is often the bare opener `/**` (every JSDoc/
+/// block comment), which is comment SYNTAX, not evidence. This strips leading/trailing
+/// comment-delimiter runs PER LINE and returns the first line with real content left. It
+/// removes only comment SYNTAX (delimiter characters the language requires), never
+/// authored words — so it is extraction of the stored fact, not invention of a preview
+/// (no file I/O, no text the author did not write). `None` when the comment is all
+/// delimiters/blank.
+fn doc_comment_first_content_line(doc: &str) -> Option<String> {
+    doc.lines().find_map(|raw| {
+        // Strip a leading run of comment-delimiter chars (`/ * ! #`) + surrounding space,
+        // and a trailing block-comment closer, leaving only authored content. A line that
+        // is ONLY delimiters (`/**`, `*/`, `*`) collapses to empty and is skipped.
+        let trimmed = raw.trim();
+        let closer_stripped = trimmed.strip_suffix("*/").unwrap_or(trimmed).trim_end();
+        let content = closer_stripped
+            .trim_start_matches(['/', '*', '!', '#'])
+            .trim();
+        (!content.is_empty()).then(|| content.to_string())
+    })
+}
+
+/// The first line of `text` that is non-empty after trimming surrounding whitespace,
+/// returned trimmed. `None` for absent or all-blank text. Used for the SIGNATURE fallback
+/// only — a signature carries no comment markers, and stripping delimiter chars from it
+/// would mangle real syntax (`*const T`, `int* x`), so it is shown verbatim (trimmed).
+fn first_non_empty_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
 }
 
 /// The subtypes the contract NAMES as the demoted tier: "variables/constants/
@@ -83,6 +146,17 @@ fn match_quality(name: &str, query_lower: &str) -> u8 {
     }
 }
 
+/// Evidence tie-break (§2.4, c2): `0` = has a stored doc-comment/signature, `1` = none.
+/// Lower sorts first, so a documented row wins an otherwise-exact tie; it is placed AFTER
+/// the (a)–(c) lexical-relevance dimensions, so it NEVER reorders rows that already differ
+/// on them (tie-break only — not a scoring model, §3).
+fn evidence_rank(evidence: &Option<String>) -> u8 {
+    match evidence {
+        Some(_) => 0,
+        None => 1,
+    }
+}
+
 /// The total-order rank key for a symbol under `query`. `Ord` on the tuple encodes the
 /// rule precedence (a) → (e); lower is better. `path` maps to `(is_none, value)` so a
 /// KNOWN path sorts before an unknown/absent one, then lexicographically; `stable_key`
@@ -92,12 +166,13 @@ fn match_quality(name: &str, query_lower: &str) -> u8 {
 fn rank_key<'a>(
     s: &SymbolRank<'a>,
     query_lower: &str,
-) -> (u8, u8, u8, usize, (bool, &'a str), &'a str) {
+) -> (u8, u8, u8, u8, usize, (bool, &'a str), &'a str) {
     let qname_len = s.qualified_name.unwrap_or(s.name).len();
     (
         test_partition(s.is_test),
         kind_weight(s.subtype),
         match_quality(s.name, query_lower),
+        evidence_rank(&s.evidence),
         qname_len,
         (s.path.is_none(), s.path.unwrap_or("")),
         s.stable_key,
@@ -131,6 +206,29 @@ mod tests {
             subtype,
             path,
             stable_key,
+            // Default no-span / no-evidence; the evidence tie-break tests set it via `se`.
+            line: None,
+            evidence: None,
+        }
+    }
+
+    /// Like [`s`] but with an explicit evidence line (tie-break c2 fixtures).
+    fn se<'a>(
+        name: &'a str,
+        subtype: Option<&'a str>,
+        path: Option<&'a str>,
+        stable_key: &'a str,
+        evidence: Option<String>,
+    ) -> SymbolRank<'a> {
+        SymbolRank {
+            name,
+            qualified_name: None,
+            is_test: Some(false),
+            subtype,
+            path,
+            stable_key,
+            line: None,
+            evidence,
         }
     }
 
@@ -297,6 +395,131 @@ mod tests {
         // The query is nowhere in the short name — it entered via qualified_name — so
         // match quality is the weakest tier (2), not promoted to exact/prefix.
         assert_eq!(match_quality("handler", "offer"), 2);
+    }
+
+    // ── (c2) evidence presence — TIE-BREAK ONLY (§2.4) ────────────────────────────
+
+    #[test]
+    fn evidence_line_extracts_prose_not_the_comment_delimiter() {
+        // A raw JSDoc/block comment is stored delimiters-and-all; the evidence line must
+        // be the AUTHORED prose (line 2), never the bare `/**` opener (comment syntax).
+        assert_eq!(
+            evidence_line(
+                Some("/**\n * ConversationManager handles conversation persistence.\n * more\n */"),
+                None
+            ),
+            Some("ConversationManager handles conversation persistence.".to_string())
+        );
+        // Rust `///` doc: the leading marker is stripped, the prose kept.
+        assert_eq!(
+            evidence_line(Some("/// The EXACT capture sequence"), None),
+            Some("The EXACT capture sequence".to_string())
+        );
+        // A comment that is ONLY delimiters carries no evidence → falls to the signature.
+        assert_eq!(
+            evidence_line(Some("/**\n */"), Some("fn f()")),
+            Some("fn f()".to_string())
+        );
+    }
+
+    #[test]
+    fn evidence_line_prefers_doc_then_signature_then_none() {
+        // Doc-comment first content line wins.
+        assert_eq!(
+            evidence_line(
+                Some("\n  Prune the READY snapshots  \nmore"),
+                Some("fn prune()")
+            ),
+            Some("Prune the READY snapshots".to_string())
+        );
+        // No doc → signature.
+        assert_eq!(
+            evidence_line(None, Some("fn prune(&self) -> Result<()>")),
+            Some("fn prune(&self) -> Result<()>".to_string())
+        );
+        // Empty/blank doc falls through to signature.
+        assert_eq!(
+            evidence_line(Some("   \n\t"), Some("sig")),
+            Some("sig".to_string())
+        );
+        // Neither stored → no evidence (visibly absent, never fabricated).
+        assert_eq!(evidence_line(None, None), None);
+        assert_eq!(evidence_line(Some(""), Some("")), None);
+    }
+
+    #[test]
+    fn rule_c2_documented_row_beats_undocumented_when_relevance_ties() {
+        // The rg-t1 scaffolding inversion: two rows tie on (test, kind, match quality);
+        // the one WITH a stored doc/signature must not rank below the bare scaffold.
+        let documented = se(
+            "prune",
+            Some("FUNCTION"),
+            Some("f/prune.rs"),
+            "k_doc",
+            Some("Prune the READY snapshots marked as prunable".to_string()),
+        );
+        let scaffold = se(
+            "prune",
+            Some("FUNCTION"),
+            Some("f/reexport.rs"),
+            "k_bare",
+            None,
+        );
+        assert_eq!(winner(documented, scaffold, "prune"), "k_doc");
+        // Order-independent: same winner from the reversed input.
+        let documented2 = se(
+            "prune",
+            Some("FUNCTION"),
+            Some("f/prune.rs"),
+            "k_doc",
+            Some("Prune the READY snapshots marked as prunable".to_string()),
+        );
+        let scaffold2 = se(
+            "prune",
+            Some("FUNCTION"),
+            Some("f/reexport.rs"),
+            "k_bare",
+            None,
+        );
+        assert_eq!(winner(scaffold2, documented2, "prune"), "k_doc");
+    }
+
+    #[test]
+    fn rule_c2_never_overrides_a_stronger_relevance_dimension() {
+        // Evidence is a TIE-BREAK ONLY: an undocumented EXACT match still beats a
+        // documented SUBSTRING match (match quality (c) outranks evidence (c2)).
+        let exact_bare = se("prune", Some("FUNCTION"), Some("f/a.rs"), "k_exact", None);
+        let substr_doc = se(
+            "backup_prune",
+            Some("FUNCTION"),
+            Some("f/b.rs"),
+            "k_substr",
+            Some("prunes the backup set".to_string()),
+        );
+        assert_eq!(winner(exact_bare, substr_doc, "prune"), "k_exact");
+        // And a non-test undocumented row still beats a documented TEST row (test
+        // partition (a) outranks evidence): evidence never rescues test noise.
+        let prod_bare = SymbolRank {
+            name: "prune",
+            qualified_name: None,
+            is_test: Some(false),
+            subtype: Some("FUNCTION"),
+            path: Some("f/a.rs"),
+            stable_key: "k_prod",
+            line: None,
+            evidence: None,
+        };
+        let test_doc = SymbolRank {
+            name: "prune",
+            qualified_name: None,
+            is_test: Some(true),
+            subtype: Some("FUNCTION"),
+            path: Some("f/t.rs"),
+            stable_key: "k_test",
+            line: None,
+            evidence: Some("documented test helper".to_string()),
+        };
+        assert_eq!(winner(prod_bare, test_doc, "prune"), "k_prod");
     }
 
     // ── (d) shorter qualified name before longer ──────────────────────────────────
