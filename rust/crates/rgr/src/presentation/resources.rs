@@ -122,6 +122,15 @@ impl ResourceListResponse {
                 "Resource-access detection on this build detects: {}.\n",
                 self.coverage.detected_mechanisms_line()
             ));
+            // RESOURCE-RECALL-1: name the arg0 string-literal gate — the dominant false-negative
+            // cause on C/C++/Python. Detection reads the path argument only when it is a string
+            // literal at the call site; a computed or variable path is invisible on this build. A
+            // measured limitation stated plainly, so the zero-state cannot be read as "this repo
+            // touches no files" when in truth the covered calls use computed paths.
+            out.push_str(
+                "Detection sees only calls whose path argument is a string literal at the call \
+                 site; computed or variable paths are not counted.\n",
+            );
             if let Some(gap) = self.coverage.gap_line() {
                 out.push_str(&format!("{}\n", gap));
             }
@@ -136,6 +145,12 @@ impl ResourceListResponse {
             self.detector_families_line(),
             self.coverage.detected_mechanisms_line()
         ));
+        // RESOURCE-RECALL-1: the same arg0 string-literal gate limits a partial listing exactly as
+        // it limits the zero-state — a lone result must read against the known-partial lens, not as
+        // the repo's inventory. Compact form (§2.2).
+        out.push_str(
+            "Literal-path calls only — a computed or variable path argument is not counted.\n",
+        );
         if let Some(gap) = self.coverage.gap_line() {
             out.push_str(&format!("{}\n", gap));
         }
@@ -575,6 +590,15 @@ mod tests {
             out.contains("Java — JDBC DriverManager.getConnection calls"),
             "{out}"
         );
+        // RESOURCE-RECALL-1: the zero-state names the arg0 string-literal gate — the dominant
+        // false-negative cause — so it cannot be read as "this repo touches no files".
+        assert!(
+            out.contains(
+                "Detection sees only calls whose path argument is a string literal at the call \
+                 site; computed or variable paths are not counted."
+            ),
+            "{out}"
+        );
         // The bare-language overclaim wording is GONE.
         assert!(
             !out.contains("on this build covers C, C++, Java"),
@@ -686,6 +710,14 @@ mod tests {
         );
         assert!(
             out.contains("Rust code is present but has no resource-access detector"),
+            "{out}"
+        );
+        // RESOURCE-RECALL-1 §2.2: a partial listing carries the same arg0 literal-path gate as the
+        // zero-state (compact form), so a lone result never poses as the repo's inventory.
+        assert!(
+            out.contains(
+                "Literal-path calls only — a computed or variable path argument is not counted."
+            ),
             "{out}"
         );
     }
