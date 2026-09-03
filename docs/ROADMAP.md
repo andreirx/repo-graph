@@ -194,6 +194,11 @@ structural basis). SEED-CHUNK-1 RATIFIED Option 1 (human 2026-09-03: full swap �
 potion-code-16M-v2 in-process, per-symbol chunks from the nodes table, is_test-partitioned
 seeds, lmstudio retired from find), sequenced AFTER FIND-EVIDENCE-1 and FIND-GREP-1;
 IS-TEST-CPP-1 slotted before it (small; demotion consumer measured). Then release+audit.
+SHIPPED: FIND-EVIDENCE-1 42f1b8f (2026-09-03: line anchors + stored evidence line per
+fact row, cursor diet −12.3% boilerplate, syntax-gated short-cursor alias with the
+nodes-free green path preserved; economy clause amended to signal-per-byte — operator
+drafting defect owned; survived an Anthropic 529 incident + codex cache corruption +
+an OpenAI Codex backend incident across its three relay runs).
 
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
