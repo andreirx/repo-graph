@@ -26,7 +26,17 @@ const SEED_SIMILARITY_FLOOR: f64 = 0.60;
 
 /// Render the DEMOTED semantic-seed tier (§2.3): the renamed header, then either the
 /// ranked guesses or an explicit `semantic seeds unavailable (<reason>)`.
-pub(super) fn render_seed_tier(result: &serde_json::Value, out: &mut String) {
+///
+/// `fact_outcome` is the FACTS tier's own report (`render_facts_tier`) of whether it
+/// established a miss. It gates ONLY the §2.4 capability close appended to the sub-floor
+/// abstain: that close claims "nothing matched" about the whole repo, true ONLY on an
+/// established fact-table miss (review-1). The seed-tier abstain itself (no seed cleared
+/// the floor) renders regardless — that is honest about the seed tier alone.
+pub(super) fn render_seed_tier(
+    result: &serde_json::Value,
+    fact_outcome: super::FactTierOutcome,
+    out: &mut String,
+) {
     out.push_str("Semantic seeds (embedding similarity — ranked guesses, not facts):\n");
 
     // `seeds_available` is our OWN DTO field, ALWAYS serialized (bool). A missing /
@@ -96,9 +106,27 @@ pub(super) fn render_seed_tier(result: &serde_json::Value, out: &mut String) {
         // ALL seeds fell below the floor → the honest ABSTAIN (§2.3), never 10 rows of
         // sub-floor hearsay padding an empty answer. `best` is the highest sub-floor
         // score, stated so the reader sees exactly how far below the floor the corpus is.
+        //
+        // The seed-tier abstain — honest about the SEED tier alone (no seed cleared the
+        // floor), always rendered here. `best` is the highest sub-floor score.
         out.push_str(&format!(
-            "  no seeds above the similarity floor (best: {best:.2}) — the concept may not have a distinct home in this repo.\n"
+            "  no seeds above the similarity floor (best: {best:.2})"
         ));
+        // FIND-GREP-1 (§2.4 / §4): the CAPABILITY close. The old close — "the concept may
+        // not have a distinct home in this repo" — was measured FALSE 3/3 on literal probes
+        // (fsync/TODO/unwrap_or all PRESENT): the gap is a CAPABILITY one (facts index
+        // symbols, not text), never a repo-absence one. §2.4 scopes the replacement close
+        // to a fact-table MISS: it claims "nothing matched" about the repo, true ONLY when
+        // the facts tier honestly established a miss. When facts MATCHED (or the payload was
+        // malformed/incomplete, so no miss is established) the close is WITHHELD — appending
+        // "nothing matched" there would be false / unproven (review-1; HONESTY RULE 1).
+        match fact_outcome {
+            super::FactTierOutcome::EstablishedMiss => out.push_str(
+                " — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`.",
+            ),
+            super::FactTierOutcome::MissNotEstablished => {}
+        }
+        out.push('\n');
     }
     // (`candidates` is non-empty and every candidate either set `best_below` or rendered,
     // so one of the two arms always fired — no silent empty tier.)
@@ -181,6 +209,7 @@ mod tests {
     use crate::commands::find::test_fixtures::{
         candidate_with_score, empty_facts, well_formed_candidate,
     };
+    use crate::commands::find::FactTierOutcome;
     use serde_json::json;
 
     #[test]
@@ -191,15 +220,22 @@ mod tests {
             .map(|i| candidate_with_score(&format!("k{i}"), 0.50 + f64::from(i) * 0.004))
             .collect();
         let mut out = String::new();
+        // Facts established a MISS → the §2.4 capability close is appended to the abstain.
         render_seed_tier(
             &json!({"seeds_available": true, "candidates": candidates}),
+            FactTierOutcome::EstablishedMiss,
             &mut out,
         );
         assert!(
             out.contains(
-                "no seeds above the similarity floor (best: 0.54) — the concept may not have a distinct home in this repo."
+                "no seeds above the similarity floor (best: 0.54) — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`."
             ),
-            "abstain with best score: {out}"
+            "abstain states capability, not repo absence: {out}"
+        );
+        // FIND-GREP-1 §4: the false repo-absence sentence is RETIRED everywhere.
+        assert!(
+            !out.contains("distinct home"),
+            "retired false repo-absence sentence must not render: {out}"
         );
         // Not one sub-floor candidate rendered.
         assert!(
@@ -221,6 +257,7 @@ mod tests {
                     candidate_with_score("below", 0.55),
                 ],
             }),
+            FactTierOutcome::EstablishedMiss,
             &mut out,
         );
         assert!(
@@ -240,6 +277,7 @@ mod tests {
         let mut out = String::new();
         render_seed_tier(
             &json!({"seeds_available": true, "candidates": [{"path": "src/x.ts"}]}),
+            FactTierOutcome::EstablishedMiss,
             &mut out,
         );
         assert!(
@@ -255,7 +293,7 @@ mod tests {
             "seeds_available": true,
             "candidates": [well_formed_candidate(json!("embedding"))],
         });
-        render_seed_tier(&result, &mut out);
+        render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
         assert!(
             out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
             "candidate label: {out}"
@@ -271,7 +309,7 @@ mod tests {
             "seeds_available": true,
             "candidates": [well_formed_candidate(json!("lexical"))],
         });
-        render_seed_tier(&result, &mut out);
+        render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
         assert!(
             out.contains("malformed candidate"),
             "surfaced malformed: {out}"
@@ -283,7 +321,11 @@ mod tests {
     #[test]
     fn seeds_available_missing_is_malformed_never_defaulted() {
         let mut out = String::new();
-        render_seed_tier(&json!({"candidates": []}), &mut out);
+        render_seed_tier(
+            &json!({"candidates": []}),
+            FactTierOutcome::EstablishedMiss,
+            &mut out,
+        );
         assert!(
             out.contains("malformed find response: seeds_available missing or not a bool"),
             "{out}"
@@ -293,7 +335,11 @@ mod tests {
     #[test]
     fn unavailable_without_reason_is_malformed() {
         let mut out = String::new();
-        render_seed_tier(&json!({"seeds_available": false}), &mut out);
+        render_seed_tier(
+            &json!({"seeds_available": false}),
+            FactTierOutcome::EstablishedMiss,
+            &mut out,
+        );
         assert!(
             out.contains("malformed find response: seeds unavailable but no reason given"),
             "{out}"

@@ -212,7 +212,11 @@ impl ServiceDispatcher {
         // absent-default (a flag not passed = false), NOT rendered facts, so the
         // `.unwrap_or(false)` here is the CLI contract, not a silent zero-collapse.
         //   `exact` = facts tier ALONE, the endpoint never touched (§2.4).
-        //   `full`  = lift the per-class display caps (uncapped facts render).
+        //   `full`  = lift the DEFAULT display caps. In the facts branch it uncaps the
+        //             per-class fact renders; in the FIND-GREP-1 `--text` branch it lifts
+        //             the live-scan hit-line cap. review-0 finding 3: the binding is
+        //             named `full` (not `full_facts`) because it now governs BOTH find
+        //             modes, not just facts.
         // They do NOT imply each other: `--exact` alone applies the default per-class
         // caps; `--exact --full` is facts-only AND uncapped; `--full` alone caps
         // nothing but still consults the endpoint.
@@ -221,9 +225,23 @@ impl ServiceDispatcher {
             .get("exact")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let full_facts = request
+        let full = request
             .params
             .get("full")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // FIND-GREP-1: `--text` selects the LIVE working-tree scan instead of the
+        // fact-table + seed tiers; `-F`/`--fixed` makes the pattern a literal. Both are
+        // request inputs with a well-defined absent-default (flag not passed = false),
+        // NOT rendered facts — the `.unwrap_or(false)` is the CLI contract here.
+        let text = request
+            .params
+            .get("text")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let fixed = request
+            .params
+            .get("fixed")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         // `next.cwd` is the registry's absolute canonical root (review-2 #2), never
@@ -242,6 +260,55 @@ impl ServiceDispatcher {
             Ok(s) => s,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+
+        // FIND-GREP-1: the `--text` LIVE scan branch. It tolerates a missing snapshot
+        // (still greps the working tree; symbol context + staleness then withheld with
+        // a reason), so it resolves the snapshot as an OPTION rather than sharing the
+        // facts branch's hard "not built" degrade. The scan needs the working-tree ROOT
+        // — the registry canonical path (`repo_root`); its absence is an honest error,
+        // never a fabricated empty root.
+        if text {
+            let snapshot_uid = match repo_graph_agent::AgentStorageRead::get_latest_snapshot(
+                &storage, &repo_uid,
+            ) {
+                Ok(s) => s.map(|s| s.snapshot_uid),
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    )
+                }
+            };
+            let root =
+                match &repo_root {
+                    Some(r) => std::path::PathBuf::from(r),
+                    None => return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InvalidRequest,
+                            "repository working directory unavailable (registry lookup failed) — \
+                             cannot run a live text scan"
+                                .to_string(),
+                        ),
+                    ),
+                };
+            let resp = crate::find_text::run_text_scan(
+                &storage,
+                snapshot_uid.as_deref(),
+                &display_name,
+                &root,
+                &query,
+                fixed,
+                full,
+            );
+            return match serde_json::to_value(&resp) {
+                Ok(v) => DispatchResult::success(&request.id, v),
+                Err(e) => DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                ),
+            };
+        }
 
         // Resolve the READY snapshot (freshness scope). No READY snapshot ⇒ the
         // store cannot exist yet ⇒ the "not built" degraded state.
@@ -285,7 +352,7 @@ impl ServiceDispatcher {
         // FACTS tier FIRST (§2.1) — always, deterministically, whether or not the
         // embedding endpoint is reachable. This is the answer that outranks guesses.
         let facts =
-            crate::find_facts::gather_facts(&storage, &repo_uid, &snapshot_uid, &query, full_facts);
+            crate::find_facts::gather_facts(&storage, &repo_uid, &snapshot_uid, &query, full);
 
         // DEMOTED semantic-seed tier (§2.3) — skipped entirely under `--exact` so the
         // endpoint is never touched (§2.4). Otherwise it degrades to

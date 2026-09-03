@@ -93,11 +93,18 @@ fn ratified_for(class: &str) -> Option<&'static RatifiedClass> {
 /// Render the FACTS tier: one block per fact class WITH hits or a per-class
 /// `unavailable (<reason>)`, and a single compact "no matches" line naming the
 /// classes that were searched and found nothing (honest searched set, §2.5).
+///
+/// Returns the [`super::FactTierOutcome`] this single validating traversal observed — the
+/// authoritative signal (no second classifier to drift from what was rendered) the seed
+/// tier gates its §2.4 capability close on (review-1). A MISS is established ONLY when the
+/// payload is well-formed, envelope-complete, and every class matched nothing; a rendered
+/// hit, ANY malformed marker, or an unavailable class read yields `MissNotEstablished`.
 pub(super) fn render_facts_tier(
     result: &serde_json::Value,
     repo_uid: Option<&str>,
     out: &mut String,
-) {
+) -> super::FactTierOutcome {
+    use super::FactTierOutcome;
     // Deterministic lexical RETRIEVAL — but the CONTENT certainty varies by source
     // layer, so each class is tagged `extracted` / `inferred` / `hint` / `governance`
     // (review-1 honesty defect; VISION § Fact Certainty Model). The retrieval is
@@ -114,9 +121,21 @@ pub(super) fn render_facts_tier(
         Some(serde_json::Value::Array(a)) => a,
         _ => {
             out.push_str("  (malformed find response: facts missing or not a list)\n");
-            return;
+            // A non-array `facts` is malformed — a miss cannot be honestly established
+            // (malformed ≠ empty; review-1).
+            return FactTierOutcome::MissNotEstablished;
         }
     };
+
+    // §2.4 miss accounting (review-1). `matched_any`: a class rendered ≥1 hit.
+    // `clean_groups`: groups that resolved to a VALID hit-or-empty state. Every malformed
+    // marker and every unavailable-class read `continue`s WITHOUT incrementing it, so
+    // `clean_groups == groups.len()` is a structural proof that NO marker fired (no need to
+    // flag each of the 13 marker sites — one drifting flag could falsely establish a miss,
+    // the exact honesty bug). A miss is established below ONLY when nothing matched, every
+    // group was clean, and the envelope is complete.
+    let mut matched_any = false;
+    let mut clean_groups = 0usize;
 
     let mut empty_classes: Vec<String> = Vec::new();
     // The ratified classes that appeared as a VALID group this response, in payload
@@ -270,9 +289,35 @@ pub(super) fn render_facts_tier(
         }
 
         if hits.is_empty() {
+            // review-3 finding 2: an empty group is a CLEAN no-match only when its own
+            // remainder metadata AGREES — `matched == 0` and not a saturated floor. A
+            // group with `hits: []` but `matched > 0` (or `matched == 0` flagged as a
+            // FLOOR, i.e. "at least 0" saturated with nothing shown) is INTERNALLY
+            // CONTRADICTORY: the remainder claims matches the group did not carry. The
+            // daemon never emits this — `finalize` sets `matched = hits.len()` and
+            // `matched_is_floor = saturated && !full` (empty ⇒ 0 / false) — so it can
+            // only be a garbled / fabricated payload. Rendering it as a clean empty class
+            // would let it establish a fact-table MISS (`clean_groups == groups.len()`)
+            // and unlock the "nothing matched" capability close. Surface it and leave the
+            // miss UNESTABLISHED — do NOT increment `clean_groups`, do NOT list it as an
+            // honest empty class (STANDING HONESTY RULE 1 — contradiction ≠ absence).
+            if matched != 0 || floor {
+                let claim = if floor {
+                    format!("at least {matched}")
+                } else {
+                    matched.to_string()
+                };
+                out.push_str(&format!(
+                    "  {label}  (malformed fact group: no hits but matched claims {claim})\n"
+                ));
+                continue;
+            }
             empty_classes.push(class.to_string());
+            clean_groups += 1; // a valid, empty group — cleanly accounted (§2.4 miss).
             continue;
         }
+        matched_any = true; // this class matched: a fact-table miss is NOT established.
+        clean_groups += 1; // a valid group with hits — cleanly accounted.
         out.push_str(&format!("  {label}\n"));
         for h in hits {
             // The hit renderer validates each hit's `next` against THIS class's ratified
@@ -325,6 +370,18 @@ pub(super) fn render_facts_tier(
             "  (malformed find response: fact group(s) missing for class(es): {})\n",
             missing.join(", ")
         ));
+    }
+
+    // §2.4 (review-1): a fact-table MISS is established ONLY when nothing matched, every
+    // group resolved cleanly (no malformed marker / no unavailable read fired — proven by
+    // `clean_groups == groups.len()`), AND the envelope is complete. Anything else — a
+    // hit, a malformed payload, an unavailable class, an omitted class — leaves the miss
+    // UNESTABLISHED, so the seed tier will NOT render the "nothing matched" capability
+    // close (malformed/unknown ≠ absent; STANDING HONESTY RULE 1).
+    if !matched_any && clean_groups == groups.len() && missing.is_empty() {
+        FactTierOutcome::EstablishedMiss
+    } else {
+        FactTierOutcome::MissNotEstablished
     }
 }
 

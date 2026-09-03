@@ -30,15 +30,21 @@ use crate::daemon_client::{DaemonClient, DaemonClientError};
 mod fact_hit;
 mod facts_render;
 mod seed_render;
+mod text_render;
 
 #[cfg(test)]
 mod test_fixtures;
 
 fn print_find_usage() {
     eprintln!("usage: rmap find \"<query>\" [--exact] [--full] [--json]");
-    eprintln!("  Searches the indexed fact tables FIRST (deterministic), each hit labeled");
-    eprintln!("  with its fact class and the command that renders it; then demoted semantic");
-    eprintln!("  (embedding) guesses below. --exact = facts only, endpoint never consulted.");
+    eprintln!("       rmap find --text \"<pattern>\" [-F] [--full] [--json]");
+    eprintln!("  Default: searches the indexed fact tables FIRST (deterministic), each hit");
+    eprintln!("  labeled with its fact class and the command that renders it; then demoted");
+    eprintln!("  semantic (embedding) guesses below. --exact = facts only, endpoint never");
+    eprintln!("  consulted.");
+    eprintln!("  --text: a LIVE regex scan of the working tree (comments, expressions, and");
+    eprintln!("  library calls the fact tables do not index), each hit annotated with its");
+    eprintln!("  enclosing stored symbol; -F matches the pattern as a fixed string.");
 }
 
 pub fn run_find(args: &[String]) -> ExitCode {
@@ -46,6 +52,10 @@ pub fn run_find(args: &[String]) -> ExitCode {
     let mut json_mode = false;
     let mut exact = false;
     let mut full = false;
+    // FIND-GREP-1: `--text` selects the live working-tree scan; `-F`/`--fixed` makes the
+    // pattern a literal (only meaningful with `--text`).
+    let mut text = false;
+    let mut fixed = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -54,6 +64,8 @@ pub fn run_find(args: &[String]) -> ExitCode {
             "--json" => json_mode = true,
             "--exact" => exact = true,
             "--full" => full = true,
+            "--text" => text = true,
+            "-F" | "--fixed" => fixed = true,
             "--help" | "-h" => {
                 print_find_usage();
                 return ExitCode::SUCCESS;
@@ -84,6 +96,20 @@ pub fn run_find(args: &[String]) -> ExitCode {
         }
     };
 
+    // FIND-GREP-1 flag-combination guards. `-F` and `--exact` are text/facts-mode
+    // qualifiers respectively; using one against the wrong mode is a user error we
+    // reject loudly rather than silently ignore.
+    if fixed && !text {
+        eprintln!("error: -F/--fixed only applies with --text");
+        print_find_usage();
+        return ExitCode::from(1);
+    }
+    if text && exact {
+        eprintln!("error: --exact (facts-only) and --text (live scan) are mutually exclusive");
+        print_find_usage();
+        return ExitCode::from(1);
+    }
+
     // Resolve repo from cwd (same convention as orient/explain).
     let cwd = match std::env::current_dir() {
         Ok(p) => p,
@@ -113,6 +139,8 @@ pub fn run_find(args: &[String]) -> ExitCode {
         "query": query,
         "exact": exact,
         "full": full,
+        "text": text,
+        "fixed": fixed,
     });
 
     match client.request("find", Some(params)) {
@@ -128,6 +156,13 @@ pub fn run_find(args: &[String]) -> ExitCode {
                         ExitCode::from(2)
                     }
                 }
+            } else if text {
+                // FIND-GREP-1: the live-scan response has its own shape and renderer.
+                // Exit code follows the classic `find` convention (STATED in the slice
+                // report): a valid response is SUCCESS whether or not it matched — `find`
+                // is a discovery verb, not a match/no-match gate.
+                print!("{}", text_render::render_text_scan(&result));
+                ExitCode::SUCCESS
             } else {
                 print!("{}", render_find_human(&result, exact));
                 ExitCode::SUCCESS
@@ -147,6 +182,34 @@ pub fn run_find(args: &[String]) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// FIND-GREP-1 (§2.4) — whether the FACTS tier established a MISS, the sole gate on the
+/// seed tier's capability close ("nothing matched; try `find --text`"). Produced by
+/// `facts_render::render_facts_tier` (the one traversal that already validates every
+/// group — single source of truth, no second classifier to drift from it) and consumed
+/// by `seed_render::render_seed_tier`.
+///
+/// Abstraction one-liner — enum `FactTierOutcome`; users: producer
+/// `facts_render::render_facts_tier`, consumer `seed_render::render_seed_tier`; axis:
+/// §2.4's honesty condition — the capability close is a claim about the repo that is only
+/// TRUE on an established fact miss; rejected simpler alternative: a bare `bool` param —
+/// an enum forces the seed tier to match BOTH arms, so the honesty-critical default
+/// (never say "nothing matched" unless a miss was proven) cannot be reintroduced by a
+/// stray `unwrap_or(false)`, and a hit or a malformed payload can never silently enable
+/// the close.
+#[derive(Clone, Copy)]
+pub(super) enum FactTierOutcome {
+    /// The facts payload was well-formed, envelope-complete, and EVERY class matched
+    /// nothing — an HONESTLY-ESTABLISHED fact-table miss. The ONLY state in which the
+    /// seed tier may render the §2.4 capability close.
+    EstablishedMiss,
+    /// EITHER a fact class matched, OR the payload was malformed / a class read was
+    /// unavailable / the envelope was incomplete, so NO miss can be honestly established.
+    /// The capability "nothing matched" close is WITHHELD: a match makes it false, and a
+    /// malformed-or-uncertain payload must never be treated as an empty result
+    /// (review-1; STANDING HONESTY RULE 1 — malformed/unknown ≠ absent).
+    MissNotEstablished,
 }
 
 /// FIND-EVIDENCE-1 (§2.3): the once-per-output uid header line (with its trailing
@@ -268,268 +331,17 @@ fn render_find_human(result: &serde_json::Value, exact: bool) -> String {
 
     // Pass `diet_uid`, not `repo_uid`: when the diet is withheld, `None` makes every
     // cursor render in its full self-contained form (matching the omitted header).
-    facts_render::render_facts_tier(result, diet_uid, &mut out);
+    // The facts tier's own single traversal REPORTS whether it established a miss — the
+    // seed tier's §2.4 capability close is gated on it (review-1: no false "nothing
+    // matched" when facts hit or the payload is malformed).
+    let fact_outcome = facts_render::render_facts_tier(result, diet_uid, &mut out);
 
     if !exact {
         out.push('\n');
-        seed_render::render_seed_tier(result, &mut out);
+        seed_render::render_seed_tier(result, fact_outcome, &mut out);
     }
     out
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::commands::find::test_fixtures::{empty_facts, well_formed_candidate};
-    use serde_json::json;
-
-    #[test]
-    fn facts_render_above_seeds_with_class_and_command_labels() {
-        let result = json!({
-            "query": "bnr",
-            "facts": [
-                {"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
-                 "hits": [{"display": "bnrService", "path": "src/bnr.ts", "key": "k1", "next": "explain k1"}],
-                 "matched": 1, "matched_is_floor": false},
-                {"fact_class": "http-surface", "render_command": "boundaries list", "certainty": "inferred",
-                 "hits": [{"display": "provider GET /api/offers", "path": "src/offer.ts", "next": "boundaries list"}],
-                 "matched": 1, "matched_is_floor": false},
-                {"fact_class": "file", "render_command": "explain", "certainty": "extracted", "hits": [], "matched": 0, "matched_is_floor": false},
-                {"fact_class": "module", "render_command": "map --dry-run", "certainty": "inferred", "hits": [], "matched": 0, "matched_is_floor": false},
-                {"fact_class": "dependency", "render_command": "deps list", "certainty": "extracted", "hits": [], "matched": 0, "matched_is_floor": false},
-                {"fact_class": "framework", "render_command": "inferences list", "certainty": "hint", "hits": [], "matched": 0, "matched_is_floor": false},
-                {"fact_class": "boundary", "certainty": "governance", "hits": [], "matched": 0, "matched_is_floor": false}
-            ],
-            "seeds_available": true,
-            "summary": "ranked guesses for \"bnr\" (embedding similarity — not facts)",
-            "candidates": [well_formed_candidate(json!("embedding"))],
-        });
-        let out = render_find_human(&result, false);
-        // Facts tier appears BEFORE the seed tier.
-        let facts_pos = out
-            .find("[symbol · extracted → rmap explain]")
-            .expect("symbol label with certainty");
-        let seed_pos = out.find("Semantic seeds").expect("seed header");
-        assert!(facts_pos < seed_pos, "facts render above seeds:\n{out}");
-        assert!(
-            out.contains("bnrService  — src/bnr.ts"),
-            "symbol hit: {out}"
-        );
-        // The runnable per-hit next command is rendered (review-1 item 1).
-        assert!(
-            out.contains("→ rmap explain k1"),
-            "runnable per-hit next command: {out}"
-        );
-        assert!(
-            out.contains("[http-surface · inferred → rmap boundaries list]"),
-            "http label with certainty: {out}"
-        );
-        assert!(
-            out.contains("provider GET /api/offers  — src/offer.ts"),
-            "route hit: {out}"
-        );
-        // Seed candidate still rendered below, with its validated label.
-        assert!(
-            out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
-            "seed candidate below: {out}"
-        );
-    }
-
-    #[test]
-    fn cursor_diet_applies_and_header_prints_when_it_amortizes() {
-        // ≥3 uid-prefixed symbol rows: the once-per-output header pays for itself, so it
-        // prints AND the per-row cursors drop the uid (`explain <suffix>`). Keys carry `#`
-        // (path#name), so the daemon single-quotes the cursor arg — mirrored here.
-        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
-        let hit = |k: &str| {
-            json!({"display": "sym", "path": "src/x.ts", "key": format!("{uid}:{k}"),
-                   "next": format!("explain '{uid}:{k}'")})
-        };
-        let mut facts = empty_facts();
-        facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
-            "hits": [hit("a#a:SYMBOL:FUNCTION"), hit("b#b:SYMBOL:FUNCTION"), hit("c#c:SYMBOL:FUNCTION")],
-            "matched": 3, "matched_is_floor": false});
-        let result = json!({
-            "query": "sym", "repo_uid": uid, "facts": facts,
-            "seeds_available": true, "candidates": [],
-        });
-        let out = render_find_human(&result, true);
-        assert!(
-            out.contains("repo-uid repo_01m1kvv00zgrtr3t23xrfe6veg (symbol cursors below are relative to it)"),
-            "header prints when the diet amortizes: {out}"
-        );
-        assert!(
-            out.contains("→ rmap explain 'a#a:SYMBOL:FUNCTION'\n"),
-            "cursor is relative (uid dropped): {out}"
-        );
-        assert!(
-            !out.contains("explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:"),
-            "the uid is not restated per row: {out}"
-        );
-    }
-
-    #[test]
-    fn cursor_diet_is_withheld_on_a_single_row_so_boilerplate_never_grows() {
-        // 1 uid-prefixed symbol row: the header would cost more than the single uid it
-        // saves (§2.5), so the diet is WITHHELD — NO header, and the cursor stays FULL and
-        // self-contained (still runnable without a header to anchor to).
-        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
-        let key = format!("{uid}:src/x.rs#witness_epoch:SYMBOL:FUNCTION");
-        let mut facts = empty_facts();
-        facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
-            "hits": [{"display": "witness_epoch", "path": "src/x.rs", "key": key,
-                      "next": format!("explain '{key}'")}],
-            "matched": 1, "matched_is_floor": false});
-        let result = json!({
-            "query": "witness_epoch", "repo_uid": uid, "facts": facts,
-            "seeds_available": true, "candidates": [],
-        });
-        let out = render_find_human(&result, true);
-        assert!(
-            !out.contains("repo-uid "),
-            "no header when the diet cannot amortize: {out}"
-        );
-        assert!(
-            out.contains("→ rmap explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:src/x.rs#witness_epoch:SYMBOL:FUNCTION'\n"),
-            "the single-row cursor stays full and self-contained: {out}"
-        );
-    }
-
-    #[test]
-    fn malformed_top_level_facts_withholds_diet_never_fabricates_header_or_cursor() {
-        // review-1 regression: a `facts` payload that is NOT the ratified array (here an
-        // object) cannot be classified for the cursor diet. The diet is WITHHELD — NO
-        // header line, NO relative cursor selected — and the malformed shape is surfaced
-        // honestly by the facts renderer, never silently classified as "0 dietable rows".
-        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
-        let result = json!({
-            "query": "sym", "repo_uid": uid,
-            "facts": {"not": "an array"},
-            "seeds_available": true, "candidates": [],
-        });
-        let out = render_find_human(&result, true);
-        assert!(
-            !out.contains("repo-uid "),
-            "no diet header on malformed facts: {out}"
-        );
-        assert!(
-            out.contains("malformed find response: facts missing or not a list"),
-            "malformed facts surfaced honestly: {out}"
-        );
-    }
-
-    #[test]
-    fn malformed_group_hits_withholds_diet_keeps_full_self_contained_cursors() {
-        // review-1 regression: three uid-prefixed symbol rows WOULD amortize the header,
-        // but a second group's `hits` is a non-list. The old classifier silently discarded
-        // that group (filter_map) and applied the diet off the survivors; the checked
-        // traversal short-circuits to Malformed, so the diet is WITHHELD ENTIRELY — every
-        // symbol cursor stays FULL and self-contained (uid restated, still runnable), no
-        // header, and the corrupt group is surfaced by the renderer.
-        let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
-        let hit = |k: &str| {
-            json!({"display": "sym", "path": "src/x.ts", "key": format!("{uid}:{k}"),
-                   "next": format!("explain '{uid}:{k}'")})
-        };
-        let mut facts = empty_facts();
-        facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
-            "hits": [hit("a#a:SYMBOL:FUNCTION"), hit("b#b:SYMBOL:FUNCTION"), hit("c#c:SYMBOL:FUNCTION")],
-            "matched": 3, "matched_is_floor": false});
-        // A malformed second group: `hits` present but not a list.
-        facts[1] = json!({"fact_class": "file", "render_command": "explain", "certainty": "extracted",
-            "hits": {"not": "a list"}, "matched": 0, "matched_is_floor": false});
-        let result = json!({
-            "query": "sym", "repo_uid": uid, "facts": facts,
-            "seeds_available": true, "candidates": [],
-        });
-        let out = render_find_human(&result, true);
-        assert!(
-            !out.contains("repo-uid "),
-            "diet withheld — no header — on a malformed group: {out}"
-        );
-        assert!(
-            out.contains("→ rmap explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:a#a:SYMBOL:FUNCTION'\n"),
-            "symbol cursor stays full and self-contained (no relative cursor fabricated): {out}"
-        );
-        assert!(
-            out.contains("malformed fact group: hits missing or not a list"),
-            "malformed group surfaced honestly: {out}"
-        );
-    }
-
-    #[test]
-    fn endpoint_down_renders_facts_and_seed_unavailable_with_reason() {
-        let mut facts = empty_facts();
-        facts[0] = json!({
-            "fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
-            "hits": [{"display": "bnrService", "path": "src/bnr.ts", "key": "k1", "next": "explain k1"}],
-            "matched": 1, "matched_is_floor": false
-        });
-        let result = json!({
-            "query": "bnr", "facts": facts,
-            "seeds_available": false,
-            "seeds_unavailable_reason": "no local embedding model reachable; seeding is optional, resolution is unaffected",
-            "summary": "no local embedding model reachable — semantic hints unavailable (find is optional)",
-            "candidates": [],
-        });
-        let out = render_find_human(&result, false);
-        // Facts intact.
-        assert!(
-            out.contains("bnrService  — src/bnr.ts"),
-            "facts intact: {out}"
-        );
-        // Seeds explicitly unavailable WITH reason.
-        assert!(
-            out.contains("semantic seeds unavailable (no local embedding model reachable"),
-            "seed unavailable with reason: {out}"
-        );
-    }
-
-    #[test]
-    fn exact_mode_omits_seed_section_entirely() {
-        let result = json!({
-            "query": "bnr", "facts": empty_facts(),
-            "seeds_available": false,
-            "seeds_unavailable_reason": "not consulted (--exact — facts only)",
-            "candidates": [],
-        });
-        let out = render_find_human(&result, true);
-        assert!(
-            !out.contains("Semantic seeds"),
-            "no seed section in --exact: {out}"
-        );
-        assert!(
-            out.contains("Facts (deterministic lexical match over the indexed tables"),
-            "facts present: {out}"
-        );
-    }
-
-    #[test]
-    fn honest_empty_names_searched_classes() {
-        let result = json!({
-            "query": "zzz", "facts": empty_facts(),
-            "seeds_available": true, "candidates": [],
-        });
-        let out = render_find_human(&result, false);
-        assert!(
-            out.contains(
-                "no matches: symbol, file, module, http-surface, dependency, framework, boundary"
-            ),
-            "honest empty names searched classes: {out}"
-        );
-        assert!(
-            out.contains("(no area scored above zero)"),
-            "seed empty stated: {out}"
-        );
-    }
-
-    #[test]
-    fn query_missing_is_malformed_never_empty_echo() {
-        let result = json!({"facts": empty_facts(), "seeds_available": true, "candidates": []});
-        let out = render_find_human(&result, false);
-        assert!(
-            out.contains("malformed find response: query missing or not a string"),
-            "missing query surfaced: {out}"
-        );
-    }
-}
+mod tests;

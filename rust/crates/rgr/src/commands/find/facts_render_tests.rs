@@ -6,6 +6,7 @@
 
 use super::render_facts_tier;
 use crate::commands::find::test_fixtures::empty_facts;
+use crate::commands::find::FactTierOutcome;
 use serde_json::json;
 
 /// Render only the facts tier of `result` to a fresh String.
@@ -13,6 +14,14 @@ fn facts(result: &serde_json::Value) -> String {
     let mut out = String::new();
     render_facts_tier(result, None, &mut out);
     out
+}
+
+/// Render the facts tier AND capture the miss outcome — the sole gate on the seed
+/// tier's "nothing matched" capability close (§2.4).
+fn facts_with_outcome(result: &serde_json::Value) -> (String, FactTierOutcome) {
+    let mut out = String::new();
+    let outcome = render_facts_tier(result, None, &mut out);
+    (out, outcome)
 }
 
 #[test]
@@ -80,6 +89,71 @@ fn failed_class_renders_unavailable_with_reason_never_dropped() {
     assert!(
         out.contains("[http-surface · inferred → rmap boundaries list]  unavailable (http-surface fact read unavailable: db locked)"),
         "failed class surfaced: {out}"
+    );
+}
+
+#[test]
+fn empty_group_whose_matched_claims_a_hit_is_malformed_and_withholds_the_close() {
+    // review-3 finding 2: a group with `hits: []` but `matched: 1` is INTERNALLY
+    // CONTRADICTORY — the remainder claims a match the group did not carry. It must NOT
+    // render as a clean empty class, and it must NOT let the facts tier establish a MISS
+    // (which would unlock the seed tier's "nothing matched" capability close).
+    let mut f = empty_facts();
+    f[0] = json!({
+        "fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+        "hits": [], "matched": 1, "matched_is_floor": false
+    });
+    let (out, outcome) = facts_with_outcome(&json!({"facts": f}));
+    assert!(
+        out.contains("(malformed fact group: no hits but matched claims 1)"),
+        "contradiction surfaced: {out}"
+    );
+    // The class is NOT listed as an honest empty match.
+    assert!(
+        !out.contains("no matches: symbol"),
+        "contradictory group is not an honest empty class: {out}"
+    );
+    // The close is WITHHELD — a malformed group leaves the miss unestablished.
+    assert!(
+        matches!(outcome, FactTierOutcome::MissNotEstablished),
+        "capability close withheld on a contradictory group"
+    );
+}
+
+#[test]
+fn empty_group_flagged_as_a_floor_is_malformed_and_withholds_the_close() {
+    // The floor variant: `hits: [], matched: 0, matched_is_floor: true` claims "at least
+    // 0" saturated with nothing shown — equally contradictory (a saturated fetch with no
+    // rows). Surfaced, and the miss stays unestablished.
+    let mut f = empty_facts();
+    f[0] = json!({
+        "fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
+        "hits": [], "matched": 0, "matched_is_floor": true
+    });
+    let (out, outcome) = facts_with_outcome(&json!({"facts": f}));
+    assert!(
+        out.contains("(malformed fact group: no hits but matched claims at least 0)"),
+        "floor contradiction surfaced: {out}"
+    );
+    assert!(
+        matches!(outcome, FactTierOutcome::MissNotEstablished),
+        "capability close withheld on a floor-flagged empty group"
+    );
+}
+
+#[test]
+fn all_empty_well_formed_groups_establish_the_miss() {
+    // The complementary guard: a truly clean, envelope-complete, all-empty payload DOES
+    // establish the miss (so the malformed guard above is not merely making the close
+    // unreachable). This is the ONLY state that unlocks the capability close.
+    let (out, outcome) = facts_with_outcome(&json!({"facts": empty_facts()}));
+    assert!(
+        out.contains("no matches: symbol"),
+        "honest empty classes listed: {out}"
+    );
+    assert!(
+        matches!(outcome, FactTierOutcome::EstablishedMiss),
+        "a clean all-empty payload establishes the miss"
     );
 }
 

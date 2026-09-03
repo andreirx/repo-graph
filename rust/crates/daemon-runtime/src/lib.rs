@@ -80,6 +80,7 @@ pub(crate) mod deps_coverage; // DEPS-ATTRIB-2 §2.3: manifest-coverage split (e
 pub(crate) mod deps_ecosystem_presence; // DEPS-ATTRIB-2 §2.4: secondary-ecosystem truth (extracted per review-1 item 5)
 pub(crate) mod deps_headline;
 mod find_facts; // FIND-FACTS-1: the `find` verb's deterministic FACTS tier (crate-private)
+pub(crate) mod find_text; // FIND-GREP-1: the `find --text` live working-tree scan (grep/ignore reuse); crate-private — sole caller is `dispatch_seed::handle_find` (review-2 finding 3)
 pub(crate) mod index_basis_probe;
 pub(crate) mod index_drift;
 pub mod livegraph_feed;

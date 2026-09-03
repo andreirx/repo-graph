@@ -89,6 +89,17 @@ jdtls-resolver = { path = "../jdtls-resolver" }
 repo-graph-platform-paths = { path = "../platform-paths" }
 
 # Utilities
+# FIND-GREP-1: the ripgrep library family for the `find --text` live working-tree
+# scan — `grep` (matcher + searcher, incl. binary detection) for matching, `ignore`
+# (the crate ripgrep walks on) for the git-faithful working-tree walk, and `regex`
+# only to escape a `-F` fixed-string pattern. review-0 finding 1: `find --text` walks
+# the working tree DIRECTLY via `ignore` (all non-ignored files), NOT through the
+# indexer's source-extension-filtered `scanner::scan_repo`. Matching and walking are
+# REUSED from the ripgrep library, never re-implemented. Pre-ratified dependency set
+# (slice §3 stop conditions — the ripgrep library family).
+grep = "0.3"
+ignore = "0.4"
+regex = "1"
 pathdiff = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

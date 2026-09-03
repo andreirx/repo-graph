@@ -179,6 +179,7 @@ pub(crate) mod diagnostic;
 mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
 pub mod error;
 pub mod find_facts_reads; // FIND-FACTS-1: lexical (LIKE) fact-table reads for the `find` FACTS tier
+pub mod find_text_reads; // FIND-GREP-1: span + file-version reads for the `find --text` live scan
 mod freshness_impl; // FreshnessStoragePort impl for StorageConnection (ACR-3)
 pub mod freshness_port; // Freshness and provenance storage port (ACR-3)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
