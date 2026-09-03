@@ -51,10 +51,14 @@ DECISION_REQUIRED. Never touch the operator's real state root. Do NOT commit.
 - Unit: hit-in-span annotated; hit-outside-span bare; changed-file staleness note; cap
   disclosure; retired-sentence absence on capability miss.
 - Live proof (isolated state root, registry sha unchanged): the three audit F probes
-  re-run — `--text fsync` on leveldb (must find env_posix.cc:411 annotated with its
-  enclosing function), `--text TODO` on FRAKTAG (3 first-party, vendored suppressed by
-  ignore rules), `--text 'unwrap_or\(0\)'` on repo-graph (count header + cap disclosure);
-  one deliberately-edited file demonstrating the staleness note.
+  re-run — `--text fsync` on leveldb (must find env_posix.cc:411, annotated to
+  STORED-SPAN FIDELITY: the annotation renders `[kind qualified_name]` exactly as
+  indexed, never implying a function — AMENDED 2026-09-03 after the operator verified the
+  stored span at :411 is the mis-extended `class Limiter` 73–806 with the real enclosing
+  function unextracted; that defect is CPP-SPAN-FIDELITY-1, a named follow-up, and the
+  build report must cite it), `--text TODO` on FRAKTAG (3 first-party, vendored
+  suppressed by ignore rules), `--text 'unwrap_or\(0\)'` on repo-graph (count header +
+  cap disclosure); one deliberately-edited file demonstrating the staleness note.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done

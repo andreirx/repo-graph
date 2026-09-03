@@ -199,6 +199,11 @@ fact row, cursor diet −12.3% boilerplate, syntax-gated short-cursor alias with
 nodes-free green path preserved; economy clause amended to signal-per-byte — operator
 drafting defect owned; survived an Anthropic 529 incident + codex cache corruption +
 an OpenAI Codex backend incident across its three relay runs).
+NEW DEFECT (verified 2026-09-03, via FIND-GREP-1 review): **CPP-SPAN-FIDELITY-1** —
+leveldb util/env_posix.cc: `class Limiter` stored span 73–806 swallows most of the file;
+the four Posix*File classes + all methods (~130–800) UNEXTRACTED (namespace{} wrapper
+suspected; diagnosis in the slice-to-be). Every C++ fact consumer inherits this
+(explains part of the C++ audit weakness). Queue candidate after SEED-CHUNK-1.
 
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
