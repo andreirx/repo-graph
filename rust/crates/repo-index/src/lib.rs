@@ -51,6 +51,12 @@
 
 pub mod compose;
 pub mod config;
+// IS-TEST-CPP-1: the compose-side STORAGE postpass that reads the snapshot's
+// FILE-node gtest markers (emitted by cpp-extractor onto metadata_json) and
+// promotes `is_test`. Split from `compose.rs` like `rust_test_reclassify` so the
+// storage postpass + its tests do not grow the >500-line orchestration file.
+// `pub(crate)` — only compose's index / refresh call sites invoke it.
+pub(crate) mod cpp_test_reclassify;
 pub mod express_detector;
 pub(crate) mod http_boundary;
 pub mod impact_propagation;

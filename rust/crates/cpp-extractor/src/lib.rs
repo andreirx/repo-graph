@@ -34,6 +34,10 @@
 //! See `docs/milestones/cpp-extractor-v1.md` for full design decisions.
 
 mod extractor;
+// IS-TEST-CPP-1: structural gtest/gmock test-marker detection over the parse tree.
+// Crate-private — the only caller is this crate's extractor, which rides the result
+// on the FILE node's metadata_json for the compose-side reclassify postpass to read.
+mod gtest_marker;
 mod linkage;
 mod metrics;
 

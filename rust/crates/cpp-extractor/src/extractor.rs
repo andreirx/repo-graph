@@ -16,6 +16,7 @@ use repo_graph_indexer::types::{
     NodeSubtype, Resolution, Visibility,
 };
 
+use crate::gtest_marker::detect_gtest_marker;
 use crate::linkage::{
     extract_linkage_from_spec, FileLinkageStats, LanguageLinkage, LinkageMetadata,
 };
@@ -341,11 +342,16 @@ impl ExtractorPort for CppExtractor {
             walk_top_level(&child, src, &mut ctx);
         }
 
-        // Update file node metadata with linkage stats
-        if ctx.file_linkage_stats.has_extern_c_declarations {
-            if let Some(file_node) = ctx.nodes.first_mut() {
-                file_node.metadata_json = ctx.file_linkage_stats.to_json();
-            }
+        // Update file node metadata with linkage stats + the IS-TEST-CPP-1 gtest
+        // marker. The FILE node has a single `metadata_json` field, so the two
+        // facts are merged: a file that is both an `extern "C"` ABI boundary AND a
+        // gtest test keeps both. `merge_file_metadata` returns the linkage blob
+        // verbatim when there is no marker, so every non-test C++ file is
+        // byte-identical to before this slice (extern-C files included).
+        let gtest_marker = detect_gtest_marker(&root, src);
+        if let Some(file_node) = ctx.nodes.first_mut() {
+            file_node.metadata_json =
+                merge_file_metadata(ctx.file_linkage_stats.to_json(), gtest_marker);
         }
 
         Ok(ExtractionResult {
@@ -357,6 +363,32 @@ impl ExtractorPort for CppExtractor {
             import_observations: Vec::new(),
         })
     }
+}
+
+/// IS-TEST-CPP-1: combine the (optional) `extern "C"` linkage metadata blob with
+/// the structural gtest test marker into the FILE node's single `metadata_json`
+/// field.
+///
+/// Byte-preserving for every non-marker file: with `gtest_marker == false` the
+/// linkage blob is returned verbatim (`None` stays `None`), so extern-C and plain
+/// C++ FILE nodes are unchanged by this slice. When the marker is present it is
+/// recorded under `is_gtest_test = true`, merged into the linkage object when one
+/// exists so no ABI-boundary fact is lost. (The linkage blob is our own valid-JSON
+/// serialization; the `_` fallback only fires on an impossible parse failure, and
+/// even then the load-bearing marker is still emitted.)
+fn merge_file_metadata(linkage_json: Option<String>, gtest_marker: bool) -> Option<String> {
+    if !gtest_marker {
+        return linkage_json;
+    }
+    let mut obj = match linkage_json
+        .as_deref()
+        .map(serde_json::from_str::<serde_json::Value>)
+    {
+        Some(Ok(serde_json::Value::Object(map))) => map,
+        _ => serde_json::Map::new(),
+    };
+    obj.insert("is_gtest_test".to_string(), serde_json::Value::Bool(true));
+    serde_json::to_string(&serde_json::Value::Object(obj)).ok()
 }
 
 // ── Extraction context ───────────────────────────────────────────

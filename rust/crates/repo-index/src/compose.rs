@@ -79,6 +79,7 @@ use repo_graph_ts_extractor::{
 };
 
 use crate::config::RepoConfigContext;
+use crate::cpp_test_reclassify::reclassify_cpp_test_files;
 use crate::express_detector::detect_express_routes;
 use crate::impact_propagation::{propagate_impact, ImpactReport};
 use crate::react_detector::{
@@ -3419,6 +3420,24 @@ pub fn index_into_storage_with_progress(
         |_s| Ok(()),
     )?;
 
+    // IS-TEST-CPP-1: promote C++ gtest/gmock test files to is_test=true by the
+    // structural marker cpp-extractor emitted onto each FILE node's metadata_json
+    // (overriding the orchestrator's path-based stamp). Same READY-snapshot honesty
+    // contract as the Rust postpass: `isolate_postpass` records a failure as a
+    // diagnostic and, if that channel itself fails, DEMOTES the snapshot. No
+    // cross-file resolution — the in-file marker IS the classification.
+    let cpp_test_outcome = reclassify_cpp_test_files(storage, repo_uid, &result.snapshot_uid);
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "cpp-test-classify",
+        "cpp_test_classify_postpass_error",
+        cpp_test_outcome,
+        // Promote-only + atomic upsert → no revertible partial state (see the Rust
+        // postpass rationale above).
+        |_s| Ok(()),
+    )?;
+
     emit_progress(&mut progress, "persisting", 1, 8)?; // about to persist config file versions
                                                        // Persist config file versions for refresh invalidation tracking.
                                                        // Config files are NOT extracted — only tracked for hash comparison.
@@ -4127,6 +4146,21 @@ pub fn refresh_into_storage_with_progress(
         rust_test_outcome,
         // No compensating cleanup — see the index call site for the rationale
         // (promote-only + atomic upsert = no revertible partial state).
+        |_s| Ok(()),
+    )?;
+
+    // IS-TEST-CPP-1: refresh recomputes C++ structural is_test over the WHOLE
+    // snapshot's FILE nodes — fresh (re-extracted) files plus copied-forward FILE
+    // nodes (metadata_json, incl. the gtest marker, is preserved by the schema
+    // copy-forward), so an unchanged gtest file stays classified. Same
+    // `isolate_postpass` honesty contract as index.
+    let cpp_test_outcome = reclassify_cpp_test_files(storage, repo_uid, &result.snapshot_uid);
+    isolate_postpass(
+        storage,
+        &result.snapshot_uid,
+        "cpp-test-classify",
+        "cpp_test_classify_postpass_error",
+        cpp_test_outcome,
         |_s| Ok(()),
     )?;
 
