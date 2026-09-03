@@ -37,8 +37,12 @@ presentation of facts we already store:
    do not rank below rows without one when lexical relevance ties. No new scoring model —
    tie-break only. (The rg-t1 scaffolding inversion; anything deeper is out of scope.)
 5. JSON: additive fields only (`line`, `evidence`, header uid); existing fields unchanged;
-   exit codes unchanged. Byte-size regression check: total output for the audit's capture
-   set must SHRINK on average (economy is a goal, not a casualty).
+   exit codes unchanged. Economy check (AMENDED 2026-09-03, operator ruling on
+   byte-dod-vs-evidence — the original "total bytes must shrink" clause contradicted the
+   ratified purpose; economy means SIGNAL PER BYTE, not absolute shrinkage): the
+   BOILERPLATE component (cursor/path/uid restatement) must measurably shrink on the audit
+   probes, reported separately; net growth is acceptable only from signal-bearing
+   additions (anchors, evidence lines), and the report states both components.
 
 ## 3. Stop conditions
 
@@ -60,8 +64,9 @@ DoD → STOP + DECISION_REQUIRED. Never touch the operator's real state root. Do
 ## 5. Definition of done
 
 An agent can open the right file at the right line from any symbol fact row without a
-second tool call; evidence lines come only from stored facts; output bytes go down; the
-short cursors run as printed; gates green.
+second tool call; evidence lines come only from stored facts; boilerplate bytes go down
+(reported separately from signal-bearing growth, per amended §2.5); the short cursors run
+as printed; gates green.
 
 CORPUS PATHS: leveldb at ../legacy-codebases/leveldb; FRAKTAG at ../FRAKTAG; repo-graph
 is THIS repo.
