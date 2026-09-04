@@ -89,6 +89,11 @@ pub fn is_config_file(path: &str) -> bool {
             | "pyproject.toml"
             | "requirements.txt"
             | "compile_commands.json"
+            // HONESTY-GATE-1 §2.3: Maven manifests are tracked as config files so they are SCANNED
+            // (hash-tracked for invalidation, never extracted — there is no Maven parser). This lets
+            // the index count pom.xml PRESENCE so the java deps view can name the capability limit
+            // ("N pom.xml present, not parsed") honestly instead of a transient "resolution downgraded".
+            | "pom.xml"
     )
 }
 

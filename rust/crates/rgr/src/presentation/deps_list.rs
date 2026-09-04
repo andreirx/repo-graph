@@ -2,9 +2,15 @@
 //!
 //! Renders the daemon's dependency reconciliation as a ≤20-line, one-screen human table:
 //! the unattributed headline FIRST (§2.3), then totals, then one row per manifest with the four
-//! reconciled counts (declared+used / declared-unused / observed-undeclared / builtins) and top
-//! examples. The `--json` path prints the daemon payload verbatim (same truth, additive) and does
-//! not go through this renderer.
+//! reconciled counts (declared+used / declared-unobserved / observed-undeclared / builtins) and top
+//! examples. The declared-unobserved column is BASIS-DEPENDENT (HONESTY-GATE-1 §2.2): it renders the
+//! word "unused" (as the header `declared-unused`) ONLY when the ecosystem's import evidence
+//! establishes absence; otherwise it reads "no static import found" with a caveat naming what was not
+//! checked. On this build the basis is `NotEstablished` for every ecosystem (the ratified honest
+//! floor), so the column never renders "unused" — that header appears only behind an `Established`
+//! basis a future evidence slice supplies.
+//! The `--json` path prints the daemon payload verbatim (same truth, additive) and does not go
+//! through this renderer.
 //!
 //! This is a pure view over the JSON DTO — no daemon/storage/business logic. Deserialize is lenient
 //! (`#[serde(default)]`) so a payload from a slightly older/newer daemon still renders.
@@ -53,6 +59,13 @@ pub struct DepModule {
     /// External-looking specifiers with no manifest scope to classify against (none-detected).
     #[serde(default)]
     pub unknown_external_like: u64,
+    /// HONESTY-GATE-1 §2.2 (arithmetic reconciliation): the distinct parsed manifests that
+    /// contributed this module's declared deps. Length >1 means a coarse module aggregates several
+    /// nested manifests (storybook root) — the manifest cell then names the span so the declared
+    /// count is never cited against a single manifest it exceeds. Empty/len==1 → the single cited
+    /// manifest (byte-parity). Additive; an older daemon omits it.
+    #[serde(default)]
+    pub declared_manifest_paths: Vec<String>,
     #[serde(default)]
     pub entries: Vec<DepEntry>,
 }
@@ -79,6 +92,12 @@ pub struct DepsListResponse {
     pub total_external_imports: u64,
     #[serde(default)]
     pub rejected_non_specifier_total: u64,
+    /// HONESTY-GATE-1 §2.3: the Maven capability-limit sentence (java view, pom.xml present, no
+    /// reader). Non-empty ⇒ rendered as the trust-ceiling line AND the transient "resolution
+    /// downgraded" posture suffix is suppressed (an architectural gap, not an index state). Empty for
+    /// every non-Maven view.
+    #[serde(default)]
+    pub maven_capability_limit: String,
     /// §2.2 / ruling-3 item-4 workspace coverage: manifests of this ecosystem PRESENT (scanned on
     /// disk) in total, and how many were attributed to a reconciled module. `present > attributed`
     /// = reported shortfall. Absent from the payload (both default 0) when the denominator is
@@ -123,6 +142,24 @@ pub struct DepsListResponse {
     pub(crate) other_ecosystems: Vec<OtherEcosystem>,
     #[serde(default)]
     pub count: u64,
+    /// HONESTY-GATE-1 §2.1 (the invariant): whether the ecosystem's import evidence is COMPLETE
+    /// enough to assert ABSENCE of use — static resolved AND dynamic-import literals extracted AND
+    /// root config files in scope. `"established"` → the declared-unobserved column may render the
+    /// word "unused". Anything else (currently always `"no_static_import_found"`, since the index does
+    /// not establish dynamic-import resolution or root-config import coverage) → the column renders "no
+    /// static import found" with the caveat below. Absent (older daemon) → treated as NOT established:
+    /// the honesty-preserving default never asserts "unused" without the basis. The word "unused"
+    /// never renders without this being `"established"`.
+    #[serde(default)]
+    pub declared_unobserved_basis: String,
+    /// HONESTY-GATE-1 §2.1: the caveat naming the coverage the "no static import found" column has NOT
+    /// established (dynamic-import resolution, root-config import coverage, ecosystem-specific static-
+    /// resolution gaps, active resolution downgrade). Reader-facing and honest — it states what is not
+    /// established, never a false "not scanned"/"not extracted" mechanism claim (review-0). Rendered
+    /// once when any row carries a no-static-import count and the basis is not established. Empty → no
+    /// caveat line.
+    #[serde(default)]
+    pub declared_unobserved_caveat: String,
     #[serde(default)]
     pub results: Vec<DepModule>,
 }
@@ -135,7 +172,46 @@ enum Posture {
     Unknown,
 }
 
+/// HONESTY-GATE-1 §2.1 (operator pin 2026-09-04): the resolved absence-evidence basis for the
+/// declared-but-unobserved column.
+///
+/// Abstraction one-liner — WHAT: an internal renderer sum type for the unused-basis. CURRENT USERS:
+/// `render_human` (column label + posture suffix + the caveat line) and `examples_line` (the example
+/// label). AXIS OF VARIATION: whether the ecosystem's import evidence is complete enough to assert
+/// ABSENCE of use — variants FIXED, render operations GROWING → sum type + exhaustive match; adding a
+/// third evidence state is a deliberate compile break at every match site. REJECTED SIMPLER
+/// ALTERNATIVE: a `bool` + a parallel `declared_unobserved_caveat` field — the "flag + nullable whose
+/// validity depends on the flag" defect-shape this pin exists to forbid (the `missing` caveat is only
+/// meaningful on `NotEstablished`, so it lives ON that variant, not beside a bool).
+///
+/// The `Established` arm is the NAMED re-enable point for the future dynamic-import + root-config
+/// evidence slice: it flips ONE variant, not a rewrite. There is no current producer of `Established`
+/// — the index emits `NotEstablished` for every ecosystem until that evidence ships. The raw DTO
+/// stays a `String` tag (boundary-raw across the JSON boundary); this type is reconstructed from it.
+enum DeclaredUnobservedBasis {
+    /// Import evidence is complete enough to assert ABSENCE — the column may print the word "unused".
+    Established,
+    /// Evidence is incomplete; `missing` names what was NOT checked (dynamic-import literals, root
+    /// config files, …). The column prints "no static import found" and the caveat is emitted once.
+    NotEstablished { missing: String },
+}
+
 impl DepsListResponse {
+    /// HONESTY-GATE-1 §2.1 (operator pin 2026-09-04): reconstruct the absence-evidence basis as a
+    /// SUM TYPE from the raw DTO strings. Only the explicit `"established"` tag yields `Established`;
+    /// absence / any other value is the honesty-preserving `NotEstablished` default (the word
+    /// "unused" never renders without the basis). The `missing` caveat rides on the `NotEstablished`
+    /// variant — where it is the only place it is valid — instead of a decoupled parallel field.
+    fn resolved_basis(&self) -> DeclaredUnobservedBasis {
+        if self.declared_unobserved_basis == "established" {
+            DeclaredUnobservedBasis::Established
+        } else {
+            DeclaredUnobservedBasis::NotEstablished {
+                missing: self.declared_unobserved_caveat.clone(),
+            }
+        }
+    }
+
     fn posture(&self) -> Posture {
         match self.resolution_state.as_str() {
             "downgraded" => Posture::Downgraded,
@@ -211,19 +287,46 @@ impl DepsListResponse {
                 }
             ));
         }
-        match self.posture() {
-            Posture::Downgraded => totals.push_str(" · resolution downgraded on this index"),
-            // Ruling 3 item 1: a failed overlay read is UNKNOWN-with-reason, never silent "clean".
-            Posture::Unknown => {
-                totals.push_str(" · resolution state unknown");
-                if !self.resolution_note.is_empty() {
-                    totals.push_str(&format!(" ({})", self.resolution_note));
+        // HONESTY-GATE-1 §2.3: when the Maven capability limit applies, the "resolution downgraded"/
+        // "unknown" suffix is SUPPRESSED — the gap is architectural (no Maven parser), not a transient
+        // index state. The capability sentence (below / in the headline) is the honest explanation.
+        let maven_limit = !self.maven_capability_limit.is_empty();
+        if !maven_limit {
+            match self.posture() {
+                Posture::Downgraded => totals.push_str(" · resolution downgraded on this index"),
+                // Ruling 3 item 1: a failed overlay read is UNKNOWN-with-reason, never silent "clean".
+                Posture::Unknown => {
+                    totals.push_str(" · resolution state unknown");
+                    if !self.resolution_note.is_empty() {
+                        totals.push_str(&format!(" ({})", self.resolution_note));
+                    }
                 }
+                Posture::Clean => {}
             }
-            Posture::Clean => {}
         }
         out.push_str(&totals);
         out.push('\n');
+
+        // HONESTY-GATE-1 §2.3: name the Maven capability limit as its own line WHEN the unattributed
+        // headline did not already carry it (the daemon routes the sentence into the ⚠ headline when
+        // there are unattributed imports to explain — hadoop's 72016 — so this avoids duplication).
+        if maven_limit && !has_headline {
+            out.push_str(&format!("⚠ {}\n", self.maven_capability_limit));
+        }
+
+        // HONESTY-GATE-1 §2.1 (the invariant): when the ecosystem's import evidence is NOT complete
+        // enough to assert absence (the declared-unobserved column renders "no static import found",
+        // not "unused"), state — ONCE, at ecosystem level — the caveat naming what was not checked.
+        // Emitted only when a row actually carries a no-static-import count, so a fully-used repo adds
+        // no line. The word "unused" is never printed for these rows; this caveat is why.
+        let basis = self.resolved_basis();
+        if let DeclaredUnobservedBasis::NotEstablished { missing } = &basis {
+            if !missing.is_empty() && self.results.iter().any(|m| m.declared_but_unobserved > 0) {
+                out.push_str(&format!(
+                    "ⓘ \"no static import found\" ≠ unused: {missing}\n"
+                ));
+            }
+        }
 
         let coverage_eco = if self.ecosystem.is_empty() {
             "workspace"
@@ -333,18 +436,34 @@ impl DepsListResponse {
         let with_examples = self.results.len() <= EXAMPLES_THRESHOLD;
         out.push('\n');
         for m in self.results.iter().take(MAX_ROWS) {
-            out.push_str(&format!("{}  [{}]\n", module_label(m), manifest_label(m)));
-            // §2.4: when resolution is downgraded OR unknown, the declared-unused count carries the
-            // honesty label — those declared deps may be unresolved (or resolution is unknown) on
-            // this index, not necessarily truly unused. Clean state asserts no such caveat.
-            let unused_suffix = if m.declared_but_unobserved > 0 {
-                match self.posture() {
-                    Posture::Downgraded => format!(" ({RESOLUTION_LABEL})"),
-                    Posture::Unknown => format!(" ({UNKNOWN_RESOLUTION_LABEL})"),
-                    Posture::Clean => String::new(),
+            out.push_str(&format!(
+                "{}  [{}]\n",
+                module_label(m),
+                manifest_label(m, &self.ecosystem)
+            ));
+            // HONESTY-GATE-1 §2.1: the declared-but-unobserved column names its BASIS. Only an
+            // established basis (dynamic-import literals + root config files evidenced) may print the
+            // word "unused"; otherwise the honest label is "no static import found" and the caveat
+            // above states what was not checked. In the (future) established path, an active resolution
+            // downgrade/unknown still tags the row — a declared dep may be an unresolved import.
+            let (unused_label, unused_suffix) = match &basis {
+                // Established: the column may print "unused"; an active resolution downgrade/unknown
+                // still tags the row (a declared dep may be an unresolved import).
+                DeclaredUnobservedBasis::Established => {
+                    let suffix = if m.declared_but_unobserved > 0 {
+                        match self.posture() {
+                            Posture::Downgraded => format!(" ({RESOLUTION_LABEL})"),
+                            Posture::Unknown => format!(" ({UNKNOWN_RESOLUTION_LABEL})"),
+                            Posture::Clean => String::new(),
+                        }
+                    } else {
+                        String::new()
+                    };
+                    ("declared-unused", suffix)
                 }
-            } else {
-                String::new()
+                DeclaredUnobservedBasis::NotEstablished { .. } => {
+                    ("no static import found", String::new())
+                }
             };
             // A scope-unavailable module (none-detected) has no declared context, so its externals
             // land in `unknown_external_like`; show that count so the row is never a deceptive
@@ -363,8 +482,9 @@ impl DepsListResponse {
                 String::new()
             };
             out.push_str(&format!(
-                "  used {} · declared-unused {}{} · undeclared {}{} · builtins {}{}\n",
+                "  used {} · {} {}{} · undeclared {}{} · builtins {}{}\n",
                 m.declared_and_used,
+                unused_label,
                 m.declared_but_unobserved,
                 unused_suffix,
                 m.observed_but_undeclared,
@@ -373,7 +493,7 @@ impl DepsListResponse {
                 unknown_suffix,
             ));
             if with_examples {
-                if let Some(line) = examples_line(m) {
+                if let Some(line) = examples_line(m, &basis) {
                     out.push_str(&format!("  {}\n", line));
                 }
             }
@@ -411,7 +531,40 @@ fn module_label(m: &DepModule) -> &str {
 
 /// The manifest cell: the exact parsed file, else the §2.2 unknown-with-reason note, else an
 /// honest "no manifest" marker — NEVER a fabricated fixed-name path.
-fn manifest_label(m: &DepModule) -> String {
+///
+/// HONESTY-GATE-1 §2.2 (arithmetic reconciliation): when the module's declared deps come from more
+/// than one PARSED manifest (`declared_manifest_paths.len() > 1` — a coarse module that owns files
+/// under several nested manifests, storybook's root `.`), the cell NAMES the span and the total
+/// declared count, so the count is reconciled to the M manifests that produced it rather than cited
+/// against a single manifest it exceeds (the arithmetically-impossible 111-vs-13 defect). A single
+/// contributing manifest renders exactly as before (byte-parity).
+fn manifest_label(m: &DepModule, ecosystem: &str) -> String {
+    if m.declared_manifest_paths.len() > 1 {
+        let declared_total = m.declared_and_used + m.declared_but_unobserved;
+        let cited = m
+            .manifest_path
+            .as_deref()
+            .filter(|p| !p.is_empty())
+            .unwrap_or(&m.declared_manifest_paths[0]);
+        let eco = if ecosystem.is_empty() {
+            "manifests"
+        } else {
+            ecosystem
+        };
+        return format!(
+            "{} (+{} nested {} manifest{}, {} declared across {})",
+            cited,
+            m.declared_manifest_paths.len() - 1,
+            eco,
+            if m.declared_manifest_paths.len() - 1 == 1 {
+                ""
+            } else {
+                "s"
+            },
+            declared_total,
+            m.declared_manifest_paths.len(),
+        );
+    }
     if let Some(p) = m.manifest_path.as_deref().filter(|p| !p.is_empty()) {
         return p.to_string();
     }
@@ -426,7 +579,10 @@ fn manifest_label(m: &DepModule) -> String {
 }
 
 /// A compact examples line: up to 3 example package names per non-empty reconciled category.
-fn examples_line(m: &DepModule) -> Option<String> {
+///
+/// HONESTY-GATE-1 §2.1: the declared-but-unobserved examples are labelled "no static import" unless
+/// the ecosystem's absence basis is established — the word "unused" never appears without the basis.
+fn examples_line(m: &DepModule, basis: &DeclaredUnobservedBasis) -> Option<String> {
     let pick = |cat: &str| -> Vec<&str> {
         m.entries
             .iter()
@@ -435,10 +591,14 @@ fn examples_line(m: &DepModule) -> Option<String> {
             .take(3)
             .collect()
     };
+    let unobserved_label = match basis {
+        DeclaredUnobservedBasis::Established => "unused",
+        DeclaredUnobservedBasis::NotEstablished { .. } => "no static import",
+    };
     let mut parts: Vec<String> = Vec::new();
     for (label, cat) in [
         ("used", "declared_and_used"),
-        ("unused", "declared_but_unobserved"),
+        (unobserved_label, "declared_but_unobserved"),
         ("undeclared", "observed_but_undeclared"),
     ] {
         let names = pick(cat);
@@ -785,8 +945,12 @@ mod tests {
 
     #[test]
     fn downgrade_label_renders_per_entry_in_human() {
+        // The per-entry posture label is now reachable only when the unused BASIS is established
+        // (HONESTY-GATE-1 §2.1) — otherwise the column is "no static import found" and the posture
+        // reason lives in the ecosystem caveat. Established here to exercise the preserved path.
         let r = resp(serde_json::json!({
             "ecosystem": "npm",
+            "declared_unobserved_basis": "established",
             "resolution_downgraded": true,
             "total_external_imports": 5,
             "count": 1,
@@ -811,6 +975,7 @@ mod tests {
         // "clean" certainty (the audit's false-1.0 case).
         let r = resp(serde_json::json!({
             "ecosystem": "npm",
+            "declared_unobserved_basis": "established",
             "resolution_state": "unknown",
             "resolution_note": "resolution-state unknown (overlay read failed: extraction diagnostics unreadable)",
             "total_external_imports": 5,
@@ -982,5 +1147,154 @@ mod tests {
         // No unattributed headline line when nothing is unattributed.
         assert!(!out.contains("⚠"), "{out}");
         assert!(out.lines().count() <= 20, "too long: {out}");
+    }
+
+    #[test]
+    fn no_static_import_found_replaces_unused_when_basis_not_established() {
+        // HONESTY-GATE-1 §2.1 (the invariant): django/zvec shape — the basis is NOT established
+        // (default), so a declared-but-unobserved package renders "no static import found", NEVER the
+        // word "unused"/"declared-unused", and the ecosystem caveat states what was not checked.
+        let r = resp(serde_json::json!({
+            "ecosystem": "python",
+            "declared_unobserved_basis": "no_static_import_found",
+            "declared_unobserved_caveat": "a declared package with no resolved static import may still be used at runtime — dynamic imports … are not resolved to a declared package; import coverage from root config files … is not established",
+            "total_external_imports": 50,
+            "count": 1,
+            "results": [{
+                "module": ".",
+                "manifest_path": "pyproject.toml",
+                "manifest_scope_available": true,
+                "declared_and_used": 1,
+                "declared_but_unobserved": 2,
+                "entries": [
+                    {"package": "asgiref", "category": "declared_but_unobserved", "import_count": 0},
+                    {"package": "tzdata", "category": "declared_but_unobserved", "import_count": 0}
+                ]
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains("no static import found 2"),
+            "column not relabelled: {out}"
+        );
+        assert!(
+            !out.contains("declared-unused") && !out.contains("· unused"),
+            "the word 'unused' must never render without an established basis: {out}"
+        );
+        assert!(
+            out.contains("no static import: asgiref, tzdata"),
+            "examples not relabelled: {out}"
+        );
+        assert!(
+            out.contains("ⓘ \"no static import found\" ≠ unused:"),
+            "caveat line missing: {out}"
+        );
+    }
+
+    #[test]
+    fn established_basis_renders_the_word_unused() {
+        // HONESTY-GATE-1 operator pin (2026-09-04): the `Established` arm of the basis SUM TYPE is the
+        // NAMED re-enable point. When a future dynamic-import + root-config evidence slice sets the
+        // basis to "established", declared-but-unobserved packages read the word "unused" (column AND
+        // examples), NEVER "no static import found", and the caveat line is suppressed. This guards the
+        // flip — one variant, not a rewrite — so the re-enable point is real, not aspirational.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "declared_unobserved_basis": "established",
+            "declared_unobserved_caveat": "should be ignored once the basis is established",
+            "total_external_imports": 5,
+            "count": 1,
+            "results": [{
+                "module": "app",
+                "manifest_path": "app/package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 1,
+                "declared_but_unobserved": 2,
+                "observed_but_undeclared": 0,
+                "runtime_builtins": 0,
+                "entries": [
+                    {"package": "left-pad", "category": "declared_but_unobserved", "import_count": 0}
+                ]
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains("declared-unused 2"),
+            "established basis must render the 'unused' column: {out}"
+        );
+        assert!(
+            out.contains("unused: left-pad"),
+            "established basis must render 'unused' examples: {out}"
+        );
+        assert!(
+            !out.contains("no static import"),
+            "established basis must NOT render the no-static-import label: {out}"
+        );
+        assert!(
+            !out.contains("ⓘ"),
+            "established basis must suppress the not-established caveat line: {out}"
+        );
+    }
+
+    #[test]
+    fn multi_manifest_module_reconciles_declared_count_not_cited_against_one() {
+        // HONESTY-GATE-1 §2.2 (arithmetic): storybook root shape — a coarse module aggregates deps
+        // from many nested manifests. The row must NOT cite a 124-declared count against the single
+        // root package.json (13 deps); the manifest cell names the M-manifest span + declared total.
+        let r = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "total_external_imports": 6220,
+            "count": 1,
+            "results": [{
+                "module": ".",
+                "manifest_path": "package.json",
+                "manifest_scope_available": true,
+                "declared_and_used": 13,
+                "declared_but_unobserved": 111,
+                "declared_manifest_paths": ["package.json", "test-storybooks/a/package.json", "test-storybooks/b/package.json"],
+                "entries": []
+            }]
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains("+2 nested npm manifests, 124 declared across 3"),
+            "declared count not reconciled to its manifests: {out}"
+        );
+        // The single-manifest cite of a 124-count is gone.
+        assert!(
+            !out.contains(".  [package.json]\n"),
+            "must not cite 124 declared against the single root manifest: {out}"
+        );
+    }
+
+    #[test]
+    fn maven_capability_limit_names_the_gap_and_suppresses_downgraded() {
+        // HONESTY-GATE-1 §2.3 (hadoop): pom.xml present, no Maven parser. The capability limit is
+        // named (trust ceiling) and the transient "resolution downgraded" suffix is SUPPRESSED.
+        let r = resp(serde_json::json!({
+            "ecosystem": "java",
+            "resolution_downgraded": true,
+            "unattributed_external_imports": 72016,
+            "unattributed_reason": "Maven manifests are not parsed on this build (119 pom.xml present) — Java dependency attribution unavailable",
+            "maven_capability_limit": "Maven manifests are not parsed on this build (119 pom.xml present) — Java dependency attribution unavailable",
+            "total_external_imports": 72016,
+            "count": 0,
+            "results": []
+        }));
+        let out = r.render_human();
+        assert!(
+            out.contains("Maven manifests are not parsed on this build (119 pom.xml present)"),
+            "capability limit not named: {out}"
+        );
+        assert!(
+            !out.contains("resolution downgraded on this index"),
+            "transient downgrade suffix must be suppressed for the Maven capability limit: {out}"
+        );
+        // The sentence rides the ⚠ headline (unattributed present); no duplicate line.
+        assert_eq!(
+            out.matches("Maven manifests are not parsed").count(),
+            1,
+            "capability sentence must not duplicate: {out}"
+        );
     }
 }

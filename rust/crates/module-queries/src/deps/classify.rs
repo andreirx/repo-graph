@@ -145,6 +145,19 @@ pub(crate) fn classify_observed(
         return ObservedKind::Builtin { name: package };
     }
 
+    // HONESTY-GATE-1 §5 (NODE-BUILTIN-AS-UNDECLARED fold-in): the `node:` URL scheme is RESERVED by
+    // Node.js for core modules — `node:test`, `node:async_hooks`, `node:module`, `node:readline`,
+    // and any future one — so a `node:`-prefixed specifier is ALWAYS a runtime builtin, never a
+    // declarable package. This is a language intrinsic (like Rust's `std`/`core`/`alloc` above),
+    // robust to the curated set omitting a given `node:` module (the zvec-grep defect: `node:async_
+    // hooks`/`node:module`/`node:readline` mis-bucketed as `observed_but_undeclared`). The reader-
+    // facing builtin name is the full `node:xxx` specifier.
+    if ecosystem == "npm" && raw.starts_with("node:") {
+        return ObservedKind::Builtin {
+            name: raw.to_string(),
+        };
+    }
+
     if let Some(name) = matches_builtin(raw, &package, builtins) {
         return ObservedKind::Builtin { name };
     }
@@ -298,6 +311,35 @@ mod tests {
         assert_eq!(
             classify_observed("crate::utils", "cargo", &b),
             ObservedKind::Local
+        );
+    }
+
+    #[test]
+    fn node_prefixed_specifiers_are_builtins_even_when_absent_from_the_set() {
+        // HONESTY-GATE-1 §5: the zvec-grep defect — `node:async_hooks`/`node:module`/`node:readline`
+        // are Node core modules the curated set omitted, so they rendered as `observed_but_undeclared`.
+        // The `node:` scheme is reserved by Node for core modules → always a builtin, set or no set.
+        let empty = builtins(&[]);
+        for raw in [
+            "node:async_hooks",
+            "node:module",
+            "node:readline",
+            "node:test",
+        ] {
+            assert_eq!(
+                classify_observed(raw, "npm", &empty),
+                ObservedKind::Builtin {
+                    name: raw.to_string()
+                },
+                "node: builtin not bucketed: {raw}"
+            );
+        }
+        // Not npm → the intrinsic does not fire (no `node:` scheme outside Node).
+        assert_eq!(
+            classify_observed("node:fs", "python", &empty),
+            ObservedKind::Package {
+                package: "node:fs".to_string()
+            }
         );
     }
 

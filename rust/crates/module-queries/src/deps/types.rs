@@ -169,6 +169,16 @@ pub struct ModuleDependencySummary {
     /// (DEPS-LIST-REWRITE-1 §2.1) — kept for honest diagnostics, never hoisted into a
     /// package category. `0` means the classifier rejected nothing for this module.
     pub rejected_non_specifier: usize,
+    /// HONESTY-GATE-1 §2.2 (arithmetic reconciliation): the DISTINCT parsed manifests that actually
+    /// contributed this module's declared dependencies, each computed as the longest-ancestor parsed
+    /// provenance manifest of a declared-dep source file. For a leaf module this is exactly the one
+    /// manifest the row cites (byte-parity). For a COARSE module that owns files spanning several
+    /// nested manifests (storybook's root `.` owning `test-storybooks/*/package.json` sources), it
+    /// is the full set — so the renderer states "declared N across M manifests" instead of citing a
+    /// 124-dep union against a single 13-dep `package.json` (the arithmetically-impossible defect).
+    /// Empty when provenance was untracked/unreadable (no structural basis to attribute) — the row
+    /// then falls back to its single `manifest_context`, never a fabricated breakdown. Sorted, distinct.
+    pub declared_manifest_paths: Vec<String>,
 }
 
 impl ModuleDependencySummary {

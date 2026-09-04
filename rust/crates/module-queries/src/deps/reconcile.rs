@@ -203,6 +203,10 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
         manifest_scope_available: input.manifest_scope_available,
         entries,
         rejected_non_specifier,
+        // HONESTY-GATE-1 §2.2: reconcile does not see provenance; `compose` attributes the
+        // contributing manifests and overwrites this after the summary is built (empty = single
+        // cited manifest, byte-parity for the leaf case reconcile alone produces).
+        declared_manifest_paths: Vec::new(),
     }
 }
 

@@ -250,6 +250,7 @@ mod tests {
             manifest_scope_available: true,
             entries,
             rejected_non_specifier: 0,
+            declared_manifest_paths: vec![],
         }
     }
 

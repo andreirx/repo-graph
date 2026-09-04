@@ -117,6 +117,14 @@ pub fn compose_dependency_summaries(
     let mut module_has_manifest: HashMap<String, bool> = HashMap::new();
     // module_key contains ecosystem prefix (e.g., "npm:repo:path" or "cargo:repo:path").
     let mut module_keys: HashMap<String, String> = HashMap::new();
+    // HONESTY-GATE-1 §2.2 (arithmetic reconciliation): per module, the DISTINCT parsed manifests
+    // that actually declared its deps — each declared-dep source file's longest-ancestor parsed
+    // provenance manifest. A coarse module that owns files under several nested manifests
+    // (storybook's root `.` over `test-storybooks/*/package.json`) accumulates the full set here, so
+    // the renderer can state "declared N across M manifests" instead of citing a union count against
+    // one manifest. Empty when provenance is untracked (no structural basis) → single-cite fallback.
+    let mut module_declared_manifests: HashMap<String, std::collections::BTreeSet<String>> =
+        HashMap::new();
     // Per-module count of observed references dropped as non-import call targets (§2.1) — bare
     // unbound identifiers like `chr`/`class`/`aiter`. Folded into the module's rejected count so
     // the unattributed headline stays honest (they are NOT unattributed imports).
@@ -185,6 +193,18 @@ pub fn compose_dependency_summaries(
                 let declared = module_declared.entry(canonical_path.clone()).or_default();
                 for name in &dep.package_names {
                     declared.insert(name.clone());
+                }
+                // HONESTY-GATE-1 §2.2: record which PARSED manifest actually governs this dep's
+                // source file (longest-ancestor provenance dir). Deps a coarse module inherits from
+                // nested manifests thus accumulate a manifest SET, keeping the declared count honestly
+                // attributable to M manifests rather than falsely to the single cited one.
+                if let Some(manifest_path) =
+                    governing_manifest(&dep.file_path, &input.ecosystem, &input.manifest_provenance)
+                {
+                    module_declared_manifests
+                        .entry(canonical_path.clone())
+                        .or_default()
+                        .insert(manifest_path.to_string());
                 }
                 // Mark that this module has manifest context.
                 // Note: dep.file_path is the source file; manifest path is derived below.
@@ -282,7 +302,12 @@ pub fn compose_dependency_summaries(
             own_manifest_names: own_manifest_names.clone(),
         };
 
-        let summary = reconcile_module_dependencies(reconcile_input);
+        let mut summary = reconcile_module_dependencies(reconcile_input);
+        // HONESTY-GATE-1 §2.2: attach the distinct parsed manifests that contributed this module's
+        // declared deps (sorted). The renderer states the multi-manifest span when it exceeds one.
+        if let Some(manifests) = module_declared_manifests.get(canonical_path) {
+            summary.declared_manifest_paths = manifests.iter().cloned().collect();
+        }
         summaries.push(summary);
     }
 
@@ -412,6 +437,32 @@ fn attach_manifest_context(
 /// back to `has_manifest` — the honest best obtainable without provenance.
 fn scope_available(has_manifest: bool, manifest_context: &ManifestContext) -> bool {
     has_manifest || matches!(manifest_context, ManifestContext::Parsed { .. })
+}
+
+/// HONESTY-GATE-1 §2.2: the PARSED manifest of `ecosystem` that governs a declared-dep SOURCE file
+/// `file_path` — the longest-ancestor-or-equal parsed provenance record (`error == None`), the same
+/// nearest-manifest semantics the index used, evaluated against the persisted records (never a
+/// filesystem rescan). `None` when provenance is not `Tracked` (old/unreadable snapshot → no
+/// structural basis) or no parsed record covers the file: the caller then leaves the manifest set
+/// empty and the row falls back to its single `manifest_context` (honest degradation, never a
+/// fabricated attribution).
+fn governing_manifest<'a>(
+    file_path: &str,
+    ecosystem: &str,
+    provenance: &'a ProvenanceRead,
+) -> Option<&'a str> {
+    let ProvenanceRead::Tracked(records) = provenance else {
+        return None;
+    };
+    records
+        .iter()
+        .filter(|r| {
+            r.ecosystem == ecosystem
+                && r.error.is_none()
+                && dir_is_ancestor_or_equal(&r.dir, file_path)
+        })
+        .max_by_key(|r| r.dir.len())
+        .map(|r| r.path.as_str())
 }
 
 /// Whether repo-relative directory `dir` is an ancestor of (or equal to) module path `path`.
@@ -883,6 +934,55 @@ mod tests {
             "npm",
             &ProvenanceRead::Absent
         ));
+    }
+
+    #[test]
+    fn governing_manifest_picks_longest_ancestor_parsed_and_ignores_failed_and_wrong_eco() {
+        // HONESTY-GATE-1 §2.2: a declared-dep source file is attributed to the LONGEST-ancestor
+        // PARSED manifest of its ecosystem. This is what lets storybook's root `.` accumulate the
+        // distinct nested manifests instead of laundering their deps under a single cited manifest.
+        let records = vec![
+            prov("package.json", "", "npm"),
+            prov("test-storybooks/a/package.json", "test-storybooks/a", "npm"),
+            prov_failed(
+                "test-storybooks/b/package.json",
+                "test-storybooks/b",
+                "npm",
+                "malformed",
+            ),
+            prov("backend/build.gradle", "backend", "java"),
+        ];
+        let tracked = ProvenanceRead::Tracked(records);
+        // Deepest ancestor wins.
+        assert_eq!(
+            governing_manifest("test-storybooks/a/preview.ts", "npm", &tracked),
+            Some("test-storybooks/a/package.json")
+        );
+        // Only the root manifest is an ancestor of a root-level file.
+        assert_eq!(
+            governing_manifest("scripts/build.ts", "npm", &tracked),
+            Some("package.json")
+        );
+        // A FAILED manifest never governs (error present) → falls back to the root ancestor.
+        assert_eq!(
+            governing_manifest("test-storybooks/b/preview.ts", "npm", &tracked),
+            Some("package.json")
+        );
+        // An ecosystem with no records never attributes (no cargo manifest anywhere).
+        assert_eq!(
+            governing_manifest("backend/App.java", "cargo", &tracked),
+            None
+        );
+        // The java view attributes the java file to its own build.gradle, not the npm root.
+        assert_eq!(
+            governing_manifest("backend/App.java", "java", &tracked),
+            Some("backend/build.gradle")
+        );
+        // No structural basis (old snapshot) → never fabricated.
+        assert_eq!(
+            governing_manifest("a/b.ts", "npm", &ProvenanceRead::Absent),
+            None
+        );
     }
 
     #[test]

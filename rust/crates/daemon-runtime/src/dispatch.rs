@@ -6630,6 +6630,24 @@ impl ServiceDispatcher {
             &ecosystem,
         );
 
+        // HONESTY-GATE-1 §2.3 (review-1 item 1): Maven manifests present but NOT parsed (no reader on
+        // this build). The count comes from the SEPARATE `deps_manifests_present["maven"]` scan
+        // diagnostic. When the java view is rendered, `maven_capability_sentence` turns the presence
+        // denominator into the capability-limit sentence (naming the trust CEILING) instead of the
+        // transient-reading "resolution downgraded" — and, crucially, an `Unavailable` presence read
+        // (corrupt/unreadable diagnostic) is NAMED as such rather than silently dropped to `None` (the
+        // former `_ => None` discarded that fallible read — STANDING HONESTY RULE #1).
+        let maven_capability: Option<String> = if ecosystem == "java" {
+            let present = crate::deps_headline::read_manifests_present(
+                &storage,
+                &snapshot.snapshot_uid,
+                "maven",
+            );
+            crate::deps_headline::maven_capability_sentence(&present)
+        } else {
+            None
+        };
+
         // DEPS-ATTRIB-2 §2.3: the HONEST "govern no indexed source" split — computed per PARSED
         // manifest from file containment (file paths ⋈ manifest dir), NOT from module attribution.
         // Two INDEPENDENT reads feed the split, BOTH fallible AND rendered/classified, so EITHER
@@ -6739,8 +6757,17 @@ impl ServiceDispatcher {
 
         // §2.3 unattributed headline — pure helper over the WHOLE repo (before any module filter),
         // so a per-module view never hides repo-level unattributed imports (glamCRM's false `0`).
-        let unattributed =
+        let mut unattributed =
             crate::deps_headline::compute_unattributed(&result, &ecosystem, &repo_languages);
+        // HONESTY-GATE-1 §2.3: when Maven is the missing parser, the honest headline REASON is the
+        // capability limit (a trust ceiling), not the generic "imported files outside a parsed
+        // manifest scope" (which reads as a transient index state). Override only when there ARE
+        // unattributed imports to explain (hadoop's 72016) — never invent a headline for a clean repo.
+        if let Some(limit) = maven_capability.as_deref() {
+            if unattributed.count > 0 {
+                unattributed.reason = limit.to_string();
+            }
+        }
         let total_rejected = crate::deps_headline::total_rejected(&result);
 
         // §2.4 resolution-state honesty (operator ruling 2, 2026-08-26 — Option B): reuse the SAME
@@ -6795,6 +6822,7 @@ impl ServiceDispatcher {
             &manifests_present,
             manifest_coverage,
             &other_ecosystems,
+            maven_capability.as_deref(),
         );
 
         DispatchResult::success(&request.id, response)

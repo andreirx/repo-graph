@@ -232,7 +232,7 @@ erasure 770/770 vcmi) · type-only NEAR-DORMANT (ALL-edge predicate; should be A
 QUEUE RATIFIED (human 2026-09-04, with two additions): 1 HONESTY-GATE-1 (deps: the
 destructive-edit family) · 2 HONESTY-GATE-2 (resources/trust/map fabrications; same
 invariant) · 3 CPP-SPAN-FIDELITY-1 (macro classes + span containment) · 4
-ANCHORS-EVERYWHERE-1 (human addition: line numbers on every surface citing symbols/files,
+[HONESTY-GATE-1 SHIPPED — see below] ANCHORS-EVERYWHERE-1 (human addition: line numbers on every surface citing symbols/files,
 not only find — sequenced AFTER span fidelity so C++ anchors land on correct spans) · 5
 SEED-CHUNK-2 · 6 COHERENCE-2 · 7 DAEMON-CONCURRENCY-1 (human addition; SPEC slice first —
 foundational, decisions to ratify) · 8 ECONOMY-2 · carried minors.

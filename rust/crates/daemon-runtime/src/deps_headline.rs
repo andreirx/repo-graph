@@ -188,6 +188,36 @@ fn parse_manifests_present(blob: Option<&str>, ecosystem: &str) -> PresentDenomi
     }
 }
 
+/// HONESTY-GATE-1 §2.3 (review-1 item 1): the Java-view Maven capability-limit sentence, derived
+/// from the scanned-`pom.xml` presence denominator. There is NO Maven parser on this build, so the
+/// sentence names the trust CEILING ("pom.xml present, not parsed") rather than the false transient
+/// "resolution downgraded".
+///
+/// Exhaustive over [`PresentDenominator`] on purpose — a FAILURE of the presence read is NAMED, never
+/// silently dropped through a `_` arm (STANDING HONESTY RULE #1; the review-1 defect was a `_ => None`
+/// in `dispatch.rs` that discarded `Unavailable`, so a corrupt presence diagnostic read as "no Maven"):
+///   - `Count(n>0)`  → the capability sentence with the definite present count.
+///   - `Count(0)` / `NotApplicable` → `None`: no `pom.xml` on disk, or the snapshot predates presence
+///     tracking — there is genuinely nothing to name for Maven.
+///   - `Unavailable { reason }` → the presence read ITSELF failed; the count is unknown, so name THAT
+///     ("presence could not be determined") instead of implying Maven is absent.
+///
+/// Caller gates on `ecosystem == "java"`; adding a `PresentDenominator` variant deliberately breaks
+/// this match so the Maven honesty rule is re-decided, not silently skipped.
+pub(crate) fn maven_capability_sentence(present: &PresentDenominator) -> Option<String> {
+    match present {
+        PresentDenominator::Count(n) if *n > 0 => Some(format!(
+            "Maven manifests are not parsed on this build ({n} pom.xml present) — \
+             Java dependency attribution unavailable"
+        )),
+        PresentDenominator::Count(_) | PresentDenominator::NotApplicable => None,
+        PresentDenominator::Unavailable { reason } => Some(format!(
+            "Maven manifest presence could not be determined ({reason}) — \
+             Java dependency attribution unavailable"
+        )),
+    }
+}
+
 /// Resolution-state posture for the §2.4 honesty label (operator ruling 3 item 1). A tri-state, NOT
 /// a bool: a failed trust-overlay read is UNKNOWN-with-reason, never silently rendered as "clean"
 /// (which would restate the audit's false-certainty case for `@fraktag/engine`).
@@ -229,6 +259,55 @@ impl ResolutionState {
             ResolutionState::Clean => None,
         }
     }
+}
+
+/// HONESTY-GATE-1 §2.1: the caveat naming why the basis for asserting ABSENCE-of-use is NOT
+/// established — the coverage whose absence forbids the word "unused". Ecosystem parity: the SAME two
+/// coverage gaps (dynamic-import resolution; root-config import coverage) apply to npm/python/java/
+/// cargo identically, plus per-ecosystem static-resolution notes and the active resolution posture.
+/// This is the ONE caveat model the §2.4 Java path used, now applied to every ecosystem (no per-
+/// ecosystem silence). Reader-facing (VISION: describes the reader's evidence, not our pipeline).
+///
+/// HONESTY (review-0, 2026-09-04): the wording states what is NOT ESTABLISHED, never a false mechanism
+/// claim. Root config files (`eslint.config.js`, `setup.py`, `conftest.py`, …) ARE scanned — their
+/// `.js`/`.ts`/`.py` extensions route to language extractors (`indexer::routing::is_source_extension`),
+/// they are NOT in `is_config_file()`'s hash-only set — so "not scanned for imports" would be FALSE;
+/// the honest limit is that their import COVERAGE toward this manifest's used-set is not established.
+/// Likewise dynamic `import("literal")` IS extracted (`ts-extractor::collect_dynamic_imports`, as an
+/// `is_dynamic` observation with `resolved_path: None`), so "not extracted" would be FALSE; the honest
+/// limit is that a dynamic import is NOT resolved to a declared package (so a package used only that
+/// way is not credited as used — the zvec-grep `@huggingface/transformers` false-unused cause).
+pub(crate) fn declared_unobserved_caveat(ecosystem: &str, resolution: &ResolutionState) -> String {
+    let mut gaps: Vec<String> = vec![
+        "dynamic imports (import()/require()/importlib.import_module(<literal>)) are not resolved to \
+         a declared package"
+            .to_string(),
+        "import coverage from root config files (eslint/vite/vitest/jest/tsconfig/setup.py/conftest.py) \
+         is not established"
+            .to_string(),
+    ];
+    // Per-ecosystem static-resolution completeness note.
+    if ecosystem == "java" {
+        gaps.push(
+            "Java static resolution is Gradle-only (Maven pom.xml is not parsed on this build)"
+                .to_string(),
+        );
+    }
+    // The active resolution posture is one more reason a declared dep may be an unresolved import
+    // rather than genuinely unused.
+    match resolution {
+        ResolutionState::Downgraded => {
+            gaps.push("alias/workspace resolution is downgraded on this index".to_string())
+        }
+        ResolutionState::Unknown { .. } => {
+            gaps.push("resolution state is unknown on this index".to_string())
+        }
+        ResolutionState::Clean => {}
+    }
+    format!(
+        "a declared package with no resolved static import may still be used at runtime — {}",
+        gaps.join("; ")
+    )
 }
 
 /// The §2.3 unattributed-imports headline.
@@ -331,6 +410,7 @@ pub(crate) fn build_deps_list_response(
     manifests_present: &PresentDenominator,
     manifest_coverage: Option<CoverageStatus>,
     other_ecosystems: &[EcosystemPresence],
+    maven_capability: Option<&str>,
 ) -> serde_json::Value {
     let total_external_imports = result.total_external_imports;
 
@@ -372,9 +452,35 @@ pub(crate) fn build_deps_list_response(
         "ecosystem": ecosystem,
         "total_external_imports": total_external_imports,
         "rejected_non_specifier_total": total_rejected,
+        // HONESTY-GATE-1 §2.1 (the invariant): the declared-unobserved column may render the word
+        // "unused" ONLY when the ecosystem's import evidence supports ABSENCE — static resolution PLUS
+        // dynamic-import literals AND root-config imports RESOLVED/ATTRIBUTED to the manifest's declared
+        // set. The extractor DOES capture both signals: dynamic `import("literal")` is extracted by
+        // `ts-extractor::collect_dynamic_imports` (as an observation with `resolved_path: None,
+        // is_dynamic: true`), and root config files (`eslint.config.js`, `setup.py`, `conftest.py`, …)
+        // carry source extensions so `indexer::routing::is_source_extension` routes them to language
+        // extractors (they are NOT in `is_config_file`'s hash-only set). The limit is ATTRIBUTION, not
+        // extraction: `is_dynamic` observations are never resolved to a declared package, and config-
+        // file import coverage is not established against the manifest — so a package used only via a
+        // dynamic import or a root config is not credited as used. Absence-of-use is therefore NOT
+        // established for any ecosystem on this index: the column renders "no static import found" with
+        // the caveat below (which states the same attribution limit, reader-facing). The `established`
+        // tag is the NAMED re-enable point for when that attribution ships; no producer emits it today
+        // (the honest floor).
+        "declared_unobserved_basis": "no_static_import_found",
+        "declared_unobserved_caveat": declared_unobserved_caveat(ecosystem, resolution),
     });
 
     if let serde_json::Value::Object(ref mut map) = response {
+        // HONESTY-GATE-1 §2.3: the Maven capability-limit sentence (java view, pom.xml present, no
+        // reader). Present ⇒ the presenter renders it as the trust-ceiling line AND suppresses the
+        // transient-reading "resolution downgraded" suffix. Absent for every non-Maven view.
+        if let Some(limit) = maven_capability {
+            map.insert(
+                "maven_capability_limit".to_string(),
+                serde_json::json!(limit),
+            );
+        }
         // §2.4: carry the specific reason when the resolution state is unknown.
         if let ResolutionState::Unknown { reason } = resolution {
             map.insert(
@@ -555,6 +661,10 @@ fn module_json(s: &ModuleDependencySummary, resolution: &ResolutionState) -> ser
         "runtime_builtins": s.runtime_builtins_count(),
         "unknown_external_like": s.unknown_external_like_count(),
         "rejected_non_specifier": s.rejected_non_specifier,
+        // HONESTY-GATE-1 §2.2: the distinct parsed manifests that contributed this module's declared
+        // deps (>1 = a coarse module aggregating nested manifests). Additive; the presenter uses it to
+        // reconcile the declared count to the M manifests that produced it.
+        "declared_manifest_paths": s.declared_manifest_paths,
         "entries": entries,
     });
     if let Some(note) = manifest_context_note {
@@ -581,6 +691,98 @@ fn format_category(cat: DependencyCategory) -> &'static str {
 mod tests {
     use super::*;
     use crate::deps_coverage::ManifestCoverage;
+
+    #[test]
+    fn caveat_has_ecosystem_parity_and_java_adds_maven_note() {
+        // HONESTY-GATE-1 §2.1/§2.4: the SAME two coverage gaps caveat npm AND python (parity); java
+        // additionally names the Gradle-only/Maven-not-parsed static-resolution gap.
+        let npm = declared_unobserved_caveat("npm", &ResolutionState::Clean);
+        let py = declared_unobserved_caveat("python", &ResolutionState::Clean);
+        for c in [&npm, &py] {
+            // Test (a): the dynamic-import missing-evidence reason is named.
+            assert!(c.contains("dynamic imports"), "{c}");
+            assert!(c.contains("not resolved to a declared package"), "{c}");
+            // Test (b): the root-config missing-evidence reason is named.
+            assert!(c.contains("root config files"), "{c}");
+            assert!(c.contains("coverage from root config files"), "{c}");
+            assert!(c.contains("is not established"), "{c}");
+            assert!(c.contains("used at runtime"), "{c}");
+            // HONESTY (review-0): the caveat must NOT make the false mechanism claims that the
+            // scanner admits these files and that dynamic imports are extracted contradict. Root
+            // config files ARE scanned (their extensions route to extractors); dynamic import()
+            // literals ARE extracted. The honest limit is non-established coverage, never "not
+            // scanned"/"not extracted".
+            assert!(!c.contains("not scanned"), "false 'not scanned' claim: {c}");
+            assert!(
+                !c.contains("are not extracted"),
+                "false 'not extracted' claim: {c}"
+            );
+        }
+        // Parity: npm and python differ ONLY by ecosystem-specific notes (none here) → identical.
+        assert_eq!(npm, py, "npm/python caveat must have parity");
+        let java = declared_unobserved_caveat("java", &ResolutionState::Clean);
+        assert!(java.contains("Maven pom.xml is not parsed"), "{java}");
+        // Posture folds into the caveat.
+        let downgraded = declared_unobserved_caveat("npm", &ResolutionState::Downgraded);
+        assert!(
+            downgraded.contains("resolution is downgraded"),
+            "{downgraded}"
+        );
+    }
+
+    #[test]
+    fn response_emits_basis_and_caveat_and_maven_limit() {
+        // HONESTY-GATE-1: the payload carries the §2.1 basis tag + caveat (additive) and, for a Maven
+        // java view, the §2.3 capability-limit field.
+        let res = result_of(vec![summary(
+            "app",
+            ManifestContext::Parsed {
+                path: "app/package.json".into(),
+            },
+            &["leftpad"],
+        )]);
+        let un = Unattributed {
+            count: 0,
+            reason: "x".into(),
+        };
+        let payload = build_deps_list_response(
+            "repo",
+            "snap",
+            "npm",
+            &[],
+            res,
+            None,
+            &ResolutionState::Clean,
+            &un,
+            0,
+            &PresentDenominator::Count(1),
+            None,
+            &[],
+            Some("Maven manifests are not parsed on this build (119 pom.xml present) — Java dependency attribution unavailable"),
+        );
+        let obj = payload.as_object().unwrap();
+        assert_eq!(
+            obj.get("declared_unobserved_basis").unwrap(),
+            "no_static_import_found"
+        );
+        assert!(obj
+            .get("declared_unobserved_caveat")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("dynamic imports"));
+        assert!(obj
+            .get("maven_capability_limit")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("119 pom.xml present"));
+        // The per-module JSON carries the arithmetic-reconciliation manifest set (empty here).
+        assert!(payload["results"][0]
+            .as_object()
+            .unwrap()
+            .contains_key("declared_manifest_paths"));
+    }
 
     #[test]
     fn absent_blob_and_absent_key_are_absent_not_unavailable() {
@@ -632,6 +834,7 @@ mod tests {
             manifest_scope_available: true,
             entries,
             rejected_non_specifier: 0,
+            declared_manifest_paths: vec![],
         }
     }
 
@@ -674,6 +877,7 @@ mod tests {
                 indexed_unattributed_files: 0,
             })),
             &[],
+            None,
         );
         let obj = payload.as_object().unwrap();
         assert!(
@@ -722,6 +926,7 @@ mod tests {
                 indexed_unattributed_files: 0,
             })),
             &[],
+            None,
         );
         let obj = payload.as_object().unwrap();
         assert_eq!(obj.get("resolution_state").unwrap(), "unknown");
@@ -792,6 +997,39 @@ mod tests {
     }
 
     #[test]
+    fn maven_capability_sentence_names_present_count_and_read_failure() {
+        // HONESTY-GATE-1 §2.3 (review-1 item 1). Count(n>0): the capability CEILING sentence with the
+        // definite count (hadoop's 119 pom.xml).
+        let s = maven_capability_sentence(&PresentDenominator::Count(119))
+            .expect("present pom.xml must yield a capability sentence");
+        assert!(s.contains("119 pom.xml present"), "{s}");
+        assert!(s.contains("not parsed on this build"), "{s}");
+        assert!(
+            !s.contains("downgraded"),
+            "must name the ceiling, not a transient downgrade: {s}"
+        );
+
+        // Count(0) and NotApplicable: nothing to name for Maven → None (no false sentence).
+        assert_eq!(
+            maven_capability_sentence(&PresentDenominator::Count(0)),
+            None
+        );
+        assert_eq!(
+            maven_capability_sentence(&PresentDenominator::NotApplicable),
+            None
+        );
+
+        // Unavailable: the presence read ITSELF failed — NAMED as such, never dropped to None (the
+        // review-1 defect: a `_ => None` arm that read a corrupt diagnostic as "no Maven").
+        let un = maven_capability_sentence(&PresentDenominator::Unavailable {
+            reason: "scanned-manifest count unreadable: disk error".into(),
+        })
+        .expect("an Unavailable presence read must be surfaced, not silently dropped");
+        assert!(un.contains("could not be determined"), "{un}");
+        assert!(un.contains("disk error"), "{un}");
+    }
+
+    #[test]
     fn computed_split_with_failed_present_read_renders_coverage_unknown_not_fabricated() {
         // review-3 (operator-ratified): the split WAS computed (provenance + owned-files reads
         // succeeded), but the SEPARATE present-count read FAILED. The denominator must NOT be
@@ -828,6 +1066,7 @@ mod tests {
                 indexed_unattributed_files: 0,
             })),
             &[],
+            None,
         );
         let obj = payload.as_object().unwrap();
         assert_eq!(
@@ -879,6 +1118,7 @@ mod tests {
                 indexed_unattributed_files: 0,
             })),
             &[],
+            None,
         );
         let obj = payload.as_object().unwrap();
         assert_eq!(obj.get("manifests_present").unwrap(), 4); // 3 + 1 parsed total

@@ -489,6 +489,31 @@ pub struct PreparedRepoInputs {
     pub(crate) manifests_present: std::collections::BTreeMap<String, usize>,
 }
 
+/// Is this repo-relative path a Maven `pom.xml` manifest (root or nested)?
+fn is_pom_xml_path(rel_path: &str) -> bool {
+    rel_path == "pom.xml" || rel_path.ends_with("/pom.xml")
+}
+
+/// Count `pom.xml` manifests the scan DISCOVERED, regardless of read outcome (HONESTY-GATE-1 §2.3 /
+/// review-1 item 1). The match over [`ScannedFile`] is exhaustive on purpose: a
+/// [`ScannedFile::ReadFailed`] pom.xml is a PRESENT-but-unreadable Maven manifest and counts toward
+/// the presence denominator exactly like a readable one — the count feeds the rendered "N pom.xml
+/// present" capability sentence, which must not exclude evidence it claims to cover. Adding a new
+/// `ScannedFile` variant deliberately breaks this match so the presence rule is re-decided, not
+/// silently skipped.
+fn count_pom_xml_present(scanned: &[ScannedFile]) -> usize {
+    scanned
+        .iter()
+        .filter(|f| {
+            let rel_path = match f {
+                ScannedFile::Ok(ok) => ok.rel_path.as_str(),
+                ScannedFile::ReadFailed { rel_path } => rel_path.as_str(),
+            };
+            is_pom_xml_path(rel_path)
+        })
+        .count()
+}
+
 /// Scan the repo, resolve config per file, assemble typed FileInput.
 ///
 /// Files are partitioned into:
@@ -517,6 +542,14 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
     // Collect settings.gradle files with content for Gradle module extraction (Phase 2b).
     let mut settings_gradle_files: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    // HONESTY-GATE-1 §2.3 (review-1 item 1): count Maven manifests (pom.xml) PRESENT on disk across
+    // BOTH read outcomes. There is NO Maven parser on this build, so pom.xml files are never
+    // read/parsed — only counted, so the java view can name the capability limit honestly ("N pom.xml
+    // present, not parsed") instead of a transient-reading "resolution downgraded". A
+    // discovered-but-unreadable pom.xml (`ScannedFile::ReadFailed`) is still PRESENT, so it MUST count
+    // — otherwise the rendered "N pom.xml present" claim would silently exclude a manifest it asserts
+    // to cover. Computed by a single exhaustive pass so a ReadFailed pom.xml can never be dropped.
+    let pom_xml_present: usize = count_pom_xml_present(&scanned);
 
     for file in &scanned {
         match file {
@@ -691,6 +724,11 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
     manifests_present.insert("npm".to_string(), package_json_files.len());
     manifests_present.insert("python".to_string(), pyproject_toml_files.len());
     manifests_present.insert("cargo".to_string(), cargo_toml_files.len());
+    // HONESTY-GATE-1 §2.3: Maven manifests present but NOT parsed (no reader). Recorded only when
+    // ≥1 pom.xml exists, so the java view names the capability limit; absent for non-Maven repos.
+    if pom_xml_present > 0 {
+        manifests_present.insert("maven".to_string(), pom_xml_present);
+    }
 
     Ok(PreparedRepoInputs {
         file_inputs,
@@ -4577,6 +4615,50 @@ mod tests {
         assert!(is_npm_owned(".cts") && ModuleEcosystem::Npm.covers_extension("cts"));
         // Negative control (backward): a Rust file is neither npm-owned nor covered.
         assert!(!is_npm_owned(".rs") && !ModuleEcosystem::Npm.covers_extension("rs"));
+    }
+
+    // ── HONESTY-GATE-1 §2.3 (review-1 item 1): Maven presence counts BOTH read outcomes ──
+
+    /// A discovered-but-UNREADABLE `pom.xml` (`ScannedFile::ReadFailed`) is a PRESENT Maven
+    /// manifest and MUST count toward the presence denominator — otherwise the rendered
+    /// "N pom.xml present" capability sentence silently excludes a manifest it claims to cover
+    /// (the exact review-1 finding: counting only `ScannedFile::Ok` under-reports presence).
+    #[test]
+    fn pom_xml_present_counts_readfailed_manifests() {
+        fn ok(rel_path: &str) -> ScannedFile {
+            ScannedFile::Ok(scanner::ScannedFileOk {
+                rel_path: rel_path.to_string(),
+                content: String::new(),
+                content_hash: String::new(),
+                size_bytes: 0,
+                line_count: 0,
+                language: None,
+                is_test: false,
+            })
+        }
+        fn failed(rel_path: &str) -> ScannedFile {
+            ScannedFile::ReadFailed {
+                rel_path: rel_path.to_string(),
+            }
+        }
+
+        let scanned = vec![
+            ok("pom.xml"),                 // readable root pom
+            ok("modules/a/pom.xml"),       // readable nested pom
+            failed("modules/b/pom.xml"),   // UNREADABLE nested pom — must still count
+            ok("modules/b/src/Main.java"), // non-manifest source
+            failed("modules/c/README.md"), // unreadable non-pom — must NOT count
+            ok("pompom.xml"),              // suffix-adjacent non-pom — must NOT count
+        ];
+
+        // 2 readable + 1 unreadable pom.xml = 3; the unreadable one is the regression guard.
+        assert_eq!(count_pom_xml_present(&scanned), 3);
+
+        // Path predicate boundaries: nested/root pom yes; look-alike no.
+        assert!(is_pom_xml_path("pom.xml"));
+        assert!(is_pom_xml_path("a/b/pom.xml"));
+        assert!(!is_pom_xml_path("pompom.xml"));
+        assert!(!is_pom_xml_path("pom.xml.bak"));
     }
 
     /// vscode-shaped fixture: an npm package rooted at `extensions/` whose shared
