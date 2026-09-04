@@ -27,6 +27,15 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    all returned `Busy: a background retention pass is writing this repo's store` within
    seconds — the Busy is honest and named (good), but a retention pass blanks EVERY read
    surface for its whole duration. Priority within this slice rises accordingly.
+   ESCALATED SAME DAY: `doctor` showed `reclaiming repo-graph: started 2h12m ago`; the
+   store is 4.8 GB, the daemon alive at 4% CPU inside `sqlite3_step → BtreeNext →
+   getPage` with a 344 MB WAL still growing — i.e. the PRUNE (row deletes across old
+   snapshots) runs as ONE multi-hour transaction under the write lock, not a brief VACUUM
+   window. Contract addendum for #4: prune work must be CHUNKED (bounded rows/time per
+   transaction, write slot released between chunks, progress visible in `doctor` with an
+   ETA basis) so foreground reads interleave; and a store this size on a single repo is
+   itself a finding (which tables? snapshot count? seed_vectors per snapshot?) — the
+   diagnosis must report the size composition.
 
 ## 2. Contract
 
