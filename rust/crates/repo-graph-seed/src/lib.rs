@@ -6,20 +6,19 @@
 //! behind ([`Embedder`], [`SeedCorpusRead`]) and implements the deterministic
 //! logic the VISION bounds require:
 //!
-//! - [`document`] — the exact serialized corpus document (`search_document: …`)
-//!   and query (`search_query: …`) the nomic model expects (spec §3.2).
+//! - [`document`] — the exact serialized chunk document (`qualified_name` +
+//!   `doc_comment` + capped span source) and the verbatim query the code model
+//!   embeds (spec §2.1; SEED-CHUNK-1 drops nomic's role prefixes).
 //! - [`hash`] — the content pin ([`content_hash`], `SHA-256(bytes).hex[..16]`),
 //!   byte-identical to the scanner's `hash_content`. The background pass re-runs
 //!   it on the working tree to close the source/snapshot race (spec §3.5).
-//! - [`store`] — the `.vec` sidecar envelope: a warm-cache-style validated
-//!   header ([`store::SeedManifest`]) + a `bincode` body, atomic publication,
-//!   and the pin hard-fail (I3).
-//! - [`rank`] — cosine (dot of L2-normalized vectors) with the `(-score, path)`
-//!   tie-break (spec §7.2), plus per-item freshness partitioning against the
-//!   current corpus (I3 staleness).
+//! - [`rank`] — cosine (dot of L2-normalized vectors) with the production-above-test
+//!   partition (spec §5) + the `(-score, path)` tie-break (spec §7.2).
 //! - [`pass`] — the pure pipeline (`build_store`) that ties the ports together
 //!   with a caller-supplied file reader + cancel token, so the whole embed pass
-//!   is testable with fakes (no model, no daemon, no DB).
+//!   is testable with fakes (no model, no daemon, no DB). It returns the
+//!   [`SeedVectorEntry`] rows the daemon writes to the per-snapshot `seed_vectors`
+//!   table (SEED-CHUNK-1 retired the `.vec` sidecar for SQLite).
 //!
 //! ## Why a crate, not a module (D-ES-8, recorded)
 //! *`repo-graph-seed` — pure corpus-build + `.vec` envelope + cosine ranking.
@@ -40,12 +39,10 @@ pub mod hash;
 pub mod pass;
 pub mod ports;
 pub mod rank;
-pub mod store;
 
 pub use hash::content_hash;
-pub use ports::{EmbedError, Embedder, SeedCorpusEntry, SeedCorpusError, SeedCorpusRead};
-pub use rank::{partition_fresh, rank, FreshnessPartition, RankedCandidate, NEAR_TIE_EPSILON};
-pub use store::{
-    SeedManifest, SeedStoreError, SeedStoreKey, SeedVectorBodyV1, SeedVectorEntryV1, MAGIC,
-    MAX_BODY_BYTES, MAX_HEADER_BYTES, SCHEMA_VERSION,
+pub use ports::{
+    EmbedError, Embedder, SeedCorpus, SeedCorpusEntry, SeedCorpusError, SeedCorpusRead,
+    SeedVectorEntry, StoredSeedVectors,
 };
+pub use rank::{best_score, rank, RankedCandidate, NEAR_TIE_EPSILON};

@@ -9,12 +9,9 @@
 //! cohesive concern each, with the flat public API (`seed::X`) preserved by
 //! re-export so no caller changes:
 //!
-//! - [`transport`] — the option-(a) `Embedder`: the a2 std-library loopback HTTP
-//!   *socket/connection* concern (D-ES-9). ~260 L.
-//! - [`http`] — the a2 accepted-response *parsing* concern: header/body framing
-//!   (exact `Content-Length`), the OpenAI body shape, and the
-//!   non-finite/zero-norm/dim/echoed-model checks (split from `transport` under the
-//!   500-line guardrail, operator ruling 2). ~300 L.
+//! - [`local_engine`] — the in-process static-embedding engine (`LocalEmbedder` over
+//!   `model2vec-rs` + potion-code-16M-v2), the ratified SEED-CHUNK-1 replacement for
+//!   the deleted lmstudio HTTP embedder (`transport`/`http` are GONE from this crate).
 //! - [`query`] — the query-time semantic tier (`run_semantic_query`), its degrade
 //!   taxonomy, and genuine owning-module resolution (§8/§8.2a). ~200 L.
 //! - [`dto`] — the `rmap find` response DTO + rendering (§8B.2/§8B.3). ~120 L.
@@ -28,93 +25,33 @@
 
 use std::path::{Path, PathBuf};
 
-use repo_graph_seed::store::SeedStoreKey;
-
-use crate::livegraph_warm_cache::REPO_GRAPH_VERSION;
-
 mod doctor;
 mod dto;
-mod http;
+mod local_engine;
 mod query;
-mod transport;
 
 // Flat public API preserved (the callers keep using `crate::seed::X`).
 pub use doctor::{seed_doctor_facts, SeedDoctorFacts};
 pub(crate) use dto::build_find_response;
 pub use dto::{build_group_b_data, FindCandidate, FindNext, FindResponse};
+// SEED-CHUNK-1: the in-process static-embedding engine is the ONLY seed embedder
+// now — the lmstudio HTTP path (`transport`/`http`) is retired from the seed tier
+// (spec §6). The model id/dim are FIXED pins from the model (no endpoint config).
+// Crate-scoped (review-0 #5): every caller (`seed_pass`, `query`, `doctor`,
+// `dispatch_seed`) is inside this crate; the loader does I/O, so no unearned
+// cross-crate surface. Widen to `pub` only when a concrete external caller appears.
+pub(crate) use local_engine::{LocalEmbedder, MODEL_DIM, MODEL_ID};
 pub use query::{run_semantic_query, DegradeReason, SemanticCandidate, SemanticResult};
-pub use transport::{EndpointEmbedder, ModelIdentity};
 
-/// Default loopback endpoint — the literal-IP form of the spike's LM Studio URL
-/// so the out-of-box default passes the literal-IP allowlist (spec §6.1).
-pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:1234/v1/embeddings";
-/// Default model id — the id the spike requested (operator-asserted, spec §6.1).
-pub const DEFAULT_MODEL_ID: &str = "text-embedding-nomic-embed-text-v1.5";
-/// Default embedding dimension (nomic-embed-text v1.5).
-pub const DEFAULT_DIM: usize = 768;
-
-/// The three endpoint env inputs (spec §6.1), read via `std::env::var` — the
-/// house pattern, NOT a config subsystem.
-#[derive(Debug, Clone)]
-pub struct SeedEndpointConfig {
-    pub endpoint: String,
-    pub model_id: String,
-    pub dim: usize,
-    /// `Some(reason)` when `RMAP_SEED_DIM` was SET to a value that is not a positive
-    /// integer. Absence → the default dim silently (honest: no operator intent to
-    /// honor). A present-but-invalid value is NEVER silently coerced to the default
-    /// (that would act on a misconfiguration as if it were valid); it is surfaced as
-    /// an honest degraded/unavailable cause on every seed surface (STANDING HONESTY
-    /// RULE — review-4 #1). `dim` still carries the default so downstream types stay
-    /// total, but the query/doctor paths decline while this is `Some`.
-    pub dim_config_error: Option<String>,
-}
-
-impl SeedEndpointConfig {
-    pub fn from_env() -> Self {
-        let endpoint =
-            std::env::var("RMAP_SEED_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string());
-        let model_id =
-            std::env::var("RMAP_SEED_MODEL_ID").unwrap_or_else(|_| DEFAULT_MODEL_ID.to_string());
-        let (dim, dim_config_error) = parse_dim(std::env::var("RMAP_SEED_DIM").ok().as_deref());
-        Self {
-            endpoint,
-            model_id,
-            dim,
-            dim_config_error,
-        }
-    }
-
-    /// The store pin for this config (spec §4.3/§7.1). `repo_graph_version` is the
-    /// same runtime version the warm cache keys on.
-    pub fn store_key(&self) -> SeedStoreKey {
-        SeedStoreKey {
-            model_id: self.model_id.clone(),
-            dim: self.dim as u32,
-            repo_graph_version: REPO_GRAPH_VERSION.to_string(),
-        }
-    }
-}
-
-/// Parse `RMAP_SEED_DIM` (spec §6.1). Distinguishes three honest cases:
-/// - absent / empty / whitespace ⇒ `(DEFAULT_DIM, None)` — no operator intent, default.
-/// - a positive integer ⇒ `(that, None)`.
-/// - a present-but-invalid value (non-numeric, zero, negative) ⇒ `(DEFAULT_DIM,
-///   Some(reason))` — the default keeps `dim` total, but the `Some` reason forces
-///   every seed surface to decline rather than silently act on a misconfiguration.
-fn parse_dim(raw: Option<&str>) -> (usize, Option<String>) {
-    match raw.map(str::trim) {
-        None | Some("") => (DEFAULT_DIM, None),
-        Some(s) => match s.parse::<usize>() {
-            Ok(d) if d > 0 => (d, None),
-            _ => (
-                DEFAULT_DIM,
-                Some(format!(
-                    "RMAP_SEED_DIM is not a valid embedding dimension: '{s}' (expected a positive integer)"
-                )),
-            ),
-        },
-    }
+/// The state-root directory the in-process model is cached under (operator ruling
+/// DEP-HFHUB-EDGE): `<state_root>/seed-model-cache`. Derived from the DB path the
+/// same way [`sidecar_path`] is, so proofs and the product share the state-isolation
+/// invariant and never touch the operator's HF home. `None` when the DB path has no
+/// resolvable state root.
+pub fn model_cache_dir(db_path: &Path) -> Option<PathBuf> {
+    let databases_dir = db_path.parent()?; // <state_root>/databases
+    let state_root = databases_dir.parent()?; // <state_root>
+    Some(state_root.join("seed-model-cache"))
 }
 
 /// Test override for [`seed_enabled`]: 0 = no override (use env), 1 = force ON,
@@ -152,9 +89,12 @@ pub fn set_auto_seed_for_test(enabled: bool) {
     );
 }
 
-/// The per-repo `.vec` sidecar path (spec §4.1): `<state_root>/seed-vectors/<hash16>.vec`,
-/// where `<hash16>` is the DB filename stem (the same `allocate_db_path` hash).
-/// A dedicated `seed-vectors/` subdir keeps the DB-orphan classifier unambiguous.
+/// The per-repo LEGACY `.vec` sidecar path: `<state_root>/seed-vectors/<hash16>.vec`.
+/// SEED-CHUNK-1 moved seed vectors into the per-snapshot `seed_vectors` SQLite table,
+/// so nothing WRITES a `.vec` anymore — but a pre-migration install may still have
+/// one on disk. `reclaim` keeps calling this to garbage-collect those legacy files
+/// (forget deletes the DB's `.vec`; the orphan scan reclaims dangling ones). It is
+/// migration hygiene, not a live store path.
 pub fn sidecar_path(db_path: &Path) -> Option<PathBuf> {
     let hash16 = db_path.file_stem()?; // "<hash16>" from "<hash16>.db"
     let databases_dir = db_path.parent()?; // <state_root>/databases
@@ -181,33 +121,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_dim_distinguishes_absent_valid_and_invalid() {
-        // Absence / empty ⇒ default, NO error (no operator intent to honor).
-        assert_eq!(parse_dim(None), (DEFAULT_DIM, None));
-        assert_eq!(parse_dim(Some("")), (DEFAULT_DIM, None));
-        assert_eq!(parse_dim(Some("  ")), (DEFAULT_DIM, None));
-        // A valid positive integer ⇒ that value, no error.
-        assert_eq!(parse_dim(Some("1024")), (1024, None));
-        assert_eq!(parse_dim(Some(" 512 ")), (512, None));
-        // Present-but-invalid ⇒ default dim (kept total) + an honest error string;
-        // NEVER a silent coercion to the default (review-4 #1).
-        for bad in ["abc", "0", "-5", "3.5", "768x"] {
-            let (dim, err) = parse_dim(Some(bad));
-            assert_eq!(
-                dim, DEFAULT_DIM,
-                "invalid dim keeps the default for totality"
-            );
-            assert!(
-                err.is_some(),
-                "'{bad}' must surface a config error, not default silently"
-            );
-        }
-    }
-
-    #[test]
     fn sidecar_path_derives_under_state_root() {
         let db = Path::new("/root/databases/deadbeef12345678.db");
         let p = sidecar_path(db).unwrap();
         assert_eq!(p, PathBuf::from("/root/seed-vectors/deadbeef12345678.vec"));
+    }
+
+    #[test]
+    fn model_cache_dir_derives_under_state_root() {
+        let db = Path::new("/root/databases/deadbeef12345678.db");
+        let p = model_cache_dir(db).unwrap();
+        assert_eq!(p, PathBuf::from("/root/seed-model-cache"));
     }
 }

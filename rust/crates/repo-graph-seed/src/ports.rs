@@ -1,24 +1,27 @@
-//! The two seams the pure seed logic depends on — defined here (policy side) so
-//! the outer adapters implement them (adapter → policy, inward dependency).
+//! The seams the pure seed logic depends on — defined here (policy side) so the
+//! outer adapters implement them (adapter → policy, inward dependency).
+//!
+//! SEED-CHUNK-1: the corpus is now per-SYMBOL **chunks** (not files), and vectors
+//! live per-snapshot in SQLite (not a `.vec` sidecar). The DTOs that cross the
+//! storage boundary stay raw owned structs — never a `rusqlite::Row`.
 
 use thiserror::Error;
 
-/// The model-runtime seam (spec §10). `texts` are already role-prefixed
-/// (`search_document: …` / `search_query: …`) by the caller (spec §3.2); the
-/// impl issues them to the model and returns raw float vectors — **only
+/// The model-runtime seam (spec §10). Implementations issue the already-assembled
+/// chunk/query text to the model and return raw float vectors — **only
 /// `Vec<Vec<f32>>` crosses this boundary, never an HTTP/framework type**.
 ///
 /// Dispatch axis (concrete): the D-ES-4 distribution choice. Implementations
-/// grow — endpoint (a) ships in IMPL-1; embedded-ONNX (b) is the named,
-/// ratification-pending second impl — so this is interface + polymorphism.
+/// grow — endpoint (a) shipped in IMPL-1; the in-process static engine (b,
+/// `LocalEmbedder`) is the SEED-CHUNK-1 ratified impl — so this is interface +
+/// polymorphism.
 pub trait Embedder {
-    /// The operator-asserted model id that becomes the store pin (spec §6.1/§7.1).
+    /// The model id that becomes the store's `model_id` stamp (spec §3).
     fn model_id(&self) -> &str;
-    /// The embedding dimension that becomes the store pin (`dim`).
+    /// The embedding dimension that becomes the store's `dim` stamp.
     fn dim(&self) -> usize;
-    /// Embed a batch of already-role-prefixed documents. Returns one vector per
-    /// input, in input order (the impl is responsible for correlating the
-    /// endpoint's response by `index`, not array position — a2 contract, D-ES-9).
+    /// Embed a batch of already-assembled documents. Returns one vector per input,
+    /// in input order.
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError>;
 }
 
@@ -27,41 +30,96 @@ pub trait Embedder {
 /// never guesses.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum EmbedError {
-    /// Endpoint not reachable (server down / no local model) → "model unavailable".
-    #[error("embedding endpoint unreachable ({endpoint}): {detail}")]
-    Unreachable { endpoint: String, detail: String },
-    /// Configured endpoint is not a loopback IP literal → refused before connect
-    /// (I4 structural enforcement, D-ES-4/§6.1). Never egress.
-    #[error("embedding endpoint is not loopback and was refused: {endpoint}")]
-    NonLoopbackRejected { endpoint: String },
-    /// Response body was not the expected bounded shape (non-200, chunked, TLS,
-    /// bad JSON, bad index permutation, non-finite/zero-norm vector — the a2
-    /// accepted-response contract, D-ES-9).
+    /// The model runtime was unavailable (endpoint down / model not cached and not
+    /// fetchable) → "model unavailable".
+    #[error("embedding model unavailable: {detail}")]
+    Unavailable { detail: String },
+    /// Response was not the expected bounded shape (bad cardinality, non-finite).
     #[error("embedding response malformed: {detail}")]
     Malformed { detail: String },
     /// A returned vector's length ≠ the pinned `dim` → whole-store "pins mismatch".
     #[error("embedding dimension mismatch: expected {expected}, got {got}")]
     DimMismatch { expected: usize, got: usize },
-    /// Model identity ≠ the pinned `model_id`. Either the endpoint's echoed
-    /// response `model` field (when present) ≠ pin (wire-time check), or the
-    /// query-time configured model ≠ the store pin (spec §7.1). A *missing* echo
-    /// is NOT this error (the pin stays operator-asserted, §6.1/§9).
-    #[error("embedding model mismatch: expected {expected}, got {got}")]
-    ModelMismatch { expected: String, got: String },
 }
 
-/// One corpus file, as a raw owned boundary DTO — three `String`s, **no**
-/// `rusqlite::Row`, no storage type, no framework object (architecture boundary
-/// DTO rule). Filled by the storage adapter's [`SeedCorpusRead`] impl.
+/// One corpus **chunk** — a SYMBOL node's identity + the raw material for its
+/// document (spec §2.1). A raw owned boundary DTO (no storage type). The span
+/// SOURCE TEXT is NOT here: the background pass reads the working-tree file and
+/// slices `line_start..line_end` itself (closing the source/snapshot race), so
+/// only the line bounds cross this boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeedCorpusEntry {
+    /// The SYMBOL node's snapshot-scoped uid (the seed_vectors PK part).
+    pub node_uid: String,
+    /// The node's cross-snapshot identity (the copy-forward + `explain <key>` key).
+    pub stable_key: String,
+    /// The owning file's uid (for the module-ownership lookup).
     pub file_uid: String,
+    /// Repo-relative file path (the `path:line` anchor + working-tree read key).
     pub path: String,
-    /// The READY-snapshot `file_versions.content_hash` pin for this file.
+    /// The symbol's qualified name (document header + anchor); `None` when unstored.
+    pub qualified_name: Option<String>,
+    /// The symbol's doc comment (document body prefix); `None` when unstored.
+    pub doc_comment: Option<String>,
+    /// 1-indexed span start line; the `line` anchor. `None` when the node had no span.
+    pub line_start: Option<i64>,
+    /// 1-indexed span end line (inclusive). `None` when the node had no span.
+    pub line_end: Option<i64>,
+    /// The owning file's `is_test` classification at this snapshot (the partition input).
+    pub is_test: bool,
+    /// The owning file's `file_versions.content_hash` pin (the copy-forward key +
+    /// the source/snapshot-race admission check).
     pub content_hash: String,
 }
 
-/// Failure reading the corpus catalog (a wrapped storage error string — the pure
+/// The corpus for a repo's current READY snapshot. `snapshot_uid` is `None` when
+/// the repo is not indexed / has no READY snapshot — that is "no corpus", never an
+/// error; the pass then has nothing to write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedCorpus {
+    pub snapshot_uid: Option<String>,
+    pub entries: Vec<SeedCorpusEntry>,
+}
+
+/// One stored seed vector — a chunk's embedding plus the denormalized fields the
+/// serving path renders WITHOUT re-joining `nodes` (spec §3/§4). A raw owned
+/// boundary DTO; `Vec<f32>` crosses the boundary, never a BLOB handle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeedVectorEntry {
+    pub node_uid: String,
+    pub stable_key: String,
+    pub file_uid: String,
+    pub path: String,
+    /// The `path:line` anchor line; `None` renders WITHOUT a line (never a 0).
+    pub line: Option<i64>,
+    pub qualified_name: Option<String>,
+    /// Production (`false`) vs test (`true`) — the moat partition (spec §5).
+    pub is_test: bool,
+    pub content_hash: String,
+    /// The `dim`-length L2-normalized vector.
+    pub vector: Vec<f32>,
+}
+
+/// A snapshot's stored vectors plus the homogeneous model stamp they carry. A
+/// snapshot's rows are all written in one pass under one model, so the set has one
+/// `model_id`/`model_checksum`/`dim` (all `None` when the set is empty). The reader
+/// REJECTS a heterogeneous set (mixed stamps / a vector whose decoded length differs
+/// from `dim`) as unreadable — it never hands the serving path a corrupt/partial
+/// store to score (STANDING HONESTY RULE 1). The serving path compares this stamp to
+/// the runtime model to decide fresh-serve vs pins-mismatch (spec §3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredSeedVectors {
+    pub model_id: Option<String>,
+    /// sha256 of the model files the writing pass loaded (spec §2 "checksum
+    /// recorded") — recorded provenance of the embedding regime; `None` when the set
+    /// is empty. Surfaced by the doctor; not part of the serve-time pin (that is
+    /// `model_id` + `dim`, the ratified invalidation identity, spec §3).
+    pub model_checksum: Option<String>,
+    pub dim: Option<u32>,
+    pub entries: Vec<SeedVectorEntry>,
+}
+
+/// Failure reading the corpus / vectors (a wrapped storage error string — the pure
 /// core never sees the concrete storage error type).
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum SeedCorpusError {
@@ -69,34 +127,27 @@ pub enum SeedCorpusError {
     Read(String),
 }
 
-/// The read seam that hands the pure seed logic its corpus catalog without the
-/// logic importing the SQLite adapter (spec §10 ledger; the earned dependency
-/// inversion — identical to the ratified `AgentStorageRead` pattern).
-///
-/// `repo-graph-storage` adds a dependency on this crate and implements this port
-/// on `StorageConnection`: the READY-snapshot
-/// `SELECT file_uid, path FROM files WHERE repo_uid=? AND is_test=0 AND
-/// is_generated=0 AND is_excluded=0` joined to `file_versions.content_hash`
-/// (spec §3.1/§3.3), converting rows to [`SeedCorpusEntry`] — direction
-/// adapter → policy (outer → inner).
+/// The read seam that hands the pure seed logic its corpus + stored vectors without
+/// the logic importing the SQLite adapter (spec §10; the earned dependency
+/// inversion — identical to the ratified `AgentStorageRead` pattern). Implemented on
+/// `StorageConnection` by `repo-graph-storage`.
 pub trait SeedCorpusRead {
-    /// Enumerate the current READY-snapshot corpus for `repo_uid`, ordered by
-    /// `path` ascending (deterministic; the corpus-cap truncation and the tie
-    /// break both rely on a stable order). Returns an empty vec when the repo is
-    /// not indexed / has no READY snapshot — that is "no corpus", never an error.
-    fn seed_corpus(&self, repo_uid: &str) -> Result<Vec<SeedCorpusEntry>, SeedCorpusError>;
+    /// Enumerate the current READY snapshot's SYMBOL chunks for `repo_uid`, ordered
+    /// by `(path, line_start)` (deterministic). `snapshot_uid = None` ⇒ not indexed.
+    fn seed_corpus(&self, repo_uid: &str) -> Result<SeedCorpus, SeedCorpusError>;
 
-    /// Resolve the OWNING MODULE display path (`module_candidates.canonical_root_path`)
-    /// for each of `file_uids` in `snapshot_uid`, from the genuine ownership mapping
-    /// (`module_file_ownership`, operator ruling 2026-08-25) — NOT a directory guess.
-    /// A file with several ownership rows resolves to its most-specific module
-    /// (longest `canonical_root_path`), the same longest-prefix winner used
-    /// everywhere else a file is displayed under a module.
-    ///
-    /// The returned map contains ONLY the file_uids that have an ownership row:
-    /// **presence = a genuine owning module; absence = no ownership recorded** (the
-    /// caller renders that as an explicit unavailable-with-reason, never a fallback
-    /// value). A read failure is `Err` (unknown-with-reason) — never an empty map.
+    /// Read all stored seed vectors for `snapshot_uid`. Empty ⇒ no vectors yet
+    /// (pre-migration snapshot, or the async pass has not written them) — the caller
+    /// renders "no seeds yet", never a stale fallback. The homogeneous model stamp is
+    /// carried on the returned [`StoredSeedVectors`] so the caller can hard-fail a
+    /// model/dim pin mismatch (I3).
+    fn read_seed_vectors(&self, snapshot_uid: &str) -> Result<StoredSeedVectors, SeedCorpusError>;
+
+    /// Resolve the OWNING MODULE display path for each of `file_uids` in
+    /// `snapshot_uid` from the genuine ownership mapping (operator ruling
+    /// 2026-08-25). Presence = a genuine owning module; absence = no ownership
+    /// recorded (the caller renders that as unavailable-with-reason, never a
+    /// fallback value). A read failure is `Err` — never an empty map.
     fn module_owners(
         &self,
         snapshot_uid: &str,

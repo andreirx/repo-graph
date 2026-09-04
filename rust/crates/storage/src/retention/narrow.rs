@@ -152,6 +152,10 @@ pub const STAMP_NARROW_TABLES: &[&str] = &[
     "surface_fs_mutation_evidence",
     "project_surface_evidence",
     "project_surfaces",
+    // SEED-CHUNK-1: per-snapshot seed vectors are a derived, rebuildable Layer-3
+    // embedding cache (Tier B) — narrowed on a baseline stamp like the other derived
+    // families; no dependents, own CASCADE on snapshot/repo delete.
+    "seed_vectors",
 ];
 
 /// A snapshot-scoped child table with no `snapshot_uid` column of its own,

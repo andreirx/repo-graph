@@ -264,8 +264,8 @@ fn query_missing_is_malformed_never_empty_echo() {
 #[test]
 fn fact_hit_with_only_subfloor_seeds_does_not_claim_nothing_matched() {
     // review-1 (§2.4): facts MATCHED (a symbol hit) but every seed is sub-floor. The
-    // seed tier must still abstain HONESTLY about the seed tier ("no seeds above the
-    // similarity floor") but must NOT append the capability close — "nothing matched"
+    // seed tier must still abstain HONESTLY about the seed tier ("no candidates above
+    // the minimum similarity") but must NOT append the capability close — "nothing matched"
     // would be FALSE when a fact class matched.
     let mut facts = empty_facts();
     facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
@@ -274,7 +274,7 @@ fn fact_hit_with_only_subfloor_seeds_does_not_claim_nothing_matched() {
     let result = json!({
         "query": "bnr", "facts": facts,
         "seeds_available": true,
-        "candidates": [candidate_with_score("k0", 0.55)],
+        "candidates": [candidate_with_score("k0", 0.22)],
     });
     let out = render_find_human(&result, false);
     assert!(
@@ -282,7 +282,7 @@ fn fact_hit_with_only_subfloor_seeds_does_not_claim_nothing_matched() {
         "fact hit rendered: {out}"
     );
     assert!(
-        out.contains("no seeds above the similarity floor"),
+        out.contains("no candidates above the minimum similarity"),
         "seed abstain still renders honestly: {out}"
     );
     assert!(
@@ -304,11 +304,11 @@ fn fact_miss_with_only_subfloor_seeds_routes_to_find_text() {
     let result = json!({
         "query": "fsync", "facts": empty_facts(),
         "seeds_available": true,
-        "candidates": [candidate_with_score("k0", 0.55)],
+        "candidates": [candidate_with_score("k0", 0.22)],
     });
     let out = render_find_human(&result, false);
     assert!(
-        out.contains("no seeds above the similarity floor"),
+        out.contains("no candidates above the minimum similarity"),
         "seed abstain: {out}"
     );
     assert!(
@@ -333,11 +333,11 @@ fn malformed_facts_with_subfloor_seeds_withholds_capability_close() {
     let result = json!({
         "query": "fsync", "facts": facts,
         "seeds_available": true,
-        "candidates": [candidate_with_score("k0", 0.55)],
+        "candidates": [candidate_with_score("k0", 0.22)],
     });
     let out = render_find_human(&result, false);
     assert!(
-        out.contains("no seeds above the similarity floor"),
+        out.contains("no candidates above the minimum similarity"),
         "seed abstain still renders: {out}"
     );
     assert!(

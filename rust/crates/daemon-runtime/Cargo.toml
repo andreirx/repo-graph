@@ -108,6 +108,20 @@ ulid = "1"
 sha2 = "0.10"
 hex = "0.4"
 
+# SEED-CHUNK-1: the in-process static-embedding engine (potion-code-16M-v2 via
+# model2vec-rs), replacing the lmstudio HTTP embedder in the find seed tier. This
+# is the IMPURE model-runtime edge (`seed::local_engine`) that implements the pure
+# `repo_graph_seed::Embedder` port — the daemon owns the runtime, the pure crate
+# never sees it (architecture Rule 3). RATIFIED dependency (slice packet STANDING
+# SCOPE). `hf-hub` is promoted from a model2vec-rs transitive to a DIRECT edge
+# (operator ruling 2026-09-03, DEP-HFHUB-EDGE) so WE control the cache directory
+# under the app state root — model2vec-rs's own resolver uses hf-hub's global
+# `~/.cache/huggingface`, which violates the state-isolation invariant. Pattern:
+# resolve/fetch via hf-hub into an explicit state-root cache dir, hand model2vec-rs
+# the LOCAL PATH. Both crates version-pinned (operator ruling).
+model2vec-rs = "=0.2.1"
+hf-hub = "=0.4.3"
+
 # Unix-specific dependencies (sandbox cleanup)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

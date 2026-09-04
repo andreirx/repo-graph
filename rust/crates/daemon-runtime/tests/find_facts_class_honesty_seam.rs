@@ -35,7 +35,7 @@ use serde_json::json;
 /// seed edges by hand for that reason).
 #[test]
 fn find_boundary_hit_next_command_renders_the_declaration() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
+    let _env = SeedEnv::quiet(); // untouched under --exact
     let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
@@ -112,7 +112,7 @@ fn find_boundary_hit_next_command_renders_the_declaration() {
 /// present) so the reconciler picks ObservedButUndeclared over UnknownExternalLike.
 #[test]
 fn find_dependency_excludes_observed_but_undeclared() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
+    let _env = SeedEnv::quiet(); // untouched under --exact
     let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
@@ -128,7 +128,7 @@ fn find_dependency_excludes_observed_but_undeclared() {
 
     // helper.ts's real file_uid (owns the declared dep + is the import source file).
     let corpus = StorageConnection::open(&db_path).unwrap();
-    let entries = corpus.seed_corpus(&repo_uid).unwrap();
+    let entries = corpus.seed_corpus(&repo_uid).unwrap().entries;
     let helper_uid = entries
         .iter()
         .find(|e| e.path.ends_with("helper.ts"))
@@ -213,7 +213,7 @@ fn find_dependency_excludes_observed_but_undeclared() {
 /// it in favor of the labeled degraded form.
 #[test]
 fn find_dependency_unavailable_when_manifest_provenance_malformed() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
+    let _env = SeedEnv::quiet(); // untouched under --exact
     let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
@@ -228,7 +228,7 @@ fn find_dependency_unavailable_when_manifest_provenance_malformed() {
         .to_string();
 
     let corpus = StorageConnection::open(&db_path).unwrap();
-    let entries = corpus.seed_corpus(&repo_uid).unwrap();
+    let entries = corpus.seed_corpus(&repo_uid).unwrap().entries;
     let helper_uid = entries
         .iter()
         .find(|e| e.path.ends_with("helper.ts"))

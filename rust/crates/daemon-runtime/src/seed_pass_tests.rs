@@ -68,13 +68,16 @@ fn generation_supersede_is_per_repo_and_monotonic() {
     assert_eq!(c.current_generation("r2"), 0);
 }
 
-/// review-5 #2 regression — the forget-vs-seed publication race is closed
-/// DETERMINISTICALLY (no detached thread / no live embedder): an in-flight pass
-/// that built its bytes BEFORE a concurrent `forget` completed must NOT resurrect
-/// the `.vec` sidecar for a now-forgotten repo. The gate is `publish_guarded`'s
+/// review-5 #2 regression (SEED-CHUNK-1 SQLite form) — the forget-vs-seed
+/// publication race is closed DETERMINISTICALLY (no detached thread / no model): an
+/// in-flight pass that built its vectors BEFORE a concurrent `forget` completed must
+/// NOT write `seed_vectors` for a now-forgotten repo. The gate is `publish_guarded`'s
 /// registry recheck under the DB write slot — exactly the code the real pass runs.
 #[test]
 fn publish_is_skipped_after_forget_removes_the_registry_entry() {
+    use repo_graph_seed::{SeedCorpusRead, SeedVectorEntry};
+    use repo_graph_storage::StorageConnection;
+
     let root = tempfile::tempdir().expect("state root");
     let registry = crate::registry::RepoRegistry::with_state_root(root.path()).expect("registry");
     let state = Arc::new(DaemonState::with_registry(registry));
@@ -87,30 +90,88 @@ fn publish_is_skipped_after_forget_removes_the_registry_entry() {
         let e = reg.register(&repo_dir).expect("register").clone();
         (e.repo_uid, e.db_path, e.canonical_path)
     };
-    let generation = state.seed_coord().bump_generation(&repo_uid);
-    let sidecar = crate::seed::sidecar_path(&db_path).expect("sidecar path");
-    let bytes = b"seed-store-bytes".to_vec();
 
-    // (1) A pass publishing for a STILL-REGISTERED repo writes the sidecar.
-    let out = publish_guarded(&state, &db_path, &repo_uid, generation, &sidecar, &bytes);
+    // Materialize a real DB with a READY snapshot so the SQLite publish FKs resolve.
+    // (migrations via StorageConnection::open; the repo+snapshot rows via a raw conn —
+    // rusqlite is a dev-dep sharing the same bundled libsqlite3.)
+    StorageConnection::open(&db_path).expect("create db + migrations");
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("raw open");
+        conn.execute(
+            "INSERT INTO repos (repo_uid, name, root_path, created_at) VALUES (?,?,?,?)",
+            rusqlite::params![repo_uid, "repo", "/repo", "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at) \
+             VALUES ('s1', ?, 'full', 'ready', '2026-01-01T00:00:00Z')",
+            rusqlite::params![repo_uid],
+        )
+        .unwrap();
+    }
+
+    let repo_state = state.load_repo(&db_path, &repo_uid).expect("load repo");
+    let generation = state.seed_coord().bump_generation(&repo_uid);
+    let entry = SeedVectorEntry {
+        node_uid: "n1".to_string(),
+        stable_key: format!("{repo_uid}:a.rs#f:SYMBOL"),
+        file_uid: "fu1".to_string(),
+        path: "a.rs".to_string(),
+        line: Some(1),
+        qualified_name: Some("f".to_string()),
+        is_test: false,
+        content_hash: "h1".to_string(),
+        // The publish stamps the row's `dim` = `MODEL_DIM`, and the homogeneity-
+        // validating read now rejects a vector whose length ≠ `dim` — so this test
+        // vector must be `MODEL_DIM`-long to be a well-formed row (the race, not a
+        // corrupt store, is what's under test).
+        vector: vec![0.0f32; crate::seed::MODEL_DIM],
+    };
+
+    // (1) A pass publishing for a STILL-REGISTERED repo writes the vectors.
+    let out = publish_guarded(
+        &state,
+        &repo_state,
+        &db_path,
+        &repo_uid,
+        generation,
+        "s1",
+        "sha256:test",
+        std::slice::from_ref(&entry),
+    );
     assert!(
         matches!(out, PublishOutcome::Published),
         "a registered repo publishes, got {out:?}"
     );
-    assert!(sidecar.exists(), "sidecar present after a valid publish");
+    let stored = StorageConnection::open(&db_path)
+        .unwrap()
+        .read_seed_vectors("s1")
+        .unwrap();
+    assert_eq!(
+        stored.entries.len(),
+        1,
+        "vectors present after a valid publish"
+    );
 
-    // (2) `forget` completes: it deletes the `.vec` AND removes the registry entry
-    //     (exactly what `reclaim::forget_repo` does) — WITHOUT bumping the seed
-    //     generation (forget is not an index).
-    std::fs::remove_file(&sidecar).unwrap();
+    // (2) `forget` removes the registry entry (WITHOUT bumping the seed generation —
+    //     forget is not an index).
     state
         .registry_mut()
         .remove(&canonical_path)
         .expect("forget removes the registry entry");
 
     // (3) The late in-flight pass — SAME generation — attempts to publish. The
-    //     registry recheck must fire and SKIP: no orphan sidecar resurrected.
-    let out2 = publish_guarded(&state, &db_path, &repo_uid, generation, &sidecar, &bytes);
+    //     registry recheck must fire and SKIP before writing: no orphan resurrected.
+    let out2 = publish_guarded(
+        &state,
+        &repo_state,
+        &db_path,
+        &repo_uid,
+        generation,
+        "s1",
+        "sha256:test",
+        std::slice::from_ref(&entry),
+    );
     match out2 {
         PublishOutcome::Skipped(reason) => assert!(
             reason.contains("forgotten"),
@@ -118,38 +179,14 @@ fn publish_is_skipped_after_forget_removes_the_registry_entry() {
         ),
         other => panic!("a forgotten repo must skip publish, got {other:?}"),
     }
-    assert!(
-        !sidecar.exists(),
-        "the forget-vs-seed race is closed: no `.vec` resurrected for a forgotten repo"
-    );
-}
-
-/// review-9 #3 regression — the pass declines with an honest, recorded reason when
-/// `RMAP_SEED_DIM` is invalid, rather than building a store at the silently-defaulted
-/// 768 dimension. Driven through the exact precondition the pass runs
-/// (`config_skip_reason`), deterministically, with no env-var mutation.
-#[test]
-fn invalid_dim_config_skips_the_pass_before_building() {
-    let mut cfg = SeedEndpointConfig::from_env();
-    // A valid/absent dim runs the pass (no skip).
-    cfg.dim_config_error = None;
-    assert!(
-        config_skip_reason(&cfg).is_none(),
-        "a valid seed config must NOT skip the pass"
-    );
-    // A present-but-invalid dim declines with a reason naming the bad value.
-    cfg.dim_config_error = Some(
-        "RMAP_SEED_DIM is not a valid embedding dimension: 'abc' (expected a positive integer)"
-            .to_string(),
-    );
-    let reason = config_skip_reason(&cfg).expect("an invalid dim must skip the pass");
-    assert!(
-        reason.contains("seed config invalid"),
-        "skip reason labels the config cause: {reason}"
-    );
-    assert!(
-        reason.contains("abc"),
-        "skip reason surfaces the specific bad value: {reason}"
+    let after = StorageConnection::open(&db_path)
+        .unwrap()
+        .read_seed_vectors("s1")
+        .unwrap();
+    assert_eq!(
+        after.entries.len(),
+        1,
+        "the forget-vs-seed race is closed: the skipped pass wrote no new vectors"
     );
 }
 

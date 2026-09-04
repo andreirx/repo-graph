@@ -114,6 +114,18 @@ pub struct FindCandidate {
     pub stable_key: String,
     /// Repo-relative path — a plain String (NOT `FocusCandidate.file: Option`).
     pub path: String,
+    /// SEED-CHUNK-1 (FIND-EVIDENCE-1 anchor): the SYMBOL chunk's start line for the
+    /// `path:line` anchor. ABSENT (skip-serialized) when the node had no stored span
+    /// — the row then renders WITHOUT a line, never a fabricated 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    /// The symbol's qualified name (the anchor's human label). ABSENT when unstored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qualified_name: Option<String>,
+    /// SEED-CHUNK-1 (spec §5, the moat): `true` ⇒ a DEMOTED test-classified chunk,
+    /// ranked below production and labeled so the reader is never misled. Always
+    /// present so the partition is honest in the JSON, not just the human render.
+    pub is_test: bool,
     pub score: f64,
     /// Always "embedding" (I2).
     pub source: String,
@@ -165,34 +177,24 @@ impl FindNext {
 /// `find`'s own degraded-state summary (spec §8B.3) — same causes as §8.3 but
 /// `find`'s own always-present rendering (it has nothing deterministic to fall
 /// back to, so it returns zero candidates + one labeled line, never an error).
-fn find_degrade_summary(reason: DegradeReason) -> String {
+fn find_degrade_summary(reason: &DegradeReason) -> String {
     match reason {
         DegradeReason::NoStore => {
-            "semantic index not built yet — hints will be available after indexing"
+            "semantic seeds not built yet — hints will be available after indexing".to_string()
         }
         DegradeReason::StoreUnreadable => {
-            "semantic index present but unreadable — it rebuilds on next index"
-        }
-        DegradeReason::FreshnessUnknown => {
-            "cannot verify the semantic index is current — hints withheld this run"
+            "semantic seeds present but unreadable — they rebuild on next index".to_string()
         }
         DegradeReason::ModelUnavailable => {
-            "no local embedding model reachable — semantic hints unavailable (find is optional)"
+            "embedding model not cached and not fetchable — semantic hints unavailable (find is optional)".to_string()
+        }
+        DegradeReason::ModelUnreadable { detail } => {
+            format!("cached embedding model unreadable ({detail}) — it rebuilds on next index")
         }
         DegradeReason::PinsMismatch => {
-            "semantic index was built with a different model — rebuild on next index"
-        }
-        DegradeReason::StoreTooLarge => {
-            "vector store exceeds the seed budget — semantic hints declined"
-        }
-        DegradeReason::ResolveUnavailable => {
-            "could not resolve semantic candidates (snapshot read failed) — hints withheld this run"
-        }
-        DegradeReason::InvalidConfig => {
-            "seed configuration is invalid (RMAP_SEED_DIM) — set a valid positive integer"
+            "semantic seeds were built with a different model — rebuild on next index".to_string()
         }
     }
-    .to_string()
 }
 
 /// Build the Group-B semantic `data` payload (spec §8.2 Group B / §8.3) that rides
@@ -217,10 +219,14 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
                     );
                     json!({
                         "stable_key": c.stable_key,
-                        // §8.2 Group B uses `file` (the store is file-level, D-ES-5),
-                        // NOT the `find` DTO's `path`; `kind` is omitted (FILE by
-                        // construction).
-                        "file": c.path,
+                        // SEED-CHUNK-1: the store is now SYMBOL-chunk-level, so the
+                        // hint carries the `path:line` anchor + qualified name, not a
+                        // bare file. `line`/`qualified_name` skip when unstored (never
+                        // a fabricated 0); `is_test` labels the demoted test block.
+                        "path": c.path,
+                        "line": c.line,
+                        "qualified_name": c.qualified_name,
+                        "is_test": c.is_test,
                         "score": c.score,
                         "source": "embedding",
                         "model_id": c.model_id,
@@ -232,16 +238,21 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
             json!({
                 "semantic_candidates": cands,
                 "hint": format!(
-                    "no such symbol; these files are semantically near your query — \
-                     open one, then re-run {verb} on a symbol inside it"
+                    "no such symbol; these symbols are semantically near your query — \
+                     explain one (test-classified hits are labeled and ranked below production)"
                 ),
             })
         }
         // Genuine known-zero: no candidates, only the honest hint (§8.3).
-        SemanticResult::NothingScored => json!({
-            "hint": format!(
-                "no such symbol; no files scored above zero for a semantic hint (re-run {verb} on a symbol name)"
-            ),
+        SemanticResult::NothingScored { best } => json!({
+            "hint": match best {
+                Some(b) => format!(
+                    "no such symbol; nothing scored above the floor (best: {b:.3}) — re-run {verb} on a symbol name"
+                ),
+                None => format!(
+                    "no such symbol; no seed vectors to score — re-run {verb} on a symbol name"
+                ),
+            },
         }),
         // Degraded substrate: the SAME causes/taxonomy as the fallback tier (§8.3) —
         // the reason string rides `data.hint`; no candidates.
@@ -349,7 +360,7 @@ pub(crate) fn build_find_response(
             Some("not consulted (--exact — facts only)".to_string()),
         ),
         Some(SemanticResult::Fired { candidates, .. }) => {
-            let cands = candidates
+            let cands: Vec<FindCandidate> = candidates
                 .into_iter()
                 .map(|c| {
                     let stable_key = c.stable_key;
@@ -357,6 +368,9 @@ pub(crate) fn build_find_response(
                         next: FindNext::explain(stable_key.clone(), repo_root),
                         stable_key,
                         path: c.path,
+                        line: c.line,
+                        qualified_name: c.qualified_name,
+                        is_test: c.is_test,
                         score: c.score,
                         source: "embedding".to_string(),
                         model_id: c.model_id,
@@ -364,26 +378,35 @@ pub(crate) fn build_find_response(
                     }
                 })
                 .collect();
-            (
-                format!("ranked guesses for \"{query}\" (embedding similarity — not facts)"),
-                cands,
-                true,
-                None,
-            )
+            // Honesty header: name the partition when any test-classified chunk is in
+            // the list, so the reader knows the demotion is in effect (spec §5).
+            let has_test = cands.iter().any(|c| c.is_test);
+            let summary = if has_test {
+                format!(
+                    "ranked guesses for \"{query}\" (embedding similarity — not facts; \
+                     production ranked above test, test labeled)"
+                )
+            } else {
+                format!("ranked guesses for \"{query}\" (embedding similarity — not facts)")
+            };
+            (summary, cands, true, None)
         }
-        Some(SemanticResult::NothingScored) => (
-            format!("no area scored above zero for \"{query}\" (embedding similarity)"),
-            Vec::new(),
-            true,
-            None,
-        ),
+        Some(SemanticResult::NothingScored { best }) => {
+            let summary = match best {
+                Some(b) => format!(
+                    "no seeds above the floor for \"{query}\" (best: {b:.3}, embedding similarity)"
+                ),
+                None => format!("no seed vectors to score for \"{query}\" (embedding similarity)"),
+            };
+            (summary, Vec::new(), true, None)
+        }
         // Degraded substrate: the facts tier still answered above; the seed tier
         // says unavailable-with-reason — the verb no longer dies with the endpoint.
         Some(SemanticResult::Unavailable(reason)) => (
-            find_degrade_summary(reason),
+            find_degrade_summary(&reason),
             Vec::new(),
             false,
-            Some(reason.reason().to_string()),
+            Some(reason.reason()),
         ),
     };
 

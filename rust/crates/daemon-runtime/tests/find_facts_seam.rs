@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 /// in the isolated harness: facts survive the model being gone.
 #[test]
 fn find_facts_tier_answers_without_the_embedding_endpoint() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // model down
+    let _env = SeedEnv::quiet(); // model down
     let (d, _root) = isolated_quiet();
     let repo = make_repo(); // helper.ts defines helperFunction; main.ts defines mainEntry
     let idx = dispatch_ok(
@@ -111,7 +111,7 @@ fn find_facts_tier_answers_without_the_embedding_endpoint() {
 /// reason — proving the endpoint path was skipped, not merely failed.
 #[test]
 fn find_exact_never_consults_the_endpoint() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // would fail IF touched
+    let _env = SeedEnv::quiet(); // would fail IF touched
     let (d, _root) = isolated_quiet();
     let repo = make_repo();
     let idx = dispatch_ok(
@@ -156,7 +156,7 @@ fn find_exact_never_consults_the_endpoint() {
 /// serves BOTH the `module` class and (as helper.ts's owner) the `dependency` compose.
 #[test]
 fn find_facts_all_seven_classes_produce_labeled_hits() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // untouched under --exact
+    let _env = SeedEnv::quiet(); // untouched under --exact
     let (d, _root) = isolated_quiet();
     let repo = make_repo(); // helper.ts defines helperFunction (symbol + file classes)
     let idx = dispatch_ok(
@@ -173,7 +173,7 @@ fn find_facts_all_seven_classes_produce_labeled_hits() {
     // Resolve helper.ts's real file_uid from the corpus (the dependency chain + the
     // http-surface source_file reference a real tracked file).
     let corpus = StorageConnection::open(&db_path).unwrap();
-    let entries = corpus.seed_corpus(&repo_uid).unwrap();
+    let entries = corpus.seed_corpus(&repo_uid).unwrap().entries;
     let helper_uid = entries
         .iter()
         .find(|e| e.path.ends_with("helper.ts"))

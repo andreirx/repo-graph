@@ -1,88 +1,100 @@
-//! Unit tests for `pass.rs` (the pure embed pipeline). Split out via `#[path]`
-//! (the repo idiom, e.g. `complexity_tests.rs`) so `pass.rs` stays under the
-//! 500-line guardrail (review-2 #7). Child module of `pass`; `super::*` = the
-//! pipeline under test.
+//! Unit tests for the pure chunk-embed pipeline (`pass::build_store`). Driven with
+//! a fake `Embedder` + in-memory file reader — no model, no daemon, no DB.
 
 use super::*;
-use crate::store::{decode, SeedStoreKey};
+use crate::hash::content_hash;
+use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedVectorEntry};
 use std::collections::HashMap;
 
-/// Deterministic fake: each doc → a fixed-dim vector derived from its length.
+/// A fake embedder: returns a fixed 2-dim vector per input and records the docs it
+/// was asked to embed (so tests can assert copy-forward skipped the reused ones).
 struct FakeEmbedder {
-    dim: usize,
+    seen: std::cell::RefCell<Vec<String>>,
+}
+impl FakeEmbedder {
+    fn new() -> Self {
+        Self {
+            seen: std::cell::RefCell::new(Vec::new()),
+        }
+    }
 }
 impl Embedder for FakeEmbedder {
     fn model_id(&self) -> &str {
-        "fake-model"
+        "fake"
     }
     fn dim(&self) -> usize {
-        self.dim
+        2
     }
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        Ok(texts
-            .iter()
-            .map(|t| {
-                let base = (t.len() % 7) as f32 + 1.0;
-                (0..self.dim).map(|i| base + i as f32).collect()
-            })
-            .collect())
+        for t in texts {
+            self.seen.borrow_mut().push(t.clone());
+        }
+        // A non-zero vector so it survives normalization + the >0 rank floor.
+        Ok(texts.iter().map(|_| vec![1.0, 1.0]).collect())
     }
 }
 
-fn entry(uid: &str, path: &str, content: &str) -> (SeedCorpusEntry, String) {
-    (
-        SeedCorpusEntry {
-            file_uid: uid.to_string(),
-            path: path.to_string(),
-            content_hash: content_hash(content),
-        },
-        content.to_string(),
-    )
+fn chunk(
+    node: &str,
+    path: &str,
+    hash: &str,
+    line_start: Option<i64>,
+    line_end: Option<i64>,
+    is_test: bool,
+) -> SeedCorpusEntry {
+    SeedCorpusEntry {
+        node_uid: node.to_string(),
+        stable_key: format!("k:{node}"),
+        file_uid: format!("fu:{path}"),
+        path: path.to_string(),
+        qualified_name: Some(node.to_string()),
+        doc_comment: None,
+        line_start,
+        line_end,
+        is_test,
+        content_hash: hash.to_string(),
+    }
 }
 
-fn key() -> SeedStoreKey {
-    SeedStoreKey {
-        model_id: "fake-model".to_string(),
-        dim: 4,
-        repo_graph_version: "0.8.0".to_string(),
+fn reader(files: HashMap<String, String>) -> impl Fn(&str) -> std::io::Result<String> {
+    move |p: &str| {
+        files
+            .get(p)
+            .cloned()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"))
     }
 }
 
 #[test]
-fn builds_a_valid_store_over_admitted_files() {
-    let (e1, c1) = entry("f1", "a.ts", "content a");
-    let (e2, c2) = entry("f2", "b.ts", "content b");
-    let files: HashMap<String, String> =
-        [("a.ts".to_string(), c1), ("b.ts".to_string(), c2)].into();
-    let entries = vec![e1, e2];
-    let embedder = FakeEmbedder { dim: 4 };
-
+fn admits_matching_chunks_and_embeds_each() {
+    let content = "line1\nline2\nline3\n";
+    let h = content_hash(content);
+    let entries = vec![
+        chunk("a", "src/x.rs", &h, Some(1), Some(2), false),
+        chunk("b", "src/x.rs", &h, Some(2), Some(3), false),
+    ];
+    let mut files = HashMap::new();
+    files.insert("src/x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
     let outcome = build_store(
         entries,
-        &embedder,
-        |p| {
-            files
-                .get(p)
-                .cloned()
-                .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
-        },
+        &emb,
+        reader(files),
         || false,
-        &key(),
-        42,
         BuildConfig::default(),
-        None,
+        &[],
     );
-
     match outcome {
-        BuildOutcome::Built { bytes, report } => {
+        BuildOutcome::Built { entries, report } => {
             assert_eq!(report.admitted, 2);
+            assert_eq!(report.reused, 0);
             assert_eq!(report.drifted, 0);
-            let body = decode(&bytes, &key()).unwrap();
-            assert_eq!(body.entries.len(), 2);
-            // stored vectors are L2-normalized (‖v‖ ≈ 1)
-            for e in &body.entries {
+            assert_eq!(entries.len(), 2);
+            assert_eq!(emb.seen.borrow().len(), 2, "both chunks embedded");
+            for e in &entries {
+                assert_eq!(e.vector.len(), 2);
                 let norm: f32 = e.vector.iter().map(|x| x * x).sum::<f32>().sqrt();
-                assert!((norm - 1.0).abs() < 1e-4, "norm was {norm}");
+                assert!((norm - 1.0).abs() < 1e-5, "stored vectors are normalized");
             }
         }
         other => panic!("expected Built, got {other:?}"),
@@ -90,302 +102,203 @@ fn builds_a_valid_store_over_admitted_files() {
 }
 
 #[test]
-fn drifted_working_tree_is_omitted_not_stored_under_old_pin() {
-    // The corpus pin says one hash; the working tree has different content.
-    let e = SeedCorpusEntry {
-        file_uid: "f".to_string(),
-        path: "a.ts".to_string(),
-        content_hash: content_hash("the snapshot content"),
-    };
-    let entries = vec![e];
-    let embedder = FakeEmbedder { dim: 4 };
-    let outcome = build_store(
+fn drifted_file_omits_the_whole_run() {
+    // The file on disk hashes differently from the snapshot pin → omit all chunks.
+    let entries = vec![chunk("a", "src/x.rs", "STALE_PIN", Some(1), Some(1), false)];
+    let mut files = HashMap::new();
+    files.insert("src/x.rs".to_string(), "current content".to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
         entries,
-        &embedder,
-        |_p| Ok("DIFFERENT working-tree content".to_string()),
+        &emb,
+        reader(files),
         || false,
-        &key(),
-        0,
         BuildConfig::default(),
-        None,
-    );
-    match outcome {
-        BuildOutcome::Built { bytes, report } => {
+        &[],
+    ) {
+        BuildOutcome::Built { entries, report } => {
             assert_eq!(report.admitted, 0);
             assert_eq!(report.drifted, 1);
-            let body = decode(&bytes, &key()).unwrap();
-            assert!(body.entries.is_empty());
+            assert!(entries.is_empty());
+            assert_eq!(emb.seen.borrow().len(), 0, "nothing embedded on drift");
         }
-        other => panic!("expected Built(empty), got {other:?}"),
+        other => panic!("expected Built, got {other:?}"),
     }
 }
 
 #[test]
-fn cancel_at_batch_boundary_does_not_build() {
-    let (e1, c1) = entry("f1", "a.ts", "x");
-    let files: HashMap<String, String> = [("a.ts".to_string(), c1)].into();
-    let entries = vec![e1];
-    let embedder = FakeEmbedder { dim: 4 };
-    let outcome = build_store(
+fn unreadable_file_drifts_its_chunks() {
+    let entries = vec![chunk("a", "missing.rs", "h", Some(1), Some(1), false)];
+    let emb = FakeEmbedder::new();
+    match build_store(
         entries,
-        &embedder,
-        |p| Ok(files.get(p).cloned().unwrap()),
-        || true, // cancelled before the first batch
-        &key(),
-        0,
-        BuildConfig::default(),
-        None,
-    );
-    assert!(matches!(outcome, BuildOutcome::Cancelled));
-}
-
-#[test]
-fn empty_corpus_is_no_corpus() {
-    let entries = vec![];
-    let embedder = FakeEmbedder { dim: 4 };
-    let outcome = build_store(
-        entries,
-        &embedder,
-        |_p| Ok(String::new()),
+        &emb,
+        reader(HashMap::new()),
         || false,
-        &key(),
-        0,
         BuildConfig::default(),
-        None,
-    );
-    assert!(matches!(outcome, BuildOutcome::NoCorpus));
-}
-
-#[test]
-fn embed_failure_declines() {
-    struct DeadEmbedder;
-    impl Embedder for DeadEmbedder {
-        fn model_id(&self) -> &str {
-            "x"
-        }
-        fn dim(&self) -> usize {
-            4
-        }
-        fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
-            Err(EmbedError::Unreachable {
-                endpoint: "http://127.0.0.1:1234".to_string(),
-                detail: "connection refused".to_string(),
-            })
-        }
-    }
-    let (e1, c1) = entry("f1", "a.ts", "x");
-    let files: HashMap<String, String> = [("a.ts".to_string(), c1)].into();
-    let entries = vec![e1];
-    let outcome = build_store(
-        entries,
-        &DeadEmbedder,
-        |p| Ok(files.get(p).cloned().unwrap()),
-        || false,
-        &key(),
-        0,
-        BuildConfig::default(),
-        None,
-    );
-    assert!(matches!(
-        outcome,
-        BuildOutcome::Embed(EmbedError::Unreachable { .. })
-    ));
-}
-
-#[test]
-fn corpus_cap_reports_omission() {
-    let entries: Vec<SeedCorpusEntry> = (0..5)
-        .map(|i| SeedCorpusEntry {
-            file_uid: format!("f{i}"),
-            path: format!("{i}.ts"),
-            content_hash: content_hash("c"),
-        })
-        .collect();
-    let embedder = FakeEmbedder { dim: 4 };
-    let outcome = build_store(
-        entries,
-        &embedder,
-        |_p| Ok("c".to_string()),
-        || false,
-        &key(),
-        0,
-        BuildConfig {
-            batch_size: 2,
-            corpus_cap: 3,
-        },
-        None,
-    );
-    match outcome {
+        &[],
+    ) {
         BuildOutcome::Built { report, .. } => {
-            assert_eq!(report.admitted, 3);
-            assert_eq!(report.corpus_omitted, 2);
+            assert_eq!(report.drifted, 1);
+            assert_eq!(report.admitted, 0);
         }
         other => panic!("expected Built, got {other:?}"),
-    }
-}
-
-/// A `FakeEmbedder` that COUNTS how many documents it was ever asked to embed.
-/// Proves the §5 incremental-refresh contract: a second pass over an unchanged
-/// corpus makes ZERO embed calls (every vector copied forward by content_hash).
-struct CountingEmbedder {
-    dim: usize,
-    embedded: std::cell::Cell<usize>,
-}
-impl Embedder for CountingEmbedder {
-    fn model_id(&self) -> &str {
-        "fake-model"
-    }
-    fn dim(&self) -> usize {
-        self.dim
-    }
-    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        self.embedded.set(self.embedded.get() + texts.len());
-        Ok(texts
-            .iter()
-            .map(|t| {
-                let base = (t.len() % 7) as f32 + 1.0;
-                (0..self.dim).map(|i| base + i as f32).collect()
-            })
-            .collect())
     }
 }
 
 #[test]
-fn second_pass_over_unchanged_corpus_makes_zero_embed_calls() {
-    let (e1, c1) = entry("f1", "a.ts", "content a");
-    let (e2, c2) = entry("f2", "b.ts", "content b");
-    let files: HashMap<String, String> =
-        [("a.ts".to_string(), c1), ("b.ts".to_string(), c2)].into();
-    let read = |p: &str| {
-        files
-            .get(p)
-            .cloned()
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
-    };
-    let embedder = CountingEmbedder {
-        dim: 4,
-        embedded: std::cell::Cell::new(0),
-    };
-
-    // First pass: no prior → both files embed.
-    let first = build_store(
-        vec![e1.clone(), e2.clone()],
-        &embedder,
-        read,
+fn node_without_span_contributes_no_chunk() {
+    let content = "one line\n";
+    let h = content_hash(content);
+    let entries = vec![chunk("a", "x.rs", &h, None, None, false)];
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
         || false,
-        &key(),
-        1,
         BuildConfig::default(),
-        None,
-    );
-    let prior_body = match first {
-        BuildOutcome::Built { bytes, report } => {
-            assert_eq!(report.admitted, 2);
-            assert_eq!(report.reused, 0);
-            decode(&bytes, &key()).unwrap()
+        &[],
+    ) {
+        BuildOutcome::Built { report, entries } => {
+            assert_eq!(report.admitted, 0);
+            assert_eq!(report.drifted, 1, "no span → omitted");
+            assert!(entries.is_empty());
         }
         other => panic!("expected Built, got {other:?}"),
-    };
-    assert_eq!(embedder.embedded.get(), 2, "first pass embeds both files");
+    }
+}
 
-    // Second pass: prior store present, corpus unchanged → ZERO embed calls,
-    // every vector copied forward, and the stored vectors are byte-identical.
-    let second = build_store(
-        vec![e1, e2],
-        &embedder,
-        read,
+#[test]
+fn copy_forward_reuses_unchanged_chunk_and_skips_the_embed() {
+    let content = "fn a() {}\nfn b() {}\n";
+    let h = content_hash(content);
+    let entries = vec![
+        chunk("a", "x.rs", &h, Some(1), Some(1), false),
+        chunk("b", "x.rs", &h, Some(2), Some(2), false),
+    ];
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    // Prior snapshot embedded chunk "a" (same stable_key + content_hash).
+    let prior = vec![SeedVectorEntry {
+        node_uid: "a_prev".to_string(),
+        stable_key: "k:a".to_string(),
+        file_uid: "fu:x.rs".to_string(),
+        path: "x.rs".to_string(),
+        line: Some(1),
+        qualified_name: Some("a".to_string()),
+        is_test: false,
+        content_hash: h.clone(),
+        vector: vec![0.6, 0.8], // already normalized
+    }];
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
         || false,
-        &key(),
-        2,
         BuildConfig::default(),
-        Some(&prior_body),
-    );
-    match second {
-        BuildOutcome::Built { bytes, report } => {
+        &prior,
+    ) {
+        BuildOutcome::Built { entries, report } => {
             assert_eq!(report.admitted, 2);
-            assert_eq!(report.reused, 2, "both vectors copied forward");
-            let body = decode(&bytes, &key()).unwrap();
+            assert_eq!(report.reused, 1, "chunk a copied forward");
+            assert_eq!(emb.seen.borrow().len(), 1, "only chunk b embedded");
+            // The reused row carries the prior vector verbatim + THIS snapshot's node_uid.
+            let a = entries.iter().find(|e| e.stable_key == "k:a").unwrap();
+            assert_eq!(a.vector, vec![0.6, 0.8]);
             assert_eq!(
-                body.entries, prior_body.entries,
-                "reused vectors are byte-identical to the prior store"
+                a.node_uid, "a",
+                "reused vector, current snapshot node identity"
             );
         }
         other => panic!("expected Built, got {other:?}"),
     }
-    assert_eq!(
-        embedder.embedded.get(),
-        2,
-        "second pass over an unchanged corpus makes NO additional embed calls"
-    );
 }
 
 #[test]
-fn changed_file_re_embeds_only_that_file() {
-    let (e1, c1) = entry("f1", "a.ts", "content a");
-    let (e2, c2) = entry("f2", "b.ts", "content b");
-    let files1: HashMap<String, String> =
-        [("a.ts".to_string(), c1.clone()), ("b.ts".to_string(), c2)].into();
-    let embedder = CountingEmbedder {
-        dim: 4,
-        embedded: std::cell::Cell::new(0),
-    };
-    let first = build_store(
-        vec![e1.clone(), e2.clone()],
-        &embedder,
-        |p: &str| {
-            files1
-                .get(p)
-                .cloned()
-                .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
-        },
+fn model_change_forces_full_reembed() {
+    // The daemon passes an EMPTY prior (model filtered it out); nothing reuses.
+    let content = "fn a() {}\n";
+    let h = content_hash(content);
+    let entries = vec![chunk("a", "x.rs", &h, Some(1), Some(1), false)];
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
         || false,
-        &key(),
-        1,
         BuildConfig::default(),
-        None,
-    );
-    let prior_body = match first {
-        BuildOutcome::Built { bytes, .. } => decode(&bytes, &key()).unwrap(),
-        other => panic!("expected Built, got {other:?}"),
-    };
-    assert_eq!(embedder.embedded.get(), 2);
-
-    // b.ts changes; its corpus pin updates to the new content hash.
-    let e2b = SeedCorpusEntry {
-        file_uid: "f2".to_string(),
-        path: "b.ts".to_string(),
-        content_hash: content_hash("content b CHANGED"),
-    };
-    let files2: HashMap<String, String> = [
-        ("a.ts".to_string(), c1),
-        ("b.ts".to_string(), "content b CHANGED".to_string()),
-    ]
-    .into();
-    let second = build_store(
-        vec![e1, e2b],
-        &embedder,
-        |p: &str| {
-            files2
-                .get(p)
-                .cloned()
-                .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
-        },
-        || false,
-        &key(),
-        2,
-        BuildConfig::default(),
-        Some(&prior_body),
-    );
-    match second {
+        &[],
+    ) {
         BuildOutcome::Built { report, .. } => {
-            assert_eq!(report.admitted, 2);
-            assert_eq!(report.reused, 1, "only the unchanged file copies forward");
+            assert_eq!(report.reused, 0);
+            assert_eq!(emb.seen.borrow().len(), 1);
         }
         other => panic!("expected Built, got {other:?}"),
     }
-    assert_eq!(
-        embedder.embedded.get(),
-        3,
-        "second pass embeds ONLY the one changed file (2 + 1)"
-    );
+}
+
+#[test]
+fn cancel_at_batch_boundary_does_not_publish() {
+    let content = "fn a() {}\n";
+    let h = content_hash(content);
+    let entries = vec![chunk("a", "x.rs", &h, Some(1), Some(1), false)];
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
+        || true,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::Cancelled => {}
+        other => panic!("expected Cancelled, got {other:?}"),
+    }
+}
+
+#[test]
+fn empty_corpus_is_no_corpus() {
+    let emb = FakeEmbedder::new();
+    match build_store(
+        Vec::new(),
+        &emb,
+        reader(HashMap::new()),
+        || false,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::NoCorpus => {}
+        other => panic!("expected NoCorpus, got {other:?}"),
+    }
+}
+
+#[test]
+fn corpus_cap_omits_the_remainder() {
+    let content = "a\nb\nc\n";
+    let h = content_hash(content);
+    let entries: Vec<_> = (0..5)
+        .map(|i| chunk(&format!("n{i}"), "x.rs", &h, Some(1), Some(1), false))
+        .collect();
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    let cfg = BuildConfig {
+        batch_size: 32,
+        corpus_cap: 2,
+    };
+    match build_store(entries, &emb, reader(files), || false, cfg, &[]) {
+        BuildOutcome::Built { report, .. } => {
+            assert_eq!(report.admitted, 2);
+            assert_eq!(report.corpus_omitted, 3);
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
 }

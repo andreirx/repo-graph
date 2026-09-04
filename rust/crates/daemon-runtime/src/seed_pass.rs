@@ -4,9 +4,12 @@
 //! run slot) ordered into the maintenance chain **enrich → seed → retention**.
 //!
 //! The pass READS the READY snapshot's corpus + the working tree, embeds via the
-//! option-(a) `Embedder`, and publishes the `.vec` sidecar by atomic rename. It
-//! writes NO SQL. On a missing/unreachable model it skips **honestly** (never an
-//! error), exactly as auto-enrich skips with no resolver toolchain.
+//! in-process static `LocalEmbedder` (SEED-CHUNK-1 — the lmstudio HTTP endpoint is
+//! retired from the seed path), and publishes the snapshot's vectors into the
+//! per-snapshot `seed_vectors` SQLite table (migration 033) under the base DB's
+//! write slot (see [`publish_guarded`]). On a missing/unreachable model it skips
+//! **honestly** (never an error), exactly as auto-enrich skips with no resolver
+//! toolchain.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -16,9 +19,10 @@ use std::time::Duration;
 use parking_lot::{Mutex, MutexGuard};
 
 use repo_graph_seed::pass::{build_store, BuildConfig, BuildOutcome};
+use repo_graph_seed::SeedVectorEntry;
 
 use crate::cancel::CancelFlag;
-use crate::seed::{seed_enabled, sidecar_path, EndpointEmbedder, SeedEndpointConfig};
+use crate::seed::{model_cache_dir, seed_enabled, LocalEmbedder, MODEL_DIM, MODEL_ID};
 use crate::state::DaemonState;
 
 const REQUEUE_MAX_ATTEMPTS: u32 = 60;
@@ -164,13 +168,18 @@ enum PublishOutcome {
 ///   • this pass publishes first ⇒ forget then deletes the `.vec` cleanly;
 ///   • concurrent                ⇒ the write-slot mutex serializes them.
 /// The slot is held only for the sub-millisecond publish, never the embed.
+#[allow(clippy::too_many_arguments)] // the publish seam's context (state/repo/db/
+                                     // repo_uid/generation/snapshot/model_checksum/entries) is irreducible — each is a
+                                     // distinct publication-gate input, not a bundle with its own identity.
 fn publish_guarded(
     state: &Arc<DaemonState>,
+    repo_state: &Arc<crate::state::RepoState>,
     db_path: &Path,
     repo_uid: &str,
     my_generation: u64,
-    sidecar: &Path,
-    bytes: &[u8],
+    snapshot_uid: &str,
+    model_checksum: &str,
+    entries: &[SeedVectorEntry],
 ) -> PublishOutcome {
     let slot = state.get_or_create_db_runtime_for_new_db(db_path).ok();
     let _publish_guard = match slot.as_ref().map(|rt| rt.try_acquire_write()) {
@@ -189,10 +198,26 @@ fn publish_guarded(
     // observes a forget that raced us (the same recheck discipline as `run_gc`).
     if !repo_uid_is_registered(state, repo_uid) {
         return PublishOutcome::Skipped(
-            "repo forgotten during embed pass — sidecar not published".to_string(),
+            "repo forgotten during embed pass — vectors not published".to_string(),
         );
     }
-    if let Err(e) = repo_graph_seed::store::atomic_write(sidecar, bytes) {
+    // The FAST SQL publish under the held write slot (never the embed): open storage
+    // and write the snapshot's vectors. The snapshot's rows are DELETEd+INSERTed in
+    // one transaction (idempotent rebuild), so a serve never sees a half-written set.
+    // ON DELETE CASCADE means a subsequent forget/retention pruning the snapshot
+    // removes these rows too — no orphan.
+    let storage = match repo_state.storage_with_busy_retry() {
+        Ok(s) => s,
+        Err(e) => return PublishOutcome::Skipped(format!("open storage for publish failed: {e}")),
+    };
+    if let Err(e) = storage.write_seed_vectors(
+        snapshot_uid,
+        repo_uid,
+        MODEL_ID,
+        model_checksum,
+        MODEL_DIM as u32,
+        entries,
+    ) {
         return PublishOutcome::Skipped(format!("publish failed: {e}"));
     }
     PublishOutcome::Published
@@ -298,20 +323,6 @@ fn run_auto_seed(
     chain_retention(state, db_path, repo_uid, repo_display);
 }
 
-/// The config precondition for running an embed pass (review-9 #3). Returns the
-/// honest skip reason when `RMAP_SEED_DIM` was SET to an invalid value
-/// (`dim_config_error`), so the pass declines rather than build a store at the
-/// silently-defaulted dimension. Factored out of [`try_seed_attempt`] so the skip
-/// is deterministically testable without process-global env-var races (the same
-/// reason `PublishOutcome` was extracted). One concrete caller; no variation axis —
-/// a test seam. Rejected simpler: an inline `if cfg.dim_config_error.is_some()`
-/// (only testable by mutating the process environment, which races parallel tests).
-fn config_skip_reason(cfg: &SeedEndpointConfig) -> Option<String> {
-    cfg.dim_config_error
-        .as_ref()
-        .map(|reason| format!("seed config invalid: {reason}"))
-}
-
 fn try_seed_attempt(
     state: &Arc<DaemonState>,
     db_path: &Path,
@@ -337,31 +348,11 @@ fn try_seed_attempt(
         Err(e) => return SeedAttempt::Skipped(format!("could not load repo: {e}")),
     };
 
-    let cfg = SeedEndpointConfig::from_env();
-    // An invalid seed config (e.g. a non-integer / zero `RMAP_SEED_DIM`) must NOT
-    // build a store at the silently-defaulted dimension (review-9 #3): every seed
-    // surface — query, doctor, AND this pass — declines while `dim_config_error` is
-    // set. Skipping honestly (recorded in the oplog + doctor via the report) beats
-    // publishing a store pinned to a dim the operator did not choose.
-    if let Some(reason) = config_skip_reason(&cfg) {
-        return SeedAttempt::Skipped(reason);
-    }
-    let embedder = match EndpointEmbedder::from_config(&cfg) {
-        Ok(e) => e,
-        // No reachable / non-loopback model → honest skip (never an error).
-        Err(e) => return SeedAttempt::Skipped(format!("{e}")),
-    };
-
-    let sidecar = match sidecar_path(db_path) {
-        Some(p) => p,
-        None => return SeedAttempt::Skipped("cannot derive sidecar path".to_string()),
-    };
-
     // Read the corpus under a BRIEF read lock, then RELEASE the lock (and close the
     // storage connection) BEFORE the slow embed phase. The embed only touches
-    // working-tree files + the model, so it must never hold a DB lock (else a
-    // 72s cold embed would block forget/index). This scope drops both.
-    let entries = {
+    // working-tree files + the in-process model, so it must never hold a DB lock (else
+    // a cold embed would block forget/index).
+    let (snapshot_uid, entries) = {
         let _read_guard = repo_state.coordinator.acquire_read();
         // Bounded busy-retry (2026-08-31): a transient lock-upgrade SQLITE_BUSY at open must
         // not permanently skip the pass — see `storage_with_busy_retry`.
@@ -369,9 +360,57 @@ fn try_seed_attempt(
             Ok(s) => s,
             Err(e) => return SeedAttempt::Skipped(format!("could not open storage: {e}")),
         };
-        match repo_graph_seed::SeedCorpusRead::seed_corpus(&storage, repo_uid) {
-            Ok(e) => e,
+        let corpus = match repo_graph_seed::SeedCorpusRead::seed_corpus(&storage, repo_uid) {
+            Ok(c) => c,
             Err(e) => return SeedAttempt::Skipped(format!("corpus read failed: {e}")),
+        };
+        let snapshot_uid = match corpus.snapshot_uid {
+            Some(s) => s,
+            None => return SeedAttempt::Skipped("no READY snapshot to seed".to_string()),
+        };
+        (snapshot_uid, corpus.entries)
+    };
+
+    // Load the in-process static model (cache-first, else fetch-once). A model that is
+    // neither cached nor fetchable is an honest skip (never an error) — exactly as
+    // auto-enrich skips with no resolver toolchain. The fetch (cold cache) holds NO DB
+    // lock (we released it above).
+    let cache_dir = match model_cache_dir(db_path) {
+        Some(d) => d,
+        None => return SeedAttempt::Skipped("cannot derive model cache dir".to_string()),
+    };
+    let embedder = match LocalEmbedder::load(&cache_dir) {
+        Ok(e) => e,
+        Err(e) => return SeedAttempt::Skipped(e.reason()),
+    };
+    // Spec §2 "checksum recorded": the sha256 of the model files this pass loaded,
+    // stamped into every row it writes (recorded provenance of the embedding regime).
+    // Computed once here, before the slow embed. An I/O fault reading files we just
+    // loaded is a genuine fault → honest skip, never a fabricated checksum. It is ALSO
+    // the copy-forward eligibility key below — the checksum MUST be known before the
+    // prior read so only vectors from THIS exact model build are reused.
+    let model_checksum = match embedder.model_checksum() {
+        Ok(c) => c,
+        Err(e) => return SeedAttempt::Skipped(format!("could not checksum model: {e}")),
+    };
+
+    // Spec §5 incremental refresh: read the PARENT snapshot's vectors, filtered to the
+    // CURRENT model IDENTITY `(model_id, model_checksum, dim)`, so unchanged chunks copy
+    // their vector forward instead of re-embedding. Filtering on the checksum (not just
+    // the id) is the review-1 fix: a byte-changed model at the same id must NOT copy
+    // stale vectors forward to be re-stamped as current (false provenance) — a mismatch
+    // hands back an empty set → full re-embed (the rebuild semantics). A BRIEF second
+    // read lock, after the model load released nothing (block above already dropped its
+    // guard). A pure build-time OPTIMIZATION read — neither rendered nor classified — so
+    // a best-effort degrade to a full re-embed on any read error is correct here
+    // (distinct from the rendered query/doctor reads).
+    let prior = {
+        let _read_guard = repo_state.coordinator.acquire_read();
+        match repo_state.storage_with_busy_retry() {
+            Ok(storage) => storage
+                .read_prior_seed_vectors(&snapshot_uid, MODEL_ID, &model_checksum, MODEL_DIM as u32)
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
         }
     };
 
@@ -402,37 +441,27 @@ fn try_seed_attempt(
         .filter(|e| !seed_path_is_exhaust(&repo_root, &e.path))
         .collect();
 
-    let created_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let key = cfg.store_key();
-
-    // Spec §5 incremental refresh: load the prior sidecar (validated under the SAME
-    // pin) so unchanged files copy their vector forward instead of re-embedding;
-    // only changed/new files hit the model. A missing OR pin-incompatible OR corrupt
-    // prior ⇒ `None` ⇒ a full (re)build. This is a pure build-time OPTIMIZATION read
-    // — its result is neither rendered nor classified to a user, so a best-effort
-    // `.ok()` (degrade to full embed) is correct here, distinct from the rendered
-    // query/doctor reads that must report unknown-with-reason.
-    // Read through the metadata-guarded reader (review-9 #1): an over-budget prior
-    // sidecar is rejected without loading it, then degrades to a full re-embed.
-    let prior_body = repo_graph_seed::store::read_validated(&sidecar, &key).ok();
-
     let outcome = build_store(
         entries,
         &embedder,
         read_file,
         cancel,
-        &key,
-        created_at,
         BuildConfig::default(),
-        prior_body.as_ref(),
+        &prior,
     );
 
     match outcome {
-        BuildOutcome::Built { bytes, report } => {
-            match publish_guarded(state, db_path, repo_uid, my_generation, &sidecar, &bytes) {
+        BuildOutcome::Built { entries, report } => {
+            match publish_guarded(
+                state,
+                &repo_state,
+                db_path,
+                repo_uid,
+                my_generation,
+                &snapshot_uid,
+                &model_checksum,
+                &entries,
+            ) {
                 PublishOutcome::Published => SeedAttempt::Ran(SeedReport {
                     repo_display: repo_display.to_string(),
                     outcome: "built".to_string(),
@@ -449,7 +478,6 @@ fn try_seed_attempt(
         BuildOutcome::Cancelled => SeedAttempt::Superseded,
         BuildOutcome::NoCorpus => SeedAttempt::Skipped("no seedable corpus".to_string()),
         BuildOutcome::Embed(e) => SeedAttempt::Skipped(format!("model unavailable: {e}")),
-        BuildOutcome::Store(e) => SeedAttempt::Skipped(format!("store encode failed: {e}")),
     }
 }
 

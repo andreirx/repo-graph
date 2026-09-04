@@ -37,7 +37,7 @@ const DECOY_VARIABLES: usize = 210;
 /// window (review-0 blocking defect; the must-fail-on-old-code regression).
 #[test]
 fn default_find_shows_prominent_symbol_behind_200_plus_lexically_early_variables() {
-    let _env = SeedEnv::with_endpoint("http://127.0.0.1:9/v1/embeddings"); // model down: facts still answer
+    let _env = SeedEnv::quiet(); // model down: facts still answer
     let (d, _root) = isolated_quiet();
     let repo = make_repo(); // helper.ts is a non-test (production) tracked file
     let idx = dispatch_ok(
@@ -55,7 +55,7 @@ fn default_find_shows_prominent_symbol_behind_200_plus_lexically_early_variables
     // (`files.is_test = 0`). So the ONLY ranking discriminator among the seeded matches is
     // KIND (§2.1b), which is exactly the axis the window bug got wrong.
     let corpus = StorageConnection::open(&db_path).unwrap();
-    let entries = corpus.seed_corpus(&repo_uid).unwrap();
+    let entries = corpus.seed_corpus(&repo_uid).unwrap().entries;
     let helper_uid = entries
         .iter()
         .find(|e| e.path.ends_with("helper.ts"))

@@ -71,6 +71,15 @@ pub(super) fn semantic_seeding_from_facts(response: &serde_json::Value) -> Probe
 
     let stale = seed.get("stale_count").and_then(|v| v.as_u64());
     let total = seed.get("total").and_then(|v| v.as_u64());
+    // SEED-CHUNK-1 (spec §2): the recorded model provenance checksum of the served
+    // set. Additive + skip-serialized (present only for a `present` store), so an
+    // absent value is a genuine "not recorded here" — rendered as a bare note, never
+    // fabricated.
+    let checksum = seed.get("model_checksum").and_then(|v| v.as_str());
+    let provenance = match checksum {
+        Some(ck) => format!("model id {identity}; checksum {ck}"),
+        None => format!("model id {identity}"),
+    };
     // Only report a staleness fraction when BOTH counts are genuinely present;
     // otherwise say so — never invent "0 of 0".
     let staleness = match (stale, total) {
@@ -82,11 +91,11 @@ pub(super) fn semantic_seeding_from_facts(response: &serde_json::Value) -> Probe
     let (message, details) = match state {
         "present" => (
             format!("present ({dim}-dim, model {model})"),
-            Some(format!("model id {identity}; {staleness}")),
+            Some(format!("{provenance}; {staleness}")),
         ),
         "building" => (
             format!("building — a background embed pass is running ({dim}-dim, model {model})"),
-            Some(format!("model id {identity}; {staleness}")),
+            Some(format!("{provenance}; {staleness}")),
         ),
         "absent" => (
             "not built yet (builds in the background after indexing)".to_string(),

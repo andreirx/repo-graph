@@ -1,24 +1,25 @@
-//! The pure embed pipeline (spec §3.5 + §5 + §4.3). [`build_store`] ties the two
-//! ports together with a caller-supplied **file reader** and **cancel token**, so
-//! the entire pass — corpus enumeration, the source/snapshot-race re-hash, batch
-//! embedding, cancellation, and envelope encoding — is testable with fakes (no
-//! model, no daemon, no DB). The daemon's `seed_pass.rs` supplies the real
-//! reader (`std::fs::read_to_string`), the real cancel flag, and the real ports.
+//! The pure chunk-embed pipeline (spec §2/§3/§5). [`build_store`] turns an
+//! already-read corpus of SYMBOL chunks into a set of [`SeedVectorEntry`] the
+//! daemon persists to the per-snapshot `seed_vectors` table. It ties the model
+//! seam together with a caller-supplied **file reader** + **cancel token**, so the
+//! whole pass — span slicing, the source/snapshot-race re-hash, copy-forward,
+//! batch embedding, cancellation — is testable with fakes (no model, no daemon, no
+//! DB). The daemon's `seed_pass.rs` supplies the real reader and ports.
 
-use crate::document::build_document;
+use std::collections::HashMap;
+
+use crate::document::{build_chunk_document, MAX_BODY_LINES};
 use crate::hash::content_hash;
-use crate::ports::{EmbedError, Embedder, SeedCorpusEntry};
+use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedVectorEntry};
 use crate::rank::l2_normalize;
-use crate::store::{encode, SeedStoreError, SeedStoreKey, SeedVectorBodyV1, SeedVectorEntryV1};
 
-/// Batch size — 32 documents per embed request (`spike.py:98`). The cancel token
+/// Batch size — 32 documents per embed call (spike `spike.py:98`). The cancel token
 /// is consulted at each batch boundary (spec §5.1).
 pub const EMBED_BATCH_SIZE: usize = 32;
-/// Corpus admission cap (spec §8.4). Above it, the first `CORPUS_CAP` files by
-/// `path` order are embedded and the remainder is reported as an honest omission
-/// (never silently dropped). A tunable safety bound for the 160k-file monorepo
-/// target — INFERRED default, adjustable.
-pub const CORPUS_CAP: usize = 50_000;
+/// Chunk admission cap (spec §8.4). Above it, the first `CORPUS_CAP` chunks by the
+/// corpus's `(path, line)` order are embedded and the remainder is an honest
+/// omission (never silently dropped). INFERRED default for the large-monorepo target.
+pub const CORPUS_CAP: usize = 200_000;
 
 /// Tunables for a build (defaults are the spec constants).
 #[derive(Debug, Clone, Copy)]
@@ -36,85 +37,73 @@ impl Default for BuildConfig {
     }
 }
 
-/// What a completed (or aborted) build produced. The daemon pass matches this and
-/// records an honest doctor/oplog fact for each arm — the tier *declines*, it
-/// never errors the index.
+/// What a completed (or aborted) build produced.
 #[derive(Debug)]
 pub enum BuildOutcome {
-    /// A store was built. `bytes` are ready for [`crate::store::atomic_write`].
-    Built { bytes: Vec<u8>, report: BuildReport },
-    /// The corpus was empty (repo not indexed / no seedable files) — nothing to build.
+    /// A vector set was built, ready for the daemon to write into `seed_vectors`.
+    Built {
+        entries: Vec<SeedVectorEntry>,
+        report: BuildReport,
+    },
+    /// The corpus was empty (repo not indexed / no seedable chunks) — nothing to build.
     NoCorpus,
-    /// The cancel token fired at a batch boundary — the caller must NOT publish
-    /// (a newer index's pass wins; the prior store stays valid).
+    /// The cancel token fired at a batch boundary — the caller must NOT publish.
     Cancelled,
-    /// The model seam declined (endpoint down, malformed, dim/model mismatch) →
-    /// honest "no hints" skip; the prior store (if any) is untouched.
+    /// The model seam declined → honest "no hints" skip; the prior vectors are untouched.
     Embed(EmbedError),
-    /// The assembled store exceeded the budget → "seeding declined" (spec §4.3).
-    Store(SeedStoreError),
 }
 
 /// Honest counts for the doctor/oplog line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildReport {
-    /// Files admitted and stored (passed the source/snapshot-race check). This is
-    /// the total store size = `reused` + freshly embedded.
+    /// Chunks admitted and stored (passed the source/snapshot-race check).
     pub admitted: usize,
-    /// Of `admitted`, files whose vector was **copied forward** from the prior
-    /// sidecar because their `content_hash` was unchanged (spec §5 incremental
-    /// refresh) — these made NO embed call this pass.
+    /// Of `admitted`, chunks whose vector was **copied forward** from the prior
+    /// snapshot because their `(stable_key, content_hash)` was unchanged (spec §5) —
+    /// these made NO embed call this pass.
     pub reused: usize,
-    /// Files omitted because the working tree drifted from the snapshot pin, or
-    /// could not be read (spec §3.5 — omit, never store under a wrong pin).
+    /// Chunks omitted because their file drifted from the snapshot pin, could not be
+    /// read, or had no span (spec §2.1/§3.5 — omit, never store under a wrong pin).
     pub drifted: usize,
-    /// Files beyond the corpus cap, embedded by nobody this pass (spec §8.4).
+    /// Chunks beyond the corpus cap, embedded by nobody this pass (spec §8.4).
     pub corpus_omitted: usize,
 }
 
-/// Source/snapshot-race admission (spec §3.5): re-hash the working-tree content
-/// with the SAME function the scanner used and admit only when it equals the
-/// snapshot's recorded `content_hash`. Returns the admitted entry + its document,
-/// or `None` when the tree drifted (omit — never store a fresh body under an old
-/// pin). The stored vector's pin therefore always equals both the bytes that
-/// produced it and the snapshot's `content_hash` — a stale-body-under-fresh-pin
-/// state is unrepresentable.
-pub fn admit(entry: &SeedCorpusEntry, content: &str) -> Option<(SeedCorpusEntry, String)> {
-    if content_hash(content) == entry.content_hash {
-        Some((entry.clone(), build_document(&entry.path, content)))
-    } else {
-        None
+/// Slice the span source for a node from its file's lines. 1-indexed inclusive
+/// `[line_start, line_end]`, bounded by the file length and capped at
+/// [`MAX_BODY_LINES`] (the document builder caps again; this bounds the allocation
+/// for a pathologically large span). Returns `None` when the node has no start line
+/// (no span → no chunk, spec §2.1).
+fn span_source(lines: &[&str], line_start: Option<i64>, line_end: Option<i64>) -> Option<String> {
+    let start = line_start?.max(1) as usize; // 1-indexed
+    let start_idx = start - 1;
+    if start_idx >= lines.len() {
+        return None; // span points past the current file content → treat as no span
     }
+    let end_1 = line_end.unwrap_or(line_start?).max(line_start?) as usize;
+    let end_idx = end_1.min(lines.len()); // inclusive end, clamped
+    let capped_end = end_idx.min(start_idx + MAX_BODY_LINES);
+    Some(lines[start_idx..capped_end].join("\n"))
 }
 
-/// Build a `.vec` store from an ALREADY-READ corpus. Pure given its embedder +
-/// closures. The caller reads the corpus under whatever DB lock it needs and then
-/// releases it BEFORE calling this — the embed phase (working-tree reads + model
-/// calls) can take tens of seconds and must NOT hold a DB lock (else it would
-/// block `forget`/`index`).
+/// Build a per-snapshot seed-vector set from an ALREADY-READ chunk corpus. Pure
+/// given its embedder + closures.
 ///
 /// - `read_file(path)` reads the current working-tree content for a repo-relative
-///   path; an `Err` (missing/unreadable) counts as drift and the file is omitted.
-/// - `cancel()` is checked at each batch boundary; a `true` aborts without
-///   publishing.
-/// - `prior` is the previously-published store (decoded under the SAME pin, so
-///   its vectors match the current `dim`), or `None` for a first build. Spec §5
-///   incremental refresh: any admitted file whose `content_hash` equals its prior
-///   entry's `content_hash` copies that vector **forward** (no embed call); only
-///   changed/new files are embedded. A cancelled/failed embed still never
-///   publishes, so a stale-under-fresh-pin store stays unrepresentable.
-// Each argument is a distinct, irreducible input (the corpus, the embedder, two
-// closures, the pins, the caller-supplied clock, the tunables, and the prior store).
+///   path; an `Err` counts as drift and ALL that file's chunks are omitted.
+/// - `cancel()` is checked at each batch boundary; a `true` aborts without publishing.
+/// - `prior` is the previous snapshot's vectors (already filtered by the daemon to
+///   the CURRENT model — a model change hands `&[]`, forcing a full re-embed). Any
+///   admitted chunk whose `(stable_key, content_hash)` matches a prior entry copies
+///   that vector forward (no embed); only changed/new chunks are embedded.
 #[allow(clippy::too_many_arguments)]
 pub fn build_store<R, C>(
-    mut entries: Vec<SeedCorpusEntry>,
+    entries: Vec<SeedCorpusEntry>,
     embedder: &dyn Embedder,
     read_file: R,
     cancel: C,
-    key: &SeedStoreKey,
-    created_at: u64,
     cfg: BuildConfig,
-    prior: Option<&SeedVectorBodyV1>,
+    prior: &[SeedVectorEntry],
 ) -> BuildOutcome
 where
     R: Fn(&str) -> std::io::Result<String>,
@@ -124,65 +113,118 @@ where
         return BuildOutcome::NoCorpus;
     }
 
-    // Corpus cap: keep the first `corpus_cap` by path order (the port already
-    // returns path-ascending), report the rest as an honest omission.
+    // Corpus cap: keep the first `corpus_cap` in the corpus's (path, line) order.
     let corpus_omitted = entries.len().saturating_sub(cfg.corpus_cap);
+    let mut entries = entries;
     if corpus_omitted > 0 {
         entries.truncate(cfg.corpus_cap);
     }
 
-    // Read + admit (source/snapshot-race check).
-    let mut admitted_entries: Vec<SeedCorpusEntry> = Vec::new();
-    let mut docs: Vec<String> = Vec::new();
+    // Group chunks by file path (the corpus is ordered by path, so this is a single
+    // pass), read each file ONCE, admit via the source/snapshot-race re-hash, and
+    // slice each node's span from the shared file content.
+    let dim = embedder.dim();
+    let mut admitted: Vec<SeedVectorEntry> = Vec::new();
+    let mut docs: Vec<String> = Vec::new(); // parallel to `admitted`, for pending slots
     let mut drifted = 0usize;
-    for entry in &entries {
-        match read_file(&entry.path) {
-            Ok(content) => match admit(entry, &content) {
-                Some((e, doc)) => {
-                    admitted_entries.push(e);
+
+    // Prior index: (stable_key, content_hash) → &vector (dim-matched only).
+    let prior_by_key: HashMap<(&str, &str), &Vec<f32>> = prior
+        .iter()
+        .filter(|e| e.vector.len() == dim)
+        .map(|e| ((e.stable_key.as_str(), e.content_hash.as_str()), &e.vector))
+        .collect();
+
+    enum Slot {
+        Reused,  // vector already set on the row (copy-forward)
+        Pending, // its doc is at the same index in `docs`
+    }
+    let mut slots: Vec<Slot> = Vec::new();
+    let mut reused = 0usize;
+
+    let mut i = 0usize;
+    while i < entries.len() {
+        let path = entries[i].path.clone();
+        // Collect the contiguous run of chunks for this path.
+        let run_start = i;
+        while i < entries.len() && entries[i].path == path {
+            i += 1;
+        }
+        let run = &entries[run_start..i];
+
+        // Read the file once; a read error drifts the whole run.
+        let content = match read_file(&path) {
+            Ok(c) => c,
+            Err(_) => {
+                drifted += run.len();
+                continue;
+            }
+        };
+        // Source/snapshot-race admission: the file's content_hash (shared by all its
+        // chunks) must equal the snapshot pin, else omit the whole run.
+        let file_hash = content_hash(&content);
+        let file_lines: Vec<&str> = content.lines().collect();
+        for chunk in run {
+            if file_hash != chunk.content_hash {
+                drifted += 1;
+                continue;
+            }
+            let span = match span_source(&file_lines, chunk.line_start, chunk.line_end) {
+                Some(s) => s,
+                None => {
+                    drifted += 1; // no span → no chunk
+                    continue;
+                }
+            };
+            let vector_row = SeedVectorEntry {
+                node_uid: chunk.node_uid.clone(),
+                stable_key: chunk.stable_key.clone(),
+                file_uid: chunk.file_uid.clone(),
+                path: chunk.path.clone(),
+                line: chunk.line_start,
+                qualified_name: chunk.qualified_name.clone(),
+                is_test: chunk.is_test,
+                content_hash: chunk.content_hash.clone(),
+                vector: Vec::new(), // filled below
+            };
+            match prior_by_key.get(&(chunk.stable_key.as_str(), chunk.content_hash.as_str())) {
+                Some(v) => {
+                    let mut row = vector_row;
+                    row.vector = (*v).clone();
+                    admitted.push(row);
+                    slots.push(Slot::Reused); // vector already set on the row
+                    reused += 1;
+                }
+                None => {
+                    let doc = build_chunk_document(
+                        chunk.qualified_name.as_deref(),
+                        chunk.doc_comment.as_deref(),
+                        &span,
+                    );
+                    admitted.push(vector_row);
+                    slots.push(Slot::Pending);
                     docs.push(doc);
                 }
-                None => drifted += 1,
+            }
+        }
+    }
+
+    if admitted.is_empty() {
+        return BuildOutcome::Built {
+            entries: Vec::new(),
+            report: BuildReport {
+                admitted: 0,
+                reused,
+                drifted,
+                corpus_omitted,
             },
-            Err(_) => drifted += 1,
-        }
+        };
     }
 
-    // Copy-forward index (spec §5): file_uid → prior entry. Because `prior` was
-    // decoded under the current pin, any prior vector already matches `dim` and is
-    // already L2-normalized (stored normalized) — a reused vector is byte-identical
-    // to the one a re-embed would produce for unchanged content.
-    let dim = embedder.dim();
-    let prior_by_uid: std::collections::HashMap<&str, &SeedVectorEntryV1> = prior
-        .map(|b| b.entries.iter().map(|e| (e.file_uid.as_str(), e)).collect())
-        .unwrap_or_default();
-
-    // Decide reuse-vs-embed per admitted file, in admitted order.
-    enum Slot {
-        Reused(Vec<f32>),
-        Pending,
-    }
-    let mut slots: Vec<Slot> = Vec::with_capacity(admitted_entries.len());
-    let mut to_embed: Vec<String> = Vec::new();
-    let mut reused = 0usize;
-    for (i, entry) in admitted_entries.iter().enumerate() {
-        match prior_by_uid.get(entry.file_uid.as_str()) {
-            Some(p) if p.content_hash == entry.content_hash && p.vector.len() == dim => {
-                slots.push(Slot::Reused(p.vector.clone()));
-                reused += 1;
-            }
-            _ => {
-                slots.push(Slot::Pending);
-                to_embed.push(docs[i].clone());
-            }
-        }
-    }
-
-    // Embed ONLY the changed/new docs, in batches, checking cancel at each
-    // boundary. An empty `to_embed` (a no-change refresh) makes ZERO embed calls.
+    // Embed ONLY the pending docs, in batches, checking cancel at each boundary.
     let batch_size = cfg.batch_size.max(1);
-    let mut embedded: Vec<Vec<f32>> = Vec::with_capacity(to_embed.len());
-    for batch in to_embed.chunks(batch_size) {
+    let mut embedded: Vec<Vec<f32>> = Vec::with_capacity(docs.len());
+    for batch in docs.chunks(batch_size) {
         if cancel() {
             return BuildOutcome::Cancelled;
         }
@@ -211,49 +253,31 @@ where
         }
     }
 
-    // Weave reused + freshly-embedded vectors back into admitted order.
+    // Weave freshly-embedded vectors into the pending slots (reused slots already
+    // carry their vector).
     let mut embedded_iter = embedded.into_iter();
-    let vectors: Vec<Vec<f32>> = slots
-        .into_iter()
-        .map(|s| match s {
-            Slot::Reused(v) => v,
-            Slot::Pending => embedded_iter
+    for (row, slot) in admitted.iter_mut().zip(slots.into_iter()) {
+        if let Slot::Pending = slot {
+            row.vector = embedded_iter
                 .next()
-                .expect("one embedded vector per pending slot"),
-        })
-        .collect();
+                .expect("one embedded vector per pending slot");
+        }
+    }
 
-    // Assemble body (admitted entries paired positionally with their vectors).
-    let entries_v1: Vec<SeedVectorEntryV1> = admitted_entries
-        .iter()
-        .zip(vectors)
-        .map(|(e, vector)| SeedVectorEntryV1 {
-            file_uid: e.file_uid.clone(),
-            path: e.path.clone(),
-            content_hash: e.content_hash.clone(),
-            vector,
-        })
-        .collect();
-
-    let body = SeedVectorBodyV1 {
-        entries: entries_v1,
+    let report = BuildReport {
+        admitted: admitted.len(),
+        reused,
+        drifted,
+        corpus_omitted,
     };
-    match encode(&body, key, created_at) {
-        Ok(bytes) => BuildOutcome::Built {
-            bytes,
-            report: BuildReport {
-                admitted: admitted_entries.len(),
-                reused,
-                drifted,
-                corpus_omitted,
-            },
-        },
-        Err(e) => BuildOutcome::Store(e),
+    BuildOutcome::Built {
+        entries: admitted,
+        report,
     }
 }
 
-/// Unit tests live in `pass_tests.rs` (split via `#[path]` to keep this file
-/// under the 500-line guardrail — review-2 #7).
+/// Unit tests live in `pass_tests.rs` (split via `#[path]` to keep this file under
+/// the 500-line guardrail).
 #[cfg(test)]
 #[path = "pass_tests.rs"]
 mod tests;

@@ -58,16 +58,8 @@ pub(super) fn apply_semantic_fallback(
         _ => return,
     };
 
-    let cfg = crate::seed::SeedEndpointConfig::from_env();
-    match crate::seed::run_semantic_query(
-        storage,
-        snapshot_uid,
-        repo_uid,
-        db_path,
-        &query,
-        top_n,
-        &cfg,
-    ) {
+    let _ = repo_uid; // no longer needed (per-snapshot vectors carry their own identity)
+    match crate::seed::run_semantic_query(storage, snapshot_uid, db_path, &query, top_n) {
         crate::seed::SemanticResult::Fired {
             candidates,
             stale_count,
@@ -89,22 +81,18 @@ pub(super) fn apply_semantic_fallback(
                     next,
                 ));
             }
-            let mut reasons = vec![format!(
+            let _ = stale_count; // always 0 in the per-snapshot model (kept for DTO shape)
+            let reasons = vec![format!(
                 "{n} candidate(s) (model {}); run each candidate's `next` (explain <key>) for its \
                  imports + symbols, then explain a listed symbol for callers",
-                cfg.model_id
+                crate::seed::MODEL_ID
             )];
-            if stale_count > 0 {
-                reasons.push(format!(
-                    "{stale_count} file(s) changed since last embed — not yet re-seeded"
-                ));
-            }
             result.limits.push(Limit::from_code_with_reasons(
                 LimitCode::SemanticFallback,
                 reasons,
             ));
         }
-        crate::seed::SemanticResult::NothingScored => {
+        crate::seed::SemanticResult::NothingScored { .. } => {
             result.limits.push(Limit::from_code_with_reasons(
                 LimitCode::SemanticFallback,
                 vec!["no candidate scored above zero".to_string()],
@@ -156,19 +144,16 @@ impl ServiceDispatcher {
         // Canonical registry root for each candidate's `next.cwd` (review-2 #2); `None`
         // ⇒ `cwd` omitted with an honest reason (operator ruling 2), never fabricated.
         let repo_root = self.canonical_root(params);
-        let cfg = crate::seed::SeedEndpointConfig::from_env();
-        // The seam's own resolution input (the symbol the agent typed) is the query
-        // (spec §8.0) — no new argument. The file-level store can only answer with
-        // files, so the hint is explicitly "here are near files", never "here are the
-        // callers" (§8.1 Group B).
+        let _ = repo_uid; // per-snapshot vectors carry their own identity
+                          // The seam's own resolution input (the symbol the agent typed) is the query
+                          // (spec §8.0) — no new argument. The chunk store answers with SYMBOL chunks
+                          // (path:line + qualified name), so the hint points the reader at near symbols.
         let result = crate::seed::run_semantic_query(
             storage,
             snapshot_uid,
-            repo_uid,
             db_path,
             query,
             SEMANTIC_FALLBACK_CAP,
-            &cfg,
         );
         let data = crate::seed::build_group_b_data(verb, result, repo_root.as_deref());
         ErrorDetail::with_data(ErrorCode::InvalidRequest, message, data)
@@ -360,15 +345,12 @@ impl ServiceDispatcher {
         let seed = if exact {
             None
         } else {
-            let cfg = crate::seed::SeedEndpointConfig::from_env();
             Some(crate::seed::run_semantic_query(
                 &storage,
                 &snapshot_uid,
-                &repo_uid,
                 repo_state.db_path(),
                 &query,
                 FIND_CANDIDATE_CAP,
-                &cfg,
             ))
         };
         let response = crate::seed::build_find_response(

@@ -13,16 +13,42 @@
 /// seeds scoring below it are hearsay padding an empty answer and are not rendered;
 /// when ALL seeds fall below it the tier ABSTAINS with the honest best-score line.
 ///
-/// Basis (recorded per §2.3): the measured no-home band. The v0.11.0 audit
-/// (`docs/audits/2026-08-31-per-command-usefulness-v0.11.0.md` #6) recorded FRAKTAG
-/// `find woocommerce` — a concept with NO distinct home in that repo — returning 10
-/// seeds at 0.50–0.54. 0.60 sits above that entire no-home band (so it abstains there)
-/// while clearing the real-neighbourhood seeds (glamCRM/django good tasks land well
-/// above it — re-confirmed against the live LM Studio bands during slice validation).
-/// This is PRESENTATION-side filtering only: the seed sidecar pins and ranking formula
-/// are frozen (§3); JSON still carries every candidate with its raw `score` for a
-/// programmatic consumer to filter.
-const SEED_SIMILARITY_FLOOR: f64 = 0.60;
+/// # Basis — potion-code-16M-v2 calibration (SEED-CHUNK-1, operator ruling Option C)
+///
+/// The old 0.60 was NOMIC/LM-Studio geometry (a no-home band 0.50–0.54); carrying it
+/// to potion's different, corpus-relative geometry was itself an unfounded certainty
+/// claim (review-1). Re-measured in the isolated rig against the four corpora
+/// (build report `.agent-manager/slices/SEED-CHUNK-1/build-3.md`; raw table
+/// `/private/tmp/seedchunk-cal/calibration-table.md`):
+///
+/// - potion's no-home band spans **0.18–0.59**. The high tail is single-word LEXICAL
+///   collision (repo-graph `find "MIDI audio synthesis"` → `FileArtifact.synthesisMode`
+///   0.589; glamCRM `find "genome sequence alignment"` → `Etapa.sequence` 0.494).
+/// - the spike's true hits: leveldb `DBImpl::Recover` **0.322**, `RemoveObsoleteFiles`
+///   **0.360**; repo-graph 0.69–0.78.
+/// - **These bands OVERLAP.** Within leveldb ALONE, a genuine no-home concept
+///   (`"react component hooks state"` → 0.338) outscores the real ground-truth
+///   `DBImpl::Recover` (0.322). So NO fixed global floor both renders leveldb's true
+///   hits (needs ≤0.32) and abstains on the no-home band (needs >0.59).
+///
+/// This value **0.30** is RATIFIED (operator ruling SEEDCHUNK-FLOOR-2, 2026-09-04) with
+/// its MEANING demoted to match the measurement: it is a NOISE-TAIL cutoff, NOT a
+/// certainty threshold. It reproduces BOTH leveldb spike ground truths through the
+/// product (0.322 / 0.360 clear it) and abstains only on the lowest no-home tail
+/// (0.18–0.29). It does NOT — cannot — abstain on lexical-collision no-home hits
+/// (0.46–0.59); for potion the fixed floor is a WEAK quality gate, not a clean
+/// signal/noise separator (the no-home band OVERLAPS the true-hit band above). The
+/// Layer-3 honesty is carried by the "ranked guesses, not facts" framing, the facts
+/// wall, and the production/test partition — NOT by this floor; the floor only trims the
+/// hopeless tail. Option C's "floor above the no-home band" was proven unsatisfiable
+/// alongside the DoD (the falsified premise), so the ruling fixed 0.30 and demoted its
+/// meaning rather than raising it. The rendered abstain line therefore says "no
+/// candidates above the minimum similarity 0.30" — never wording implying calibrated
+/// certainty (ruling condition 2).
+///
+/// PRESENTATION-side filtering only: pins + ranking formula are frozen (§3); JSON still
+/// carries every candidate with its raw `score` for a programmatic consumer to filter.
+const SEED_SIMILARITY_FLOOR: f64 = 0.30;
 
 /// Render the DEMOTED semantic-seed tier (§2.3): the renamed header, then either the
 /// ranked guesses or an explicit `semantic seeds unavailable (<reason>)`.
@@ -107,10 +133,15 @@ pub(super) fn render_seed_tier(
         // sub-floor hearsay padding an empty answer. `best` is the highest sub-floor
         // score, stated so the reader sees exactly how far below the floor the corpus is.
         //
-        // The seed-tier abstain — honest about the SEED tier alone (no seed cleared the
-        // floor), always rendered here. `best` is the highest sub-floor score.
+        // Wording (operator ruling SEEDCHUNK-FLOOR-2 condition 2): the floor is a
+        // NOISE-TAIL cutoff, NOT a calibrated signal/noise separator (the calibration
+        // proved the no-home band overlaps the true-hit band for potion). So this line
+        // says "no candidates above the minimum similarity <floor>" — it must NOT imply
+        // the floor separates signal from noise. The Layer-3 honesty is carried by the
+        // "ranked guesses, not facts" header (above) + the facts wall + the
+        // production/test partition; the floor only trims the hopeless tail.
         out.push_str(&format!(
-            "  no seeds above the similarity floor (best: {best:.2})"
+            "  no candidates above the minimum similarity {SEED_SIMILARITY_FLOOR:.2} (best: {best:.2})"
         ));
         // FIND-GREP-1 (§2.4 / §4): the CAPABILITY close. The old close — "the concept may
         // not have a distinct home in this repo" — was measured FALSE 3/3 on literal probes
@@ -159,7 +190,33 @@ fn render_seed_candidate(c: &serde_json::Value) -> String {
             "  (malformed candidate: missing or invalid module hint — expected owning/unavailable)\n"
                 .to_string();
     };
-    let mut s = format!("  {path}  (score {score:.2}, {source}, model {model}{module})\n");
+    // SEED-CHUNK-1: seeds are per-SYMBOL chunks, so the anchor is `path:line` +
+    // qualified name (FIND-EVIDENCE-1 discipline). `line`/`qualified_name` are additive
+    // (skip-serialized when the node had no stored span/name) — absent renders WITHOUT
+    // them, never a fabricated 0. `is_test` (always serialized) labels the DEMOTED test
+    // block so a test hit is never mistaken for production (spec §5).
+    let anchor = match c.get("line").and_then(|v| v.as_i64()) {
+        Some(line) => format!("{path}:{line}"),
+        None => path.to_string(),
+    };
+    let symbol = c
+        .get("qualified_name")
+        .and_then(|v| v.as_str())
+        .map(|q| format!("  {q}"))
+        .unwrap_or_default();
+    // `is_test` is our OWN DTO field, ALWAYS serialized (spec §5 the moat). Production
+    // (`false`) is the unlabeled default (it ranks above the wall); a test chunk is
+    // labeled `[test]`. A MISSING / non-bool `is_test` is UNKNOWN classification —
+    // rendered with an explicit marker, NEVER left blank to masquerade as production
+    // (review-1 gap d; STANDING HONESTY: unknown is never invisible).
+    let test_label = match c.get("is_test") {
+        Some(serde_json::Value::Bool(true)) => "  [test]",
+        Some(serde_json::Value::Bool(false)) => "",
+        _ => "  [is_test unknown]",
+    };
+    let mut s = format!(
+        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){test_label}\n"
+    );
     s.push_str(&render_next(c.get("next"), key));
     s
 }
@@ -214,10 +271,11 @@ mod tests {
 
     #[test]
     fn all_seeds_below_floor_abstains_with_best_score() {
-        // FIND-RANK-1 §2.3: 10 sub-floor seeds (the FRAKTAG woocommerce shape) → the
-        // honest abstain with the best score, NOT 10 rows of hearsay.
+        // FIND-RANK-1 §2.3: 10 sub-floor seeds (the lowest-no-home shape) → the honest
+        // abstain with the best score, NOT 10 rows of hearsay. Scores are below the
+        // potion-calibrated floor (0.30); the best is 0.136.
         let candidates: Vec<serde_json::Value> = (0..10)
-            .map(|i| candidate_with_score(&format!("k{i}"), 0.50 + f64::from(i) * 0.004))
+            .map(|i| candidate_with_score(&format!("k{i}"), 0.10 + f64::from(i) * 0.004))
             .collect();
         let mut out = String::new();
         // Facts established a MISS → the §2.4 capability close is appended to the abstain.
@@ -228,9 +286,9 @@ mod tests {
         );
         assert!(
             out.contains(
-                "no seeds above the similarity floor (best: 0.54) — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`."
+                "no candidates above the minimum similarity 0.30 (best: 0.14) — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`."
             ),
-            "abstain states capability, not repo absence: {out}"
+            "abstain states capability, not repo absence, in noise-tail-cutoff wording: {out}"
         );
         // FIND-GREP-1 §4: the false repo-absence sentence is RETIRED everywhere.
         assert!(
@@ -254,7 +312,7 @@ mod tests {
                 "seeds_available": true,
                 "candidates": [
                     candidate_with_score("above", 0.72),
-                    candidate_with_score("below", 0.55),
+                    candidate_with_score("below", 0.22),
                 ],
             }),
             FactTierOutcome::EstablishedMiss,
@@ -265,7 +323,7 @@ mod tests {
             "above-floor rendered: {out}"
         );
         assert!(
-            !out.contains("no seeds above the similarity floor"),
+            !out.contains("no candidates above the minimum similarity"),
             "no abstain when a seed cleared the floor: {out}"
         );
     }
@@ -299,6 +357,71 @@ mod tests {
             "candidate label: {out}"
         );
         assert!(out.contains(", module backend/auth"), "module hint: {out}");
+    }
+
+    #[test]
+    fn chunk_seed_renders_path_line_anchor_qualified_name_and_test_label() {
+        // SEED-CHUNK-1: a per-SYMBOL chunk seed renders `path:line` + qualified name;
+        // a test-classified chunk is labeled `[test]` (production above test, spec §5).
+        let mut out = String::new();
+        let prod = json!({
+            "stable_key": "k1", "path": "db/db_impl.cc", "line": 415,
+            "qualified_name": "leveldb::DBImpl::RecoverLogFile", "is_test": false,
+            "score": 0.71, "source": "embedding", "model_id": "minishlab/potion-code-16M-v2",
+            "module": {"owning": "db"},
+            "next": {"cmd": "explain", "args": ["k1"], "cwd": "/repo"}
+        });
+        let test = json!({
+            "stable_key": "k2", "path": "db/recovery_test.cc", "line": 30,
+            "qualified_name": "leveldb::RecoveryTest::OpenWithStatus", "is_test": true,
+            "score": 0.65, "source": "embedding", "model_id": "minishlab/potion-code-16M-v2",
+            "module": {"owning": "db"},
+            "next": {"cmd": "explain", "args": ["k2"], "cwd": "/repo"}
+        });
+        render_seed_tier(
+            &json!({"seeds_available": true, "candidates": [prod, test]}),
+            FactTierOutcome::EstablishedMiss,
+            &mut out,
+        );
+        assert!(
+            out.contains("db/db_impl.cc:415  leveldb::DBImpl::RecoverLogFile  (score 0.71"),
+            "production chunk anchor + qualified name: {out}"
+        );
+        assert!(
+            out.contains(
+                "db/recovery_test.cc:30  leveldb::RecoveryTest::OpenWithStatus  (score 0.65"
+            ) && out.contains("[test]"),
+            "test chunk is anchored AND labeled [test]: {out}"
+        );
+    }
+
+    #[test]
+    fn missing_is_test_renders_unknown_marker_never_blank_like_production() {
+        // review-1 gap d: a candidate whose `is_test` is ABSENT must render an explicit
+        // unknown marker — never blank (which reads as unlabeled production). Unknown
+        // classification is never invisible (STANDING HONESTY).
+        let mut out = String::new();
+        let cand = json!({
+            "stable_key": "k1", "path": "db/db_impl.cc", "line": 42,
+            "qualified_name": "leveldb::DBImpl::Foo",
+            // NO is_test key
+            "score": 0.71, "source": "embedding", "model_id": "minishlab/potion-code-16M-v2",
+            "module": {"owning": "db"},
+            "next": {"cmd": "explain", "args": ["k1"], "cwd": "/repo"}
+        });
+        render_seed_tier(
+            &json!({"seeds_available": true, "candidates": [cand]}),
+            FactTierOutcome::EstablishedMiss,
+            &mut out,
+        );
+        assert!(
+            out.contains("[is_test unknown]"),
+            "absent is_test surfaces an explicit unknown marker: {out}"
+        );
+        assert!(
+            !out.contains("[test]") || out.contains("[is_test unknown]"),
+            "unknown is not silently treated as production: {out}"
+        );
     }
 
     #[test]
