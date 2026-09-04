@@ -221,7 +221,8 @@ docs/audits/2026-09-04-per-command-usefulness-v0.16.0.md · artifact
 581da1fc-faa1-4972-ae77-2d27579b0493 · three-perspective gate (matrix grader + judge +
 codex standalone). VERDICT: more useful (all four zg F's dead — --text exact parity;
 anchors everywhere; spike seed ranks reproduced, lmstudio retired) BUT the trust contract
-regressed: a NEW FABRICATION CLASS (verified: vscode .env resource, hadoop phantom
+regressed: a NEW FABRICATION CLASS (verified: ~~vscode .env resource~~ [RETRACTED 2026-09-04 — real, 4 literal sites;
+grader error], hadoop phantom
 writers, nextjs-on-React-Router, invented map edges, deps "unused" false positives incl.
 django asgiref vs 31 import sites). "v0.15.0 failed by silence (safe); v0.16.0 fails by
 confident invention (indefensible)." Trust repair dominates the next round.

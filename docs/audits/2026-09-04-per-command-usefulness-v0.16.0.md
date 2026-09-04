@@ -14,7 +14,7 @@ v0.16.0 is more useful — find --text retires all four zg F's with exact ripgre
 with lmstudio retired — but the trust contract regressed in the highest-risk layer: the
 product now emits CONFIDENT UNSUPPORTED CLAIMS. v0.15.0's failure mode was silence
 (safe); v0.16.0's is confident invention (indefensible for an agent). Verified
-fabrications: vscode ".env FS_PATH 2 readers 2 writers" (no literal-path call exists);
+fabrications: ~~vscode ".env FS_PATH 2 readers 2 writers"~~ (RETRACTED 2026-09-04: four literal `.env` fs calls exist in extensions/copilot/script/setup/*.mts — the product was RIGHT, the grader wrong);
 hadoop 5 phantom writers (its 6 readers exactly right); "nextjs_app_router_detected" on a
 React-Router-7 Java monorepo; map edges invented for a JDK-only file; django "unused:
 asgiref" vs 31 import sites; storybook "declared-unused 111" vs a 13-entry manifest.

@@ -6,12 +6,13 @@ slice, diagnose-then-fix per family. Maturity: MATURE.
 ## 1. Problem (VERIFIED — docs/audits/2026-09-04-per-command-usefulness-v0.16.0.md)
 
 Three surfaces emit rows no evidence supports — the fabrication class:
-- **resource list (computed path + invented modes):** vscode `.env FS_PATH 2 readers 2
-  writers` — NO literal-path fs call to `.env` exists; the only sources are
-  `join(dir,'.env')` in a test, `resolve(__dirname,'.env')` (not an fs call), and an
-  array-literal string in a test. The row violates the literal-path caveat printed six
-  lines above it. hadoop `. FS_PATH 6 readers 5 writers` — the 6 readers are exactly
-  right (all `O_RDONLY`); the 5 writers are invented.
+- **resource list (invented modes):** hadoop `. FS_PATH 6 readers 5 writers` — the
+  writers AND five of the six readers came from an undetermined-mode default (ruling
+  HG2-FAM1-RESOURCES). RETRACTED 2026-09-04 (ruling HG2-FAM1B-VSCODE-ENV): the audit's
+  claim that vscode `.env FS_PATH 2 readers 2 writers` was fabricated is FALSE — four
+  direct literal arg-0 accesses exist (`extensions/copilot/script/setup/getEnv.mts:78,85`,
+  `getToken.mts:86,93`: existsSync/readFileSync/writeFileSync('.env')); the product was
+  right, the audit grader missed the `.mts` scripts. The row is EVIDENCED and survives.
 - **trust (name-shaped framework detection):** hadoop `nextjs_app_router_detected` — no
   `next` dependency, no `next.config.*`; the `src/app/` directory is React Router 7. A
   directory NAME drove a framework claim that then downgraded reliability.
@@ -61,9 +62,9 @@ touch the operator's real state root. Do NOT commit.
 
 - Reproducing tests FIRST per family: literal-in-join → no resource row; mode-unknown →
   no writer count; dir-name-only → no framework claim; JDK-collision → unresolved edge.
-- Live proof (isolated state root, registry sha unchanged): vscode resource list (.env
-  gone; any survivors carry access-position evidence), hadoop resource list (6 readers
-  survive; writers gone or evidenced), hadoop trust (no nextjs; basis rendered on any
+- Live proof (isolated state root, registry sha unchanged): vscode resource list (`.env`
+  row RETAINED with its four access-position sites — the corrected expectation), hadoop
+  resource list (undetermined accesses render mode unknown; before/after counts), hadoop trust (no nextjs; basis rendered on any
   real detection elsewhere — e.g. amodx/glamCRM real frameworks still detected WITH
   basis), hadoop map (wrapper file's edges agree with its file map). Before/after
   verbatim; non-affected repos byte-stable.
@@ -72,8 +73,9 @@ touch the operator's real state root. Do NOT commit.
 ## 5. Definition of done
 
 Every resource row, framework claim, and resolved edge carries evidence the caveat
-admits; the three verified fabrications are gone while correctly-evidenced rows survive
-exactly; bases render with claims; gates green.
+admits; the verified fabrications (hadoop invented modes, nextjs name-detection, map JDK-collision
+edges — the last deferred by ruling) are gone or basis-labeled while evidenced rows (incl.
+vscode `.env`) survive exactly; bases render with claims; gates green.
 
 CORPUS PATHS: vscode at ../legacy-codebases/vscode; hadoop at ../legacy-codebases/hadoop;
 amodx at ../amodx; glamCRM at ../glamCRM; repo-graph is THIS repo.
