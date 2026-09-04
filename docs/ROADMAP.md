@@ -299,6 +299,16 @@ one counted "unreadable" line, never a malformed placeholder); additive `cursor_
 JSON field (verb-less, unquoted, uid-stripped). Live proof on the retained seeded root:
 `callers` on a short cursor → 65 real callers (was "symbol not found"); nonexistent
 symbol → real candidates, zero "malformed". Gates ALL GREEN; approved review-1.
+SHIPPED: CPP-SPAN-FIDELITY-1 (2026-09-05): macro-decorated C++ types carry their real
+names and kinds (name = last identifier before base-clause/body; kind from the keyword;
+macros kept as metadata) and spans never take an ERROR extent (balanced-brace recovery,
+raw-string-aware; unrecoverable → no span; parser-swallowed siblings re-walked at true
+scope). Mechanisms proven: tree-sitter error recovery (names) + preprocessor-confused
+brace matching (spans). Live: env_posix.cc 13 → 74 symbols, Limiter 73–130, Posix*File
+recovered; vcmi CGHeroInstance → SYMBOL:CLASS (DLL_LINKAGE no longer a name); leveldb
+DB → SYMBOL:CLASS; `--text fsync` → [method PosixWritableFile::SyncFd]. One reindex key
+transition (~813 vcmi, 23 leveldb defs); openxcom byte-stable. Single file +766/−83; 80
+crate tests; gates ALL GREEN; approved review-2.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

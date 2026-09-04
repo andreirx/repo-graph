@@ -478,11 +478,23 @@ fn location_from_node(node: &tree_sitter::Node) -> SourceLocation {
 fn walk_top_level(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
     match node.kind() {
         "preproc_include" => extract_include(node, src, ctx),
-        "function_definition" => extract_function(node, src, ctx),
+        // A `function_definition` / `declaration` is the shape tree-sitter-cpp
+        // ERROR-recovers a macro-decorated type into (`class DLL_LINKAGE Name`,
+        // `struct EXPORT Name : Base {}`). If the construct leads with a
+        // class/struct/enum specifier fragment, it is a TYPE, not a function —
+        // route it to the type path so the keyword drives the kind (a struct is
+        // never `function`) and the real name is recovered from the header.
+        "function_definition" => {
+            if let Some((frag, subtype)) = leading_type_specifier(node) {
+                extract_type(&frag, node, src, ctx, subtype);
+            } else {
+                extract_function(node, src, ctx)
+            }
+        }
         "declaration" => extract_declaration(node, src, ctx),
-        "class_specifier" => extract_class(node, src, ctx),
-        "struct_specifier" => extract_struct(node, src, ctx),
-        "enum_specifier" => extract_enum(node, src, ctx),
+        "class_specifier" => extract_type(node, node, src, ctx, NodeSubtype::Class),
+        "struct_specifier" => extract_type(node, node, src, ctx, NodeSubtype::Struct),
+        "enum_specifier" => extract_type(node, node, src, ctx, NodeSubtype::Enum),
         "namespace_definition" => extract_namespace(node, src, ctx),
         "linkage_specification" => extract_linkage_spec(node, src, ctx),
         "template_declaration" => {
@@ -634,39 +646,61 @@ fn extract_linkage_spec(node: &tree_sitter::Node, src: &[u8], ctx: &mut Extracti
     ctx.current_linkage = prev_linkage;
 }
 
-// ── Class extraction ─────────────────────────────────────────────
+// ── Type extraction (class / struct / enum) ──────────────────────
+//
+// CPP-SPAN-FIDELITY-1. One path for every class/struct/enum, whether the parse
+// is clean (`class Foo {…}`) or ERROR-recovered from a macro-decorated form
+// (`class DLL_LINKAGE Foo : Base {…}` → a `declaration`/`function_definition`
+// wrapping a truncated specifier fragment). The keyword drives the kind; the
+// name is the last identifier of the header (macros recorded, never the name);
+// the span comes from balanced-brace recovery, never a tree ERROR extent; and
+// definitions the parser swallowed into an over-extended body are recovered as
+// siblings under their true scope.
 
-fn extract_class(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
-    extract_class_like(node, src, ctx, NodeSubtype::Class);
+/// The first `class_specifier`/`struct_specifier`/`enum_specifier` among a
+/// construct's children, with the keyword-derived subtype. Presence of one under
+/// a `declaration`/`function_definition` is the signal that the construct is a
+/// TYPE (possibly macro-mangled), not a function or a plain declaration.
+fn leading_type_specifier<'a>(
+    node: &tree_sitter::Node<'a>,
+) -> Option<(tree_sitter::Node<'a>, NodeSubtype)> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "class_specifier" => return Some((child, NodeSubtype::Class)),
+            "struct_specifier" => return Some((child, NodeSubtype::Struct)),
+            "enum_specifier" => return Some((child, NodeSubtype::Enum)),
+            _ => {}
+        }
+    }
+    None
 }
 
-fn extract_struct(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
-    extract_class_like(node, src, ctx, NodeSubtype::Struct);
-}
-
-fn extract_class_like(
-    node: &tree_sitter::Node,
+/// Emit a class/struct/enum node. `frag` is the specifier fragment (drives the
+/// kind + header start); `construct` is the enclosing node whose byte span holds
+/// the full header + body (`frag` itself when the parse is clean).
+fn extract_type(
+    frag: &tree_sitter::Node,
+    construct: &tree_sitter::Node,
     src: &[u8],
     ctx: &mut ExtractionCtx,
     subtype: NodeSubtype,
 ) {
-    let name = node
-        .child_by_field_name("name")
-        .and_then(|n| n.utf8_text(src).ok())
-        .map(|s| s.to_string());
-
-    // Anonymous classes/structs
-    let class_name = name.clone().unwrap_or_else(|| {
-        if subtype == NodeSubtype::Class {
-            "anon_class".to_string()
-        } else {
-            "anon_struct".to_string()
-        }
+    let (resolved_name, macros) = type_name_and_macros(frag, construct, src);
+    let type_name = resolved_name.unwrap_or_else(|| match subtype {
+        NodeSubtype::Struct => "anon_struct".to_string(),
+        NodeSubtype::Enum => "anon_enum".to_string(),
+        _ => "anon_class".to_string(),
     });
 
-    let qualified_name = ctx.qualified_name(&class_name);
+    let qualified_name = ctx.qualified_name(&type_name);
     let stable_key = ctx.make_stable_key(&qualified_name, &subtype);
     let linkage_meta = ctx.linkage_metadata();
+
+    // Span: balanced-brace recovery from source. `true_close` is the byte just
+    // past the real closing `}` — the boundary between the body's own members
+    // and any definitions the parser swallowed past it.
+    let (location, true_close) = type_span_and_body_close(frag, construct, src);
 
     ctx.nodes.push(ExtractedNode {
         node_uid: uuid::Uuid::new_v4().to_string(),
@@ -675,24 +709,33 @@ fn extract_class_like(
         stable_key,
         kind: NodeKind::Symbol,
         subtype: Some(subtype),
-        name: class_name.clone(),
+        name: type_name.clone(),
         qualified_name: Some(qualified_name),
         file_uid: Some(ctx.file_uid.into()),
         parent_node_uid: None,
-        location: Some(location_from_node(node)),
+        location,
         signature: None,
         visibility: Some(Visibility::Export),
-        doc_comment: extract_doc_comment(node, src),
-        metadata_json: linkage_meta.to_json(),
+        doc_comment: extract_doc_comment(construct, src),
+        metadata_json: type_metadata_json(&linkage_meta, &macros),
     });
 
-    // Extract base classes as IMPLEMENTS edges
-    extract_base_classes(node, src, ctx);
+    // Base classes (IMPLEMENTS). Only recoverable when the base clause parsed as
+    // a `base_class_clause` node; on a macro-mangled construct the base tokens
+    // sit inside ERROR nodes and are not modeled (unchanged from before).
+    extract_base_classes(construct, src, ctx);
 
-    // Process class body
-    if let Some(body) = node.child_by_field_name("body") {
+    // enums carry no members we extract.
+    if subtype == NodeSubtype::Enum {
+        return;
+    }
+
+    // Process the body. The body node is the specifier's `body` field when clean,
+    // else the sibling `compound_statement`/`initializer_list` the parser used
+    // for the mangled form.
+    if let Some(body) = type_body_node(frag, construct) {
         let prev_class = ctx.current_class.take();
-        ctx.current_class = Some(class_name);
+        ctx.current_class = Some(type_name);
 
         let mut current_visibility = if subtype == NodeSubtype::Class {
             Visibility::Private // C++ class default
@@ -702,27 +745,43 @@ fn extract_class_like(
 
         let mut cursor = body.walk();
         for child in body.children(&mut cursor) {
+            // Members past the real closing brace are not members — they are
+            // sibling definitions the parser swallowed. Skip here; recover below.
+            if let Some(close) = true_close {
+                if child.start_byte() >= close {
+                    continue;
+                }
+            }
             match child.kind() {
                 "access_specifier" => {
                     current_visibility = parse_access_specifier(&child, src);
                 }
                 "function_definition" => {
-                    extract_method(node, &child, src, ctx, current_visibility);
+                    extract_method(construct, &child, src, ctx, current_visibility);
                 }
                 "field_declaration" => {
-                    // Check if it's a method declaration (has function_declarator)
                     if has_function_declarator(&child) {
                         extract_method_declaration(&child, src, ctx, current_visibility);
                     }
                 }
                 "declaration" => {
-                    // Nested class/struct/enum
+                    // Nested class/struct/enum defined directly in the body.
                     let mut decl_cursor = child.walk();
                     for decl_child in child.children(&mut decl_cursor) {
                         match decl_child.kind() {
-                            "class_specifier" => extract_class(&decl_child, src, ctx),
-                            "struct_specifier" => extract_struct(&decl_child, src, ctx),
-                            "enum_specifier" => extract_enum(&decl_child, src, ctx),
+                            "class_specifier" => {
+                                extract_type(&decl_child, &decl_child, src, ctx, NodeSubtype::Class)
+                            }
+                            "struct_specifier" => extract_type(
+                                &decl_child,
+                                &decl_child,
+                                src,
+                                ctx,
+                                NodeSubtype::Struct,
+                            ),
+                            "enum_specifier" => {
+                                extract_type(&decl_child, &decl_child, src, ctx, NodeSubtype::Enum)
+                            }
                             _ => {}
                         }
                     }
@@ -732,6 +791,409 @@ fn extract_class_like(
         }
 
         ctx.current_class = prev_class;
+
+        // Recover definitions swallowed past the real closing brace. They live
+        // deep inside `body` as well-formed specifier nodes (proven by the parse
+        // dump); dispatch each at THIS enclosing scope (current_class already
+        // restored), not as members of this type.
+        if let Some(close) = true_close {
+            if body.end_byte() > close {
+                recover_swallowed_definitions(&body, close, src, ctx);
+            }
+        }
+    }
+}
+
+/// Header name + macro tokens for a type. Scans source from the keyword to the
+/// first `{` / `:` (base or enum-base) / `;`, collecting identifier tokens. The
+/// LAST identifier is the name; the preceding ones are decoration macros
+/// (`DLL_LINKAGE`, `LEVELDB_EXPORT`, …). `None` name → anonymous.
+fn type_name_and_macros(
+    frag: &tree_sitter::Node,
+    construct: &tree_sitter::Node,
+    src: &[u8],
+) -> (Option<String>, Vec<String>) {
+    let start = frag.start_byte();
+    let end = construct.end_byte().min(src.len());
+    let mut tokens: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut i = start;
+    while i < end {
+        // A decl may carry a comment (or, defensively, a string/char) between the
+        // macro and the name; reuse the shared non-code skipper so a `{`/`:` inside
+        // one never ends the header early.
+        if let Some(next) = skip_noncode(src, i, end) {
+            if !cur.is_empty() {
+                tokens.push(std::mem::take(&mut cur));
+            }
+            i = next;
+            continue;
+        }
+        let c = src[i];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            cur.push(c as char);
+            i += 1;
+            continue;
+        }
+        if !cur.is_empty() {
+            tokens.push(std::mem::take(&mut cur));
+        }
+        match c {
+            b'{' | b';' => break,
+            b':' => {
+                // `::` keeps a qualified name together; a lone `:` opens the base
+                // clause (class) / underlying-type (enum) → header ends.
+                if i + 1 < end && src[i + 1] == b':' {
+                    i += 2;
+                } else {
+                    break;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
+
+    // Drop the leading keyword and structural words; what remains is
+    // [macro… , Name].
+    tokens.retain(|t| !matches!(t.as_str(), "class" | "struct" | "enum" | "final"));
+    match tokens.pop() {
+        Some(name) => (Some(name), tokens),
+        None => (None, Vec::new()),
+    }
+}
+
+/// The body node whose braces delimit a type's members: the specifier's `body`
+/// field when the parse is clean, else the sibling block the parser attached to
+/// the mangled construct.
+fn type_body_node<'a>(
+    frag: &tree_sitter::Node<'a>,
+    construct: &tree_sitter::Node<'a>,
+) -> Option<tree_sitter::Node<'a>> {
+    if let Some(body) = frag.child_by_field_name("body") {
+        return Some(body);
+    }
+    let mut cursor = construct.walk();
+    for child in construct.children(&mut cursor) {
+        if matches!(
+            child.kind(),
+            "field_declaration_list"
+                | "compound_statement"
+                | "initializer_list"
+                | "enumerator_list"
+        ) {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Compute the type's source span and the byte just past its real closing brace.
+///
+/// Honesty rule (spec §2.3): a span NEVER takes a tree ERROR/over-extended
+/// extent. From the keyword we find the opening `{` and balance-match its `}` in
+/// source (skipping strings/chars/comments). Balanced → `[keyword_line,
+/// close_line]`. A `;` before any `{` → forward/opaque declaration → the single
+/// declaration line. Unbalanced braces (genuinely unparseable) → NO span: the
+/// declaration is emitted as a visible absence, never a guessed range.
+fn type_span_and_body_close(
+    frag: &tree_sitter::Node,
+    construct: &tree_sitter::Node,
+    src: &[u8],
+) -> (Option<SourceLocation>, Option<usize>) {
+    let start_byte = frag.start_byte();
+    let start_line = (frag.start_position().row + 1) as i64;
+    let start_col = frag.start_position().column as i64;
+    let end = construct.end_byte().min(src.len());
+
+    // Locate the body opener, or a `;` proving there is no body.
+    match find_body_open_or_terminator(src, start_byte, end) {
+        BodyProbe::ForwardDecl { semi } => {
+            let line = line_of(src, semi) as i64;
+            (
+                Some(SourceLocation {
+                    line_start: start_line,
+                    col_start: start_col,
+                    line_end: line,
+                    col_end: 0,
+                }),
+                None,
+            )
+        }
+        BodyProbe::Body { open } => match balanced_brace_end(src, open, src.len()) {
+            Some(close_byte) => {
+                let end_line = line_of(src, close_byte.saturating_sub(1)) as i64;
+                (
+                    Some(SourceLocation {
+                        line_start: start_line,
+                        col_start: start_col,
+                        line_end: end_line,
+                        col_end: 0,
+                    }),
+                    Some(close_byte),
+                )
+            }
+            // Unbalanced → honest absence, no swallowing span.
+            None => (None, None),
+        },
+        // No body and no terminator in range: a forward/opaque declaration whose
+        // `;` sits just outside the specifier node (`class Foo;`). Its location is
+        // known and tight — the fragment's own extent — so this is NOT the
+        // unparseable case; emit that span rather than a false absence.
+        BodyProbe::None => (
+            Some(SourceLocation {
+                line_start: start_line,
+                col_start: start_col,
+                line_end: (frag.end_position().row + 1) as i64,
+                col_end: frag.end_position().column as i64,
+            }),
+            None,
+        ),
+    }
+}
+
+enum BodyProbe {
+    /// A `{` opens the body at this byte.
+    Body { open: usize },
+    /// A `;` closed the declaration before any `{` (forward/opaque decl).
+    ForwardDecl { semi: usize },
+    /// Neither found within range.
+    None,
+}
+
+/// Scan for the first `{` (body opener) or `;` (no body), skipping strings,
+/// char literals, and comments so a brace inside them never counts.
+fn find_body_open_or_terminator(src: &[u8], from: usize, end: usize) -> BodyProbe {
+    let mut i = from;
+    while i < end {
+        if let Some(next) = skip_noncode(src, i, end) {
+            i = next;
+            continue;
+        }
+        match src[i] {
+            b'{' => return BodyProbe::Body { open: i },
+            b';' => return BodyProbe::ForwardDecl { semi: i },
+            _ => i += 1,
+        }
+    }
+    BodyProbe::None
+}
+
+/// Byte just past the `}` matching the `{` at `open`. Counts brace depth over
+/// code only (strings/chars/comments skipped). `None` if depth never returns to
+/// zero within `end` — the genuinely-unparseable case.
+fn balanced_brace_end(src: &[u8], open: usize, end: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = open;
+    while i < end {
+        if let Some(next) = skip_noncode(src, i, end) {
+            i = next;
+            continue;
+        }
+        match src[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// If `src[i]` begins a non-code region (line/block comment, string/char literal,
+/// or C++ raw string literal), return the byte index just past it; else `None`.
+///
+/// Raw strings (`R"delim( ... )delim"`) are special-cased: their payload is
+/// verbatim, so an embedded `"` or `}` must never be read as code — otherwise a
+/// raw brace could falsely open or close a class span (reviewer repro:
+/// `R"(text " } text)"`). See `skip_raw_string`.
+fn skip_noncode(src: &[u8], i: usize, end: usize) -> Option<usize> {
+    let c = src[i];
+    if c == b'/' && i + 1 < end && src[i + 1] == b'/' {
+        let mut j = i + 2;
+        while j < end && src[j] != b'\n' {
+            j += 1;
+        }
+        return Some(j);
+    }
+    if c == b'/' && i + 1 < end && src[i + 1] == b'*' {
+        let mut j = i + 2;
+        while j + 1 < end && !(src[j] == b'*' && src[j + 1] == b'/') {
+            j += 1;
+        }
+        return Some((j + 2).min(end));
+    }
+    if c == b'"' {
+        if let Some(after) = skip_raw_string(src, i, end) {
+            return Some(after);
+        }
+    }
+    if c == b'"' || c == b'\'' {
+        let quote = c;
+        let mut j = i + 1;
+        while j < end {
+            if src[j] == b'\\' {
+                j += 2;
+                continue;
+            }
+            if src[j] == quote {
+                j += 1;
+                break;
+            }
+            j += 1;
+        }
+        return Some(j);
+    }
+    None
+}
+
+/// If the `"` at `quote` opens a C++ raw string literal, return the byte just
+/// past its closing `"`; else `None` (an ordinary string — the caller handles
+/// it with the normal string rule).
+///
+/// Grammar: `(u8|u|U|L)? R "delim( ... )delim"`, where `delim` is the char
+/// sequence between the opening `"` and the first `(` (a d-char sequence: no
+/// `(`, `)`, `\`, or whitespace), and the literal ends at the first `)delim"`.
+/// The `R` must sit at a token boundary — `fooR"x"` is the identifier `fooR`
+/// followed by an ordinary string, not a raw string.
+///
+/// An unterminated raw payload consumes to `end`; the enclosing brace scan then
+/// never balances and the class is emitted as a visible absence (honest — never
+/// a guessed span), consistent with the §2.3 no-span fallback.
+fn skip_raw_string(src: &[u8], quote: usize, end: usize) -> Option<usize> {
+    // Require an `R` immediately before the quote.
+    if quote == 0 || src[quote - 1] != b'R' {
+        return None;
+    }
+    // Walk back over an optional encoding prefix (`u8` | `u` | `U` | `L`) to find
+    // the token start, then require a boundary (start of buffer or a non-ident
+    // byte) so an identifier ending in `R` is not misread as a raw prefix.
+    let mut token_start = quote - 1; // the `R`
+    if token_start >= 1 {
+        match src[token_start - 1] {
+            b'L' | b'u' | b'U' => token_start -= 1,
+            b'8' if token_start >= 2 && src[token_start - 2] == b'u' => token_start -= 2,
+            _ => {}
+        }
+    }
+    let at_boundary = token_start == 0
+        || !(src[token_start - 1].is_ascii_alphanumeric() || src[token_start - 1] == b'_');
+    if !at_boundary {
+        return None;
+    }
+    // Delimiter: bytes between the opening `"` and the first `(`.
+    let delim_start = quote + 1;
+    let mut p = delim_start;
+    while p < end && src[p] != b'(' {
+        // A d-char is not `)`, `\`, or whitespace; if one appears before `(`,
+        // this is not a well-formed raw string — defer to the ordinary rule.
+        if src[p] == b')' || src[p] == b'\\' || src[p].is_ascii_whitespace() {
+            return None;
+        }
+        p += 1;
+    }
+    if p >= end {
+        return None; // no opening `(` → not a raw string
+    }
+    let delim = &src[delim_start..p]; // possibly empty: R"( ... )"
+                                      // Terminator: `)` + delim + `"`.
+    let mut k = p + 1;
+    while k < end {
+        if src[k] == b')' {
+            let after_paren = k + 1;
+            if src.get(after_paren..after_paren + delim.len()) == Some(delim)
+                && src.get(after_paren + delim.len()) == Some(&b'"')
+            {
+                return Some(after_paren + delim.len() + 1);
+            }
+        }
+        k += 1;
+    }
+    // Unterminated raw payload runs to the end of the buffer.
+    Some(end)
+}
+
+/// 1-based line number containing byte offset `pos`.
+fn line_of(src: &[u8], pos: usize) -> usize {
+    let upto = pos.min(src.len());
+    1 + src[..upto].iter().filter(|&&b| b == b'\n').count()
+}
+
+/// Merge the linkage blob with the recorded macro decoration tokens into the
+/// symbol's single `metadata_json`. Additive: with no macros and no linkage the
+/// result is `None` (byte-identical to a plain type before this slice); macros
+/// are recorded under `macro_tokens` alongside any linkage facts.
+fn type_metadata_json(linkage: &LinkageMetadata, macros: &[String]) -> Option<String> {
+    let linkage_json = linkage.to_json();
+    if macros.is_empty() {
+        return linkage_json;
+    }
+    let mut obj = match linkage_json
+        .as_deref()
+        .map(serde_json::from_str::<serde_json::Value>)
+    {
+        Some(Ok(serde_json::Value::Object(map))) => map,
+        _ => serde_json::Map::new(),
+    };
+    obj.insert(
+        "macro_tokens".to_string(),
+        serde_json::Value::Array(
+            macros
+                .iter()
+                .map(|m| serde_json::Value::String(m.clone()))
+                .collect(),
+        ),
+    );
+    serde_json::to_string(&serde_json::Value::Object(obj)).ok()
+}
+
+/// Recover definitions the parser swallowed into an over-extended body. They
+/// survive as well-formed specifier nodes deep in `body`; find each whose start
+/// is at/after the real closing brace and dispatch it at the current scope.
+/// Does NOT descend into a dispatched node — `extract_type` handles its members
+/// (and its own nested recovery) itself.
+fn recover_swallowed_definitions(
+    body: &tree_sitter::Node,
+    true_close: usize,
+    src: &[u8],
+    ctx: &mut ExtractionCtx,
+) {
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.end_byte() <= true_close {
+            continue; // entirely within the real body — a genuine member
+        }
+        match child.kind() {
+            "class_specifier" if child.start_byte() >= true_close => {
+                extract_type(&child, &child, src, ctx, NodeSubtype::Class);
+            }
+            "struct_specifier" if child.start_byte() >= true_close => {
+                extract_type(&child, &child, src, ctx, NodeSubtype::Struct);
+            }
+            "enum_specifier" if child.start_byte() >= true_close => {
+                extract_type(&child, &child, src, ctx, NodeSubtype::Enum);
+            }
+            "function_definition" if child.start_byte() >= true_close => {
+                if let Some((f, st)) = leading_type_specifier(&child) {
+                    extract_type(&f, &child, src, ctx, st);
+                } else {
+                    extract_function(&child, src, ctx);
+                }
+            }
+            "declaration" if child.start_byte() >= true_close => {
+                extract_declaration(&child, src, ctx);
+            }
+            // A wrapper node (field_declaration_list, ERROR, …) straddling the
+            // boundary: descend to reach the definitions nested inside it.
+            _ => recover_swallowed_definitions(&child, true_close, src, ctx),
+        }
     }
 }
 
@@ -822,38 +1284,6 @@ fn is_virtual_base(_clause: &tree_sitter::Node, _type_node: &tree_sitter::Node) 
     false
 }
 
-// ── Enum extraction ──────────────────────────────────────────────
-
-fn extract_enum(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
-    let name = node
-        .child_by_field_name("name")
-        .and_then(|n| n.utf8_text(src).ok())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "anon_enum".to_string());
-
-    let qualified_name = ctx.qualified_name(&name);
-    let stable_key = ctx.make_stable_key(&qualified_name, &NodeSubtype::Enum);
-    let linkage_meta = ctx.linkage_metadata();
-
-    ctx.nodes.push(ExtractedNode {
-        node_uid: uuid::Uuid::new_v4().to_string(),
-        snapshot_uid: ctx.snapshot_uid.into(),
-        repo_uid: ctx.repo_uid.into(),
-        stable_key,
-        kind: NodeKind::Symbol,
-        subtype: Some(NodeSubtype::Enum),
-        name,
-        qualified_name: Some(qualified_name),
-        file_uid: Some(ctx.file_uid.into()),
-        parent_node_uid: None,
-        location: Some(location_from_node(node)),
-        signature: None,
-        visibility: Some(Visibility::Export),
-        doc_comment: extract_doc_comment(node, src),
-        metadata_json: linkage_meta.to_json(),
-    });
-}
-
 // ── Typedef / Type alias extraction ──────────────────────────────
 
 fn extract_typedef(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
@@ -912,15 +1342,13 @@ fn find_typedef_name(node: &tree_sitter::Node, src: &[u8]) -> String {
 // ── Declaration extraction ───────────────────────────────────────
 
 fn extract_declaration(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
-    // Check for nested class/struct/enum
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "class_specifier" => extract_class(&child, src, ctx),
-            "struct_specifier" => extract_struct(&child, src, ctx),
-            "enum_specifier" => extract_enum(&child, src, ctx),
-            _ => {}
-        }
+    // A declaration that leads with a class/struct/enum specifier is a type
+    // definition (`class Foo;`, `struct Point {} p;`) OR a macro-decorated type
+    // ERROR-recovered into declaration shape (`class DLL_LINKAGE HeroClass : …`).
+    // Route to the type path: `node` is the construct (carries the real name +
+    // body as siblings of the fragment), `frag` is the specifier fragment.
+    if let Some((frag, subtype)) = leading_type_specifier(node) {
+        extract_type(&frag, node, src, ctx, subtype);
     }
 }
 
@@ -1946,6 +2374,261 @@ mod tests {
             .find(|n| n.subtype == Some(NodeSubtype::Destructor))
             .unwrap();
         assert_eq!(dtor.name, "~C");
+    }
+
+    // ── CPP-SPAN-FIDELITY-1: macro-decorated names, span fidelity, recovery ──
+
+    /// Helper: the SYMBOL node with the given name (panics with the symbol list).
+    fn sym<'a>(r: &'a ExtractionResult, name: &str) -> &'a ExtractedNode {
+        r.nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Symbol && n.name == name)
+            .unwrap_or_else(|| {
+                let syms: Vec<_> = r
+                    .nodes
+                    .iter()
+                    .filter(|n| n.kind == NodeKind::Symbol)
+                    .map(|n| format!("{} {:?}", n.name, n.subtype))
+                    .collect();
+                panic!("no symbol named {name}; symbols = {syms:#?}")
+            })
+    }
+
+    #[test]
+    fn macro_class_name_is_the_type_not_the_macro() {
+        // §4(a): `class EXPORT_MACRO Foo {}` → name Foo, kind class, tight span,
+        // macro recorded as metadata — never as the name.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, "class DLL_LINKAGE Foo {\n  int x;\n};\n", "src/a.cpp");
+
+        assert!(
+            !result.nodes.iter().any(|n| n.name == "DLL_LINKAGE"),
+            "the export macro must never be a symbol name",
+        );
+        let foo = sym(&result, "Foo");
+        assert_eq!(foo.subtype, Some(NodeSubtype::Class));
+        let loc = foo.location.as_ref().expect("clean class has a span");
+        assert_eq!((loc.line_start, loc.line_end), (1, 3));
+        let meta = foo.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            meta.contains("\"macro_tokens\":[\"DLL_LINKAGE\"]"),
+            "macro recorded additively, got {meta:?}",
+        );
+    }
+
+    #[test]
+    fn macro_struct_with_base_is_struct_named_bar_not_function() {
+        // §4(b): `struct API Bar : Base {}` → Bar/struct (never `function`,
+        // which is what tree-sitter's function_definition mis-shape yields).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "struct API_EXPORT Bar : Base { int x; };\n",
+            "src/b.cpp",
+        );
+
+        let bar = sym(&result, "Bar");
+        assert_eq!(
+            bar.subtype,
+            Some(NodeSubtype::Struct),
+            "a macro-decorated struct with a base must be STRUCT, never FUNCTION",
+        );
+        assert!(!result
+            .nodes
+            .iter()
+            .any(|n| n.subtype == Some(NodeSubtype::Function)));
+        let loc = bar.location.as_ref().unwrap();
+        assert_eq!((loc.line_start, loc.line_end), (1, 1));
+    }
+
+    #[test]
+    fn leveldb_export_db_class_not_function() {
+        // The reported leveldb defect: `class LEVELDB_EXPORT DB { … }` landed as
+        // SYMBOL:FUNCTION. It must be CLASS named DB.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let src = "class LEVELDB_EXPORT DB {\n public:\n  virtual ~DB();\n};\n";
+        let result = extract_ok(&ext, src, "include/db.h");
+        let db = sym(&result, "DB");
+        assert_eq!(db.subtype, Some(NodeSubtype::Class));
+    }
+
+    #[test]
+    fn preproc_confused_body_recovers_siblings_under_true_scope() {
+        // §4(c): an anonymous-namespace class whose body is over-extended by a
+        // preprocessor guard must not swallow the sibling classes/methods after
+        // it. All three types are extracted with tight spans under the namespace.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let src = r#"
+namespace {
+class Limiter {
+ public:
+#if !defined(NDEBUG)
+  int max_;
+#endif
+  bool Acquire() { return true; }
+};
+
+class Worker final : public Base {
+ public:
+  void Run() { work(); }
+};
+
+class Sink {
+ public:
+  void Flush() {}
+};
+}  // namespace
+"#;
+        let result = extract_ok(&ext, src, "src/anon.cpp");
+
+        // All three classes recovered (not swallowed into Limiter).
+        for name in ["Limiter", "Worker", "Sink"] {
+            let n = sym(&result, name);
+            assert_eq!(n.subtype, Some(NodeSubtype::Class), "{name} kind");
+            assert!(n.location.is_some(), "{name} must carry a span");
+        }
+        // Limiter's span must NOT reach the later siblings.
+        let limiter = sym(&result, "Limiter");
+        let worker = sym(&result, "Worker");
+        let lim_end = limiter.location.as_ref().unwrap().line_end;
+        let wrk_start = worker.location.as_ref().unwrap().line_start;
+        assert!(
+            lim_end < wrk_start,
+            "Limiter span {lim_end} must end before Worker starts {wrk_start} (no swallow)",
+        );
+        // Their methods are recovered under the right owners.
+        assert_eq!(
+            sym(&result, "Run").qualified_name.as_deref(),
+            Some("Worker::Run")
+        );
+        assert_eq!(
+            sym(&result, "Flush").qualified_name.as_deref(),
+            Some("Sink::Flush")
+        );
+    }
+
+    #[test]
+    fn balanced_brace_end_is_the_honesty_primitive() {
+        // §4(d): the span comes from balanced-brace recovery. When braces never
+        // balance, the primitive returns None → `type_span_and_body_close` emits
+        // NO span (visible absence), never a guessed/swallowing range. Strings,
+        // char literals, and comments never contribute a brace.
+        let bal = |s: &str| balanced_brace_end(s.as_bytes(), 0, s.len());
+        assert_eq!(bal("{ a { } b }"), Some(11)); // balanced
+        assert_eq!(bal("{ a { } b"), None); // one close missing → honest None
+        assert_eq!(bal("{ \"}}}\" }"), Some(9)); // braces in a string ignored
+        assert_eq!(bal("{ '}' }"), Some(7)); // brace in a char literal ignored
+        assert_eq!(bal("{ /* } } */ }"), Some(13)); // braces in a comment ignored
+        assert_eq!(bal("{ // }\n }"), Some(9)); // brace in a line comment ignored
+                                                // Raw-string payload braces never count: R"(})" holds a `}` that must
+                                                // not close the region; the real `}` after it does. Length 10.
+        assert_eq!(bal("{ R\"(})\" }"), Some(10));
+        // Custom delimiter: the payload's `)"` (wrong delim) does not terminate;
+        // only `)x"` does, so the inner `}` stays inside the literal. Length 16.
+        assert_eq!(bal("{ R\"x(} )\" )x\" }"), Some(16));
+    }
+
+    #[test]
+    fn skip_raw_string_boundaries() {
+        // The `R` must be at a token boundary: `fooR"x"` is identifier + string,
+        // not a raw string, so its `"` obeys the ordinary rule.
+        let s = b"fooR\"a } b\"";
+        // quote index is 4 (after `fooR`); `R` is preceded by `o` (ident) → None.
+        assert_eq!(skip_raw_string(s, 4, s.len()), None);
+        // Bare `R"(...)"`: consumes the whole literal including inner `"` and `}`.
+        let s = b"R\"(x \" } y)\"";
+        assert_eq!(skip_raw_string(s, 1, s.len()), Some(s.len()));
+        // Encoding-prefixed forms resolve their token start correctly.
+        let s = b"u8R\"(z)\"";
+        assert_eq!(skip_raw_string(s, 3, s.len()), Some(s.len()));
+    }
+
+    #[test]
+    fn unparseable_class_yields_no_span_and_does_not_swallow_sibling() {
+        // §4(d): a genuinely-unparseable class (its body braces never balance to
+        // EOF) is emitted as a DECLARATION WITHOUT A SPAN — a visible absence,
+        // never a guessed or swallowing range — and a following sibling
+        // definition keeps its own tight span (is not absorbed).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        // `Broken`'s body opens on line 1; the stray `{` on line 3 leaves the
+        // brace depth net-open through EOF, so balanced-brace recovery finds no
+        // honest close. `After` (line 5) is a clean, separate definition.
+        let src = "struct Broken {\n  int x;\n{\n};\nstruct After { int y; };\n";
+        let result = extract_ok(&ext, src, "src/broken.cpp");
+
+        // Broken IS emitted (the declaration is not lost) …
+        let broken = sym(&result, "Broken");
+        // … but carries NO span: the honest no-span fallback, not a swallow.
+        assert!(
+            broken.location.is_none(),
+            "unbalanced class must be emitted with no span, got {:?}",
+            broken.location,
+        );
+
+        // The following sibling is extracted independently with its own span —
+        // it was not absorbed into Broken.
+        let after = sym(&result, "After");
+        let loc = after.location.as_ref().expect("After has a real span");
+        assert_eq!(
+            (loc.line_start, loc.line_end),
+            (5, 5),
+            "After must keep its own tight span, not be swallowed",
+        );
+
+        // Invariant restated over every emitted symbol: none spans past EOF.
+        let file_lines = src.lines().count() as i64;
+        for n in result.nodes.iter().filter(|n| n.kind == NodeKind::Symbol) {
+            if let Some(loc) = &n.location {
+                assert!(
+                    loc.line_end <= file_lines,
+                    "no symbol may span past EOF: {} @ {:?}",
+                    n.name,
+                    loc,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn raw_string_payload_never_moves_a_class_span() {
+        // §2.3 honesty: a C++ raw string in a member initializer holds a bare `"`
+        // and an unbalanced `}`. If the source scanner treated it as an ordinary
+        // string, the embedded `"` would end the string early and the `}` would
+        // falsely CLOSE the class span two lines short. Raw-aware scanning must
+        // ignore both, so the span ends at the real closing brace.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let src = "class C {\n  const char* s = R\"(a \" } b)\";\n  void m() {}\n};\n";
+        let result = extract_ok(&ext, src, "src/raw.cpp");
+
+        let c = sym(&result, "C");
+        let loc = c.location.as_ref().expect("C has a real span");
+        assert_eq!(
+            (loc.line_start, loc.line_end),
+            (1, 4),
+            "span must end at the real closing brace, not the raw payload's `}}`",
+        );
+        // The member after the raw string is still inside the class (body not
+        // truncated by a premature close).
+        assert_eq!(sym(&result, "m").qualified_name.as_deref(), Some("C::m"));
+    }
+
+    #[test]
+    fn wellformed_class_span_is_unchanged() {
+        // Regression guard: a clean class's span is the keyword line to its
+        // closing-brace line (byte-stable vs pre-slice behavior).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, "class C {\n  void m() {}\n};\n", "src/c.cpp");
+        let c = sym(&result, "C");
+        let loc = c.location.as_ref().unwrap();
+        assert_eq!((loc.line_start, loc.line_end), (1, 3));
+        assert!(c.metadata_json.is_none(), "no macros → no metadata");
     }
 
     #[test]
