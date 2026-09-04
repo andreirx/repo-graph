@@ -77,7 +77,8 @@ hypotheses until that run speaks.
    — human-ratified Option A (2026-09-04) and, same day, retention fix (a) FK indexes +
    chunking AND (b) rebuild-instead-of-delete when prunable dominates, plus a prevention
    set (snapshot hard cap with prune-on-commit, time budget → rebuild, cache sizing, doctor
-   visibility, benchmark gate): diagnose the assess hang under reproduced
+   visibility, benchmark gate). PRODUCTION REBUILD DONE same day: 40 s reindex replaced a
+   5h+ zero-progress prune; store 4,802 → 253 MB, snapshots 29 → 1. Diagnose the assess hang under reproduced
    load first, then fix the three known residuals under the frozen invariants
    (docs/slices/daemon-residuals-1.md). Queue slot #7.
 4. **Scale chain** — POSTPASS-PROFILE-1 → delta-indexing completion → sharding

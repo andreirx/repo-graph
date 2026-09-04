@@ -41,7 +41,12 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    28 snapshots to delete (27 READY prunable + 1 failed; keep-set is current-state only)
    accumulated since 2026-05-28 because a pass this long NEVER COMPLETES before a daemon
    restart (reboot, install, launchd) kills it — and it restarts from scratch. Hours, on
-   a 977-file repo whose full reindex takes minutes. Contract addendum for #4 (HUMAN-RATIFIED 2026-09-04: (a)+(b) — (c) optional; plus the prevention set in §2.6): (a) index the 15 unindexed FK child tables on
+   a 977-file repo whose full reindex takes minutes.
+   REBUILD DONE (human-ratified, 2026-09-04 19:22): `rmap repo remove` + `rmap index` —
+   the index took ~40 s (19:22:46 → 19:23:24); store 4,802 MB → 253 MB (19×); snapshots
+   29 → 1; nodes 454k → 18k, edges 419k → 22k, extraction_edges 2.19M → 110k; orient
+   serves. The prune it replaced had run 5h+ and committed nothing. This is the
+   measured case for (b): O(current) ≈ 40 s vs O(history × unindexed children) = never. Contract addendum for #4 (HUMAN-RATIFIED 2026-09-04: (a)+(b) — (c) optional; plus the prevention set in §2.6): (a) index the 15 unindexed FK child tables on
    `snapshot_uid` (additive migration; each cascade becomes an index seek instead of a
    full scan — the cheap, large win) + chunk within a snapshot with the write slot released
    between chunks, progress in `doctor`; and/or (b) REBUILD instead of DELETE when the
