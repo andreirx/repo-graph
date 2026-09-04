@@ -62,9 +62,15 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
 3. **#3 under the coordinator**: preload/refresh acquire the repo coordinator's refresh
    (writer) guard; readers bound to an epoch keep their graph until release (the W-B
    epoch invariants FROZEN).
-4. **#4 guarded**: the VACUUM DELETE-mode window runs under the repo's writer guard and
-   foreground opens during it receive the typed Busy with the holder named ("retention
-   VACUUM"), never a raw SQLite error; bounded duration reported in doctor.
+4. **#4 chunked and guarded** (aligned with §1's escalation): the retention PRUNE runs
+   as bounded transactions (≤N rows or ≤T ms of write-slot hold each; N/T stated and
+   justified against the 450ms foreground patience), releasing the write slot between
+   chunks so foreground reads interleave; `doctor` shows prune progress (rows done/total,
+   elapsed) rather than a bare "started Nh ago". The VACUUM DELETE-mode window (when the
+   reclaim threshold IS met) runs under the repo's writer guard and foreground opens
+   during it receive the typed Busy naming the holder ("retention VACUUM"), never a raw
+   SQLite error. The diagnosis also reports WHY 29 snapshots were retained on one repo
+   (policy window vs re-index cadence) — a policy finding, not necessarily a fix here.
 5. Frozen invariants (survey §7, code-stated): single-writer per DB FIFO-fair; readers
    never observe partial writes (READY-snapshot filter + WAL); no head-of-line blocking;
    bounded concurrency with honest Busy; prompt shutdown; per-connection ordering;
