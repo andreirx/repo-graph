@@ -30,8 +30,9 @@ use serde::{Deserialize, Serialize};
 
 // ── Edge types ──────────────────────────────────────────────────
 
-/// The 18 canonical edge types. Mirror of `EdgeType` from
-/// `src/core/model/types.ts:9`.
+/// The canonical edge types. Mirror of `EdgeType` from
+/// `src/core/model/types.ts:9`, plus `Accesses` (Rust-only,
+/// HONESTY-GATE-2 family 1 — no TS producer emits it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EdgeType {
@@ -43,6 +44,14 @@ pub enum EdgeType {
     // Data flow
     Reads,
     Writes,
+    /// A resource access whose direction (read vs write) could NOT
+    /// be determined from the detector's evidence (HONESTY-GATE-2
+    /// family 1). Emitted in place of a guessed `READS`/`WRITES`
+    /// when a `state-bindings` `Direction::Unknown` binding matches
+    /// (e.g. POSIX `open()` with dynamic flags). Serialized
+    /// `"ACCESSES"`; counted separately from readers/writers and
+    /// rendered "access (mode unknown)". No TS producer emits it.
+    Accesses,
     // Async / event
     Emits,
     Consumes,

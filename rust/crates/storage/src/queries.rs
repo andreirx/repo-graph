@@ -580,6 +580,12 @@ pub struct ResourceListItem {
     pub subtype: Option<String>,
     pub readers: i64,
     pub writers: i64,
+    /// HONESTY-GATE-2 family 1: count of `ACCESSES` edges — accesses whose
+    /// direction (read vs write) could NOT be determined from the detector's
+    /// evidence. Counted separately from readers/writers (never folded into
+    /// either); rendered "access (mode unknown)".
+    #[serde(default)]
+    pub unknown_access: i64,
 }
 
 /// Error when resolving a symbol query.
@@ -952,11 +958,13 @@ impl StorageConnection {
             .map_err(StorageError::from)
     }
 
-    /// List all resource nodes with their read/write edge counts.
+    /// List all resource nodes with their read/write/unknown-access edge counts.
     ///
     /// SB-7A: Used by `rmap resource list` for CLI-based parity validation.
     /// Returns all resource nodes (FS_PATH, DB_RESOURCE, BLOB, STATE+CACHE)
-    /// with counts of READS and WRITES edges pointing to each.
+    /// with counts of READS, WRITES, and ACCESSES edges pointing to each.
+    /// HONESTY-GATE-2 family 1: `ACCESSES` (undetermined direction) is counted
+    /// as `unknown_access`, separately from readers/writers — never folded in.
     ///
     /// Optional `kind_filter` restricts to a specific resource kind.
     pub fn list_resources(
@@ -972,11 +980,12 @@ impl StorageConnection {
 				n.kind,
 				n.subtype,
 				COALESCE(SUM(CASE WHEN e.type = 'READS' THEN 1 ELSE 0 END), 0) AS readers,
-				COALESCE(SUM(CASE WHEN e.type = 'WRITES' THEN 1 ELSE 0 END), 0) AS writers
+				COALESCE(SUM(CASE WHEN e.type = 'WRITES' THEN 1 ELSE 0 END), 0) AS writers,
+				COALESCE(SUM(CASE WHEN e.type = 'ACCESSES' THEN 1 ELSE 0 END), 0) AS unknown_access
 			 FROM nodes n
 			 LEFT JOIN edges e ON e.target_node_uid = n.node_uid
 			                  AND e.snapshot_uid = n.snapshot_uid
-			                  AND e.type IN ('READS', 'WRITES')
+			                  AND e.type IN ('READS', 'WRITES', 'ACCESSES')
 			 WHERE n.snapshot_uid = ?1
 			   AND (
 			       n.kind IN ('FS_PATH', 'DB_RESOURCE', 'BLOB')
@@ -1016,6 +1025,7 @@ impl StorageConnection {
                 subtype: row.get(3)?,
                 readers: row.get(4)?,
                 writers: row.get(5)?,
+                unknown_access: row.get(6)?,
             })
         }
 
@@ -5013,6 +5023,68 @@ mod tests {
         assert_eq!(resources.len(), 1);
         assert_eq!(resources[0].readers, 2);
         assert_eq!(resources[0].writers, 1);
+    }
+
+    /// HONESTY-GATE-2 family 1: a stored `ACCESSES` edge (undetermined
+    /// direction) is counted EXCLUSIVELY as `unknown_access` — never as a
+    /// reader or a writer. This pins the SQL `CASE`/`IN` change: a genuine
+    /// `READS` still counts as a reader, and the phantom writer that the old
+    /// undetermined-mode default manufactured never appears.
+    #[test]
+    fn list_resources_counts_accesses_as_unknown_access_only() {
+        let (storage, snap_uid) = setup_db_with_snapshot();
+
+        // One FS resource, like hadoop's `.` after the fix: 1 genuine
+        // O_RDONLY reader plus 2 undetermined-flag opens.
+        insert_raw_node_with_subtype(
+            &storage,
+            &snap_uid,
+            "n-res",
+            "r1:fs:.:FS_PATH",
+            ".",
+            "FS_PATH",
+            Some("FILE_PATH"),
+        );
+        insert_raw_node(
+            &storage,
+            &snap_uid,
+            "n-r1",
+            "r1:a.c#read1:SYMBOL:FUNCTION",
+            "read1",
+            "SYMBOL",
+        );
+        insert_raw_node(
+            &storage,
+            &snap_uid,
+            "n-u1",
+            "r1:a.c#open1:SYMBOL:FUNCTION",
+            "open1",
+            "SYMBOL",
+        );
+        insert_raw_node(
+            &storage,
+            &snap_uid,
+            "n-u2",
+            "r1:a.c#open2:SYMBOL:FUNCTION",
+            "open2",
+            "SYMBOL",
+        );
+
+        // One genuine READS, two ACCESSES (undetermined direction).
+        insert_raw_edge(&storage, &snap_uid, "e1", "n-r1", "n-res", "READS");
+        insert_raw_edge(&storage, &snap_uid, "e2", "n-u1", "n-res", "ACCESSES");
+        insert_raw_edge(&storage, &snap_uid, "e3", "n-u2", "n-res", "ACCESSES");
+
+        let resources = storage.list_resources(&snap_uid, None).unwrap();
+
+        assert_eq!(resources.len(), 1);
+        let res = &resources[0];
+        // The genuine reader survives exactly.
+        assert_eq!(res.readers, 1);
+        // No writer is fabricated from the undetermined accesses.
+        assert_eq!(res.writers, 0);
+        // The two undetermined accesses are their own bucket.
+        assert_eq!(res.unknown_access, 2);
     }
 
     #[test]

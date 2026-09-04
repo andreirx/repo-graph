@@ -320,6 +320,9 @@ basis         = "stdlib_api"
 #   - 'r', 'rb' → fopen_read
 #   - 'w', 'wb', 'a', 'ab', 'x' → fopen_write
 #   - 'r+', 'w+', etc. → fopen_read_write
+#   - undetermined mode (dynamic/unrecognized) → fopen_unknown
+#     (HONESTY-GATE-2 family 1: an undetermined mode is `unknown`,
+#     never a guessed `read`).
 # This mirrors the Python adapter's mode normalization pattern.
 
 [[binding]]
@@ -329,6 +332,15 @@ symbol_path   = "fopen_read"
 resource_kind = "fs"
 driver        = "libc"
 direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "libc:stdio"
+symbol_path   = "fopen_unknown"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "unknown"
 basis         = "stdlib_api"
 
 [[binding]]
@@ -356,7 +368,10 @@ basis         = "stdlib_api"
 #   - O_RDONLY → open_read
 #   - O_WRONLY → open_write
 #   - O_RDWR → open_read_write
-# Unknown/dynamic flags default to read_write.
+#   - undetermined flags (dynamic/unrecognized) → open_unknown
+#     (HONESTY-GATE-2 family 1: an undetermined mode is `unknown`,
+#     never a guessed `read_write` — the default that fabricated
+#     hadoop's phantom writers and 5-of-6 phantom readers).
 
 [[binding]]
 language      = "c"
@@ -365,6 +380,15 @@ symbol_path   = "open_read"
 resource_kind = "fs"
 driver        = "libc"
 direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "libc:fcntl"
+symbol_path   = "open_unknown"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "unknown"
 basis         = "stdlib_api"
 
 [[binding]]
@@ -426,6 +450,15 @@ basis         = "stdlib_api"
 [[binding]]
 language      = "cpp"
 module        = "libc:stdio"
+symbol_path   = "fopen_unknown"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "unknown"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:stdio"
 symbol_path   = "fopen_write"
 resource_kind = "fs"
 driver        = "libc"
@@ -448,6 +481,15 @@ symbol_path   = "open_read"
 resource_kind = "fs"
 driver        = "libc"
 direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:fcntl"
+symbol_path   = "open_unknown"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "unknown"
 basis         = "stdlib_api"
 
 [[binding]]
@@ -502,6 +544,11 @@ basis         = "stdlib_api"
 #   - fstream_open → read_write default
 #   - fstream_read → read (explicit std::ios::in)
 #   - fstream_write → write (explicit std::ios::out/app/trunc)
+#   - fstream_unknown → unknown (HONESTY-GATE-2 review-3: an explicit mode
+#     argument the extractor could not recognize — a dynamic variable, a
+#     typo, a near-name token, or direction-less modifiers only — is
+#     undetermined, NOT a guessed read_write). Contract-fixed no-argument
+#     defaults still resolve to `fstream`/`fstream_open` (read_write).
 
 [[binding]]
 language      = "cpp"
@@ -573,4 +620,13 @@ symbol_path   = "fstream_write"
 resource_kind = "fs"
 driver        = "libstdc++"
 direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "fstream_unknown"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "unknown"
 basis         = "stdlib_api"

@@ -5791,6 +5791,9 @@ impl ServiceDispatcher {
         // Compute summary counts
         let total_reads: i64 = resources.iter().map(|r| r.readers).sum();
         let total_writes: i64 = resources.iter().map(|r| r.writers).sum();
+        // HONESTY-GATE-2 family 1: accesses whose direction could not be
+        // determined, counted separately from reads/writes (never folded in).
+        let total_unknown_access: i64 = resources.iter().map(|r| r.unknown_access).sum();
         let count = resources.len();
 
         // RESOURCE-HONESTY-1: the detector-coverage statement. `detected_languages` is the
@@ -5836,6 +5839,7 @@ impl ServiceDispatcher {
             "count": count,
             "total_reads": total_reads,
             "total_writes": total_writes,
+            "total_unknown_access": total_unknown_access,
             "coverage": {
                 "detected_languages": detected_languages,
                 "detected_mechanisms": detected_mechanisms,

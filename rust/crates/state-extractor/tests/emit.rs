@@ -291,6 +291,70 @@ fn read_write_binding_emits_both_edges_for_same_resource() {
     }
 }
 
+// ── Unknown binding: ONE ACCESSES edge, never READS/WRITES ───────
+
+/// HONESTY-GATE-2 family 1: a `direction = "unknown"` binding (the
+/// undetermined-mode case, e.g. POSIX `open()` with dynamic flags)
+/// emits EXACTLY ONE `ACCESSES` edge and NO `READS`/`WRITES` edge.
+/// The resource node still exists (the access is not lost); the
+/// evidence carries `direction: unknown`, so nothing downstream can
+/// count it as a reader or a writer.
+#[test]
+fn unknown_binding_emits_single_accesses_edge_never_reads_or_writes() {
+    // A dedicated one-entry table: an FS binding whose direction is
+    // undetermined. Mirrors the real c/cpp `open_unknown` binding.
+    let table = BindingTable::load_str(
+        r#"
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "open"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "unknown"
+basis         = "stdlib_api"
+"#,
+    )
+    .expect("unknown-direction table must parse");
+
+    let mut emitter = StateBoundaryEmitter::new(&table, context());
+    let cs = callsite_generic(
+        "sym-open",
+        "fs",
+        "open",
+        "/var/lib/data",
+        LogicalNameSource::NormalizedPath,
+        42,
+    );
+
+    // Exactly one edge emitted for the undetermined access.
+    assert_eq!(emitter.emit_for_callsite(&cs).unwrap(), 1);
+
+    let facts = emitter.drain();
+    // The resource node is still built — the access is not dropped.
+    assert_eq!(facts.nodes.len(), 1);
+    assert_eq!(facts.edges.len(), 1);
+
+    let edge = &facts.edges[0];
+    // The ONE edge is ACCESSES — never READS, never WRITES.
+    assert_eq!(edge.edge_type, EdgeType::Accesses);
+    assert_ne!(edge.edge_type, EdgeType::Reads);
+    assert_ne!(edge.edge_type, EdgeType::Writes);
+    // No READS/WRITES edge exists at all.
+    assert!(facts
+        .edges
+        .iter()
+        .all(|e| e.edge_type == EdgeType::Accesses));
+
+    // The evidence records the direction as `unknown`, not a guess.
+    let md = edge.metadata_json.as_ref().unwrap();
+    assert!(md.contains("\"direction\":\"unknown\""), "{md}");
+    assert!(
+        md.contains("\"binding_key\":\"typescript:fs:open:unknown\""),
+        "{md}"
+    );
+}
+
 // ── Dedup: two call sites touching the same resource ─────────────
 
 #[test]

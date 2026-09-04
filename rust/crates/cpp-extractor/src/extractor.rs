@@ -1355,7 +1355,8 @@ fn try_resolve_c_style_api(
             // fopen: use mode argument to determine direction.
             let mode = match &arg1_payload {
                 Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
-                _ => "", // Default to read if no mode
+                // Undetermined mode → empty → `unknown` (HONESTY-GATE-2 family 1).
+                _ => "",
             };
             format!("{}_{}", base_symbol, normalize_fopen_mode(mode))
         }
@@ -1363,7 +1364,8 @@ fn try_resolve_c_style_api(
             // open: use flags argument to determine direction.
             let flags = match &arg1_payload {
                 Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
-                _ => "", // Default to read_write if flags are dynamic
+                // Dynamic/undetermined flags → empty → `unknown` (HONESTY-GATE-2 family 1).
+                _ => "",
             };
             format!("{}_{}", base_symbol, normalize_open_flags(flags))
         }
@@ -1393,8 +1395,14 @@ fn try_resolve_stream_open(
     ctx: &ExtractionCtx,
 ) -> Option<ResolvedCallsite> {
     // Check if the field is "open".
+    // HONESTY-GATE-2 (review-3): no `.ok()?` collapse on the structural read that
+    // decides whether this is an access at all. An unreadable field name means we
+    // cannot classify the call → emit no row (return None), never a guessed access.
     let field = function_node.child_by_field_name("field")?;
-    let field_name = field.utf8_text(src).ok()?;
+    let field_name = match field.utf8_text(src) {
+        Ok(t) => t,
+        Err(_) => return None,
+    };
     if field_name != "open" {
         return None;
     }
@@ -1404,7 +1412,12 @@ fn try_resolve_stream_open(
     if argument.kind() != "identifier" {
         return None; // Not a simple identifier receiver (e.g., getStream().open())
     }
-    let receiver_name = argument.utf8_text(src).ok()?;
+    // Same policy: an unreadable receiver name cannot be matched in the local type
+    // map → no row, never a guessed stream type.
+    let receiver_name = match argument.utf8_text(src) {
+        Ok(t) => t,
+        Err(_) => return None,
+    };
 
     // Look up receiver in local type map.
     let stream_type = ctx.local_stream_types.get(receiver_name)?;
@@ -1427,7 +1440,12 @@ fn try_resolve_stream_open(
             if let Some(CallArgPayload::StringLiteral { value }) = arg1_payload.as_ref() {
                 normalize_ios_mode_to_fstream_symbol(value)
             } else {
-                stream_type.open_symbol().to_string() // Default read_write
+                // No explicit mode argument. C++ contract fixes the direction:
+                // std::basic_fstream::open's openmode defaults to
+                // ios_base::in | ios_base::out (read_write). Contract-fixed, so
+                // classified — not a guess (operator steering: stdlib DEFAULTS may
+                // stay classified where the API contract fixes direction).
+                stream_type.open_symbol().to_string()
             }
         }
     };
@@ -1475,6 +1493,9 @@ fn try_extract_stream_declaration(
                                 _ => stream_type.constructor_symbol().to_string(),
                             }
                         } else {
+                            // No explicit mode argument. Contract-fixed default
+                            // openmode per stream type (ifstream=in, ofstream=out,
+                            // fstream=in|out) — classified, not guessed.
                             stream_type.constructor_symbol().to_string()
                         };
 
@@ -1572,7 +1593,13 @@ fn extract_arg0_string_literal(
 
         if arg_index == 0 {
             if child.kind() == "string_literal" {
-                let text = child.utf8_text(src).ok()?;
+                // HONESTY-GATE-2 (review-2): no `.ok()?` collapse on a read
+                // feeding a rendered resource row. An unreadable path literal
+                // is NOT path evidence → emit no row (return None).
+                let text = match child.utf8_text(src) {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                };
                 let value = text.trim_matches('"').to_string();
                 return Some(CallArgPayload::StringLiteral { value });
             }
@@ -1595,13 +1622,23 @@ fn extract_arg1_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Cal
         }
 
         if arg_index == 1 {
+            // arg1 CLASSIFIES the access direction (fopen mode / open flags).
+            // HONESTY-GATE-2 (review-2): no `.ok()?` collapse — an unreadable
+            // mode is undetermined, so return None; the caller maps a missing
+            // arg1 to `unknown`, never a guessed direction.
             if child.kind() == "string_literal" {
-                let text = child.utf8_text(src).ok()?;
+                let text = match child.utf8_text(src) {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                };
                 let value = text.trim_matches('"').to_string();
                 return Some(CallArgPayload::StringLiteral { value });
             } else if child.kind() == "identifier" {
                 // For open(), flags are identifiers like O_RDONLY.
-                let value = child.utf8_text(src).ok()?.to_string();
+                let value = match child.utf8_text(src) {
+                    Ok(t) => t.to_string(),
+                    Err(_) => return None,
+                };
                 return Some(CallArgPayload::StringLiteral { value });
             }
             return None;
@@ -1624,7 +1661,13 @@ fn extract_arg1_ios_mode(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Ca
 
         if arg_index == 1 {
             // Capture the entire expression text for mode parsing.
-            let text = child.utf8_text(src).ok()?.to_string();
+            // HONESTY-GATE-2 (review-2): no `.ok()?` collapse — an unreadable
+            // mode expression is undetermined (return None), never silently
+            // decoded.
+            let text = match child.utf8_text(src) {
+                Ok(t) => t.to_string(),
+                Err(_) => return None,
+            };
             return Some(CallArgPayload::StringLiteral { value: text });
         }
         arg_index += 1;
@@ -1633,57 +1676,148 @@ fn extract_arg1_ios_mode(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Ca
 }
 
 /// Normalize fopen mode string to direction suffix.
+///
+/// Recognizes ONLY well-formed C `fopen` mode strings: the FIRST character
+/// must be a base mode (`r`/`w`/`a`) and every trailing character must be a
+/// recognized mode flag (`+`, `b`, `x`, or the glibc extensions
+/// `e`/`m`/`c`/`l`). Direction: `'+'` → `read_write`; else `r` → `read`,
+/// `w`/`a` → `write`.
+///
+/// HONESTY-GATE-2 family 1: an undetermined mode (missing, dynamic, a
+/// non-mode token such as `"q+"` or `"r_not_a_mode"`, or a malformed form
+/// that REPEATS a mode-flag character such as `"r++"` / `"rbb"`) is
+/// `unknown`, NOT a guessed direction. A `'+'` is honored only inside an
+/// otherwise valid mode string — never as a bare or repeated substring
+/// match (review-2).
 fn normalize_fopen_mode(mode: &str) -> &'static str {
-    let mode_normalized: String = mode.chars().filter(|c| *c != 'b').collect();
-
-    if mode_normalized.contains('+') {
+    let mut chars = mode.chars();
+    let base = match chars.next() {
+        Some(c @ ('r' | 'w' | 'a')) => c,
+        _ => return "unknown",
+    };
+    // Each recognized trailing mode-flag character appears at most once in a
+    // well-formed fopen mode; a repetition is malformed → `unknown`.
+    let mut has_plus = false;
+    let (mut seen_b, mut seen_x, mut seen_e, mut seen_m, mut seen_c, mut seen_l) =
+        (false, false, false, false, false, false);
+    for c in chars {
+        let seen = match c {
+            '+' => &mut has_plus,
+            'b' => &mut seen_b,
+            'x' => &mut seen_x,
+            'e' => &mut seen_e,
+            'm' => &mut seen_m,
+            'c' => &mut seen_c,
+            'l' => &mut seen_l,
+            _ => return "unknown",
+        };
+        if *seen {
+            return "unknown";
+        }
+        *seen = true;
+    }
+    if has_plus {
         "read_write"
-    } else if mode_normalized.starts_with('r') || mode_normalized.is_empty() {
+    } else if base == 'r' {
         "read"
-    } else if mode_normalized.starts_with('w')
-        || mode_normalized.starts_with('a')
-        || mode_normalized.starts_with('x')
-    {
-        "write"
     } else {
-        "read"
+        "write"
     }
 }
 
-/// Normalize open() flags identifier to direction suffix.
+/// Normalize an `open()` flags identifier to a direction suffix.
+///
+/// HONESTY-GATE-2 family 1: undetermined flags are `unknown`, NOT a
+/// guessed `read_write` (the default that fabricated hadoop's phantom
+/// writers). Matches the EXACT access-mode flag identifier only — a
+/// substring match would misclassify a near-match such as
+/// `O_RDONLY_ALIAS` (STANDING RULE 2: never classify from a name
+/// fragment). `read_write` is emitted only for an explicit `O_RDWR`.
 fn normalize_open_flags(flags: &str) -> &'static str {
-    if flags.contains("O_RDONLY") {
-        "read"
-    } else if flags.contains("O_WRONLY") {
-        "write"
-    } else {
-        // O_RDWR or unknown flags → conservative read_write default.
-        "read_write"
+    match flags {
+        "O_RDONLY" => "read",
+        "O_WRONLY" => "write",
+        "O_RDWR" => "read_write",
+        _ => "unknown",
     }
 }
 
-/// Normalize std::ios mode flags to fstream symbol.
+/// A recognized `std::ios` open-mode flag token, classified by the direction
+/// it contributes. Fixed variant set, single operation (fold into a symbol) →
+/// sum type + exhaustive match. Sole caller: `normalize_ios_mode_to_fstream_symbol`.
+/// Rejected alternative: an `Option<bool>` tuple — it cannot distinguish a
+/// recognized-but-direction-less modifier from an unrecognized token, which is
+/// exactly the distinction the honesty invariant turns on.
+enum IosFlag {
+    /// `std::ios::in` — contributes read.
+    In,
+    /// `std::ios::out` / `app` / `trunc` — contributes write.
+    Out,
+    /// `std::ios::binary` / `ate` — recognized, carries NO direction.
+    Modifier,
+    /// Anything else: a dynamic variable, a typo, an unknown constant, or a
+    /// near-name token (`std::ios::in_alias`). Makes the mode undetermined.
+    Unrecognized,
+}
+
+/// Classify a single trimmed `std::ios` mode token by EXACT match.
+///
+/// HONESTY-GATE-2 (review-3): the previous `mode_text.contains("::in")` also
+/// matched near-name tokens such as `std::ios::in_alias`. Exact matching on the
+/// enumerated flag spellings rejects those.
+fn classify_ios_flag(token: &str) -> IosFlag {
+    match token {
+        "std::ios::in" | "ios::in" | "std::ios_base::in" | "ios_base::in" => IosFlag::In,
+        "std::ios::out"
+        | "ios::out"
+        | "std::ios_base::out"
+        | "ios_base::out"
+        | "std::ios::app"
+        | "ios::app"
+        | "std::ios_base::app"
+        | "ios_base::app"
+        | "std::ios::trunc"
+        | "ios::trunc"
+        | "std::ios_base::trunc"
+        | "ios_base::trunc" => IosFlag::Out,
+        "std::ios::binary"
+        | "ios::binary"
+        | "std::ios_base::binary"
+        | "ios_base::binary"
+        | "std::ios::ate"
+        | "ios::ate"
+        | "std::ios_base::ate"
+        | "ios_base::ate" => IosFlag::Modifier,
+        _ => IosFlag::Unrecognized,
+    }
+}
+
+/// Normalize an explicit `std::ios` open-mode expression to an fstream direction
+/// symbol. The expression is a `|`-separated list of flag tokens.
+///
+/// HONESTY-GATE-2 family 1 (review-3): a token that is not a recognized flag
+/// (a dynamic variable, a typo, a near-name spelling) makes the whole mode
+/// undetermined → `fstream_unknown` (binding direction `unknown`), NEVER a
+/// guessed `read_write`. A mode composed ONLY of direction-less modifiers
+/// (`binary`/`ate`) is likewise direction-undetermined → `fstream_unknown`.
+/// This function is only reached when an EXPLICIT mode argument is present; the
+/// no-argument default (contract-fixed `in|out`) is handled by the caller.
 fn normalize_ios_mode_to_fstream_symbol(mode_text: &str) -> String {
-    // Pattern matching on mode expression text.
-    // std::ios::in → read
-    // std::ios::out → write
-    // std::ios::in | std::ios::out → read_write
-    // std::ios::app, std::ios::trunc → write
-
-    let has_in = mode_text.contains("::in") || mode_text.contains("ios_base::in");
-    let has_out = mode_text.contains("::out")
-        || mode_text.contains("ios_base::out")
-        || mode_text.contains("::app")
-        || mode_text.contains("::trunc");
-
-    if has_in && has_out {
-        "fstream".to_string() // read_write
-    } else if has_in {
-        "fstream_read".to_string()
-    } else if has_out {
-        "fstream_write".to_string()
-    } else {
-        "fstream".to_string() // Default read_write
+    let mut has_in = false;
+    let mut has_out = false;
+    for raw in mode_text.split('|') {
+        match classify_ios_flag(raw.trim()) {
+            IosFlag::In => has_in = true,
+            IosFlag::Out => has_out = true,
+            IosFlag::Modifier => {}
+            IosFlag::Unrecognized => return "fstream_unknown".to_string(),
+        }
+    }
+    match (has_in, has_out) {
+        (true, true) => "fstream".to_string(),           // read_write
+        (true, false) => "fstream_read".to_string(),     // read
+        (false, true) => "fstream_write".to_string(),    // write
+        (false, false) => "fstream_unknown".to_string(), // modifiers only / empty
     }
 }
 
@@ -2037,6 +2171,97 @@ void read_device() {
     }
 
     #[test]
+    fn open_dynamic_flags_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 family 1: undetermined flags → open_unknown, NOT the
+        // old guessed open_read_write.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fcntl.h>
+
+void open_it(int fl) {
+    int fd = open("/dev/thing", fl);
+    if (fd >= 0) close(fd);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/dyn.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_unknown");
+    }
+
+    #[test]
+    fn fopen_invalid_plus_mode_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 family 1 (review-1): a literal that is NOT a valid
+        // fopen mode but merely contains '+' (e.g. "q+") must NOT be guessed
+        // as read_write via a substring match → fopen_unknown.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <cstdio>
+
+void weird() {
+    FILE* f = fopen("/etc/config.txt", "q+");
+    if (f) fclose(f);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/weird.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "fopen_unknown"
+        );
+    }
+
+    #[test]
+    fn fopen_repeated_flag_mode_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 family 1 (review-2): a malformed mode that merely
+        // REPEATS a recognized flag character (e.g. "r++") is not a mode any
+        // real fopen accepts. It must NOT collapse to read_write via a
+        // has_plus latch — a repeated flag → fopen_unknown.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <cstdio>
+
+void weird() {
+    FILE* f = fopen("/etc/config.txt", "r++");
+    if (f) fclose(f);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/weird.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "fopen_unknown"
+        );
+    }
+
+    #[test]
+    fn open_near_match_flag_identifier_emits_unknown_not_read() {
+        // HONESTY-GATE-2 family 1 (review-1): a near-match identifier that
+        // merely CONTAINS an O_* fragment (e.g. O_RDONLY_ALIAS) must NOT be
+        // classified from that fragment (STANDING RULE 2). Exact-match only
+        // → open_unknown.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fcntl.h>
+
+void read_device() {
+    int fd = open("/dev/input0", O_RDONLY_ALIAS);
+    if (fd >= 0) close(fd);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/device.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_unknown");
+    }
+
+    #[test]
     fn ifstream_constructor_emits_resolved_callsite() {
         let mut ext = CppExtractor::new();
         ext.initialize().unwrap();
@@ -2097,6 +2322,108 @@ void read_binary() {
         let cs = &result.resolved_callsites[0];
         assert_eq!(cs.resolved_module, "std:fstream");
         assert_eq!(cs.resolved_symbol, "fstream_read");
+    }
+
+    #[test]
+    fn fstream_in_and_out_mode_emits_read_write() {
+        // Sanity: a well-formed in|out explicit mode still classifies read_write.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+void rw() {
+    std::fstream data("/data/file.bin", std::ios::in | std::ios::out);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/rw.cpp");
+        assert_eq!(result.resolved_callsites.len(), 1);
+        // "fstream" symbol binds to direction read_write.
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "fstream");
+    }
+
+    #[test]
+    fn fstream_dynamic_mode_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 (review-3): an explicit mode that is a dynamic variable
+        // (not a recognized std::ios flag) is undetermined → fstream_unknown,
+        // never the old read_write default.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+void open_dyn(std::ios::openmode m) {
+    std::fstream data("/data/file.bin", m);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/dyn.cpp");
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol, "fstream_unknown",
+            "dynamic std::fstream mode must render unknown, not read_write"
+        );
+    }
+
+    #[test]
+    fn fstream_near_name_ios_token_emits_unknown_not_read() {
+        // HONESTY-GATE-2 (review-3): a near-name token (`std::ios::in_alias`) must
+        // NOT match `::in` by substring. Unrecognized token → fstream_unknown.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+void open_near() {
+    std::fstream data("/data/file.bin", std::ios::in_alias);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/near.cpp");
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol, "fstream_unknown",
+            "near-name ios token must not be read-classified"
+        );
+    }
+
+    #[test]
+    fn fstream_modifier_only_mode_emits_unknown() {
+        // A mode composed only of direction-less modifiers (binary) is
+        // direction-undetermined → fstream_unknown.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+void open_bin() {
+    std::fstream data("/data/file.bin", std::ios::binary);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/bin.cpp");
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol, "fstream_unknown",
+            "modifier-only mode carries no direction"
+        );
+    }
+
+    #[test]
+    fn literal_in_non_access_position_produces_no_callsite() {
+        // HONESTY-GATE-2 spec §2.1 (review-3): a string literal that is NOT arg0
+        // of the access call — here it is an argument to a path-join helper whose
+        // result is passed to fopen — is NOT path evidence. arg0 is a call
+        // expression, not a string literal → no resource callsite.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <cstdio>
+extern char* join(const char*, const char*);
+void read_joined() {
+    FILE* f = fopen(join("dir", "file.txt"), "r");
+    if (f) fclose(f);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/joined.cpp");
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "literal inside a path-join argument is not access-position evidence: {:?}",
+            result.resolved_callsites
+        );
     }
 
     #[test]

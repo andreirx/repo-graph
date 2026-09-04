@@ -12,7 +12,7 @@
 //!   - `resource_kind` is one of {db, fs, cache, blob} (the
 //!     `config` value is reserved for the future config/env seam
 //!     slice and is rejected here per contract §9.2)
-//!   - `direction` is one of {read, write, read_write}
+//!   - `direction` is one of {read, write, read_write, unknown}
 //!   - `basis` is one of {stdlib_api, sdk_call}
 //!   - `language` is one of {rust, typescript, python, java, cpp}
 //!   - optional `notes` is at most 200 characters
@@ -109,8 +109,19 @@ impl ResourceKind {
 /// Read / write direction of a binding.
 ///
 /// `read_write` is the honest representation for generic entry
-/// points (e.g. `db.query(sql)`) where slice 1 does not parse the
-/// SQL to determine direction.
+/// points (e.g. `db.query(sql)`) where the access provably touches
+/// both directions (an atomic upsert, a bidirectional `std::fstream`,
+/// a generic `query()`).
+///
+/// `unknown` (HONESTY-GATE-2, family 1) is the honest representation
+/// when the detector CANNOT determine the direction at all —
+/// e.g. a POSIX `open(path, flags)` whose `flags` argument is a
+/// dynamic expression the extractor cannot read. It is DISTINCT from
+/// `read_write`: `read_write` asserts "both", `unknown` asserts
+/// "neither claim is evidenced". Defaulting an undetermined mode to
+/// `read_write` (or `read`) is a guess that manufactured phantom
+/// readers/writers on the corpus; `unknown` refuses that guess and
+/// renders as "access (mode unknown)".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -126,6 +137,11 @@ pub enum Direction {
     /// Emits BOTH `READS` and `WRITES` edges at the same call
     /// site (contract §3.2).
     ReadWrite,
+    /// The access direction could NOT be determined from the
+    /// evidence the detector has (HONESTY-GATE-2 family 1). Emits a
+    /// single `ACCESSES` edge (mode undetermined) — never a guessed
+    /// `READS`/`WRITES`. Renders as "access (mode unknown)".
+    Unknown,
 }
 
 impl Direction {
@@ -135,6 +151,7 @@ impl Direction {
             Direction::Read => "read",
             Direction::Write => "write",
             Direction::ReadWrite => "read_write",
+            Direction::Unknown => "unknown",
         }
     }
 }

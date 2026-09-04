@@ -2068,9 +2068,16 @@ fn resolve_callee_via_imports(
     source: &[u8],
     import_bindings: &[ImportBinding],
 ) -> Option<(String, String)> {
+    // HONESTY-GATE-2 (operator steering, review-3): no `.ok()?` collapse on the
+    // reads that establish callee identity. An unreadable callee cannot be
+    // resolved to a (module, symbol) → return None → no resource row, never a
+    // guessed resolution.
     match fn_node.kind() {
         "identifier" => {
-            let ident = fn_node.utf8_text(source).ok()?.to_string();
+            let ident = match fn_node.utf8_text(source) {
+                Ok(t) => t.to_string(),
+                Err(_) => return None,
+            };
             // Look up a named-import binding whose local
             // identifier matches. Only named imports resolve
             // this way (they have imported_name populated);
@@ -2098,8 +2105,14 @@ fn resolve_callee_via_imports(
             if object.kind() != "identifier" {
                 return None;
             }
-            let obj_text = object.utf8_text(source).ok()?.to_string();
-            let prop_text = property.utf8_text(source).ok()?.to_string();
+            let obj_text = match object.utf8_text(source) {
+                Ok(t) => t.to_string(),
+                Err(_) => return None,
+            };
+            let prop_text = match property.utf8_text(source) {
+                Ok(t) => t.to_string(),
+                Err(_) => return None,
+            };
             // The binding must be a default or namespace
             // import (imported_name = None). A named import
             // called via member access (`named.method()`)
@@ -2137,12 +2150,18 @@ fn classify_arg0_payload(call_node: &tree_sitter::Node, source: &[u8]) -> Option
         }
     }
     let arg0 = arg0?;
+    // HONESTY-GATE-2 (operator steering, review-3): no `.ok()?` collapse on the
+    // reads that classify the arg-0 payload (the path/env evidence a resource row
+    // rests on). An unreadable payload is not evidence → return None → no row.
     match arg0.kind() {
         "string" => {
             // tree-sitter's string node wraps quoted content.
             // Strip outer quotes by reading string_fragment if
             // present, else fall back to slicing the literal.
-            let literal_text = arg0.utf8_text(source).ok()?;
+            let literal_text = match arg0.utf8_text(source) {
+                Ok(t) => t,
+                Err(_) => return None,
+            };
             let stripped = literal_text
                 .trim_matches(|c| c == '\'' || c == '"' || c == '`')
                 .to_string();
@@ -2158,13 +2177,24 @@ fn classify_arg0_payload(call_node: &tree_sitter::Node, source: &[u8]) -> Option
             }
             let inner_object = object.child_by_field_name("object")?;
             let inner_property = object.child_by_field_name("property")?;
-            if inner_object.utf8_text(source).ok()? != "process" {
+            let inner_obj_text = match inner_object.utf8_text(source) {
+                Ok(t) => t,
+                Err(_) => return None,
+            };
+            if inner_obj_text != "process" {
                 return None;
             }
-            if inner_property.utf8_text(source).ok()? != "env" {
+            let inner_prop_text = match inner_property.utf8_text(source) {
+                Ok(t) => t,
+                Err(_) => return None,
+            };
+            if inner_prop_text != "env" {
                 return None;
             }
-            let key_name = property.utf8_text(source).ok()?.to_string();
+            let key_name = match property.utf8_text(source) {
+                Ok(t) => t.to_string(),
+                Err(_) => return None,
+            };
             Some(CallArgPayload::EnvKeyRead { key_name })
         }
         _ => None,
@@ -3387,6 +3417,64 @@ export function load() {
             }
             other => panic!("expected StringLiteral, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn literal_in_path_join_position_produces_no_resource_payload() {
+        // HONESTY-GATE-2 spec §2.1 (review-3): a string literal that is an
+        // argument to a path-join helper (not arg0 of the access call) is NOT
+        // path evidence. arg0 is a call_expression → classify_arg0_payload
+        // returns None → no resolved_callsite → no resource row.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"
+import { readFile } from "fs";
+import { join } from "path";
+export function load() {
+  readFile(join("dir", "config"), () => {});
+}
+"#,
+            "src/load.ts",
+        );
+        // The `join(...)` call itself is not an fs access binding, and the fs
+        // `readFile` call's arg0 is not a literal → no access-position evidence.
+        assert!(
+            result
+                .resolved_callsites
+                .iter()
+                .all(|rc| rc.resolved_symbol != "readFile"),
+            "literal inside a path-join argument is not access-position evidence: {:?}",
+            result.resolved_callsites
+        );
+    }
+
+    #[test]
+    fn literal_in_array_element_position_produces_no_resource_payload() {
+        // A string literal that is an array element, reached via subscript at the
+        // access call, is not a literal in arg0 position → no resource payload.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"
+import { readFile } from "fs";
+const paths = ["/etc/config", "/etc/other"];
+export function load() {
+  readFile(paths[0], () => {});
+}
+"#,
+            "src/load.ts",
+        );
+        assert!(
+            result
+                .resolved_callsites
+                .iter()
+                .all(|rc| rc.resolved_symbol != "readFile"),
+            "literal as an array element is not access-position evidence: {:?}",
+            result.resolved_callsites
+        );
     }
 
     #[test]

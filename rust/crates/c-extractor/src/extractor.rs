@@ -599,7 +599,9 @@ fn try_resolve_callsite_c(
             // fopen: use mode argument to determine direction.
             let mode = match &arg1_payload {
                 Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
-                _ => "", // Default to read if no mode
+                // No/undetermined mode → empty → normalize to `unknown`
+                // (HONESTY-GATE-2 family 1: never a guessed `read`).
+                _ => "",
             };
             format!("{}_{}", base_symbol, normalize_fopen_mode(mode))
         }
@@ -607,7 +609,10 @@ fn try_resolve_callsite_c(
             // open: use flags argument to determine direction.
             let flags = match &arg1_payload {
                 Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
-                _ => "", // Default to read_write if flags are dynamic
+                // Dynamic/undetermined flags → empty → normalize to
+                // `unknown` (HONESTY-GATE-2 family 1: never a guessed
+                // `read_write`).
+                _ => "",
             };
             format!("{}_{}", base_symbol, normalize_open_flags(flags))
         }
@@ -646,7 +651,14 @@ fn extract_arg0_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Cal
         if arg_index == 0 {
             // This is arg0.
             if child.kind() == "string_literal" {
-                let text = child.utf8_text(src).ok()?;
+                // HONESTY-GATE-2 (review-2): no `.ok()?` collapse on a read
+                // that feeds a rendered resource row. An unreadable path
+                // literal is NOT evidence of a path → emit no row (return
+                // None), never a fabricated/empty path.
+                let text = match child.utf8_text(src) {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                };
                 // Strip quotes. C string literals are "..."
                 let value = text.trim_matches('"').to_string();
                 return Some(CallArgPayload::StringLiteral { value });
@@ -675,16 +687,26 @@ fn extract_arg1_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Cal
         }
 
         if arg_index == 1 {
-            // This is arg1.
+            // This is arg1 (the fopen mode / open flags that CLASSIFY the
+            // access direction). HONESTY-GATE-2 (review-2): no `.ok()?`
+            // collapse — an unreadable mode is undetermined, so return None;
+            // the caller maps a missing arg1 to `unknown`, never a guessed
+            // direction.
             if child.kind() == "string_literal" {
-                let text = child.utf8_text(src).ok()?;
+                let text = match child.utf8_text(src) {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                };
                 let value = text.trim_matches('"').to_string();
                 return Some(CallArgPayload::StringLiteral { value });
             } else if child.kind() == "identifier" {
                 // For open(), flags are often identifiers like O_RDONLY.
                 // We capture the identifier name as a string literal for
                 // pattern matching in normalize_open_flags.
-                let value = child.utf8_text(src).ok()?.to_string();
+                let value = match child.utf8_text(src) {
+                    Ok(t) => t.to_string(),
+                    Err(_) => return None,
+                };
                 return Some(CallArgPayload::StringLiteral { value });
             }
             // Dynamic arg1 — return None.
@@ -697,46 +719,88 @@ fn extract_arg1_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Cal
 
 /// Normalize fopen mode string to direction suffix.
 ///
-/// Mode interpretation (matches Python adapter):
-/// - `'r'`, `'rb'` → `read`
-/// - `'w'`, `'wb'`, `'a'`, `'ab'`, `'x'`, `'xb'` → `write`
-/// - Contains `'+'` → `read_write`
-/// - Missing or unknown → `read` (C default)
+/// Recognizes ONLY well-formed C `fopen` mode strings, and derives the
+/// direction from their structure:
+/// - base mode `'r'` → `read`; `'w'` / `'a'` → `write`
+/// - any `'+'` update flag → `read_write`
+/// - trailing mode characters `b` (binary), `x` (C11 exclusive), and the
+///   glibc extensions `e`/`m`/`c`/`l` are permitted but do not change the
+///   direction.
+///
+/// HONESTY-GATE-2 family 1: an undetermined mode is `unknown`, NOT a
+/// guessed direction. Any string whose FIRST character is not `r`/`w`/`a`,
+/// that carries a character outside the recognized mode-flag set (a
+/// dynamic identifier, a typo, an unexpected token — e.g. `"q+"` or
+/// `"r_not_a_mode"`), or that REPEATS a mode-flag character (a malformed
+/// form such as `"r++"` or `"rbb"` that no real `fopen` accepts) is NOT a
+/// mode string we can interpret, so the direction is `unknown`. A `'+'` is
+/// honored only inside an otherwise valid mode string — never as a bare or
+/// repeated substring match (review-2).
 fn normalize_fopen_mode(mode: &str) -> &'static str {
-    // Strip 'b' (binary mode indicator).
-    let mode_normalized: String = mode.chars().filter(|c| *c != 'b').collect();
-
-    if mode_normalized.contains('+') {
+    let mut chars = mode.chars();
+    let base = match chars.next() {
+        Some(c @ ('r' | 'w' | 'a')) => c,
+        // Missing mode, or a first character that is not a base mode → the
+        // string is not a recognized fopen mode.
+        _ => return "unknown",
+    };
+    // Each recognized trailing mode-flag character appears at most once in a
+    // well-formed fopen mode; a repetition is malformed → `unknown`.
+    let mut has_plus = false;
+    let (mut seen_b, mut seen_x, mut seen_e, mut seen_m, mut seen_c, mut seen_l) =
+        (false, false, false, false, false, false);
+    for c in chars {
+        let seen = match c {
+            '+' => &mut has_plus,
+            'b' => &mut seen_b,
+            'x' => &mut seen_x,
+            'e' => &mut seen_e,
+            'm' => &mut seen_m,
+            'c' => &mut seen_c,
+            'l' => &mut seen_l,
+            // Anything outside the recognized mode-flag set → not a mode.
+            _ => return "unknown",
+        };
+        if *seen {
+            // Repeated flag character → malformed mode → `unknown`.
+            return "unknown";
+        }
+        *seen = true;
+    }
+    if has_plus {
         "read_write"
-    } else if mode_normalized.starts_with('r') || mode_normalized.is_empty() {
+    } else if base == 'r' {
         "read"
-    } else if mode_normalized.starts_with('w')
-        || mode_normalized.starts_with('a')
-        || mode_normalized.starts_with('x')
-    {
-        "write"
     } else {
-        "read" // Unknown mode, default to read.
+        // base is 'w' or 'a'
+        "write"
     }
 }
 
-/// Normalize open() flags identifier to direction suffix.
+/// Normalize an `open()` flags identifier to a direction suffix.
 ///
-/// Flag pattern matching:
+/// Matches ONLY the exact access-mode flag identifier:
 /// - `O_RDONLY` → `read`
 /// - `O_WRONLY` → `write`
 /// - `O_RDWR` → `read_write`
-/// - Unknown/dynamic → `read_write` (conservative default)
+/// - anything else (absent, dynamic, or a near-match such as
+///   `O_RDONLY_ALIAS`) → `unknown`
+///
+/// HONESTY-GATE-2 family 1: undetermined flags are `unknown`, NOT a
+/// guessed `read_write`. The old `read_write` default fabricated
+/// hadoop's phantom writers (and 5 of its 6 phantom readers). A
+/// substring match would misclassify an unrelated identifier that merely
+/// contains an `O_*` fragment — STANDING RULE 2: never classify from a
+/// name fragment. Only bare single-identifier flags reach this function
+/// (`O_WRONLY|O_CREAT` combinations arrive as a non-identifier arg1 and
+/// are already treated as undetermined upstream).
 fn normalize_open_flags(flags: &str) -> &'static str {
-    if flags.contains("O_RDONLY") {
-        "read"
-    } else if flags.contains("O_WRONLY") {
-        "write"
-    } else if flags.contains("O_RDWR") {
-        "read_write"
-    } else {
-        // Unknown flags, conservative default.
-        "read_write"
+    match flags {
+        "O_RDONLY" => "read",
+        "O_WRONLY" => "write",
+        "O_RDWR" => "read_write",
+        // Flags absent or not an exact recognized O_* token → undetermined.
+        _ => "unknown",
     }
 }
 
@@ -1262,6 +1326,101 @@ static void helper() {}
             result.resolved_callsites[0].resolved_symbol,
             "open_read_write"
         );
+    }
+
+    #[test]
+    fn open_dynamic_flags_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 family 1: undetermined flags → open_unknown, NOT the
+        // old guessed open_read_write (which fabricated phantom writers/readers).
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo(int fl) { int fd = open("data.bin", fl); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_unknown");
+    }
+
+    #[test]
+    fn fopen_dynamic_mode_emits_unknown_not_read() {
+        // HONESTY-GATE-2 family 1: a dynamic mode variable → fopen_unknown,
+        // NOT the old guessed fopen_read.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo(char* m) { FILE* f = fopen("config.txt", m); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "fopen_unknown"
+        );
+    }
+
+    #[test]
+    fn fopen_invalid_plus_mode_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 family 1 (review-1): a literal that is NOT a valid
+        // fopen mode but merely contains '+' (e.g. "q+") must NOT be guessed
+        // as read_write via a substring match. Its first char is not a base
+        // mode → fopen_unknown.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("config.txt", "q+"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "fopen_unknown"
+        );
+    }
+
+    #[test]
+    fn fopen_repeated_flag_mode_emits_unknown_not_read_write() {
+        // HONESTY-GATE-2 family 1 (review-2): a malformed mode that merely
+        // REPEATS a recognized flag character (e.g. "r++") is not a mode any
+        // real fopen accepts. It must NOT collapse to read_write via a
+        // has_plus latch — a repeated flag → fopen_unknown.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("config.txt", "r++"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "fopen_unknown"
+        );
+    }
+
+    #[test]
+    fn open_near_match_flag_identifier_emits_unknown_not_read() {
+        // HONESTY-GATE-2 family 1 (review-1): a near-match identifier that
+        // merely CONTAINS an O_* fragment (e.g. O_RDONLY_ALIAS) must NOT be
+        // classified from that fragment (STANDING RULE 2). Exact-match only
+        // → open_unknown.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { int fd = open("data.bin", O_RDONLY_ALIAS); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_unknown");
     }
 
     #[test]

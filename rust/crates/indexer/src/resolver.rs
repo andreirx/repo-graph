@@ -323,8 +323,9 @@ fn resolve_target(
         // symbol name. Try stable-key lookup first; fall back to
         // name resolution for any non-state-boundary READS/WRITES
         // edges that may use symbol names as target_key in the
-        // future.
-        EdgeType::Reads | EdgeType::Writes => {
+        // future. `ACCESSES` (HONESTY-GATE-2 family 1) is the same
+        // state-boundary shape with an undetermined direction.
+        EdgeType::Reads | EdgeType::Writes | EdgeType::Accesses => {
             if let Some(node) = index.nodes_by_stable_key.get(&edge.target_key) {
                 TargetResolution::Resolved(node.node_uid.clone())
             } else {
@@ -335,7 +336,26 @@ fn resolve_target(
                 ))
             }
         }
-        _ => option_to_resolution(resolve_named_target(
+        // Remaining edge types resolve by unfiltered name lookup
+        // (their affinity filter is the identity — see the matching
+        // enumerated arm in `filter_by_edge_affinity`). Enumerated
+        // EXHAUSTIVELY (no `_` arm) so that adding a future
+        // `EdgeType` variant is a compile error HERE, forcing a
+        // deliberate resolution-policy decision for it rather than
+        // silently defaulting to name lookup (exhaustive-domain-sum
+        // rule; the resolver dispatches on a fixed variant set).
+        EdgeType::Emits
+        | EdgeType::Consumes
+        | EdgeType::RoutesTo
+        | EdgeType::RegisteredBy
+        | EdgeType::GatedBy
+        | EdgeType::DependsOn
+        | EdgeType::Owns
+        | EdgeType::TestedBy
+        | EdgeType::Covers
+        | EdgeType::Throws
+        | EdgeType::Catches
+        | EdgeType::TransitionsTo => option_to_resolution(resolve_named_target(
             &edge.target_key,
             &index.nodes_by_name,
             edge.edge_type,
@@ -634,7 +654,29 @@ pub fn filter_by_edge_affinity(
             .iter()
             .filter(|n| !is_type_only_subtype(n.subtype.as_deref()))
             .collect(),
-        _ => candidates.iter().collect(),
+        // All remaining edge types apply the identity affinity filter (no
+        // declaration-space narrowing). Enumerated EXHAUSTIVELY (no `_`
+        // arm) so that adding a future `EdgeType` variant is a compile
+        // error HERE, forcing a deliberate affinity decision rather than
+        // silently inheriting the identity filter (exhaustive-domain-sum
+        // rule). `Accesses` (HONESTY-GATE-2 family 1) joins the
+        // state-boundary edges here.
+        EdgeType::Imports
+        | EdgeType::Reads
+        | EdgeType::Writes
+        | EdgeType::Accesses
+        | EdgeType::Emits
+        | EdgeType::Consumes
+        | EdgeType::RoutesTo
+        | EdgeType::RegisteredBy
+        | EdgeType::GatedBy
+        | EdgeType::DependsOn
+        | EdgeType::Owns
+        | EdgeType::TestedBy
+        | EdgeType::Covers
+        | EdgeType::Throws
+        | EdgeType::Catches
+        | EdgeType::TransitionsTo => candidates.iter().collect(),
     }
 }
 
@@ -654,7 +696,28 @@ pub fn categorize_unresolved_edge(
         EdgeType::Instantiates => UnresolvedEdgeCategory::InstantiatesClassNotFound,
         EdgeType::Implements => UnresolvedEdgeCategory::ImplementsInterfaceNotFound,
         EdgeType::Calls => categorize_unresolved_call(edge),
-        _ => UnresolvedEdgeCategory::Other,
+        // All remaining edge types have no dedicated failure category yet
+        // and fall to `Other`. Enumerated EXHAUSTIVELY (no `_` arm) so that
+        // adding a future `EdgeType` variant is a compile error HERE,
+        // forcing a deliberate categorization decision rather than silently
+        // defaulting to `Other` (exhaustive-domain-sum rule). `Accesses`
+        // (HONESTY-GATE-2 family 1) categorizes as `Other` like the other
+        // state-boundary edges.
+        EdgeType::Reads
+        | EdgeType::Writes
+        | EdgeType::Accesses
+        | EdgeType::Emits
+        | EdgeType::Consumes
+        | EdgeType::RoutesTo
+        | EdgeType::RegisteredBy
+        | EdgeType::GatedBy
+        | EdgeType::DependsOn
+        | EdgeType::Owns
+        | EdgeType::TestedBy
+        | EdgeType::Covers
+        | EdgeType::Throws
+        | EdgeType::Catches
+        | EdgeType::TransitionsTo => UnresolvedEdgeCategory::Other,
     }
 }
 

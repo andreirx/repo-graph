@@ -279,6 +279,15 @@ fallback renders seed candidates via the pre-SEED-CHUNK-1 DTO shape, printing
 "(malformed candidate: missing file/stable_key/score/model_id/source)" ×N in user output.
 Probe corrections: `--text` regex alternation WORKS (201 hits) — the initial "no
 alternation" claim was an operator quoting error.
+SHIPPED: HONESTY-GATE-2 (2026-09-04): resources — `Direction::Unknown` → ACCESSES edge,
+stored/counted separately, rendered "access (mode unknown)"; C/C++ fopen/fstream modes
+accept only demonstrated-valid forms (dynamic, malformed `"r++"`, near-name tokens →
+unknown); `.ok()?` collapses swept from the classified-read paths of three extractors;
+trust's Next.js detection requires app-router convention AND `next.config.*`, basis
+rendered (name-only → honest abstention); map JDK-collision edges DEFERRED to
+JAVA-RESOLVER-IDENTITY-1 by ruling. The audit's vscode `.env` fabrication claim was
+RETRACTED mid-slice (four literal sites exist — product right, grader wrong). 6 cycles,
+closed-list steering converged it. Gates ALL GREEN.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

@@ -23,6 +23,10 @@
 //! - Binding direction `read_write` → TWO edges (one `READS`, one
 //!   `WRITES`). Each carries its own evidence blob whose
 //!   `direction` field matches that edge's actual direction.
+//! - Binding direction `unknown` → ONE `ACCESSES` edge (HONESTY-GATE-2
+//!   family 1). The direction could not be determined, so no `READS`/
+//!   `WRITES` claim is evidenced; the evidence blob's `direction` is
+//!   `unknown` and the resource renders "access (mode unknown)".
 //!
 //! - `Resolution::Static`   when the logical name is literal
 //!   (`literal_identifier`, `normalized_path`, `normalized_url`).
@@ -367,6 +371,25 @@ impl<'t> StateBoundaryEmitter<'t> {
                     binding_notes,
                 );
                 2
+            }
+            Direction::Unknown => {
+                // HONESTY-GATE-2 family 1: the access direction could not
+                // be determined (e.g. POSIX `open()` with dynamic flags).
+                // Emit ONE `ACCESSES` edge with `Direction::Unknown` in its
+                // evidence — never a guessed `READS`/`WRITES`. The resource
+                // node still exists (built above), so the access is not lost;
+                // it renders as "access (mode unknown)".
+                self.emit_edge(
+                    callsite,
+                    &target_key,
+                    EdgeType::Accesses,
+                    resolution,
+                    Direction::Unknown,
+                    &binding_key,
+                    basis,
+                    binding_notes,
+                );
+                1
             }
         };
         Ok(emitted)

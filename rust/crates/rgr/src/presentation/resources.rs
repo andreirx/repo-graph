@@ -26,6 +26,11 @@ pub struct ResourceListResponse {
     pub count: usize,
     pub total_reads: usize,
     pub total_writes: usize,
+    /// HONESTY-GATE-2 family 1: total accesses whose direction could not be
+    /// determined (`ACCESSES` edges). Additive — an older daemon omits it
+    /// (defaults to 0) and the Totals block simply shows no unknown-access line.
+    #[serde(default)]
+    pub total_unknown_access: usize,
     /// RESOURCE-HONESTY-1: the detector-coverage statement (additive). Names which
     /// languages this build's resource-access detection covers and which
     /// materially-present languages it does NOT — so the zero-state stops blaming the
@@ -91,6 +96,11 @@ pub struct ResourceEntry {
     pub subtype: String,
     pub readers: usize,
     pub writers: usize,
+    /// HONESTY-GATE-2 family 1: accesses to this resource whose direction
+    /// (read vs write) could not be determined — never counted as a reader or
+    /// writer. Additive (defaults to 0 for an older daemon).
+    #[serde(default)]
+    pub unknown_access: usize,
 }
 
 impl ResourceListResponse {
@@ -159,6 +169,15 @@ impl ResourceListResponse {
         out.push_str("\nTotals:\n");
         out.push_str(&format!("  {} reads\n", self.total_reads));
         out.push_str(&format!("  {} writes\n", self.total_writes));
+        // HONESTY-GATE-2 family 1: undetermined-direction accesses are their own
+        // total — an honest third bucket, never folded into reads or writes. Shown
+        // only when present so unaffected repos stay byte-stable.
+        if self.total_unknown_access > 0 {
+            out.push_str(&format!(
+                "  {} access (mode unknown)\n",
+                self.total_unknown_access
+            ));
+        }
 
         // Group by kind (sorted by count desc, then kind asc)
         let mut by_kind: std::collections::BTreeMap<&str, usize> =
@@ -192,9 +211,24 @@ impl ResourceListResponse {
             } else {
                 "writers"
             };
+            // HONESTY-GATE-2 family 1: append the undetermined-direction access
+            // count as a distinct clause ("N access (mode unknown)") only when
+            // present. It is NOT a reader or writer count — the direction was not
+            // evidenced — so it never inflates either. Absent → byte-stable line.
+            let unknown_clause = if entry.unknown_access > 0 {
+                format!("  {} access (mode unknown)", entry.unknown_access)
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
-                "  {}  {}  {} {}  {} {}\n",
-                entry.name, entry.kind, entry.readers, readers_word, entry.writers, writers_word
+                "  {}  {}  {} {}  {} {}{}\n",
+                entry.name,
+                entry.kind,
+                entry.readers,
+                readers_word,
+                entry.writers,
+                writers_word,
+                unknown_clause
             ));
         }
 
@@ -474,6 +508,7 @@ mod tests {
                     subtype: "FILE_PATH".to_string(),
                     readers: 5,
                     writers: 2,
+                    unknown_access: 0,
                 },
                 ResourceEntry {
                     stable_key: "repo:fs:data.db:FS_PATH".to_string(),
@@ -482,6 +517,7 @@ mod tests {
                     subtype: "FILE_PATH".to_string(),
                     readers: 3,
                     writers: 1,
+                    unknown_access: 0,
                 },
                 ResourceEntry {
                     stable_key: "repo:db:users:DB_RESOURCE".to_string(),
@@ -490,11 +526,13 @@ mod tests {
                     subtype: "TABLE".to_string(),
                     readers: 10,
                     writers: 4,
+                    unknown_access: 0,
                 },
             ],
             count: 3,
             total_reads: 18,
             total_writes: 7,
+            total_unknown_access: 0,
         }
     }
 
@@ -551,6 +589,58 @@ mod tests {
         assert!(out.contains("10 readers  4 writers"));
     }
 
+    /// HONESTY-GATE-2 family 1: an undetermined-direction access renders as a
+    /// distinct "N access (mode unknown)" clause — on the entry line AND in the
+    /// Totals block — and is NEVER counted as a reader or writer.
+    #[test]
+    fn list_render_shows_mode_unknown_access_not_as_reader_or_writer() {
+        let resp = ResourceListResponse {
+            command: "resource list".to_string(),
+            repo: "repo_test".to_string(),
+            snapshot: "repo_test/snapshot".to_string(),
+            coverage: covered_no_gap(),
+            results: vec![ResourceEntry {
+                stable_key: "repo:fs:.:FS_PATH".to_string(),
+                name: ".".to_string(),
+                kind: "FS_PATH".to_string(),
+                subtype: "FILE_PATH".to_string(),
+                // 1 genuine O_RDONLY reader; the 5 undetermined-flag opens are
+                // NOT readers and NOT writers — they are mode-unknown accesses.
+                readers: 1,
+                writers: 0,
+                unknown_access: 5,
+            }],
+            count: 1,
+            total_reads: 1,
+            total_writes: 0,
+            total_unknown_access: 5,
+        };
+        let out = resp.render_human();
+        // The entry line carries the mode-unknown clause.
+        assert!(
+            out.contains("1 reader  0 writers  5 access (mode unknown)"),
+            "{out}"
+        );
+        // The Totals block reports it as its own bucket.
+        assert!(out.contains("1 reads"), "{out}");
+        assert!(out.contains("0 writes"), "{out}");
+        assert!(out.contains("5 access (mode unknown)"), "{out}");
+        // The phantom-writer fabrication is gone: 0 writers, never 5.
+        assert!(
+            !out.contains("5 writers"),
+            "must not fabricate writers: {out}"
+        );
+    }
+
+    /// A resource with no undetermined accesses renders byte-identically to
+    /// before — the unknown clause and Totals line are suppressed at zero.
+    #[test]
+    fn list_render_no_unknown_access_is_byte_stable() {
+        let resp = sample_list_response(); // all unknown_access = 0
+        let out = resp.render_human();
+        assert!(!out.contains("mode unknown"), "{out}");
+    }
+
     #[test]
     fn list_render_shows_hint() {
         let resp = sample_list_response();
@@ -572,6 +662,7 @@ mod tests {
             count: 0,
             total_reads: 0,
             total_writes: 0,
+            total_unknown_access: 0,
         };
         let out = resp.render_human();
         assert!(out.contains("0 resources"));
@@ -630,6 +721,7 @@ mod tests {
             count: 0,
             total_reads: 0,
             total_writes: 0,
+            total_unknown_access: 0,
         };
         let out = resp.render_human();
         assert!(
@@ -661,6 +753,7 @@ mod tests {
             count: 0,
             total_reads: 0,
             total_writes: 0,
+            total_unknown_access: 0,
         };
         let out = resp.render_human();
         assert!(
@@ -691,10 +784,12 @@ mod tests {
                 subtype: "FILE_PATH".to_string(),
                 readers: 1,
                 writers: 1,
+                unknown_access: 0,
             }],
             count: 1,
             total_reads: 1,
             total_writes: 1,
+            total_unknown_access: 0,
         };
         let out = resp.render_human();
         assert!(out.contains("1 resource\n")); // singular
@@ -744,6 +839,7 @@ mod tests {
             count: 0,
             total_reads: 0,
             total_writes: 0,
+            total_unknown_access: 0,
         };
         let out = resp.render_human();
         // The languages are still named …

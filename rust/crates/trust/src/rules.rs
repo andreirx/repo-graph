@@ -16,20 +16,58 @@ use crate::types::{
 
 // ── Downgrade detection ──────────────────────────────────────────
 
-/// Next.js app-router convention detection. Matches files under
-/// `app/` ending in page.tsx/jsx, layout.tsx/jsx, or route.ts/js.
+/// Next.js app-router detection (HONESTY-GATE-2 family 2).
 ///
-/// Mirror of `detectNextjsConventions` from `rules.ts:36`.
-pub(crate) fn detect_nextjs_conventions(file_paths: &[String]) -> bool {
-    for path in file_paths {
-        if has_nextjs_file(path, "page", &["tsx", "jsx"])
+/// A framework claim requires STRUCTURAL evidence, never a directory/file NAME
+/// alone (STANDING HONESTY RULE 2). Next.js is claimed only when BOTH hold:
+///   1. an app-router convention file exists (page/layout/route nested under an
+///      `app/` directory) — the "which router" signal; AND
+///   2. a `next.config.{js,ts,mjs,cjs}` file is present in the repo — the
+///      structural signal that this IS a Next.js project (the "config file"
+///      evidence named by the slice §2.2).
+///
+/// The `app/` directory name matched (1) on real non-Next.js repos (a React
+/// Router 7 app under `src/app/` in hadoop), fabricating the claim.
+///
+/// Structural basis = app-router convention AND `next.config.*`. This is a
+/// DELIBERATELY CONSERVATIVE basis, not a completeness claim: a `next.config.*`
+/// file is OPTIONAL in Next.js (a project can run on framework defaults with no
+/// config), so requiring it TRADES RECALL FOR HONESTY — a genuine Next.js app
+/// that ships no config is not detected here (accepted recall loss), but the
+/// claim we DO emit always carries structural evidence rather than a directory
+/// name. Absence of config → no claim (honest abstention over fabrication).
+/// Widening this basis to other Next.js signals (a `next` dependency in the
+/// manifest, a framework import) is detector-recall widening — OUT OF SCOPE for
+/// this slice (STANDING SCOPE), a named follow-up.
+///
+/// Returns `Some(basis_path)` (the config file proving the claim, rendered WITH
+/// the claim) when detected, else `None`. Absent basis → no claim (and no
+/// reliability downgrade derived from it).
+///
+/// Diverges from the TS mirror `detectNextjsConventions` (`rules.ts:36`), which
+/// returned a bare bool from names alone — the exact fabrication this removes.
+pub(crate) fn detect_nextjs_conventions(file_paths: &[String]) -> Option<String> {
+    let has_convention = file_paths.iter().any(|path| {
+        has_nextjs_file(path, "page", &["tsx", "jsx"])
             || has_nextjs_file(path, "layout", &["tsx", "jsx"])
             || has_nextjs_file(path, "route", &["ts", "js"])
-        {
-            return true;
-        }
+    });
+    if !has_convention {
+        return None;
     }
-    false
+    // Structural evidence gate: a Next.js config file must be present.
+    file_paths.iter().find(|p| is_nextjs_config(p)).cloned()
+}
+
+/// Whether `path`'s basename is a Next.js config file (`next.config.{js,ts,mjs,cjs}`).
+/// Basename match, any directory — a Next.js sub-app (e.g. `renderer/next.config.ts`)
+/// is valid structural evidence for the whole indexed repo.
+fn is_nextjs_config(path: &str) -> bool {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    matches!(
+        base,
+        "next.config.js" | "next.config.ts" | "next.config.mjs" | "next.config.cjs"
+    )
 }
 
 /// Check if a path matches the pattern `(^|/)app/.../<filename>.<ext>$`
@@ -76,8 +114,14 @@ pub(crate) fn detect_react_heavy(file_paths: &[String]) -> bool {
 /// Mirror of `detectFrameworkHeavySuspicion` from `rules.ts:75`.
 pub fn detect_framework_heavy_suspicion(file_paths: &[String]) -> DowngradeTrigger {
     let mut reasons = Vec::new();
-    if detect_nextjs_conventions(file_paths) {
-        reasons.push("nextjs_app_router_detected".to_string());
+    if let Some(config_basis) = detect_nextjs_conventions(file_paths) {
+        // Render the basis WITH the claim (STANDING HONESTY RULE 2): the config
+        // file that proves this is Next.js, not the directory name that merely
+        // resembles it.
+        reasons.push(format!(
+            "nextjs_app_router_detected (basis: {} present)",
+            config_basis
+        ));
     }
     if detect_react_heavy(file_paths) {
         reasons.push("react_heavy_tsx_ratio".to_string());
@@ -404,36 +448,79 @@ mod tests {
 
     #[test]
     fn nextjs_detects_app_router_page() {
-        assert!(detect_nextjs_conventions(&[
-            "src/app/home/page.tsx".into(),
-            "lib/util.ts".into(),
-        ]));
+        // Convention file + structural evidence (next.config) → detected, basis returned.
+        assert_eq!(
+            detect_nextjs_conventions(&[
+                "src/app/home/page.tsx".into(),
+                "next.config.js".into(),
+                "lib/util.ts".into(),
+            ]),
+            Some("next.config.js".to_string())
+        );
     }
 
     #[test]
     fn nextjs_detects_app_router_layout() {
-        assert!(detect_nextjs_conventions(&["app/[id]/layout.tsx".into()]));
+        assert_eq!(
+            detect_nextjs_conventions(&["app/[id]/layout.tsx".into(), "next.config.mjs".into()]),
+            Some("next.config.mjs".to_string())
+        );
     }
 
     #[test]
     fn nextjs_detects_app_router_route() {
-        assert!(detect_nextjs_conventions(
-            &["app/api/users/route.ts".into()]
-        ));
+        assert_eq!(
+            detect_nextjs_conventions(&[
+                "app/api/users/route.ts".into(),
+                "renderer/next.config.ts".into()
+            ]),
+            Some("renderer/next.config.ts".to_string())
+        );
+    }
+
+    /// HONESTY-GATE-2 family 2 (reproducing): app-router convention files but NO
+    /// `next.config.*` — the real hadoop case (React Router 7 under `src/app/`).
+    /// A directory NAME is not a framework: the claim must NOT fire.
+    #[test]
+    fn nextjs_not_detected_without_config_even_with_convention_files() {
+        assert_eq!(
+            detect_nextjs_conventions(&[
+                "src/app/routes/layout.tsx".into(),
+                "src/app/dashboard/page.tsx".into(),
+                "vite.config.ts".into(),
+                "package.json".into(),
+            ]),
+            None,
+            "app/ convention files without next.config must not detect Next.js"
+        );
     }
 
     #[test]
-    fn nextjs_returns_false_with_no_matches() {
-        assert!(!detect_nextjs_conventions(&[
-            "src/index.ts".into(),
-            "lib/util.ts".into(),
-            "components/Button.tsx".into(),
-        ]));
+    fn nextjs_returns_none_with_no_matches() {
+        assert_eq!(
+            detect_nextjs_conventions(&[
+                "src/index.ts".into(),
+                "lib/util.ts".into(),
+                "components/Button.tsx".into(),
+            ]),
+            None
+        );
     }
 
     #[test]
-    fn nextjs_returns_false_for_app_without_specific_files() {
-        assert!(!detect_nextjs_conventions(&["app/README.md".into()]));
+    fn nextjs_returns_none_for_app_without_specific_files() {
+        assert_eq!(detect_nextjs_conventions(&["app/README.md".into()]), None);
+    }
+
+    /// A `next.config.*` present but NO app-router convention file → the
+    /// app-router claim still requires (2) the convention (pages-router or a
+    /// non-app Next app is not an app-router detection).
+    #[test]
+    fn nextjs_not_detected_with_config_but_no_convention() {
+        assert_eq!(
+            detect_nextjs_conventions(&["next.config.js".into(), "src/index.ts".into()]),
+            None
+        );
     }
 
     #[test]
@@ -488,11 +575,38 @@ mod tests {
 
     #[test]
     fn framework_heavy_triggered_by_nextjs() {
-        let result = detect_framework_heavy_suspicion(&["app/home/page.tsx".into()]);
+        // Structural evidence present → detected, and the reason renders the basis.
+        let result = detect_framework_heavy_suspicion(&[
+            "app/home/page.tsx".into(),
+            "next.config.js".into(),
+        ]);
         assert!(result.triggered);
-        assert!(result
-            .reasons
-            .contains(&"nextjs_app_router_detected".to_string()));
+        assert!(
+            result
+                .reasons
+                .iter()
+                .any(|r| r.starts_with("nextjs_app_router_detected (basis: next.config.js")),
+            "reason must render the config basis: {:?}",
+            result.reasons
+        );
+    }
+
+    /// HONESTY-GATE-2 family 2: the fabrication case — app-router convention
+    /// files but no `next.config.*` → nextjs is NOT among the reasons.
+    #[test]
+    fn framework_heavy_not_triggered_by_nextjs_without_config() {
+        let result = detect_framework_heavy_suspicion(&[
+            "src/app/routes/layout.tsx".into(),
+            "vite.config.ts".into(),
+        ]);
+        assert!(
+            !result
+                .reasons
+                .iter()
+                .any(|r| r.contains("nextjs_app_router_detected")),
+            "must not claim Next.js from the app/ directory name: {:?}",
+            result.reasons
+        );
     }
 
     #[test]
