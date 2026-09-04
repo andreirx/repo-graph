@@ -66,7 +66,15 @@ hypotheses until that run speaks.
    decisions as written; D-EC-1/7 superseded by reconciliation-over-adjudication;
    RECON-DESIGN-1 §8 ratified 2026-07-17). Remaining: the M-1..M-6 milestone EXECUTION
    (status audit vs shipped code opened 2026-09-03 — this block was stale since July).
-3. **DAEMON-CONCURRENCY-1** — serial → concurrent (the multi-agent gap; TECH-DEBT #1).
+3. ~~DAEMON-CONCURRENCY-1 — serial → concurrent~~ **SHIPPED** (10493e8 2026-06-24,
+   thread-per-connection + 64-conn cap + typed Busy; DELIVERED 2026-07-17 per
+   docs/slices/daemon-concurrency-1.md; TECH-DEBT #1 closed 2026-07-17 — this block was
+   stale until 2026-09-04). REMAINING concurrency residuals (see 2026-09-04 audit +
+   survey): TECH-DEBT #2b (LiveGraph preload/refresh bypass the repo coordinator);
+   seed-publish write window vs foreground open patience (django Busy bounce, measured);
+   assess 301s hang under batch load (UNDIAGNOSED — not write-mutex contention, different
+   DB); retention's VACUUM journal_mode=DELETE window. Re-scoped as DAEMON-RESIDUALS-1
+   pending human ruling.
 4. **Scale chain** — POSTPASS-PROFILE-1 → delta-indexing completion → sharding
    (monorepo reindex cost).
 5. Housekeeping: PROTOCOL-HELP-TRUTH-1 (#7+#9), F6 (`rmap check` F2 residual),
