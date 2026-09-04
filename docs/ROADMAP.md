@@ -250,6 +250,8 @@ Requiring qualified identity is a Layer-0 contract change across callers/callees
 trust — its own slice with a whole-graph before/after parity budget. Deferred by ruling;
 HONESTY-GATE-2 renders the resolution basis on the edge if the resolver records one.
 ## rmap-on-rmap modeling experiment (2026-09-04, human-directed) — docs/audits/2026-09-04-self-model.md
+Artifact: https://claude.ai/code/artifact/a7630d1b-6c7c-41a6-868e-4536a545b471 · CURSOR-ROUNDTRIP-1
+(spec b3417df) slotted immediately after HONESTY-GATE-2 — small, user-visible garbage on a common path.
 
 Question: can rmap model its OWN modules as algorithms + data structures + data flows +
 access patterns? Method: 24 captures + ~20 live queries on the v0.16.0 isolated index;
