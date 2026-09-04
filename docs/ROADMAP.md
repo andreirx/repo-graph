@@ -236,6 +236,19 @@ invariant) · 3 CPP-SPAN-FIDELITY-1 (macro classes + span containment) · 4
 not only find — sequenced AFTER span fidelity so C++ anchors land on correct spans) · 5
 SEED-CHUNK-2 · 6 COHERENCE-2 · 7 DAEMON-CONCURRENCY-1 (human addition; SPEC slice first —
 foundational, decisions to ratify) · 8 ECONOMY-2 · carried minors.
+SHIPPED: HONESTY-GATE-1 9ea23df (2026-09-04): deps list never renders "unused" without an
+established basis — "no static import found" + a TRUE caveat (dynamic imports are
+extracted but not attributed to a declared package); counts reconcile to the parsed
+manifests (storybook 124 across 12); Maven absence named as a capability limit; node:
+builtins bucketed; basis is an exhaustive sum type with the Established arm pinned by
+test as the re-enable point. Four verified false claims gone in live proofs. Operator
+close-out after two reviewer timeouts at the verdict step (codex high effort ≈2h/diff).
+NAMED FOLLOW-UP (2026-09-04, HONESTY-GATE-2 ruling HG2-FAM3-MAP): **JAVA-RESOLVER-IDENTITY-1**
+— the Java resolver emits intra-repo CALLS/INSTANTIATES edges on bare-name collisions with
+JDK classes (hadoop MavenWrapperDownloader: 3 "resolved" edges for a JDK-only file).
+Requiring qualified identity is a Layer-0 contract change across callers/callees/dead/
+trust — its own slice with a whole-graph before/after parity budget. Deferred by ruling;
+HONESTY-GATE-2 renders the resolution basis on the edge if the resolver records one.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
