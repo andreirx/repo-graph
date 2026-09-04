@@ -60,6 +60,21 @@ caught by "does it run".)
 
 A command can be honest (passes layering) yet useless (fails usefulness/density) — score every row.
 
+## Grader ground-truth discipline (added 2026-09-04)
+
+A grader's "fabrication" verdict is itself a claim that must survive falsification.
+Bitten: the v0.16.0 matrix grader declared vscode's `.env` resource row invented after a
+grep that excluded `.mts`/`.cts`/`.mjs` and script directories; four literal
+`fs.*('.env')` sites existed (`extensions/copilot/script/setup/*.mts`). The product was
+right; the audit was wrong; a relay builder caught it by refusing to suppress evidenced
+rows. Rules: (1) a negative claim ("no X exists") must state the exact search (tool,
+pattern, include/exclude globs) so it can be re-run; (2) ground-truth greps include every
+source extension the product indexes for that language (TS: ts/tsx/mts/cts/js/mjs/cjs)
+and do not exclude `script/`, `tools/`, config roots; (3) any grader claim that a slice
+will act on is re-verified by the operator with the cheapest independent check BEFORE it
+enters a spec — a spec built on a false negative wastes a relay cycle and, worse, orders
+the removal of true facts.
+
 ## Track-level evaluation — the gate (two-agent)
 
 The per-command rubric scores individual outputs. On top of it, the track **as a whole** must pass a
