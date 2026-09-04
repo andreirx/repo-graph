@@ -40,8 +40,13 @@ family's mechanism on the real corpus FIRST (DB rows + extractor provenance), th
    (`File`, `Path`, …). Where a collision is the only match, the edge is unresolved
    (external/unknown) — the file map and the edge list must agree within one artifact.
 4. JSON additive (basis fields); exit codes unchanged; the three verified fabrications
-   are gone in the live proofs; no NEW suppression of correctly-evidenced rows (hadoop's
-   6 readers must survive exactly).
+   are gone in the live proofs; no NEW suppression of EVIDENCED rows. (AMENDED 2026-09-04,
+   ruling HG2-FAM1-RESOURCES: the original "hadoop's 6 readers must survive exactly" was
+   written on the audit's OUTPUT check; the builder found five of those six readers came
+   from the same undetermined-mode DEFAULT that invented the five writers — a guess that
+   happened to be right is still a guess. Evidenced rows survive; undetermined-mode
+   accesses render as `mode unknown` via an explicit additive access-direction variant,
+   never as reader or writer.)
 
 ## 3. Stop conditions
 
