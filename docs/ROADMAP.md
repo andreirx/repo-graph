@@ -74,7 +74,10 @@ hypotheses until that run speaks.
    seed-publish write window vs foreground open patience (django Busy bounce, measured);
    assess 301s hang under batch load (UNDIAGNOSED — not write-mutex contention, different
    DB); retention's VACUUM journal_mode=DELETE window. Re-scoped as DAEMON-RESIDUALS-1
-   — human-ratified Option A (2026-09-04): diagnose the assess hang under reproduced
+   — human-ratified Option A (2026-09-04) and, same day, retention fix (a) FK indexes +
+   chunking AND (b) rebuild-instead-of-delete when prunable dominates, plus a prevention
+   set (snapshot hard cap with prune-on-commit, time budget → rebuild, cache sizing, doctor
+   visibility, benchmark gate): diagnose the assess hang under reproduced
    load first, then fix the three known residuals under the frozen invariants
    (docs/slices/daemon-residuals-1.md). Queue slot #7.
 4. **Scale chain** — POSTPASS-PROFILE-1 → delta-indexing completion → sharding

@@ -41,8 +41,7 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    28 snapshots to delete (27 READY prunable + 1 failed; keep-set is current-state only)
    accumulated since 2026-05-28 because a pass this long NEVER COMPLETES before a daemon
    restart (reboot, install, launchd) kills it — and it restarts from scratch. Hours, on
-   a 977-file repo whose full reindex takes minutes. Contract addendum for #4 (DESIGN DECISION for the human — options in the
-   operator's 2026-09-04 note): (a) index the 15 unindexed FK child tables on
+   a 977-file repo whose full reindex takes minutes. Contract addendum for #4 (HUMAN-RATIFIED 2026-09-04: (a)+(b) — (c) optional; plus the prevention set in §2.6): (a) index the 15 unindexed FK child tables on
    `snapshot_uid` (additive migration; each cascade becomes an index seek instead of a
    full scan — the cheap, large win) + chunk within a snapshot with the write slot released
    between chunks, progress in `doctor`; and/or (b) REBUILD instead of DELETE when the
@@ -85,6 +84,18 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    during it receive the typed Busy naming the holder ("retention VACUUM"), never a raw
    SQLite error. The diagnosis also reports WHY 29 snapshots were retained on one repo
    (policy window vs re-index cadence) — a policy finding, not necessarily a fix here.
+6. **Prevention set (human directive 2026-09-04 — "no future purge takes this long"):**
+   (i) HARD CAP on retained snapshots per repo: current + its parent only — prune the
+   previous history at index/refresh COMMIT time (prune-on-commit), so history never
+   accumulates between passes; (ii) a retention TIME BUDGET: any pass over T (e.g. 60 s
+   per repo) aborts at the next chunk boundary, records the overrun in `doctor`, and
+   flips that repo to the REBUILD path on the next pass instead of retrying the delete;
+   (iii) the rebuild path exposed as `rmap maintenance rebuild` for operators; (iv) a
+   maintenance-connection `PRAGMA cache_size` sized to the store (not the 2 MB default);
+   (v) `doctor` reports store size, snapshot count, prunable share, and last pass
+   duration, with a stated threshold; (vi) a retention BENCHMARK GATE in the test suite:
+   N snapshots × M rows must prune (or rebuild) under a fixed bound, so a regression to
+   hours cannot ship silently.
 5. Frozen invariants (survey §7, code-stated): single-writer per DB FIFO-fair; readers
    never observe partial writes (READY-snapshot filter + WAL); no head-of-line blocking;
    bounded concurrency with honest Busy; prompt shutdown; per-connection ordering;
