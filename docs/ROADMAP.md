@@ -249,6 +249,33 @@ JDK classes (hadoop MavenWrapperDownloader: 3 "resolved" edges for a JDK-only fi
 Requiring qualified identity is a Layer-0 contract change across callers/callees/dead/
 trust — its own slice with a whole-graph before/after parity budget. Deferred by ruling;
 HONESTY-GATE-2 renders the resolution basis on the edge if the resolver records one.
+## rmap-on-rmap modeling experiment (2026-09-04, human-directed) — docs/audits/2026-09-04-self-model.md
+
+Question: can rmap model its OWN modules as algorithms + data structures + data flows +
+access patterns? Method: 24 captures + ~20 live queries on the v0.16.0 isolated index;
+every model statement labeled [rmap:…] or [source:…]. RESULT: ~30% from rmap, all in the
+topology/attention band (59 modules, hotspots, complexity centers, the type-only cycle,
+and — best surface — `find --text` enumerating all 61 lock-acquisition sites with
+enclosing symbols); ~70% from source: every algorithm identity, every struct shape, every
+lock SEMANTIC, every DTO crossing, and the ENTIRE crate dependency graph — rmap resolves
+NO cross-module dependency on its own Rust workspace (7,490 unresolved imports; 47
+modules "zero connectivity"; the Unix-socket NDJSON protocol — the system's real IPC
+boundary — undetected; the 48-table SQLite store invisible to `resource list`; no
+trait/port surface). Verdict: "a triage instrument that tells you where to read, not yet
+a modeling instrument you can build an architecture from."
+THE FIVE MODELING SURFACES (proposed track MODELING-SURFACES, awaiting human ordering):
+1 Rust import/module-edge resolution (gates all others) · 2 `rmap shape <symbol>` —
+struct fields/enum variants/trait methods · 3 store/schema surface for Rust (tables from
+migrations; per-symbol readers/writers) · 4 concurrency/lock surface (guard-typed values,
+where acquired, held across what) · 5 trait/port surface (implementors, dyn/generic
+dispatch edges).
+LIVE DEFECTS FOUND (v0.16.0 regressions, small): CURSOR-ROUNDTRIP-1 — find's printed
+short cursors are accepted by `explain` only; `callers`/`callees` reject them ("symbol
+not found") — extend the FIND-EVIDENCE-1 alias; SEED-FALLBACK-DTO-1 — the not-found
+fallback renders seed candidates via the pre-SEED-CHUNK-1 DTO shape, printing
+"(malformed candidate: missing file/stable_key/score/model_id/source)" ×N in user output.
+Probe corrections: `--text` regex alternation WORKS (201 hits) — the initial "no
+alternation" claim was an operator quoting error.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
