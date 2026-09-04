@@ -205,6 +205,27 @@ the four Posix*File classes + all methods (~130–800) UNEXTRACTED (namespace{} 
 suspected; diagnosis in the slice-to-be). Every C++ fact consumer inherits this
 (explains part of the C++ audit weakness). Queue candidate after SEED-CHUNK-1.
 
+## Usefulness audit v0.16.0 — round four (2026-09-04)
+
+docs/audits/2026-09-04-per-command-usefulness-v0.16.0.md · artifact
+581da1fc-faa1-4972-ae77-2d27579b0493 · three-perspective gate (matrix grader + judge +
+codex standalone). VERDICT: more useful (all four zg F's dead — --text exact parity;
+anchors everywhere; spike seed ranks reproduced, lmstudio retired) BUT the trust contract
+regressed: a NEW FABRICATION CLASS (verified: vscode .env resource, hadoop phantom
+writers, nextjs-on-React-Router, invented map edges, deps "unused" false positives incl.
+django asgiref vs 31 import sites). "v0.15.0 failed by silence (safe); v0.16.0 fails by
+confident invention (indefensible)." Trust repair dominates the next round.
+Shipped-fix verdicts: --text FIXED-recall/BROKEN-C++-evidence · anchors PARTIAL · false
+sentence FIXED · seeds PARTIAL (is_test partition inert on Rust; decl-chunk dominance) ·
+resource caveat FIXED-disclosure/NEW-fabrication · .h routing REGRESSED (macro-name
+erasure 770/770 vcmi) · type-only NEAR-DORMANT (ALL-edge predicate; should be ANY).
+PROPOSED QUEUE (awaiting human ratification): 1 HONESTY-GATE-1 (no-fabrication invariant)
+· 2 CPP-SPAN-FIDELITY-1 (macro classes + span containment; absorbs the filed Limiter
+defect) · 3 SEED-CHUNK-2 (per-chunk is_test, decl demotion) · 4 COHERENCE-2 (orient/cycles
+walks; type-only ANY; surfaces test exclusion; totals) · 5 ECONOMY-2 · 6 carried minors.
+Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
+chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
+
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
 timeout override.
