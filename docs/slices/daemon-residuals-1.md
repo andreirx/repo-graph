@@ -36,6 +36,13 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    ETA basis) so foreground reads interleave; and a store this size on a single repo is
    itself a finding (which tables? snapshot count? seed_vectors per snapshot?) — the
    diagnosis must report the size composition.
+   MEASURED (read-only, same day): 4,579 MB; 29 snapshots retained; extraction_edges
+   2,194,150 rows; unresolved_edges 1,791,621; nodes 454,261; edges 418,513;
+   measurements 305,623; file_versions 33,122; seed_vectors only 16,812 (chunk vectors are
+   NOT the bloat). The prune deletes old-snapshot rows from the two ~2M-row edge tables —
+   the transaction-size problem is per-snapshot edge facts × 29 snapshots. Chunk the
+   prune AND question why 29 snapshots are retained on one repo (retention policy
+   window vs today's relay-driven re-index cadence).
 
 ## 2. Contract
 
