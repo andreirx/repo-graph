@@ -22,7 +22,11 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    readers (`dispatch.rs` ~764-880 per TECH-DEBT citation).
 4. **Retention VACUUM window**: `prune.rs:143-158` flips `journal_mode=DELETE` for VACUUM
    — the one place WAL's reader-non-blocking guarantee is suspended, unguarded against
-   concurrent foreground reads.
+   concurrent foreground reads. FIELD-CONFIRMED on the operator's PRODUCTION daemon
+   (2026-09-04): 24 consecutive read commands (orient/modules/cycles/stats/trust/find…)
+   all returned `Busy: a background retention pass is writing this repo's store` within
+   seconds — the Busy is honest and named (good), but a retention pass blanks EVERY read
+   surface for its whole duration. Priority within this slice rises accordingly.
 
 ## 2. Contract
 
