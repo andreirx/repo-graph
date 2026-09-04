@@ -29,13 +29,27 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    surface for its whole duration. Priority within this slice rises accordingly.
    ESCALATED SAME DAY: `doctor` showed `reclaiming repo-graph: started 2h12m ago`; the
    store is 4.8 GB, the daemon alive at 4% CPU inside `sqlite3_step → BtreeNext →
-   getPage` with a 344 MB WAL still growing — i.e. the PRUNE (row deletes across old
-   snapshots) runs as ONE multi-hour transaction under the write lock, not a brief VACUUM
-   window. Contract addendum for #4: prune work must be CHUNKED (bounded rows/time per
-   transaction, write slot released between chunks, progress visible in `doctor` with an
-   ETA basis) so foreground reads interleave; and a store this size on a single repo is
-   itself a finding (which tables? snapshot count? seed_vectors per snapshot?) — the
-   diagnosis must report the size composition.
+   getPage` with a 344 MB WAL still growing. CORRECTED (code read, 2026-09-04 evening):
+   the prune is NOT one transaction — `delete_snapshots_cascade` (prune.rs:186) runs ONE
+   TRANSACTION PER SNAPSHOT: explicit `DELETE … WHERE snapshot_uid=?` on six orphan
+   tables, then `DELETE FROM snapshots` which fires `ON DELETE CASCADE` across 37 FK child
+   tables. THE MECHANISM: 15 of those child tables have NO index on `snapshot_uid` —
+   including `nodes` (454k rows), `edges` (419k), `file_versions`, `symbol_call_degrees`,
+   `resolved_call_file_pairs` — so every cascade FULL-SCANS each unindexed child table,
+   per snapshot; each deleted row also updates every secondary index; the daemon's RSS is
+   ~32 MB (SQLite's default 2 MB page cache) against a 4.8 GB file → page-cache thrash.
+   28 snapshots to delete (27 READY prunable + 1 failed; keep-set is current-state only)
+   accumulated since 2026-05-28 because a pass this long NEVER COMPLETES before a daemon
+   restart (reboot, install, launchd) kills it — and it restarts from scratch. Hours, on
+   a 977-file repo whose full reindex takes minutes. Contract addendum for #4 (DESIGN DECISION for the human — options in the
+   operator's 2026-09-04 note): (a) index the 15 unindexed FK child tables on
+   `snapshot_uid` (additive migration; each cascade becomes an index seek instead of a
+   full scan — the cheap, large win) + chunk within a snapshot with the write slot released
+   between chunks, progress in `doctor`; and/or (b) REBUILD instead of DELETE when the
+   prunable share dominates the store (copy the kept snapshot(s) into a fresh file and
+   swap; O(current) instead of O(history × children); no VACUUM needed); and/or (c) make
+   the pass RESUMABLE across daemon restarts so it never restarts from zero. The diagnosis
+   must report the size composition.
    MEASURED (read-only, same day): 4,579 MB; 29 snapshots retained; extraction_edges
    2,194,150 rows; unresolved_edges 1,791,621; nodes 454,261; edges 418,513;
    measurements 305,623; file_versions 33,122; seed_vectors only 16,812 (chunk vectors are
