@@ -292,6 +292,13 @@ rendered (name-only → honest abstention); map JDK-collision edges DEFERRED to
 JAVA-RESOLVER-IDENTITY-1 by ruling. The audit's vscode `.env` fabrication claim was
 RETRACTED mid-slice (four literal sites exist — product right, grader wrong). 6 cycles,
 closed-list steering converged it. Gates ALL GREEN.
+SHIPPED: CURSOR-ROUNDTRIP-1 (2026-09-04): every printed short cursor resolves in
+callers/callees/path via ONE syntax-gated, storage-free helper (nodes-free green path
+kept); the not-found fallback shares find's current seed renderer (invalid candidates →
+one counted "unreadable" line, never a malformed placeholder); additive `cursor_raw`
+JSON field (verb-less, unquoted, uid-stripped). Live proof on the retained seeded root:
+`callers` on a short cursor → 65 real callers (was "symbol not found"); nonexistent
+symbol → real candidates, zero "malformed". Gates ALL GREEN; approved review-1.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

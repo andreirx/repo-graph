@@ -87,6 +87,46 @@ fn hit_command_is_runnable_per_class() {
 }
 
 #[test]
+fn cursor_arg_is_the_uid_stripped_raw_cursor() {
+    // CURSOR-ROUNDTRIP-1 (§2.3, revision 1): `cursor_arg` is the verb-less, UNQUOTED cursor
+    // TOKEN an agent passes straight to `callers`/`callees`/`path`/`explain` — never a
+    // command, never shell-quoted, never the `<uid>:` prefix the human short cursor drops.
+    let uid = "repo_01m1my5";
+    // Symbol: the key carries the repo `<uid>:` prefix → the raw cursor is the uid-STRIPPED
+    // suffix (byte-for-byte the short cursor `find` prints), NOT `explain <full-key>`.
+    assert_eq!(
+        FactClass::Symbol.cursor_arg(Some(&format!("{uid}:src/bnr.ts:BNRService:SYMBOL")), uid),
+        Some("src/bnr.ts:BNRService:SYMBOL".to_string())
+    );
+    // A symbol whose stripped suffix contains a space (a path with a space) stays UNQUOTED —
+    // the agent passes it as a single argument; the human render is what shell-quotes it.
+    assert_eq!(
+        FactClass::Symbol.cursor_arg(Some(&format!("{uid}:src/my file.ts:foo:SYMBOL")), uid),
+        Some("src/my file.ts:foo:SYMBOL".to_string())
+    );
+    // File: an explain-folding class, but its key is a path with no `<uid>:` prefix → the
+    // full key (already short), unquoted even with a space.
+    assert_eq!(
+        FactClass::File.cursor_arg(Some("src/my file.ts"), uid),
+        Some("src/my file.ts".to_string())
+    );
+    // Module renders through `map` (no reattach alias) → never uid-stripped: the full key.
+    assert_eq!(
+        FactClass::Module.cursor_arg(Some(&format!("{uid}:packages/api")), uid),
+        Some(format!("{uid}:packages/api"))
+    );
+    // A key that is JUST the prefix (empty suffix) is not a runnable short cursor → full key.
+    assert_eq!(
+        FactClass::Symbol.cursor_arg(Some(&format!("{uid}:")), uid),
+        Some(format!("{uid}:"))
+    );
+    // Whole-listing classes + boundary take no cursor argument → None (field skip-serialized).
+    assert_eq!(FactClass::Dependency.cursor_arg(Some("lodash"), uid), None);
+    assert_eq!(FactClass::HttpSurface.cursor_arg(None, uid), None);
+    assert_eq!(FactClass::Boundary.cursor_arg(None, uid), None);
+}
+
+#[test]
 fn finalize_dedups_by_path_and_key() {
     // Two rows with the same (path, key) collapse to one; a different key stays.
     let hits = vec![

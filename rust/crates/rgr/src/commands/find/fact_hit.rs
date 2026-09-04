@@ -594,4 +594,66 @@ mod tests {
         let out = render_fact_hit(&h, &["explain"], true, Some("leveldb-abc123"));
         assert!(out.contains("→ rmap explain src/f.ts\n"), "{out}");
     }
+
+    // ── CURSOR-ROUNDTRIP-1 (§2.3, revision 1): raw cursor ⇔ human short cursor ───────
+
+    /// Reverse of the daemon/CLI `shell_arg` encoder: strip the single-quote wrapping
+    /// (and unescape embedded `'\''`) so a rendered cursor can be compared to the raw,
+    /// unquoted `cursor_raw` the daemon serializes. A bare (unquoted) token is returned
+    /// unchanged. Test-only.
+    fn unquote_shell(s: &str) -> String {
+        match (s.strip_prefix('\''), s.strip_suffix('\'')) {
+            (Some(_), Some(_)) if s.len() >= 2 => s[1..s.len() - 1].replace("'\\''", "'"),
+            _ => s.to_string(),
+        }
+    }
+
+    #[test]
+    fn raw_cursor_equals_human_short_cursor_with_verb_and_quoting_removed() {
+        // The binding the revision-1 reviewer required: the daemon's JSON `cursor_raw`
+        // (verb-less, unquoted, uid-stripped) is EXACTLY the human short cursor with the
+        // `explain ` verb and shell quoting removed. The daemon computes `cursor_raw` as
+        // the uid-stripped suffix (FactClass::cursor_arg); here we PROVE the human render
+        // of the SAME hit, stripped of verb + quotes, yields that identical suffix — so an
+        // agent reading `cursor_raw` gets byte-for-byte what a human copies off the screen.
+        // Mirrors the daemon's rule (the `shell_arg` cross-crate mirror pattern).
+        let uid = "leveldb-abc123";
+        for key in [
+            // Plain symbol cursor — safe characters, no quoting on either side.
+            "leveldb-abc123:db/db_impl.cc:CompactRange:SYMBOL:FUNCTION",
+            // Symbol whose path carries a SPACE: the human render single-quotes it, the raw
+            // cursor stays bare — the whitespace/metacharacter case the reviewer required.
+            "leveldb-abc123:db/my file.cc:CompactRange:SYMBOL:FUNCTION",
+        ] {
+            // `next` is the FULL, self-contained runnable command the daemon emits —
+            // shell-QUOTED for a key with spaces (`shell_quote_arg`, the daemon mirror), so
+            // it passes `next_is_ratified`. `cursor_raw` (the field under test) is the
+            // separate UNQUOTED short cursor.
+            let h = json!({
+                "display": "CompactRange", "path": "db/db_impl.cc", "line": 1,
+                "key": key, "next": format!("explain {}", shell_quote_arg(key)),
+            });
+            let out = render_fact_hit(&h, &["explain"], true, Some(uid));
+            // The rendered cursor: the token after `→ rmap explain `.
+            let rendered = out
+                .lines()
+                .find_map(|l| l.trim_start().strip_prefix("→ rmap explain "))
+                .unwrap_or_else(|| panic!("a rendered explain cursor in: {out}"))
+                .trim_end();
+            // The daemon's `cursor_raw` value for this hit: the uid-stripped suffix.
+            let cursor_raw = key
+                .strip_prefix(&format!("{uid}:"))
+                .expect("test key carries the uid prefix");
+            assert_eq!(
+                unquote_shell(rendered),
+                cursor_raw,
+                "human cursor minus verb+quoting == cursor_raw (key={key}) out={out}"
+            );
+            // And the uid prefix is genuinely absent from the raw cursor (no restatement).
+            assert!(
+                !cursor_raw.starts_with(&format!("{uid}:")),
+                "raw cursor is uid-stripped: {cursor_raw}"
+            );
+        }
+    }
 }

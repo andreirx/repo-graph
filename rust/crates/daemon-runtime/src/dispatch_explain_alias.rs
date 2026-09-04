@@ -40,12 +40,23 @@
 //! reverse. It never widens `explain` output, exit codes, or resolution semantics for any
 //! input that already worked.
 //!
-//! Abstraction record — module: `dispatch::explain_alias`; concrete current user:
-//! `dispatch::ServiceDispatcher::handle_explain` (the sole caller); axis: the ≤500-line
-//! / "do not append responsibilities to oversized files" guardrail — this
+//! Abstraction record — module: `dispatch::explain_alias`; concrete current users (as of
+//! CURSOR-ROUNDTRIP-1 §2.1): `dispatch::ServiceDispatcher::handle_explain` (inline, before
+//! its focus-resolution pipeline) AND `dispatch::ServiceDispatcher::resolve_symbol_cursor`
+//! (the shared `resolve_symbol` normalizer for `callers`/`callees`/`path`) — one aliasing
+//! function, several call sites, never a per-handler copy (STANDING HONESTY RULE 2). Axis:
+//! the ≤500-line / "do not append responsibilities to oversized files" guardrail — this
 //! target-normalization responsibility gets its own file + unit seam rather than growing
-//! the ~5k-line `dispatch.rs`; rejected simpler alternative: inlining the check in
-//! `handle_explain` (no unit seam, more mass on the god-file).
+//! the ~5k-line `dispatch.rs`; rejected simpler alternative: inlining the check in each
+//! handler (no unit seam, more mass on the god-file, drift risk across sites).
+//!
+//! NAME NOTE (surfaced, not renamed): the module/file name `explain_alias` /
+//! `dispatch_explain_alias.rs` predates this slice, when `explain` was the sole caller.
+//! The function now serves every symbol-cursor command, so the `explain` in the name
+//! under-describes the contract. The name is RETAINED here because the ratified slice doc
+//! (`docs/slices/cursor-roundtrip-1.md` §2.1) references it by this exact path and a rename
+//! is a boundary-touching change (module path + `#[path]` + call sites); flagged for the
+//! reviewer rather than applied unilaterally.
 
 /// The fact-class discriminant every SYMBOL stable_key carries (`…#name:SYMBOL[:KIND]` —
 /// see `storage::types` fixtures, e.g. `r1:src/foo.ts#bar:SYMBOL`). Its presence in a

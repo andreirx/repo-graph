@@ -110,154 +110,77 @@ pub(super) fn render_seed_tier(
     // FIND-RANK-1 (§2.3): apply the similarity FLOOR. A candidate whose score is present
     // and below the floor is sub-floor hearsay — not rendered, but its score feeds the
     // best-below tracker. A candidate with a present-and-above score OR a MISSING/invalid
-    // score is rendered (the latter surfaces as malformed inside `render_seed_candidate`
-    // — the floor never silently drops a malformed candidate; STANDING HONESTY RULE 1).
+    // score is validated by the shared renderer (the latter surfaces as unreadable — the
+    // floor never silently drops a malformed candidate; STANDING HONESTY RULE 1).
+    //
+    // CURSOR-ROUNDTRIP-1 (§2.2): rows render through the ONE shared current-DTO renderer
+    // (`presentation::seed::render_seed_chunk_candidate`) that Group B (callers/callees/path
+    // not-found fallback) also uses — never a per-command copy (STANDING HONESTY RULE 2). A
+    // candidate that fails validation is COUNTED and stated on ONE honest line
+    // (`render_unreadable_summary`), never a per-row placeholder (RULE 1).
     let mut rendered = String::new();
     let mut rendered_any = false;
     let mut best_below: Option<f64> = None;
+    let mut unreadable: Vec<String> = Vec::new();
     for c in candidates {
         match c.get("score").and_then(|v| v.as_f64()) {
             Some(score) if score < SEED_SIMILARITY_FLOOR => {
                 best_below = Some(best_below.map_or(score, |b| b.max(score)));
             }
-            _ => {
-                rendered.push_str(&render_seed_candidate(c));
-                rendered_any = true;
-            }
+            _ => match crate::presentation::seed::render_seed_chunk_candidate(c) {
+                Ok(row) => {
+                    rendered.push_str(&row);
+                    rendered_any = true;
+                }
+                Err(reason) => unreadable.push(reason),
+            },
         }
     }
     if rendered_any {
         out.push_str(&rendered);
-    } else if let Some(best) = best_below {
-        // ALL seeds fell below the floor → the honest ABSTAIN (§2.3), never 10 rows of
-        // sub-floor hearsay padding an empty answer. `best` is the highest sub-floor
-        // score, stated so the reader sees exactly how far below the floor the corpus is.
-        //
-        // Wording (operator ruling SEEDCHUNK-FLOOR-2 condition 2): the floor is a
-        // NOISE-TAIL cutoff, NOT a calibrated signal/noise separator (the calibration
-        // proved the no-home band overlaps the true-hit band for potion). So this line
-        // says "no candidates above the minimum similarity <floor>" — it must NOT imply
-        // the floor separates signal from noise. The Layer-3 honesty is carried by the
-        // "ranked guesses, not facts" header (above) + the facts wall + the
-        // production/test partition; the floor only trims the hopeless tail.
-        out.push_str(&format!(
+    }
+    if !unreadable.is_empty() {
+        out.push_str(&crate::presentation::seed::render_unreadable_summary(
+            &unreadable,
+        ));
+    }
+    if !rendered_any {
+        if let Some(best) = best_below {
+            // ALL seeds fell below the floor → the honest ABSTAIN (§2.3), never 10 rows of
+            // sub-floor hearsay padding an empty answer. `best` is the highest sub-floor
+            // score, stated so the reader sees exactly how far below the floor the corpus is.
+            //
+            // Wording (operator ruling SEEDCHUNK-FLOOR-2 condition 2): the floor is a
+            // NOISE-TAIL cutoff, NOT a calibrated signal/noise separator (the calibration
+            // proved the no-home band overlaps the true-hit band for potion). So this line
+            // says "no candidates above the minimum similarity <floor>" — it must NOT imply
+            // the floor separates signal from noise. The Layer-3 honesty is carried by the
+            // "ranked guesses, not facts" header (above) + the facts wall + the
+            // production/test partition; the floor only trims the hopeless tail.
+            out.push_str(&format!(
             "  no candidates above the minimum similarity {SEED_SIMILARITY_FLOOR:.2} (best: {best:.2})"
         ));
-        // FIND-GREP-1 (§2.4 / §4): the CAPABILITY close. The old close — "the concept may
-        // not have a distinct home in this repo" — was measured FALSE 3/3 on literal probes
-        // (fsync/TODO/unwrap_or all PRESENT): the gap is a CAPABILITY one (facts index
-        // symbols, not text), never a repo-absence one. §2.4 scopes the replacement close
-        // to a fact-table MISS: it claims "nothing matched" about the repo, true ONLY when
-        // the facts tier honestly established a miss. When facts MATCHED (or the payload was
-        // malformed/incomplete, so no miss is established) the close is WITHHELD — appending
-        // "nothing matched" there would be false / unproven (review-1; HONESTY RULE 1).
-        match fact_outcome {
+            // FIND-GREP-1 (§2.4 / §4): the CAPABILITY close. The old close — "the concept may
+            // not have a distinct home in this repo" — was measured FALSE 3/3 on literal probes
+            // (fsync/TODO/unwrap_or all PRESENT): the gap is a CAPABILITY one (facts index
+            // symbols, not text), never a repo-absence one. §2.4 scopes the replacement close
+            // to a fact-table MISS: it claims "nothing matched" about the repo, true ONLY when
+            // the facts tier honestly established a miss. When facts MATCHED (or the payload was
+            // malformed/incomplete, so no miss is established) the close is WITHHELD — appending
+            // "nothing matched" there would be false / unproven (review-1; HONESTY RULE 1).
+            match fact_outcome {
             super::FactTierOutcome::EstablishedMiss => out.push_str(
                 " — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`.",
             ),
             super::FactTierOutcome::MissNotEstablished => {}
         }
-        out.push('\n');
-    }
-    // (`candidates` is non-empty and every candidate either set `best_below` or rendered,
-    // so one of the two arms always fired — no silent empty tier.)
-}
-
-/// Render one seed candidate (unchanged validation from the prior slice): every
-/// identity field is our own DTO; a genuinely-absent required field is MALFORMED and
-/// surfaced, NEVER fabricated. The provenance label is the daemon's own VALIDATED
-/// `source` (must be `embedding`), never a literal pasted over the payload.
-fn render_seed_candidate(c: &serde_json::Value) -> String {
-    let path = c.get("path").and_then(|v| v.as_str());
-    let key = c.get("stable_key").and_then(|v| v.as_str());
-    let score = c.get("score").and_then(|v| v.as_f64());
-    let model = c.get("model_id").and_then(|v| v.as_str());
-    let source = c.get("source").and_then(|v| v.as_str());
-    let (Some(path), Some(key), Some(score), Some(model), Some(source)) =
-        (path, key, score, model, source)
-    else {
-        return
-            "  (malformed candidate: missing required field — path/stable_key/score/model_id/source)\n"
-                .to_string();
-    };
-    if source != "embedding" {
-        return format!(
-            "  (malformed candidate: source {source:?} is not a Layer-3 embedding hint)\n"
-        );
-    }
-    let Some(module) = render_module_hint(c.get("module")) else {
-        return
-            "  (malformed candidate: missing or invalid module hint — expected owning/unavailable)\n"
-                .to_string();
-    };
-    // SEED-CHUNK-1: seeds are per-SYMBOL chunks, so the anchor is `path:line` +
-    // qualified name (FIND-EVIDENCE-1 discipline). `line`/`qualified_name` are additive
-    // (skip-serialized when the node had no stored span/name) — absent renders WITHOUT
-    // them, never a fabricated 0. `is_test` (always serialized) labels the DEMOTED test
-    // block so a test hit is never mistaken for production (spec §5).
-    let anchor = match c.get("line").and_then(|v| v.as_i64()) {
-        Some(line) => format!("{path}:{line}"),
-        None => path.to_string(),
-    };
-    let symbol = c
-        .get("qualified_name")
-        .and_then(|v| v.as_str())
-        .map(|q| format!("  {q}"))
-        .unwrap_or_default();
-    // `is_test` is our OWN DTO field, ALWAYS serialized (spec §5 the moat). Production
-    // (`false`) is the unlabeled default (it ranks above the wall); a test chunk is
-    // labeled `[test]`. A MISSING / non-bool `is_test` is UNKNOWN classification —
-    // rendered with an explicit marker, NEVER left blank to masquerade as production
-    // (review-1 gap d; STANDING HONESTY: unknown is never invisible).
-    let test_label = match c.get("is_test") {
-        Some(serde_json::Value::Bool(true)) => "  [test]",
-        Some(serde_json::Value::Bool(false)) => "",
-        _ => "  [is_test unknown]",
-    };
-    let mut s = format!(
-        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){test_label}\n"
-    );
-    s.push_str(&render_next(c.get("next"), key));
-    s
-}
-
-/// Render a candidate's `next` follow-up line. `cwd` is OPTIONAL (operator ruling 2):
-/// when the registry resolved the repo root it prints the `cd <cwd> && …` hint; when
-/// the lookup was unavailable it prints the honest reason from `next.cwd_unavailable`
-/// (never a fabricated empty cwd). A `next` object carrying NEITHER is malformed.
-fn render_next(next: Option<&serde_json::Value>, key: &str) -> String {
-    let Some(n) = next.and_then(|v| v.as_object()) else {
-        return "    (malformed candidate: missing next follow-up)\n".to_string();
-    };
-    let cwd = n.get("cwd").and_then(|v| v.as_str());
-    let unavailable = n.get("cwd_unavailable").and_then(|v| v.as_str());
-    match (cwd, unavailable) {
-        (Some(cwd), _) => format!("    → (cd {cwd} && rmap explain {key})\n"),
-        (None, Some(reason)) => {
-            format!(
-                "    → rmap explain {key}  (run from the repo root — working directory {reason})\n"
-            )
-        }
-        (None, None) => {
-            "    (malformed candidate: next has neither cwd nor a reason)\n".to_string()
+            out.push('\n');
         }
     }
-}
-
-/// Render the owning-module hint (`ModuleHint`, externally tagged) for human mode:
-/// `Some(", module <path>")` when a genuine module is known, `Some(", module: <reason>")`
-/// when explicitly unavailable. Returns `None` when the field is absent or is neither
-/// tagged shape — a MALFORMED candidate (our own DTO always carries one of the two), which
-/// the caller surfaces rather than rendering as "no module required". Never fabricates.
-fn render_module_hint(module: Option<&serde_json::Value>) -> Option<String> {
-    let m = module?.as_object()?;
-    if let Some(path) = m.get("owning").and_then(|v| v.as_str()) {
-        return Some(format!(", module {path}"));
-    }
-    if let Some(reason) = m.get("unavailable").and_then(|v| v.as_str()) {
-        return Some(format!(", module: {reason}"));
-    }
-    None
+    // (`candidates` is non-empty and every candidate either set `best_below`, rendered a
+    // row, or was counted `unreadable` — so at least one arm always fired; no silent empty
+    // tier. The per-candidate render + the malformed-count line both live in
+    // `presentation::seed`, shared with the Group-B not-found fallback — one renderer.)
 }
 
 #[cfg(test)]
@@ -330,8 +253,10 @@ mod tests {
 
     #[test]
     fn seed_below_floor_with_missing_score_is_still_surfaced_not_swallowed() {
-        // A candidate with NO score cannot be floor-filtered — it must still render (and
-        // surface as malformed), never silently dropped by the floor (HONESTY RULE 1).
+        // A candidate with NO score cannot be floor-filtered — it must still be VALIDATED
+        // (and, failing, COUNTED as unreadable on one honest line), never silently dropped
+        // by the floor (STANDING HONESTY RULE 1). CURSOR-ROUNDTRIP-1 (§2.2): the shared
+        // renderer counts + states it, never a per-row `(malformed candidate: …)` placeholder.
         let mut out = String::new();
         render_seed_tier(
             &json!({"seeds_available": true, "candidates": [{"path": "src/x.ts"}]}),
@@ -339,8 +264,12 @@ mod tests {
             &mut out,
         );
         assert!(
-            out.contains("malformed candidate"),
-            "malformed surfaced: {out}"
+            out.contains("1 candidate unreadable: missing required field"),
+            "counted + stated on one line: {out}"
+        );
+        assert!(
+            !out.contains("(malformed candidate"),
+            "no per-row placeholder (RULE 1): {out}"
         );
     }
 
@@ -425,7 +354,9 @@ mod tests {
     }
 
     #[test]
-    fn non_embedding_seed_source_is_malformed_never_relabeled() {
+    fn non_embedding_seed_source_is_counted_never_relabeled() {
+        // A non-`embedding` source is COUNTED unreadable with the offending source named,
+        // never relabeled as an embedding hint, never a per-row placeholder (RULE 1).
         let _ = empty_facts(); // fixture parity with the other tiers' tests.
         let mut out = String::new();
         let result = json!({
@@ -433,12 +364,13 @@ mod tests {
             "candidates": [well_formed_candidate(json!("lexical"))],
         });
         render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
-        assert!(
-            out.contains("malformed candidate"),
-            "surfaced malformed: {out}"
-        );
+        assert!(out.contains("unreadable"), "surfaced unreadable: {out}");
         assert!(out.contains("\"lexical\""), "names offending source: {out}");
         assert!(!out.contains("0.71, embedding"), "not relabeled: {out}");
+        assert!(
+            !out.contains("(malformed candidate"),
+            "no per-row placeholder: {out}"
+        );
     }
 
     #[test]

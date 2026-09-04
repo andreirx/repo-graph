@@ -10,6 +10,9 @@ use serde_json::{json, Value};
 use super::query::{DegradeReason, SemanticResult};
 use crate::find_facts::ClassOutcome;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FindResponse {
     pub schema: String,
@@ -106,7 +109,19 @@ pub struct FindFactHit {
     /// Always present and executable (review-1 item 1): the renderer prints it and
     /// the e2e proof runs it verbatim, exit 0. FULL form (the JSON stays byte-stable);
     /// the human renderer derives the relative short cursor from `repo_uid` + `key`.
+    /// SHELL-QUOTED when the key carries spaces/metacharacters (copy-paste safe for a human).
     pub next: String,
+    /// CURSOR-ROUNDTRIP-1 (§2.3) additive: the RAW cursor ARGUMENT — the verb-less,
+    /// UNQUOTED token an agent passes straight to any cursor-taking command
+    /// (`explain`/`callers`/`callees`/`path`), so it never strips the shell quotes `next`
+    /// may carry nor the verb prefix (the self-model experiment's finding; revision 1
+    /// review). NOT a runnable command — the cursor alone. uid-STRIPPED for the
+    /// explain-folding symbol/file classes whose key carries this repo's `<uid>:` prefix
+    /// (byte-for-byte the short cursor the human render prints), else the full key.
+    /// ABSENT (skip-serialized) for the whole-listing classes and boundary, whose
+    /// renderers take no cursor argument — a cursor field only where a cursor exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_raw: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -266,7 +281,7 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
 /// fact class, in the fixed [`crate::find_facts::FactClass::ALL`] order. A class
 /// whose read FAILED carries its `error` (rendered `unavailable (<reason>)`),
 /// never a silent empty (STANDING HONESTY RULE).
-fn fact_groups(facts: &[ClassOutcome]) -> Vec<FindFactGroup> {
+fn fact_groups(facts: &[ClassOutcome], repo_uid: &str) -> Vec<FindFactGroup> {
     facts
         .iter()
         .map(|o| match &o.result {
@@ -307,8 +322,17 @@ fn fact_groups(facts: &[ClassOutcome]) -> Vec<FindFactGroup> {
                             (None, Some(cmd)) => cmd,
                             (None, None) => String::new(),
                         };
+                        // CURSOR-ROUNDTRIP-1 (§2.3): the RAW cursor ARGUMENT (verb-less,
+                        // unquoted) an agent passes to any cursor-taking command. Derived
+                        // from (class, key, repo_uid) — uid-stripped to the short cursor for
+                        // the explain-folding symbol/file classes, else the full key; `None`
+                        // for the whole-listing/boundary classes whose renderer takes no
+                        // cursor argument (a boundary hit's per-kind renderer, like the
+                        // `… list` classes, has no cursor to carry).
+                        let cursor_raw = o.class.cursor_arg(h.key.as_deref(), repo_uid);
                         FindFactHit {
                             next,
+                            cursor_raw,
                             display: h.display.clone(),
                             path,
                             path_unknown_reason,
@@ -419,7 +443,7 @@ pub(crate) fn build_find_response(
         query: query.to_string(),
         summary,
         candidates,
-        facts: fact_groups(facts),
+        facts: fact_groups(facts, repo_uid),
         seeds_available,
         seeds_unavailable_reason,
     }

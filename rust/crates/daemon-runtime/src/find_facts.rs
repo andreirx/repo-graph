@@ -195,6 +195,40 @@ impl FactClass {
         })
     }
 
+    /// CURSOR-ROUNDTRIP-1 (§2.3): the RAW cursor ARGUMENT this hit's next command takes —
+    /// the verb-less, UNQUOTED token an agent passes straight to any cursor-taking command
+    /// (`explain`/`callers`/`callees`/`path`), so it never has to strip the shell quoting
+    /// `next` may carry NOR the verb prefix (the self-model experiment's finding,
+    /// docs/audits/2026-09-04-self-model.md; revision 1 review). This is NOT a runnable
+    /// command — it is the cursor alone.
+    ///
+    /// For the explain-rendered folding classes (symbol/file) whose key carries this repo's
+    /// `<repo_uid>:` prefix it is the uid-STRIPPED short cursor — byte-for-byte the suffix
+    /// the human render prints as `explain <suffix>` and the daemon's reattach alias
+    /// resolves. A non-explain folding class (module → `map`), or a key without the prefix,
+    /// keeps the full key (already short — a path). `None` for the whole-listing classes
+    /// (`… list`) and boundary: their renderers take no cursor argument, so there is no
+    /// cursor to carry. Mirrors the CLI `find::fact_hit::relative_cursor` gate — a binding
+    /// CLI serialization test holds the two in lockstep (the `shell_arg` mirror pattern).
+    pub(crate) fn cursor_arg(self, key: Option<&str>, repo_uid: &str) -> Option<String> {
+        if !self.folds_hit_key() {
+            return None;
+        }
+        let key = key?;
+        let short = if self.render_command() == Some("explain") {
+            match key.strip_prefix(&format!("{repo_uid}:")) {
+                Some(suffix) if !suffix.is_empty() => Some(suffix),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        Some(match short {
+            Some(s) => s.to_string(),
+            None => key.to_string(),
+        })
+    }
+
     /// True for the classes whose per-hit next command appends the hit's key
     /// (`explain <key>` / `map --dry-run <path>`); false for the whole-listing `… list`
     /// classes whose command IS the move. `Boundary` is false (its whole-listing

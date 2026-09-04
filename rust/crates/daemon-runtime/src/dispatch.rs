@@ -47,11 +47,13 @@ use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot,
 #[path = "dispatch_seed.rs"]
 mod seed_dispatch;
 
-/// FIND-EVIDENCE-1 (§2.3): the additive short-cursor alias for `explain`. `find` prints
-/// relative `explain <suffix>` cursors (the repo uid stripped, shown once in the header);
-/// this reattaches the uid prefix so those cursors run verbatim, WITHOUT changing any
-/// input `explain` already resolves. A child module of `dispatch` (its own file for the
-/// ≤500-line guardrail); its `reattach_repo_uid_prefix` is called from `handle_explain`.
+/// FIND-EVIDENCE-1 (§2.3) + CURSOR-ROUNDTRIP-1 (§2.1): the additive short-cursor alias.
+/// `find` prints relative `explain <suffix>` cursors (the repo uid stripped, shown once in
+/// the header); this reattaches the uid prefix so those cursors run verbatim, WITHOUT
+/// changing any input a resolver already resolves. A child module of `dispatch` (its own
+/// file for the ≤500-line guardrail); its `reattach_repo_uid_prefix` is called from
+/// `handle_explain` AND (via `resolve_symbol_cursor`) from `handle_callers`/`callees`/`path`
+/// — one aliasing function, several call sites (see the module's abstraction record).
 #[path = "dispatch_explain_alias.rs"]
 mod explain_alias;
 
@@ -158,6 +160,38 @@ impl ServiceDispatcher {
         repo_state: &crate::state::RepoState,
     ) -> Result<StorageConnection, crate::foreground_open::ForegroundOpenFault> {
         self.state.open_repo_storage_for_request_split(repo_state)
+    }
+
+    /// CURSOR-ROUNDTRIP-1 (§2.1): resolve a symbol cursor, first reattaching this repo's
+    /// `<repo_uid>:` prefix when `query` is the printed short-cursor form (a symbol
+    /// stable_key SUFFIX). The ONE syntax-gated, storage-free aliasing site
+    /// (`explain_alias::reattach_repo_uid_prefix`) shared by EVERY symbol-cursor command
+    /// that resolves through `resolve_symbol` — `callers`/`callees`/`path`. `explain`
+    /// applies the SAME alias function inline before its focus-resolution pipeline (a
+    /// different resolver, so it cannot route through this helper), so the aliasing logic
+    /// still lives in exactly one function, never a per-handler copy (STANDING HONESTY
+    /// RULE 2). Pure passthrough for every other input: a full `<uid>:` key, a plain
+    /// symbol name (`CompactRange`), or a path resolves byte-identically to today — the
+    /// alias rewrites ONLY a prefix-less `:SYMBOL` suffix, which today never resolves.
+    /// The reattach is a pure string op (no `StorageConnection`), so it adds no `nodes`
+    /// read to the resolution these handlers already perform.
+    ///
+    /// Abstraction one-liner: a crate-private resolution helper; concrete current users —
+    /// `handle_callers`, `handle_callees`, `handle_path` (from + to = 4 call sites); axis:
+    /// none claimed — a shared normalize-then-resolve so the four sites cannot diverge on
+    /// the alias; rejected simpler: inlining the `reattach_repo_uid_prefix` call at each
+    /// `resolve_symbol` (4 near-identical insertions, drift risk on a future 5th site).
+    fn resolve_symbol_cursor(
+        storage: &StorageConnection,
+        snapshot_uid: &str,
+        repo_uid: &str,
+        query: &str,
+    ) -> Result<
+        repo_graph_storage::queries::ResolvedSymbol,
+        repo_graph_storage::queries::SymbolResolveError,
+    > {
+        let reattached = explain_alias::reattach_repo_uid_prefix(repo_uid, query);
+        storage.resolve_symbol(snapshot_uid, reattached.as_deref().unwrap_or(query))
     }
 
     /// Get a required string parameter.
@@ -1297,9 +1331,14 @@ impl ServiceDispatcher {
                 }
             };
 
-        // Resolve symbol
+        // Resolve symbol. CURSOR-ROUNDTRIP-1 (§2.1): `resolve_symbol_cursor` reattaches
+        // this repo's uid prefix when `symbol` is the short cursor `find` prints, so the
+        // printed cursor round-trips into `callers` (storage-free string op; a full key /
+        // plain name / path resolves exactly as before).
         use repo_graph_storage::queries::SymbolResolveError;
-        let target = match storage.resolve_symbol(epoch.snapshot_uid(), symbol) {
+        let resolved =
+            Self::resolve_symbol_cursor(&storage, epoch.snapshot_uid(), &repo_uid, symbol);
+        let target = match resolved {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the semantic tier on the
@@ -1470,9 +1509,12 @@ impl ServiceDispatcher {
                 }
             };
 
-        // Resolve symbol
+        // Resolve symbol. CURSOR-ROUNDTRIP-1 (§2.1): reattach the uid prefix so `find`'s
+        // printed cursor round-trips into `callees` (storage-free; other forms unchanged).
         use repo_graph_storage::queries::SymbolResolveError;
-        let target = match storage.resolve_symbol(epoch.snapshot_uid(), symbol) {
+        let resolved =
+            Self::resolve_symbol_cursor(&storage, epoch.snapshot_uid(), &repo_uid, symbol);
+        let target = match resolved {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the semantic tier on the
@@ -2569,7 +2611,14 @@ impl ServiceDispatcher {
         // Resolve symbols
         use repo_graph_storage::queries::SymbolResolveError;
 
-        let from_sym = match storage.resolve_symbol(epoch.snapshot_uid(), from_query) {
+        // CURSOR-ROUNDTRIP-1 (§2.1): reattach the uid prefix so a short cursor `find`
+        // prints round-trips into `path` (both endpoints); other forms unchanged.
+        let from_sym = match Self::resolve_symbol_cursor(
+            &storage,
+            epoch.snapshot_uid(),
+            &repo_uid,
+            from_query,
+        ) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the tier on the `from`
@@ -2603,7 +2652,12 @@ impl ServiceDispatcher {
             }
         };
 
-        let to_sym = match storage.resolve_symbol(epoch.snapshot_uid(), to_query) {
+        let to_sym = match Self::resolve_symbol_cursor(
+            &storage,
+            epoch.snapshot_uid(),
+            &repo_uid,
+            to_query,
+        ) {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 // EMBED-SEED-IMPL-1 (spec §8, Group B): fire the tier on the `to`
