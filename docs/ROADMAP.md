@@ -219,10 +219,13 @@ Shipped-fix verdicts: --text FIXED-recall/BROKEN-C++-evidence · anchors PARTIAL
 sentence FIXED · seeds PARTIAL (is_test partition inert on Rust; decl-chunk dominance) ·
 resource caveat FIXED-disclosure/NEW-fabrication · .h routing REGRESSED (macro-name
 erasure 770/770 vcmi) · type-only NEAR-DORMANT (ALL-edge predicate; should be ANY).
-PROPOSED QUEUE (awaiting human ratification): 1 HONESTY-GATE-1 (no-fabrication invariant)
-· 2 CPP-SPAN-FIDELITY-1 (macro classes + span containment; absorbs the filed Limiter
-defect) · 3 SEED-CHUNK-2 (per-chunk is_test, decl demotion) · 4 COHERENCE-2 (orient/cycles
-walks; type-only ANY; surfaces test exclusion; totals) · 5 ECONOMY-2 · 6 carried minors.
+QUEUE RATIFIED (human 2026-09-04, with two additions): 1 HONESTY-GATE-1 (deps: the
+destructive-edit family) · 2 HONESTY-GATE-2 (resources/trust/map fabrications; same
+invariant) · 3 CPP-SPAN-FIDELITY-1 (macro classes + span containment) · 4
+ANCHORS-EVERYWHERE-1 (human addition: line numbers on every surface citing symbols/files,
+not only find — sequenced AFTER span fidelity so C++ anchors land on correct spans) · 5
+SEED-CHUNK-2 · 6 COHERENCE-2 · 7 DAEMON-CONCURRENCY-1 (human addition; SPEC slice first —
+foundational, decisions to ratify) · 8 ECONOMY-2 · carried minors.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
