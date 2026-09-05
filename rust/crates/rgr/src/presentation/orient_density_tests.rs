@@ -14,7 +14,8 @@ use super::*;
 /// list, cycles, docs, degraded call-graph) PLUS limits + next steps and 80
 /// named complexity centers, all carried in evidence (`high_complexity_count ==
 /// len`). The 80 centers let the per-tier complexity caps (medium 10, large 50,
-/// full uncapped) actually bite, so the ladder's progression is observable.
+/// full ORIENT_FULL_LONG_TAIL_CAP=200) actually bite, so the ladder's progression
+/// is observable; 80 < 200, so `--full` shows all 80 within its cap (no tail).
 fn ladder_fixture() -> OrientResponse {
     use serde_json::json;
     let mut r = nginx_like();
@@ -106,10 +107,11 @@ fn budget_ladder_is_progressive_small_medium_large() {
 }
 
 #[test]
-fn medium_caps_complexity_large_expands_full_uncapped() {
-    // The complexity table is the ladder's uncapped-at-full section: medium shows
-    // a scannable top-10 (honest "+N more" tail), large a larger detailed table,
-    // `--full` the complete set with NO truncation tail. Proves large < full.
+fn medium_caps_complexity_large_expands_full_within_long_tail_cap() {
+    // The complexity table's ladder: medium shows a scannable top-10 (honest "+N more"
+    // tail), large a larger detailed table, `--full` up to ORIENT_FULL_LONG_TAIL_CAP=200
+    // (ECONOMY-2 §2.3 — NOT uncapped). This fixture's 80 centers are within the 200 cap, so
+    // `--full` shows all 80 with NO truncation tail. Proves large < full.
     let r = ladder_fixture();
     let medium = r.render_human(OrientDepth::Medium);
     let large = r.render_human(OrientDepth::Large);
@@ -125,8 +127,8 @@ fn medium_caps_complexity_large_expands_full_uncapped() {
         "medium caps the complexity table at 10:\n{medium}"
     );
     assert!(
-        medium.contains("+70 more above threshold — rmap hotspots"),
-        "medium's capped table carries an honest tail:\n{medium}"
+        medium.contains("+70 more above threshold (showing 10) — rmap hotspots"),
+        "medium's capped table carries an honest tail STATING the bound:\n{medium}"
     );
 
     // Large: expands to top-50 (f49 present, f50 not), still an honest tail (80-50).
@@ -139,18 +141,19 @@ fn medium_caps_complexity_large_expands_full_uncapped() {
         "large caps the detailed table at 50:\n{large}"
     );
     assert!(
-        large.contains("+30 more above threshold — rmap hotspots"),
-        "large's capped table carries an honest tail:\n{large}"
+        large.contains("+30 more above threshold (showing 50) — rmap hotspots"),
+        "large's capped table carries an honest tail STATING the bound:\n{large}"
     );
 
-    // Full: uncapped — every center (f79) with NO truncation tail; large < full.
+    // Full: the 80 centers are within the 200-cap, so every center (f79) shows with NO
+    // truncation tail (capped, but not reached here); large < full.
     assert!(
         full.contains("src/f79.c — fn79"),
-        "full is uncapped:\n{full}"
+        "full shows all 80 within the long-tail cap:\n{full}"
     );
     assert!(
         !full.contains("more above threshold"),
-        "full has no truncation tail (it is complete):\n{full}"
+        "full has no truncation tail (80 < 200 cap — complete):\n{full}"
     );
     assert!(
         large.len() < full.len(),
@@ -240,8 +243,8 @@ fn d7_scale_bounded_human_true_omission_at_every_tier() {
     let medium = r.render_human(OrientDepth::Medium);
     assert!(medium.contains("Package groups (directory/package topology"));
     assert!(
-        medium.contains("… and 110 more groups — see `stats --json` / `modules`"),
-        "medium omission must be true:\n{medium}"
+        medium.contains("… and 110 more groups (showing 20) — see `stats --json` / `modules`"),
+        "medium omission must be true and STATE the bound:\n{medium}"
     );
     assert!(
         medium.contains("g000 — 1000 files"),
@@ -259,8 +262,8 @@ fn d7_scale_bounded_human_true_omission_at_every_tier() {
     // LARGE: section capped at 50 + TRUE omission (130 - 50 = 80).
     let large = r.render_human(OrientDepth::Large);
     assert!(
-        large.contains("… and 80 more groups — see `stats --json` / `modules`"),
-        "large omission must be true:\n{large}"
+        large.contains("… and 80 more groups (showing 50) — see `stats --json` / `modules`"),
+        "large omission must be true and STATE the bound:\n{large}"
     );
     assert!(
         large.contains("g049 — "),
@@ -271,17 +274,17 @@ fn d7_scale_bounded_human_true_omission_at_every_tier() {
         "large caps the section at 50:\n{large}"
     );
 
-    // FULL: ORIENT-SEGMENT-2 §2.4 (operator ruling 2, 2026-08-28) UNCAPS the
-    // package-group section at `--full` — the COMPLETE breakdown the small-budget
-    // footer advertises. A >50-group repo's `--full` renders EVERY group (all 130
-    // here), so there is NO omission line. This deliberately supersedes the earlier
-    // MODULE-MODEL-2 §13 D7 "bounded at every tier" reading FOR PACKAGE GROUPS AT FULL
-    // ONLY (medium/large stay bounded above); the headline still names the complete
-    // total and the JSON evidence is untouched.
+    // FULL: ECONOMY-2 (§2.3) caps the package-group section at `ORIENT_FULL_LONG_TAIL_CAP`
+    // (200) — SUPERSEDING ORIENT-SEGMENT-2 §2.4's earlier `--full` UNCAP (which measured as a
+    // 314 KB dump). This fixture's 130 groups are BELOW the 200 cap, so `--full` still renders
+    // EVERY group (all 130) with NO omission line — the cap simply is not reached here. Above
+    // 200 the tail elides with the honest `… and N more groups (showing 200) — …` line
+    // (proven in `orient_seg2_tests`). The headline still names the complete total and the JSON
+    // evidence is untouched — human bounding is presentation-only.
     let full = r.render_human(OrientDepth::Full);
     assert!(
         !full.contains("more groups — see `stats --json`"),
-        "full renders every group — no omission line:\n{full}"
+        "130 groups < the 200 cap → full renders every group, no omission line:\n{full}"
     );
     assert!(
         full.contains("g050 — "),

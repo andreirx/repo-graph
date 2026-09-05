@@ -48,7 +48,7 @@
 ///
 /// PRESENTATION-side filtering only: pins + ranking formula are frozen (§3); JSON still
 /// carries every candidate with its raw `score` for a programmatic consumer to filter.
-const SEED_SIMILARITY_FLOOR: f64 = 0.30;
+pub(super) const SEED_SIMILARITY_FLOOR: f64 = 0.30;
 
 /// Render the DEMOTED semantic-seed tier (§2.3): the renamed header, then either the
 /// ranked guesses or an explicit `semantic seeds unavailable (<reason>)`.
@@ -61,6 +61,7 @@ const SEED_SIMILARITY_FLOOR: f64 = 0.30;
 pub(super) fn render_seed_tier(
     result: &serde_json::Value,
     fact_outcome: super::FactTierOutcome,
+    repo_uid: Option<&str>,
     out: &mut String,
 ) {
     out.push_str("Semantic seeds (embedding similarity — ranked guesses, not facts):\n");
@@ -142,7 +143,7 @@ pub(super) fn render_seed_tier(
             Some(score) if score < SEED_SIMILARITY_FLOOR => {
                 best_below = Some(best_below.map_or(score, |b| b.max(score)));
             }
-            _ => match crate::presentation::seed::render_seed_chunk_candidate(c) {
+            _ => match crate::presentation::seed::render_seed_chunk_candidate(c, repo_uid) {
                 // Partition by the candidate's OWN `is_test` DTO field. A missing / non-bool
                 // value is UNKNOWN classification (old daemon / malformed) — routed to its
                 // own bucket, NEVER counted as production; the shared renderer already

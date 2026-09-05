@@ -203,11 +203,15 @@ impl OrientResponse {
     }
 
     /// The complexity centers, NAMED with cyclomatic complexity (ORIENT-DENSITY-1).
-    /// `cap` is the per-tier render limit (`OrientDepth::complexity_breakdown_cap`):
-    /// `Some(n)` a top-`n` slice (`medium` / `large`), `None` every carried center
-    /// (`--full`). When more remain above threshold than shown, an honest
-    /// "+N more — rmap hotspots" tail follows, keyed on `high_complexity_count` to
-    /// match the headline. Empty when no complexity signal is present.
+    /// `cap` is the per-tier render limit (`OrientDepth::complexity_breakdown_cap`): a top-`n`
+    /// slice at EVERY tier that renders the section — `medium` (10), `large` (50), and `--full`
+    /// (the STATED `ORIENT_FULL_LONG_TAIL_CAP` = 200, ECONOMY-2 §2.3; the former `None`/uncapped
+    /// `--full` measured as a 314 KB dump). `None` is the uncapped sentinel, no longer produced
+    /// by any tier that reaches here (kept only for the `unwrap_or(top.len())` fallback). When
+    /// more remain above threshold than shown, an honest "+N more above threshold (showing
+    /// <shown>) — rmap hotspots" tail follows — keyed on `high_complexity_count` to match the
+    /// headline, and STATING the bound actually applied (§2.3). Empty when no complexity signal
+    /// is present.
     pub(super) fn complexity_breakdown_section(&self, cap: Option<usize>) -> String {
         let Some(ev) = self.signal_evidence("HIGH_COMPLEXITY") else {
             return String::new();
@@ -248,8 +252,12 @@ impl OrientResponse {
         // shows, keyed on `high_complexity_count` (absent count → no tail).
         if let Some(total) = ev.get("high_complexity_count").and_then(|v| v.as_u64()) {
             if total > shown {
+                // ECONOMY-2 (§2.3, review-1 finding 2b): STATE the bound actually applied —
+                // `shown` is the row count this tier rendered (the `--full` cap is
+                // `ORIENT_FULL_LONG_TAIL_CAP` = 200; medium/large state their true 10/50), so
+                // the reader sees BOTH how many were omitted AND where the cap fell.
                 out.push_str(&bullet(&format!(
-                    "+{} more above threshold — rmap hotspots",
+                    "+{} more above threshold (showing {shown}) — rmap hotspots",
                     total - shown
                 )));
             }
@@ -401,7 +409,21 @@ impl OrientResponse {
 
         let docs = self.doc_basenames();
         if !docs.is_empty() {
-            parts.push(format!("Docs: {}", docs.join(", ")));
+            let mut docs_line = format!("Docs: {}", docs.join(", "));
+            // ECONOMY-2 (§2.2, review-0 gap c): the headline names at most DOC_HEADLINE_CAP
+            // docs; when more relevant docs exist the remainder is COUNTED and the exact
+            // command for the whole set is named — never silently dropped (STANDING HONESTY
+            // RULE 2). `budget_saturated` reads the same condition, so "output complete" is
+            // refused whenever this line renders.
+            // This branch runs only when `doc_basenames()` is non-empty, i.e. the section is
+            // PRESENT — so `docs_elided_count()` is `Some(n)` here; a defensive `if let`
+            // (never an `unwrap`) keeps the absent case silent rather than asserting a count.
+            if let Some(elided) = self.docs_elided_count() {
+                if elided > 0 {
+                    docs_line.push_str(&format!(" … and {elided} more docs — rmap docs list"));
+                }
+            }
+            parts.push(docs_line);
         }
 
         if parts.is_empty() {
@@ -430,6 +452,26 @@ impl OrientResponse {
             .collect()
     }
 
+    /// ECONOMY-2 (§2.2, review-0 gap c; review-1 finding 1): how many relevant docs the
+    /// headline ELIDES beyond [`DOC_HEADLINE_CAP`]. `Some(0)` = the headline names them all;
+    /// `Some(n>0)` = `n` elided. `None` = the documentation section is ABSENT and therefore
+    /// UNKNOWN: the daemon's `build_documentation_section` (agent `orient/repo.rs`) collapses
+    /// a `get_doc_inventory` READ FAILURE into the SAME `None` as a genuinely doc-less repo, so
+    /// an absent section carries no evidence that "nothing was elided" — STANDING HONESTY
+    /// RULE #1 forbids the old `.unwrap_or(0)` that read it as a known zero. Callers that gate a
+    /// completeness CLAIM must treat `None` as "not provably complete" (see `budget_saturated`);
+    /// the RENDER path only runs when the section is `Some`, so its `Some(n)` is exact.
+    /// The single source of both the rendered `… and N more docs` count AND the
+    /// `budget_saturated` docs-completeness gate, so the count and the "output complete"
+    /// claim can never disagree.
+    pub(super) fn docs_elided_count(&self) -> Option<usize> {
+        self.documentation.as_ref().map(|d| {
+            d.relevant_files
+                .len()
+                .saturating_sub(super::orient_seg2::DOC_HEADLINE_CAP)
+        })
+    }
+
     /// The full package-group breakdown (NAMED, with file + test counts), shown
     /// at `medium` and up — the scannable KEY STRUCTURE (ORIENT-DENSITY-1;
     /// MODULE-MODEL-1 D4): the directory/package TOPOLOGY (Layer 0/1). DISTINCT
@@ -449,13 +491,16 @@ impl OrientResponse {
         // §13 D7: top-N by file count (the fold returns them size-DESC), then an
         // honest omission line. `cap` is `OrientDepth::package_group_section_cap`:
         // `None` is the "uncapped" sentinel this renderer honors (`unwrap_or(total)`
-        // renders every group). ORIENT-SEGMENT-2 §2.4 (operator ruling 2, 2026-08-28):
-        // `medium` caps at 20, `large` at 50, and `--full` now passes `None` — the
-        // COMPLETE breakdown the small-budget footer advertises, so a >50-group repo's
-        // `--full` renders EVERY group (no elision). `small` also produces `None` but
-        // never reaches this renderer (`shows_detail()` gates the section off). `total`
-        // is the COMPLETE set — the fold never caps and the JSON carries it whole — so
-        // the omission count on the capped tiers is always TRUE at scale.
+        // renders every group), used only where a tier carries no cap. ECONOMY-2
+        // (§2.3/§3) SUPERSEDES ORIENT-SEGMENT-2 §2.4 operator ruling 2 ("`--full` UNCAPS"):
+        // the uncap measured as a 314 KB dump, so `medium` caps at 20, `large` at 50, and
+        // `--full` NOW ALSO caps — at the STATED `ORIENT_FULL_LONG_TAIL_CAP` — with the
+        // omission line naming the rest (`stats --json` / `modules`); a >200-group repo's
+        // `--full` therefore ELIDES the tail (and `budget_saturated` refuses "output
+        // complete"). `small` produces `None` but never reaches this renderer
+        // (`shows_detail()` gates the section off). `total` is the COMPLETE set — the fold
+        // never caps and the JSON carries it whole — so the omission count is always TRUE
+        // at scale.
         let total = groups.len();
         let limit = cap.unwrap_or(total);
         let mut out = heading("Package groups (directory/package topology — Layer 0/1)");
@@ -516,8 +561,12 @@ impl OrientResponse {
         }
         let shown = limit.min(total);
         if total > shown {
+            // ECONOMY-2 (§2.3, review-1 finding 2b): STATE the bound actually applied — `shown`
+            // is the number of group rows this tier rendered (the `--full` cap is
+            // `ORIENT_FULL_LONG_TAIL_CAP` = 200; medium/large state their true 20/50), so the
+            // omission line names BOTH the omitted count AND where the cap fell.
             out.push_str(&bullet(&format!(
-                "… and {} more group{} — see `stats --json` / `modules`",
+                "… and {} more group{} (showing {shown}) — see `stats --json` / `modules`",
                 total - shown,
                 plural((total - shown) as u64)
             )));

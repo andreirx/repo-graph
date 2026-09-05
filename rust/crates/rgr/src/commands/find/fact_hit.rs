@@ -73,6 +73,33 @@ pub(super) fn render_fact_hit(
             None => p.to_string(),
         }
     };
+    // `key` is OPTIONAL (the argument-taking classes carry one; the list classes do not).
+    // Read up front: it drives BOTH the cursor-composability check (ECONOMY-2 §2.1) AND the
+    // `next` validation below. A present-but-non-string key is MALFORMED — surfaced once the
+    // identity line exists (it feeds `next`, so a corrupt key must not silently pass).
+    let key: Result<Option<&str>, ()> = match h.get("key") {
+        None => Ok(None),
+        Some(serde_json::Value::String(k)) => Ok(Some(k.as_str())),
+        Some(_) => Err(()),
+    };
+    // ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): a SYMBOL hit whose Known path +
+    // display (the qualified name) reassemble the runnable short cursor
+    // (`<path>#<display>:SYMBOL:<KIND>`) is CURSOR-COMPOSABLE — the ONE pattern header `find`
+    // prints covers it, so its per-row `→ rmap explain …` line is DROPPED and the identity
+    // line shows `[KIND]` instead. A hit that does NOT compose (non-symbol class, unknown /
+    // out-of-root path, no header uid, or a suffix the display+path do not reassemble) keeps
+    // its explicit runnable cursor — never silently stripped (STANDING HONESTY RULE). The
+    // JSON `cursor_raw` is unchanged.
+    let composable_kind = match (path, key) {
+        (Some(p), Ok(Some(k))) => {
+            crate::presentation::seed::composable_cursor_kind(repo_uid, k, p, display)
+        }
+        _ => None,
+    };
+    let kind_label = match &composable_kind {
+        Some(k) => format!("  [{k}]"),
+        None => String::new(),
+    };
     let mut line = match (path, path_unknown_reason) {
         (Some(_), Some(_)) => {
             return "    (malformed fact hit: both path and path_unknown_reason present)\n"
@@ -80,8 +107,10 @@ pub(super) fn render_fact_hit(
         }
         // A concrete owning path distinct from the display (the `file` class's path
         // equals its display, so it is not repeated), rendered as the `path:line` anchor.
-        (Some(p), None) if p != display => format!("    {display}  — {}\n", anchored(p)),
-        (Some(_), None) => format!("    {display}\n"),
+        (Some(p), None) if p != display => {
+            format!("    {display}  — {}{kind_label}\n", anchored(p))
+        }
+        (Some(_), None) => format!("    {display}{kind_label}\n"),
         // The class HAS a path dimension but this hit's path is unknown — shown WITH
         // its reason (review-4 item 2), never omitted.
         (None, Some(reason)) => format!("    {display}  — path unknown ({reason})\n"),
@@ -104,17 +133,20 @@ pub(super) fn render_fact_hit(
             line.push_str("      (malformed fact hit: evidence present but not a string)\n");
         }
     }
-    // `key` is OPTIONAL (the argument-taking classes carry one; the list classes do
-    // not). A present-but-non-string key is MALFORMED — it feeds the `next`
-    // validation, so a corrupt key must not silently pass.
-    let key = match h.get("key") {
-        None => None,
-        Some(serde_json::Value::String(k)) => Some(k.as_str()),
-        Some(_) => {
+    // Surface a malformed (non-string) key now that the identity line exists.
+    let key = match key {
+        Ok(k) => k,
+        Err(()) => {
             line.push_str("      (malformed fact hit: key present but not a string)\n");
             return line;
         }
     };
+    // ECONOMY-2 (§2.1): a composable row's cursor is covered by the pattern header — emit NO
+    // per-row cursor line. (The row still carries its full runnable identity: `path:line
+    // display [KIND]`, from which the header pattern reassembles `cursor_raw`.)
+    if composable_kind.is_some() {
+        return line;
+    }
     // `next` is our OWN DTO field, ALWAYS serialized (the runnable invocation). It
     // must be a NON-EMPTY string AND the ratified runnable form for this class+key
     // (review-4 item 3): a missing / non-string / EMPTY / non-ratified `next` is
@@ -206,29 +238,14 @@ fn next_is_ratified(next: &str, commands: &[&str], folds_key: bool, key: Option<
     }
 }
 
-/// POSIX single-quote encoder — a deliberate MIRROR of the daemon's
-/// `find_facts::shell_arg` (the emitter), so this validator reconstructs the exact
-/// `next` the daemon produced. The two MUST encode the identical rule; a divergence
-/// renders a valid hit as malformed (loud, fail-safe), never a wrong command as
-/// runnable. A small, security-relevant duplication kept inline rather than crossing
-/// a crate boundary for a shared helper (that would be a new dependency edge — a
-/// boundary decision out of this focused close's scope).
-///
-/// SEED-CHUNK-2 (review-1 item 3): `pub(super)` so the sibling `find::seed_render`
-/// reuses this exact encoder for the `--text` referral query — same crate, same
-/// `commands::find` module tree (NO crate boundary crossed), avoiding a third copy of
-/// the POSIX rule.
-pub(super) fn shell_quote_arg(arg: &str) -> String {
-    let safe = !arg.is_empty()
-        && arg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':' | '@'));
-    if safe {
-        arg.to_string()
-    } else {
-        format!("'{}'", arg.replace('\'', "'\\''"))
-    }
-}
+/// POSIX single-quote encoder — the render-side cursor quoter, a MIRROR of the daemon's
+/// `find_facts::shell_arg` (the emitter), so this validator reconstructs the exact `next`
+/// the daemon produced. ECONOMY-2 (review-2 finding 2) RELOCATED the canonical definition
+/// to [`crate::presentation::shell_quote_arg`] (twin of `presentation::anchor`) so the
+/// seed-tier short cursor shares this exact encoder WITHOUT a `presentation → commands`
+/// module cycle; re-exported here `pub(super)` so `next_is_ratified` / `relative_cursor` and
+/// the sibling `find::seed_render` (`super::fact_hit::shell_quote_arg`) resolve unchanged.
+pub(super) use crate::presentation::shell_quote_arg;
 
 #[cfg(test)]
 mod tests {
@@ -660,5 +677,50 @@ mod tests {
                 "raw cursor is uid-stripped: {cursor_raw}"
             );
         }
+    }
+
+    // ── ECONOMY-2 (§2.1): composable rows drop the per-row cursor, show [KIND] ────────
+
+    #[test]
+    fn composable_symbol_row_drops_cursor_and_shows_kind() {
+        // A symbol hit whose Known path + display reassemble the runnable short cursor
+        // (`<path>#<display>:SYMBOL:<KIND>`) is composable → its per-row cursor line is
+        // DROPPED (the pattern header covers it) and the identity line shows `[KIND]`.
+        let uid = "leveldb-abc123";
+        let h = json!({
+            "display": "CompactRange", "path": "db/db_impl.cc", "line": 582,
+            "key": format!("{uid}:db/db_impl.cc#CompactRange:SYMBOL:METHOD"),
+            "next": format!("explain {uid}:db/db_impl.cc#CompactRange:SYMBOL:METHOD"),
+        });
+        let out = render_fact_hit(&h, &["explain"], true, Some(uid));
+        assert!(
+            out.contains("CompactRange  — db/db_impl.cc:582  [METHOD]"),
+            "identity line shows [KIND]: {out}"
+        );
+        assert!(
+            !out.contains("→ rmap explain"),
+            "composable row drops its per-row cursor line: {out}"
+        );
+    }
+
+    #[test]
+    fn non_composable_symbol_row_keeps_explicit_cursor_and_no_kind() {
+        // A key whose qualified-name segment does NOT match the row's display (a foreign /
+        // divergent shape) does NOT reassemble the cursor → NOT composable → the explicit
+        // cursor stays and no `[KIND]` is fabricated (fail-safe, never a false pattern claim).
+        let uid = "leveldb-abc123";
+        // Real symbol keys carry `#` (an unsafe shell char), so the daemon's `next` — and the
+        // rendered short cursor — are single-quoted (`shell_quote_arg`, mirrored here).
+        let key = format!("{uid}:db/db_impl.cc#Other:SYMBOL:METHOD");
+        let h = json!({
+            "display": "CompactRange", "path": "db/db_impl.cc", "line": 582,
+            "key": key, "next": format!("explain '{key}'"),
+        });
+        let out = render_fact_hit(&h, &["explain"], true, Some(uid));
+        assert!(!out.contains("[METHOD]"), "no fabricated kind label: {out}");
+        assert!(
+            out.contains("→ rmap explain 'db/db_impl.cc#Other:SYMBOL:METHOD'"),
+            "non-composable row keeps its explicit runnable cursor: {out}"
+        );
     }
 }

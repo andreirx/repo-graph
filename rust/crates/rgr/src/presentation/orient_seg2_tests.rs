@@ -299,17 +299,104 @@ fn with_module_summary(mut extra: Value, evidence: Value) -> Value {
 #[test]
 fn budget_saturated_true_when_nothing_elided() {
     // Affirmative evidence (a MODULE_SUMMARY with all groups/modules shown) + a
-    // fully-shown directory fallback → complete.
-    let r = response(with_module_summary(
-        json!({
-            "directory_group_fallback": {
-                "groups": [{"name": "a", "fan_in": 1, "fan_out": 0, "file_count": 1}],
-                "total": 1
-            }
-        }),
-        json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+    // fully-shown directory fallback + a PRESENT, within-cap documentation section →
+    // complete. (review-1 finding 1: the docs section must be PRESENT for a completeness
+    // claim — an absent section is UNKNOWN, not "nothing to elide".)
+    let r = response(with_docs(
+        with_module_summary(
+            json!({
+                "directory_group_fallback": {
+                    "groups": [{"name": "a", "fan_in": 1, "fan_out": 0, "file_count": 1}],
+                    "total": 1
+                }
+            }),
+            json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+        ),
+        1,
     ));
     assert!(r.budget_saturated());
+}
+
+/// A `documentation` section carrying `n` relevant docs (each with the required
+/// path/kind/reason fields) — the headline names at most DOC_HEADLINE_CAP=6.
+fn with_docs(mut extra: Value, n: usize) -> Value {
+    let files: Vec<Value> = (0..n)
+        .map(|i| json!({"path": format!("docs/d{i}.md"), "kind": "doc", "reason": "relevant"}))
+        .collect();
+    extra.as_object_mut().unwrap().insert(
+        "documentation".into(),
+        json!({"relevant_files": files, "count": n}),
+    );
+    extra
+}
+
+#[test]
+fn budget_saturated_false_when_docs_exceed_the_headline_cap() {
+    // ECONOMY-2 §2.2 (review-0 gap c): the Docs headline caps at DOC_HEADLINE_CAP=6; a repo
+    // with more relevant docs ELIDES the rest, so "output complete" must be REFUSED even when
+    // every other section is whole (module summary complete, no fallback).
+    let r = response(with_docs(
+        with_module_summary(
+            json!({}),
+            json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+        ),
+        7,
+    ));
+    assert!(!r.budget_saturated());
+}
+
+#[test]
+fn budget_saturated_true_when_docs_within_the_headline_cap() {
+    // Exactly DOC_HEADLINE_CAP docs → nothing elided → the completeness claim is allowed.
+    let r = response(with_docs(
+        with_module_summary(
+            json!({}),
+            json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+        ),
+        6,
+    ));
+    assert!(r.budget_saturated());
+}
+
+#[test]
+fn budget_saturated_false_when_documentation_absent() {
+    // ECONOMY-2 review-1 finding 1 (STANDING HONESTY RULE #1): the daemon's
+    // `build_documentation_section` collapses a `get_doc_inventory` READ FAILURE into the
+    // SAME absent `documentation` (None) as a genuinely doc-less repo, so an absent section is
+    // UNKNOWN — not evidence that "nothing was elided". Even with EVERY other dimension
+    // provably complete (module summary whole, no fallback, no over-cap package groups or
+    // complexity centers), the terminal "output complete" claim must be REFUSED while the
+    // documentation axis is unknown. The prior `.unwrap_or(0)` read this None as a known zero
+    // and let the claim through — the exact defect this slice removes.
+    let r = response(with_module_summary(
+        json!({}),
+        json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+    ));
+    // `documentation` is intentionally NOT injected → deserializes to None.
+    assert!(r.documentation.is_none());
+    assert!(!r.budget_saturated());
+}
+
+#[test]
+fn docs_headline_names_the_elided_remainder() {
+    // The Docs headline names the elided remainder + the exact command (STANDING HONESTY 2),
+    // and the render carries no false "output complete" while docs are unshown.
+    let r = response(with_docs(
+        with_module_summary(
+            json!({}),
+            json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+        ),
+        9,
+    ));
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains("… and 3 more docs — rmap docs list"),
+        "docs elision names N + command:\n{out}"
+    );
+    assert!(
+        !out.contains("output complete"),
+        "no false 'output complete' while docs elide:\n{out}"
+    );
 }
 
 #[test]
@@ -327,14 +414,38 @@ fn budget_saturated_false_when_fallback_elides() {
 }
 
 #[test]
-fn budget_saturated_true_with_many_package_groups() {
-    // §2.4 (operator ruling 2): `--full` uncaps the package-group section, so a repo
-    // with >50 package groups is COMPLETE at full (the old >50 gate is gone). All
-    // modules shown, no fallback → complete.
+fn budget_saturated_true_with_many_package_groups_under_the_cap() {
+    // ECONOMY-2 (§2.3): `--full` caps the package-group section at 200 (was uncapped). A
+    // repo with MORE than `large`'s 50 groups but WITHIN the cap is still COMPLETE at full
+    // (nothing elided). All modules shown, no fallback → complete.
     // Rows carry all three REQUIRED contract fields (name/file_count/test_file_count) —
     // the shape both producers actually emit; a row is well-formed only with all three
     // (review-2: `test_file_count` is required, not optional).
     let groups: Vec<Value> = (0..60)
+        .map(|i| json!({"name": format!("g{i}"), "file_count": 1, "test_file_count": 0}))
+        .collect();
+    // A PRESENT, within-cap documentation section (review-1 finding 1) so the ONLY
+    // dimension under test is the package-group cap, not the docs gate.
+    let r = response(with_docs(
+        with_module_summary(
+            json!({}),
+            json!({
+                "package_groups": groups,
+                "discovered_module_count": 0,
+                "top_modules": []
+            }),
+        ),
+        1,
+    ));
+    assert!(r.budget_saturated());
+}
+
+#[test]
+fn budget_saturated_false_when_package_groups_exceed_the_full_cap() {
+    // ECONOMY-2 (§2.2/§2.3): a package-group count ABOVE the `--full` cap ELIDES
+    // (`… and N more group`), so "output complete" must be REFUSED — the truthful-ladder
+    // tie. 201 well-formed groups > the 200-row cap.
+    let groups: Vec<Value> = (0..201)
         .map(|i| json!({"name": format!("g{i}"), "file_count": 1, "test_file_count": 0}))
         .collect();
     let r = response(with_module_summary(
@@ -345,7 +456,50 @@ fn budget_saturated_true_with_many_package_groups() {
             "top_modules": []
         }),
     ));
-    assert!(r.budget_saturated());
+    assert!(!r.budget_saturated());
+    let full = r.render_human(OrientDepth::Full);
+    assert!(!full.contains("budget not reached"));
+    // review-1 finding 2b (§2.3): the `--full` package-group elision STATES the 200-row bound.
+    // 201 groups − the 200 cap = 1 omitted; the line names the count AND where the cap fell.
+    assert!(
+        full.contains("… and 1 more group (showing 200) — see `stats --json` / `modules`"),
+        "the --full package-group elision must STATE the 200-row bound:\n{full}"
+    );
+}
+
+#[test]
+fn budget_saturated_false_when_complexity_centers_exceed_the_full_cap() {
+    // ECONOMY-2 (§2.2/§2.3): a complexity count ABOVE the `--full` cap ELIDES
+    // (`+N more above threshold`), so "output complete" must be REFUSED.
+    let top: Vec<Value> = (0..201)
+        .map(|i| json!({"complexity": 9, "file": format!("f{i}.rs")}))
+        .collect();
+    let mut extra = json!({});
+    extra.as_object_mut().unwrap().insert(
+        "signals".into(),
+        json!([
+            signal_leaf(json!({
+                "code": "MODULE_SUMMARY", "severity": "low", "category": "structure",
+                "summary": "s",
+                "evidence": {"package_groups": [], "discovered_module_count": 0, "top_modules": []}
+            })),
+            signal_leaf(json!({
+                "code": "HIGH_COMPLEXITY", "severity": "medium", "category": "quality",
+                "summary": "c",
+                "evidence": {"high_complexity_count": 201, "top_complex": top}
+            }))
+        ]),
+    );
+    let r = response(extra);
+    assert!(!r.budget_saturated());
+    let full = r.render_human(OrientDepth::Full);
+    assert!(!full.contains("budget not reached"));
+    // review-1 finding 2b (§2.3): the `--full` complexity elision STATES the 200-row bound.
+    // 201 centers − the 200 cap = 1 omitted.
+    assert!(
+        full.contains("+1 more above threshold (showing 200) — rmap hotspots"),
+        "the --full complexity elision must STATE the 200-row bound:\n{full}"
+    );
 }
 
 #[test]
@@ -553,14 +707,38 @@ fn budget_saturated_false_when_a_complexity_row_is_malformed() {
 
 #[test]
 fn saturated_line_renders_only_at_full_when_complete() {
-    let r = response(with_module_summary(
-        json!({}),
-        json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+    // review-2 finding 1: `[budget not reached — output complete]` renders ONLY when the repo
+    // is saturated AND `--full` expanded a long tail BEYOND `--budget large` (full != large) —
+    // otherwise the identical-to-large notice takes precedence (proven in the sibling test).
+    // 60 package groups make this a GENUINE output-complete case: `large` caps at 50 (elides
+    // 10), `--full` shows all 60 within the 200 cap (nothing elided) → saturated AND full !=
+    // large. A PRESENT, within-cap docs section (review-1 finding 1) keeps the documentation
+    // axis KNOWN-complete (absent is UNKNOWN and would correctly refuse the terminal line).
+    let groups: Vec<Value> = (0..60)
+        .map(|i| json!({"name": format!("g{i}"), "file_count": 1, "test_file_count": 0}))
+        .collect();
+    let r = response(with_docs(
+        with_module_summary(
+            json!({}),
+            json!({"package_groups": groups, "discovered_module_count": 0, "top_modules": []}),
+        ),
+        1,
     ));
-    // Full + affirmatively-complete → the honest terminal line.
-    assert!(r
-        .render_human(OrientDepth::Full)
-        .contains("budget not reached — output complete"));
+    assert!(
+        r.budget_saturated(),
+        "60 groups < 200 cap, all else complete → saturated"
+    );
+    let full = r.render_human(OrientDepth::Full);
+    // Full + affirmatively-complete + expanded beyond large → the honest terminal line.
+    assert!(
+        full.contains("budget not reached — output complete"),
+        "saturated + full-beyond-large → the completeness line:\n{full}"
+    );
+    // NOT the identical notice — `large` elided 10 groups that `--full` shows, so full != large.
+    assert!(
+        !full.contains("identical to --budget large"),
+        "full != large here, so the identical notice must NOT render:\n{full}"
+    );
     // Large never prints it (still under the detailed tables).
     assert!(!r
         .render_human(OrientDepth::Large)
@@ -569,6 +747,69 @@ fn saturated_line_renders_only_at_full_when_complete() {
     assert!(r
         .render_human(OrientDepth::Small)
         .contains("--full for the complete breakdown"));
+}
+
+#[test]
+fn saturated_and_identical_to_large_prefers_identical_notice() {
+    // review-2 finding 1: when `--full` is BYTE-IDENTICAL to `--budget large` AND the repo is
+    // otherwise complete (budget_saturated), the identical-to-large notice takes PRECEDENCE
+    // over `[budget not reached — output complete]` — the spec's "`--full` identical to `large`
+    // → one-line notice" is UNCONDITIONAL. A small complete repo (0 package groups, no
+    // complexity long tail) renders the same bytes at `large` and `--full`, so full == large;
+    // docs present within cap keeps the documentation axis known-complete. (The prior code
+    // checked `budget_saturated()` first and printed "output complete" here — the defect.)
+    let r = response(with_docs(
+        with_module_summary(
+            json!({}),
+            json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+        ),
+        1,
+    ));
+    assert!(
+        r.budget_saturated(),
+        "the repo is complete (nothing elided anywhere)"
+    );
+    let full = r.render_human(OrientDepth::Full);
+    assert!(
+        full.contains("[--full identical to --budget large (nothing further to show)]"),
+        "identical notice takes precedence over the completeness line:\n{full}"
+    );
+    assert!(
+        !full.contains("budget not reached — output complete"),
+        "the identical notice REPLACES the completeness line when full == large:\n{full}"
+    );
+}
+
+#[test]
+fn full_identical_to_large_renders_the_notice_not_a_false_complete() {
+    // ECONOMY-2 (§2.2): when `--full`'s body is BYTE-IDENTICAL to `--budget large`'s (both
+    // long tails under `large`'s cap) but something ELSE elided (here the directory-group
+    // fallback: 1 shown of 42) — the zvec-grep defect was a silent unmarked repeat of
+    // `large`. `--full` now says so explicitly, and does NOT claim completeness.
+    let r = response(with_module_summary(
+        json!({
+            "directory_group_fallback": {
+                "groups": [{"name": "a", "fan_in": 1, "fan_out": 0, "file_count": 1}],
+                "total": 42
+            }
+        }),
+        json!({"package_groups": [], "discovered_module_count": 0, "top_modules": []}),
+    ));
+    assert!(!r.budget_saturated(), "the fallback elides → not saturated");
+    let full = r.render_human(OrientDepth::Full);
+    assert!(
+        full.contains("[--full identical to --budget large (nothing further to show)]"),
+        "the comparative notice replaces the silent repeat: {full}"
+    );
+    assert!(
+        !full.contains("budget not reached"),
+        "the identical notice is NOT a completeness claim: {full}"
+    );
+    // The elided directory fallback still carries its own honest omission line.
+    assert!(
+        full.contains("and 41 more group"),
+        "elision line present: {full}"
+    );
 }
 
 #[test]

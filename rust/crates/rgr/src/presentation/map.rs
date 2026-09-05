@@ -804,6 +804,140 @@ pub fn render_summary(facts: &MapFacts, rendered: &[RenderedMapFile]) -> String 
 /// no-extractor files while still making the set actionable (names, not a count).
 const UNMAPPED_SUMMARY_CAP: usize = 12;
 
+/// ECONOMY-2 (§2.4): the DEFAULT cap on `map --dry-run`. The audit measured dry-run at a
+/// median 1.17 MB, max 32.2 MB (hadoop), 254,685 lines (gstreamer) — an unusable dump with
+/// no header, cap, or hint. This single knob bounds BOTH the per-file manifest (as a file-row
+/// count) and the CONTENT body (as a content-line count); the count header (aggregate totals)
+/// is never capped. `--full` removes the cap (the determinism-diff path — render twice, diff
+/// empty); `--limit <n>` raises it. Both a huge content dump AND an O(files) manifest are
+/// bounded, so the default is usable on a 17k-file monorepo.
+pub(crate) const DRY_RUN_DEFAULT_LINE_CAP: usize = 200;
+
+/// ECONOMY-2 (§2.4): render the `map --dry-run` STDOUT — a count header (aggregate totals,
+/// never capped), the per-file bytes manifest (capped at `line_cap` FILE rows), then the
+/// rendered file CONTENTS capped at `line_cap` content lines. `None` = `--full` (uncapped,
+/// both sections). Each capped section carries an honest elision line naming the remainder +
+/// the exact `--full` / `--limit` / `--json` command for the rest. The extraction-coverage
+/// summary stays on stderr (`render_summary`), unchanged. Pure + deterministic (unit-tested
+/// without a daemon): `rendered` is already sorted by `rel_path`.
+pub(crate) fn render_dry_run(
+    facts: &MapFacts,
+    rendered: &[RenderedMapFile],
+    line_cap: Option<usize>,
+) -> String {
+    let dir_maps = rendered
+        .iter()
+        .filter(|r| r.rel_path == "MAP.md" || r.rel_path.ends_with("/MAP.md"))
+        .count();
+    let file_maps = rendered.len() - dir_maps;
+    let total_bytes: usize = rendered.iter().map(|r| r.contents.len()).sum();
+    let scope = if facts.path.is_empty() {
+        "(whole repo)".to_string()
+    } else {
+        facts.path.clone()
+    };
+    // Count header (ECONOMY-2 §2.4): the "what would be written" totals up front — never
+    // capped. It names the SOURCE files being mapped (`facts.files` — the index inputs in
+    // scope) SEPARATELY from the GENERATED sidecars (`rendered` — the MAP.md files output),
+    // so the reader never conflates the input corpus with the artifact count (review-0 gap b).
+    let source_files = facts.files.len();
+    let mut out = format!(
+        "map --dry-run: {} sidecar MAP file(s) would be written ({} directory, {} per-file) \
+         mapping {} source file(s), {} bytes total, snapshot {} [{}]\n",
+        rendered.len(),
+        dir_maps,
+        file_maps,
+        source_files,
+        total_bytes,
+        short_uid(&facts.snapshot),
+        scope,
+    );
+    // Bytes-per-file manifest: the per-file inventory (path + bytes + lines) so the reader
+    // sees which files would be written and how big, WITHOUT the content dump. Capped at the
+    // same `line_cap` FILE bound (as a row count) — an uncapped manifest grows O(files) and is
+    // itself unbounded on a 17k-file monorepo (the DoD "bounded" requirement), so the tail
+    // rides an honest omission line naming the exact commands for the rest. `None` = `--full`
+    // = the complete manifest. Deterministic order (rendered is pre-sorted by rel_path).
+    out.push_str("files (bytes each):\n");
+    let manifest_cap = line_cap.unwrap_or(rendered.len());
+    for r in rendered.iter().take(manifest_cap) {
+        out.push_str(&format!(
+            "  {} — {} B ({} line(s))\n",
+            r.rel_path,
+            r.contents.len(),
+            r.contents.lines().count(),
+        ));
+    }
+    if rendered.len() > manifest_cap {
+        out.push_str(&format!(
+            "  … and {} more file(s) in the manifest — \
+             rmap map --dry-run --full, or --json for the complete list\n",
+            rendered.len() - manifest_cap,
+        ));
+    }
+    // Content body, capped at `line_cap` CONTENT lines. The cap is a HARD line budget that
+    // bites BOTH between files (a whole file elided once the budget is spent) AND INSIDE a
+    // file (review-0 gap a: an oversized FIRST file must not print in full just because the
+    // budget was untouched when it started — it is truncated at the remaining budget with a
+    // per-file `… N more line(s) of this file` line). `None` = `--full` = uncapped.
+    out.push_str("content:\n");
+    let mut printed_lines = 0usize;
+    let mut elided_files = 0usize;
+    let mut elided_lines = 0usize;
+    for r in rendered {
+        let file_lines = r.contents.lines().count();
+        match line_cap {
+            // Budget already spent → this whole file is elided (counted for the summary line).
+            Some(cap) if printed_lines >= cap => {
+                elided_files += 1;
+                elided_lines += file_lines;
+            }
+            // Capped, and this file would overrun the remaining budget → print the marker +
+            // the lines that fit, then a per-file truncation line naming THIS file's cut tail
+            // and the exact commands. Spend the budget so every later file elides.
+            Some(cap) if file_lines > cap - printed_lines => {
+                let remaining = cap - printed_lines;
+                out.push_str(&format!("==> {} <==\n", r.rel_path));
+                for l in r.contents.lines().take(remaining) {
+                    out.push_str(l);
+                    out.push('\n');
+                }
+                out.push_str(&format!(
+                    "  … {} more line(s) of this file not shown ({}-line cap reached) — \
+                     rmap map --dry-run --full, or --limit <n> to raise the cap\n",
+                    file_lines - remaining,
+                    cap,
+                ));
+                printed_lines = cap;
+            }
+            // Uncapped (`--full`), or the whole file fits within the remaining budget.
+            _ => {
+                out.push_str(&format!("==> {} <==\n", r.rel_path));
+                out.push_str(&r.contents);
+                // A file whose content does not end in a newline would run the next marker
+                // onto its last line — normalize so markers always start a line (deterministic).
+                if !r.contents.is_empty() && !r.contents.ends_with('\n') {
+                    out.push('\n');
+                }
+                printed_lines += file_lines;
+            }
+        }
+    }
+    if elided_files > 0 {
+        // Honest summary line for the FULLY-elided files (a partially-truncated file already
+        // carries its own per-file line above): names N files + N content lines and the EXACT
+        // commands that yield the rest (STANDING HONESTY RULE 2). `line_cap` is always `Some`
+        // here (the `None`/`--full` path never elides).
+        let cap = line_cap.unwrap_or(0);
+        out.push_str(&format!(
+            "… content for {} more file(s) ({} more line(s)) not shown — \
+             rmap map --dry-run --full for all content, or --limit <n> to raise the {}-line cap\n",
+            elided_files, elided_lines, cap,
+        ));
+    }
+    out
+}
+
 /// Join up to `cap` names with `, `, appending `(+K more)` when the list is longer.
 /// `names` is assumed already ordered by the caller (deterministic output).
 fn capped_name_list(names: &[&str], cap: usize) -> String {
@@ -1170,6 +1304,154 @@ mod tests {
             !summary.contains("listed as unmapped (not parsed)"),
             "old colliding wording retired:\n{}",
             summary
+        );
+    }
+
+    // ── ECONOMY-2 §2.4: dry-run count header + line cap + bytes-per-file manifest ──
+
+    #[test]
+    fn dry_run_has_count_header_and_bytes_per_file_manifest() {
+        let facts = fixture();
+        let rendered = render_maps(&facts);
+        let out = render_dry_run(&facts, &rendered, Some(DRY_RUN_DEFAULT_LINE_CAP));
+        let total_bytes: usize = rendered.iter().map(|r| r.contents.len()).sum();
+        // Count header names the file total + bytes (never capped).
+        assert!(
+            out.contains("map --dry-run:") && out.contains(&format!("{total_bytes} bytes total")),
+            "count header with byte total:\n{out}"
+        );
+        // Bytes-per-file manifest lists every rendered file with its size (default cap 200
+        // covers the fixture's few files, so no manifest elision).
+        assert!(
+            out.contains("files (bytes each):"),
+            "manifest heading:\n{out}"
+        );
+        for r in &rendered {
+            assert!(
+                out.contains(&format!("  {} — {} B", r.rel_path, r.contents.len())),
+                "manifest names {} with bytes:\n{out}",
+                r.rel_path
+            );
+        }
+        assert!(
+            !out.contains("more file(s) in the manifest"),
+            "no manifest elision when the cap covers every file:\n{out}"
+        );
+    }
+
+    #[test]
+    fn dry_run_caps_content_and_manifest_and_names_the_remainder_with_the_hint() {
+        // A cap of 1 forces BOTH the manifest (file rows) AND the content to elide after the
+        // first file; each elision line names the remainder AND the exact commands.
+        let facts = fixture();
+        let rendered = render_maps(&facts);
+        assert!(rendered.len() > 1, "fixture renders multiple files");
+        let out = render_dry_run(&facts, &rendered, Some(1));
+        // Content elision names N files + N lines + --full / --limit.
+        assert!(
+            out.contains("not shown — rmap map --dry-run --full for all content, or --limit <n>"),
+            "content elision documents --full and --limit:\n{out}"
+        );
+        assert!(
+            out.contains("more file(s)") && out.contains("more line(s)"),
+            "content elision names N files + N lines:\n{out}"
+        );
+        // Manifest elision names the remaining files + --full / --json.
+        assert!(
+            out.contains("more file(s) in the manifest — rmap map --dry-run --full, or --json"),
+            "manifest elision documents --full / --json:\n{out}"
+        );
+        // Exactly the first file's manifest row is shown under the cap of 1.
+        assert!(
+            out.contains(&format!(
+                "  {} — {} B",
+                rendered[0].rel_path,
+                rendered[0].contents.len()
+            )),
+            "the first file's manifest row is shown:\n{out}"
+        );
+    }
+
+    #[test]
+    fn dry_run_full_shows_all_content_no_elision() {
+        // `--full` (None cap) prints every file's content and NO elision line — the
+        // determinism-diff path.
+        let facts = fixture();
+        let rendered = render_maps(&facts);
+        let out = render_dry_run(&facts, &rendered, None);
+        assert!(!out.contains("not shown —"), "no elision at --full:\n{out}");
+        for r in &rendered {
+            assert!(
+                out.contains(&format!("==> {} <==", r.rel_path)),
+                "every file's content marker present at --full for {}:\n{out}",
+                r.rel_path
+            );
+        }
+    }
+
+    #[test]
+    fn dry_run_hard_caps_content_inside_an_oversized_first_file() {
+        // review-0 gap a: an oversized FIRST file must be TRUNCATED at the remaining line
+        // budget — the cap bites INSIDE a file, not only between files. Before the fix a
+        // 50-line first file printed in full under `--limit 10` because the budget was
+        // untouched when the file started.
+        let facts = fixture();
+        let big = RenderedMapFile {
+            rel_path: "BIG/MAP.md".to_string(),
+            contents: (0..50).map(|i| format!("line {i}\n")).collect::<String>(),
+        };
+        let small = RenderedMapFile {
+            rel_path: "small_rs_MAP.md".to_string(),
+            contents: "only\n".to_string(),
+        };
+        let rendered = vec![big, small];
+        let out = render_dry_run(&facts, &rendered, Some(10));
+        assert!(
+            out.contains("==> BIG/MAP.md <=="),
+            "first file marker present:\n{out}"
+        );
+        // Exactly the first 10 content lines (line 0..=line 9), not the whole file.
+        assert!(
+            out.contains("line 9\n") && !out.contains("line 10\n"),
+            "the cap bites INSIDE the file at 10 lines:\n{out}"
+        );
+        // The truncated file names its own cut tail + the exact commands (STANDING HONESTY 2).
+        assert!(
+            out.contains(
+                "… 40 more line(s) of this file not shown (10-line cap reached) — \
+                 rmap map --dry-run --full, or --limit <n> to raise the cap"
+            ),
+            "per-file truncation line names the tail + commands:\n{out}"
+        );
+        // Budget spent → the second file is fully elided, named on the summary line.
+        assert!(
+            !out.contains("==> small_rs_MAP.md <=="),
+            "second file elided once the budget is spent:\n{out}"
+        );
+        assert!(
+            out.contains("content for 1 more file(s)"),
+            "summary names the fully-elided file:\n{out}"
+        );
+    }
+
+    #[test]
+    fn dry_run_header_counts_source_files_separately_from_sidecars() {
+        // review-0 gap b: the header must report the SOURCE files being mapped
+        // (`facts.files`) separately from the GENERATED sidecars (`rendered`) so the reader
+        // never conflates the input corpus with the artifact count.
+        let facts = fixture();
+        let rendered = render_maps(&facts);
+        let out = render_dry_run(&facts, &rendered, Some(DRY_RUN_DEFAULT_LINE_CAP));
+        assert!(
+            out.contains(&format!("mapping {} source file(s)", facts.files.len())),
+            "header names the source-file count:\n{out}"
+        );
+        assert!(
+            out.contains(&format!(
+                "{} sidecar MAP file(s) would be written",
+                rendered.len()
+            )),
+            "header names the generated sidecar count distinctly:\n{out}"
         );
     }
 

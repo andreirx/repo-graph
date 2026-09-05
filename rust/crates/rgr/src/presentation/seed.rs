@@ -27,6 +27,47 @@
 
 use serde_json::Value;
 
+/// ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): a row is CURSOR-COMPOSABLE when the
+/// reader can reassemble the runnable short cursor `<path>#<qualified_name>:SYMBOL:<KIND>`
+/// from the identity fields the row ALREADY prints. When it is, the per-row `→ rmap explain
+/// …` cursor line is redundant with the ONE pattern header `find` prints, so it is DROPPED
+/// and the row shows `[KIND]` instead (a fraction of a cursor line's bytes). This is how the
+/// LITERAL ≤15%-of-bytes-on-cursor-lines target is met BY DESIGN, not by redefinition.
+///
+/// Returns `Some(kind)` iff `key` is this repo's IN-ROOT symbol stable_key AND its
+/// uid-stripped suffix is EXACTLY `<path>#<qualified_name>:SYMBOL:<kind>` for the row's OWN
+/// `path` + `qualified_name`, with `kind` a single non-empty token (no `:`/`#`). `None`
+/// otherwise (no header uid, out-of-root key, non-symbol key, a missing/mismatched
+/// path/name, or an absent kind) — the caller then keeps an explicit per-row cursor, so a
+/// non-composable row is NEVER silently stripped of its runnable cursor.
+///
+/// Deriving `kind` from the SAME suffix that forms `cursor_raw` is what makes the header's
+/// promise TRUE: `format!("{path}#{qualified_name}:SYMBOL:{kind}")` reproduces the suffix
+/// byte-for-byte, and the daemon's syntax-gated `explain` reattach alias (keyed on the
+/// `:SYMBOL` marker) resolves that suffix to the same node the full key does. So "copy a
+/// row into the pattern → `explain` resolves" holds by construction; a row whose fields do
+/// NOT reassemble the suffix fails the `strip_prefix` and keeps its cursor (fail-safe —
+/// never a false runnable-pattern claim; STANDING HONESTY RULE).
+///
+/// Shared by `find`'s two render tiers (`fact_hit::render_fact_hit`,
+/// `render_seed_chunk_candidate`) AND `find`'s pre-count (`diet_eligibility`), so the
+/// header-on/off count and the per-row drop decision are computed by the ONE function and
+/// cannot drift (a drift would print the header while a row kept its cursor, or vice versa).
+pub(crate) fn composable_cursor_kind(
+    repo_uid: Option<&str>,
+    key: &str,
+    path: &str,
+    qualified_name: &str,
+) -> Option<String> {
+    let uid = repo_uid?;
+    let suffix = key.strip_prefix(&format!("{uid}:"))?;
+    let kind = suffix.strip_prefix(&format!("{path}#{qualified_name}:SYMBOL:"))?;
+    if kind.is_empty() || kind.contains(':') || kind.contains('#') {
+        return None;
+    }
+    Some(kind.to_string())
+}
+
 /// Render the semantic `hint` + `semantic_candidates` (if any) carried on a
 /// `symbol not found` error's `data`. Returns `None` when `data` carries no seed
 /// semantic keys at all (a plain not-found from a daemon without the tier) so the
@@ -57,7 +98,12 @@ pub fn render_symbol_not_found_semantic(data: Option<&Value>) -> Option<String> 
         // stated ONCE below (STANDING HONESTY RULE 1).
         let mut unreadable: Vec<String> = Vec::new();
         for c in cands {
-            match render_seed_chunk_candidate(c) {
+            // Group B has NO once-per-output repo-uid header (it renders inside a
+            // `symbol not found` error, not `find`'s framed output), so it passes
+            // `None`: every seed cursor stays in its full, self-contained `cd … &&`
+            // form here — byte-identical to before ECONOMY-2. Only `find`'s seed tier,
+            // which prints the uid header once, passes `Some(uid)` to shorten rows.
+            match render_seed_chunk_candidate(c, None) {
                 Ok(row) => out.push_str(&row),
                 Err(reason) => unreadable.push(reason),
             }
@@ -93,7 +139,20 @@ pub(crate) fn render_semantic_header(summary: &str, reasons: &[String]) -> Strin
 /// `render_seed_candidate` output (2-space anchor indent, `path:line` + qualified name,
 /// validated `source == "embedding"` label, `[test]`/`[is_test unknown]` partition,
 /// 4-space `next` line).
-pub(crate) fn render_seed_chunk_candidate(c: &Value) -> Result<String, String> {
+///
+/// ECONOMY-2 (§1) seed-row cursor diet: `repo_uid` is the uid printed ONCE in `find`'s
+/// seeds header (`Some`), or `None` when there is no header to anchor to (Group B, or the
+/// no-snapshot degraded state). When present AND this row's `stable_key` carries the
+/// `<uid>:` prefix (an IN-ROOT row — the common case, since seeds are drawn from the
+/// indexed repo), the follow-up renders the SHORT runnable cursor `→ rmap explain <suffix>`
+/// (uid dropped, `cd … &&` dropped — you are already in the repo, matching the fact tier's
+/// diet). An OUT-OF-ROOT key (no `<uid>:` prefix — old/foreign daemon) or `None` keeps the
+/// full self-contained `(cd <cwd> && rmap explain <key>)` form, so a non-current-repo cursor
+/// still runs verbatim.
+pub(crate) fn render_seed_chunk_candidate(
+    c: &Value,
+    repo_uid: Option<&str>,
+) -> Result<String, String> {
     let path = c.get("path").and_then(|v| v.as_str());
     let key = c.get("stable_key").and_then(|v| v.as_str());
     let score = c.get("score").and_then(|v| v.as_f64());
@@ -112,18 +171,26 @@ pub(crate) fn render_seed_chunk_candidate(c: &Value) -> Result<String, String> {
     let module = render_seed_chunk_module_hint(c.get("module")).ok_or_else(|| {
         "missing or invalid module hint — expected owning/unavailable".to_string()
     })?;
-    let next = render_seed_chunk_next(c.get("next"), key)?;
     // SEED-CHUNK-1 anchor: `path:line` when a span is stored, else bare path (never a
     // fabricated 0). `qualified_name` is the human label when stored.
     let anchor = match c.get("line").and_then(|v| v.as_i64()) {
         Some(line) => format!("{path}:{line}"),
         None => path.to_string(),
     };
-    let symbol = c
-        .get("qualified_name")
-        .and_then(|v| v.as_str())
-        .map(|q| format!("  {q}"))
-        .unwrap_or_default();
+    let qualified_name = c.get("qualified_name").and_then(|v| v.as_str());
+    let symbol = qualified_name.map(|q| format!("  {q}")).unwrap_or_default();
+    // ECONOMY-2 (§2.1): a row whose OWN path + qualified_name reassemble the runnable short
+    // cursor (`<path>#<qualified_name>:SYMBOL:<KIND>`) is CURSOR-COMPOSABLE — the ONE pattern
+    // header `find` prints covers it, so its per-row `→ rmap explain …` line is DROPPED and
+    // the row shows `[KIND]` instead. A row that does NOT compose (out-of-root key, no header
+    // uid, absent qualified_name, or a mismatched suffix) keeps its explicit runnable cursor
+    // — never silently stripped (STANDING HONESTY RULE). `cursor_raw` in the JSON is unchanged.
+    let composable_kind =
+        qualified_name.and_then(|q| composable_cursor_kind(repo_uid, key, path, q));
+    let kind_label = match &composable_kind {
+        Some(k) => format!("  [{k}]"),
+        None => String::new(),
+    };
     // `is_test` is always serialized (SEED-CHUNK-1 §5 moat): production is the unlabeled
     // default; a test chunk is `[test]`; a MISSING/non-bool value is UNKNOWN classification,
     // rendered explicitly — never left blank to masquerade as production.
@@ -145,23 +212,84 @@ pub(crate) fn render_seed_chunk_candidate(c: &Value) -> Result<String, String> {
         _ => "  [is_decl unknown]",
     };
     let mut row = format!(
-        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){decl_label}{test_label}\n"
+        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){decl_label}{test_label}{kind_label}\n"
     );
-    row.push_str(&next);
+    // Composable ⇒ the pattern header covers this row; emit NO per-row cursor line. Otherwise
+    // render the explicit follow-up (the short in-root cursor, or the full self-contained
+    // out-of-root/`None` form) — validating `next` as before so a malformed payload surfaces.
+    if composable_kind.is_none() {
+        row.push_str(&render_seed_chunk_next(c.get("next"), key, repo_uid)?);
+    }
     Ok(row)
 }
 
 /// Render a current-DTO candidate's `next` follow-up (4-space indent — `find`'s form).
 /// `cwd` present ⇒ the `cd <cwd> && …` hint; absent-with-reason ⇒ the honest reason;
 /// a `next` carrying neither, or no `next` object at all, is `Err` (malformed).
-fn render_seed_chunk_next(next: Option<&Value>, key: &str) -> Result<String, String> {
+///
+/// ECONOMY-2 (§1): when `repo_uid` is `Some(uid)` and `key` carries this repo's `<uid>:`
+/// prefix (an IN-ROOT row), the short cursor `→ rmap explain <suffix>` replaces the full
+/// `(cd <cwd> && rmap explain <key>)` form — the uid rides the once-per-output header and
+/// `cd` is redundant when the target is in the current repo (the same discipline the fact
+/// tier's `relative_cursor` applies). The `explain` reattach alias
+/// (`daemon-runtime::dispatch::explain_alias::reattach_repo_uid_prefix`) reattaches the uid
+/// to a prefix-less `:SYMBOL`-bearing suffix, so the short cursor runs verbatim. An
+/// out-of-root key (no `<uid>:` prefix), a NON-symbol in-root key (a suffix WITHOUT the
+/// `:SYMBOL` marker the alias gates on — it would not round-trip), or `None` keeps the full
+/// self-contained form (review-1 finding 2d).
+fn render_seed_chunk_next(
+    next: Option<&Value>,
+    key: &str,
+    repo_uid: Option<&str>,
+) -> Result<String, String> {
     let Some(n) = next.and_then(|v| v.as_object()) else {
         return Err("missing next follow-up".to_string());
     };
+    // IN-ROOT short cursor: only when a header uid exists AND the key carries its prefix
+    // (leaving a non-empty suffix) AND that suffix is a form the `explain` reattach alias
+    // ACCEPTS. The alias (`dispatch::explain_alias::reattach_repo_uid_prefix`) reattaches the
+    // uid ONLY to a prefix-less suffix carrying the `:SYMBOL` fact-class marker; a non-symbol
+    // in-root key (no `:SYMBOL` — e.g. a file/path-level or malformed seed key) shortened
+    // here would be read by `explain` as a PATH, miss the reattach, and NOT round-trip. So we
+    // shorten only `:SYMBOL`-bearing suffixes and keep the known-good full self-contained
+    // follow-up for anything else (review-1 finding 2d; STANDING HONESTY RULE: never print a
+    // cursor that does not run). The `:SYMBOL` literal is the SAME printed-cursor SYNTAX
+    // `composable_cursor_kind` derives from above and the marker the alias gates on — the
+    // gate here mirrors the alias's acceptance contract exactly. (This branch is reached only
+    // for NON-composable rows; a composable row already emitted no cursor at all.)
+    if let Some(uid) = repo_uid {
+        if let Some(suffix) = key.strip_prefix(&format!("{uid}:")) {
+            if !suffix.is_empty() && suffix.contains(":SYMBOL") {
+                // review-2 finding 2: shell-quote the suffix with the SAME render-side POSIX
+                // encoder the fact tier uses (`presentation::shell_quote_arg`). A `:SYMBOL`
+                // suffix ALWAYS carries a `#` (`<path>#<qualified_name>:SYMBOL:<KIND>`) — a
+                // shell COMMENT char — so an unquoted `rmap explain <suffix>` would be
+                // truncated at the `#` when copy-pasted and NOT round-trip. The shell strips
+                // the single quotes before `rmap` sees the arg, so the reattach alias still
+                // resolves the same node (STANDING HONESTY RULE: never print a cursor that
+                // does not run).
+                return Ok(format!(
+                    "    → rmap explain {}\n",
+                    crate::presentation::shell_quote_arg(suffix)
+                ));
+            }
+        }
+    }
     let cwd = n.get("cwd").and_then(|v| v.as_str());
     let unavailable = n.get("cwd_unavailable").and_then(|v| v.as_str());
+    // review-3: the full-form fallback is a copy-paste command too, so BOTH the `cwd`
+    // (a path may carry a space) and the `key` (a symbol stable_key ALWAYS carries `#`, a
+    // shell COMMENT char — `uid:path#name:SYMBOL:KIND`) go through the SAME POSIX encoder
+    // the short cursor uses. A safe token (no `#`/space) is left bare, so an in-root
+    // non-symbol key or a plain `cwd` renders byte-identical to before; the shell strips the
+    // quotes before `rmap` sees the arg, so the reattach/explain resolves the same node
+    // (STANDING HONESTY RULE 2: never print a cursor that does not run).
+    let key = crate::presentation::shell_quote_arg(key);
     match (cwd, unavailable) {
-        (Some(cwd), _) => Ok(format!("    → (cd {cwd} && rmap explain {key})\n")),
+        (Some(cwd), _) => Ok(format!(
+            "    → (cd {} && rmap explain {key})\n",
+            crate::presentation::shell_quote_arg(cwd)
+        )),
         (None, Some(reason)) => Ok(format!(
             "    → rmap explain {key}  (run from the repo root — working directory {reason})\n"
         )),
@@ -265,8 +393,16 @@ pub(crate) fn render_next(next: Option<&Value>, key: &str) -> String {
     };
     let cwd = n.get("cwd").and_then(|v| v.as_str());
     let unavailable = n.get("cwd_unavailable").and_then(|v| v.as_str());
+    // review-3: same runnable-cursor discipline as `render_seed_chunk_next` — quote both
+    // `cwd` and `key` through `shell_quote_arg`, including the no-`cwd` key form. A Group-A
+    // FILE key (`uid:path:FILE`, no `#`) stays bare (byte-identical); a `#`-bearing key or a
+    // space-bearing path is single-quoted so the copy-paste runs verbatim.
+    let key = crate::presentation::shell_quote_arg(key);
     match (cwd, unavailable) {
-        (Some(cwd), _) => format!("     → (cd {cwd} && rmap explain {key})\n"),
+        (Some(cwd), _) => format!(
+            "     → (cd {} && rmap explain {key})\n",
+            crate::presentation::shell_quote_arg(cwd)
+        ),
         (None, Some(reason)) => format!(
             "     → rmap explain {key}  (run from the repo root — working directory {reason})\n"
         ),
@@ -306,7 +442,14 @@ mod tests {
         assert!(out.contains("src/a.ts:12  svc"));
         assert!(out.contains("embedding"));
         assert!(out.contains("module backend/services"));
-        assert!(out.contains("(cd /repo && rmap explain glamCRM:src/a.ts#svc:SYMBOL:FUNCTION)"));
+        // review-3: the `#`-bearing symbol key is single-quoted in the full-form fallback
+        // (Group B, repo_uid=None) so the copy-paste command runs — an unquoted `#` would
+        // start a shell comment and truncate the key.
+        assert!(out.contains("(cd /repo && rmap explain 'glamCRM:src/a.ts#svc:SYMBOL:FUNCTION')"));
+        assert!(
+            !out.contains("rmap explain glamCRM:src/a.ts#svc:SYMBOL:FUNCTION)"),
+            "must NOT print the unquoted `#`-bearing key: {out}"
+        );
         // The bug this slice fixes: a well-formed current-DTO candidate must NOT render as
         // a malformed placeholder (the pre-slice `file`-shaped renderer printed exactly that).
         assert!(
@@ -492,6 +635,159 @@ mod tests {
         assert!(
             !out.contains("embedding, model"),
             "no fabricated embedding label: {out}"
+        );
+    }
+
+    #[test]
+    fn in_root_non_symbol_key_keeps_full_cursor_because_alias_rejects_short_form() {
+        // review-1 finding 2d (boundary): the `explain` reattach alias reattaches the uid
+        // ONLY to a prefix-less suffix carrying `:SYMBOL`. An in-root key WITHOUT that marker
+        // (a file/path-level or malformed seed key), if shortened, would be read by `explain`
+        // as a PATH, miss the reattach, and NOT round-trip. So `render_seed_chunk_next` keeps
+        // the known-good full self-contained `(cd … && rmap explain <key>)` follow-up for it.
+        let uid = "leveldb-abc123";
+        let key = format!("{uid}:db/version_set.cc"); // in-root prefix, but NO :SYMBOL marker
+        let next = json!({ "cwd": "/repo" });
+        let out = render_seed_chunk_next(Some(&next), &key, Some(uid)).expect("renders");
+        assert!(
+            out.contains(&format!("(cd /repo && rmap explain {key})")),
+            "a non-symbol in-root key keeps the full round-tripping cursor: {out}"
+        );
+        assert!(
+            !out.contains("→ rmap explain db/version_set.cc\n"),
+            "must NOT emit a shortened cursor the reattach alias would reject: {out}"
+        );
+    }
+
+    #[test]
+    fn in_root_symbol_key_is_shortened_and_round_trips() {
+        // The complement: a prefix-less suffix carrying `:SYMBOL` is EXACTLY what the alias
+        // reattaches, so shortening is safe and `rmap explain <suffix>` runs verbatim.
+        //
+        // review-2 finding 2: the suffix ALWAYS carries a `#` (a shell COMMENT char), so the
+        // short cursor is single-quoted by `presentation::shell_quote_arg` — the SAME encoder
+        // the fact tier uses. The shell strips the quotes before `rmap` sees the arg, so the
+        // reattach alias resolves the identical node; an UNQUOTED form would be truncated at
+        // the `#` and would not round-trip.
+        let uid = "leveldb-abc123";
+        let suffix = "db/version_set.cc#leveldb::Builder::MaybeAddFile:SYMBOL:METHOD";
+        let key = format!("{uid}:{suffix}");
+        let next = json!({ "cwd": "/repo" });
+        let out = render_seed_chunk_next(Some(&next), &key, Some(uid)).expect("renders");
+        assert_eq!(
+            out,
+            format!(
+                "    → rmap explain {}\n",
+                crate::presentation::shell_quote_arg(suffix)
+            )
+        );
+        // The rendered suffix is single-quoted (the `#` forces quoting), so the `#` is inside
+        // the quotes — no early comment truncation.
+        assert!(
+            out.contains(&format!("'{suffix}'")),
+            "the `#`-bearing suffix is single-quoted so it runs verbatim: {out}"
+        );
+        assert!(
+            !out.contains(&format!("explain {suffix}\n")),
+            "must NOT print the unquoted suffix (the `#` would start a shell comment): {out}"
+        );
+    }
+
+    #[test]
+    fn in_root_short_cursor_shell_quotes_a_metacharacter_bearing_suffix() {
+        // review-2 finding 2 (metacharacter round-trip): a suffix whose path carries a SPACE
+        // (on top of the always-present `#`) must be wrapped as ONE single-quoted argument, so
+        // the copy-pasted cursor runs as a single non-injecting `rmap explain <arg>` — the
+        // space never splits the argument, the `#` never starts a comment.
+        let uid = "leveldb-abc123";
+        let suffix = "db/my file.cc#leveldb::Recover:SYMBOL:METHOD";
+        let key = format!("{uid}:{suffix}");
+        let next = json!({ "cwd": "/repo" });
+        let out = render_seed_chunk_next(Some(&next), &key, Some(uid)).expect("renders");
+        assert_eq!(
+            out, "    → rmap explain 'db/my file.cc#leveldb::Recover:SYMBOL:METHOD'\n",
+            "the whole suffix is one single-quoted argument: {out}"
+        );
+    }
+
+    #[test]
+    fn full_form_seed_next_quotes_hash_key_and_space_cwd() {
+        // review-3: the full-form fallback (`repo_uid = None` — Group B / degraded) renders a
+        // COPY-PASTE command. The key ALWAYS carries `#` (a shell comment char) and the cwd
+        // may carry a space, so BOTH are single-quoted; an unquoted form would truncate at the
+        // `#` and word-split the path — a non-runnable cursor (STANDING HONESTY RULE 2).
+        let key = "leveldb-uid:db/my file.cc#leveldb::Recover:SYMBOL:METHOD";
+        let next = json!({ "cwd": "/my repo/leveldb" });
+        let out = render_seed_chunk_next(Some(&next), key, None).expect("renders");
+        assert_eq!(
+            out,
+            "    → (cd '/my repo/leveldb' && rmap explain 'leveldb-uid:db/my file.cc#leveldb::Recover:SYMBOL:METHOD')\n",
+            "both cwd (space) and key (# + space) are single-quoted: {out}"
+        );
+    }
+
+    #[test]
+    fn full_form_seed_next_out_of_root_key_is_quoted() {
+        // A header uid EXISTS but the key is out-of-root (no `<uid>:` prefix), so the short
+        // cursor is not taken and the full form is rendered — the `#`-bearing foreign key is
+        // still quoted so it runs verbatim.
+        let key = "OTHER-uid:x.ts#f:SYMBOL:FUNCTION";
+        let next = json!({ "cwd": "/other/repo" });
+        let out = render_seed_chunk_next(Some(&next), key, Some("leveldb-uid")).expect("renders");
+        assert_eq!(
+            out, "    → (cd /other/repo && rmap explain 'OTHER-uid:x.ts#f:SYMBOL:FUNCTION')\n",
+            "out-of-root key quoted (cwd safe, left bare): {out}"
+        );
+    }
+
+    #[test]
+    fn full_form_seed_next_no_cwd_reason_form_quotes_key() {
+        // The no-`cwd` reason arm is a copy-paste command too — quote the `#`-bearing key.
+        let key = "leveldb-uid:db/db_impl.cc#Recover:SYMBOL:FUNCTION";
+        let next = json!({ "cwd_unavailable": "was deleted" });
+        let out = render_seed_chunk_next(Some(&next), key, None).expect("renders");
+        assert_eq!(
+            out,
+            "    → rmap explain 'leveldb-uid:db/db_impl.cc#Recover:SYMBOL:FUNCTION'  (run from the repo root — working directory was deleted)\n",
+            "no-cwd key form is quoted: {out}"
+        );
+    }
+
+    #[test]
+    fn full_form_seed_next_embedded_quote_key_is_escaped() {
+        // Embedded single quote in the key → the `'\''` POSIX escape, wrapped, so the whole
+        // key is one argument (no injection, no early termination).
+        let key = "r:db/o'brien.cc#f:SYMBOL:FUNCTION";
+        let next = json!({ "cwd": "/repo" });
+        let out = render_seed_chunk_next(Some(&next), key, None).expect("renders");
+        assert_eq!(
+            out, "    → (cd /repo && rmap explain 'r:db/o'\\''brien.cc#f:SYMBOL:FUNCTION')\n",
+            "embedded quote is escaped: {out}"
+        );
+    }
+
+    #[test]
+    fn render_next_group_a_quotes_hash_key_and_space_cwd() {
+        // review-3: the Group-A full-form (`render_next`, used by `orient`/`explain` no-match
+        // candidate lists) has the SAME copy-paste contract — a `#`-bearing key and a
+        // space-bearing cwd are both single-quoted; a plain FILE key (below) stays bare.
+        let next = json!({ "cwd": "/my repo" });
+        let out = render_next(Some(&next), "r:src/a.ts#svc:SYMBOL:FUNCTION");
+        assert_eq!(
+            out, "     → (cd '/my repo' && rmap explain 'r:src/a.ts#svc:SYMBOL:FUNCTION')\n",
+            "Group-A full form quotes both cwd and key: {out}"
+        );
+    }
+
+    #[test]
+    fn render_next_group_a_safe_file_key_stays_bare() {
+        // A FILE key (`uid:path:FILE`, no `#`/space) is a POSIX-safe token, so the encoder
+        // leaves it bare — the pre-slice output is byte-identical (no gratuitous quoting).
+        let next = json!({ "cwd": "/repo" });
+        let out = render_next(Some(&next), "glamCRM:src/price.ts:FILE");
+        assert_eq!(
+            out, "     → (cd /repo && rmap explain glamCRM:src/price.ts:FILE)\n",
+            "safe file key is not quoted: {out}"
         );
     }
 

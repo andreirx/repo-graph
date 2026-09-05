@@ -15,24 +15,35 @@
 //!                            # default: whole repo). Files land at their
 //!                            # repo-root-relative locations regardless of cwd.
 //! rmap map [path] --dry-run  # print the rendered files to stdout, write nothing
+//! rmap map [path] --dry-run --full        # dry-run with the content cap removed
+//! rmap map [path] --dry-run --limit <n>   # dry-run capped at <n> content lines
 //! rmap map [path] --json     # machine envelope: the rendered file set
 //! ```
 //!
-//! `--dry-run` writes nothing and emits pure file content to stdout (summary to
-//! stderr) — the isolated, tree-safe path used for live determinism checks
-//! (render twice, diff empty).
+//! `--dry-run` writes nothing and emits (to stdout) a count header, the complete
+//! bytes-per-file manifest, and the rendered file CONTENT capped at
+//! `DRY_RUN_DEFAULT_LINE_CAP` lines (ECONOMY-2 §2.4); the extraction-coverage summary
+//! goes to stderr. `--full` removes the content cap — the isolated, tree-safe path used
+//! for live determinism checks (render twice, diff empty); `--limit <n>` raises it.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::daemon_command::{execute_repo_request, print_daemon_error};
-use crate::presentation::map::{render_maps, render_summary, MapFacts, RenderedMapFile};
+use crate::presentation::map::{
+    render_maps, render_summary, MapFacts, RenderedMapFile, DRY_RUN_DEFAULT_LINE_CAP,
+};
 
 struct MapOpts {
     /// Repo-root-relative directory to render; empty = whole repo.
     path: String,
     dry_run: bool,
     json: bool,
+    /// ECONOMY-2 (§2.4): the `--dry-run` CONTENT-line cap. `Some(n)` caps at `n` lines
+    /// (the default `DRY_RUN_DEFAULT_LINE_CAP`, or `--limit <n>`); `None` = `--full`
+    /// (uncapped — the determinism-diff path). Ignored unless `dry_run` (and `--json`,
+    /// which emits the full machine envelope, is unaffected).
+    dry_run_cap: Option<usize>,
 }
 
 /// Entry point for `rmap map`.
@@ -41,7 +52,7 @@ pub fn run_map(args: &[String]) -> ExitCode {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            eprintln!("usage: rmap map [path] [--dry-run] [--json]");
+            eprintln!("usage: rmap map [path] [--dry-run [--full | --limit <n>]] [--json]");
             return ExitCode::from(1);
         }
     };
@@ -70,12 +81,14 @@ pub fn run_map(args: &[String]) -> ExitCode {
     }
 
     if opts.dry_run {
-        // Pure content to stdout (deterministic; safe to diff across two runs);
-        // the summary goes to stderr so stdout is exactly the rendered bytes.
-        for r in &rendered {
-            println!("==> {} <==", r.rel_path);
-            print!("{}", r.contents);
-        }
+        // ECONOMY-2 (§2.4): count header + complete bytes-per-file manifest + the rendered
+        // CONTENT capped at `dry_run_cap` (deterministic; safe to diff across two runs at
+        // `--full`). The extraction-coverage summary still goes to stderr so stdout is the
+        // pure dry-run artifact.
+        print!(
+            "{}",
+            crate::presentation::map::render_dry_run(&facts, &rendered, opts.dry_run_cap)
+        );
         eprint!("{}", render_summary(&facts, &rendered));
         return ExitCode::SUCCESS;
     }
@@ -156,6 +169,9 @@ fn parse_map_args(args: &[String]) -> Result<MapOpts, String> {
     let mut path = String::new();
     let mut dry_run = false;
     let mut json = false;
+    let mut full = false;
+    // `--limit <n>`; `None` until the flag is seen. ECONOMY-2 (§2.4).
+    let mut limit: Option<usize> = None;
     let mut have_path = false;
     let mut i = 0;
     while i < args.len() {
@@ -167,6 +183,20 @@ fn parse_map_args(args: &[String]) -> Result<MapOpts, String> {
             "--json" => {
                 json = true;
                 i += 1;
+            }
+            "--full" => {
+                full = true;
+                i += 1;
+            }
+            "--limit" => {
+                let raw = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a value (a line count)".to_string())?;
+                let n: usize = raw
+                    .parse()
+                    .map_err(|_| format!("--limit expects a non-negative integer, got: {raw}"))?;
+                limit = Some(n);
+                i += 2;
             }
             other if other.starts_with("--") => {
                 return Err(format!("unknown flag: {}", other));
@@ -181,10 +211,23 @@ fn parse_map_args(args: &[String]) -> Result<MapOpts, String> {
             }
         }
     }
+    // ECONOMY-2 (§2.4): the two cap controls are mutually exclusive — `--full` means
+    // uncapped, `--limit` sets a finite cap; asking for both is contradictory.
+    if full && limit.is_some() {
+        return Err("--full and --limit are mutually exclusive".to_string());
+    }
+    // Effective CONTENT cap: `--full` → None (uncapped); `--limit n` → Some(n); neither →
+    // the default cap. Only meaningful with `--dry-run` (the sole content-dumping path).
+    let dry_run_cap = if full {
+        None
+    } else {
+        Some(limit.unwrap_or(DRY_RUN_DEFAULT_LINE_CAP))
+    };
     Ok(MapOpts {
         path,
         dry_run,
         json,
+        dry_run_cap,
     })
 }
 
@@ -216,6 +259,51 @@ mod tests {
         assert!(parse_map_args(&["--bogus".to_string()]).is_err());
         let two: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
         assert!(parse_map_args(&two).is_err());
+    }
+
+    // ── ECONOMY-2 §2.4: --dry-run content cap controls ──────────────────────────
+
+    #[test]
+    fn parse_dry_run_defaults_to_the_default_cap() {
+        let o = parse_map_args(&["--dry-run".to_string()]).unwrap();
+        assert!(o.dry_run);
+        assert_eq!(o.dry_run_cap, Some(DRY_RUN_DEFAULT_LINE_CAP));
+    }
+
+    #[test]
+    fn parse_full_uncaps_the_dry_run_content() {
+        let args: Vec<String> = ["--dry-run", "--full"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let o = parse_map_args(&args).unwrap();
+        assert_eq!(o.dry_run_cap, None);
+    }
+
+    #[test]
+    fn parse_limit_sets_a_finite_cap() {
+        let args: Vec<String> = ["--dry-run", "--limit", "50"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let o = parse_map_args(&args).unwrap();
+        assert_eq!(o.dry_run_cap, Some(50));
+    }
+
+    #[test]
+    fn parse_full_and_limit_together_is_rejected() {
+        let args: Vec<String> = ["--dry-run", "--full", "--limit", "50"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_map_args(&args).is_err());
+    }
+
+    #[test]
+    fn parse_limit_requires_a_numeric_value() {
+        assert!(parse_map_args(&["--limit".to_string()]).is_err());
+        let args: Vec<String> = ["--limit", "abc"].iter().map(|s| s.to_string()).collect();
+        assert!(parse_map_args(&args).is_err());
     }
 
     #[test]

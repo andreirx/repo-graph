@@ -17,7 +17,7 @@
 use serde::Deserialize;
 
 use super::module_disambiguation::{collision_disambiguator, ModuleRow};
-use super::orient::{OrientDepth, OrientResponse};
+use super::orient::{OrientDepth, OrientResponse, ORIENT_FULL_LONG_TAIL_CAP};
 use super::orient_sections::plural;
 use super::{bullet, heading};
 
@@ -394,16 +394,19 @@ impl OrientResponse {
             return false;
         }
 
-        // Package groups (review-3 §1 + review-4 §1): at `--full` `package_group_section_cap`
-        // is `None` (ORIENT-SEGMENT-2 §2.4, operator ruling 2) — the section renders the
-        // COMPLETE, budget-independent `package_groups` evidence array, so it is whole IFF
-        // that array is PRESENT, readable, and every row well-formed for rendering (a
-        // readable `name` + `file_count`). Absent / malformed-row → UNKNOWN → refuse (never
-        // "complete" from silence or from a false-zero row). `total = 0`: `package_groups`
-        // is neither agent-capped nor render-capped at `--full`, so presence + row
-        // well-formedness — not a length cover — gate the claim.
-        if !array_rows_complete("package_groups", ms, 0, package_group_row_wellformed) {
-            return false;
+        // Package groups (review-3 §1 + review-4 §1; ECONOMY-2 §2.2/§2.3): at `--full` the
+        // section now caps at `ORIENT_FULL_LONG_TAIL_CAP` (was uncapped), so it is whole IFF
+        // the `package_groups` array is PRESENT, readable, every row well-formed for rendering
+        // (a readable `name` + `file_count` + `test_file_count`), AND its length is WITHIN the
+        // cap — a group count above the cap ELIDES (`… and N more group`), so "output complete"
+        // must be refused. Absent / malformed-row / over-cap → UNKNOWN or elided → refuse
+        // (never "complete" from silence, a false-zero row, or a silently-truncated tail). This
+        // is exactly the negation of `package_groups_section`'s elision condition at `--full`.
+        match ms.get("package_groups").and_then(|v| v.as_array()) {
+            Some(list)
+                if list.len() <= ORIENT_FULL_LONG_TAIL_CAP
+                    && list.iter().all(package_group_row_wellformed) => {}
+            _ => return false,
         }
 
         // Directory-group fallback (collapse only). Whole IFF the read SUCCEEDED
@@ -433,6 +436,12 @@ impl OrientResponse {
             let Some(total) = ev.get("high_complexity_count").and_then(|v| v.as_u64()) else {
                 return false;
             };
+            // ECONOMY-2 (§2.2/§2.3): `complexity_breakdown_section` caps at
+            // `ORIENT_FULL_LONG_TAIL_CAP` at `--full`, so a count above the cap ELIDES
+            // (`+N more above threshold — rmap hotspots`) → refuse the completeness claim.
+            if total > ORIENT_FULL_LONG_TAIL_CAP as u64 {
+                return false;
+            }
             match ev.get("top_complex").and_then(|v| v.as_array()) {
                 Some(list) => {
                     if (list.len() as u64) < total || !list.iter().all(complexity_row_wellformed) {
@@ -447,6 +456,23 @@ impl OrientResponse {
                     }
                 }
             }
+        }
+
+        // Docs headline (ECONOMY-2 §2.2, review-0 gap c; review-1 finding 1): the Docs line
+        // names at most DOC_HEADLINE_CAP relevant docs; a repo with more ELIDES the rest
+        // (rendered as `… and N more docs — rmap docs list`), so "output complete" must be
+        // refused while a doc is unshown. `docs_elided_count` is the SAME condition the
+        // headline renders, so the claim and the elision line never disagree.
+        //
+        // Only `Some(0)` — a PRESENT documentation section whose headline names every
+        // relevant doc — is provably complete. `Some(n>0)` elides, and `None` is UNKNOWN:
+        // the daemon collapses a `get_doc_inventory` read FAILURE into the same `None` as a
+        // doc-less repo (agent `orient/repo.rs build_documentation_section`), so an absent
+        // section carries no evidence of completeness. Reading it as "nothing elided" is the
+        // exact `unwrap_or(0)` STANDING HONESTY RULE #1 forbids; both `None` and `Some(>0)`
+        // therefore refuse the terminal completeness claim.
+        if self.docs_elided_count() != Some(0) {
+            return false;
         }
 
         true

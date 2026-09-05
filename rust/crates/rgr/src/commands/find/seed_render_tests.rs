@@ -23,6 +23,7 @@ fn all_seeds_below_floor_abstains_with_best_score() {
     render_seed_tier(
         &json!({"seeds_available": true, "candidates": candidates}),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
@@ -63,6 +64,7 @@ fn seeds_above_floor_render_and_sub_floor_are_dropped_without_abstain() {
             ],
         }),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
@@ -94,6 +96,7 @@ fn text_referral_uses_the_actual_query_when_present() {
             "candidates": [candidate_with_score("above", 0.72)],
         }),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     assert!(
@@ -117,6 +120,7 @@ fn text_referral_shell_quotes_a_query_with_spaces_and_quotes() {
             "candidates": [candidate_with_score("above", 0.72)],
         }),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     // The whole query is one single-quoted argument (the metacharacters `;`, `"`,
@@ -149,6 +153,7 @@ fn text_referral_placeholder_is_a_bare_fill_in_marker() {
             "candidates": [candidate_with_score("above", 0.72)],
         }),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     assert!(
@@ -171,6 +176,7 @@ fn decl_candidate_renders_the_decl_label() {
     render_seed_tier(
         &json!({"seeds_available": true, "query": "recover", "candidates": [decl]}),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     assert!(
@@ -191,6 +197,7 @@ fn text_referral_absent_when_seeds_do_not_serve() {
             "query": "fsync",
         }),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     assert!(
@@ -209,6 +216,7 @@ fn seed_below_floor_with_missing_score_is_still_surfaced_not_swallowed() {
     render_seed_tier(
         &json!({"seeds_available": true, "candidates": [{"path": "src/x.ts"}]}),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
@@ -228,7 +236,7 @@ fn well_formed_candidate_renders_with_validated_label() {
         "seeds_available": true,
         "candidates": [well_formed_candidate(json!("embedding"))],
     });
-    render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
+    render_seed_tier(&result, FactTierOutcome::EstablishedMiss, None, &mut out);
     assert!(
         out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
         "candidate label: {out}"
@@ -258,6 +266,7 @@ fn chunk_seed_renders_path_line_anchor_qualified_name_and_test_label() {
     render_seed_tier(
         &json!({"seeds_available": true, "candidates": [prod, test]}),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
@@ -304,6 +313,7 @@ fn partition_header_absent_when_only_production_candidates() {
             "candidates": [prod("Recover", 292, 0.72), prod("Write", 1206, 0.61)],
         }),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     assert!(
@@ -331,6 +341,7 @@ fn partition_header_absent_when_only_test_candidates() {
     render_seed_tier(
         &json!({"seeds_available": true, "candidates": [test]}),
         FactTierOutcome::MissNotEstablished,
+        None,
         &mut out,
     );
     assert!(out.contains("[test]"), "test row still labeled: {out}");
@@ -357,6 +368,7 @@ fn missing_is_test_renders_unknown_marker_never_blank_like_production() {
     render_seed_tier(
         &json!({"seeds_available": true, "candidates": [cand]}),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
@@ -379,7 +391,7 @@ fn non_embedding_seed_source_is_counted_never_relabeled() {
         "seeds_available": true,
         "candidates": [well_formed_candidate(json!("lexical"))],
     });
-    render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
+    render_seed_tier(&result, FactTierOutcome::EstablishedMiss, None, &mut out);
     assert!(out.contains("unreadable"), "surfaced unreadable: {out}");
     assert!(out.contains("\"lexical\""), "names offending source: {out}");
     assert!(!out.contains("0.71, embedding"), "not relabeled: {out}");
@@ -395,6 +407,7 @@ fn seeds_available_missing_is_malformed_never_defaulted() {
     render_seed_tier(
         &json!({"candidates": []}),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
@@ -409,10 +422,122 @@ fn unavailable_without_reason_is_malformed() {
     render_seed_tier(
         &json!({"seeds_available": false}),
         FactTierOutcome::EstablishedMiss,
+        None,
         &mut out,
     );
     assert!(
         out.contains("malformed find response: seeds unavailable but no reason given"),
         "{out}"
+    );
+}
+
+// ── ECONOMY-2 §1: seed-row cursor diet ──────────────────────────────────────
+
+#[test]
+fn in_root_composable_seed_row_drops_cursor_and_shows_kind() {
+    // ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): with the header uid present, an
+    // IN-ROOT seed row whose OWN path + qualified_name reassemble the runnable short cursor
+    // (`<path>#<qualified_name>:SYMBOL:<KIND>`) is CURSOR-COMPOSABLE — the ONE pattern header
+    // `find` prints covers it, so its per-row `→ rmap explain …` line is DROPPED entirely and
+    // the row shows `[KIND]` instead. This is how the LITERAL ≤15% target is met by design.
+    let mut out = String::new();
+    let result = json!({
+        "seeds_available": true,
+        "candidates": [{
+            "path": "db/db_impl.cc", "line": 42, "qualified_name": "Recover",
+            "stable_key": "leveldb-uid:db/db_impl.cc#Recover:SYMBOL:FUNCTION",
+            "is_test": false, "is_decl": false,
+            "score": 0.71, "source": "embedding", "model_id": "m",
+            "module": {"owning": "db"},
+            "next": {"cwd": "/some/abs/path/leveldb"}
+        }],
+    });
+    render_seed_tier(
+        &result,
+        FactTierOutcome::EstablishedMiss,
+        Some("leveldb-uid"),
+        &mut out,
+    );
+    // No per-row cursor line at all — the header covers it.
+    assert!(
+        !out.contains("→ rmap explain"),
+        "composable in-root seed row drops its per-row cursor line: {out}"
+    );
+    assert!(
+        !out.contains("cd /some/abs/path/leveldb"),
+        "no cd wrap on a composable in-root seed row: {out}"
+    );
+    // The row shows the KIND inline, and the identity from which the header pattern
+    // reassembles the cursor (`db/db_impl.cc#Recover:SYMBOL:FUNCTION`).
+    assert!(
+        out.contains("db/db_impl.cc:42  Recover") && out.contains("[FUNCTION]"),
+        "row carries path:line, qualified_name, and [KIND]: {out}"
+    );
+    // PROVE the runnable pattern: the visible fields reassemble the uid-stripped suffix the
+    // JSON `cursor_raw` carries and the daemon alias resolves.
+    assert_eq!(
+        crate::presentation::seed::composable_cursor_kind(
+            Some("leveldb-uid"),
+            "leveldb-uid:db/db_impl.cc#Recover:SYMBOL:FUNCTION",
+            "db/db_impl.cc",
+            "Recover",
+        )
+        .as_deref(),
+        Some("FUNCTION"),
+        "row fields reassemble the cursor suffix exactly"
+    );
+}
+
+#[test]
+fn out_of_root_seed_cursor_keeps_full_cd_form() {
+    // A seed whose `stable_key` does NOT carry THIS repo's `<uid>:` prefix (a foreign /
+    // old-daemon key) keeps the full self-contained `(cd <cwd> && rmap explain <key>)`
+    // form even when a header uid exists — the short form would not resolve there.
+    let mut out = String::new();
+    let result = json!({
+        "seeds_available": true,
+        "candidates": [{
+            "path": "x.ts", "line": 1, "qualified_name": "f",
+            "stable_key": "OTHER-uid:x.ts#f:SYMBOL:FUNCTION",
+            "is_test": false, "is_decl": false,
+            "score": 0.71, "source": "embedding", "model_id": "m",
+            "module": {"owning": "x"},
+            "next": {"cwd": "/other/repo"}
+        }],
+    });
+    render_seed_tier(
+        &result,
+        FactTierOutcome::EstablishedMiss,
+        Some("leveldb-uid"),
+        &mut out,
+    );
+    assert!(
+        out.contains("→ (cd /other/repo && rmap explain 'OTHER-uid:x.ts#f:SYMBOL:FUNCTION')\n"),
+        "out-of-root seed keeps the full self-contained cursor, `#`-bearing key quoted: {out}"
+    );
+}
+
+#[test]
+fn seed_cursor_stays_full_without_a_header_uid() {
+    // No header uid (`None` — degraded / Group-B path) → the full `cd … &&` cursor, never
+    // a truncated non-runnable short form. Byte-identical to pre-ECONOMY-2.
+    let mut out = String::new();
+    let result = json!({
+        "seeds_available": true,
+        "candidates": [{
+            "path": "db/db_impl.cc", "line": 42, "qualified_name": "Recover",
+            "stable_key": "leveldb-uid:db/db_impl.cc#Recover:SYMBOL:FUNCTION",
+            "is_test": false, "is_decl": false,
+            "score": 0.71, "source": "embedding", "model_id": "m",
+            "module": {"owning": "db"},
+            "next": {"cwd": "/some/abs/path/leveldb"}
+        }],
+    });
+    render_seed_tier(&result, FactTierOutcome::EstablishedMiss, None, &mut out);
+    assert!(
+        out.contains(
+            "→ (cd /some/abs/path/leveldb && rmap explain 'leveldb-uid:db/db_impl.cc#Recover:SYMBOL:FUNCTION')\n"
+        ),
+        "full cursor without a header uid, `#`-bearing key quoted: {out}"
     );
 }

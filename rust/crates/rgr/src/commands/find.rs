@@ -212,22 +212,28 @@ pub(super) enum FactTierOutcome {
     MissNotEstablished,
 }
 
-/// FIND-EVIDENCE-1 (§2.3): the once-per-output uid header line (with its trailing
-/// newline). The SINGLE source of both the printed text AND its byte length used by the
-/// amortization gate — so the two can never drift.
-fn uid_header_line(uid: &str) -> String {
-    format!("repo-uid {uid} (symbol cursors below are relative to it)\n")
+/// ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): the ONE pattern-header line (with its
+/// trailing newline) that replaces every in-root row's per-row `→ rmap explain …` cursor
+/// line. It states the composition pattern once — the reader reassembles the runnable short
+/// cursor from each row's own visible `path` / `qualified_name` / `[KIND]`, and the daemon's
+/// syntax-gated `explain` reattach alias (keyed on `:SYMBOL`) resolves it. This is how the
+/// LITERAL ≤15%-of-bytes-on-cursor-lines target is met BY DESIGN. The SINGLE source of both
+/// the printed text and (via `len()`) the amortization gate — so the two never drift. The
+/// repo uid rides the alias, not this line, so no uid is restated per output.
+fn pattern_header_line() -> &'static str {
+    "→ explain any row below: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>' \
+     (compose it from the row's path, name, and [KIND])\n"
 }
 
-/// FIND-EVIDENCE-1 (§2.3): the cursor-diet eligibility of a `find` response — either an
-/// EXACT count of the symbol rows the diet would shorten, or that the `facts` payload
-/// shape is MALFORMED and so cannot be classified at all. Only SYMBOL hits carry a
-/// `<uid>:`-prefixed `key` (file/module keys are paths; dependency/framework/boundary keys
-/// are names/none), and the symbol class renders via `explain` — so a uid-prefixed key is
-/// EXACTLY the set `fact_hit::relative_cursor` shortens.
+/// ECONOMY-2 (§2.1): the cursor-diet eligibility of a `find` response — either an EXACT
+/// count of the CURSOR-COMPOSABLE rows (fact symbol rows + seed rows whose own path +
+/// qualified_name reassemble the runnable short cursor, so the pattern header can cover them
+/// and their per-row cursor line is dropped), or that the payload shape is MALFORMED and so
+/// cannot be classified at all. Computed with the SAME `composable_cursor_kind` the renderers
+/// use, so the header-on/off count and the per-row drop decision cannot drift.
 enum DietEligibility {
-    /// `facts` is a well-formed array of well-formed groups: the exact number of
-    /// uid-prefixed symbol rows the diet would shorten.
+    /// `facts`/`candidates` are well-formed: the exact number of composable rows the diet
+    /// would strip of their per-row cursor line.
     Countable(usize),
     /// `facts` is absent / not an array, or a group's `hits` is present-but-not-a-list, or
     /// a hit's `key` is present-but-not-a-string. The count cannot be TRUSTED, so the diet
@@ -246,7 +252,6 @@ enum DietEligibility {
 /// so a partially-corrupt payload withholds the diet entirely (full cursors for every row)
 /// rather than applying a byte optimization computed off data we could not fully read.
 fn diet_eligibility(result: &serde_json::Value, uid: &str) -> DietEligibility {
-    let prefix = format!("{uid}:");
     // `facts` is our OWN DTO field, ALWAYS serialized as the per-class group array. Any
     // other shape (absent / non-array) is malformed — we cannot count, so we do not guess.
     let groups = match result.get("facts") {
@@ -264,19 +269,65 @@ fn diet_eligibility(result: &serde_json::Value, uid: &str) -> DietEligibility {
             Some(_) => return DietEligibility::Malformed,
         };
         for h in hits {
-            // `key` is OPTIONAL (only the uid-prefixed argument classes carry one); ABSENT
-            // → not a dietable row. PRESENT but not a string → malformed: the key drives
-            // the diet classification, so a corrupt key must not silently pass as "0".
-            match h.get("key") {
-                None => {}
-                Some(serde_json::Value::String(k)) => {
-                    if k.starts_with(&prefix) {
+            // `key` is OPTIONAL (only the argument classes carry one); ABSENT → not a
+            // dietable row. PRESENT but not a string → malformed: a corrupt key must not
+            // silently pass as "0". A composable row is one whose Known path + display
+            // reassemble the runnable short cursor — exactly the rows whose cursor line the
+            // pattern header replaces (`composable_cursor_kind`, the renderer's own gate).
+            let k = match h.get("key") {
+                None => continue,
+                Some(serde_json::Value::String(k)) => k.as_str(),
+                Some(_) => return DietEligibility::Malformed,
+            };
+            if let (Some(p), Some(d)) = (
+                h.get("path").and_then(|v| v.as_str()),
+                h.get("display").and_then(|v| v.as_str()),
+            ) {
+                if crate::presentation::seed::composable_cursor_kind(Some(uid), k, p, d).is_some() {
+                    count += 1;
+                }
+            }
+        }
+    }
+    // ECONOMY-2 (§1): the SAME header amortizes the seed tier too, so seed-only results
+    // (the common seed-bearing `find` — no fact symbol hit) can still shorten cursors. Count
+    // the seed candidates the seed tier WILL RENDER (above the similarity floor, carrying
+    // this repo's `<uid>:` prefix) — the exact rows whose `<uid>:` restatement the header
+    // removes. `candidates` is ABSENT in `--exact` mode / when seeds are unavailable (0
+    // dietable seed rows); a present-but-non-array `candidates`, or a candidate whose
+    // `stable_key` is present-but-not-a-string, is a shape we cannot count → withhold the
+    // diet (STANDING HONESTY RULE 1 — never guess around an unreadable shape). A sub-floor or
+    // missing/invalid `score` candidate is NOT counted: the renderer drops it (sub-floor) or
+    // surfaces it unreadable, so it contributes no dietable cursor.
+    match result.get("candidates") {
+        None => {}
+        Some(serde_json::Value::Array(cands)) => {
+            for c in cands {
+                let above_floor = matches!(
+                    c.get("score").and_then(|v| v.as_f64()),
+                    Some(s) if s >= seed_render::SEED_SIMILARITY_FLOOR
+                );
+                if !above_floor {
+                    continue;
+                }
+                let k = match c.get("stable_key") {
+                    None => continue,
+                    Some(serde_json::Value::String(k)) => k.as_str(),
+                    Some(_) => return DietEligibility::Malformed,
+                };
+                if let (Some(p), Some(q)) = (
+                    c.get("path").and_then(|v| v.as_str()),
+                    c.get("qualified_name").and_then(|v| v.as_str()),
+                ) {
+                    if crate::presentation::seed::composable_cursor_kind(Some(uid), k, p, q)
+                        .is_some()
+                    {
                         count += 1;
                     }
                 }
-                Some(_) => return DietEligibility::Malformed,
             }
         }
+        Some(_) => return DietEligibility::Malformed,
     }
     DietEligibility::Countable(count)
 }
@@ -294,38 +345,38 @@ fn render_find_human(result: &serde_json::Value, exact: bool) -> String {
         None => out.push_str("find (malformed find response: query missing or not a string)\n"),
     }
 
-    // FIND-EVIDENCE-1 (§2.3) — cursor diet: the repo uid is printed ONCE here so the
-    // per-row symbol cursors below can drop it (`explain <suffix>`, which the daemon's
-    // additive alias resolves). `repo_uid` is our OWN DTO field, always present; an
-    // empty value is the no-snapshot degraded state (nothing to anchor) — the header
-    // line is then omitted and cursors render in full (never a fabricated uid). A
-    // genuinely-absent field (old daemon) degrades the same way: no header, full cursors.
+    // ECONOMY-2 (§2.1) — cursor diet: when composable rows exist, the ONE pattern header
+    // is printed here and every composable row below drops its per-row `→ rmap explain …`
+    // line (the header + the row's own `path`/`qualified_name`/`[KIND]` reassemble the
+    // runnable cursor, which the daemon's additive alias resolves). `repo_uid` is our OWN
+    // DTO field, always present; an empty value is the no-snapshot degraded state (nothing
+    // to anchor the composability strip to) — the header is then omitted and every cursor
+    // renders in full. A genuinely-absent field (old daemon) degrades the same way.
     let repo_uid = result
         .get("repo_uid")
         .and_then(|v| v.as_str())
         .filter(|u| !u.is_empty());
-    // §2.5 boilerplate economy: the header amortizes only when the once-per-output uid it
-    // adds costs FEWER bytes than the per-row `<uid>:` restatement it removes. On a 0- or
-    // 1-symbol-row result the header cannot pay for itself (measured: the single-row
-    // `witness_epoch` probe would GROW boilerplate ~+51 B), so the diet is WITHHELD there:
-    // no header, full self-contained cursors — boilerplate then never grows. When applied
-    // (break-even ≈ 3 symbol rows for a 26-char uid) it strictly shrinks it. This is a
-    // BYTE-ECONOMY heuristic, not a fact. A MALFORMED `facts` shape (review-1 honesty fix)
-    // withholds the diet the same way — full cursors, no header — but is a DISTINCT
-    // classification, never conflated with "0 dietable rows": the corrupt payload is
-    // surfaced honestly by `render_facts_tier` below, never papered over.
+    // ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): the ONE pattern header replaces each
+    // composable row's WHOLE per-row cursor line. §2.1 permits an explicit per-row cursor
+    // ONLY where the row CANNOT compose one — so whenever ANY row is composable (≥1) the
+    // header prints and every composable row drops its per-row `→ rmap explain …` line. The
+    // header is a single fixed-cost line; the contract (never emit a redundant per-row cursor
+    // a reader would treat as the only runnable handle) governs over a per-output byte
+    // count — a lone composable row would otherwise keep a full uid-restating cursor in
+    // breach of §2.1 (review-0 finding 1). A `Countable(0)` result has no composable row to
+    // amortize, so no header and every (non-composable) cursor stays full. A MALFORMED
+    // payload (review-1 honesty fix) withholds the diet the same way — full cursors, no
+    // header — but is a DISTINCT classification, never conflated with "0 composable rows":
+    // the corrupt payload is surfaced honestly by `render_facts_tier` below, never papered
+    // over.
     let diet_uid = repo_uid.filter(|uid| match diet_eligibility(result, uid) {
-        DietEligibility::Countable(rows) => {
-            let header_bytes = uid_header_line(uid).len();
-            let per_row_saving = uid.len() + 1; // "<uid>:" dropped from each relative cursor
-            rows * per_row_saving > header_bytes
-        }
+        DietEligibility::Countable(composable) => composable >= 1,
         // Unclassifiable payload → withhold the diet (full cursors); the malformed shape
         // is rendered as an honest degradation by the facts renderer that follows.
         DietEligibility::Malformed => false,
     });
-    if let Some(uid) = diet_uid {
-        out.push_str(&uid_header_line(uid));
+    if diet_uid.is_some() {
+        out.push_str(pattern_header_line());
     }
     out.push('\n');
 
@@ -338,7 +389,11 @@ fn render_find_human(result: &serde_json::Value, exact: bool) -> String {
 
     if !exact {
         out.push('\n');
-        seed_render::render_seed_tier(result, fact_outcome, &mut out);
+        // ECONOMY-2 (§2.1): the seed tier shares the ONE pattern header. When the diet is
+        // applied, composable in-root seed rows drop their whole per-row cursor line (the
+        // header covers them, `[KIND]` shown inline); when withheld (`None`) every seed
+        // cursor stays full — matching the header's absence.
+        seed_render::render_seed_tier(result, fact_outcome, diet_uid, &mut out);
     }
     out
 }

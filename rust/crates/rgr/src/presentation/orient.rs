@@ -69,7 +69,10 @@ pub use super::orient_types::{
 ///   declared/inferred module list, a complexity top-slice, limits/next-steps.
 /// - `Large`  — + the DETAILED TABLES: a larger (capped) complexity table, the
 ///   per-axis reliability breakdown, the remaining signals.
-/// - `Full`   — `large` with the complexity table uncapped (the only uncapped tier).
+/// - `Full`   — `large` with the two long-tail sections (package groups, complexity)
+///   raised to the STATED [`ORIENT_FULL_LONG_TAIL_CAP`] bound (ECONOMY-2 §2.3) rather
+///   than `large`'s tighter table cap; a repo above the bound still elides with the
+///   honest omission line, and the terminal ladder says so.
 ///
 /// Mirrors the CLI `--budget` / `--full` selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +82,18 @@ pub enum OrientDepth {
     Large,
     Full,
 }
+
+/// ECONOMY-2 (§2.3 / §3): the STATED bound on `orient --full`'s two long-tail sections —
+/// the package-group topology and the complexity centers. SUPERSEDES ORIENT-SEGMENT-2 §2.4
+/// operator ruling 2 ("`--full` uncaps the package-group section"): the audit measured that
+/// uncap as a 314 KB dump (gstreamer `--full` was 98.6 % package-group/complexity rows). The
+/// section renderers already carry an honest `… and N more … — <where>` elision line keyed
+/// on the COMPLETE total, so a repo above this bound loses nothing that the JSON / the named
+/// drill-down does not still carry, and `budget_saturated` refuses "output complete" whenever
+/// a tail elides at this cap (the truthful-ladder tie). Chosen at 200: large enough that the
+/// audit corpora's typical repos render whole (never eliding a modest repo), small enough that
+/// a monorepo's tail is bounded to a few KB.
+pub(super) const ORIENT_FULL_LONG_TAIL_CAP: usize = 200;
 
 impl OrientDepth {
     /// Map the CLI budget token (`small|medium|large|full`) to a depth.
@@ -127,19 +142,23 @@ impl OrientDepth {
 
     /// The per-tier render cap for the package-group SECTION (§13 D7), distinct
     /// from the headline cap above — the knob that keeps the primary orientation
-    /// surface bounded on a monorepo: `medium` a top-slice, `large` a larger table.
-    /// ORIENT-SEGMENT-2 §2.4 (operator ruling 2, 2026-08-28): `--full` means the
-    /// COMPLETE breakdown the small-budget footer advertises, so `Full` UNCAPS the
-    /// package-group section (`None`) — a >50-group repo's `--full` renders every
-    /// group, no elision. `Large` keeps the bounded `Some(50)` table (the omitted
-    /// groups ride the honest omission line → `stats --json` / `modules`; the
-    /// COMPLETE size-DESC set always rides the JSON, so the cap never overclaims).
-    /// `None` at `small` is unused — `small` never renders the section
-    /// (`shows_detail()` gates it), the headline being the sole topology surface
-    /// there.
+    /// surface bounded on a monorepo: `medium` a top-slice, `large` a larger table,
+    /// `full` the STATED [`ORIENT_FULL_LONG_TAIL_CAP`]. ECONOMY-2 (§2.3/§3) SUPERSEDES
+    /// ORIENT-SEGMENT-2 §2.4 operator ruling 2 ("`--full` UNCAPS the section"): the
+    /// uncap measured as a 314 KB dump, so `Full` now caps at the stated bound. Every
+    /// capped tier's omitted groups ride the honest omission line → `stats --json` /
+    /// `modules`, and the COMPLETE size-DESC set always rides the JSON, so the cap
+    /// never overclaims. `None` at `small` is unused — `small` never renders the
+    /// section (`shows_detail()` gates it), the headline being the sole topology
+    /// surface there.
     fn package_group_section_cap(self) -> Option<usize> {
         match self {
-            Self::Small | Self::Full => None,
+            // `small` never renders the section (`shows_detail()` gates it off) — `None`
+            // there is unused. ECONOMY-2 (§2.3): `full` caps at the STATED long-tail bound
+            // (was `None`/uncapped — the 314 KB dump) with the section's honest omission line
+            // naming the rest (`stats --json` / `modules`).
+            Self::Small => None,
+            Self::Full => Some(ORIENT_FULL_LONG_TAIL_CAP),
             Self::Medium => Some(20),
             Self::Large => Some(50),
         }
@@ -158,15 +177,21 @@ impl OrientDepth {
 
     /// The per-tier render cap for the complexity-centers SECTION (distinct from
     /// the headline cap above) — the knob that makes the ladder progressive below
-    /// the headline: `medium` a top-slice, `large` a larger table, `--full`
-    /// uncapped. `None` = uncapped; `small` never renders the section (unused).
-    /// Re-composition only: a PREFIX of the SAME `top_complex` evidence + a tail.
+    /// the headline: `medium` a top-slice, `large` a larger table, `--full` the
+    /// STATED [`ORIENT_FULL_LONG_TAIL_CAP`] (ECONOMY-2 §2.3 — the former uncap
+    /// measured as a 314 KB dump, so `Full` now caps too, with the section's honest
+    /// `+N more … — rmap hotspots` tail). `None` = uncapped, used only where a tier
+    /// carries no cap; `small` never renders the section (unused). Re-composition
+    /// only: a PREFIX of the SAME `top_complex` evidence + a tail.
     fn complexity_breakdown_cap(self) -> Option<usize> {
         match self {
             Self::Small => None,
             Self::Medium => Some(10),
             Self::Large => Some(50),
-            Self::Full => None,
+            // ECONOMY-2 (§2.3): `full` caps the complexity long tail at the STATED bound
+            // (was `None`/uncapped) with the section's honest `+N more … — rmap hotspots`
+            // line naming the rest.
+            Self::Full => Some(ORIENT_FULL_LONG_TAIL_CAP),
         }
     }
 }
@@ -282,6 +307,51 @@ impl OrientResponse {
     /// and the honesty posture (reliability caveat, next-action, and — via the
     /// envelope wrapper — the serving footer) rides EVERY tier.
     pub fn render_human(&self, depth: OrientDepth) -> String {
+        let mut out = self.render_body(depth);
+
+        // ── TERMINAL LADDER (ECONOMY-2 §2.2 truthful `--full`) ─────────
+        if !depth.shows_full_detail() {
+            // Small / medium have not yet reached the detailed tables — point there.
+            out.push_str(
+                "\n[--full for the complete breakdown; rmap hotspots / modules / cycles to drill down]\n",
+            );
+        } else if matches!(depth, OrientDepth::Full) {
+            if self.render_body(OrientDepth::Large) == out {
+                // ECONOMY-2 §2.2 (review-2 finding 1): `--full` produced BYTE-IDENTICAL output
+                // to `--budget large` (both long tails sit under `large`'s cap), so it silently
+                // repeated large's bytes with no marker — the zvec-grep defect. Say so
+                // explicitly. This identical-to-large check takes PRECEDENCE over the
+                // completeness line: the spec's "`--full` identical to `large` → one-line
+                // notice" is UNCONDITIONAL, so it fires even on a repo that is ALSO complete
+                // (nothing elided). "nothing further to show" is a COMPARATIVE claim (full vs
+                // large), always TRUE when the two bodies match — whether or not the repo is
+                // saturated; any elided section did so identically in large and carries its own
+                // `… and N more` line.
+                out.push_str("\n[--full identical to --budget large (nothing further to show)]\n");
+            } else if self.budget_saturated() {
+                // ORIENT-SEGMENT-2 §2.4: a saturated ladder (nothing elided anywhere) states
+                // so. ECONOMY-2 §2.2 keeps the tie EXACT — `budget_saturated` is cap-aware, so
+                // this line renders ONLY when no long tail elided at the `--full` cap. Reached
+                // only when `--full` is NOT identical to `large` (the branch above wins that
+                // overlap), i.e. when `--full` genuinely EXPANDED a long tail beyond `large`'s
+                // cap and showed everything (51–200 groups/complexity, otherwise complete) —
+                // `--full` MEANS something on such repos.
+                out.push_str("\n[budget not reached — output complete]\n");
+            }
+            // else: `--full` elided MORE than `large` — the per-section `… and N more —
+            // <where>` lines carry the remainder; no false terminal completeness claim.
+        }
+
+        out.trim_end().to_string()
+    }
+
+    /// ORIENT-DENSITY-1 body: the headline + key structure + detailed tables, WITHOUT the
+    /// terminal ladder line. Split from `render_human` for ECONOMY-2 (§2.2): `render_human`
+    /// appends the ladder, and the `--full`-vs-`--budget large` notice compares
+    /// `render_body(Full)` to `render_body(Large)` byte-for-byte — the honest, drift-proof
+    /// test of "did `--full` add anything beyond `large`?" (a structural re-derivation of the
+    /// cap arithmetic could silently drift from the actual render; a byte compare cannot).
+    fn render_body(&self, depth: OrientDepth) -> String {
         let mut out = String::new();
 
         // Non-repo / unresolved focus keeps an explicit line so the agent
@@ -404,8 +474,10 @@ impl OrientResponse {
                 out.push('\n');
                 out.push_str(&breakdown);
             }
-            // Complexity centers, capped per tier (top-slice / larger / uncapped);
-            // the cap carries an honest "+N more — rmap hotspots" tail.
+            // Complexity centers, capped per tier (top-slice / larger / the STATED
+            // `ORIENT_FULL_LONG_TAIL_CAP` = 200 rows at `--full` — never uncapped, ECONOMY-2
+            // §2.3); every cap carries the honest "+N more above threshold (showing K) —
+            // rmap hotspots" tail, and an elided tail blocks the "output complete" claim.
             let complexity = self.complexity_breakdown_section(depth.complexity_breakdown_cap());
             if !complexity.is_empty() {
                 out.push('\n');
@@ -439,20 +511,7 @@ impl OrientResponse {
             }
         }
 
-        // Small / medium have not yet reached the detailed tables — point there.
-        if !depth.shows_full_detail() {
-            out.push_str(
-                "\n[--full for the complete breakdown; rmap hotspots / modules / cycles to drill down]\n",
-            );
-        } else if matches!(depth, OrientDepth::Full) && self.budget_saturated() {
-            // ORIENT-SEGMENT-2 §2.4: a saturated ladder (repo smaller than the budget —
-            // every section rendered complete, no elision) states so, instead of `--full`
-            // being a silent byte-copy of `large` under a footer that promised "the
-            // complete breakdown". `--full` now MEANS something on such repos.
-            out.push_str("\n[budget not reached — output complete]\n");
-        }
-
-        out.trim_end().to_string()
+        out
     }
 
     fn render_focus(&self) -> String {

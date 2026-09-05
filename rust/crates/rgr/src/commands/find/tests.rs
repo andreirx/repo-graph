@@ -62,34 +62,49 @@ fn facts_render_above_seeds_with_class_and_command_labels() {
 }
 
 #[test]
-fn cursor_diet_applies_and_header_prints_when_it_amortizes() {
-    // ≥3 uid-prefixed symbol rows: the once-per-output header pays for itself, so it
-    // prints AND the per-row cursors drop the uid (`explain <suffix>`). Keys carry `#`
-    // (path#name), so the daemon single-quotes the cursor arg — mirrored here.
+fn cursor_diet_applies_pattern_header_and_drops_composable_cursor_lines() {
+    // ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): CURSOR-COMPOSABLE symbol rows
+    // (their Known path + display reassemble `<path>#<display>:SYMBOL:<KIND>`) → the ONE
+    // pattern header prints AND every composable row's per-row `→ rmap explain …` line is
+    // DROPPED, the row showing `[KIND]` instead. This is the whole-cursor-line elision that
+    // meets the LITERAL ≤15% target by design. Keys carry the real `#` format. (This case
+    // exercises three composable rows; the single-row case is covered separately.)
     let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
-    let hit = |k: &str| {
-        json!({"display": "sym", "path": "src/x.ts", "key": format!("{uid}:{k}"),
-               "next": format!("explain '{uid}:{k}'")})
+    let hit = |name: &str, path: &str| {
+        let key = format!("{uid}:{path}#{name}:SYMBOL:FUNCTION");
+        json!({"display": name, "path": path, "key": key.clone(),
+               "next": format!("explain '{key}'")})
     };
     let mut facts = empty_facts();
     facts[0] = json!({"fact_class": "symbol", "render_command": "explain", "certainty": "extracted",
-        "hits": [hit("a#a:SYMBOL:FUNCTION"), hit("b#b:SYMBOL:FUNCTION"), hit("c#c:SYMBOL:FUNCTION")],
+        "hits": [hit("alpha", "src/a.ts"), hit("beta", "src/b.ts"), hit("gamma", "src/c.ts")],
         "matched": 3, "matched_is_floor": false});
     let result = json!({
         "query": "sym", "repo_uid": uid, "facts": facts,
         "seeds_available": true, "candidates": [],
     });
     let out = render_find_human(&result, true);
+    // The ONE pattern header prints (stating the composition, not the uid).
     assert!(
         out.contains(
-            "repo-uid repo_01m1kvv00zgrtr3t23xrfe6veg (symbol cursors below are relative to it)"
+            "→ explain any row below: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>'"
         ),
-        "header prints when the diet amortizes: {out}"
+        "pattern header prints when rows are composable: {out}"
     );
+    // No per-row cursor lines — the header covers every composable row. (A per-row cursor is
+    // an indented `→ rmap explain <arg>` line; the class label `[symbol · … → rmap explain]`
+    // and the pattern header are NOT per-row cursors, so match the row-line shape precisely.)
     assert!(
-        out.contains("→ rmap explain 'a#a:SYMBOL:FUNCTION'\n"),
-        "cursor is relative (uid dropped): {out}"
+        !out.lines()
+            .any(|l| l.trim_start().starts_with("→ rmap explain")),
+        "composable rows drop their per-row cursor lines: {out}"
     );
+    // Each row shows its identity + [KIND], from which the pattern reassembles the cursor.
+    assert!(
+        out.contains("alpha  — src/a.ts  [FUNCTION]"),
+        "row carries display, path, and [KIND]: {out}"
+    );
+    // The uid is never restated per row.
     assert!(
         !out.contains("explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:"),
         "the uid is not restated per row: {out}"
@@ -97,10 +112,13 @@ fn cursor_diet_applies_and_header_prints_when_it_amortizes() {
 }
 
 #[test]
-fn cursor_diet_is_withheld_on_a_single_row_so_boilerplate_never_grows() {
-    // 1 uid-prefixed symbol row: the header would cost more than the single uid it
-    // saves (§2.5), so the diet is WITHHELD — NO header, and the cursor stays FULL and
-    // self-contained (still runnable without a header to anchor to).
+fn cursor_diet_applies_to_a_single_composable_row_per_contract() {
+    // ECONOMY-2 §2.1 (review-0 finding 1): an explicit per-row cursor is permitted ONLY where
+    // the row CANNOT compose one. A single composable symbol row therefore takes the diet like
+    // any other — the ONE pattern header prints and the row DROPS its per-row `→ rmap explain …`
+    // line, showing `[KIND]` instead. The prior `≥2` byte-economy gate that kept a per-row
+    // cursor for a lone row was a contract breach; the contract governs over a per-output byte
+    // count for the single-row case.
     let uid = "repo_01m1kvv00zgrtr3t23xrfe6veg";
     let key = format!("{uid}:src/x.rs#witness_epoch:SYMBOL:FUNCTION");
     let mut facts = empty_facts();
@@ -113,13 +131,28 @@ fn cursor_diet_is_withheld_on_a_single_row_so_boilerplate_never_grows() {
         "seeds_available": true, "candidates": [],
     });
     let out = render_find_human(&result, true);
+    // The ONE pattern header prints for the lone composable row.
     assert!(
-        !out.contains("repo-uid "),
-        "no header when the diet cannot amortize: {out}"
+        out.contains(
+            "→ explain any row below: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>'"
+        ),
+        "pattern header prints for a single composable row: {out}"
     );
+    // The row drops its per-row cursor line (an indented `→ rmap explain <arg>` line).
     assert!(
-        out.contains("→ rmap explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:src/x.rs#witness_epoch:SYMBOL:FUNCTION'\n"),
-        "the single-row cursor stays full and self-contained: {out}"
+        !out.lines()
+            .any(|l| l.trim_start().starts_with("→ rmap explain")),
+        "the single composable row drops its per-row cursor line: {out}"
+    );
+    // The row shows its identity + [KIND], from which the pattern reassembles the cursor.
+    assert!(
+        out.contains("witness_epoch  — src/x.rs  [FUNCTION]"),
+        "row carries display, path, and [KIND]: {out}"
+    );
+    // The uid is never restated per row.
+    assert!(
+        !out.contains("explain 'repo_01m1kvv00zgrtr3t23xrfe6veg:"),
+        "the uid is not restated per row: {out}"
     );
 }
 

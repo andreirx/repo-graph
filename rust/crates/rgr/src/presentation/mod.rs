@@ -176,6 +176,33 @@ pub fn anchor(path: &str, line: Option<u64>) -> String {
     }
 }
 
+/// The render-side POSIX single-quote encoder for a runnable cursor argument — the twin
+/// of [`anchor`] (a render chokepoint), for shell safety rather than line formatting. A
+/// deliberate MIRROR of the daemon's `find_facts::shell_arg` (the emitter), so a cursor the
+/// CLI prints is byte-for-byte a runnable, non-injecting invocation: a safe token (the POSIX
+/// portable-filename set plus `:@`, which stable_keys use) is left bare; anything else — a
+/// space, a `#` (a shell COMMENT char, which every symbol suffix `<path>#<name>:SYMBOL:<KIND>`
+/// carries), a quote, a metacharacter — is wrapped in single quotes with the embedded-quote
+/// escape. The two encoders MUST agree; a divergence renders a valid cursor as malformed
+/// (loud, fail-safe), never a wrong command as runnable.
+///
+/// ECONOMY-2 (review-2 finding 2): relocated here from `commands::find::fact_hit` so BOTH the
+/// fact-tier cursor (`fact_hit`, via re-export) and the seed-tier short cursor
+/// (`presentation::seed::render_seed_chunk_next`) share ONE encoder without inverting the
+/// one-way commands→presentation layering (a `presentation → commands` call would be a module
+/// cycle). `pub(crate)`: every caller is in-crate; the packet freezes new PUBLIC APIs.
+pub(crate) fn shell_quote_arg(arg: &str) -> String {
+    let safe = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':' | '@'));
+    if safe {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 /// Render a "next steps" section with suggested commands.
 ///
 /// Commands are rendered as bullet items. Returns empty string if no commands.

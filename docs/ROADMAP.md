@@ -371,6 +371,15 @@ mutex and the coordinator guards, holder class + elapsed from the activity regis
 Diagnosis evidenced (lock order + 1.30/1.44 s measured blocks), not reproduced at 301 s;
 enrich holding both exclusive guards for its whole run → ENRICH-GUARD-1. Rescoped by
 ruling A; -2 (retention) and -3 (seed chunking/#2b/VACUUM) staged.
+SHIPPED: ECONOMY-2 (2026-09-06): seed cursor lines collapse to one header pattern (rows
+already carry the short cursor's identity) — literal whole-cursor-line share on a
+seed-bearing find 53.05% → 6.69%; `orient --full` caps long tails at a STATED 200 rows
+with truthful elision lines and "output complete" only when nothing (docs included) was
+elided (gstreamer 314,730 → 38,987 B; zvec-grep identical-to-large notice); `map --dry-run`
+gets a source/sidecar count header + hard line cap (gstreamer 12.99 MB → 24.6 KB, hadoop
+32.2 MB → 31.4 KB); public `--full` help corrected. 5 cycles + operator close-out on a
+single stale comment. THE v0.16.0 AUDIT QUEUE IS COMPLETE — next: release v0.17.0 + audit
+round five; DAEMON-RESIDUALS-2/-3 staged after.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

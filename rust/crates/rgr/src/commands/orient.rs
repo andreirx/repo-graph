@@ -13,10 +13,14 @@
 //! rmap explain <target> [--budget medium|large] [--full] [--json]
 //! ```
 //!
-//! TRUNCATION-AUDIT-1: `--full` uncaps budget-truncated output (no list is truncated and
-//! `*_truncated` is false) for `rmap <cmd> --full | grep <x>`. It is mutually exclusive with
-//! `--budget` on orient/explain. `check` output is never budget-capped, so `--full` is
-//! accepted on `check` for invocation symmetry but is a documented no-op there.
+//! TRUNCATION-AUDIT-1: `--full` lifts the daemon's budget truncation (`*_truncated` is false)
+//! for `rmap <cmd> --full | grep <x>`. On `orient`, ECONOMY-2 (§2.3) then re-caps the two long
+//! tails (package groups, complexity centers) at a stated 200-row bound in the presentation
+//! layer — each carrying an honest `… and N more (showing 200) — <where>` omission line — so
+//! `--full` there means "complete, or says what it elided", never an unbounded dump; `explain`
+//! `--full` stays uncapped. `--full` is mutually exclusive with `--budget` on orient/explain.
+//! `check` output is never budget-capped, so `--full` is accepted on `check` for invocation
+//! symmetry but is a documented no-op there.
 //!
 //! # CLI-OUT-1 Output Modes
 //!
@@ -131,8 +135,12 @@ pub fn run_orient(args: &[String]) -> ExitCode {
     }
 
     // ── Validate budget ──────────────────────────────────────
-    // TRUNCATION-AUDIT-1: --full is the uncapped escape hatch. It and --budget both set the
-    // cap, so they are mutually exclusive; --full maps to the daemon's `full` budget tier.
+    // TRUNCATION-AUDIT-1: --full lifts the daemon's budget truncation (every item is sent);
+    // ECONOMY-2 (§2.3) then re-caps orient's two long tails — package groups and complexity
+    // centers — at `ORIENT_FULL_LONG_TAIL_CAP` (200) in the presentation layer, each with an
+    // honest omission line naming the rest (the former uncap measured as a 314 KB dump). It
+    // and --budget both set the cap, so they are mutually exclusive; --full maps to the
+    // daemon's `full` budget tier.
     if full && budget_raw.is_some() {
         eprintln!("error: --full cannot be combined with --budget");
         print_orient_usage();
@@ -249,7 +257,7 @@ fn print_orient_usage() {
     eprintln!(
         "usage: rmap orient [--focus <path>] [--budget small|medium|large] [--full] [--json]"
     );
-    eprintln!("  --full   deepest tier: uncaps the complexity table; other sections stay bounded with honest omission lines — complete listings ride --json / `stats --json`");
+    eprintln!("  --full   deepest tier: caps the package-group and complexity long tails at 200 rows each (ECONOMY-2 §2.3), each with an honest `… and N more (showing 200) — <where>` omission line; every other list carries its omission line too — complete listings ride --json / `stats --json` / `rmap hotspots`");
 }
 
 // ── check command (REG-1) ────────────────────────────────────────────
