@@ -75,8 +75,9 @@ state root. Do NOT commit.
 
 Test chunks partition by structural per-chunk evidence on every covered language;
 implementations outrank their own declarations with the decl labeled; the --text referral
-is always offered beside seeds; the three verified captures improve as measured; gates
-green.
+is always offered beside seeds; the leveldb and repo-graph captures improve as measured
+and FRAKTAG's referral renders (its ranking recorded unchanged — SEED-CHUNK-3); pre-034
+stores self-heal via a scheduled re-seed; gates green.
 
 CORPUS PATHS: repo-graph is THIS repo; leveldb at ../legacy-codebases/leveldb; FRAKTAG at
 ../FRAKTAG; vcmi at ../legacy-codebases/vcmi.
