@@ -19,13 +19,20 @@ slice, presentation. Maturity: MATURE.
 
 ## 2. Contract
 
-1. **Seed-row cursor diet, same discipline as the fact tier**: repo uid once in the
-   seeds header; per-row cursor is the runnable short form (CURSOR-ROUNDTRIP-1's helper
-   accepts it everywhere) — `explain <path#symbol:KIND>`; the absolute `cd … &&` prefix
-   is dropped when the row's path is inside the current repo root (the common case) and
-   kept only for out-of-root rows. JSON keeps the full canonical cursor (`cursor_raw`).
-   Measured target: cursor bytes ≤ 15% of a seed-bearing `find` output on the audit
-   probes; report before/after per probe.
+1. **Seed-row cursor diet — the LITERAL metric, by design not by redefinition** (AMENDED
+   2026-09-05, ruling economy_2_cursor_metric): the target is ≤15% of a seed-bearing
+   `find` output's bytes spent on WHOLE cursor lines (every byte of every `→ … rmap
+   explain …` line, header included). Since CURSOR-ROUNDTRIP-1 the runnable short cursor
+   is exactly `<path>#<qualified_name>:SYMBOL:<KIND>` — the identity each row ALREADY
+   prints — so per-row cursor lines are redundant: (a) rows render `path:line
+   qualified_name [KIND]`; (b) ONE header line under the seeds heading states the
+   pattern: `→ explain any row: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>'`
+   (repo uid resolved by the syntax-gated alias); (c) an explicit per-row cursor line is
+   printed ONLY where the row cannot compose it (out-of-root path, or a kind/identity the
+   row line does not show); (d) JSON keeps `cursor_raw` per hit unchanged. Fact rows follow
+   the same rule. Redefining the metric to "repeated boilerplate only" is REJECTED — an
+   honest 31% is the right report; success is claimed on the literal measure or not at
+   all. Report before/after bytes per probe, both metrics shown.
 2. **`--full` means complete or says what it elided** — one truthful ladder: every
    list that can be elided carries either all rows or an explicit `… and N more <kind> —
    <where to get them>` line; `[budget not reached — output complete]` renders ONLY when
