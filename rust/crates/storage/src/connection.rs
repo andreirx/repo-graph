@@ -468,8 +468,8 @@ mod tests {
             })
             .expect("query schema_migrations");
         assert_eq!(
-            count, 33,
-            "open_in_memory must run all 33 migrations before returning"
+            count, 34,
+            "open_in_memory must run all 34 migrations before returning"
         );
     }
 
@@ -548,7 +548,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 33);
+        assert_eq!(count, 34);
     }
 
     #[test]
@@ -599,7 +599,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            migration_count, 33,
+            migration_count, 34,
             "re-open must not duplicate schema_migrations rows"
         );
     }
@@ -678,7 +678,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 33);
+        assert_eq!(count, 34);
     }
 
     // ── Connection accessor tests ─────────────────────────────
@@ -693,7 +693,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 33);
+        assert_eq!(count, 34);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use crate::classify;
 use crate::document::{build_chunk_document, MAX_BODY_LINES};
 use crate::hash::content_hash;
 use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedVectorEntry};
@@ -164,6 +165,10 @@ where
         // chunks) must equal the snapshot pin, else omit the whole run.
         let file_hash = content_hash(&content);
         let file_lines: Vec<&str> = content.lines().collect();
+        // SEED-CHUNK-2: per-file structural test regions computed ONCE per file (the
+        // `#[cfg(test)] mod` / `describe(` bodies), reused for every chunk in the run.
+        let lang = classify::lang_for_path(&path);
+        let test_regions = classify::compute_test_regions(lang, &content);
         for chunk in run {
             if file_hash != chunk.content_hash {
                 drifted += 1;
@@ -176,6 +181,15 @@ where
                     continue;
                 }
             };
+            // SEED-CHUNK-2 per-chunk classification (spec §2.1/§2.2). is_test is
+            // PROMOTE-ONLY: the file fact OR structural per-symbol evidence, so a chunk
+            // never DROPS below its file classification on weak evidence. is_decl is a
+            // pure structural read of the span (a bodyless callable signature).
+            let structural_test = chunk.line_start.is_some_and(|ls| {
+                classify::structural_is_test(lang, &file_lines, ls as usize, &test_regions)
+            });
+            let is_test = chunk.is_test || structural_test;
+            let is_decl = classify::is_declaration(&chunk.path, chunk.subtype.as_deref(), &span);
             let vector_row = SeedVectorEntry {
                 node_uid: chunk.node_uid.clone(),
                 stable_key: chunk.stable_key.clone(),
@@ -183,7 +197,8 @@ where
                 path: chunk.path.clone(),
                 line: chunk.line_start,
                 qualified_name: chunk.qualified_name.clone(),
-                is_test: chunk.is_test,
+                is_test,
+                is_decl,
                 content_hash: chunk.content_hash.clone(),
                 vector: Vec::new(), // filled below
             };

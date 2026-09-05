@@ -59,6 +59,10 @@ pub struct SeedCorpusEntry {
     pub path: String,
     /// The symbol's qualified name (document header + anchor); `None` when unstored.
     pub qualified_name: Option<String>,
+    /// The node's `subtype` (`FUNCTION`/`METHOD`/`CONSTANT`/…, the stored uppercase
+    /// value); `None` when unstored. SEED-CHUNK-2 uses it to gate the decl/impl label to
+    /// CALLABLES only — a const/variable is never a "declaration without a body".
+    pub subtype: Option<String>,
     /// The symbol's doc comment (document body prefix); `None` when unstored.
     pub doc_comment: Option<String>,
     /// 1-indexed span start line; the `line` anchor. `None` when the node had no span.
@@ -94,7 +98,13 @@ pub struct SeedVectorEntry {
     pub line: Option<i64>,
     pub qualified_name: Option<String>,
     /// Production (`false`) vs test (`true`) — the moat partition (spec §5).
+    /// SEED-CHUNK-2: this is now the PER-CHUNK value (the file fact OR structural
+    /// per-symbol evidence), not the bare file fact.
     pub is_test: bool,
+    /// SEED-CHUNK-2 (spec §2.2): the chunk's span is a DECLARATION without a body
+    /// (prototype / trait-method decl / interface member / `declare`). A decl ranks
+    /// below any body-bearing chunk of the same qualified name and renders `(decl)`.
+    pub is_decl: bool,
     pub content_hash: String,
     /// The `dim`-length L2-normalized vector.
     pub vector: Vec<f32>,
@@ -125,6 +135,17 @@ pub struct StoredSeedVectors {
 pub enum SeedCorpusError {
     #[error("seed corpus read failed: {0}")]
     Read(String),
+    /// SEED-CHUNK-2 (§2.4): the stored vectors predate per-chunk test/decl
+    /// classification (migration 034) — they carry the stale per-FILE `is_test` and no
+    /// `is_decl`, so serving them would present a false per-chunk fact. A DISTINCT
+    /// variant from [`Read`](Self::Read) (genuine corruption / I-O) because the two
+    /// outcomes are treated differently: this is a self-healing UPGRADE state — the
+    /// daemon SCHEDULES a background re-seed and renders "re-embedding (pending)", never
+    /// the terminal "unreadable; rebuild on next index". Kept a typed variant, NOT a
+    /// message-substring test at the consumer (a name/message is not its semantics —
+    /// STANDING HONESTY RULE: never classify from a string).
+    #[error("seed vectors predate per-chunk classification (migration 034): {0}")]
+    StaleClassification(String),
 }
 
 /// The read seam that hands the pure seed logic its corpus + stored vectors without

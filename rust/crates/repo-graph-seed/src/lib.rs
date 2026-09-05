@@ -34,6 +34,7 @@
 //! enters a resolved fact, and it is discarded on any pin mismatch rather than
 //! served stale (I3/I4).
 
+pub mod classify;
 pub mod document;
 pub mod hash;
 pub mod pass;

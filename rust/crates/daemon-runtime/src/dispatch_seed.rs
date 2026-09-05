@@ -15,6 +15,7 @@
 //! except the added `seed::` prefix inside the parent.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use repo_graph_daemon_transport::{
     DispatchResult, ErrorCode, ErrorDetail, ProgressEmitter, Request,
@@ -22,7 +23,40 @@ use repo_graph_daemon_transport::{
 use repo_graph_storage::StorageConnection;
 use serde_json::Value;
 
+use crate::state::DaemonState;
+
 use super::ServiceDispatcher;
+
+/// SEED-CHUNK-2 §2.4 self-heal seam: when a serve produced the StaleClassification degrade
+/// (a pre-034 store, refused rather than served), kick the idempotent background re-seed so
+/// the upgrade fixes itself. A no-op for every other degrade reason and when the working-tree
+/// root is unavailable (the pass needs it to embed; its absence is already an honest render).
+/// Shared by all three seed serve paths (`handle_find`, `symbol_not_found_with_semantic`,
+/// `apply_semantic_fallback`) so the trigger is defined once.
+fn self_heal_if_stale(
+    state: &Arc<DaemonState>,
+    reason: Option<&crate::seed::DegradeReason>,
+    db_path: &Path,
+    repo_uid: &str,
+    repo_root: Option<&str>,
+) {
+    if matches!(reason, Some(crate::seed::DegradeReason::SeedsReembedding)) {
+        if let Some(root) = repo_root {
+            crate::seed_pass::schedule_reseed_for_stale_classification(
+                state, db_path, repo_uid, root,
+            );
+        }
+    }
+}
+
+/// The degrade reason of a semantic result, if it is `Unavailable` — the input the self-heal
+/// seam keys on. `None` for `Fired`/`NothingScored` (a healthy or empty-but-readable store).
+fn degrade_reason(result: &crate::seed::SemanticResult) -> Option<&crate::seed::DegradeReason> {
+    match result {
+        crate::seed::SemanticResult::Unavailable(r) => Some(r),
+        _ => None,
+    }
+}
 
 /// EMBED-SEED-IMPL-1 (spec §8.4): the fallback tier's candidate cap (≤5, VISION bound).
 pub(super) const SEMANTIC_FALLBACK_CAP: usize = 5;
@@ -36,7 +70,12 @@ pub(super) const FIND_CANDIDATE_CAP: usize = 10;
 /// (this is never reached on those branches). A degraded substrate (no store /
 /// model down / pins mismatch) appends one `SemanticFallbackUnavailable` `Limit`
 /// and leaves the candidates empty — exactly today's no-match plus one line.
+#[allow(clippy::too_many_arguments)] // the seam context (state/result/storage/snapshot/
+                                     // repo/db/root/cap) is irreducible — `state` is the
+                                     // added §2.4 self-heal dependency, each other arg a
+                                     // distinct resolution input, not a bundle.
 pub(super) fn apply_semantic_fallback(
+    state: &Arc<DaemonState>,
     result: &mut repo_graph_agent::dto::envelope::OrientResult,
     storage: &StorageConnection,
     snapshot_uid: &str,
@@ -99,6 +138,9 @@ pub(super) fn apply_semantic_fallback(
             ));
         }
         crate::seed::SemanticResult::Unavailable(reason) => {
+            // SEED-CHUNK-2 §2.4: a pre-034 store self-heals — schedule the background
+            // re-seed before rendering the "re-embedding (pending)" reason.
+            self_heal_if_stale(state, Some(&reason), db_path, repo_uid, repo_root);
             result.limits.push(Limit::from_code_with_reasons(
                 LimitCode::SemanticFallbackUnavailable,
                 vec![reason.reason().to_string()],
@@ -144,16 +186,23 @@ impl ServiceDispatcher {
         // Canonical registry root for each candidate's `next.cwd` (review-2 #2); `None`
         // ⇒ `cwd` omitted with an honest reason (operator ruling 2), never fabricated.
         let repo_root = self.canonical_root(params);
-        let _ = repo_uid; // per-snapshot vectors carry their own identity
-                          // The seam's own resolution input (the symbol the agent typed) is the query
-                          // (spec §8.0) — no new argument. The chunk store answers with SYMBOL chunks
-                          // (path:line + qualified name), so the hint points the reader at near symbols.
+        // The seam's own resolution input (the symbol the agent typed) is the query
+        // (spec §8.0) — no new argument. The chunk store answers with SYMBOL chunks
+        // (path:line + qualified name), so the hint points the reader at near symbols.
         let result = crate::seed::run_semantic_query(
             storage,
             snapshot_uid,
             db_path,
             query,
             SEMANTIC_FALLBACK_CAP,
+        );
+        // SEED-CHUNK-2 §2.4: a pre-034 store found here self-heals via a scheduled re-seed.
+        self_heal_if_stale(
+            &self.state,
+            degrade_reason(&result),
+            db_path,
+            repo_uid,
+            repo_root.as_deref(),
         );
         let data = crate::seed::build_group_b_data(verb, result, repo_root.as_deref());
         ErrorDetail::with_data(ErrorCode::InvalidRequest, message, data)
@@ -353,6 +402,17 @@ impl ServiceDispatcher {
                 FIND_CANDIDATE_CAP,
             ))
         };
+        // SEED-CHUNK-2 §2.4: if the affirmative `find` hit a pre-034 store, kick the
+        // idempotent background self-heal re-seed (no-op for any other degrade reason).
+        if let Some(result) = &seed {
+            self_heal_if_stale(
+                &self.state,
+                degrade_reason(result),
+                repo_state.db_path(),
+                &repo_uid,
+                repo_root.as_deref(),
+            );
+        }
         let response = crate::seed::build_find_response(
             &display_name,
             &repo_uid,

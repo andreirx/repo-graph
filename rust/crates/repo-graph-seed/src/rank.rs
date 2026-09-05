@@ -36,6 +36,10 @@ pub struct RankedCandidate {
     pub qualified_name: Option<String>,
     /// `true` ⇒ this candidate is in the DEMOTED test block (labeled downstream).
     pub is_test: bool,
+    /// SEED-CHUNK-2 (spec §2.2): `true` ⇒ a declaration without a body (labeled
+    /// `(decl)` downstream), ranked below any body-bearing chunk of the same
+    /// qualified name.
+    pub is_decl: bool,
     pub score: f32,
     /// Within [`NEAR_TIE_EPSILON`] of the next-lower candidate in the returned
     /// order — advisory only (spec §7.3).
@@ -82,12 +86,63 @@ pub fn rank(query_vec: &[f32], entries: &[&SeedVectorEntry], top_n: usize) -> Ve
         .filter(|(s, _)| *s > 0.0)
         .collect();
 
+    // SEED-CHUNK-2 (spec §2.2) declaration demotion: a declaration ranks BELOW *any*
+    // body-bearing chunk of the SAME qualified name, regardless of raw cosine (the
+    // measured leveldb case — a 0.45 decl must sink below its 0.30 impl). We give each
+    // decl the score of the WORST-scoring impl of its qualified name (`impl_min_score`),
+    // then break the resulting tie with `is_decl` (impl before decl): the decl lands just
+    // UNDER the lowest-scoring impl, so it is below every impl even when impls straddle
+    // the decl's own score (impls 0.80 & 0.20, decl 0.90 ⇒ 0.80, 0.20, decl). A decl with
+    // no matching impl in the scored set keeps its own score (it may be the only hit —
+    // still labeled, never suppressed). Computed over the whole scored set BEFORE the
+    // top_n cut so the pairing survives truncation. `None` qualified_name never pairs.
+    //
+    // PRECEDENCE (ratified 2026-09-05, review-2 item 1): the production/test PARTITION is
+    // applied FIRST; decl-below-impl holds only WITHIN a partition. So the pairing key is
+    // `(is_test, qualified_name)`, NOT the name alone — a TEST implementation must never
+    // lower the effective score of a PRODUCTION declaration of the same name (that would
+    // let a test hit reorder production-internal ranking across the partition boundary).
+    let mut impl_min_score: std::collections::HashMap<(bool, &str), f32> =
+        std::collections::HashMap::new();
+    for (s, e) in &scored {
+        if e.is_decl {
+            continue;
+        }
+        if let Some(q) = e.qualified_name.as_deref() {
+            impl_min_score
+                .entry((e.is_test, q))
+                .and_modify(|cur| {
+                    if *s < *cur {
+                        *cur = *s;
+                    }
+                })
+                .or_insert(*s);
+        }
+    }
+    // The effective sort score: a decl inherits its WORST same-partition impl's score when
+    // one exists, so the is_decl tie-break places it below every impl of the same qualified
+    // name IN ITS OWN PARTITION (production decls pair only with production impls).
+    let effective = |s: f32, e: &SeedVectorEntry| -> f32 {
+        if e.is_decl {
+            if let Some(q) = e.qualified_name.as_deref() {
+                if let Some(impl_s) = impl_min_score.get(&(e.is_test, q)) {
+                    return *impl_s;
+                }
+            }
+        }
+        s
+    };
+
     // Production (is_test=false) sorts before test (is_test=true); within a block,
-    // descending score, then path, then node_uid — a deterministic total order.
+    // descending EFFECTIVE score, then impl-before-decl (so a decl sits just under its
+    // impl), then path, then node_uid — a deterministic total order.
     scored.sort_by(|a, b| {
+        let ea = effective(a.0, a.1);
+        let eb = effective(b.0, b.1);
         a.1.is_test
             .cmp(&b.1.is_test)
-            .then_with(|| b.0.total_cmp(&a.0))
+            .then_with(|| eb.total_cmp(&ea))
+            .then_with(|| a.1.is_decl.cmp(&b.1.is_decl))
             .then_with(|| a.1.path.cmp(&b.1.path))
             .then_with(|| a.1.node_uid.cmp(&b.1.node_uid))
     });
@@ -103,6 +158,7 @@ pub fn rank(query_vec: &[f32], entries: &[&SeedVectorEntry], top_n: usize) -> Ve
             line: e.line,
             qualified_name: e.qualified_name.clone(),
             is_test: e.is_test,
+            is_decl: e.is_decl,
             score,
             near_tie: false,
         })
@@ -134,9 +190,192 @@ mod tests {
             line: Some(1),
             qualified_name: Some(node.to_string()),
             is_test,
+            is_decl: false,
             content_hash: "h".to_string(),
             vector: v,
         }
+    }
+
+    /// An entry with an explicit qualified_name + is_decl, for decl-demotion tests.
+    fn named(node: &str, path: &str, qname: &str, is_decl: bool, v: Vec<f32>) -> SeedVectorEntry {
+        SeedVectorEntry {
+            node_uid: node.to_string(),
+            stable_key: format!("k:{node}"),
+            file_uid: format!("fu:{path}"),
+            path: path.to_string(),
+            line: Some(1),
+            qualified_name: Some(qname.to_string()),
+            is_test: false,
+            is_decl,
+            content_hash: "h".to_string(),
+            vector: v,
+        }
+    }
+
+    #[test]
+    fn impl_outranks_its_own_decl_even_when_decl_scores_higher() {
+        // The measured leveldb case: decl (db_impl.h) cosine 0.45 must sink BELOW its
+        // impl (db_impl.cc) cosine 0.30 because an impl always outranks its own decl.
+        // Cosine against [1,0] is just the first component: decl 0.45, impl 0.30.
+        let decl = named(
+            "decl",
+            "db/db_impl.h",
+            "leveldb.DBImpl.Recover",
+            true,
+            vec![0.45, 0.0],
+        );
+        let impl_ = named(
+            "impl",
+            "db/db_impl.cc",
+            "leveldb.DBImpl.Recover",
+            false,
+            vec![0.30, 0.0],
+        );
+        let refs = vec![&decl, &impl_];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].node_uid, "impl", "impl first despite lower score");
+        assert!(!ranked[0].is_decl);
+        assert_eq!(ranked[1].node_uid, "decl");
+        assert!(
+            ranked[1].is_decl,
+            "decl demoted below its impl, still present"
+        );
+    }
+
+    #[test]
+    fn decl_ranks_below_every_impl_of_its_name_even_a_lower_scoring_one() {
+        // Reviewer §2.2 case: with two impls (0.80 and 0.20) and a decl scoring 0.90, the
+        // decl must land below BOTH impls — not merely below the best. Cosine against
+        // [1,0] is the first component.
+        let decl = named("decl", "a.h", "N.F", true, vec![0.90, 0.0]);
+        let impl_hi = named("hi", "a.cc", "N.F", false, vec![0.80, 0.0]);
+        let impl_lo = named("lo", "b.cc", "N.F", false, vec![0.20, 0.0]);
+        let refs = vec![&decl, &impl_hi, &impl_lo];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(ranked.len(), 3);
+        assert_eq!(ranked[0].node_uid, "hi", "highest impl first");
+        assert_eq!(ranked[1].node_uid, "lo", "lower impl still above the decl");
+        assert_eq!(
+            ranked[2].node_uid, "decl",
+            "decl below EVERY impl of its name, despite the highest raw score"
+        );
+        assert!(ranked[2].is_decl);
+    }
+
+    #[test]
+    fn production_decl_outranks_a_test_impl_of_the_same_name() {
+        // RATIFIED PRECEDENCE (operator 2026-09-05, answering review-2
+        // SC2-DECL-TEST-PRECEDENCE): the production/test PARTITION is applied FIRST;
+        // decl-below-impl holds only WITHIN a partition. So a PRODUCTION declaration
+        // renders ABOVE a TEST-partition implementation of the same qualified name — the
+        // test impl is a double, not the answer — while the production decl is still
+        // labeled `(decl)`. This pins the crossing-partition case the reviewer flagged:
+        // the unqualified "impl always ranks above its own decl" is scoped to a partition,
+        // it does NOT override the test moat.
+        //
+        // The test impl scores HIGHER (0.90) than the production decl (0.40) on purpose:
+        // partition dominance must hold even when the test hit is the stronger cosine.
+        let prod_decl = SeedVectorEntry {
+            node_uid: "prod_decl".to_string(),
+            stable_key: "k:prod_decl".to_string(),
+            file_uid: "fu:api.h".to_string(),
+            path: "src/api.h".to_string(),
+            line: Some(1),
+            qualified_name: Some("N.F".to_string()),
+            is_test: false,
+            is_decl: true,
+            content_hash: "h".to_string(),
+            vector: vec![0.40, 0.0],
+        };
+        let test_impl = SeedVectorEntry {
+            node_uid: "test_impl".to_string(),
+            stable_key: "k:test_impl".to_string(),
+            file_uid: "fu:api_test.cc".to_string(),
+            path: "test/api_test.cc".to_string(),
+            line: Some(1),
+            qualified_name: Some("N.F".to_string()),
+            is_test: true,
+            is_decl: false,
+            content_hash: "h".to_string(),
+            vector: vec![0.90, 0.0],
+        };
+        let refs = vec![&prod_decl, &test_impl];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(
+            ranked[0].node_uid, "prod_decl",
+            "the production declaration ranks ABOVE the test implementation (partition first)"
+        );
+        assert!(
+            ranked[0].is_decl && !ranked[0].is_test,
+            "the production decl is still labeled (decl), and it is production"
+        );
+        assert_eq!(
+            ranked[1].node_uid, "test_impl",
+            "the higher-scoring test impl is demoted below production — a double, not the answer"
+        );
+        assert!(ranked[1].is_test);
+    }
+
+    #[test]
+    fn a_test_impl_does_not_reorder_production_internal_ranking() {
+        // review-2 item 1: the pairing key is (is_test, qualified_name), so a TEST-partition
+        // implementation must NOT lower the effective score of a PRODUCTION declaration of
+        // the same name. Set-up: an unrelated production candidate (0.50), a production decl
+        // "N.F" (0.40, no production impl of its name in the set), and a higher-scoring TEST
+        // impl "N.F" (0.90). Correct: within production, the unrelated 0.50 ranks ABOVE the
+        // 0.40 decl (the decl keeps its own score — no PRODUCTION impl to sink under); the
+        // test impl lands in the demoted test partition last. If the key were name-only, the
+        // test impl's 0.90 would become the decl's effective score and wrongly hoist the
+        // production decl above the unrelated production candidate.
+        let unrelated = named("u", "src/other.cc", "N.G", false, vec![0.50, 0.0]);
+        let prod_decl = named("d", "src/api.h", "N.F", true, vec![0.40, 0.0]);
+        let test_impl = SeedVectorEntry {
+            node_uid: "ti".to_string(),
+            stable_key: "k:ti".to_string(),
+            file_uid: "fu:t".to_string(),
+            path: "test/api_test.cc".to_string(),
+            line: Some(1),
+            qualified_name: Some("N.F".to_string()),
+            is_test: true,
+            is_decl: false,
+            content_hash: "h".to_string(),
+            vector: vec![0.90, 0.0],
+        };
+        let refs = vec![&unrelated, &prod_decl, &test_impl];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(ranked.len(), 3);
+        assert_eq!(
+            ranked[0].node_uid, "u",
+            "unrelated production candidate (0.50) ranks above the production decl (0.40)"
+        );
+        assert_eq!(
+            ranked[1].node_uid, "d",
+            "the production decl keeps its OWN score — the test impl did not hoist it"
+        );
+        assert!(!ranked[1].is_test && ranked[1].is_decl);
+        assert_eq!(
+            ranked[2].node_uid, "ti",
+            "the test impl is demoted to the test partition, last"
+        );
+        assert!(ranked[2].is_test);
+    }
+
+    #[test]
+    fn a_decl_with_no_matching_impl_keeps_its_own_score_and_is_labeled() {
+        // Only a decl is present (no body-bearing sibling) → it still appears, ranked by
+        // its own score, labeled `(decl)` downstream.
+        let decl = named("d", "a.h", "Foo.bar", true, vec![0.6, 0.0]);
+        let other = named("o", "b.cc", "Baz.qux", false, vec![0.5, 0.0]);
+        let refs = vec![&decl, &other];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(
+            ranked[0].node_uid, "d",
+            "decl keeps its higher own score, no impl to sink under"
+        );
+        assert!(ranked[0].is_decl);
+        assert_eq!(ranked[1].node_uid, "o");
     }
 
     #[test]

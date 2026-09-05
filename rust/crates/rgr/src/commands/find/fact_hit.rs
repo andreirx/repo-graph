@@ -213,7 +213,12 @@ fn next_is_ratified(next: &str, commands: &[&str], folds_key: bool, key: Option<
 /// runnable. A small, security-relevant duplication kept inline rather than crossing
 /// a crate boundary for a shared helper (that would be a new dependency edge — a
 /// boundary decision out of this focused close's scope).
-fn shell_quote_arg(arg: &str) -> String {
+///
+/// SEED-CHUNK-2 (review-1 item 3): `pub(super)` so the sibling `find::seed_render`
+/// reuses this exact encoder for the `--text` referral query — same crate, same
+/// `commands::find` module tree (NO crate boundary crossed), avoiding a third copy of
+/// the POSIX rule.
+pub(super) fn shell_quote_arg(arg: &str) -> String {
     let safe = !arg.is_empty()
         && arg
             .chars()

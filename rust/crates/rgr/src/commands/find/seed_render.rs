@@ -102,8 +102,16 @@ pub(super) fn render_seed_tier(
             return;
         }
     };
+    // SEED-CHUNK-2 (spec §2.3.3): the `--text` referral renders whenever seeds SERVE
+    // (the tier is available and reached here), not only on empty tiers. The query is
+    // our OWN DTO field; when absent/empty the referral uses a `<pattern>` placeholder.
+    let query = result
+        .get("query")
+        .and_then(|v| v.as_str())
+        .filter(|q| !q.is_empty());
     if candidates.is_empty() {
         out.push_str("  (no area scored above zero)\n");
+        append_text_referral(out, query);
         return;
     }
 
@@ -118,8 +126,15 @@ pub(super) fn render_seed_tier(
     // not-found fallback) also uses — never a per-command copy (STANDING HONESTY RULE 2). A
     // candidate that fails validation is COUNTED and stated on ONE honest line
     // (`render_unreadable_summary`), never a per-row placeholder (RULE 1).
-    let mut rendered = String::new();
-    let mut rendered_any = false;
+    // SEED-CHUNK-2 (spec §2.1): bucket the rendered rows into the production and test
+    // PARTITIONS (plus an `unknown` bucket for the defensive old-daemon / malformed
+    // case, which must never be folded into production). Candidates arrive already ranked
+    // production-above-test; we preserve that order within each bucket and, when BOTH the
+    // production and test partitions are non-empty, emit ONE partition header between them
+    // so the reader sees the moat boundary explicitly — not only the per-row `[test]` label.
+    let mut prod = String::new();
+    let mut tests = String::new();
+    let mut unknown = String::new();
     let mut best_below: Option<f64> = None;
     let mut unreadable: Vec<String> = Vec::new();
     for c in candidates {
@@ -128,16 +143,31 @@ pub(super) fn render_seed_tier(
                 best_below = Some(best_below.map_or(score, |b| b.max(score)));
             }
             _ => match crate::presentation::seed::render_seed_chunk_candidate(c) {
-                Ok(row) => {
-                    rendered.push_str(&row);
-                    rendered_any = true;
-                }
+                // Partition by the candidate's OWN `is_test` DTO field. A missing / non-bool
+                // value is UNKNOWN classification (old daemon / malformed) — routed to its
+                // own bucket, NEVER counted as production; the shared renderer already
+                // emitted the `[is_test unknown]` per-row marker (STANDING HONESTY RULE 1).
+                Ok(row) => match c.get("is_test") {
+                    Some(serde_json::Value::Bool(false)) => prod.push_str(&row),
+                    Some(serde_json::Value::Bool(true)) => tests.push_str(&row),
+                    _ => unknown.push_str(&row),
+                },
                 Err(reason) => unreadable.push(reason),
             },
         }
     }
+    let rendered_any = !prod.is_empty() || !tests.is_empty() || !unknown.is_empty();
     if rendered_any {
-        out.push_str(&rendered);
+        out.push_str(&prod);
+        // The partition header renders ONLY when BOTH partitions are non-empty (spec
+        // §2.1): a divider naming the demoted block and restating the moat (production
+        // above test). With only one partition present the flat list + per-row labels are
+        // already unambiguous, so no header is emitted.
+        if !prod.is_empty() && !tests.is_empty() {
+            out.push_str("  tests (ranked below production, labeled [test]):\n");
+        }
+        out.push_str(&tests);
+        out.push_str(&unknown);
     }
     if !unreadable.is_empty() {
         out.push_str(&crate::presentation::seed::render_unreadable_summary(
@@ -167,237 +197,51 @@ pub(super) fn render_seed_tier(
             // to a fact-table MISS: it claims "nothing matched" about the repo, true ONLY when
             // the facts tier honestly established a miss. When facts MATCHED (or the payload was
             // malformed/incomplete, so no miss is established) the close is WITHHELD — appending
-            // "nothing matched" there would be false / unproven (review-1; HONESTY RULE 1).
+            // "nothing matched" there would be false / unproven (review-1; HONESTY RULE 1). The
+            // `--text` referral that FIND-GREP-1 tucked into this close moved OUT (SEED-CHUNK-2
+            // §2.3.3): it now renders on EVERY serving tier below, so this close keeps only the
+            // repo-level "nothing matched" claim it is uniquely entitled to make.
             match fact_outcome {
-            super::FactTierOutcome::EstablishedMiss => out.push_str(
-                " — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`.",
-            ),
-            super::FactTierOutcome::MissNotEstablished => {}
-        }
+                super::FactTierOutcome::EstablishedMiss => out.push_str(" — nothing matched."),
+                super::FactTierOutcome::MissNotEstablished => {}
+            }
             out.push('\n');
         }
     }
+    // SEED-CHUNK-2 (spec §2.3.3): the `--text` referral renders whenever seeds SERVE —
+    // beside rendered candidates, and on the abstain/known-zero paths — so the reader is
+    // always told where exact text/comments/expressions are searched (the `find fsync`
+    // capture rendered a seed and never mentioned `--text`; that is the defect this fixes).
+    append_text_referral(out, query);
     // (`candidates` is non-empty and every candidate either set `best_below`, rendered a
     // row, or was counted `unreadable` — so at least one arm always fired; no silent empty
     // tier. The per-candidate render + the malformed-count line both live in
     // `presentation::seed`, shared with the Group-B not-found fallback — one renderer.)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::commands::find::test_fixtures::{
-        candidate_with_score, empty_facts, well_formed_candidate,
-    };
-    use crate::commands::find::FactTierOutcome;
-    use serde_json::json;
-
-    #[test]
-    fn all_seeds_below_floor_abstains_with_best_score() {
-        // FIND-RANK-1 §2.3: 10 sub-floor seeds (the lowest-no-home shape) → the honest
-        // abstain with the best score, NOT 10 rows of hearsay. Scores are below the
-        // potion-calibrated floor (0.30); the best is 0.136.
-        let candidates: Vec<serde_json::Value> = (0..10)
-            .map(|i| candidate_with_score(&format!("k{i}"), 0.10 + f64::from(i) * 0.004))
-            .collect();
-        let mut out = String::new();
-        // Facts established a MISS → the §2.4 capability close is appended to the abstain.
-        render_seed_tier(
-            &json!({"seeds_available": true, "candidates": candidates}),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains(
-                "no candidates above the minimum similarity 0.30 (best: 0.14) — nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`."
-            ),
-            "abstain states capability, not repo absence, in noise-tail-cutoff wording: {out}"
-        );
-        // FIND-GREP-1 §4: the false repo-absence sentence is RETIRED everywhere.
-        assert!(
-            !out.contains("distinct home"),
-            "retired false repo-absence sentence must not render: {out}"
-        );
-        // Not one sub-floor candidate rendered.
-        assert!(
-            !out.contains("src/x.ts"),
-            "no sub-floor rows rendered: {out}"
-        );
-    }
-
-    #[test]
-    fn seeds_above_floor_render_and_sub_floor_are_dropped_without_abstain() {
-        // A mix: one above-floor seed renders; a below-floor one is silently dropped and
-        // the abstain line does NOT appear (the tier answered).
-        let mut out = String::new();
-        render_seed_tier(
-            &json!({
-                "seeds_available": true,
-                "candidates": [
-                    candidate_with_score("above", 0.72),
-                    candidate_with_score("below", 0.22),
-                ],
-            }),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains("score 0.72, embedding"),
-            "above-floor rendered: {out}"
-        );
-        assert!(
-            !out.contains("no candidates above the minimum similarity"),
-            "no abstain when a seed cleared the floor: {out}"
-        );
-    }
-
-    #[test]
-    fn seed_below_floor_with_missing_score_is_still_surfaced_not_swallowed() {
-        // A candidate with NO score cannot be floor-filtered — it must still be VALIDATED
-        // (and, failing, COUNTED as unreadable on one honest line), never silently dropped
-        // by the floor (STANDING HONESTY RULE 1). CURSOR-ROUNDTRIP-1 (§2.2): the shared
-        // renderer counts + states it, never a per-row `(malformed candidate: …)` placeholder.
-        let mut out = String::new();
-        render_seed_tier(
-            &json!({"seeds_available": true, "candidates": [{"path": "src/x.ts"}]}),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains("1 candidate unreadable: missing required field"),
-            "counted + stated on one line: {out}"
-        );
-        assert!(
-            !out.contains("(malformed candidate"),
-            "no per-row placeholder (RULE 1): {out}"
-        );
-    }
-
-    #[test]
-    fn well_formed_candidate_renders_with_validated_label() {
-        let mut out = String::new();
-        let result = json!({
-            "seeds_available": true,
-            "candidates": [well_formed_candidate(json!("embedding"))],
-        });
-        render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
-        assert!(
-            out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
-            "candidate label: {out}"
-        );
-        assert!(out.contains(", module backend/auth"), "module hint: {out}");
-    }
-
-    #[test]
-    fn chunk_seed_renders_path_line_anchor_qualified_name_and_test_label() {
-        // SEED-CHUNK-1: a per-SYMBOL chunk seed renders `path:line` + qualified name;
-        // a test-classified chunk is labeled `[test]` (production above test, spec §5).
-        let mut out = String::new();
-        let prod = json!({
-            "stable_key": "k1", "path": "db/db_impl.cc", "line": 415,
-            "qualified_name": "leveldb::DBImpl::RecoverLogFile", "is_test": false,
-            "score": 0.71, "source": "embedding", "model_id": "minishlab/potion-code-16M-v2",
-            "module": {"owning": "db"},
-            "next": {"cmd": "explain", "args": ["k1"], "cwd": "/repo"}
-        });
-        let test = json!({
-            "stable_key": "k2", "path": "db/recovery_test.cc", "line": 30,
-            "qualified_name": "leveldb::RecoveryTest::OpenWithStatus", "is_test": true,
-            "score": 0.65, "source": "embedding", "model_id": "minishlab/potion-code-16M-v2",
-            "module": {"owning": "db"},
-            "next": {"cmd": "explain", "args": ["k2"], "cwd": "/repo"}
-        });
-        render_seed_tier(
-            &json!({"seeds_available": true, "candidates": [prod, test]}),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains("db/db_impl.cc:415  leveldb::DBImpl::RecoverLogFile  (score 0.71"),
-            "production chunk anchor + qualified name: {out}"
-        );
-        assert!(
-            out.contains(
-                "db/recovery_test.cc:30  leveldb::RecoveryTest::OpenWithStatus  (score 0.65"
-            ) && out.contains("[test]"),
-            "test chunk is anchored AND labeled [test]: {out}"
-        );
-    }
-
-    #[test]
-    fn missing_is_test_renders_unknown_marker_never_blank_like_production() {
-        // review-1 gap d: a candidate whose `is_test` is ABSENT must render an explicit
-        // unknown marker — never blank (which reads as unlabeled production). Unknown
-        // classification is never invisible (STANDING HONESTY).
-        let mut out = String::new();
-        let cand = json!({
-            "stable_key": "k1", "path": "db/db_impl.cc", "line": 42,
-            "qualified_name": "leveldb::DBImpl::Foo",
-            // NO is_test key
-            "score": 0.71, "source": "embedding", "model_id": "minishlab/potion-code-16M-v2",
-            "module": {"owning": "db"},
-            "next": {"cmd": "explain", "args": ["k1"], "cwd": "/repo"}
-        });
-        render_seed_tier(
-            &json!({"seeds_available": true, "candidates": [cand]}),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains("[is_test unknown]"),
-            "absent is_test surfaces an explicit unknown marker: {out}"
-        );
-        assert!(
-            !out.contains("[test]") || out.contains("[is_test unknown]"),
-            "unknown is not silently treated as production: {out}"
-        );
-    }
-
-    #[test]
-    fn non_embedding_seed_source_is_counted_never_relabeled() {
-        // A non-`embedding` source is COUNTED unreadable with the offending source named,
-        // never relabeled as an embedding hint, never a per-row placeholder (RULE 1).
-        let _ = empty_facts(); // fixture parity with the other tiers' tests.
-        let mut out = String::new();
-        let result = json!({
-            "seeds_available": true,
-            "candidates": [well_formed_candidate(json!("lexical"))],
-        });
-        render_seed_tier(&result, FactTierOutcome::EstablishedMiss, &mut out);
-        assert!(out.contains("unreadable"), "surfaced unreadable: {out}");
-        assert!(out.contains("\"lexical\""), "names offending source: {out}");
-        assert!(!out.contains("0.71, embedding"), "not relabeled: {out}");
-        assert!(
-            !out.contains("(malformed candidate"),
-            "no per-row placeholder: {out}"
-        );
-    }
-
-    #[test]
-    fn seeds_available_missing_is_malformed_never_defaulted() {
-        let mut out = String::new();
-        render_seed_tier(
-            &json!({"candidates": []}),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains("malformed find response: seeds_available missing or not a bool"),
-            "{out}"
-        );
-    }
-
-    #[test]
-    fn unavailable_without_reason_is_malformed() {
-        let mut out = String::new();
-        render_seed_tier(
-            &json!({"seeds_available": false}),
-            FactTierOutcome::EstablishedMiss,
-            &mut out,
-        );
-        assert!(
-            out.contains("malformed find response: seeds unavailable but no reason given"),
-            "{out}"
-        );
+/// SEED-CHUNK-2 (spec §2.3.3): the one-line `--text` referral appended whenever the seed
+/// tier serves. Uses the actual query for a copy-paste-runnable command when present;
+/// falls back to a `<pattern>` placeholder when the query is absent/empty (a malformed
+/// response — never a fabricated query).
+///
+/// review-1 item 3: the query is POSIX-shell-quoted via the crate's existing
+/// [`super::fact_hit::shell_quote_arg`] so a query containing spaces, `"`, or shell
+/// metacharacters yields a RUNNABLE, non-injecting copy-paste line (`--text 'a "b" c'`),
+/// not the prior raw double-quote interpolation. The `<pattern>` placeholder (absent
+/// query) stays a BARE fill-in marker — it is a human template, not a real argument to
+/// run, so it is intentionally left unquoted.
+fn append_text_referral(out: &mut String, query: Option<&str>) {
+    match query {
+        Some(q) => out.push_str(&format!(
+            "  for exact text, comments, or expressions: rmap find --text {}\n",
+            super::fact_hit::shell_quote_arg(q)
+        )),
+        None => {
+            out.push_str("  for exact text, comments, or expressions: rmap find --text <pattern>\n")
+        }
     }
 }
+
+#[cfg(test)]
+#[path = "seed_render_tests.rs"]
+mod tests;

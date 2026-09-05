@@ -69,7 +69,8 @@ impl SeedCorpusRead for StorageConnection {
         let mut stmt = conn
             .prepare(
                 "SELECT n.node_uid, n.stable_key, n.file_uid, f.path, n.qualified_name, \
-                        n.doc_comment, n.line_start, n.line_end, f.is_test, fv.content_hash \
+                        n.doc_comment, n.line_start, n.line_end, f.is_test, fv.content_hash, \
+                        n.subtype \
                  FROM nodes n \
                  JOIN files f ON f.file_uid = n.file_uid \
                  JOIN file_versions fv \
@@ -96,6 +97,7 @@ impl SeedCorpusRead for StorageConnection {
                     line_end: row.get(7)?,
                     is_test: is_test_i != 0,
                     content_hash: row.get(9)?,
+                    subtype: row.get(10)?,
                 })
             })
             .map_err(|e| SeedCorpusError::Read(e.to_string()))?;
@@ -114,7 +116,7 @@ impl SeedCorpusRead for StorageConnection {
         let mut stmt = conn
             .prepare(
                 "SELECT node_uid, stable_key, file_uid, path, line, qualified_name, \
-                        is_test, content_hash, model_id, model_checksum, dim, vector \
+                        is_test, content_hash, model_id, model_checksum, dim, vector, is_decl \
                  FROM seed_vectors WHERE snapshot_uid = ?",
             )
             .map_err(|e| SeedCorpusError::Read(e.to_string()))?;
@@ -126,10 +128,16 @@ impl SeedCorpusRead for StorageConnection {
                 let model_checksum: String = row.get(9)?;
                 let dim: i64 = row.get(10)?;
                 let blob: Vec<u8> = row.get(11)?;
+                // SEED-CHUNK-2 (migration 034): `is_decl` is NULLABLE. NULL marks a row
+                // written BEFORE per-chunk classification (pre-034, not yet re-seeded) —
+                // read it as `Option` so the loop below can refuse to serve a legacy set
+                // rather than present its stale per-file is_test/is_decl as fact.
+                let is_decl_opt: Option<i64> = row.get(12)?;
                 Ok((
                     model_id,
                     model_checksum,
                     dim as u32,
+                    is_decl_opt,
                     SeedVectorEntry {
                         node_uid: row.get(0)?,
                         stable_key: row.get(1)?,
@@ -138,6 +146,7 @@ impl SeedCorpusRead for StorageConnection {
                         line: row.get(4)?,
                         qualified_name: row.get(5)?,
                         is_test: is_test_i != 0,
+                        is_decl: false, // set from `is_decl_opt` in the loop below
                         content_hash: row.get(7)?,
                         vector: Vec::new(), // filled after blob decode
                     },
@@ -154,8 +163,27 @@ impl SeedCorpusRead for StorageConnection {
         let mut stamp: Option<(String, String, u32)> = None;
         let mut entries: Vec<SeedVectorEntry> = Vec::new();
         for row in rows {
-            let (mid, ck, d, mut entry, blob) =
+            let (mid, ck, d, is_decl_opt, mut entry, blob) =
                 row.map_err(|e| SeedCorpusError::Read(e.to_string()))?;
+            // review-1 item 2 (honesty): a NULL `is_decl` is a row that predates SEED-CHUNK-2
+            // per-chunk classification (migration 034). Its `is_test`/`is_decl` are the stale
+            // per-FILE 033 values, so serving them would present a false per-chunk fact.
+            // Refuse the whole set — a snapshot is homogeneous (all-legacy or all-classified,
+            // because 034 backfilled every row and the pass rewrites the set atomically), and
+            // the very next index/refresh re-seeds it. The serve path (query.rs) and doctor
+            // map this read error to the honest "present but unreadable; rebuild on next
+            // index" degraded state (StoreUnreadable: "rows may exist but cannot be used").
+            let Some(is_decl_i) = is_decl_opt else {
+                // SEED-CHUNK-2 §2.4: a DISTINCT error variant (not `Read`) so the serve
+                // path can tell "stale pre-034 classification" (self-heals via a scheduled
+                // re-seed) apart from genuine corruption (terminal "rebuild on next index").
+                return Err(SeedCorpusError::StaleClassification(format!(
+                    "seed vectors for node {} predate per-chunk test/decl classification \
+                     (migration 034); the daemon re-seeds them in the background",
+                    entry.node_uid
+                )));
+            };
+            entry.is_decl = is_decl_i != 0;
             match &stamp {
                 Some((m, c, dd)) if *m != mid || *c != ck || *dd != d => {
                     return Err(SeedCorpusError::Read(format!(
@@ -277,8 +305,9 @@ impl StorageConnection {
             let mut stmt = tx.prepare(
                 "INSERT INTO seed_vectors \
                  (snapshot_uid, node_uid, repo_uid, stable_key, file_uid, path, line, \
-                  qualified_name, is_test, content_hash, model_id, model_checksum, dim, vector) \
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  qualified_name, is_test, content_hash, model_id, model_checksum, dim, vector, \
+                  is_decl) \
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )?;
             for e in entries {
                 stmt.execute(rusqlite::params![
@@ -296,6 +325,7 @@ impl StorageConnection {
                     model_checksum,
                     dim as i64,
                     encode_vector(&e.vector),
+                    e.is_decl as i64,
                 ])?;
             }
         }
@@ -344,7 +374,7 @@ impl StorageConnection {
 
         let mut stmt = conn.prepare(
             "SELECT node_uid, stable_key, file_uid, path, line, qualified_name, \
-                    is_test, content_hash, vector \
+                    is_test, content_hash, vector, is_decl \
              FROM seed_vectors \
              WHERE snapshot_uid = ? AND model_id = ? AND model_checksum = ? AND dim = ?",
         )?;
@@ -353,6 +383,15 @@ impl StorageConnection {
             |row| {
                 let is_test_i: i64 = row.get(6)?;
                 let blob: Vec<u8> = row.get(8)?;
+                // SEED-CHUNK-2 (migration 034): `is_decl` is NULLABLE. A LEGACY parent
+                // (pre-034) still carries the model stamp, so its vectors are eligible to
+                // copy forward — read `is_decl` as `Option` and map NULL→false. This is
+                // harmless: is_test/is_decl on a copy-forward entry are INFORMATIONAL only
+                // (the reused row is rebuilt from the CURRENT corpus chunk, which recomputes
+                // both structurally), so a legacy parent's stale/NULL classification is
+                // OVERWRITTEN on this pass — the VECTOR is what copy-forward reuses, and the
+                // re-seed is exactly what clears the legacy marker for the child snapshot.
+                let is_decl_opt: Option<i64> = row.get(9)?;
                 Ok((
                     SeedVectorEntry {
                         node_uid: row.get(0)?,
@@ -362,6 +401,7 @@ impl StorageConnection {
                         line: row.get(4)?,
                         qualified_name: row.get(5)?,
                         is_test: is_test_i != 0,
+                        is_decl: is_decl_opt.is_some_and(|v| v != 0),
                         content_hash: row.get(7)?,
                         vector: Vec::new(),
                     },
@@ -419,12 +459,15 @@ mod tests {
         dim: i64,
         blob: &[u8],
     ) {
+        // is_decl = 0 (a CLASSIFIED implementation row) so these corruption/copy-forward
+        // tests exercise the homogeneity / decode / stamp paths — NOT the new pre-034
+        // legacy-NULL refusal (which its own test covers).
         storage
             .connection()
             .execute(
                 "INSERT INTO seed_vectors (snapshot_uid,node_uid,repo_uid,stable_key,file_uid,path,\
-                 line,qualified_name,is_test,content_hash,model_id,model_checksum,dim,vector) \
-                 VALUES ('s1',?,'r1',?,'fu1','a.rs',10,'a::f',0,'h1',?,?,?,?)",
+                 line,qualified_name,is_test,content_hash,model_id,model_checksum,dim,vector,is_decl) \
+                 VALUES ('s1',?,'r1',?,'fu1','a.rs',10,'a::f',0,'h1',?,?,?,?,0)",
                 rusqlite::params![node, node, model_id, checksum, dim, blob],
             )
             .unwrap();
@@ -446,6 +489,7 @@ mod tests {
             line: Some(10),
             qualified_name: Some("a::f".into()),
             is_test: false,
+            is_decl: true,
             content_hash: "h1".into(),
             vector: vec![1.0, 0.0],
         };
@@ -465,6 +509,96 @@ mod tests {
         assert_eq!(stored.dim, Some(2));
         assert_eq!(stored.entries.len(), 1);
         assert_eq!(stored.entries[0].vector, vec![1.0, 0.0]);
+        assert!(
+            stored.entries[0].is_decl,
+            "SEED-CHUNK-2: is_decl round-trips through write/read"
+        );
+    }
+
+    /// Insert a LEGACY (pre-034) seed_vectors row: the `is_decl` column is OMITTED so it
+    /// backfills to NULL — exactly the state migration 034 leaves for a row written by a
+    /// pre-SEED-CHUNK-2 pass and not yet re-seeded. Stamp + blob are otherwise valid.
+    fn insert_legacy_row(storage: &StorageConnection, node: &str, blob: &[u8]) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO seed_vectors (snapshot_uid,node_uid,repo_uid,stable_key,file_uid,path,\
+                 line,qualified_name,is_test,content_hash,model_id,model_checksum,dim,vector) \
+                 VALUES ('s1',?,'r1',?,'fu1','a.rs',10,'a::f',0,'h1','m1','ck1',2,?)",
+                rusqlite::params![node, node, blob],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn legacy_pre_034_rows_are_refused_at_read_then_serve_after_reseed() {
+        // review-1 item 2 (honesty upgrade path): after an upgrade to migration 034 the
+        // existing (pre-SEED-CHUNK-2) vectors carry NULL is_decl and the stale per-FILE
+        // is_test. read_seed_vectors must NOT serve them as definite per-chunk facts — it
+        // surfaces a rebuild-needed read error (mapped upstream to the honest "present but
+        // unreadable; rebuild on next index"). The very next re-seed (write_seed_vectors,
+        // which sets is_decl explicitly) then serves normally.
+        let storage = StorageConnection::open_in_memory().unwrap();
+        seed_scaffold(&storage);
+        insert_legacy_row(&storage, "n1", &f32_blob(&[1.0, 0.0]));
+
+        let err = storage.read_seed_vectors("s1").unwrap_err();
+        // SEED-CHUNK-2 §2.4: the legacy set is refused with the DISTINCT
+        // StaleClassification variant (the self-heal trigger) — NOT the generic `Read`
+        // corruption variant. The serve path keys the background re-seed off this type.
+        assert!(
+            matches!(err, SeedCorpusError::StaleClassification(_)),
+            "legacy pre-034 set is refused as StaleClassification, not generic Read: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("predate per-chunk classification"),
+            "the refusal names the pre-034 cause: {msg}"
+        );
+
+        // Re-seed the snapshot (the atomic DELETE+INSERT the background pass performs).
+        let entry = SeedVectorEntry {
+            node_uid: "n1".into(),
+            stable_key: "k1".into(),
+            file_uid: "fu1".into(),
+            path: "a.rs".into(),
+            line: Some(10),
+            qualified_name: Some("a::f".into()),
+            is_test: false,
+            is_decl: false,
+            content_hash: "h1".into(),
+            vector: vec![1.0, 0.0],
+        };
+        storage
+            .write_seed_vectors("s1", "r1", "m1", "ck1", 2, std::slice::from_ref(&entry))
+            .unwrap();
+        let stored = storage.read_seed_vectors("s1").unwrap();
+        assert_eq!(
+            stored.entries.len(),
+            1,
+            "after re-seed the snapshot serves normally"
+        );
+        assert!(!stored.entries[0].is_decl);
+    }
+
+    #[test]
+    fn copy_forward_tolerates_a_legacy_null_is_decl_parent() {
+        // The self-heal path: a LEGACY parent (NULL is_decl) is still eligible to copy its
+        // VECTOR forward (the stamp matches). read_prior_seed_vectors must NOT error on the
+        // NULL — the classification is recomputed from the current corpus during the pass,
+        // so the reused row's is_decl is informational and lands `false` here.
+        let storage = StorageConnection::open_in_memory().unwrap();
+        parent_child_scaffold(&storage);
+        insert_legacy_row(&storage, "n1", &f32_blob(&[1.0, 0.0]));
+        let reused = storage
+            .read_prior_seed_vectors("s2", "m1", "ck1", 2)
+            .unwrap();
+        assert_eq!(reused.len(), 1, "legacy parent vector copies forward");
+        assert_eq!(reused[0].vector, vec![1.0, 0.0]);
+        assert!(
+            !reused[0].is_decl,
+            "NULL is_decl on a copy-forward parent reads as false (recomputed on the pass)"
+        );
     }
 
     #[test]

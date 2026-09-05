@@ -289,9 +289,12 @@ fn fact_hit_with_only_subfloor_seeds_does_not_claim_nothing_matched() {
         !out.contains("nothing matched"),
         "no false 'nothing matched' when a fact class matched: {out}"
     );
+    // SEED-CHUNK-2 §2.3.3: the `--text` referral renders whenever seeds SERVE — even when
+    // a fact class matched. It is NOT the "nothing matched" capability close (that stays
+    // withheld above); it is the always-on "where exact text is searched" line.
     assert!(
-        !out.contains("find --text"),
-        "no capability route to find --text when facts matched: {out}"
+        out.contains("for exact text, comments, or expressions: rmap find --text"),
+        "the --text referral renders whenever seeds serve, independent of the facts tier: {out}"
     );
 }
 
@@ -311,9 +314,18 @@ fn fact_miss_with_only_subfloor_seeds_routes_to_find_text() {
         out.contains("no candidates above the minimum similarity"),
         "seed abstain: {out}"
     );
+    // SEED-CHUNK-2 §2.3.3: the capability close keeps only its repo-level "nothing
+    // matched" claim (gated on the established fact miss); the `--text` referral moved out
+    // to the always-on line below (a copy-paste-runnable command with the actual query).
     assert!(
-        out.contains("nothing matched; for literal text, comments, or expressions try `rmap find --text \"<pattern>\"`."),
-        "capability close routes to find --text on an established fact miss: {out}"
+        out.contains("nothing matched."),
+        "capability close states the established fact miss: {out}"
+    );
+    // review-1 item 3: the query is POSIX-shell-quoted; a shell-safe token like `fsync`
+    // renders BARE (no wrapping quotes), so the line runs verbatim.
+    assert!(
+        out.contains("for exact text, comments, or expressions: rmap find --text fsync\n"),
+        "the --text referral routes to a live text scan on the actual query: {out}"
     );
     assert!(
         !out.contains("distinct home"),

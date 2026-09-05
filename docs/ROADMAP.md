@@ -322,6 +322,18 @@ NAMED FOLLOW-UP (2026-09-05, SEED-CHUNK-2 ruling SC2-FRAKTAG-DOD): **SEED-CHUNK-
 short-chunk / property demotion: one-line interface properties (FRAKTAG: 6 of 10 slots for
 "where are conversations persisted") have NO implementation counterpart, so decl demotion
 cannot reach them; a chunk-length/kind-aware ranking policy needs its own measured slice.
+SHIPPED: SEED-CHUNK-2 (2026-09-05): per-chunk is_test from structural evidence (Rust
+`#[test]`/`#[cfg(test)]` on the item or an enclosing mod with real predicate evaluation —
+`cfg(not(test))` is production; TS/JS enclosing describe/it/test); migration 034 adds
+per-chunk `is_test`/`is_decl` (nullable = pre-034, REFUSED as classified and SELF-HEALED:
+the daemon schedules a re-seed via the SeedCoordinator latch and renders the pending
+reason); partition FIRST, then declaration-below-ANY-implementation within it, `(decl)`
+labeled; `--text` referral always beside seeds, shell-quoted. Live: repo-graph fresh
+isolated index → 16,980 chunks, 5,329 in the test partition (≥ the 4,578 literal floor);
+leveldb impl above its higher-scoring decl; FRAKTAG re-scoped to referral evidence
+(one-line PROPERTIES have no impl counterpart → SEED-CHUNK-3). Strain: two 120-min proof
+kills + a stash lost to a timeout; converged after closed-list steering. 19+4 files;
+gates ALL GREEN; approved review-4.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

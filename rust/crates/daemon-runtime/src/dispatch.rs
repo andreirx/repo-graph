@@ -4472,6 +4472,7 @@ impl ServiceDispatcher {
             // ruling 2 — never a fabricated empty cwd).
             let repo_root = self.canonical_root(&request.params);
             seed_dispatch::apply_semantic_fallback(
+                &self.state,
                 &mut result,
                 &storage,
                 &epoch.snapshot.snapshot_uid,
@@ -5039,6 +5040,7 @@ impl ServiceDispatcher {
             // ruling 2 — never a fabricated empty cwd).
             let repo_root = self.canonical_root(&request.params);
             seed_dispatch::apply_semantic_fallback(
+                &self.state,
                 &mut result,
                 &storage,
                 &ep.snapshot.snapshot_uid,

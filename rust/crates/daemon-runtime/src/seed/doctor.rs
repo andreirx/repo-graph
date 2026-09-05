@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use repo_graph_seed::SeedCorpusRead;
+use repo_graph_seed::{SeedCorpusError, SeedCorpusRead};
 
 use super::query::DegradeReason;
 use super::{MODEL_DIM, MODEL_ID};
@@ -97,6 +97,13 @@ where
     };
     let stored = match storage.read_seed_vectors(&snapshot_uid) {
         Ok(s) => s,
+        // SEED-CHUNK-2 §2.4: a pre-034 store reads as the self-healing "re-embedding
+        // (pending)" state (the serve paths schedule the re-seed), distinct from terminal
+        // corruption. `doctor` reports this state honestly; it does not itself trigger the
+        // heavy re-seed (a diagnostics read stays read-only) — the serve paths do.
+        Err(SeedCorpusError::StaleClassification(_)) => {
+            return degraded(DegradeReason::SeedsReembedding.reason())
+        }
         Err(_) => return degraded(DegradeReason::StoreUnreadable.reason()),
     };
     if stored.entries.is_empty() {
@@ -178,6 +185,7 @@ mod tests {
                 line: Some(1),
                 qualified_name: Some("q".to_string()),
                 is_test: false,
+                is_decl: false,
                 content_hash: "h".to_string(),
                 vector: vec![1.0; dim as usize],
             }],

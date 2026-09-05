@@ -42,12 +42,15 @@ fn chunk(
     line_end: Option<i64>,
     is_test: bool,
 ) -> SeedCorpusEntry {
+    // Default subtype FUNCTION so the decl/impl gate (callables only) is exercised;
+    // tests that care about the subtype set it explicitly via `..chunk(..)`.
     SeedCorpusEntry {
         node_uid: node.to_string(),
         stable_key: format!("k:{node}"),
         file_uid: format!("fu:{path}"),
         path: path.to_string(),
         qualified_name: Some(node.to_string()),
+        subtype: Some("FUNCTION".to_string()),
         doc_comment: None,
         line_start,
         line_end,
@@ -190,6 +193,7 @@ fn copy_forward_reuses_unchanged_chunk_and_skips_the_embed() {
         line: Some(1),
         qualified_name: Some("a".to_string()),
         is_test: false,
+        is_decl: false,
         content_hash: h.clone(),
         vector: vec![0.6, 0.8], // already normalized
     }];
@@ -277,6 +281,117 @@ fn empty_corpus_is_no_corpus() {
     ) {
         BuildOutcome::NoCorpus => {}
         other => panic!("expected NoCorpus, got {other:?}"),
+    }
+}
+
+#[test]
+fn in_file_test_mod_chunk_is_classified_test_production_chunk_stays_production() {
+    // SEED-CHUNK-2 §4 unit: a chunk inside an in-file `#[cfg(test)] mod` (in a
+    // PRODUCTION file — file is_test=false) is stored is_test=true; a production
+    // symbol in the SAME file stays is_test=false. Structural per-CHUNK evidence.
+    let content = "\
+pub fn prod() {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn checks() { assert!(true); }
+}
+";
+    let h = content_hash(content);
+    let entries = vec![
+        // file is_test = false for BOTH (a production .rs file with an in-file test mod).
+        chunk("prod", "src/x.rs", &h, Some(1), Some(1), false),
+        chunk("checks", "src/x.rs", &h, Some(6), Some(6), false),
+    ];
+    let mut files = HashMap::new();
+    files.insert("src/x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::Built { entries, .. } => {
+            let prod = entries.iter().find(|e| e.stable_key == "k:prod").unwrap();
+            let checks = entries.iter().find(|e| e.stable_key == "k:checks").unwrap();
+            assert!(!prod.is_test, "production symbol stays production");
+            assert!(
+                checks.is_test,
+                "the in-file #[test] chunk is promoted to the test partition"
+            );
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
+}
+
+#[test]
+fn file_fact_test_is_never_demoted_by_absent_structural_evidence() {
+    // PROMOTE-ONLY: a chunk whose FILE is is_test=true stays test even with no
+    // per-symbol structural marker (structural is OR'd, never AND'd).
+    let content = "pub fn helper() {}\n";
+    let h = content_hash(content);
+    let entries = vec![chunk("helper", "tests/it.rs", &h, Some(1), Some(1), true)];
+    let mut files = HashMap::new();
+    files.insert("tests/it.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::Built { entries, .. } => {
+            assert!(entries[0].is_test, "file-test chunk stays test");
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
+}
+
+#[test]
+fn decl_and_impl_kinds_are_set_from_span_structure() {
+    // SEED-CHUNK-2 §2.2: a bodyless callable signature is is_decl=true; a body-bearing
+    // one is is_decl=false — from span structure, not the extension.
+    let content = "\
+trait T {
+    fn decl_only(&self) -> u32;
+}
+fn impl_fn() -> u32 { 1 }
+";
+    let h = content_hash(content);
+    let entries = vec![
+        chunk("decl_only", "src/x.rs", &h, Some(2), Some(2), false),
+        chunk("impl_fn", "src/x.rs", &h, Some(4), Some(4), false),
+    ];
+    let mut files = HashMap::new();
+    files.insert("src/x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::Built { entries, .. } => {
+            let d = entries
+                .iter()
+                .find(|e| e.stable_key == "k:decl_only")
+                .unwrap();
+            let i = entries
+                .iter()
+                .find(|e| e.stable_key == "k:impl_fn")
+                .unwrap();
+            assert!(d.is_decl, "bodyless signature is a declaration");
+            assert!(!i.is_decl, "body-bearing fn is an implementation");
+        }
+        other => panic!("expected Built, got {other:?}"),
     }
 }
 

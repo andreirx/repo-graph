@@ -132,8 +132,20 @@ pub(crate) fn render_seed_chunk_candidate(c: &Value) -> Result<String, String> {
         Some(Value::Bool(false)) => "",
         _ => "  [is_test unknown]",
     };
+    // SEED-CHUNK-2 (spec §2.2): a declaration-without-a-body chunk is labeled `(decl)`
+    // so the agent knows it is not the implementation; a body-bearing chunk is the
+    // unlabeled default (implementation). `is_decl` is always serialized (bool) by the
+    // current DTO, so a MISSING/non-bool value means an UNKNOWN classification (old /
+    // foreign daemon) — rendered EXPLICITLY as `[is_decl unknown]`, symmetric with
+    // `[is_test unknown]` (review-3 item 3: unknown must never masquerade as the
+    // unlabeled implementation default; VISION unknown≠zero, STANDING HONESTY RULE 1).
+    let decl_label = match c.get("is_decl") {
+        Some(Value::Bool(true)) => "  (decl)",
+        Some(Value::Bool(false)) => "",
+        _ => "  [is_decl unknown]",
+    };
     let mut row = format!(
-        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){test_label}\n"
+        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){decl_label}{test_label}\n"
     );
     row.push_str(&next);
     Ok(row)
@@ -323,6 +335,64 @@ mod tests {
         let out = render_symbol_not_found_semantic(Some(&data)).expect("renders");
         assert!(out.contains("src/a_test.ts:5  t"), "{out}");
         assert!(out.contains("[test]"), "test chunk labeled: {out}");
+    }
+
+    #[test]
+    fn missing_is_decl_renders_unknown_marker_never_unlabeled_impl() {
+        // review-3 item 3: an old/foreign-daemon candidate with NO `is_decl` field must
+        // render `[is_decl unknown]`, symmetric with `[is_test unknown]` — never the
+        // unlabeled implementation default (which would hide an unknown classification).
+        let data = json!({
+            "semantic_candidates": [{
+                "stable_key": "r:src/a.rs#s:SYMBOL:FUNCTION",
+                "path": "src/a.rs", "line": 9, "qualified_name": "s", "is_test": false,
+                // no is_decl
+                "score": 0.7, "source": "embedding", "model_id": "m",
+                "module": {"owning": "db"},
+                "next": {"cmd": "explain", "args": ["r:src/a.rs#s:SYMBOL:FUNCTION"], "cwd": "/repo"}
+            }],
+            "hint": "h"
+        });
+        let out = render_symbol_not_found_semantic(Some(&data)).expect("renders");
+        assert!(
+            out.contains("[is_decl unknown]"),
+            "missing is_decl renders explicit unknown marker: {out}"
+        );
+        assert!(
+            !out.contains("(decl)"),
+            "no fabricated (decl) over unknown: {out}"
+        );
+    }
+
+    #[test]
+    fn is_decl_true_labeled_decl_false_unlabeled() {
+        // A body-bearing chunk (is_decl=false) is the unlabeled implementation default; a
+        // bodyless one (is_decl=true) is labeled `(decl)`. Neither renders the unknown marker.
+        let base = |is_decl: bool| {
+            json!({
+                "semantic_candidates": [{
+                    "stable_key": "r:src/a.rs#s:SYMBOL:FUNCTION",
+                    "path": "src/a.rs", "line": 9, "qualified_name": "s", "is_test": false,
+                    "is_decl": is_decl,
+                    "score": 0.7, "source": "embedding", "model_id": "m",
+                    "module": {"owning": "db"},
+                    "next": {"cmd": "explain", "args": ["r:src/a.rs#s:SYMBOL:FUNCTION"], "cwd": "/repo"}
+                }],
+                "hint": "h"
+            })
+        };
+        let decl = render_symbol_not_found_semantic(Some(&base(true))).expect("renders");
+        assert!(
+            decl.contains("(decl)"),
+            "is_decl=true labeled (decl): {decl}"
+        );
+        assert!(!decl.contains("unknown"), "not unknown: {decl}");
+        let imp = render_symbol_not_found_semantic(Some(&base(false))).expect("renders");
+        assert!(
+            !imp.contains("(decl)"),
+            "is_decl=false is unlabeled impl: {imp}"
+        );
+        assert!(!imp.contains("[is_decl unknown]"), "not unknown: {imp}");
     }
 
     #[test]

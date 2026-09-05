@@ -141,6 +141,10 @@ pub struct FindCandidate {
     /// ranked below production and labeled so the reader is never misled. Always
     /// present so the partition is honest in the JSON, not just the human render.
     pub is_test: bool,
+    /// SEED-CHUNK-2 (spec §2.2): `true` ⇒ a declaration without a body, ranked below
+    /// its own implementation and labeled `(decl)`. Always present so the decl/impl
+    /// kind is honest in the JSON, not just the human render.
+    pub is_decl: bool,
     pub score: f64,
     /// Always "embedding" (I2).
     pub source: String,
@@ -209,6 +213,12 @@ fn find_degrade_summary(reason: &DegradeReason) -> String {
         DegradeReason::PinsMismatch => {
             "semantic seeds were built with a different model — rebuild on next index".to_string()
         }
+        DegradeReason::SeedsReembedding => {
+            "semantic seeds re-embedding for per-chunk facts (pending) — hints return once it completes".to_string()
+        }
+        DegradeReason::SeedsStaleSeedingDisabled => {
+            "semantic seeds predate per-chunk facts and seeding is disabled — enable seeding (unset RMAP_SEED_VECTORS) to rebuild them".to_string()
+        }
     }
 }
 
@@ -242,6 +252,7 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
                         "line": c.line,
                         "qualified_name": c.qualified_name,
                         "is_test": c.is_test,
+                        "is_decl": c.is_decl,
                         "score": c.score,
                         "source": "embedding",
                         "model_id": c.model_id,
@@ -395,6 +406,7 @@ pub(crate) fn build_find_response(
                         line: c.line,
                         qualified_name: c.qualified_name,
                         is_test: c.is_test,
+                        is_decl: c.is_decl,
                         score: c.score,
                         source: "embedding".to_string(),
                         model_id: c.model_id,

@@ -120,6 +120,7 @@ fn publish_is_skipped_after_forget_removes_the_registry_entry() {
         line: Some(1),
         qualified_name: Some("f".to_string()),
         is_test: false,
+        is_decl: false,
         content_hash: "h1".to_string(),
         // The publish stamps the row's `dim` = `MODEL_DIM`, and the homogeneity-
         // validating read now rejects a vector whose length ≠ `dim` — so this test
@@ -187,6 +188,41 @@ fn publish_is_skipped_after_forget_removes_the_registry_entry() {
         after.entries.len(),
         1,
         "the forget-vs-seed race is closed: the skipped pass wrote no new vectors"
+    );
+}
+
+#[test]
+fn self_heal_reseed_latch_is_idempotent_and_reclaimable() {
+    // SEED-CHUNK-2 §2.4: the self-heal trigger must spawn at most ONE re-seed per db while
+    // one is in flight (so repeated stale reads neither livelock nor pile up threads), and
+    // must re-arm once that pass terminates (a still-stale store can re-trigger later).
+    let c = SeedCoordinator::new();
+    let db = Path::new("/x/databases/abcd1234.db");
+
+    // First stale read claims the latch → THIS caller spawns the heal.
+    assert!(
+        c.mark_reseed_scheduled(db),
+        "the first stale read claims the latch and is responsible for spawning the re-seed"
+    );
+    // Further stale reads while it is in flight do NOT re-claim → no duplicate passes.
+    assert!(
+        !c.mark_reseed_scheduled(db),
+        "a second stale read must NOT re-claim while a heal is already scheduled/in flight"
+    );
+    assert!(!c.mark_reseed_scheduled(db), "…and neither does a third");
+
+    // The pass terminates → latch released → a later stale read can re-trigger.
+    c.clear_reseed_scheduled(db);
+    assert!(
+        c.mark_reseed_scheduled(db),
+        "after the pass ends the latch re-arms so a still-stale store re-triggers"
+    );
+
+    // Independent per db — one db's latch never blocks another's heal.
+    let other = Path::new("/x/databases/ef567890.db");
+    assert!(
+        c.mark_reseed_scheduled(other),
+        "a different db latches independently"
     );
 }
 

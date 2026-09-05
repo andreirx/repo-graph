@@ -19,7 +19,7 @@ use std::path::Path;
 use repo_graph_agent::dto::envelope::ModuleHint;
 use repo_graph_seed::document::build_query;
 use repo_graph_seed::rank::{best_score, l2_normalize, rank};
-use repo_graph_seed::{Embedder, SeedCorpusRead, SeedVectorEntry};
+use repo_graph_seed::{Embedder, SeedCorpusError, SeedCorpusRead, SeedVectorEntry};
 
 use super::local_engine::{LocalEmbedder, ModelResolveError};
 use super::{model_cache_dir, MODEL_DIM, MODEL_ID};
@@ -48,6 +48,38 @@ pub enum DegradeReason {
     /// hard-fail) — they were built by a different embedding regime; rebuild on next
     /// index.
     PinsMismatch,
+    /// SEED-CHUNK-2 (§2.4): the stored vectors predate per-chunk test/decl
+    /// classification (migration 034). Refused rather than served as stale per-file
+    /// fact — and the daemon SCHEDULES a background re-seed (self-heal), so this is a
+    /// transient UPGRADE state that fixes itself, DISTINCT from
+    /// [`StoreUnreadable`](Self::StoreUnreadable) (terminal corruption).
+    SeedsReembedding,
+    /// SEED-CHUNK-2 (review-2 item 2): the stored vectors predate per-chunk
+    /// classification (as [`SeedsReembedding`](Self::SeedsReembedding)) BUT seeding is
+    /// disabled (`RMAP_SEED_VECTORS` off), so NO re-seed is scheduled — nothing is
+    /// "pending." A distinct, truthful terminal-until-re-enabled state: refusing to serve
+    /// stale classification is still right, but it must not falsely claim a re-embed is in
+    /// progress. Never collapsed into [`StoreUnreadable`](Self::StoreUnreadable) (that is
+    /// corruption, not an opt-out) nor into [`SeedsReembedding`](Self::SeedsReembedding).
+    SeedsStaleSeedingDisabled,
+}
+
+/// The degrade reason for a pre-034 (StaleClassification) store, chosen by whether
+/// seeding is enabled. PURE so both branches are unit-tested without mutating the global
+/// `seed_enabled()` override (which would race parallel unit tests) — the same test-seam
+/// convention as [`degrade_for_resolve_error`] / [`serve_identity`] in this file.
+///
+/// Abstraction one-liner: pure mapper `stale_degrade_reason`; caller
+/// [`run_semantic_query`]; axis: a config-free test seam for the enabled-vs-disabled
+/// branch (a concrete honesty requirement, review-2 item 2); rejected simpler: inline
+/// `if seed_enabled()` tested through the global override — racy across parallel unit
+/// tests and untestable without process-global mutation.
+fn stale_degrade_reason(seeding_enabled: bool) -> DegradeReason {
+    if seeding_enabled {
+        DegradeReason::SeedsReembedding
+    } else {
+        DegradeReason::SeedsStaleSeedingDisabled
+    }
 }
 
 impl DegradeReason {
@@ -69,6 +101,12 @@ impl DegradeReason {
             DegradeReason::PinsMismatch => {
                 "seed vectors were built with a different model; rebuild on next index".to_string()
             }
+            DegradeReason::SeedsReembedding => {
+                "seeds re-embedding for per-chunk facts (pending)".to_string()
+            }
+            DegradeReason::SeedsStaleSeedingDisabled => {
+                "seeds predate per-chunk facts and seeding is disabled; enable seeding (unset RMAP_SEED_VECTORS) to rebuild them".to_string()
+            }
         }
     }
 }
@@ -85,6 +123,9 @@ pub struct SemanticCandidate {
     pub qualified_name: Option<String>,
     /// `true` ⇒ a DEMOTED test-classified chunk (labeled in rendering, spec §5).
     pub is_test: bool,
+    /// SEED-CHUNK-2 (spec §2.2): `true` ⇒ a declaration without a body — ranked below
+    /// its own implementation and labeled `(decl)` in rendering.
+    pub is_decl: bool,
     /// Owning-module hint — a GENUINE module or explicit unavailable-with-reason.
     pub module: ModuleHint,
     pub score: f64,
@@ -192,6 +233,14 @@ where
     // (no vectors yet / pre-migration snapshot); a read error is present-but-unusable.
     let stored = match storage.read_seed_vectors(snapshot_uid) {
         Ok(s) => s,
+        // SEED-CHUNK-2 §2.4: a pre-034 store is refused as StaleClassification. When
+        // seeding is ENABLED it maps to the self-healing "re-embedding (pending)" state
+        // (the daemon caller schedules the re-seed); when seeding is DISABLED nothing will
+        // re-embed, so it maps to the distinct truthful "stale + disabled" state (review-2
+        // item 2 — never a false "pending"). Genuine corruption stays StoreUnreadable.
+        Err(SeedCorpusError::StaleClassification(_)) => {
+            return SemanticResult::Unavailable(stale_degrade_reason(crate::seed::seed_enabled()))
+        }
         Err(_) => return SemanticResult::Unavailable(DegradeReason::StoreUnreadable),
     };
     if stored.entries.is_empty() {
@@ -285,6 +334,7 @@ where
             line: r.line,
             qualified_name: r.qualified_name,
             is_test: r.is_test,
+            is_decl: r.is_decl,
             score: r.score as f64,
             model_id: MODEL_ID.to_string(),
         })
@@ -332,6 +382,8 @@ mod tests {
                 detail: "safetensors parse error".to_string(),
             },
             PinsMismatch,
+            SeedsReembedding,
+            SeedsStaleSeedingDisabled,
         ];
         let strings: Vec<String> = all.iter().map(|r| r.reason()).collect();
         for (i, a) in strings.iter().enumerate() {
@@ -409,6 +461,90 @@ mod tests {
         );
     }
 
+    /// A fake `SeedCorpusRead` whose vector read reports a pre-034 (StaleClassification)
+    /// store — the SEED-CHUNK-2 §2.4 self-heal trigger. `run_semantic_query` reads the
+    /// vectors FIRST, so this returns before any model load (no cache needed).
+    struct StaleStore;
+    impl SeedCorpusRead for StaleStore {
+        fn seed_corpus(
+            &self,
+            _repo_uid: &str,
+        ) -> Result<repo_graph_seed::SeedCorpus, SeedCorpusError> {
+            unreachable!("run_semantic_query never reads the corpus")
+        }
+        fn read_seed_vectors(
+            &self,
+            _snapshot_uid: &str,
+        ) -> Result<repo_graph_seed::StoredSeedVectors, SeedCorpusError> {
+            Err(SeedCorpusError::StaleClassification(
+                "node n predates per-chunk classification (migration 034)".to_string(),
+            ))
+        }
+        fn module_owners(
+            &self,
+            _snapshot_uid: &str,
+            _file_uids: &[String],
+        ) -> Result<HashMap<String, String>, SeedCorpusError> {
+            Ok(HashMap::new())
+        }
+    }
+
+    #[test]
+    fn pre_034_store_maps_to_seeds_reembedding_not_store_unreadable() {
+        // SEED-CHUNK-2 §2.4: a StaleClassification read is the self-healing upgrade state
+        // (SeedsReembedding, "re-embedding (pending)"), NEVER collapsed into the terminal
+        // StoreUnreadable ("rebuild on next index") — the two carry different truths and
+        // the daemon schedules a re-seed only for the former.
+        let result = run_semantic_query(
+            &StaleStore,
+            "snap1",
+            Path::new("/x/databases/a.db"),
+            "crash recovery",
+            5,
+        );
+        match result {
+            SemanticResult::Unavailable(DegradeReason::SeedsReembedding) => {}
+            other => panic!("pre-034 store must map to SeedsReembedding, got {other:?}"),
+        }
+        assert_ne!(
+            DegradeReason::SeedsReembedding.reason(),
+            DegradeReason::StoreUnreadable.reason(),
+            "the self-healing state must not read as terminal corruption"
+        );
+    }
+
+    #[test]
+    fn stale_degrade_reason_tracks_whether_seeding_is_enabled() {
+        // review-2 item 2: a pre-034 store maps to the self-healing "(pending)" state ONLY
+        // when seeding is enabled (a re-seed IS scheduled). With seeding disabled nothing
+        // re-embeds, so it maps to the distinct disabled state — tested via the pure mapper
+        // so neither branch mutates the process-global `seed_enabled()` override.
+        assert_eq!(
+            stale_degrade_reason(true),
+            DegradeReason::SeedsReembedding,
+            "seeding enabled ⇒ a re-seed is scheduled ⇒ pending is truthful",
+        );
+        assert_eq!(
+            stale_degrade_reason(false),
+            DegradeReason::SeedsStaleSeedingDisabled,
+            "seeding disabled ⇒ nothing re-embeds ⇒ NOT pending",
+        );
+    }
+
+    #[test]
+    fn disabled_stale_state_never_claims_pending_and_is_distinct() {
+        // The disabled render must not contain "pending" / "re-embedding" (there is no
+        // re-embed in flight), and must be distinct from both the self-healing state and
+        // terminal corruption — it is an opt-out, not a failure.
+        let disabled = DegradeReason::SeedsStaleSeedingDisabled.reason();
+        assert!(
+            !disabled.contains("pending") && !disabled.contains("re-embedding"),
+            "disabled state must not falsely claim a re-embed: {disabled}",
+        );
+        assert_ne!(disabled, DegradeReason::SeedsReembedding.reason());
+        assert_ne!(disabled, DegradeReason::StoreUnreadable.reason());
+    }
+
     /// A fake `SeedCorpusRead` returning ONE matching-pin vector, so `run_semantic_query`
     /// clears the pin gate and reaches the real `LocalEmbedder::load` — letting the
     /// end-to-end test below drive the product's model-load degrade branch.
@@ -436,6 +572,7 @@ mod tests {
                     line: Some(1),
                     qualified_name: Some("q".to_string()),
                     is_test: false,
+                    is_decl: false,
                     content_hash: "h".to_string(),
                     vector: vec![0.0; MODEL_DIM],
                 }],

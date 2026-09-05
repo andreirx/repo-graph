@@ -11,7 +11,7 @@
 //! **honestly** (never an error), exactly as auto-enrich skips with no resolver
 //! toolchain.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,6 +50,13 @@ pub struct SeedCoordinator {
     run_slot: Mutex<()>,
     running: Mutex<BTreeMap<PathBuf, CancelFlag>>,
     last_report: Mutex<Option<SeedReport>>,
+    /// SEED-CHUNK-2 §2.4 self-heal latch: db_paths with a background re-seed already
+    /// scheduled/in-flight because a serve found a pre-034 (StaleClassification) store.
+    /// The latch makes the trigger IDEMPOTENT — repeated stale reads spawn at most ONE
+    /// self-heal pass per db, so they neither livelock (each bump cancelling the last) nor
+    /// pile up threads. Cleared when the pass terminates (a later read that still finds the
+    /// store stale can then re-trigger).
+    reseed_scheduled: Mutex<BTreeSet<PathBuf>>,
 }
 
 impl SeedCoordinator {
@@ -97,6 +104,19 @@ impl SeedCoordinator {
             },
             flag,
         )
+    }
+
+    /// SEED-CHUNK-2 §2.4: claim the self-heal latch for `db_path`. Returns `true` iff THIS
+    /// call newly set it (the caller then spawns the re-seed); `false` if a self-heal pass
+    /// is already scheduled/in-flight for this db (the caller does nothing — idempotent).
+    pub fn mark_reseed_scheduled(&self, db_path: &Path) -> bool {
+        self.reseed_scheduled.lock().insert(db_path.to_path_buf())
+    }
+
+    /// Release the self-heal latch for `db_path` (the scheduled pass terminated). A later
+    /// serve that still finds the store stale may then schedule a fresh self-heal.
+    pub fn clear_reseed_scheduled(&self, db_path: &Path) {
+        self.reseed_scheduled.lock().remove(db_path);
     }
 
     pub fn record_report(&self, report: SeedReport) {
@@ -266,6 +286,52 @@ pub fn spawn_auto_seed(
     state.seed_coord().request_cancel_for_db(&db_path);
     std::thread::spawn(move || {
         run_auto_seed(&state, &db_path, &repo_uid, &repo_display, my_generation);
+    });
+}
+
+/// SEED-CHUNK-2 §2.4 self-heal: a serve found a pre-034 (StaleClassification) store for
+/// `db_path` — vectors that predate per-chunk test/decl classification and are therefore
+/// REFUSED at read. Schedule a background re-seed so the upgrade never leaves the repo
+/// serving refused vectors ("an upgrade never leaves a repo silently seedless").
+///
+/// Three properties matter and are why this is NOT just `spawn_auto_seed`:
+///  1. **Idempotent** — the coordinator latch (`mark_reseed_scheduled`) guarantees at most
+///     ONE self-heal pass in flight per db, so an agent hammering `find` against a stale
+///     store spawns one heal, not a thread per call.
+///  2. **No generation bump** — the corpus is UNCHANGED (this is triggered by a READ, not
+///     an index), so bumping the generation and cancelling any in-flight pass would be
+///     wrong: a concurrent real index's newer pass must still supersede THIS one, never the
+///     reverse. We capture the CURRENT generation; if an index bumps mid-flight, the heal
+///     pass supersedes itself (correct — the index produces fresh classified vectors).
+///  3. **Honest no-op when disabled** — with seeding opted out nothing re-embeds; we skip
+///     scheduling. The serve still renders the degrade reason, which is the truthful state.
+///
+/// `repo_display` is the repo's canonical working-tree root (the pass reads files by
+/// repo-relative path under it) — the caller passes the registry `canonical_path`, never a
+/// display alias.
+pub fn schedule_reseed_for_stale_classification(
+    state: &Arc<DaemonState>,
+    db_path: &Path,
+    repo_uid: &str,
+    repo_display: &str,
+) {
+    if !seed_enabled() {
+        return;
+    }
+    if !state.seed_coord().mark_reseed_scheduled(db_path) {
+        // A self-heal pass is already scheduled / in flight for this db — do nothing.
+        return;
+    }
+    let state = Arc::clone(state);
+    let db_path = db_path.to_path_buf();
+    let repo_uid = repo_uid.to_string();
+    let repo_display = repo_display.to_string();
+    std::thread::spawn(move || {
+        // Current generation, NOT a bump (see property 2): a newer index still supersedes us.
+        let my_generation = state.seed_coord().current_generation(&repo_uid);
+        run_auto_seed(&state, &db_path, &repo_uid, &repo_display, my_generation);
+        // Release the latch so a still-stale store can re-trigger on the next serve.
+        state.seed_coord().clear_reseed_scheduled(&db_path);
     });
 }
 
