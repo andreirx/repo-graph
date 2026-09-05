@@ -180,6 +180,8 @@ fn map_candidate_and_kind() {
     assert_eq!(dto.stable_key, "repo:src/a.ts#foo:SYMBOL:FUNCTION");
     assert_eq!(dto.kind, repo_graph_agent::AgentFocusKind::Symbol);
     assert_eq!(dto.file.as_deref(), Some("src/a.ts"));
+    // ANCHORS-EVERYWHERE-1: the LiveGraph-served candidate carries no same-source line.
+    assert_eq!(dto.line, None);
 }
 
 #[test]

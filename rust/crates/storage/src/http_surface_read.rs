@@ -30,9 +30,11 @@ pub(crate) fn query_http_surfaces(
     // no positive test evidence), never dropped. `files.is_test` is stored 0/1;
     // a NULL means no matching `files` row (data absence, not a read failure).
     let mut stmt = conn.prepare(
+        // ANCHORS-EVERYWHERE-1: also SELECT bis.line_start (this SAME read feeds both linking
+        // and rendering — no parallel SQL to drift) for the individual-row `path:line` anchor.
         r#"
         SELECT bis.surface_uid, bis.direction, bis.source_file, bis.symbol_stable_key,
-               bis.evidence_json, f.is_test
+               bis.evidence_json, f.is_test, bis.line_start
         FROM boundary_interaction_surfaces bis
         LEFT JOIN files f
                ON f.repo_uid = bis.repo_uid AND f.path = bis.source_file
@@ -49,6 +51,11 @@ pub(crate) fn query_http_surfaces(
         // is_test rides as a nullable INTEGER. Strict `== 1` matches TrackedFile's
         // mapper (out-of-range values → false); NULL (no files row) → None.
         let is_test: Option<bool> = row.get::<_, Option<i64>>(5)?.map(|v| v == 1);
+        // ANCHORS-EVERYWHERE-1: nullable line; a 0/NULL degrades to None (no fabricated anchor).
+        let line: Option<u64> = row
+            .get::<_, Option<i64>>(6)?
+            .filter(|v| *v > 0)
+            .map(|v| v as u64);
         Ok((
             surface_uid,
             direction,
@@ -56,12 +63,14 @@ pub(crate) fn query_http_surfaces(
             symbol_stable_key,
             evidence_json,
             is_test,
+            line,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (surface_uid, direction, source_file, symbol_stable_key, evidence_json, is_test) = row?;
+        let (surface_uid, direction, source_file, symbol_stable_key, evidence_json, is_test, line) =
+            row?;
         // review-5 item 3: a surface whose `evidence_json` cannot be parsed (or
         // lacks the required `httpMethod`) is CORRUPT, not "a dynamic-route
         // consumer". Silently substituting (UNKNOWN, None) would classify it as
@@ -86,6 +95,7 @@ pub(crate) fn query_http_surfaces(
             http_method: parsed.http_method,
             route: parsed.route,
             source_file,
+            line,
             symbol_stable_key,
             is_test,
             framework: parsed.framework,

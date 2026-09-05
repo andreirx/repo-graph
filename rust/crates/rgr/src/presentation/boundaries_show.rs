@@ -17,6 +17,7 @@
 
 use serde::Deserialize;
 
+use super::anchor;
 use super::module_shared::format_count;
 
 // =============================================================================
@@ -40,6 +41,12 @@ pub struct BoundaryDetail {
     pub service_name: Option<String>,
     #[serde(default, rename = "sourceFile")]
     pub file_path: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's stored start line (`lineStart`,
+    /// already on the detail wire from `BoundaryInteractionDetail`), for the `path:line`
+    /// anchor on the Location line. A `0`/absent value renders no line (honesty: lines are
+    /// 1-based; `0` is the unset sentinel, never rendered).
+    #[serde(default, rename = "lineStart")]
+    pub line_start: Option<u64>,
     #[serde(default, rename = "symbolStableKey")]
     pub symbol_key: Option<String>,
     #[serde(default)]
@@ -135,7 +142,10 @@ impl BoundariesShowResponse {
         if boundary.file_path.is_some() || boundary.symbol_key.is_some() {
             out.push_str("\nLocation:\n");
             if let Some(ref path) = boundary.file_path {
-                out.push_str(&format!("  File: {}\n", path));
+                // ANCHORS-EVERYWHERE-1 (Tier 1): anchor `File:` at `path:line` when a real
+                // (1-based, >0) stored line exists; bare path otherwise (never a `:0`).
+                let line = boundary.line_start.filter(|l| *l > 0);
+                out.push_str(&format!("  File: {}\n", anchor(path, line)));
             }
             if let Some(ref symbol) = boundary.symbol_key {
                 out.push_str(&format!("  Symbol: {}\n", symbol));
@@ -210,6 +220,7 @@ mod tests {
                 protocol_family: Some("REST".to_string()),
                 service_name: Some("UserService".to_string()),
                 file_path: Some("src/api/client.ts".to_string()),
+                line_start: None,
                 symbol_key: Some("fetchUser".to_string()),
                 confidence: 0.9,
                 basis: Some("pattern".to_string()),
@@ -282,6 +293,31 @@ mod tests {
         assert!(output.contains("Location:"));
         assert!(output.contains("File: src/api/client.ts"));
         assert!(output.contains("Symbol: fetchUser"));
+    }
+
+    /// ANCHORS-EVERYWHERE-1 (§4): a present, 1-based `lineStart` anchors the Location `File:` at
+    /// `path:line`; a `0`/absent value renders the bare path (1-based lines; `0` is the unset
+    /// sentinel — never a fabricated `:0`).
+    #[test]
+    fn show_render_location_anchors_file_at_line_when_present() {
+        let mut resp = sample_show_response();
+        resp.boundary.as_mut().unwrap().line_start = Some(88);
+        let out = resp.render_human();
+        assert!(
+            out.contains("File: src/api/client.ts:88"),
+            "Location anchors `path:line`:\n{out}"
+        );
+
+        // Absent → bare path (the sample default), and a 0 sentinel is NOT rendered.
+        let bare = sample_show_response().render_human(); // line_start None
+        assert!(bare.contains("File: src/api/client.ts\n"), "{bare}");
+        let mut zero = sample_show_response();
+        zero.boundary.as_mut().unwrap().line_start = Some(0);
+        let zout = zero.render_human();
+        assert!(
+            zout.contains("File: src/api/client.ts\n") && !zout.contains("client.ts:0"),
+            "line 0 is the unset sentinel, rendered as bare path:\n{zout}"
+        );
     }
 
     #[test]

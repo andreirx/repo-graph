@@ -119,6 +119,14 @@ enum CallgraphCertState {
 struct RowEnrichment {
     name: String,
     file: Option<String>,
+    /// ANCHORS-EVERYWHERE-1: the symbol's start line from the resident IR `symbol_context`
+    /// (`line_start`) — the SAME source as `file`. `focus_resolution_cert` proves
+    /// `symbol_context.line_start` field-equal to SQLite `get_symbol_context` (and the bounded
+    /// serve cert AND-folds focus-resolution GREEN), so on the served green path this line
+    /// equals the SQLite `nodes.line_start` — the LiveGraph-served caller row's `path:line`
+    /// anchor is byte-identical to the SQLite path's. Excluded from the no-loss `caller_pairs`
+    /// compare (presentation, not identity), so it does not affect the cert verdict.
+    line: Option<u64>,
     module_path: Option<String>,
     module_stable_key: Option<String>,
 }
@@ -135,6 +143,8 @@ fn lg_symbol_enrichment(lg: &LiveGraph, key: &str) -> Option<RowEnrichment> {
     Some(RowEnrichment {
         name: ctx.name.clone(),
         file: ctx.file_path.clone(),
+        // ANCHORS-EVERYWHERE-1: line + file from the SAME symbol_context (single source).
+        line: ctx.line_start,
         module_path: ctx.module_path.clone(),
         module_stable_key: ctx.module_key.clone(),
     })
@@ -161,6 +171,10 @@ pub(crate) fn lg_caller_rows(lg: &LiveGraph, target: &str) -> Option<Vec<AgentCa
             stable_key: caller_key.clone(),
             name: e.name,
             file: e.file,
+            // ANCHORS-EVERYWHERE-1: the cert-proven-equal IR line (single source with `file`),
+            // so the LiveGraph-served caller row matches the SQLite row's `path:line` anchor
+            // (parity). Excluded from the `caller_pairs` no-loss compare → cert verdict unchanged.
+            line: e.line,
             module_path: e.module_path,
             module_stable_key: e.module_stable_key,
         });
@@ -186,6 +200,9 @@ pub(crate) fn lg_callee_rows(lg: &LiveGraph, target: &str) -> Option<Vec<AgentCa
             stable_key: callee_key.clone(),
             name: e.name,
             file: e.file,
+            // ANCHORS-EVERYWHERE-1: cert-proven-equal IR line (single source with `file`) →
+            // parity with the SQLite callee row. Excluded from `callee_pairs` → verdict unchanged.
+            line: e.line,
             module_path: e.module_path,
             module_stable_key: e.module_stable_key,
         });
@@ -239,7 +256,12 @@ pub(crate) fn callers_multiset_eq(lg: &[AgentCallerRow], sq: &[AgentCallerRow]) 
     let mut b: Vec<&AgentCallerRow> = sq.iter().collect();
     a.sort_by(|x, y| caller_key(x).cmp(&caller_key(y)));
     b.sort_by(|x, y| caller_key(x).cmp(&caller_key(y)));
-    a == b
+    // ANCHORS-EVERYWHERE-1: compare on `caller_key` (the no-loss identity fields), NOT the
+    // full struct — `line` is a presentation anchor excluded from the production compare
+    // (`ledger::caller_pairs`), so the oracle must ignore it too to stay equivalent.
+    a.iter()
+        .map(|r| caller_key(r))
+        .eq(b.iter().map(|r| caller_key(r)))
 }
 
 /// Callee rows equal as MULTISETS (same length + element-wise equal after a canonical sort).
@@ -252,7 +274,11 @@ pub(crate) fn callees_multiset_eq(lg: &[AgentCalleeRow], sq: &[AgentCalleeRow]) 
     let mut b: Vec<&AgentCalleeRow> = sq.iter().collect();
     a.sort_by(|x, y| callee_key(x).cmp(&callee_key(y)));
     b.sort_by(|x, y| callee_key(x).cmp(&callee_key(y)));
-    a == b
+    // ANCHORS-EVERYWHERE-1: compare on `callee_key` (no-loss identity), excluding the
+    // presentation-only `line` — matches production `ledger::callee_pairs`.
+    a.iter()
+        .map(|r| callee_key(r))
+        .eq(b.iter().map(|r| callee_key(r)))
 }
 
 /// RECON-M-R1: build the WITNESS LEDGER for the current graph state (the generalized cert

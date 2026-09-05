@@ -56,7 +56,7 @@ use repo_graph_agent::dto::IndexDrift;
 use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
-use crate::presentation::{bullet, heading, kv_line};
+use crate::presentation::{anchor, bullet, heading, kv_line};
 
 // ── Response Types ───────────────────────────────────────────────────────────
 
@@ -126,6 +126,11 @@ pub struct FocusCandidate {
     pub stable_key: String,
     #[serde(default)]
     pub file: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the candidate's start line for the `path:line`
+    /// anchor. Absent (older daemon, semantic candidate, or LiveGraph-served candidate
+    /// with no same-source line) → the bare path renders, never a fabricated line.
+    #[serde(default)]
+    pub line: Option<u64>,
     pub kind: String,
     // EMBED-SEED-IMPL-1 (spec §8.2 Group A): additive, semantic-only fields — present
     // ONLY on a semantic fallback candidate (a deterministic *ambiguous* candidate
@@ -255,7 +260,13 @@ impl ExplainResponse {
                 // Symbol target: show name, kind, and file
                 let mut result = kv_line("Target", &name);
                 result.push_str(&format!("Kind: {}\n", kind));
-                result.push_str(&format!("File: {}\n", path));
+                // ANCHORS-EVERYWHERE-1 (Tier 0): anchor the file at the symbol's line
+                // (`path:line`) when the identity evidence carries one — absence renders
+                // the bare path (never a fabricated 0/1).
+                result.push_str(&format!(
+                    "File: {}\n",
+                    anchor(path, self.get_identity_line())
+                ));
                 result
             }
             (Some(path), _) => {
@@ -269,6 +280,20 @@ impl ExplainResponse {
             (None, Some(name)) => kv_line("Target", &format!("{} ({})", name, kind)),
             (None, None) => kv_line("Target", &format!("({})", kind)),
         }
+    }
+
+    /// ANCHORS-EVERYWHERE-1 (Tier 0): the target symbol's start line from the identity
+    /// evidence (`line_start`, already on the wire). `None` when absent — the header then
+    /// renders the bare path (STANDING HONESTY RULE: absent line → no line, never 0/1).
+    fn get_identity_line(&self) -> Option<u64> {
+        for signal in &self.signals {
+            if signal.value.code == "EXPLAIN_IDENTITY" {
+                if let Some(ref ev) = signal.value.evidence {
+                    return ev.get("line_start").and_then(|v| v.as_u64());
+                }
+            }
+        }
+        None
     }
 
     fn get_identity_name(&self) -> Option<String> {
@@ -380,10 +405,12 @@ impl ExplainResponse {
     fn render_candidates(&self) -> String {
         let mut out = heading("Ambiguous target - multiple matches found");
         for c in &self.focus.candidates {
+            // ANCHORS-EVERYWHERE-1 (Tier 1): anchor the candidate at `path:line` when a
+            // (single-source) line is present; bare path otherwise.
             let file_info = c
                 .file
                 .as_deref()
-                .map(|f| format!(" in {}", f))
+                .map(|f| format!(" in {}", anchor(f, c.line)))
                 .unwrap_or_default();
             out.push_str(&bullet(&format!(
                 "{} ({}){}",
@@ -463,6 +490,7 @@ mod tests {
                 FocusCandidate {
                     stable_key: "r1:src/auth:AuthService.validate:SYMBOL".to_string(),
                     file: Some("src/auth/service.ts".to_string()),
+                    line: None,
                     kind: "symbol".to_string(),
                     source: None,
                     model_id: None,
@@ -473,6 +501,7 @@ mod tests {
                 FocusCandidate {
                     stable_key: "r1:src/user:UserService.validate:SYMBOL".to_string(),
                     file: Some("src/user/service.ts".to_string()),
+                    line: None,
                     kind: "symbol".to_string(),
                     source: None,
                     model_id: None,
@@ -502,6 +531,7 @@ mod tests {
             candidates: vec![FocusCandidate {
                 stable_key: "glamCRM:src/price.ts:FILE".to_string(),
                 file: Some("src/price.ts".to_string()),
+                line: None,
                 kind: "file".to_string(),
                 source: Some("embedding".to_string()),
                 model_id: Some("text-embedding-nomic-embed-text-v1.5".to_string()),
@@ -604,6 +634,184 @@ mod tests {
         let out = r.render_human(false);
         assert!(out.contains("Callers (3)"));
         assert!(out.contains("handleLogin (src/controllers)"));
+    }
+
+    // ── ANCHORS-EVERYWHERE-1 (§4 unit-per-surface: present line renders `path:line`; absent renders nothing) ──
+
+    /// Build a resolved SYMBOL-target response whose EXPLAIN_IDENTITY evidence optionally carries
+    /// `line_start`, for the Tier-0 header anchor tests.
+    fn symbol_target(line_start: Option<u64>) -> ExplainResponse {
+        let mut r = minimal_response();
+        r.focus = ExplainFocus {
+            input: Some("AuthService.validate".to_string()),
+            resolved: true,
+            resolved_kind: Some("symbol".to_string()),
+            resolved_path: Some("src/core/auth/service.ts".to_string()),
+            reason: None,
+            candidates: vec![],
+        };
+        let mut ev = serde_json::json!({ "name": "validate" });
+        if let Some(l) = line_start {
+            ev["line_start"] = serde_json::json!(l);
+        }
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_IDENTITY".to_string(),
+            summary: "Identity: symbol target.".to_string(),
+            evidence: Some(ev),
+        })];
+        r
+    }
+
+    #[test]
+    fn tier0_header_anchors_symbol_file_at_identity_line() {
+        // Present line → `File: path:line`.
+        let out = symbol_target(Some(42)).render_human(false);
+        assert!(
+            out.contains("File: src/core/auth/service.ts:42"),
+            "header anchors at the symbol's line:\n{out}"
+        );
+    }
+
+    #[test]
+    fn tier0_header_absent_line_renders_bare_path_no_fabrication() {
+        // Absent line → bare path, never `:0`/`:1`.
+        let out = symbol_target(None).render_human(false);
+        assert!(
+            out.contains("File: src/core/auth/service.ts\n"),
+            "absent line → bare path:\n{out}"
+        );
+        assert!(
+            !out.contains("service.ts:"),
+            "no fabricated line suffix when absent:\n{out}"
+        );
+    }
+
+    #[test]
+    fn tier0_symbols_section_anchors_present_line_and_omits_absent() {
+        // A file target with a Symbols section: one item has a line (anchored), one does not
+        // (rendered bare — byte-identical to the pre-anchor row).
+        let mut r = minimal_response();
+        r.focus.resolved_path = Some("src/many.ts".to_string());
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_SYMBOLS".to_string(),
+            summary: "2 symbols.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 2,
+                "items": [
+                    {"name": "withLine", "subtype": "function", "line_start": 7},
+                    {"name": "noLine", "subtype": "function"}
+                ]
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("withLine (function)  src/many.ts:7"),
+            "symbol with a line anchors `path:line`:\n{out}"
+        );
+        assert!(
+            out.contains("noLine (function)") && !out.contains("noLine (function)  src/many.ts"),
+            "symbol without a line renders no anchor (bare row):\n{out}"
+        );
+    }
+
+    /// STANDING HONESTY RULE regression (review-0 blocking defect): a symbol whose stored
+    /// `line_start` is the `0` "no span" sentinel must render a BARE row — never `src/x.ts:0`.
+    /// Proves the explain rendering path routes through the fixed `anchor()` chokepoint.
+    #[test]
+    fn tier0_symbols_section_never_emits_zero_line() {
+        let mut r = minimal_response();
+        r.focus.resolved_path = Some("src/x.ts".to_string());
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_SYMBOLS".to_string(),
+            summary: "1 symbol.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 1,
+                "items": [
+                    {"name": "zeroLine", "subtype": "function", "line_start": 0}
+                ]
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            !out.contains("src/x.ts:0"),
+            "a 0 line_start must NEVER render as `:0`:\n{out}"
+        );
+        assert!(
+            out.contains("zeroLine (function)"),
+            "the symbol row still renders (bare, no anchor):\n{out}"
+        );
+    }
+
+    #[test]
+    fn tier1_callers_anchor_file_line_when_both_present() {
+        // Caller carrying file+line → `name (module)  file:line`; a caller lacking them stays bare.
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "2 direct callers.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 2,
+                "items": [
+                    {"name": "handleLogin", "module": "src/ctl", "file": "src/ctl/login.ts", "line": 11},
+                    {"name": "legacy", "module": "src/old"}
+                ]
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("handleLogin (src/ctl)  src/ctl/login.ts:11"),
+            "caller anchors its own file:line:\n{out}"
+        );
+        assert!(
+            out.contains("legacy (src/old)") && !out.contains("legacy (src/old)  "),
+            "caller without file+line renders no anchor:\n{out}"
+        );
+    }
+
+    #[test]
+    fn tier1_candidate_anchor_file_line_in_ambiguous() {
+        // An ambiguous candidate carrying a line anchors `in path:line`.
+        let mut r = minimal_response();
+        r.focus = ExplainFocus {
+            input: Some("validate".to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_path: None,
+            reason: Some("ambiguous".to_string()),
+            candidates: vec![
+                FocusCandidate {
+                    stable_key: "r1:src/auth:AuthService.validate:SYMBOL".to_string(),
+                    file: Some("src/auth/service.ts".to_string()),
+                    line: Some(15),
+                    kind: "symbol".to_string(),
+                    source: None,
+                    model_id: None,
+                    score: None,
+                    module: None,
+                    next: None,
+                },
+                FocusCandidate {
+                    stable_key: "r1:src/user:UserService.validate:SYMBOL".to_string(),
+                    file: Some("src/user/service.ts".to_string()),
+                    line: None,
+                    kind: "symbol".to_string(),
+                    source: None,
+                    model_id: None,
+                    score: None,
+                    module: None,
+                    next: None,
+                },
+            ],
+        };
+        let out = r.render_human(false);
+        assert!(
+            out.contains("in src/auth/service.ts:15"),
+            "candidate with a line anchors `in path:line`:\n{out}"
+        );
+        assert!(
+            out.contains("in src/user/service.ts\n") || out.contains("in src/user/service.ts)"),
+            "candidate without a line renders the bare path:\n{out}"
+        );
     }
 
     /// Review-1 item 3: the NONZERO g2u-b union-degree second figure through final human

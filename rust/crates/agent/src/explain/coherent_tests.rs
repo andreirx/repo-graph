@@ -58,6 +58,8 @@ pub(super) fn callers_signal() -> Signal {
             stable_key: "r:src/b.ts:Caller.x:SYMBOL".to_string(),
             name: "x".to_string(),
             module: Some("src".to_string()),
+            file: None,
+            line: None,
         }],
         items_truncated: None,
         items_omitted_count: None,

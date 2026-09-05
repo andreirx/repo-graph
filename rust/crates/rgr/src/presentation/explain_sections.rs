@@ -24,7 +24,7 @@
 use repo_graph_agent::reliability;
 
 use super::explain::{ExplainResponse, ExplainSignal};
-use super::{bullet, heading};
+use super::{anchor, bullet, heading};
 
 /// RECON-M-R3a (g2u-b): the union-degree second-figure heading suffix — present ONLY when the
 /// daemon attached the additive `union` object (W-BOTH with a current measured ledger AND the
@@ -44,6 +44,31 @@ fn union_degree_suffix(evidence: &serde_json::Value) -> String {
             ))
         })
         .unwrap_or_default()
+}
+
+/// ANCHORS-EVERYWHERE-1 (Tier 1): render ONE caller/callee row — `name (module)` plus the
+/// callgraph endpoint's own `path:line` anchor. Shared by [`ExplainResponse::render_callers`]
+/// and `render_callees` (two concrete callers, identical row shape — the real duplication that
+/// earns the helper). The anchor is appended ONLY when BOTH `file` and `line` are present: they
+/// are a single SQLite pair (STANDING HONESTY RULE #2), and a missing line renders no anchor at
+/// all (byte-identical to the pre-anchor row), never a fabricated `:0`.
+fn render_callgraph_item(item: &serde_json::Value) -> String {
+    let name = item
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown)");
+    let module = item.get("module").and_then(|v| v.as_str());
+    let mut row = match module {
+        Some(m) => format!("{name} ({m})"),
+        None => name.to_string(),
+    };
+    if let (Some(file), Some(line)) = (
+        item.get("file").and_then(|v| v.as_str()),
+        item.get("line").and_then(|v| v.as_u64()),
+    ) {
+        row.push_str(&format!("  {}", anchor(file, Some(line))));
+    }
+    row
 }
 
 impl ExplainResponse {
@@ -83,16 +108,7 @@ impl ExplainResponse {
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
             let shown = if full { items.len() } else { 10 };
             for item in items.iter().take(shown) {
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let module = item.get("module").and_then(|v| v.as_str());
-                if let Some(m) = module {
-                    out.push_str(&bullet(&format!("{} ({})", name, m)));
-                } else {
-                    out.push_str(&bullet(name));
-                }
+                out.push_str(&bullet(&render_callgraph_item(item)));
             }
             if items.len() > shown {
                 out.push_str(&format!("  ... ({} more)\n", items.len() - shown));
@@ -113,16 +129,7 @@ impl ExplainResponse {
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
             let shown = if full { items.len() } else { 10 };
             for item in items.iter().take(shown) {
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let module = item.get("module").and_then(|v| v.as_str());
-                if let Some(m) = module {
-                    out.push_str(&bullet(&format!("{} ({})", name, m)));
-                } else {
-                    out.push_str(&bullet(name));
-                }
+                out.push_str(&bullet(&render_callgraph_item(item)));
             }
             if items.len() > shown {
                 out.push_str(&format!("  ... ({} more)\n", items.len() - shown));
@@ -157,6 +164,11 @@ impl ExplainResponse {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
         let mut out = heading(&format!("Symbols ({})", count));
 
+        // ANCHORS-EVERYWHERE-1 (Tier 0): the Symbols section is emitted for a FILE target,
+        // so every symbol shares the resolved file path; the per-item `line_start` (already
+        // on the wire) completes the `path:line` anchor. No path → no anchor.
+        let file_path = self.focus.resolved_path.as_deref();
+
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
             let shown = if full { items.len() } else { 15 };
             for item in items.iter().take(shown) {
@@ -165,11 +177,18 @@ impl ExplainResponse {
                     .and_then(|v| v.as_str())
                     .unwrap_or("(unknown)");
                 let subtype = item.get("subtype").and_then(|v| v.as_str());
-                if let Some(st) = subtype {
-                    out.push_str(&bullet(&format!("{} ({})", name, st)));
-                } else {
-                    out.push_str(&bullet(name));
+                let mut row = match subtype {
+                    Some(st) => format!("{} ({})", name, st),
+                    None => name.to_string(),
+                };
+                // Append `path:line` only when BOTH the file path and a stored line exist
+                // (byte-identical to the pre-anchor row otherwise — never a fabricated line).
+                if let (Some(path), Some(line)) =
+                    (file_path, item.get("line_start").and_then(|v| v.as_u64()))
+                {
+                    row.push_str(&format!("  {}", anchor(path, Some(line))));
                 }
+                out.push_str(&bullet(&row));
             }
             if items.len() > shown {
                 out.push_str(&format!("  ... ({} more)\n", items.len() - shown));

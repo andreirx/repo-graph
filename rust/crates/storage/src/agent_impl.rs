@@ -524,7 +524,9 @@ impl AgentStorageRead for StorageConnection {
         stable_key: &str,
     ) -> Result<Option<AgentFocusCandidate>, AgentStorageError> {
         let result = self.connection().query_row(
-            "SELECT n.stable_key, n.kind, f.path \
+            // ANCHORS-EVERYWHERE-1: also SELECT n.line_start (same row as f.path) for the
+            // candidate `path:line` anchor — no new join, the `nodes` row is already here.
+            "SELECT n.stable_key, n.kind, f.path, n.line_start \
 			 FROM nodes n \
 			 LEFT JOIN files f ON n.file_uid = f.file_uid \
 			 WHERE n.snapshot_uid = ? AND n.stable_key = ?",
@@ -533,12 +535,18 @@ impl AgentStorageRead for StorageConnection {
                 let sk: String = row.get(0)?;
                 let kind_str: String = row.get(1)?;
                 let file: Option<String> = row.get(2)?;
-                Ok((sk, kind_str, file))
+                // ANCHORS-EVERYWHERE-1: a 0/NULL/non-positive line_start degrades to None
+                // (the DB's "no span" sentinel is never a real 1-based anchor — no `:0`).
+                let line: Option<u64> = row
+                    .get::<_, Option<i64>>(3)?
+                    .filter(|v| *v > 0)
+                    .map(|v| v as u64);
+                Ok((sk, kind_str, file, line))
             },
         );
 
         match result {
-            Ok((sk, kind_str, file)) => {
+            Ok((sk, kind_str, file, line)) => {
                 let kind = match kind_str.as_str() {
                     "FILE" => AgentFocusKind::File,
                     "MODULE" => AgentFocusKind::Module,
@@ -548,6 +556,7 @@ impl AgentStorageRead for StorageConnection {
                     stable_key: sk,
                     kind,
                     file,
+                    line,
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -953,7 +962,7 @@ impl AgentStorageRead for StorageConnection {
         let conn = self.connection();
         let mut stmt = conn
             .prepare(
-                "SELECT n.stable_key, n.kind, f.path \
+                "SELECT n.stable_key, n.kind, f.path, n.line_start \
 				 FROM nodes n \
 				 LEFT JOIN files f ON n.file_uid = f.file_uid \
 				 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' AND n.name = ? \
@@ -967,10 +976,18 @@ impl AgentStorageRead for StorageConnection {
                 let sk: String = row.get(0)?;
                 let _kind_str: String = row.get(1)?;
                 let file: Option<String> = row.get(2)?;
+                // ANCHORS-EVERYWHERE-1: nodes.line_start, same row as file (single source). A
+                // NULL/absent OR non-positive (0-sentinel) line degrades to None — the DB's
+                // "no span" marker is never a real 1-based anchor, so no `:0` reaches DTO/JSON.
+                let line: Option<u64> = row
+                    .get::<_, Option<i64>>(3)?
+                    .filter(|v| *v > 0)
+                    .map(|v| v as u64);
                 Ok(AgentFocusCandidate {
                     stable_key: sk,
                     kind: AgentFocusKind::Symbol,
                     file,
+                    line,
                 })
             })
             .map_err(map_err("resolve_symbol_name"))?;
@@ -1038,7 +1055,7 @@ impl AgentStorageRead for StorageConnection {
             .prepare(
                 "SELECT \
 					caller.stable_key, caller.name, \
-					f.path AS file_path, \
+					f.path AS file_path, caller.line_start, \
 					mod_n.qualified_name AS module_path, \
 					mod_n.stable_key AS module_stable_key \
 				 FROM edges e \
@@ -1069,8 +1086,15 @@ impl AgentStorageRead for StorageConnection {
                         stable_key: row.get(0)?,
                         name: row.get(1)?,
                         file: row.get(2)?,
-                        module_path: row.get(3)?,
-                        module_stable_key: row.get(4)?,
+                        // ANCHORS-EVERYWHERE-1: nodes.line_start (same row as file). Read via
+                        // i64; a NULL/absent OR non-positive (0-sentinel) line degrades to None
+                        // so no fabricated `:0` anchor reaches the DTO/JSON.
+                        line: row
+                            .get::<_, Option<i64>>(3)?
+                            .filter(|v| *v > 0)
+                            .map(|v| v as u64),
+                        module_path: row.get(4)?,
+                        module_stable_key: row.get(5)?,
                     })
                 },
             )
@@ -1090,7 +1114,7 @@ impl AgentStorageRead for StorageConnection {
             .prepare(
                 "SELECT \
 					callee.stable_key, callee.name, \
-					f.path AS file_path, \
+					f.path AS file_path, callee.line_start, \
 					mod_n.qualified_name AS module_path, \
 					mod_n.stable_key AS module_stable_key \
 				 FROM edges e \
@@ -1121,8 +1145,15 @@ impl AgentStorageRead for StorageConnection {
                         stable_key: row.get(0)?,
                         name: row.get(1)?,
                         file: row.get(2)?,
-                        module_path: row.get(3)?,
-                        module_stable_key: row.get(4)?,
+                        // ANCHORS-EVERYWHERE-1: nodes.line_start (same row as file). A
+                        // NULL/absent OR non-positive (0-sentinel) line degrades to None so no
+                        // fabricated `:0` anchor reaches the DTO/JSON.
+                        line: row
+                            .get::<_, Option<i64>>(3)?
+                            .filter(|v| *v > 0)
+                            .map(|v| v as u64),
+                        module_path: row.get(4)?,
+                        module_stable_key: row.get(5)?,
                     })
                 },
             )
@@ -1390,7 +1421,9 @@ impl AgentStorageRead for StorageConnection {
         // descending, limit to top N.
         let mut stmt = conn
             .prepare(
-                "SELECT m.target_stable_key, n.name, f.path, m.value_json \
+                // ANCHORS-EVERYWHERE-1: also SELECT n.line_start (same joined `nodes` row as
+                // f.path) so the complexity breakdown row can anchor `file:line`.
+                "SELECT m.target_stable_key, n.name, f.path, n.line_start, m.value_json \
 				 FROM measurements m \
 				 LEFT JOIN nodes n ON m.target_stable_key = n.stable_key \
 				   AND n.snapshot_uid = m.snapshot_uid \
@@ -1406,7 +1439,14 @@ impl AgentStorageRead for StorageConnection {
                 let stable_key: String = row.get(0)?;
                 let symbol_name: Option<String> = row.get(1)?;
                 let file_path: Option<String> = row.get(2)?;
-                let value_json: String = row.get(3)?;
+                // ANCHORS-EVERYWHERE-1: nodes.line_start, same row as file_path (single source).
+                // A NULL/absent OR non-positive (0-sentinel) line degrades to None — the DB's
+                // "no span" marker is never a real 1-based anchor, so no `:0` reaches DTO/JSON.
+                let line: Option<u64> = row
+                    .get::<_, Option<i64>>(3)?
+                    .filter(|v| *v > 0)
+                    .map(|v| v as u64);
+                let value_json: String = row.get(4)?;
 
                 // Parse the complexity value from JSON {"value": N}
                 let complexity: u64 = serde_json::from_str::<serde_json::Value>(&value_json)
@@ -1414,7 +1454,7 @@ impl AgentStorageRead for StorageConnection {
                     .and_then(|v| v.get("value").and_then(|n| n.as_u64()))
                     .unwrap_or(0);
 
-                Ok((stable_key, symbol_name, file_path, complexity))
+                Ok((stable_key, symbol_name, file_path, line, complexity))
             })
             .map_err(map_err("query_high_complexity_symbols"))?;
 
@@ -1455,7 +1495,7 @@ impl AgentStorageRead for StorageConnection {
                     "cancelled (client disconnected during complexity materialization)",
                 ));
             }
-            let (stable_key, symbol_name, file_path, complexity) =
+            let (stable_key, symbol_name, file_path, line, complexity) =
                 row.map_err(map_err("query_high_complexity_symbols"))?;
 
             if complexity >= min_threshold {
@@ -1463,6 +1503,7 @@ impl AgentStorageRead for StorageConnection {
                     stable_key,
                     symbol_name: symbol_name.unwrap_or_else(|| "unknown".to_string()),
                     file_path,
+                    line,
                     complexity,
                 });
             }

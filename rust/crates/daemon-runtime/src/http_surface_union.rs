@@ -65,6 +65,10 @@ pub(crate) struct HttpSurfaceInput {
     /// `None` = dynamic/unreadable URL — never fabricated, never dedup-merged.
     pub route: Option<String>,
     pub source_file: String,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's start line, for the `path:line`
+    /// anchor. `None` for the project family (no stored line) or an absent line — never
+    /// fabricated. On dedup the richest record's line wins, back-filled from the other.
+    pub line: Option<u64>,
     pub is_test: Option<bool>,
     pub framework: Option<String>,
     pub route_unknown_reason: Option<String>,
@@ -78,6 +82,10 @@ pub(crate) struct UnifiedHttpSurface {
     pub http_method: String,
     pub route: Option<String>,
     pub source_file: String,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's start line for the `path:line` anchor
+    /// on individual rows (`surfaces list`) — NOT rendered on grouped `boundaries list`
+    /// headlines. `None` = no single-source line (never fabricated).
+    pub line: Option<u64>,
     pub is_test: Option<bool>,
     pub framework: Option<String>,
     pub route_unknown_reason: Option<String>,
@@ -138,6 +146,7 @@ fn to_unified(input: &HttpSurfaceInput, conflict: Option<String>) -> UnifiedHttp
         http_method: input.http_method.clone(),
         route: input.route.clone(),
         source_file: input.source_file.clone(),
+        line: input.line,
         is_test: input.is_test,
         framework: input.framework.clone(),
         route_unknown_reason: input.route_unknown_reason.clone(),
@@ -209,6 +218,11 @@ pub(crate) fn unify(
                 }
                 if row.route.is_none() {
                     row.route = other.route.clone();
+                }
+                // ANCHORS-EVERYWHERE-1: the richest record's line wins; back-fill from the
+                // other family (typically project → boundary) so a dedup never loses the line.
+                if row.line.is_none() {
+                    row.line = other.line;
                 }
             }
             let mut prov: Vec<&'static str> = inputs.iter().map(|i| i.family.label()).collect();
@@ -285,6 +299,7 @@ mod tests {
             http_method: method.to_string(),
             route: route.map(str::to_string),
             source_file: file.to_string(),
+            line: None,
             is_test: None,
             framework: None,
             route_unknown_reason: None,

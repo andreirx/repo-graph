@@ -11,7 +11,7 @@
 //! helpers stay private. Pure relocation — no behavior changed.
 
 use super::orient::{OrientDepth, OrientResponse};
-use super::{bullet, heading, sub_heading};
+use super::{anchor, bullet, heading, sub_heading};
 
 /// Plural suffix helper (`""` for 1, `"s"` otherwise). `pub(super)` so the sibling
 /// `orient_seg2` section renderers (split out under the 500-line guardrail) share it.
@@ -225,16 +225,19 @@ impl OrientResponse {
                 .unwrap_or(0);
             let file = entry.get("file").and_then(|v| v.as_str());
             let symbol = entry.get("symbol").and_then(|v| v.as_str());
-            // The detailed view names BOTH the file (orientation target) and the
-            // symbol when present — richer than the headline, which names only the
-            // file/symbol label.
-            let line = match (file, symbol) {
-                (Some(f), Some(s)) => format!("{f} — {s} (cx {cx})"),
-                (Some(f), None) => format!("{f} (cx {cx})"),
+            // ANCHORS-EVERYWHERE-1 (Tier 1): anchor the file at the symbol's start line
+            // (`file:line`) on this SYMBOL-level row — the line shares the SQLite `nodes`
+            // row with `file`. Absent line → bare path (never a fabricated 0/1). The
+            // file-deduped headline (`complexity_line`) stays unanchored: a file rollup
+            // spans many symbols and has no single line.
+            let line_no = entry.get("line").and_then(|v| v.as_u64());
+            let row = match (file, symbol) {
+                (Some(f), Some(s)) => format!("{} — {s} (cx {cx})", anchor(f, line_no)),
+                (Some(f), None) => format!("{} (cx {cx})", anchor(f, line_no)),
                 (None, Some(s)) => format!("{s} (cx {cx})"),
                 (None, None) => continue,
             };
-            out.push_str(&bullet(&line));
+            out.push_str(&bullet(&row));
             shown += 1;
         }
         // Honest tail: centers still above threshold beyond what this section

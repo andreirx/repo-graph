@@ -14,6 +14,7 @@ fn caller(stable_key: &str, name: &str, module: Option<&str>) -> AgentCallerRow 
         stable_key: stable_key.into(),
         name: name.into(),
         file: Some("src/a.ts".into()),
+        line: None,
         module_path: module.map(str::to_string),
         module_stable_key: module.map(|m| format!("repo:{m}:MODULE")),
     }
@@ -23,6 +24,7 @@ fn callee(stable_key: &str, name: &str) -> AgentCalleeRow {
         stable_key: stable_key.into(),
         name: name.into(),
         file: None,
+        line: None,
         module_path: None,
         module_stable_key: None,
     }

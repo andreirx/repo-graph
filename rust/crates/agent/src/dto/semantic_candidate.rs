@@ -81,13 +81,20 @@ pub enum ModuleHint {
 }
 
 impl FocusCandidate {
-    /// A deterministic (ambiguity) candidate — the original three-field shape;
-    /// all semantic fields absent, so its JSON is byte-identical to before.
-    pub fn deterministic(stable_key: String, file: Option<String>, kind: ResolvedKind) -> Self {
+    /// A deterministic (ambiguity) candidate. `line` is the ANCHORS-EVERYWHERE-1
+    /// `path:line` anchor, single-sourced with `file`; `None` keeps the JSON
+    /// byte-identical to the pre-anchor shape. All semantic fields absent.
+    pub fn deterministic(
+        stable_key: String,
+        file: Option<String>,
+        line: Option<u64>,
+        kind: ResolvedKind,
+    ) -> Self {
         Self {
             stable_key,
             file,
             kind,
+            line,
             source: None,
             model_id: None,
             score: None,
@@ -111,6 +118,7 @@ impl FocusCandidate {
             stable_key,
             file: Some(path),
             kind: ResolvedKind::File,
+            line: None,
             source: Some("embedding".to_string()),
             model_id: Some(model_id),
             score: Some(score),

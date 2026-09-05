@@ -50,6 +50,13 @@ pub struct BoundaryListEntry {
     pub service_name: Option<String>,
     #[serde(default, rename = "sourceFile")]
     pub file_path: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's start line, carried from the four-struct
+    /// thread for machine consumers of the boundaries-list JSON. Deliberately NOT rendered in
+    /// the HUMAN grouped view — a `file × direction (×N)` group spans many rows/lines and has
+    /// no single line, so a headline never picks one (the anchor lands on the individual
+    /// `surfaces list` rows and on `boundaries show` instead).
+    #[serde(default, rename = "lineStart")]
+    pub line: Option<u64>,
     #[serde(default, rename = "symbolStableKey")]
     pub symbol_key: Option<String>,
     #[serde(default)]

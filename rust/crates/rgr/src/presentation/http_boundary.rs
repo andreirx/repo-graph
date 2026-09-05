@@ -16,6 +16,8 @@
 
 use serde::Deserialize;
 
+use crate::presentation::anchor;
+
 /// One HTTP/REST provider or consumer surface from the boundary-interaction
 /// store (`channel_kind='http'`). Rendered as a distinct section from
 /// `project_surfaces`, never mixed into them.
@@ -30,6 +32,11 @@ pub(crate) struct HttpBoundarySurfaceEntry {
     pub(crate) route: Option<String>,
     #[serde(default, rename = "sourceFile")]
     pub(crate) source_file: String,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's start line for the `path:line` anchor
+    /// on this individual row. `None` (older daemon, project family, or absent line) → the
+    /// bare file path renders, never a fabricated line.
+    #[serde(default, rename = "lineStart")]
+    pub(crate) line: Option<u64>,
     /// §2.5 — `files.is_test` for this surface's file. `Some(true)` → `[test]`;
     /// `Some(false)`/`None` → no label (never asserts non-test). A read failure
     /// degrades upstream, so `None` here is data absence, not a swallowed error.
@@ -140,9 +147,14 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
                 None => "<dynamic>".to_string(),
             },
         };
+        // ANCHORS-EVERYWHERE-1 (Tier 1): anchor the individual surface row at
+        // `source_file:line` (uniform with find). Absent line → bare path, never fabricated.
         let mut line = format!(
             "  {:6} {}  {}  [{}]",
-            s.http_method, route, s.source_file, s.direction
+            s.http_method,
+            route,
+            anchor(&s.source_file, s.line),
+            s.direction
         );
         // §2.5: `[test]` for a surface in a test file (files.is_test = true).
         if s.is_test == Some(true) {
@@ -234,6 +246,7 @@ type LineKey<'a> = (
     &'a str,         // http_method
     Option<&'a str>, // route
     &'a str,         // source_file
+    Option<u64>,     // line (ANCHORS-EVERYWHERE-1: rows at different lines render differently)
     Option<bool>,    // is_test
     Option<&'a str>, // framework
     Option<&'a str>, // route_unknown_reason
@@ -246,6 +259,9 @@ fn line_key(s: &HttpBoundarySurfaceEntry) -> LineKey<'_> {
         s.http_method.as_str(),
         s.route.as_deref(),
         s.source_file.as_str(),
+        // ANCHORS-EVERYWHERE-1: the rendered anchor line is part of the row identity, so two
+        // surfaces at DIFFERENT lines never collapse into one `×N` (that would hide a line).
+        s.line,
         s.is_test,
         s.framework.as_deref(),
         s.route_unknown_reason.as_deref(),
@@ -431,6 +447,7 @@ mod tests {
             http_method: method.to_string(),
             route: route.map(str::to_string),
             source_file: file.to_string(),
+            line: None,
             is_test: None,
             framework: None,
             route_unknown_reason: None,
@@ -625,6 +642,35 @@ mod tests {
     #[test]
     fn render_surfaces_empty_is_empty_string() {
         assert!(render_surfaces(&[]).is_empty());
+    }
+
+    /// ANCHORS-EVERYWHERE-1 (§4): an individual surface row anchors `source_file:line` when a line
+    /// is present; absent → bare path. And two surfaces at the SAME (method,route,file) but
+    /// DIFFERENT lines must NOT collapse into one `×N` (that would hide a distinct anchor).
+    #[test]
+    fn surface_row_anchors_line_and_distinct_lines_do_not_collapse() {
+        let mut a = entry("consumer", "GET", Some("/api/x"), "web/a.ts");
+        a.line = Some(12);
+        let out = render_surfaces(&[a.clone()]);
+        assert!(out.contains("web/a.ts:12"), "row anchors path:line:\n{out}");
+
+        // Absent line → bare path (byte-identical to the pre-anchor row).
+        let bare = render_surfaces(&[entry("consumer", "GET", Some("/api/x"), "web/a.ts")]);
+        assert!(
+            bare.contains("web/a.ts  [consumer]"),
+            "absent line → bare path:\n{bare}"
+        );
+
+        // Same identity, different lines → two separate rows (no ×N collapse).
+        let mut b = entry("consumer", "GET", Some("/api/x"), "web/a.ts");
+        b.line = Some(30);
+        let two = render_surfaces(&[a, b]);
+        let rows: Vec<&str> = two
+            .lines()
+            .filter(|l| l.starts_with("  ") && l.contains('['))
+            .collect();
+        assert_eq!(rows.len(), 2, "distinct lines must stay separate:\n{two}");
+        assert!(!two.contains('×'), "no ×N collapse across lines:\n{two}");
     }
 
     #[test]

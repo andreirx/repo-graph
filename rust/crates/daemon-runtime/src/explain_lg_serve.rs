@@ -273,13 +273,22 @@ pub(crate) fn serve_callers(
         );
     };
     // The SQLite primary's rendered rows (SQL order + module) — the snapshot half of the multi-source leaf.
-    let sqlite_rows: Vec<(String, String, Option<String>)> = ev
+    let sqlite_rows: Vec<RebuiltRow> = ev
         .items
         .iter()
-        .map(|it| (it.stable_key.clone(), it.name.clone(), it.module.clone()))
+        .map(|it| {
+            (
+                it.stable_key.clone(),
+                it.name.clone(),
+                it.module.clone(),
+                // ANCHORS-EVERYWHERE-1: file + line ride from the SQLite base evidence.
+                it.file.clone(),
+                it.line,
+            )
+        })
         .collect();
     // Rebuild the rendered rows: LIVE name per item (fallback to the SQLite name when the IR cannot name it),
-    // SQLite module + SQL order preserved. `None` => the live set diverged from the SQLite primary.
+    // SQLite module + file + line + SQL order preserved. `None` => the live set diverged from the SQLite primary.
     let Some(rows) = rebuild_identity_rows(&live_names, ev.count, &sqlite_rows) else {
         return (
             None,
@@ -290,10 +299,12 @@ pub(crate) fn serve_callers(
     };
     let items: Vec<ExplainCallerItem> = rows
         .into_iter()
-        .map(|(stable_key, name, module)| ExplainCallerItem {
+        .map(|(stable_key, name, module, file, line)| ExplainCallerItem {
             stable_key,
             name,
             module,
+            file,
+            line,
         })
         .collect();
     let served = Signal::explain_callers(ExplainCallersEvidence {
@@ -336,10 +347,19 @@ pub(crate) fn serve_callees(
             )),
         );
     };
-    let sqlite_rows: Vec<(String, String, Option<String>)> = ev
+    let sqlite_rows: Vec<RebuiltRow> = ev
         .items
         .iter()
-        .map(|it| (it.stable_key.clone(), it.name.clone(), it.module.clone()))
+        .map(|it| {
+            (
+                it.stable_key.clone(),
+                it.name.clone(),
+                it.module.clone(),
+                // ANCHORS-EVERYWHERE-1: file + line ride from the SQLite base evidence.
+                it.file.clone(),
+                it.line,
+            )
+        })
         .collect();
     let Some(rows) = rebuild_identity_rows(&live_names, ev.count, &sqlite_rows) else {
         return (
@@ -351,10 +371,12 @@ pub(crate) fn serve_callees(
     };
     let items: Vec<ExplainCalleeItem> = rows
         .into_iter()
-        .map(|(stable_key, name, module)| ExplainCalleeItem {
+        .map(|(stable_key, name, module, file, line)| ExplainCalleeItem {
             stable_key,
             name,
             module,
+            file,
+            line,
         })
         .collect();
     let served = Signal::explain_callees(ExplainCalleesEvidence {
@@ -424,24 +446,35 @@ fn live_callgraph_names(
 /// set DIVERGES from the SQLite primary (the full count differs, or a rendered key is absent from the live
 /// set) — the caller then keeps the proven SQLite primary, labelled a callgraph divergence (never a false
 /// LiveGraph value). The no-loss gate already proved set-equality, so `None` is a TOCTOU-defensive guard.
+///
+/// ANCHORS-EVERYWHERE-1 (source-of-truth rule): each row also carries `file` + `line`. Both
+/// come UNCHANGED from the SQLite base evidence (`sqlite_rows`) — the live IR recomputes only
+/// the NAME. So the rendered `file:line` anchor is always a single-source SQLite pair, never a
+/// live-IR name spliced onto a foreign line (STANDING HONESTY RULE #2).
 fn rebuild_identity_rows(
     live_names: &BTreeMap<String, Option<String>>,
     sqlite_count: u64,
-    sqlite_rows: &[(String, String, Option<String>)],
-) -> Option<Vec<(String, String, Option<String>)>> {
+    sqlite_rows: &[RebuiltRow],
+) -> Option<Vec<RebuiltRow>> {
     // The full caller/callee count (pre-truncation) must match the live identity-set size.
     if sqlite_count != live_names.len() as u64 {
         return None;
     }
     let mut rows = Vec::with_capacity(sqlite_rows.len());
-    for (key, sqlite_name, module) in sqlite_rows {
+    for (key, sqlite_name, module, file, line) in sqlite_rows {
         // A rendered key absent from the live set => divergence (no false LiveGraph value).
         let live = live_names.get(key)?;
         let name = live.clone().unwrap_or_else(|| sqlite_name.clone());
-        rows.push((key.clone(), name, module.clone()));
+        // file + line stay the SQLite pair; only `name` is the live-IR value.
+        rows.push((key.clone(), name, module.clone(), file.clone(), *line));
     }
     Some(rows)
 }
+
+/// ANCHORS-EVERYWHERE-1: one rebuilt caller/callee row — `(stable_key, name, module, file, line)`.
+/// `name` is the live-IR value on the rebuild path; `module`/`file`/`line` are the SQLite base pair
+/// (the anchor's single source). Aliased so the 5-tuple has one name across the three use sites.
+type RebuiltRow = (String, String, Option<String>, Option<String>, Option<u64>);
 
 /// A labelled SQLite fallback leaf decision (the proven SQLite primary is kept; the reason records why the
 /// LiveGraph could not serve the rebuilt value).

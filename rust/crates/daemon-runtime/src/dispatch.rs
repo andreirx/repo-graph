@@ -7560,19 +7560,40 @@ impl ServiceDispatcher {
             },
         };
 
-        // Build evidence array
-        let evidence: Vec<serde_json::Value> = evidence_rows
-            .into_iter()
-            .map(|e| {
-                serde_json::json!({
-                    "source_type": e.source_type,
-                    "source_path": e.source_path,
-                    "evidence_kind": e.evidence_kind,
-                    "confidence": e.confidence,
-                    "payload": e.payload_json.as_ref().and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok()),
-                })
-            })
-            .collect();
+        // Build evidence array.
+        //
+        // ANCHORS-EVERYWHERE-1 (Tier 2): `surfaces show` now renders `path:line` from this
+        // payload's `lineStart`. A stored `payload_json` that FAILS to parse is a corrupt-store
+        // condition — NOT an absent line. Suppressing the parse error with `.ok()` would collapse
+        // corruption into `None`, which the renderer draws as an indistinguishable bare path,
+        // silently presenting a broken record as a line-less one (violates the binding honesty
+        // rule against `.ok()` on a fallible RENDERED read + VISION honest-degradation). Propagate
+        // as InternalError instead. A genuinely absent payload (`None`) stays `null` → bare path.
+        let mut evidence: Vec<serde_json::Value> = Vec::with_capacity(evidence_rows.len());
+        for e in evidence_rows {
+            let payload = match parse_evidence_payload(e.payload_json.as_deref()) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InternalError,
+                            format!(
+                                "corrupt project_surface_evidence payload_json for surface {}: {}",
+                                surface.project_surface_uid, err
+                            ),
+                        ),
+                    );
+                }
+            };
+            evidence.push(serde_json::json!({
+                "source_type": e.source_type,
+                "source_path": e.source_path,
+                "evidence_kind": e.evidence_kind,
+                "confidence": e.confidence,
+                "payload": payload,
+            }));
+        }
 
         let response = serde_json::json!({
             "command": "surfaces show",
@@ -9656,6 +9677,28 @@ fn parse_protocol_family(s: &str) -> Option<repo_graph_boundary_interaction::Pro
     }
 }
 
+/// Parse a stored project-surface-evidence `payload_json` for `surfaces show`.
+///
+/// Abstraction record — free fn `parse_evidence_payload`; sole current user:
+/// `handle_surfaces_show`'s evidence loop; axis: none (single call site) — extracted only for the
+/// malformed-payload regression coverage review-2 (iteration 3) required, matching this module's
+/// `parse_channel_kind`-style free-fn test convention (this crate's dispatch tests never build a
+/// full storage fixture); rejected simpler: inline `serde_json::from_str` (no test seam).
+///
+/// ANCHORS-EVERYWHERE-1 (Tier 2) honesty: `surfaces show` renders `path:line` from this payload's
+/// `lineStart`. `None` is a genuinely absent payload → `Value::Null` (renders a bare path,
+/// honest). A `Some(raw)` that FAILS to parse is corrupt store state, NOT an absent line —
+/// returned as `Err` so the handler can surface it as `InternalError` rather than `.ok()`-collapse
+/// it to `Null` and draw it as an indistinguishable bare path.
+fn parse_evidence_payload(
+    payload_json: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    match payload_json {
+        None => Ok(serde_json::Value::Null),
+        Some(raw) => serde_json::from_str::<serde_json::Value>(raw),
+    }
+}
+
 /// Map an ExtractedFact to a NewSemanticFact for storage.
 fn map_extracted_to_storage(
     repo_uid: &str,
@@ -9771,5 +9814,37 @@ mod http_boundary_filter_tests {
     fn http_filters_are_not_silently_cleared() {
         assert!(parse_channel_kind("http").is_some());
         assert!(parse_protocol_family("http").is_some());
+    }
+}
+
+#[cfg(test)]
+mod surfaces_show_payload_tests {
+    //! ANCHORS-EVERYWHERE-1 review-2 (iteration 3) item 1: `surfaces show` renders `path:line`
+    //! from evidence `payload_json.lineStart` (Tier 2). A malformed stored payload must NOT be
+    //! silently collapsed to an absent (line-less) record — it is corrupt store state and must
+    //! surface as an error, not draw as an indistinguishable bare path. These pin the parse
+    //! contract that `handle_surfaces_show` maps to an `InternalError` response.
+    use super::parse_evidence_payload;
+
+    #[test]
+    fn absent_payload_is_null_not_error() {
+        // A genuinely absent payload is honest absence → JSON null (renders a bare path).
+        let parsed = parse_evidence_payload(None).expect("None is not an error");
+        assert!(parsed.is_null());
+    }
+
+    #[test]
+    fn valid_payload_parses_to_value() {
+        let parsed =
+            parse_evidence_payload(Some(r#"{"lineStart": 42}"#)).expect("valid JSON parses");
+        assert_eq!(parsed.get("lineStart").and_then(|v| v.as_u64()), Some(42));
+    }
+
+    #[test]
+    fn malformed_payload_is_error_not_silent_none() {
+        // The exact regression: before iteration 3 this was `.ok()` → None → bare path. It MUST
+        // be an Err so the handler returns InternalError instead of hiding corruption.
+        assert!(parse_evidence_payload(Some("{not valid json")).is_err());
+        assert!(parse_evidence_payload(Some("")).is_err());
     }
 }

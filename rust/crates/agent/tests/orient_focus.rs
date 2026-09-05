@@ -182,6 +182,7 @@ fn focus_resolves_via_stable_key_for_module() {
             stable_key: "r1:src/core:MODULE".into(),
             kind: AgentFocusKind::Module,
             file: None,
+            line: None,
         },
     );
     let result = orient(
@@ -228,6 +229,7 @@ fn focus_resolves_symbol_via_stable_key() {
             stable_key: "r1:src/core/service.ts:SYMBOL:myFunc".into(),
             kind: AgentFocusKind::Symbol,
             file: Some("src/core/service.ts".into()),
+            line: None,
         },
     );
     // Seed symbol context so the pipeline can run.

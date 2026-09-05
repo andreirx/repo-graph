@@ -412,6 +412,14 @@ pub(super) fn map_candidate(c: &FocusCandidate) -> AgentFocusCandidate {
         stable_key: c.key.clone(),
         kind: map_focus_kind(c.kind),
         file: c.file.clone(),
+        // ANCHORS-EVERYWHERE-1: the LiveGraph focus resolver derives `file` from the KEY
+        // STRING (no backing node line at this seam), so there is NO same-source line to
+        // pair with it. Per STANDING HONESTY RULE #2 the anchor line MUST share the file's
+        // source — so a LiveGraph-served candidate carries no line (rendered without an
+        // anchor), never a mismatched SQLite line. The SQLite-served path (`resolve_symbol_name`)
+        // supplies file+line from one row. The focus-resolution cert compares only
+        // {key,kind,file}; this `None` does not affect that parity verdict.
+        line: None,
     }
 }
 

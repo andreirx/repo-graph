@@ -115,6 +115,7 @@ fn seed_depth_repo() -> FakeAgentStorage {
             stable_key: format!("r1:src/mod{i:02}/f.rs:sym{i:02}:SYMBOL"),
             symbol_name: format!("sym{i:02}"),
             file_path: Some(format!("src/mod{i:02}/f.rs")),
+            line: None,
             // 50 down to 21 — all >= the default threshold (20).
             complexity: (50 - i) as u64,
         })

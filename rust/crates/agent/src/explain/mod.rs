@@ -212,6 +212,8 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                             crate::dto::envelope::FocusCandidate::deterministic(
                                 c.stable_key,
                                 c.file,
+                                // ANCHORS-EVERYWHERE-1: file+line share the SQLite row.
+                                c.line,
                                 crate::dto::envelope::ResolvedKind::Symbol,
                             )
                         })
@@ -337,6 +339,9 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 stable_key: c.stable_key.clone(),
                 name: c.name.clone(),
                 module: c.module_path.clone(),
+                // ANCHORS-EVERYWHERE-1: file+line are the SAME SQLite row (single source).
+                file: c.file.clone(),
+                line: c.line,
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);
@@ -363,6 +368,9 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 stable_key: c.stable_key.clone(),
                 name: c.name.clone(),
                 module: c.module_path.clone(),
+                // ANCHORS-EVERYWHERE-1: file+line are the SAME SQLite row (single source).
+                file: c.file.clone(),
+                line: c.line,
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);

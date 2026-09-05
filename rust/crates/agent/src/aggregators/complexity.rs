@@ -118,6 +118,8 @@ pub fn aggregate_with_threshold_cancellable<S: AgentStorageRead + ?Sized>(
         .map(|m| ComplexSymbolEvidence {
             symbol: m.symbol_name,
             file: m.file_path,
+            // ANCHORS-EVERYWHERE-1: line shares the SQLite `nodes` row with `file`.
+            line: m.line,
             complexity: m.complexity,
         })
         .collect();

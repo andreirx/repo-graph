@@ -298,6 +298,7 @@ mod tests {
             stable_key: key.to_string(),
             symbol_name: format!("sym::{key}"),
             file_path: Some(format!("src/{key}.rs")),
+            line: None,
             complexity,
         }
     }

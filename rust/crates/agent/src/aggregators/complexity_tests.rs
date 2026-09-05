@@ -308,6 +308,7 @@ fn empty_when_below_threshold() {
         stable_key: "k1".into(),
         symbol_name: "foo".into(),
         file_path: Some("foo.rs".into()),
+        line: None,
         complexity: 10, // Below default threshold of 20
     }]);
     let result = aggregate(&storage, "snap1", Budget::Small).unwrap();
@@ -320,6 +321,7 @@ fn emits_signal_when_above_threshold() {
         stable_key: "k1".into(),
         symbol_name: "complex_func".into(),
         file_path: Some("src/complex.rs".into()),
+        line: None,
         complexity: 25,
     }]);
     let result = aggregate(&storage, "snap1", Budget::Small).unwrap();
@@ -333,6 +335,7 @@ fn custom_threshold_works() {
         stable_key: "k1".into(),
         symbol_name: "moderate".into(),
         file_path: Some("mod.rs".into()),
+        line: None,
         complexity: 15,
     }]);
     // Default threshold (20) - should not emit
@@ -351,12 +354,14 @@ fn evidence_contains_top_complex_symbols() {
             stable_key: "k1".into(),
             symbol_name: "very_complex".into(),
             file_path: Some("a.rs".into()),
+            line: None,
             complexity: 50,
         },
         AgentComplexityMeasurement {
             stable_key: "k2".into(),
             symbol_name: "also_complex".into(),
             file_path: Some("b.rs".into()),
+            line: None,
             complexity: 30,
         },
     ]);
@@ -378,6 +383,7 @@ fn budget_trades_complexity_evidence_depth_small_subset_of_full() {
             stable_key: format!("k{i}"),
             symbol_name: format!("fn{i}"),
             file_path: Some(format!("src/f{i}.rs")),
+            line: None,
             complexity: 100 - i as u64, // descending → deterministic order
         })
         .collect();

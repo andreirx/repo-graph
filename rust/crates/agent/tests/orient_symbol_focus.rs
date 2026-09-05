@@ -39,6 +39,7 @@ fn symbol_resolves_by_stable_key() {
             stable_key: "r1:src/lib.rs:SYMBOL:parse".into(),
             kind: AgentFocusKind::Symbol,
             file: Some("src/lib.rs".into()),
+            line: None,
         },
     );
     // Seed symbol context.
@@ -88,6 +89,7 @@ fn symbol_resolves_by_exact_name_single_match() {
             stable_key: "r1:src/handler.rs:SYMBOL:handleRequest".into(),
             kind: AgentFocusKind::Symbol,
             file: Some("src/handler.rs".into()),
+            line: None,
         }],
     );
     // Seed context for that candidate.
@@ -143,16 +145,19 @@ fn symbol_name_multiple_matches_returns_ambiguous() {
                 stable_key: "r1:src/a.rs:SYMBOL:init".into(),
                 kind: AgentFocusKind::Symbol,
                 file: Some("src/a.rs".into()),
+                line: None,
             },
             AgentFocusCandidate {
                 stable_key: "r1:src/b.rs:SYMBOL:init".into(),
                 kind: AgentFocusKind::Symbol,
                 file: Some("src/b.rs".into()),
+                line: None,
             },
             AgentFocusCandidate {
                 stable_key: "r1:src/c.rs:SYMBOL:init".into(),
                 kind: AgentFocusKind::Symbol,
                 file: Some("src/c.rs".into()),
+                line: None,
             },
         ],
     );

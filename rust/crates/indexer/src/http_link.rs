@@ -255,6 +255,7 @@ mod tests {
             http_method: method.to_string(),
             route: route.map(str::to_string),
             source_file: format!("{uid}.rs"),
+            line: None,
             symbol_stable_key: format!("r:{uid}:FILE"),
             is_test: None,
             framework: None,

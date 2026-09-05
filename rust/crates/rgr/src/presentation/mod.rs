@@ -158,6 +158,24 @@ pub fn kv_line_indented(key: &str, value: &str) -> String {
     format!("  {}: {}\n", key, value)
 }
 
+/// ANCHORS-EVERYWHERE-1: the ONE `path:line` anchor formatter, uniform with `find`.
+///
+/// `Some(line)` with a POSITIVE line → `path:line`; `None` OR a non-positive line (`Some(0)`)
+/// → the bare `path`. It NEVER fabricates a line: an absent line renders no `:N` suffix, and a
+/// non-openable line (0 — source lines are 1-based, so `line_start = 0` is the DB's
+/// "no span" sentinel, never a real location) is treated as absence, NOT rendered as `:0`
+/// (STANDING HONESTY RULE — no `0`, no `1`). This is the single RENDER chokepoint: every
+/// symbol-level citation (explain header/symbols/callers/callees/candidates, orient complexity
+/// centers, boundary rows) passes through here, so no human surface can emit `path:0` even if a
+/// `Some(0)` slips past a read. Storage reads ALSO normalize `0`→`None` so JSON never serializes
+/// a false line (the DTO/wire chokepoint); this is the render-side twin of that rule.
+pub fn anchor(path: &str, line: Option<u64>) -> String {
+    match line {
+        Some(l) if l > 0 => format!("{path}:{l}"),
+        _ => path.to_string(),
+    }
+}
+
 /// Render a "next steps" section with suggested commands.
 ///
 /// Commands are rendered as bullet items. Returns empty string if no commands.
@@ -338,6 +356,25 @@ mod tests {
     }
 
     #[test]
+    fn anchor_renders_positive_line() {
+        assert_eq!(anchor("src/a.rs", Some(7)), "src/a.rs:7");
+    }
+
+    #[test]
+    fn anchor_omits_absent_line() {
+        assert_eq!(anchor("src/a.rs", None), "src/a.rs");
+    }
+
+    /// STANDING HONESTY RULE regression (review-0 blocking defect): a `Some(0)` line
+    /// (the DB "no span" sentinel — source lines are 1-based) MUST render the bare path,
+    /// NEVER `src/a.rs:0`. This is the single render chokepoint, so proving it here proves
+    /// no human surface can emit `:0`.
+    #[test]
+    fn anchor_omits_zero_sentinel_line() {
+        assert_eq!(anchor("src/a.rs", Some(0)), "src/a.rs");
+    }
+
+    #[test]
     fn display_severity_parse() {
         assert_eq!(DisplaySeverity::parse("high"), DisplaySeverity::High);
         assert_eq!(DisplaySeverity::parse("medium"), DisplaySeverity::Medium);
@@ -427,6 +464,7 @@ mod http_count_coherence {
                 http_method: r.method.to_string(),
                 route: r.route.map(str::to_string),
                 source_file: r.file.to_string(),
+                line: None,
                 is_test: None,
                 framework: None,
                 route_unknown_reason: None,
@@ -448,6 +486,7 @@ mod http_count_coherence {
                     protocol_family: Some("http".to_string()),
                     service_name: None,
                     file_path: Some(r.file.to_string()),
+                    line: None,
                     symbol_key: None,
                     confidence: 0.9,
                     basis: None,

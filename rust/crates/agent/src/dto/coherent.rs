@@ -737,6 +737,7 @@ mod tests {
             top_complex: vec![crate::dto::signal::ComplexSymbolEvidence {
                 symbol: "complex_fn".to_string(),
                 file: Some("src/a.ts".to_string()),
+                line: Some(10),
                 complexity: 40,
             }],
         })

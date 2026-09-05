@@ -470,6 +470,24 @@ pub struct SurfacesShowResponse {
     pub evidence: Vec<SurfaceEvidence>,
 }
 
+/// ANCHORS-EVERYWHERE-1 (Tier 2): extract the evidence anchor line from a surface-evidence
+/// payload WITHOUT a schema column. Some detectors already store `lineStart` inside
+/// `payload_json` (today: the Express `route_registration` evidence written in
+/// `repo-index/src/compose.rs`). Returns `None` — the honest "no line" path, rendered as a bare
+/// `path` by [`anchor`](super::anchor) — when the payload is absent, has no `lineStart`, or
+/// `lineStart` is not a non-negative JSON integer (`as_u64` also rejects negatives and floats).
+/// A stored `0` (the DB "no span" sentinel) surfaces as `Some(0)` and is likewise rendered bare
+/// by `anchor`. The `?`/`as_u64` chain is optional-field extraction, NOT fallible-read
+/// suppression: a genuinely absent field must render no line (STANDING HONESTY RULE #1).
+///
+/// Abstraction record — free fn `evidence_line`; sole current user: `SurfacesShowResponse::
+/// render_human`'s evidence loop; axis: none (single call site) — extracted only for the
+/// present/absent/zero/negative unit coverage the reviewer required; rejected simpler: inlining
+/// the chain (loses the focused test seam).
+fn evidence_line(payload: Option<&serde_json::Value>) -> Option<u64> {
+    payload?.get("lineStart")?.as_u64()
+}
+
 impl SurfacesShowResponse {
     /// Render as human-readable text.
     pub fn render_human(&self) -> String {
@@ -550,10 +568,19 @@ impl SurfacesShowResponse {
             });
 
             for ev in &evidence {
-                let path = ev.source_path.as_deref().unwrap_or("-");
+                // ANCHORS-EVERYWHERE-1 (Tier 2): if the evidence's OWN payload already carries a
+                // line (`payload_json.lineStart`, written today by the Express route detector in
+                // repo-index/src/compose.rs), anchor the source as `path:line` — same shape as
+                // `find`, no schema column. The line and `source_path` come from the SAME evidence
+                // record (single-source). Absent path → "-" and never anchored; absent/malformed/
+                // non-positive line → bare path (enforced by `evidence_line` + `anchor`).
+                let rendered_path = match ev.source_path.as_deref() {
+                    Some(sp) => super::anchor(sp, evidence_line(ev.payload.as_ref())),
+                    None => "-".to_string(),
+                };
                 out.push_str(&format!(
                     "  {}  {}  {:.2}\n",
-                    ev.evidence_kind, path, ev.confidence
+                    ev.evidence_kind, rendered_path, ev.confidence
                 ));
             }
         }
@@ -711,6 +738,7 @@ mod tests {
             http_method: "POST".to_string(),
             route: Some("/api/v2/etape".to_string()),
             source_file: "serverless/api.ts".to_string(),
+            line: None,
             ..Default::default()
         }];
         let output = resp.render_human();
@@ -738,6 +766,7 @@ mod tests {
                 http_method: "GET".to_string(),
                 route: Some("/api/a".to_string()),
                 source_file: "backend/A.java".to_string(),
+                line: None,
                 ..Default::default()
             },
             HttpBoundarySurfaceEntry {
@@ -745,6 +774,7 @@ mod tests {
                 http_method: "POST".to_string(),
                 route: Some("/api/b".to_string()),
                 source_file: "backend/B.java".to_string(),
+                line: None,
                 ..Default::default()
             },
         ];
@@ -1105,6 +1135,97 @@ mod tests {
         assert!(
             express_pos < pkg_pos,
             "Evidence should be sorted by (kind, path)"
+        );
+    }
+
+    // -- ANCHORS-EVERYWHERE-1 (Tier 2): evidence payload line rendering --
+
+    fn show_with_evidence(payload: Option<serde_json::Value>) -> SurfacesShowResponse {
+        let mut resp = sample_show_response();
+        resp.evidence = vec![SurfaceEvidence {
+            source_type: "code_detection".to_string(),
+            source_path: Some("src/routes.ts".to_string()),
+            evidence_kind: "route_registration".to_string(),
+            confidence: 0.9,
+            payload,
+        }];
+        resp
+    }
+
+    #[test]
+    fn evidence_line_extracts_positive_line_start() {
+        // Present positive `lineStart` in the payload → the extracted anchor line.
+        let payload = serde_json::json!({ "method": "GET", "lineStart": 42 });
+        assert_eq!(evidence_line(Some(&payload)), Some(42));
+    }
+
+    #[test]
+    fn evidence_line_is_none_when_absent_missing_negative_or_noninteger() {
+        // Absent payload, missing field, negative, and non-integer all → None, so the renderer
+        // emits a bare path (STANDING HONESTY RULE #1 — no invented line). NOTE: a stored `0`
+        // is NOT in this set — it returns `Some(0)` here and is suppressed downstream by
+        // `anchor()` (see `evidence_line_zero_returns_some_zero` and the render-level test).
+        assert_eq!(evidence_line(None), None);
+        assert_eq!(
+            evidence_line(Some(&serde_json::json!({ "path": "/x" }))),
+            None
+        );
+        // `as_u64` rejects negatives and non-integers.
+        assert_eq!(
+            evidence_line(Some(&serde_json::json!({ "lineStart": -3 }))),
+            None
+        );
+        assert_eq!(
+            evidence_line(Some(&serde_json::json!({ "lineStart": "12" }))),
+            None
+        );
+    }
+
+    #[test]
+    fn evidence_line_zero_returns_some_zero() {
+        // A stored `0` is a real (if degenerate) `as_u64` value: `evidence_line` returns
+        // `Some(0)` — it does NOT filter the zero sentinel. Suppression of `:0` is the
+        // single responsibility of `anchor()` (asserted at render level in
+        // `show_render_evidence_zero_line_is_bare_path`). This test pins that division of
+        // labor so the misnaming corrected in review-2 iteration 3 cannot silently return.
+        assert_eq!(
+            evidence_line(Some(&serde_json::json!({ "lineStart": 0 }))),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn show_render_evidence_anchors_present_line() {
+        let resp = show_with_evidence(Some(serde_json::json!({ "lineStart": 42 })));
+        let output = resp.render_human();
+        assert!(
+            output.contains("src/routes.ts:42"),
+            "evidence with a payload lineStart anchors path:line:\n{output}"
+        );
+    }
+
+    #[test]
+    fn show_render_evidence_absent_line_is_bare_path() {
+        let resp = show_with_evidence(None);
+        let output = resp.render_human();
+        assert!(
+            output.contains("src/routes.ts") && !output.contains("src/routes.ts:"),
+            "absent line renders a bare path, never `:N`:\n{output}"
+        );
+    }
+
+    #[test]
+    fn show_render_evidence_zero_line_is_bare_path() {
+        // The "no span" sentinel (0) must NOT render as `:0`.
+        let resp = show_with_evidence(Some(serde_json::json!({ "lineStart": 0 })));
+        let output = resp.render_human();
+        assert!(
+            !output.contains("src/routes.ts:0"),
+            "zero lineStart must never render `:0`:\n{output}"
+        );
+        assert!(
+            output.contains("src/routes.ts"),
+            "path still rendered:\n{output}"
         );
     }
 }

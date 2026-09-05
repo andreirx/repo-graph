@@ -401,3 +401,46 @@ fn rendered_numbers_are_budget_invariant_length_is_monotonic() {
         "small must render shorter than full (budget really trades depth): {lens:?}"
     );
 }
+
+/// ANCHORS-EVERYWHERE-1 (§4): the orient complexity BREAKDOWN row (SYMBOL-level `file — symbol`)
+/// anchors `file:line` when a line is present, and renders the bare file when absent (never a
+/// fabricated line). The file-deduped HEADLINE (`Complexity centers:`) stays unanchored — a file
+/// rollup spans many symbols and has no single line.
+#[test]
+fn complexity_breakdown_anchors_line_headline_stays_unanchored() {
+    use serde_json::json;
+    let mut r = nginx_like();
+    // Two centers in the SAME file (so the headline dedups to one file rollup): one carries a
+    // line, one does not.
+    let top = json!([
+        {"symbol": "hot", "file": "src/a.c", "line": 42, "complexity": 40},
+        {"symbol": "warm", "file": "src/a.c", "complexity": 30}
+    ]);
+    for leaf in &mut r.signals {
+        if leaf.value.code == "HIGH_COMPLEXITY" {
+            leaf.value.evidence = Some(json!({
+                "high_complexity_count": 2, "threshold": 20, "top_complex": top
+            }));
+        }
+    }
+    let out = r.render_human(OrientDepth::Medium);
+    // Breakdown: the symbol WITH a line anchors `file:line — symbol`.
+    assert!(
+        out.contains("src/a.c:42 — hot (cx 40)"),
+        "breakdown row anchors file:line:\n{out}"
+    );
+    // The symbol WITHOUT a line renders the bare file (no fabricated anchor).
+    assert!(
+        out.contains("src/a.c — warm (cx 30)"),
+        "breakdown row without a line renders bare file:\n{out}"
+    );
+    // The dense HEADLINE names the file rollup WITHOUT a line.
+    assert!(
+        out.contains("Complexity centers: src/a.c (cx 40)"),
+        "file-rollup headline is unanchored:\n{out}"
+    );
+    assert!(
+        !out.contains("Complexity centers: src/a.c:42"),
+        "the headline must not pick one symbol's line for the file rollup:\n{out}"
+    );
+}

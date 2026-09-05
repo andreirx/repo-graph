@@ -234,6 +234,10 @@ fn unified_row_to_entry_json(r: &UnifiedHttpSurface) -> serde_json::Value {
         "direction": r.direction,
         "protocolFamily": "http",
         "sourceFile": r.source_file,
+        // ANCHORS-EVERYWHERE-1: additive `lineStart`. Carried in the boundaries-list JSON
+        // for machine consumers; the HUMAN grouped view (file × direction ×N) never renders
+        // a line on a group headline (a group spans many rows / lines — never pick one).
+        "lineStart": r.line,
         "surface_display_name": display,
     });
     TestComposition::from_is_test_fact(r.is_test, &r.source_file).write_json(&mut entry);
@@ -303,6 +307,7 @@ mod tests {
             http_method: method.to_string(),
             route: route.map(str::to_string),
             source_file: file.to_string(),
+            line: None,
             is_test: None,
             framework: None,
             route_unknown_reason: None,

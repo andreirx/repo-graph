@@ -304,6 +304,9 @@ pub struct AgentComplexityMeasurement {
     pub symbol_name: String,
     /// Owning file path (if resolvable).
     pub file_path: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the symbol's `nodes.line_start` (same row as
+    /// `file_path`), for the `path:line` anchor. `None` when unresolved/no stored line.
+    pub line: Option<u64>,
     /// The cyclomatic complexity value.
     pub complexity: u64,
 }
@@ -470,6 +473,12 @@ pub struct AgentFocusCandidate {
     pub stable_key: String,
     pub kind: AgentFocusKind,
     pub file: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the candidate's `nodes.line_start` (same SQLite
+    /// row as `file`), for the `path:line` anchor on ambiguous matches. `None` on the
+    /// LiveGraph-served path (its `file` is key-derived — no same-source line), never a
+    /// mixed-source pair. The focus-resolution cert compares only {key,kind,file}, so
+    /// this field does not participate in the LiveGraph↔SQLite parity verdict.
+    pub line: Option<u64>,
 }
 
 /// Result of resolving a path-based focus string against the
@@ -524,6 +533,9 @@ pub struct AgentCallerRow {
     pub stable_key: String,
     pub name: String,
     pub file: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the caller's `nodes.line_start` (same row as
+    /// `file`), for the `path:line` anchor. `None` when the node has no stored line.
+    pub line: Option<u64>,
     pub module_path: Option<String>,
     pub module_stable_key: Option<String>,
 }
@@ -535,6 +547,9 @@ pub struct AgentCalleeRow {
     pub stable_key: String,
     pub name: String,
     pub file: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the callee's `nodes.line_start` (same row as
+    /// `file`), for the `path:line` anchor. `None` when the node has no stored line.
+    pub line: Option<u64>,
     pub module_path: Option<String>,
     pub module_stable_key: Option<String>,
 }

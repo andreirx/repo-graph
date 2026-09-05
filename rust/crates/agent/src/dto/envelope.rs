@@ -75,6 +75,16 @@ pub struct FocusCandidate {
     pub file: Option<String>,
     pub kind: ResolvedKind,
 
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the candidate's start line, for the `path:line`
+    /// anchor on ambiguous matches. Populated from the SAME SQLite row as `file`
+    /// (`resolve_symbol_name`/`resolve_stable_key_focus`). On a LiveGraph-served
+    /// candidate `file` is derived from the key string (no same-source line), so `line`
+    /// stays `None` there — never a mixed-source pair (STANDING HONESTY RULE #2). Absent
+    /// on a semantic candidate. `skip_serializing_if` keeps deterministic/semantic JSON
+    /// byte-identical when no line is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
+
     // ── additive, semantic-only fields (absent on deterministic candidates) ──
     /// Always `"embedding"` on a semantic candidate (I2). Absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]

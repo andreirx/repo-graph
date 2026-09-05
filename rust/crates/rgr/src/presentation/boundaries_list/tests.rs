@@ -33,6 +33,7 @@ fn sample_list_response() -> BoundariesListResponse {
                 protocol_family: Some("REST".to_string()),
                 service_name: Some("UserService".to_string()),
                 file_path: Some("src/api/client.ts".to_string()),
+                line: None,
                 symbol_key: None,
                 confidence: 0.9,
                 basis: Some("pattern".to_string()),
@@ -49,6 +50,7 @@ fn sample_list_response() -> BoundariesListResponse {
                 protocol_family: Some("SQL".to_string()),
                 service_name: None,
                 file_path: Some("src/db/pool.ts".to_string()),
+                line: None,
                 symbol_key: Some("DbPool.query".to_string()),
                 confidence: 0.8,
                 basis: Some("import".to_string()),
@@ -116,6 +118,7 @@ fn list_render_headline_counts_groups_not_rows() {
         protocol_family: Some("http".to_string()),
         service_name: None,
         file_path: Some("src/app/api/x/route.ts".to_string()),
+        line: None,
         symbol_key: None,
         confidence: 0.9,
         basis: None,
@@ -174,6 +177,7 @@ fn list_render_groups_duplicate_rows_with_count() {
         protocol_family: Some("http".to_string()),
         service_name: None,
         file_path: Some("src/app/api/x/route.ts".to_string()),
+        line: None,
         symbol_key: None,
         confidence: 0.9,
         basis: None,
@@ -211,6 +215,7 @@ fn list_render_summarizes_methods_routes_per_file_direction() {
         protocol_family: Some("http".to_string()),
         service_name: None,
         file_path: Some("src/app/api/x/route.ts".to_string()),
+        line: None,
         symbol_key: None,
         confidence: 0.9,
         basis: None,
@@ -244,6 +249,7 @@ fn entry(uid: &str, file: &str, kind: &str, composition: &str) -> BoundaryListEn
         protocol_family: Some("amqp".to_string()),
         service_name: None,
         file_path: Some(file.to_string()),
+        line: None,
         symbol_key: None,
         confidence: 0.9,
         basis: None,
@@ -442,4 +448,25 @@ fn list_render_shows_filter() {
     resp.filter_kind = Some("http_client".to_string());
     let output = resp.render_human();
     assert!(output.contains("Filtered by: kind=http_client"));
+}
+
+/// ANCHORS-EVERYWHERE-1 (§4): the `boundaries list` GROUPED view (file × direction ×N) never
+/// renders a line — a group spans many rows/lines and has no single line. Even when every entry
+/// carries a `line`, the human output contains no `file:line` anchor (the line rides only in the
+/// JSON for machine consumers; the anchor lands on `surfaces list` rows / `boundaries show`).
+#[test]
+fn grouped_headline_never_carries_a_line() {
+    let mut resp = sample_list_response();
+    for e in &mut resp.results {
+        e.line = Some(123);
+    }
+    let out = resp.render_human();
+    assert!(
+        !out.contains(":123"),
+        "grouped boundaries headline must not render a line:\n{out}"
+    );
+    assert!(
+        !out.contains("client.ts:") && !out.contains("pool.ts:"),
+        "no `file:line` anchor on a grouped row:\n{out}"
+    );
 }

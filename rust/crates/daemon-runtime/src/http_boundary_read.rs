@@ -106,6 +106,8 @@ fn read_boundary_inputs(
             http_method: s.http_method,
             route: s.route,
             source_file: s.source_file,
+            // ANCHORS-EVERYWHERE-1: the boundary family carries the stored line.
+            line: s.line,
             is_test: s.is_test,
             framework: s.framework,
             route_unknown_reason: s.route_unknown_reason,
@@ -194,6 +196,10 @@ fn project_surface_to_input(
         http_method: method,
         route,
         source_file,
+        // ANCHORS-EVERYWHERE-1: the legacy project_surfaces family carries no line_start in
+        // scope for this slice → None (honest absence, back-filled from the boundary family
+        // on a dedup merge; never fabricated).
+        line: None,
         is_test,
         framework,
         route_unknown_reason: None,
@@ -299,6 +305,8 @@ fn unified_to_json(rows: &[UnifiedHttpSurface]) -> Vec<serde_json::Value> {
                 "httpMethod": r.http_method,
                 "route": r.route,
                 "sourceFile": r.source_file,
+                // ANCHORS-EVERYWHERE-1: additive `lineStart` for the individual-row anchor.
+                "lineStart": r.line,
                 "isTest": r.is_test,
                 "framework": r.framework,
                 "routeUnknownReason": r.route_unknown_reason,
@@ -406,6 +414,8 @@ fn count_http_links_over_unified(unified: &[UnifiedHttpSurface]) -> usize {
             http_method: r.http_method.clone(),
             route: r.route.clone(),
             source_file: r.source_file.clone(),
+            // ANCHORS-EVERYWHERE-1: carried for fidelity; the matcher ignores it.
+            line: r.line,
             symbol_stable_key: String::new(),
             is_test: r.is_test,
             framework: r.framework.clone(),
@@ -428,6 +438,7 @@ mod tests {
             http_method: method.to_string(),
             route: route.map(|r| r.to_string()),
             source_file: "f.rs".to_string(),
+            line: None,
             symbol_stable_key: "k".to_string(),
             is_test: None,
             framework: None,
@@ -530,6 +541,7 @@ mod tests {
             http_method: "GET".to_string(),
             route: Some("/api/x".to_string()),
             source_file: file.to_string(),
+            line: None,
             is_test: None,
             framework: Some("express".to_string()),
             route_unknown_reason: None,

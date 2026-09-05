@@ -309,6 +309,15 @@ recovered; vcmi CGHeroInstance → SYMBOL:CLASS (DLL_LINKAGE no longer a name); 
 DB → SYMBOL:CLASS; `--text fsync` → [method PosixWritableFile::SyncFd]. One reindex key
 transition (~813 vcmi, 23 leveldb defs); openxcom byte-stable. Single file +766/−83; 80
 crate tests; gates ALL GREEN; approved review-2.
+SHIPPED: ANCHORS-EVERYWHERE-1 (2026-09-05, human directive "line numbers everywhere"):
+one shared `path:line` formatter; Tier 0 (explain header + Symbols, line already on the
+wire); Tier 1 (explain callers/callees/candidates + orient complexity centers via
+SQLite-paired file+line reads; boundaries rows through four structs, grouped headlines
+never anchored); Tier 2 (surfaces show renders `payload_json.lineStart` — it WAS stored;
+malformed payload surfaced, never silently bare). LiveGraph rebuild keeps SQLite
+file+line together while swapping only the name (single-source invariant asserted).
+Growth 0.8–3.4%, anchor suffixes only. Reviewer spot-checked leveldb/FRAKTAG anchors
+against source. 42 files +1,015/−87; gates ALL GREEN; approved review-4.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

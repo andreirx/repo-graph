@@ -39,6 +39,12 @@ pub struct HttpSurfaceRow {
     pub route: Option<String>,
     /// Source file (for evidence).
     pub source_file: String,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's start line
+    /// (`boundary_interaction_surfaces.line_start`), for the `path:line` anchor on
+    /// individual boundary/surface rows. Carried on the SAME read that feeds linking +
+    /// rendering (no parallel SQL). `None` when the store has no line (never fabricated).
+    /// The matcher IGNORES it; it is a presentation label like `is_test`.
+    pub line: Option<u64>,
     /// Surface symbol stable key (for provenance).
     pub symbol_stable_key: String,
     /// HTTP-SURFACE-COHERENCE-1 §2.5 — presentation labels the matcher IGNORES.
@@ -222,6 +228,7 @@ mod tests {
             http_method: method.to_string(),
             route: route.map(|s| s.to_string()),
             source_file: file.to_string(),
+            line: None,
             symbol_stable_key: format!("r:{}:FILE", file),
             is_test: None,
             framework: None,

@@ -54,11 +54,36 @@ fn cycle_involves_path_focus_matches_prefix() {
 
 // ── rebuild_identity_rows: the callgraph value-rebuild join (LG names + SQLite module/order) ──
 
-fn row(key: &str, name: &str, module: Option<&str>) -> (String, String, Option<String>) {
+/// ANCHORS-EVERYWHERE-1: the rebuild tuple is now `(key, name, module, file, line)`. This
+/// helper defaults file/line to `None`; [`row_anchored`] pins a specific SQLite file+line.
+fn row(
+    key: &str,
+    name: &str,
+    module: Option<&str>,
+) -> (String, String, Option<String>, Option<String>, Option<u64>) {
     (
         key.to_string(),
         name.to_string(),
         module.map(str::to_string),
+        None,
+        None,
+    )
+}
+
+/// A SQLite base row carrying a concrete file + line (the anchor pair).
+fn row_anchored(
+    key: &str,
+    name: &str,
+    module: Option<&str>,
+    file: &str,
+    line: u64,
+) -> (String, String, Option<String>, Option<String>, Option<u64>) {
+    (
+        key.to_string(),
+        name.to_string(),
+        module.map(str::to_string),
+        Some(file.to_string()),
+        Some(line),
     )
 }
 
@@ -74,6 +99,23 @@ fn rebuild_swaps_in_live_name_keeps_sqlite_module_and_order() {
     // SQL order preserved; `a` gets the LIVE name; `b` falls back to the SQLite name; modules SQLite.
     assert_eq!(out[0], row("a", "liveA", Some("modA")));
     assert_eq!(out[1], row("b", "sqlB", None));
+}
+
+/// ANCHORS-EVERYWHERE-1 source-of-truth (STANDING HONESTY RULE #2): on the LiveGraph rebuild
+/// path the NAME is swapped to the live IR value, but `file` AND `line` MUST stay the SQLite
+/// base pair — never a live-IR name spliced onto a foreign/absent line. This pins that the
+/// anchor pair survives the name swap unchanged.
+#[test]
+fn rebuild_keeps_sqlite_file_and_line_while_swapping_name() {
+    let live: BTreeMap<String, Option<String>> =
+        BTreeMap::from([("a".to_string(), Some("liveA".to_string()))]);
+    let sqlite = vec![row_anchored("a", "staleA", Some("modA"), "src/a.ts", 42)];
+    let out = rebuild_identity_rows(&live, 1, &sqlite).expect("sets match -> rebuilt");
+    // name is the LIVE value; file + line are the ORIGINAL SQLite pair (single source).
+    assert_eq!(
+        out[0],
+        row_anchored("a", "liveA", Some("modA"), "src/a.ts", 42)
+    );
 }
 
 #[test]

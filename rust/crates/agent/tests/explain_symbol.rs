@@ -18,6 +18,7 @@ fn seed_symbol_repo(fake: &mut FakeAgentStorage) {
             stable_key: "r1:src/service.ts:MyService:SYMBOL".into(),
             kind: AgentFocusKind::Symbol,
             file: Some("src/service.ts".into()),
+            line: None,
         }],
     );
 
@@ -145,6 +146,7 @@ fn explain_symbol_callers_truncated_when_exceeding_cap() {
             stable_key: format!("r1:src/c{}.ts:fn{}:SYMBOL", i, i),
             name: format!("fn{}", i),
             file: Some(format!("src/c{}.ts", i)),
+            line: None,
             module_path: Some("src/callers".into()),
             module_stable_key: None,
         })

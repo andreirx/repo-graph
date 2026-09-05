@@ -688,6 +688,12 @@ pub struct ComplexSymbolEvidence {
     pub symbol: String,
     /// Owning file path.
     pub file: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the symbol's start line, from the SAME SQLite
+    /// `nodes` row the complexity query already joins for `file` (`n.line_start`).
+    /// Absent → no line rendered (never a fabricated 0/1). Rendered only on the
+    /// SYMBOL-level breakdown row, not the file-deduped headline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
     /// Cyclomatic complexity value.
     pub complexity: u64,
 }
@@ -790,6 +796,15 @@ pub struct ExplainCallerItem {
     pub stable_key: String,
     pub name: String,
     pub module: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the caller's own file + start line, for the
+    /// `path:line` anchor. Both come from the SAME SQLite `nodes`/`files` row
+    /// (`find_symbol_callers`); on the LiveGraph rebuild path the NAME is recomputed
+    /// from the live IR but `file`/`line` stay this SQLite pair (STANDING HONESTY
+    /// RULE #2 — a citation's file+line share one source). Absent → no line rendered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -808,6 +823,12 @@ pub struct ExplainCalleeItem {
     pub stable_key: String,
     pub name: String,
     pub module: Option<String>,
+    /// ANCHORS-EVERYWHERE-1 (Tier 1): the callee's own file + start line — same
+    /// single-source contract as [`ExplainCallerItem`]. Absent → no line rendered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

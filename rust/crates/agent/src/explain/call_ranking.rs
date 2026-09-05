@@ -95,6 +95,7 @@ mod tests {
             stable_key: key.to_string(),
             name: name.to_string(),
             file: None,
+            line: None,
             module_path: module.map(str::to_string),
             module_stable_key: module.map(|m| format!("repo:{m}:MODULE")),
         }
