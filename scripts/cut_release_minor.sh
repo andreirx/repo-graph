@@ -50,6 +50,11 @@ echo ""
 echo "=== Bumping minor version ==="
 "$SCRIPT_DIR/bump_version_minor.sh"
 
+# Re-resolve workspace member versions into Cargo.lock NOW — the bump edits Cargo.toml
+# only; without this the lock's version stamps are stale at commit time and the release
+# build dirties it afterwards (bitten v0.16.0, 2026-09-04). Offline: no dependency change.
+(cd "$REPO_ROOT/rust" && cargo update --workspace --offline)
+
 # Get new version
 VERSION=$(grep -A10 '^\[workspace\.package\]' "$CARGO_TOML" | grep '^version = "' | sed 's/version = "\(.*\)"/\1/')
 TAG="v${VERSION}"
