@@ -352,6 +352,13 @@ test fixtures on the stored is_test fact (vscode 99/9 → `54 (3 providers / 51 
 orient == check `1909 files indexed`). Operator close-out after a 3-cycle checkpoint with
 the diff reviewed sound and only evidence unrecorded; operator gates + live proof on the
 retained root. Minor carried: `1 owned files` plural.
+NAMED FOLLOW-UP (2026-09-05, DAEMON-RESIDUALS-1 ruling D1): **ENRICH-GUARD-1** — the enrich
+pass holds the DB write mutex AND the repo coordinator's refresh guard for its entire
+duration (rust-analyzer resolution included), so every same-DB foreground request waits
+unboundedly (the assess 301 s hang: assess takes the write mutex FIRST). D1-A (bounded
+patience + named Busy on both layers) ships in DAEMON-RESIDUALS-1; the deeper fix —
+resolve without holding either exclusive guard, acquire both only for a verified atomic
+promotion — needs its own slice because it touches promotion atomicity.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
