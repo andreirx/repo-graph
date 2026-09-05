@@ -125,6 +125,7 @@ fn file_focus_does_not_emit_import_cycles() {
             modules: vec!["src/core".into(), "src/adapters".into()],
             test_composition: None,
             type_only: None,
+            walk: None,
         }],
     );
     let result = orient(

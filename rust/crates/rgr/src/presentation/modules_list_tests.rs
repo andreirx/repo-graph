@@ -101,39 +101,39 @@ fn list_render_file_count_is_total_with_test_subset() {
     let resp = sample_list_response();
     let output = resp.render_human();
     assert!(
-        output.contains("110 files (10 test)"),
+        output.contains("110 owned files (10 test)"),
         "total headline (100 non-test + 10 test) with test as subset:\n{output}"
     );
     assert!(
-        !output.contains("100 files"),
+        !output.contains("100 owned files"),
         "the non-test count must NOT be the headline (the addend defect):\n{output}"
     );
     // The zero-test module renders the bare total, no clause.
     assert!(
-        output.contains("20 files"),
+        output.contains("20 owned files"),
         "zero-test module bare total:\n{output}"
     );
 }
 
-/// Sum the per-module file TOTALS a reader sees on the `modules list` rows — the `<N> files`
+/// Sum the per-module file TOTALS a reader sees on the `modules list` rows — the `<N> owned files`
 /// headline of each row (NOT the `(M test)` subset, NOT the edge-list `file-level import` counts).
-/// `split_whitespace` collapses the `{:>20}` column padding; the only `… files` tokens are the row
-/// headlines (`format_files_compact` always renders a plain integer directly before `files`; the
-/// caveat/edge/note lines never render a bare `<int> files`).
+/// `split_whitespace` collapses the `{:>20}` column padding; the only `<N> owned files` triples are
+/// the row headlines (COHERENCE-3 §2.3: `format_files_compact` renders `<int> owned files`; the
+/// caveat/edge/note lines never render that basis-named triple).
 ///
-/// review-1 #2: the parse is STRICT — a `<tok> files` whose `tok` is not a `usize` PANICS the test
-/// with a diagnostic. `.ok()` would silently drop a malformed headline from the sum, so the
+/// review-1 #2: the parse is STRICT — a `<tok> owned files` whose `tok` is not a `usize` PANICS the
+/// test with a diagnostic. `.ok()` would silently drop a malformed headline from the sum, so the
 /// reconciliation could pass while under-counting the very total it is meant to pin. Failing loudly
 /// keeps the seam honest (STANDING HONESTY RULE #1: never swallow a fallible classified read).
 fn sum_rendered_file_totals(output: &str) -> usize {
     let toks: Vec<&str> = output.split_whitespace().collect();
-    toks.windows(2)
-        .filter(|w| w[1] == "files")
+    toks.windows(3)
+        .filter(|w| w[1] == "owned" && w[2] == "files")
         .map(|w| {
             w[0].parse::<usize>().unwrap_or_else(|e| {
                 panic!(
-                    "malformed `<N> files` row headline: token {:?} before `files` is not a count \
-                     ({e}); a silently-dropped headline would weaken the check reconciliation:\n{output}",
+                    "malformed `<N> owned files` row headline: token {:?} before `owned files` is not \
+                     a count ({e}); a silently-dropped headline would weaken the check reconciliation:\n{output}",
                     w[0]
                 )
             })
@@ -193,10 +193,10 @@ fn modules_list_rendered_file_totals_sum_to_the_check_indexed_basis() {
 
     let output = resp.render_human();
 
-    // Each row is total-inclusive with the test count as a subset.
-    assert!(output.contains("110 files (10 test)"), "{output}");
-    assert!(output.contains("20 files"), "{output}");
-    assert!(output.contains("100 files (50 test)"), "{output}");
+    // Each row is total-inclusive with the test count as a subset, basis named (COHERENCE-3 §2.3).
+    assert!(output.contains("110 owned files (10 test)"), "{output}");
+    assert!(output.contains("20 owned files"), "{output}");
+    assert!(output.contains("100 owned files (50 test)"), "{output}");
 
     // The SUM of what the reader sees reconciles with the check indexed-file basis (230), NOT the
     // old addend basis (170). This is the reconciliation the addend defect broke.

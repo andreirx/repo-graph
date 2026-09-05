@@ -138,7 +138,7 @@ pub(super) fn nginx_like() -> OrientResponse {
             "IMPORT_CYCLES",
             "medium",
             "3 import cycles detected at the module level.",
-            json!({ "cycle_count": 3, "cycles": [{"length": 3, "modules": ["http", "core", "event"]}] }),
+            json!({ "cycle_count": 3, "cycles": [{"length": 3, "modules": ["http", "core", "event"], "walk": ["http", "core", "event"]}] }),
         ),
     ];
     r.trust_briefing = Some(TrustOverlay {
@@ -408,7 +408,7 @@ fn small_structure_line_names_modules() {
     let out = nginx_like().render_human(OrientDepth::Small);
     assert!(
         out.contains(
-            "nginx · 397 files, 5000 symbols · 6 package groups: http, core, event, os, stream, mail · 6 modules"
+            "nginx · 397 files indexed, 5000 symbols · 6 package groups: http, core, event, os, stream, mail · 6 modules"
         ),
         "small must NAME the package groups + label the module count:\n{out}"
     );
@@ -855,12 +855,14 @@ fn budget_trades_depth_small_subset_of_full() {
         full.contains("Package groups (directory/package topology"),
         "full adds the topology breakdown:\n{full}"
     );
-    assert!(full.contains("http — 89 files"), "{full}");
+    // COHERENCE-3 §2.3: package-group rows name their basis (files IN the group).
+    assert!(full.contains("http — 89 files in group"), "{full}");
     assert!(
         full.contains("Modules (declared/inferred, by size)"),
         "full adds the labelled module breakdown:\n{full}"
     );
-    assert!(full.contains("src/http — 89 files"));
+    // COHERENCE-3 §2.3: module rows name their basis (owned files), matching `modules list`.
+    assert!(full.contains("src/http — 89 owned files"));
     assert!(
         full.contains("Degradation"),
         "full expands per-axis reliability"
@@ -938,10 +940,12 @@ fn honesty_named_facts_are_extracted_no_dead_claim() {
     );
 }
 
-// ── Cycle anchor formatting (preserved behavior) ────────────────
+// ── Cycle anchor: the REAL walk (COHERENCE-3 §2.1) ──────────────
 
 #[test]
 fn cycle_anchor_full_chain_for_small_cycle() {
+    // COHERENCE-3: the anchor renders the REAL walk carried on the `walk` leaf (the SAME the
+    // `cycles` command draws), closing the ring, NOT a ring fabricated from the member set.
     let mut r = minimal_response();
     r.signals = vec![sig(
         "IMPORT_CYCLES",
@@ -949,11 +953,96 @@ fn cycle_anchor_full_chain_for_small_cycle() {
         "1 import cycle detected.",
         serde_json::json!({
             "cycle_count": 1,
-            "cycles": [{ "length": 4, "modules": ["Auth", "User", "Session", "Config"] }]
+            "cycles": [{ "length": 4, "modules": ["Auth", "User", "Session", "Config"],
+                         "walk": ["Auth", "User", "Session", "Config"] }]
         }),
     )];
     let out = r.render_human(OrientDepth::Small);
     assert!(out.contains("1 import cycle (Auth -> User -> Session -> Config -> Auth)"));
+}
+
+#[test]
+fn cycle_anchor_unordered_form_when_no_walk() {
+    // COHERENCE-3: absent `walk` (LiveGraph/focus/truncated/non-SQLite — exactly where `cycles`
+    // renders `members (unordered)`) ⇒ the honest unordered form "largest: N modules — rmap
+    // cycles", NEVER a fabricated ring from the sorted member set.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "1 import cycle detected.",
+        serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{ "length": 35, "modules": ["apps", "backends", "core"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("1 import cycle (largest: 35 modules — rmap cycles)"),
+        "no walk ⇒ the unordered size form, not a fabricated ring:\n{out}"
+    );
+    assert!(
+        !out.contains("->"),
+        "no fabricated arrows without a real walk:\n{out}"
+    );
+}
+
+#[test]
+fn cycle_anchor_one_element_walk_is_not_a_fabricated_self_ring() {
+    // COHERENCE-3 review-1 #1 (STANDING HONESTY RULE #1): a one-element `walk` is NOT a real ring
+    // (a real ring closes over ≥2 distinct members). The old `filter_map` rendered it as the
+    // fabricated self-cycle `Auth -> Auth`. It must now surface an explicit unreadable reason —
+    // never an invented arrow.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "1 import cycle detected.",
+        serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{ "length": 1, "modules": ["Auth"], "walk": ["Auth"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("1 import cycle (cycle walk unreadable on this snapshot — run `rmap cycles`)"),
+        "malformed one-element walk ⇒ explicit unreadable reason:\n{out}"
+    );
+    assert!(
+        !out.contains("Auth -> Auth"),
+        "no fabricated self-ring from a one-element walk:\n{out}"
+    );
+}
+
+#[test]
+fn cycle_anchor_non_string_walk_element_is_unreadable_not_dropped() {
+    // COHERENCE-3 review-1 #1: a non-string walk element is wire/schema DRIFT. The old
+    // `filter_map(as_str)` silently DROPPED it, turning `["A", 42]` into a one-element list and
+    // then the fabricated `A -> A`. Strict validation now surfaces the unknown with its reason —
+    // it must NOT drop the bad element nor draw a partial ring.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "1 import cycle detected.",
+        serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{ "length": 2, "modules": ["A", "B"], "walk": ["A", 42] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("1 import cycle (cycle walk unreadable on this snapshot — run `rmap cycles`)"),
+        "non-string walk element ⇒ explicit unreadable reason:\n{out}"
+    );
+    assert!(
+        !out.contains("A -> A"),
+        "the dropped-element fabrication must not appear:\n{out}"
+    );
+    assert!(
+        !out.contains("A -> B"),
+        "no partial ring drawn from a malformed walk:\n{out}"
+    );
 }
 
 #[test]
@@ -1046,7 +1135,8 @@ fn cycle_headline_unknown_only_when_no_test_only() {
 #[test]
 fn cycle_headline_falls_back_to_raw_total_without_split() {
     // On a serving path with no exclusion-aware split (LiveGraph/focus — `production_count`
-    // absent), orient renders the raw total exactly as before, WITH the example anchor.
+    // absent), orient renders the raw total. COHERENCE-3: that same path also carries NO `walk`,
+    // so the anchor is the honest unordered form — never a fabricated ring.
     let mut r = minimal_response();
     r.signals = vec![sig(
         "IMPORT_CYCLES",
@@ -1059,8 +1149,8 @@ fn cycle_headline_falls_back_to_raw_total_without_split() {
     )];
     let out = r.render_human(OrientDepth::Small);
     assert!(
-        out.contains("2 import cycles (core -> graph -> core)"),
-        "no split ⇒ raw total + anchor (unchanged):\n{out}"
+        out.contains("2 import cycles (largest: 2 modules — rmap cycles)"),
+        "no split, no walk ⇒ raw total + unordered form (no fabricated ring):\n{out}"
     );
     assert!(
         !out.contains("test-only"),
@@ -1077,7 +1167,8 @@ fn cycle_anchor_truncates_large_cycle() {
         "1 import cycle detected.",
         serde_json::json!({
             "cycle_count": 1,
-            "cycles": [{ "length": 10, "modules": ["A","B","C","D","E","F","G","H","I","J"] }]
+            "cycles": [{ "length": 10, "modules": ["A","B","C","D","E","F","G","H","I","J"],
+                         "walk": ["A","B","C","D","E","F","G","H","I","J"] }]
         }),
     )];
     let out = r.render_human(OrientDepth::Small);
@@ -1147,9 +1238,11 @@ fn wrapper_full_renders_dense_body_serving_block_and_degradation() {
         }"#;
     let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
     let out = render_orient_envelope(&env, OrientDepth::Full);
-    // Dense body: repo named in the structure line, cycle anchor rendered.
+    // Dense body: repo named in the structure line, cycle anchor rendered. COHERENCE-3: this is
+    // the LiveGraph wire shape (provenance `livegraph`) — no `walk` leaf — so orient renders the
+    // honest unordered form, not a fabricated ring.
     assert!(out.contains("my-app"));
-    assert!(out.contains("1 import cycle (http -> core -> http)"));
+    assert!(out.contains("1 import cycle (largest: 2 modules — rmap cycles)"));
     // Compressed reliability caveat (legacy fields → 78%), reader-frame.
     assert!(out.contains("Reliability: your code's calls 78% resolved"));
     // Full per-axis Degradation present at --full.
@@ -1885,6 +1978,145 @@ fn cross_surface_cycle_headlines_agree_unknown_present() {
     ]);
 }
 
+// ── COHERENCE-3 §2.1: cross-surface cycle-WALK seam ───────────────────────────────────────────
+//
+// The two REAL renderers — the `cycles` command's `render_cycle_body` and the `orient` leaf's
+// cycle anchor — MUST draw the SAME walk for one cycle. Both derive it from the ONE shared
+// `repo_graph_agent::find_cycle_walk` over the SAME (members, edges): `cycles` calls it client-
+// side; `orient` renders the walk the SQLite serving path precomputed with the SAME kernel (here
+// simulated by feeding the kernel's output on the `walk` leaf). If either surface fabricated a
+// ring from the member set instead, the sequences would diverge and these fail — disagreement is
+// otherwise unrepresentable, since there is exactly one walk kernel.
+
+/// A real single-cycle `CyclesResponse` carrying `members` (node_id, qualified display) and real
+/// `edges` (node_id pairs) — the SQLite `cycles` shape whose `render_cycle_body` walks the edges.
+fn seam_walk_cycles_response(
+    members: &[(&str, &str)],
+    edges: Option<&[(&str, &str)]>,
+) -> crate::presentation::cycles::CyclesResponse {
+    use crate::presentation::cycles::{Cycle, CycleEdge, CycleNode, CyclesResponse};
+    let cycle = Cycle {
+        nodes: members
+            .iter()
+            .map(|(id, disp)| CycleNode {
+                node_id: id.to_string(),
+                name: disp.to_string(),
+                qualified_name: Some(disp.to_string()),
+                file: None,
+            })
+            .collect(),
+        edges: edges.map(|es| {
+            es.iter()
+                .map(|(f, t)| CycleEdge {
+                    from_node_id: f.to_string(),
+                    to_node_id: t.to_string(),
+                })
+                .collect()
+        }),
+        edges_truncated: None,
+        test_composition: Some("production".to_string()),
+        test_composition_unknown_reason: None,
+        type_only: None,
+    };
+    CyclesResponse {
+        repo_uid: "repo_seam".to_string(),
+        display_name: Some("seam".to_string()),
+        snapshot_uid: "snap_seam".to_string(),
+        count: 1,
+        cycles: vec![cycle],
+        ts_type_only_caveat: false,
+        test_composition_note: None,
+    }
+}
+
+#[test]
+fn cross_surface_cycle_walk_agrees_ordered() {
+    // Real edges a->c->b->a; member order a,b,c. The shared kernel yields the ring a,c,b — the
+    // walk a->c->b->a, NOT the member-order ring a->b->c->a. BOTH surfaces must draw a->c->b->a.
+    let members = [("a", "a"), ("b", "b"), ("c", "c")];
+    let edges = [("a", "c"), ("c", "b"), ("b", "a")];
+    let ring = repo_graph_agent::find_cycle_walk(&members, &edges).expect("a walk closes");
+    assert_eq!(
+        ring,
+        vec!["a", "c", "b"],
+        "the shared kernel's ordered walk"
+    );
+
+    // cycles: the body walks the real edges.
+    let cycles_out = seam_walk_cycles_response(&members, Some(&edges)).render_human();
+    assert!(
+        cycles_out.contains("a -> c -> b -> a"),
+        "cycles draws the real walk:\n{cycles_out}"
+    );
+    assert!(
+        !cycles_out.contains("a -> b -> c -> a"),
+        "cycles must NOT draw the fabricated member-order ring:\n{cycles_out}"
+    );
+
+    // orient: the anchor renders the SAME walk the kernel produced (carried on the `walk` leaf).
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 1, "production_count": 1, "test_only_count": 0, "unknown_count": 0,
+            "cycles": [{ "length": 3, "modules": ["a", "b", "c"], "walk": ring }]
+        }),
+    )];
+    let orient_out = r.render_human(OrientDepth::Small);
+    assert!(
+        orient_out.contains("a -> c -> b -> a"),
+        "orient draws the SAME real walk:\n{orient_out}"
+    );
+    assert!(
+        !orient_out.contains("a -> b -> c -> a"),
+        "orient must NOT draw the fabricated member-order ring:\n{orient_out}"
+    );
+}
+
+#[test]
+fn cross_surface_cycle_walk_agrees_unordered_without_edges() {
+    // No carried edges (the LiveGraph route) → the shared kernel yields NO walk. `cycles` renders
+    // `members (unordered)`; `orient` renders the unordered size form. Neither draws a walk.
+    let members = [("a", "a"), ("b", "b"), ("c", "c")];
+    assert_eq!(
+        repo_graph_agent::find_cycle_walk(&members, &[]),
+        None,
+        "no edges ⇒ no walk from the shared kernel"
+    );
+
+    let cycles_out = seam_walk_cycles_response(&members, None).render_human();
+    assert!(
+        cycles_out.contains("members (unordered)"),
+        "cycles renders the unordered listing without edges:\n{cycles_out}"
+    );
+    assert!(
+        !cycles_out.contains("->"),
+        "cycles draws no arrows without a walk:\n{cycles_out}"
+    );
+
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{ "length": 3, "modules": ["a", "b", "c"] }]
+        }),
+    )];
+    let orient_out = r.render_human(OrientDepth::Small);
+    assert!(
+        orient_out.contains("largest: 3 modules — rmap cycles"),
+        "orient renders the unordered size form without a walk:\n{orient_out}"
+    );
+    assert!(
+        !orient_out.contains("->"),
+        "orient draws no arrows without a walk:\n{orient_out}"
+    );
+}
+
 // ── COHERENCE-2 §2.2: type-only verdict rendered IDENTICALLY by cycles AND orient ─────────────
 
 /// The JSON shape the daemon emits for a `CycleTypeOnly` verdict (mirrors the agent producer's
@@ -2012,6 +2244,7 @@ fn orient_malformed_type_only_leaf_renders_unavailable_not_panic() {
             "cycles": [{
                 "length": 2,
                 "modules": ["src/a", "src/b"],
+                "walk": ["src/a", "src/b"],
                 // A `kind` that matches NO CycleTypeOnly variant → serde decode fails at render time.
                 "type_only": { "kind": "not_a_real_variant", "type_only": 1, "of": 2 },
             }],
@@ -2057,6 +2290,7 @@ fn orient_has_runtime_edges_missing_counts_renders_unavailable_not_silent_zero()
             "cycles": [{
                 "length": 2,
                 "modules": ["src/a", "src/b"],
+                "walk": ["src/a", "src/b"],
                 // Real variant, REQUIRED counts absent → decode now fails (no more silent {0,0}).
                 "type_only": { "kind": "has_runtime_edges" },
             }],
@@ -2104,8 +2338,9 @@ fn orient_package_group_test_count_is_a_subset_of_the_total() {
     )];
     // Full depth renders the package-group breakdown section.
     let out = r.render_human(OrientDepth::Full);
+    // COHERENCE-3 §2.3: the row names its basis (files IN the group).
     assert!(
-        out.contains("core — 100 files (10 test)"),
+        out.contains("core — 100 files in group (10 test)"),
         "the group headline is the TOTAL (100) with the test count as a subset (10):\n{out}"
     );
     // The addend defect would show the non-test count (90) as the headline — forbidden.
@@ -2115,7 +2350,7 @@ fn orient_package_group_test_count_is_a_subset_of_the_total() {
     );
     // The zero-test group renders the bare total with no `(0 test)` noise.
     assert!(
-        out.contains("util — 20 files") && !out.contains("20 files (0 test)"),
+        out.contains("util — 20 files in group") && !out.contains("20 files in group (0 test)"),
         "a zero-test group renders the bare total:\n{out}"
     );
 }
@@ -2149,11 +2384,11 @@ fn orient_package_group_absent_test_count_renders_unavailable_not_silent_zero() 
     let out = r.render_human(OrientDepth::Full);
     // The row still renders its valid file total, with the unknown made VISIBLE.
     assert!(
-        out.contains("core — 100 files (test count unavailable)"),
+        out.contains("core — 100 files in group (test count unavailable)"),
         "an absent test_file_count must render an explicit unavailable clause:\n{out}"
     );
     assert!(
-        out.contains("util — 20 files (test count unavailable)"),
+        out.contains("util — 20 files in group (test count unavailable)"),
         "a non-u64 test_file_count is malformed → same unavailable clause:\n{out}"
     );
     // The defect this kills: silently rendering the unknown as zero tests.

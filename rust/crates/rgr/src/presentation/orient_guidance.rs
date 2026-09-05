@@ -54,20 +54,40 @@ impl OrientResponse {
         out
     }
 
-    /// Format cycle anchor as "A -> B -> C -> ... -> A". `pub(super)` so the headline
-    /// `cycles_docs_line` (in `orient_sections`) shares it across the module split.
-    pub(super) fn format_cycle_anchor(
-        &self,
-        modules: &[serde_json::Value],
-        _length: usize,
-    ) -> String {
-        let names: Vec<&str> = modules.iter().filter_map(|m| m.as_str()).collect();
-
-        if names.is_empty() {
-            return "(empty cycle)".to_string();
+    /// Format a cycle's VERIFIED walk as "A -> B -> C -> ... -> A", or `None` when the carried
+    /// `walk` is not a well-formed ordered ring. `pub(super)` so the headline `cycles_docs_line`
+    /// (in `orient_sections`) shares it across the module split.
+    ///
+    /// COHERENCE-3 (§2.1): `walk` is the REAL directed ring the shared `cycle_walk` kernel found
+    /// over the cycle's true import edges (carried on the `walk` leaf), in ring order — NOT the
+    /// lexically-sorted member set. So the arrows drawn here are real edges; the closing
+    /// `-> {first}` is the ring's back-edge. The `first 3 -> … -> last -> first` truncation for a
+    /// long ring hides intermediate REAL edges but never invents one.
+    ///
+    /// COHERENCE-3 review-1 #1 (STANDING HONESTY RULE #1): STRICT validation. The producer
+    /// (`agent_cycle_labeling::label_module_cycles` via `find_cycle_walk`) only ever emits a ring of
+    /// ≥2 non-empty DISPLAY strings, or `None` (which serializes as an absent/`null` leaf the caller
+    /// routes to the unordered form). So ANY non-string element, ANY empty string, or fewer than 2
+    /// members reaching here is wire/schema DRIFT, not a walk — return `None` so the caller makes the
+    /// unknown VISIBLE with its reason, NEVER a fabricated ring. The prior `filter_map(as_str)`
+    /// silently dropped non-strings, turning a two-element `["A", 42]` into the invented self-cycle
+    /// `A -> A`; that is exactly the fabrication this rejects.
+    pub(super) fn format_cycle_anchor(&self, walk: &[serde_json::Value]) -> Option<String> {
+        let mut names: Vec<&str> = Vec::with_capacity(walk.len());
+        for m in walk {
+            let s = m.as_str()?; // non-string element => drift => None (no silent drop)
+            if s.is_empty() {
+                return None; // empty display name => drift => None
+            }
+            names.push(s);
+        }
+        if names.len() < 2 {
+            // A real directed ring closes over ≥2 distinct members (a self-import is not a cycle
+            // edge). A one-element walk is the fabricated `A -> A` the reviewer flagged.
+            return None;
         }
 
-        if names.len() <= 4 {
+        let chain = if names.len() <= 4 {
             // Show full chain
             let mut chain = names.join(" -> ");
             chain.push_str(&format!(" -> {}", names[0]));
@@ -78,7 +98,8 @@ impl OrientResponse {
             chain.push_str(" -> ...");
             chain.push_str(&format!(" -> {} -> {}", names[names.len() - 1], names[0]));
             chain
-        }
+        };
+        Some(chain)
     }
 
     pub(super) fn render_limits(&self) -> String {

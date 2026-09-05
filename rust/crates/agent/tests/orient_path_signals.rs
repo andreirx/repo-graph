@@ -97,6 +97,7 @@ fn path_focus_import_cycles_includes_descendant_modules() {
             modules: vec!["src/core".into(), "src/core/sub".into()],
             test_composition: None,
             type_only: None,
+            walk: None,
         }],
     );
     let result = orient(

@@ -61,6 +61,13 @@ fn canonical_cycle_shape(mut v: serde_json::Value) -> serde_json::Value {
                         for cyc in cycles.iter_mut() {
                             if let Some(obj) = cyc.as_object_mut() {
                                 obj.remove("type_only");
+                                // COHERENCE-3: the per-cycle `walk` is the SAME kind of
+                                // ROUTE-CONDITIONAL additive decoration — present on the SQLite
+                                // serve (the intra-SCC edges are reachable), absent on the M-2
+                                // LiveGraph serve (no edges in the warm path). OUTSIDE the CYCLES-B
+                                // certified member-ring shape, so project it off before the parity
+                                // compare, exactly as the split and `type_only` are.
+                                obj.remove("walk");
                             }
                         }
                     }

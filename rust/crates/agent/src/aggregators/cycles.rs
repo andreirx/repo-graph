@@ -77,6 +77,10 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
             // SQLite path (the storage adapter computed it via the shared kernel); `None` on the
             // LiveGraph/focus paths and non-TS cycles (§5) — omitted from JSON there.
             type_only: c.type_only,
+            // COHERENCE-3: carry the precomputed REAL walk (shared `cycle_walk` kernel) into the
+            // leaf. `Some` on the SQLite path; `None` on LiveGraph/focus/truncated — orient then
+            // renders the unordered form, matching `cycles`.
+            walk: c.walk,
         })
         .collect();
 
@@ -141,6 +145,10 @@ pub fn aggregate_path_cancellable<S: AgentStorageRead + ?Sized>(
             // SQLite path (the storage adapter computed it via the shared kernel); `None` on the
             // LiveGraph/focus paths and non-TS cycles (§5) — omitted from JSON there.
             type_only: c.type_only,
+            // COHERENCE-3: carry the precomputed REAL walk (shared `cycle_walk` kernel) into the
+            // leaf. `Some` on the SQLite path; `None` on LiveGraph/focus/truncated — orient then
+            // renders the unordered form, matching `cycles`.
+            walk: c.walk,
         })
         .collect();
 
@@ -168,6 +176,7 @@ mod tests {
             modules: vec!["a".into(), "b".into()],
             test_composition: comp,
             type_only: None,
+            walk: None,
         }
     }
 

@@ -368,6 +368,7 @@ fn explain_cycles_serves_live_cycles_from_livegraph() {
                 length: 1,
                 modules: vec!["BOGUS_SQLITE_MODULE".to_string()],
                 type_only: None,
+                walk: None,
             }],
             items_truncated: None,
             items_omitted_count: None,

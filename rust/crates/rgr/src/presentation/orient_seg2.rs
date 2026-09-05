@@ -70,6 +70,16 @@ pub struct HttpSurfaces {
     pub providers: Option<u64>,
     #[serde(default)]
     pub consumers: Option<u64>,
+    /// COHERENCE-3 (§2.2): test-fixture surfaces excluded from the headline counts above (the
+    /// `is_test == Some(true)` partition — the SAME the `surfaces` command and `boundaries summary`
+    /// apply). Rendered as "(+M test-fixture excluded)". `default` 0 on an older daemon that omits
+    /// it → no clause (byte-identical), NEVER a fabricated exclusion.
+    #[serde(default)]
+    pub test_fixture_excluded: u64,
+    /// COHERENCE-3 (§2.2 / RULE #1): surfaces whose `is_test` is UNKNOWN — kept in the counts above
+    /// but disclosed as "test-status unknown for K", never counted invisibly. `default` 0.
+    #[serde(default)]
+    pub test_status_unknown: u64,
     #[serde(default)]
     pub unavailable: Option<String>,
 }
@@ -172,12 +182,15 @@ fn complexity_row_wellformed(e: &serde_json::Value) -> bool {
 
 impl OrientResponse {
     /// ORIENT-SEGMENT-2 §2.5: the HTTP architecture headline — rendered where the
-    /// repo HAS HTTP surfaces (> 0), from the HSC-1 unified counts the daemon
-    /// attached (READ-only; the SAME union `surfaces list` / `boundaries summary`
-    /// consume). A FAILED union read is surfaced as unknown-with-reason at the
-    /// detailed tiers only (large / --full) — it never mints a fabricated count nor
-    /// pollutes the small/medium headline. `None` when the daemon attached nothing
-    /// (non-HTTP repo → byte-identical).
+    /// repo HAS production HTTP surfaces (`total > 0`) OR where its ONLY surfaces are
+    /// test fixtures we excluded (COHERENCE-3 §2.2: `total == 0` with a disclosure —
+    /// storybook, whose sole provider is a fixture; the exclusion is never made
+    /// invisible), from the HSC-1 unified counts the daemon attached (READ-only; the
+    /// SAME union `surfaces list` / `boundaries summary` consume). A FAILED union read
+    /// is surfaced as unknown-with-reason at the detailed tiers only (large / --full) —
+    /// it never mints a fabricated count nor pollutes the small/medium headline. `None`
+    /// when the daemon attached nothing (non-HTTP repo → byte-identical) or when the
+    /// clean-zero read has nothing to disclose.
     pub(super) fn http_surfaces_line(&self, depth: OrientDepth) -> Option<String> {
         // Absent field (non-HTTP repo) → byte-identical, no line.
         let http = self.http_surfaces.as_ref()?;
@@ -187,15 +200,36 @@ impl OrientResponse {
         if let (Some(total), Some(providers), Some(consumers)) =
             (http.total, http.providers, http.consumers)
         {
-            if total > 0 {
+            // COHERENCE-3 (§2.2): disclose the test-fixture / unknown surfaces excluded from
+            // (or kept-but-unknown in) the headline counts — the SAME shape `cycles` and the
+            // `surfaces` command render, so the reader sees one story. No clause when there is
+            // nothing to disclose ⇒ byte-identical on a repo with no test/unknown surfaces.
+            let disclosure = match crate::presentation::surface_exclusion_clause(
+                http.test_fixture_excluded,
+                http.test_status_unknown,
+            ) {
+                Some(c) => format!(" ({c})"),
+                None => String::new(),
+            };
+            // Render the headline when there ARE production surfaces (`total > 0`) OR when the only
+            // surfaces are test fixtures we excluded (`total == 0` but a disclosure exists). A
+            // fixture-only repo (storybook — its sole HTTP provider is a test fixture) must NEVER
+            // silently drop the excluded partition: returning `None` here hid it entirely
+            // (review-0 item 2; standing honesty rule #1 — an exclusion is never invisible). A
+            // GENUINELY non-HTTP-surface repo (`total == 0`, nothing to disclose) stays
+            // byte-identical: no line. `test_status_unknown > 0` always implies `total > 0` (an
+            // unknown-`is_test` surface is KEPT in the count), so the fixture case is the only
+            // zero-total path that discloses.
+            if total > 0 || !disclosure.is_empty() {
                 return Some(format!(
-                    "{} HTTP surface{} ({} provider{} / {} consumer{}) — rmap surfaces",
+                    "{} HTTP surface{} ({} provider{} / {} consumer{}){} — rmap surfaces",
                     total,
                     plural(total),
                     providers,
                     plural(providers),
                     consumers,
                     plural(consumers),
+                    disclosure,
                 ));
             }
             return None;

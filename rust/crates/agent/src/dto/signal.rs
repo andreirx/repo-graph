@@ -515,6 +515,19 @@ pub struct CycleEvidence {
     /// `cycles` route emits and the renderer deserializes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_only: Option<crate::cycle_type_only::CycleTypeOnly>,
+    /// COHERENCE-3 (§2.1): the REAL directed import walk over this cycle's members, in DISPLAY
+    /// (qualified-path) order, precomputed at the SQLite serving computation via the SHARED
+    /// [`crate::cycle_walk`] kernel — the SAME walk `cycles` renders. `orient`'s cycle parenthetical
+    /// renders THIS instead of a ring fabricated from the sorted member set, so the two surfaces
+    /// cannot state a different walk (the seam). `Some(ring)` when a directed walk closes over the
+    /// carried real edges (the ring may cover a SUBSET of a large SCC — the count line states the
+    /// full size); `None` where the serving computation cannot reach the edges (LiveGraph/focus/non-
+    /// SQLite) or no walk can be formed — `orient` then renders the honest unordered form ("largest:
+    /// N modules — rmap cycles"), exactly as `cycles` renders `members (unordered)` there. Additive:
+    /// `None` is omitted from JSON (byte-identical for existing consumers). NEVER a fabricated ring —
+    /// absence is `None`, never a synthetic walk (Fact Certainty Model / RULE #1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub walk: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -2136,6 +2149,7 @@ mod tests {
                 length: 2,
                 modules: vec!["m1".into(), "m2".into()],
                 type_only: None,
+                walk: None,
             }],
         });
         let json = serde_json::to_value(&s).unwrap();
@@ -2168,11 +2182,13 @@ mod tests {
                     length: 2,
                     modules: vec!["a".into(), "b".into()],
                     type_only: Some(CycleTypeOnly::TypeOnly),
+                    walk: None,
                 },
                 CycleEvidence {
                     length: 2,
                     modules: vec!["c".into(), "d".into()],
                     type_only: None,
+                    walk: None,
                 },
             ],
         });

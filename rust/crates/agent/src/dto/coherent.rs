@@ -726,6 +726,7 @@ mod tests {
                 length: 2,
                 modules: vec!["a".to_string(), "b".to_string()],
                 type_only: None,
+                walk: None,
             }],
         })
     }

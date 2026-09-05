@@ -35,6 +35,75 @@ fn http_headline_renders_when_present() {
 }
 
 #[test]
+fn http_headline_discloses_test_fixture_and_unknown_partition() {
+    // COHERENCE-3 §2.2: the production counts head the line; the excluded test-fixture surfaces
+    // and the unknown-is_test surfaces are disclosed in the SAME shape the `surfaces` command and
+    // `cycles` use — so orient states the SAME production count as those surfaces, never inflated
+    // by fixtures.
+    let r = response(json!({
+        "http_surfaces": {
+            "total": 3, "providers": 3, "consumers": 0,
+            "test_fixture_excluded": 6, "test_status_unknown": 1
+        }
+    }));
+    let line = r.http_surfaces_line(OrientDepth::Small).unwrap();
+    assert_eq!(
+        line,
+        "3 HTTP surfaces (3 providers / 0 consumers) (+6 test-fixture excluded; test-status \
+         unknown for 1) — rmap surfaces"
+    );
+}
+
+#[test]
+fn http_headline_no_clause_when_no_fixtures_or_unknown() {
+    // Zero excluded/unknown ⇒ no clause ⇒ byte-identical to the pre-slice headline.
+    let r = response(json!({
+        "http_surfaces": {"total": 5, "providers": 3, "consumers": 2,
+                          "test_fixture_excluded": 0, "test_status_unknown": 0}
+    }));
+    assert_eq!(
+        r.http_surfaces_line(OrientDepth::Small).unwrap(),
+        "5 HTTP surfaces (3 providers / 2 consumers) — rmap surfaces"
+    );
+}
+
+#[test]
+fn http_headline_fixture_only_still_discloses_when_production_zero() {
+    // COHERENCE-3 §2.2 (review-0 item 2): a repo whose ONLY HTTP surface is a test fixture
+    // (storybook) — the daemon attaches the block with production `total == 0` but
+    // `test_fixture_excluded > 0`. The pre-fix code returned `None` on `total == 0`, hiding the
+    // exclusion ENTIRELY (a partition made invisible — standing honesty rule #1). Now the zero
+    // production count renders WITH the exclusion clause, so the excluded fixtures are never
+    // silent.
+    let r = response(json!({
+        "http_surfaces": {
+            "total": 0, "providers": 0, "consumers": 0,
+            "test_fixture_excluded": 1, "test_status_unknown": 0
+        }
+    }));
+    assert_eq!(
+        r.http_surfaces_line(OrientDepth::Small).unwrap(),
+        "0 HTTP surfaces (0 providers / 0 consumers) (+1 test-fixture excluded) — rmap surfaces"
+    );
+}
+
+#[test]
+fn http_headline_clean_zero_with_nothing_to_disclose_is_none() {
+    // A block attached with a genuine clean zero (no production surfaces, no fixtures, no
+    // unknowns) has NOTHING to disclose → no line, byte-identical. The fixture-only disclosure
+    // above must NOT leak into this case (it would fabricate a "0 HTTP surfaces" headline on a
+    // repo that has none).
+    let r = response(json!({
+        "http_surfaces": {
+            "total": 0, "providers": 0, "consumers": 0,
+            "test_fixture_excluded": 0, "test_status_unknown": 0
+        }
+    }));
+    assert!(r.http_surfaces_line(OrientDepth::Small).is_none());
+    assert!(r.http_surfaces_line(OrientDepth::Full).is_none());
+}
+
+#[test]
 fn http_headline_absent_when_field_missing() {
     // Non-HTTP repo: the daemon attached nothing → no line (byte-identical).
     let r = response(json!({}));

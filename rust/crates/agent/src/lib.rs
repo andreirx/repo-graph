@@ -63,6 +63,7 @@ pub mod check;
 pub mod confidence;
 pub mod cycle_composition;
 pub mod cycle_type_only;
+pub mod cycle_walk;
 pub mod doc_relevance;
 pub mod dto;
 pub mod errors;
@@ -88,6 +89,7 @@ pub use cycle_type_only::{
     classify_cycle_type_only, classify_cycles_type_only, is_ts_js_language_token,
     ts_js_cycle_member_dirs, CycleTypeOnly, EdgeTypeOnly,
 };
+pub use cycle_walk::{find_cycle_walk, intra_cycle_edges, EDGE_CAP as CYCLE_EDGE_CAP};
 pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
 pub use dto::coherent::{
     to_coherent, CoherentOrientResult, OrientLeafLabel, OrientLgDecisions, COHERENT_ORIENT_SCHEMA,

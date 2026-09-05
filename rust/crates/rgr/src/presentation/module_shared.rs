@@ -52,18 +52,24 @@ pub fn format_count(count: usize, singular: &str, plural: &str) -> String {
 /// rendering (it passed the non-test count as the headline, so `907 files (1997 test)` read as
 /// 2904), which disagreed with `stats`/`check` about the same module's size.
 ///
+/// COHERENCE-3 §2.3: the count NAMES its basis inline — `owned` files (the files this module
+/// OWNS, `module_file_ownership`). This is a DIFFERENT basis from the repo-wide `check`/`orient`
+/// "N files indexed" (a repo may hold files no module owns), so the per-row count and the
+/// Σ across rows are not silently conflated with the repo total; the reader sees the basis on
+/// every value it appears (the same discipline `stats`/`map`/`check`/`orient` now follow).
+///
 /// Examples:
-/// - "100 files"           (total=100, test=0)
-/// - "100 files (10 test)" (total=100, of which 10 are tests)
+/// - "100 owned files"           (total=100, test=0)
+/// - "100 owned files (10 test)" (total=100, of which 10 are tests)
 pub fn format_files_compact(total: usize, test: usize) -> String {
     debug_assert!(
         test <= total,
         "COHERENCE-2 §2.4: `(N test)` is a subset — test ({test}) must not exceed total ({total})"
     );
     if test > 0 {
-        format!("{} files ({} test)", total, test)
+        format!("{} owned files ({} test)", total, test)
     } else {
-        format!("{} files", total)
+        format!("{} owned files", total)
     }
 }
 
@@ -116,14 +122,16 @@ mod tests {
 
     #[test]
     fn format_files_compact_without_test() {
-        assert_eq!(format_files_compact(100, 0), "100 files");
+        // COHERENCE-3 §2.3: the basis (`owned`) is named inline on the value.
+        assert_eq!(format_files_compact(100, 0), "100 owned files");
     }
 
     #[test]
     fn format_files_compact_with_test_is_a_subset() {
         // COHERENCE-2 §2.4: the headline (100) is the TOTAL and (10 test) is the subset of it —
         // a reader reads "10 of 100 are tests", never 100+10. Same meaning as `stats`.
-        assert_eq!(format_files_compact(100, 10), "100 files (10 test)");
+        // COHERENCE-3 §2.3: the basis (`owned`) is named inline.
+        assert_eq!(format_files_compact(100, 10), "100 owned files (10 test)");
     }
 
     #[test]

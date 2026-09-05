@@ -249,6 +249,7 @@ mod tests {
             modules: modules.iter().map(|m| m.to_string()).collect(),
             test_composition: None,
             type_only: None,
+            walk: None,
         }
     }
 

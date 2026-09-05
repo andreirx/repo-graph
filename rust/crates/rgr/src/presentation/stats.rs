@@ -217,7 +217,13 @@ impl StatsResponse {
         let total_symbols: i64 = self
             .total_symbols
             .unwrap_or_else(|| self.stats.iter().map(|m| m.symbol_count).sum());
-        out.push_str(&format!("  total_files: {}\n", total_files));
+        // COHERENCE-3 (§2.3): NAME the basis — this total is the files owned by a directory group
+        // (summed OWNS edges), which EXCLUDES files no directory node owns, so it differs from
+        // orient/check's "indexed" total by design. Naming it makes five totals read as five bases.
+        out.push_str(&format!(
+            "  total_files: {} (in directory groups)\n",
+            total_files
+        ));
         out.push_str(&format!("  total_symbols: {}\n", total_symbols));
         out.push('\n');
 
@@ -523,7 +529,7 @@ mod tests {
             !output.contains("  modules: "),
             "bare module count: {output}"
         );
-        assert!(output.contains("total_files: 93")); // 45 + 38 + 10
+        assert!(output.contains("total_files: 93 (in directory groups)")); // 45 + 38 + 10
         assert!(output.contains("total_symbols: 1646")); // 892 + 634 + 120
     }
 

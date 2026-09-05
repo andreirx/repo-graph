@@ -114,15 +114,42 @@ pub(crate) fn label_module_cycles(
         &all_module_dirs,
     );
 
+    // COHERENCE-3 (§2.1): precompute each cycle's REAL directed walk via the SHARED
+    // `cycle_walk` kernel — the SAME intra-SCC edge selection + walk finder the `cycles`
+    // command uses — over the SAME `module_import_edges` set already read above. `cycle_members`
+    // is `(node_id, qualified_display)` (the SAME identities the edges key on and the SAME display
+    // `cycles` renders), so `orient`'s walk and `cycles`' walk cannot differ. A truncated edge set
+    // (over `CYCLE_EDGE_CAP`) draws NO walk — an incomplete subset could imply a chain the full set
+    // does not — exactly as the `cycles` renderer falls back to `members (unordered)` there.
+    let all_pairs: Vec<(&str, &str)> = edges_mapped.iter().map(|(f, t, _)| (*f, *t)).collect();
+    let walks: Vec<Option<Vec<String>>> = cycle_members
+        .iter()
+        .map(|members| {
+            let member_ids: Vec<&str> = members.iter().map(|(id, _)| *id).collect();
+            let (intra, truncated) = repo_graph_agent::intra_cycle_edges(&member_ids, &all_pairs);
+            if truncated {
+                None
+            } else {
+                let intra_refs: Vec<(&str, &str)> = intra
+                    .iter()
+                    .map(|(f, t)| (f.as_str(), t.as_str()))
+                    .collect();
+                repo_graph_agent::find_cycle_walk(members, &intra_refs)
+            }
+        })
+        .collect();
+
     Ok(cycles
         .into_iter()
         .zip(comps)
         .zip(type_onlys)
-        .map(|((c, comp), type_only)| AgentCycle {
+        .zip(walks)
+        .map(|(((c, comp), type_only), walk)| AgentCycle {
             length: c.length,
             modules: c.nodes.into_iter().map(|n| n.name).collect(),
             test_composition: Some(comp),
             type_only,
+            walk,
         })
         .collect())
 }

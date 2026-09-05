@@ -158,6 +158,17 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
         Some(ref snapshot) => {
             let snap_uid = snapshot.snapshot_uid.clone();
 
+            // COHERENCE-3 (§2.3 / D1): the file total is the LIVE indexed-file count —
+            // `compute_repo_summary().file_count` (`COUNT(DISTINCT file_uid) FROM file_versions`),
+            // the SAME derivation `orient`'s "N files indexed" uses — NOT the stored
+            // `snapshots.files_total` counter, which is a stale cache of the SAME basis (only
+            // recomputed on explicit counter refresh) and made check disagree with orient for one
+            // snapshot (grpc-java 1627 vs 1909). Both surfaces now name the SAME basis ("indexed")
+            // AND agree by construction (seam-pinned). A read failure is a CLASSIFIED figure →
+            // propagates (RULE #1), never a silent stale/zero. Verdict UNCHANGED: INDEX_NOT_EMPTY
+            // only tests `> 0`, which the live count also satisfies whenever files exist.
+            let files_total = storage.compute_repo_summary(&snap_uid)?.file_count;
+
             // 3. Get stale files.
             let stale_files = storage.get_stale_files(&snap_uid)?;
 
@@ -174,7 +185,7 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
             let input = CheckInput {
                 snapshot_exists: true,
-                files_total: snapshot.files_total,
+                files_total,
                 stale_file_count: stale_files.len() as u64,
                 call_graph_reliability: Some(trust.call_graph_reliability.level),
                 // RELIABILITY-REFRAME-1: the FULL reader-frame projection facts —

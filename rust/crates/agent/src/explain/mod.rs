@@ -400,6 +400,8 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     length: c.length,
                     modules: c.modules,
                     type_only: c.type_only,
+                    // COHERENCE-3: carried through (`None` on this focus-scoped serve).
+                    walk: c.walk,
                 })
                 .collect();
             let (trunc, omitted) = truncate_items(&mut items, cap);
@@ -719,6 +721,8 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 length: c.length,
                 modules: c.modules,
                 type_only: c.type_only,
+                // COHERENCE-3: carried through (`None` on this focus-scoped serve).
+                walk: c.walk,
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);

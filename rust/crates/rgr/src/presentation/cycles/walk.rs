@@ -12,9 +12,7 @@
 //! VERIFIED carried edge. No carried edges, an incomplete (truncated) set, or no directed walk over the
 //! carried subset → `members (unordered)`, never a fabricated ring drawn from the member ORDER.
 
-use std::collections::{HashMap, HashSet};
-
-use super::{Cycle, CycleEdge, CycleNode};
+use super::{Cycle, CycleNode};
 
 /// Render one cycle's members as INDENTED lines. With the COMPLETE real intra-SCC edge set carried AND a
 /// directed walk formed over it, draw that walk (`A -> B -> C -> A`) plus a `(+ N more …)` line for members
@@ -37,23 +35,24 @@ pub(super) fn render_cycle_body(cycle: &Cycle) -> String {
 
     if let Some(edges) = cycle.edges.as_deref() {
         if !edges.is_empty() {
-            if let Some(ring) = find_walk(&cycle.nodes, edges) {
-                let display: HashMap<&str, &str> = cycle
-                    .nodes
-                    .iter()
-                    .map(|n| (n.node_id.as_str(), n.display()))
-                    .collect();
-                let chain: Vec<&str> = ring
-                    .iter()
-                    .map(|id| *display.get(id.as_str()).unwrap_or(&id.as_str()))
-                    .collect();
-                let mut s = format!("  {} -> {}\n", chain.join(" -> "), chain[0]);
-                let on_walk: HashSet<&str> = ring.iter().map(String::as_str).collect();
-                let more = cycle
-                    .nodes
-                    .iter()
-                    .filter(|n| !on_walk.contains(n.node_id.as_str()))
-                    .count();
+            // COHERENCE-3 (§2.1): the walk is found by the SHARED `cycle_walk` kernel — the SAME
+            // function `orient`'s serving path uses to precompute its walk — so the two surfaces
+            // cannot draw a different ring. Members are `(node_id, display)`; edges are node_id
+            // pairs; the kernel returns the ring's DISPLAY names in walk order (or `None`).
+            let members: Vec<(&str, &str)> = cycle
+                .nodes
+                .iter()
+                .map(|n| (n.node_id.as_str(), n.display()))
+                .collect();
+            let edge_pairs: Vec<(&str, &str)> = edges
+                .iter()
+                .map(|e| (e.from_node_id.as_str(), e.to_node_id.as_str()))
+                .collect();
+            if let Some(ring) = repo_graph_agent::find_cycle_walk(&members, &edge_pairs) {
+                let mut s = format!("  {} -> {}\n", ring.join(" -> "), ring[0]);
+                // Off-walk members: the ring visits `ring.len()` distinct members; the rest are
+                // in the SCC but off the displayed loop (the count line above states the full size).
+                let more = cycle.nodes.len().saturating_sub(ring.len());
                 if more > 0 {
                     s.push_str(&format!(
                         "  (+ {more} more member{} in this cycle)\n",
@@ -86,81 +85,9 @@ fn render_unordered(cycle: &Cycle) -> String {
     }
 }
 
-/// Find a directed cycle (a closed walk) using ONLY the carried real edges. Every SCC contains one, but the
-/// carried set may be capped, so a walk is not guaranteed over the subset — returns `None` then (the caller
-/// renders unordered). Iterative DFS with an on-path stack; adjacency is sorted for deterministic output.
-/// Returns the ring's member `node_id`s in walk order (the closing edge goes from the last back to the
-/// first).
-fn find_walk(nodes: &[CycleNode], edges: &[CycleEdge]) -> Option<Vec<String>> {
-    let member_ids: HashSet<&str> = nodes.iter().map(|n| n.node_id.as_str()).collect();
-    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
-    for e in edges {
-        // Defensive: only traverse edges whose BOTH endpoints are members of this cycle.
-        if member_ids.contains(e.from_node_id.as_str())
-            && member_ids.contains(e.to_node_id.as_str())
-        {
-            adj.entry(&e.from_node_id).or_default().push(&e.to_node_id);
-        }
-    }
-    for targets in adj.values_mut() {
-        targets.sort_unstable();
-    }
-
-    // Deterministic start order: iterate members in their canonical (given) order.
-    let mut visited: HashSet<&str> = HashSet::new();
-    for start in nodes.iter().map(|n| n.node_id.as_str()) {
-        if visited.contains(start) {
-            continue;
-        }
-        if let Some(ring) = dfs_find_cycle(start, &adj, &mut visited) {
-            return Some(ring);
-        }
-    }
-    None
-}
-
-/// Iterative DFS from `start` following `adj`; returns the first directed cycle found (the slice of the
-/// current path from the revisited node onward). Nodes fully explored without closing a cycle are marked
-/// `visited` so a later start does not re-walk them.
-fn dfs_find_cycle<'a>(
-    start: &'a str,
-    adj: &HashMap<&'a str, Vec<&'a str>>,
-    visited: &mut HashSet<&'a str>,
-) -> Option<Vec<String>> {
-    // Stack frames: (node, index of the next neighbour to try).
-    let mut path: Vec<&'a str> = vec![start];
-    let mut on_path: HashSet<&'a str> = HashSet::from([start]);
-    let mut cursor: Vec<usize> = vec![0];
-
-    while let Some(&node) = path.last() {
-        let i = *cursor.last().unwrap();
-        let neighbours = adj.get(node).map(Vec::as_slice).unwrap_or(&[]);
-        if i < neighbours.len() {
-            *cursor.last_mut().unwrap() += 1;
-            let next = neighbours[i];
-            if on_path.contains(next) {
-                // Back-edge -> a cycle. Return the path slice from `next` to the current node.
-                let from = path.iter().position(|&x| x == next).unwrap();
-                return Some(path[from..].iter().map(|s| s.to_string()).collect());
-            }
-            if !visited.contains(next) {
-                path.push(next);
-                on_path.insert(next);
-                cursor.push(0);
-            }
-        } else {
-            // Exhausted `node`'s neighbours without closing a cycle through it.
-            visited.insert(node);
-            on_path.remove(node);
-            path.pop();
-            cursor.pop();
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::CycleEdge;
     use super::*;
 
     /// A MODULE cycle node; `qualified_name` defaults to `None` (exercises the `name` fallback).

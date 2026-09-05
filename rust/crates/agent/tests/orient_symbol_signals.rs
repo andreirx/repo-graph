@@ -294,6 +294,7 @@ fn inherited_import_cycles_have_module_context_scope() {
             modules: vec!["src/core".into(), "src/adapters".into()],
             test_composition: None,
             type_only: None,
+            walk: None,
         }],
     );
 
@@ -371,6 +372,7 @@ fn no_inherited_signals_when_module_context_missing() {
             modules: vec!["src/standalone".into(), "src/other".into()],
             test_composition: None,
             type_only: None,
+            walk: None,
         }],
     );
 

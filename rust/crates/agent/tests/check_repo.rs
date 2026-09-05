@@ -14,17 +14,19 @@ mod common;
 
 use common::{FakeAgentStorage, TEST_NOW};
 use repo_graph_agent::{
-    run_check, AgentReliabilityAxis, AgentReliabilityLevel, AgentStaleFile, AgentTrustSummary,
-    CheckError, EnrichmentState, SignalCode, SignalEvidence, CHECK_COMMAND, ORIENT_SCHEMA,
+    orient, run_check, AgentReliabilityAxis, AgentReliabilityLevel, AgentStaleFile,
+    AgentTrustSummary, Budget, CheckError, EnrichmentState, SignalCode, SignalEvidence,
+    CHECK_COMMAND, ORIENT_SCHEMA,
 };
 use repo_graph_gate::{GateBoundaryDeclaration, GateObligation, GateRequirement};
 
 fn seeded() -> FakeAgentStorage {
     let mut fake = FakeAgentStorage::new();
     fake.seed_minimal_repo("r1", "my-repo", "snap-1");
-    // seed_minimal_repo sets files_total=0; override to
-    // non-zero so INDEX_NOT_EMPTY passes by default.
-    fake.snapshots.get_mut("r1").unwrap().files_total = 42;
+    // COHERENCE-3 (§2.3): check's file total is now the LIVE `compute_repo_summary().file_count`
+    // (the SAME derivation orient uses), NOT the stored `snapshots.files_total` counter. Seed the
+    // repo summary non-zero so INDEX_NOT_EMPTY passes by default.
+    fake.repo_summaries.get_mut("snap-1").unwrap().file_count = 42;
     fake
 }
 
@@ -45,6 +47,64 @@ fn envelope_uses_check_command_and_shared_schema() {
     assert_eq!(result.command, CHECK_COMMAND);
     assert_eq!(result.repo, "my-repo");
     assert_eq!(result.snapshot, "snap-1");
+}
+
+// ── COHERENCE-3 §2.3: orient & check state the SAME "indexed files" total ───────
+
+/// The DoD seam: orient's "N files indexed" (MODULE_SUMMARY.file_count) and check's
+/// "N files indexed." (INDEX_NOT_EMPTY) name the SAME basis and MUST agree, because both now
+/// derive from the ONE `compute_repo_summary().file_count` live count. Seed a STALE
+/// `snapshots.files_total` (7) distinct from the live count (100): the pre-slice check read the
+/// counter and reported 7 while orient reported 100 — the incoherence the slice removes. Now both
+/// report 100. If check regressed to the counter, the two numbers diverge and this fails.
+#[test]
+fn orient_and_check_state_the_same_indexed_file_total() {
+    let mut fake = seeded();
+    // LIVE indexed-file count (what both surfaces must report).
+    fake.repo_summaries.get_mut("snap-1").unwrap().file_count = 100;
+    // A STALE counter, deliberately different — neither surface may report this.
+    fake.snapshots.get_mut("r1").unwrap().files_total = 7;
+
+    // orient's "N files indexed" = MODULE_SUMMARY.file_count.
+    let orient_result = orient(&fake, "r1", None, Budget::Medium, TEST_NOW).unwrap();
+    let module_summary = find_signal(&orient_result, SignalCode::ModuleSummary)
+        .expect("orient emits MODULE_SUMMARY");
+    let orient_files = serde_json::to_value(module_summary).unwrap()["evidence"]["file_count"]
+        .as_u64()
+        .expect("MODULE_SUMMARY file_count");
+    assert_eq!(orient_files, 100, "orient reports the live indexed count");
+
+    // check's "N files indexed." = the INDEX_NOT_EMPTY condition summary (in whichever check
+    // signal carries it). Serialize + search so the test is robust to the pass/fail/incomplete
+    // verdict shape.
+    let check_result = run_check(&fake, "r1", TEST_NOW).unwrap();
+    let check_json = serde_json::to_value(&check_result).unwrap();
+    let index_summary = find_condition_summary(&check_json, "INDEX_NOT_EMPTY")
+        .expect("check emits an INDEX_NOT_EMPTY condition");
+    assert_eq!(
+        index_summary, "100 files indexed.",
+        "check reports the SAME live count as orient (never the stale counter 7)"
+    );
+}
+
+/// Recursively find the `summary` of the check condition whose `code` matches, anywhere in the
+/// serialized check envelope (conditions live under different evidence keys per verdict).
+fn find_condition_summary(v: &serde_json::Value, code: &str) -> Option<String> {
+    match v {
+        serde_json::Value::Object(map) => {
+            if map.get("code").and_then(|c| c.as_str()) == Some(code) {
+                if let Some(s) = map.get("summary").and_then(|s| s.as_str()) {
+                    return Some(s.to_string());
+                }
+            }
+            map.values()
+                .find_map(|child| find_condition_summary(child, code))
+        }
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find_map(|child| find_condition_summary(child, code)),
+        _ => None,
+    }
 }
 
 // ── 1. no_snapshot_produces_incomplete ──────────────────────────
@@ -86,8 +146,9 @@ fn no_snapshot_produces_incomplete() {
 #[test]
 fn empty_snapshot_produces_incomplete() {
     let mut fake = seeded();
-    // Override files_total to 0 for INDEX_NOT_EMPTY fail.
-    fake.snapshots.get_mut("r1").unwrap().files_total = 0;
+    // COHERENCE-3: drive the LIVE count to 0 for INDEX_NOT_EMPTY fail (check reads
+    // `compute_repo_summary().file_count` now, not the stored counter).
+    fake.repo_summaries.get_mut("snap-1").unwrap().file_count = 0;
 
     let result = run_check(&fake, "r1", TEST_NOW).unwrap();
 

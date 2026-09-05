@@ -18,14 +18,6 @@ use serde_json::{json, Value};
 
 use super::sqlite_module_cycles_json;
 
-/// The per-cycle intra-SCC edge cap. A cycle with more real import edges than this carries the first
-/// `EDGE_CAP` (deterministically sorted) plus an EXPLICIT `edges_truncated: true` marker — never a silent
-/// cut (spec §2.1). 200 is generous: a cycle needing more than 200 distinct intra-SCC edges is
-/// exceptional. When truncated, the human renderer draws NO walk (a partial edge set could imply a chain
-/// the full set does not) and falls back to `members (unordered)` per §2.2; the capped `edges` + marker
-/// remain in `--json` for programmatic consumers, and the count line states the full size.
-pub(crate) const EDGE_CAP: usize = 200;
-
 /// Attach the REAL intra-SCC directed IMPORTS edges to each canonical SQLite cycle, ADDITIVELY
 /// (`edges: [{from_node_id, to_node_id}]` + `edges_truncated: bool`). Post-canonicalization (mutates the
 /// JSON [`super::canonical_module_cycles_json`] produced): the member SET / order / `cycle_id` / `length`
@@ -33,51 +25,32 @@ pub(crate) const EDGE_CAP: usize = 200;
 /// The LiveGraph fastpath adapter never calls this, so its output omits the field (an absent optional
 /// field is honest — operator ruling A1).
 ///
-/// An edge is attached to a cycle iff BOTH endpoints are members of THAT cycle (`from != to`), keyed by
-/// the node `node_id` the canonical nodes carry. `module_edges` is the snapshot's MODULE→MODULE IMPORTS
-/// set (`module_import_edges`); a self-loop or a cross-cycle pair is dropped. The renderer draws an arrow
-/// ONLY between a pair present here — so no arrow can claim an import that does not exist.
+/// COHERENCE-3 (§2.1): the per-cycle edge SELECTION is the SHARED
+/// [`repo_graph_agent::intra_cycle_edges`] — the SAME function `orient`'s serving path
+/// (`agent_cycle_labeling`) uses to feed its walk — so the two surfaces draw over the IDENTICAL edge
+/// set (an edge iff BOTH endpoints are members of THAT cycle and `from != to`, keyed by `node_id`,
+/// deduped/sorted, capped at [`repo_graph_agent::CYCLE_EDGE_CAP`]). `module_edges` is the
+/// snapshot's MODULE→MODULE IMPORTS
+/// set (`module_import_edges`). The renderer draws an arrow ONLY between a pair present here.
 pub(crate) fn attach_intra_cycle_edges(
     cycles_json: &mut [Value],
     module_edges: &[(String, String)],
 ) {
-    use std::collections::BTreeSet;
-
-    // node_id -> the index of the (single) cycle it belongs to. SCCs partition the nodes, so a node_id
-    // is in at most one cycle; a node in no rendered cycle is simply absent from the map.
-    let mut owner: HashMap<&str, usize> = HashMap::new();
-    for (i, cycle) in cycles_json.iter().enumerate() {
-        if let Some(nodes) = cycle["nodes"].as_array() {
-            for n in nodes {
-                if let Some(id) = n["node_id"].as_str() {
-                    owner.insert(id, i);
-                }
-            }
-        }
-    }
-
-    // Bucket each intra-cycle edge (both endpoints owned by the SAME cycle). BTreeSet = dedup + deterministic
-    // (from, to) order without a separate sort pass.
-    let mut buckets: Vec<BTreeSet<(String, String)>> = vec![BTreeSet::new(); cycles_json.len()];
-    for (from, to) in module_edges {
-        if from == to {
-            continue; // a self-import is not an inter-module cycle edge
-        }
-        if let (Some(&fi), Some(&ti)) = (owner.get(from.as_str()), owner.get(to.as_str())) {
-            if fi == ti {
-                buckets[fi].insert((from.clone(), to.clone()));
-            }
-        }
-    }
-
-    for (cycle, bucket) in cycles_json.iter_mut().zip(buckets.into_iter()) {
-        let truncated = bucket.len() > EDGE_CAP;
-        let edges: Vec<Value> = bucket
+    let all_edges: Vec<(&str, &str)> = module_edges
+        .iter()
+        .map(|(f, t)| (f.as_str(), t.as_str()))
+        .collect();
+    for cycle in cycles_json.iter_mut() {
+        let member_ids: Vec<&str> = cycle["nodes"]
+            .as_array()
+            .map(|nodes| nodes.iter().filter_map(|n| n["node_id"].as_str()).collect())
+            .unwrap_or_default();
+        let (edges, truncated) = repo_graph_agent::intra_cycle_edges(&member_ids, &all_edges);
+        let edges_json: Vec<Value> = edges
             .into_iter()
-            .take(EDGE_CAP)
             .map(|(from, to)| json!({ "from_node_id": from, "to_node_id": to }))
             .collect();
-        cycle["edges"] = Value::Array(edges);
+        cycle["edges"] = Value::Array(edges_json);
         cycle["edges_truncated"] = Value::Bool(truncated);
     }
 }
@@ -182,7 +155,10 @@ mod tests {
             }
         }
         attach_intra_cycle_edges(&mut out, &edges);
-        assert_eq!(out[0]["edges"].as_array().unwrap().len(), EDGE_CAP);
+        assert_eq!(
+            out[0]["edges"].as_array().unwrap().len(),
+            repo_graph_agent::CYCLE_EDGE_CAP
+        );
         assert_eq!(out[0]["edges_truncated"], Value::Bool(true));
     }
 

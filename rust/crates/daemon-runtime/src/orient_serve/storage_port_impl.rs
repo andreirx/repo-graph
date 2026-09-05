@@ -122,6 +122,9 @@ fn cycles_repo_shape(cycles: &[Vec<String>]) -> Vec<AgentCycle> {
             // `cycles` on this same LiveGraph-served path.
             test_composition: None,
             type_only: None,
+            // COHERENCE-3: the LiveGraph/focus serve cannot reach the intra-SCC edges — no walk
+            // precomputed; orient renders the unordered form ("largest: N modules — rmap cycles").
+            walk: None,
         })
         .collect()
 }
@@ -154,6 +157,9 @@ fn cycles_qualified_filtered(
             // (§2.3) and not the repo headline; no test-only split claimed.
             test_composition: None,
             type_only: None,
+            // COHERENCE-3: the LiveGraph/focus serve cannot reach the intra-SCC edges — no walk
+            // precomputed; orient renders the unordered form ("largest: N modules — rmap cycles").
+            walk: None,
         })
         .collect()
 }

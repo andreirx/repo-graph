@@ -72,12 +72,20 @@ pub(crate) fn inject<D: Serialize>(
     // consume, so the three cannot disagree). A clean-zero read attaches nothing
     // (byte-identical on non-HTTP repos); a FAILED read is unknown-with-reason
     // (rendered at large/--full), never a silent zero (standing honesty rule #1).
-    match crate::http_boundary_read::unified_http_surfaces_json(storage, repo_uid, snapshot_uid) {
-        Ok((rows, providers, consumers)) if !rows.is_empty() => {
+    // COHERENCE-3 (§2.2): the headline counts EXCLUDE test-fixture surfaces (via the SHARED
+    // `counts_partitioned`, the SAME `is_test` partition the `surfaces` command and `boundaries
+    // summary` apply) so the three cannot state a different provider/consumer count; the excluded +
+    // unknown tallies ride additively for the disclosure clause. `total`/`providers`/`consumers`
+    // are the PRODUCTION (non-fixture) figures — byte-identical on a repo with no test surfaces.
+    match crate::http_boundary_read::unified_http_surfaces(storage, repo_uid, snapshot_uid) {
+        Ok(rows) if !rows.is_empty() => {
+            let part = crate::http_surface_union::counts_partitioned(&rows);
             let block = serde_json::json!({
-                "total": rows.len(),
-                "providers": providers,
-                "consumers": consumers,
+                "total": part.providers + part.consumers,
+                "providers": part.providers,
+                "consumers": part.consumers,
+                "test_fixture_excluded": part.test_fixture_excluded,
+                "test_status_unknown": part.test_status_unknown,
             });
             inject_value_field(output, "http_surfaces", &block, repo_uid);
         }

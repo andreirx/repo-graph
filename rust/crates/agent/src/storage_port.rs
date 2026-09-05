@@ -138,6 +138,22 @@ pub struct AgentCycle {
     /// definition, label ABSENT not Unknown). Additive; the `None` case reaches the JSON leaf as
     /// an omitted field, byte-identical to before. NEVER classify from a `None` (RULE #2).
     pub type_only: Option<CycleTypeOnly>,
+    /// COHERENCE-3 (§2.1): the REAL directed import walk over this cycle's members, in DISPLAY
+    /// (qualified-path) order — precomputed at the SQLite SERVING computation
+    /// (`agent_cycle_labeling::label_module_cycles`) via the SHARED
+    /// [`crate::cycle_walk::find_cycle_walk`] over the SAME intra-SCC edges the `cycles` command
+    /// walks. `orient`'s cycle parenthetical renders THIS (a real walk) instead of a ring
+    /// fabricated from the sorted member set, so the two surfaces cannot state a different walk.
+    ///
+    /// `Some(ring)` when a directed walk closes over the carried real edges; `None` where the
+    /// serving computation cannot reach the edges (the LiveGraph module-cycle serve — §2.3
+    /// asymmetry — and focus/path-scoped reads) OR no walk can be formed (no/incomplete edges),
+    /// in which case `orient` renders the honest unordered form ("largest: N modules — rmap
+    /// cycles"), exactly as `cycles` renders `members (unordered)` on those same paths. The ring
+    /// may cover a SUBSET of a large SCC's members (a walk visits one closed loop); the count
+    /// line still states the full member size. NOT serialized as a port field; the aggregator
+    /// copies it to `CycleEvidence::walk`. NEVER a fabricated ring — absence is `None` (RULE #1).
+    pub walk: Option<Vec<String>>,
 }
 
 // ── Dead node ────────────────────────────────────────────────────

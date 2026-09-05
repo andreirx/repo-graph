@@ -343,6 +343,14 @@ counts render "(test count unavailable)". Live: FRAKTAG's 5-module SCC → Break
 (3 of 10 edges type-only, no runtime cycle remains); rgistr stays TypeOnly. Split:
 walks / headline partitions / totals → COHERENCE-3 (spec + packet staged). 16 files
 +1,070/−102; gates ALL GREEN; approved review-3.
+SHIPPED: COHERENCE-3 (2026-09-05, part 2): one cycle-walk derivation (`agent::cycle_walk`,
+additive `walk` field) — orient renders a walk only when cycles would, else the unordered
+form; malformed walk evidence renders no walk; surfaces/boundaries headlines partition
+test fixtures on the stored is_test fact (vscode 99/9 → `54 (3 providers / 51 consumers)
+(+45 test-fixture excluded)`); every file total names its basis (same-basis totals agree:
+orient == check `1909 files indexed`). Operator close-out after a 3-cycle checkpoint with
+the diff reviewed sound and only evidence unrecorded; operator gates + live proof on the
+retained root. Minor carried: `1 owned files` plural.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

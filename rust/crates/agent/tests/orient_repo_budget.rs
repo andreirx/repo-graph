@@ -84,6 +84,7 @@ fn seed_many_signals() -> FakeAgentStorage {
             modules: vec!["m1".into(), "m2".into()],
             test_composition: None,
             type_only: None,
+            walk: None,
         }],
     );
     // Dead code surface withdrawn — no dead_nodes seeding.

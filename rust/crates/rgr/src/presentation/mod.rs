@@ -229,6 +229,29 @@ pub(crate) fn cycle_exclusion_clause(
     }
 }
 
+/// COHERENCE-3 (§2.2): the ONE test-fixture exclusion / unknown disclosure clause for the HTTP
+/// surface headlines — the SAME wording the `surfaces` command
+/// ([`http_boundary`]'s `render_surfaces`) and the `orient` HTTP headline
+/// ([`orient_seg2`]'s `http_surfaces_line`) both append, so the two cannot phrase the same
+/// partition differently (the cycle-clause analogue, [`cycle_exclusion_clause`]). `excluded` are
+/// test-fixture surfaces demoted OUT of the headline count; `unknown` are `is_test`-unknown
+/// surfaces KEPT in the count but disclosed (never invisible, RULE #1). `None` when neither
+/// applies ⇒ byte-identical to the pre-slice headline.
+pub(crate) fn surface_exclusion_clause(excluded: u64, unknown: u64) -> Option<String> {
+    let mut clauses: Vec<String> = Vec::new();
+    if excluded > 0 {
+        clauses.push(format!("+{excluded} test-fixture excluded"));
+    }
+    if unknown > 0 {
+        clauses.push(format!("test-status unknown for {unknown}"));
+    }
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join("; "))
+    }
+}
+
 /// GOV-ARMED-1: the shared "unknown" degradation line for the governance
 /// quartet (`gate` / `assess` / `violations` / `modules violations`).
 ///

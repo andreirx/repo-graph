@@ -66,6 +66,7 @@ fn seed_with_all_signals() -> FakeAgentStorage {
             modules: vec!["m1".into(), "m2".into()],
             test_composition: None,
             type_only: None,
+            walk: None,
         }],
     );
 

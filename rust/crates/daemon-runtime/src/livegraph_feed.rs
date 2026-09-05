@@ -2338,6 +2338,8 @@ fn module_cycle_compare_data_cancellable(
                 // not a served value; test-composition is not part of the equivalence.
                 test_composition: None,
                 type_only: None,
+                // COHERENCE-3: canonical-shape compare only — walk is not part of the equivalence.
+                walk: None,
             })
             .collect();
         let mut lg_repo: Vec<AgentCycle> = lg_cycles
@@ -2351,6 +2353,8 @@ fn module_cycle_compare_data_cancellable(
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
                 test_composition: None,
                 type_only: None,
+                // COHERENCE-3: canonical-shape compare only — walk is not part of the equivalence.
+                walk: None,
             })
             .collect();
         let mut sq_qual: Vec<AgentCycle> = sqlite_qualified
@@ -2362,6 +2366,8 @@ fn module_cycle_compare_data_cancellable(
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
                 test_composition: None,
                 type_only: None,
+                // COHERENCE-3: canonical-shape compare only — walk is not part of the equivalence.
+                walk: None,
             })
             .collect();
         let mut lg_qual: Vec<AgentCycle> = lg_cycles
@@ -2372,6 +2378,8 @@ fn module_cycle_compare_data_cancellable(
                 // ORIENT-CYCLES-DISAGREE-1: canonical-shape compare only (see above).
                 test_composition: None,
                 type_only: None,
+                // COHERENCE-3: canonical-shape compare only — walk is not part of the equivalence.
+                walk: None,
             })
             .collect();
         canonicalize_cycles(&mut sq_repo);

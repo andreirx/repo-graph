@@ -73,17 +73,52 @@ pub(crate) struct HttpBoundarySurfaceEntry {
 /// must never disagree; rejected simpler alternative: counting inline at each
 /// print site (the exact drift the audit measured — headline 0 above N rows).
 pub(crate) struct HttpSurfaceAggregation {
+    /// HEADLINE providers = NON-test-fixture providers (`is_test != Some(true)` — production plus
+    /// unknown). COHERENCE-3 (§2.2): the SAME count the `boundaries summary` HTTP line shows (it
+    /// too subtracts test-only), so the two surfaces cannot state a different provider count.
     pub(crate) providers: usize,
+    /// HEADLINE consumers = NON-test-fixture consumers.
     pub(crate) consumers: usize,
+    /// COHERENCE-3 (§2.2): test-FIXTURE surfaces (`files.is_test == Some(true)`) EXCLUDED from the
+    /// headline — the same demotion `cycles` applies to test-only cycles. Disclosed as
+    /// "(+M test-fixture excluded)"; the fixture ROWS still render below, labeled `[test]`.
+    test_fixture_excluded: usize,
+    /// COHERENCE-3 (§2.2 / RULE #1): surfaces whose `is_test` is UNKNOWN (`None` — no `files` row,
+    /// never asserted non-test). KEPT in the headline (never demoted) but disclosed as
+    /// "test-status unknown for K" so an unknown is never counted invisibly.
+    unknown: usize,
 }
 
 impl HttpSurfaceAggregation {
-    /// Count providers/consumers off the rows that WILL be printed — the single
-    /// source of truth for both the headline and the footer.
+    /// Partition providers/consumers off the rows that WILL be printed by the stored `is_test`
+    /// fact — the single source of truth for the headline, footer, and the exclusion clause.
+    /// Test-fixture surfaces are excluded from the headline counts; unknown-`is_test` surfaces stay
+    /// counted (never demoted) but are tallied for the disclosure. NEVER classifies from a path —
+    /// only the stored fact (STANDING HONESTY RULE #2).
     pub(crate) fn from_entries(entries: &[HttpBoundarySurfaceEntry]) -> Self {
+        let mut providers = 0;
+        let mut consumers = 0;
+        let mut test_fixture_excluded = 0;
+        let mut unknown = 0;
+        for s in entries {
+            if s.is_test == Some(true) {
+                test_fixture_excluded += 1;
+                continue; // a test-fixture surface is demoted out of the headline
+            }
+            if s.is_test.is_none() {
+                unknown += 1; // kept in the headline, disclosed — never invisible
+            }
+            match s.direction.as_str() {
+                "provider" => providers += 1,
+                "consumer" => consumers += 1,
+                _ => {}
+            }
+        }
         HttpSurfaceAggregation {
-            providers: entries.iter().filter(|s| s.direction == "provider").count(),
-            consumers: entries.iter().filter(|s| s.direction == "consumer").count(),
+            providers,
+            consumers,
+            test_fixture_excluded,
+            unknown,
         }
     }
 
@@ -102,6 +137,19 @@ impl HttpSurfaceAggregation {
             if self.consumers == 1 { "" } else { "s" },
         )
     }
+
+    /// COHERENCE-3 (§2.2): the exclusion/unknown disclosure appended to the headline — the SAME
+    /// shape `cycles` uses ("+M test-fixture excluded; test-status unknown for K"), so the reader
+    /// sees the demoted and unknown surfaces even though they leave the headline count. `None` when
+    /// there is nothing to disclose (no fixtures, no unknowns) — then byte-identical to pre-slice.
+    fn exclusion_clause(&self) -> Option<String> {
+        // The SHARED clause — the SAME wording `orient`'s HTTP headline appends — so the two
+        // surfaces cannot phrase the partition differently.
+        crate::presentation::surface_exclusion_clause(
+            self.test_fixture_excluded as u64,
+            self.unknown as u64,
+        )
+    }
 }
 
 /// Render the HTTP/REST provider & consumer map as a distinct section. Each
@@ -117,7 +165,17 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
     let agg = HttpSurfaceAggregation::from_entries(surfaces);
 
     let mut out = String::new();
-    out.push_str(&format!("\nHTTP/REST API surfaces: {}\n", agg.phrase()));
+    // COHERENCE-3 (§2.2): the headline counts EXCLUDE test-fixture surfaces (matching `cycles` and
+    // the `boundaries summary` HTTP line) and DISCLOSE the excluded + unknown counts, so no two
+    // surfaces state a different provider/consumer count for one snapshot.
+    match agg.exclusion_clause() {
+        Some(clause) => out.push_str(&format!(
+            "\nHTTP/REST API surfaces: {} ({})\n",
+            agg.phrase(),
+            clause
+        )),
+        None => out.push_str(&format!("\nHTTP/REST API surfaces: {}\n", agg.phrase())),
+    }
 
     // §2.5 dual-implementation (review-3 item 3): a (method, route) served by ≥2
     // DISTINCT real owning MODULES is a stated dual implementation, noted ONCE.
@@ -196,14 +254,27 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
         }
     }
 
-    // §2.3: the footer repeats the SAME aggregation — headline == footer by
-    // construction, and both == the rows above.
-    out.push_str(&format!(
-        "— {} HTTP surface{}: {} —\n",
-        agg.total(),
-        if agg.total() == 1 { "" } else { "s" },
-        agg.phrase(),
-    ));
+    // §2.3 + COHERENCE-3 §2.2 (review-0 item 3): the footer repeats the SAME aggregation
+    // AND the SAME exclusion clause as the headline — so headline == footer verbatim. Its
+    // count is the PRODUCTION (non-fixture) partition (`agg.total()` counts the same rows the
+    // phrase names); the test-fixture rows it still lists above (labeled `[test]`) are disclosed
+    // here too, so the footer is never a bare count silently sitting below listed fixtures.
+    let footer_plural = if agg.total() == 1 { "" } else { "s" };
+    match agg.exclusion_clause() {
+        Some(clause) => out.push_str(&format!(
+            "— {} HTTP surface{}: {} ({}) —\n",
+            agg.total(),
+            footer_plural,
+            agg.phrase(),
+            clause,
+        )),
+        None => out.push_str(&format!(
+            "— {} HTTP surface{}: {} —\n",
+            agg.total(),
+            footer_plural,
+            agg.phrase(),
+        )),
+    }
     out
 }
 
@@ -448,7 +519,11 @@ mod tests {
             route: route.map(str::to_string),
             source_file: file.to_string(),
             line: None,
-            is_test: None,
+            // COHERENCE-3: default to a KNOWN production surface (`Some(false)`) — the common real
+            // case (a surface in a file the tracked-files table knows is non-test). Tests that
+            // exercise the test-fixture partition set `is_test = Some(true)`; the unknown case sets
+            // `None` explicitly.
+            is_test: Some(false),
             framework: None,
             route_unknown_reason: None,
             module: None,
@@ -503,6 +578,87 @@ mod tests {
         assert_eq!((hp, hc), (fp, fc), "headline vs footer:\n{out}");
         assert_eq!(hp + hc, row_count, "headline count vs rows printed:\n{out}");
         assert_eq!((hp, hc), (3, 1), "3 providers, 1 consumer:\n{out}");
+    }
+
+    #[test]
+    fn headline_excludes_test_fixtures_and_discloses_but_still_lists_them() {
+        // COHERENCE-3 §2.2: a test-fixture surface (is_test == Some(true)) is EXCLUDED from the
+        // headline provider/consumer counts (matching cycles + the boundaries-summary HTTP line),
+        // DISCLOSED as "(+M test-fixture excluded)", and STILL rendered below, labeled [test].
+        let mut fixture = entry("provider", "GET", Some("/fx"), "test/fixtures/server.js");
+        fixture.is_test = Some(true);
+        let surfaces = vec![
+            entry("provider", "GET", Some("/a"), "backend/A.java"), // production
+            fixture,                                                // test-fixture (excluded)
+            entry("consumer", "GET", Some("/a"), "web/a.ts"),       // production
+        ];
+        let out = render_surfaces(&surfaces);
+        assert!(
+            out.contains(
+                "HTTP/REST API surfaces: 1 provider, 1 consumer (+1 test-fixture excluded)"
+            ),
+            "headline excludes the fixture and discloses it:\n{out}"
+        );
+        // The fixture row still renders, labeled [test] (fixtures labeled in lists).
+        assert!(
+            out.contains("[test]"),
+            "fixture still listed, labeled:\n{out}"
+        );
+        // COHERENCE-3 (review-0 item 3): the footer shows the SAME production phrase AND the SAME
+        // exclusion clause as the headline — byte-identical, never a bare "2 surfaces" sitting
+        // silently below the listed `[test]` fixture row.
+        assert!(
+            out.contains("— 2 HTTP surfaces: 1 provider, 1 consumer (+1 test-fixture excluded) —"),
+            "footer matches the headline production phrase AND discloses the exclusion:\n{out}"
+        );
+    }
+
+    #[test]
+    fn footer_count_is_the_production_partition_and_discloses_excluded_fixtures() {
+        // COHERENCE-3 (review-0 item 3): with fixtures present, MORE rows print than the footer
+        // counts (the footer is the production partition), so the footer MUST disclose the gap —
+        // never a bare "N surfaces" sitting silently below listed `[test]` rows. This pins the
+        // footer's count against the rows it does NOT include.
+        let mut fx1 = entry("provider", "GET", Some("/fx1"), "test/fixtures/a.js");
+        fx1.is_test = Some(true);
+        let mut fx2 = entry("consumer", "GET", Some("/fx2"), "test/fixtures/b.js");
+        fx2.is_test = Some(true);
+        let surfaces = vec![
+            entry("provider", "GET", Some("/a"), "backend/A.java"), // production
+            fx1,                                                    // fixture (excluded)
+            fx2,                                                    // fixture (excluded)
+        ];
+        let out = render_surfaces(&surfaces);
+        // Three rows render (incl. both `[test]` fixtures); the footer counts only the 1 production
+        // surface but discloses the 2 excluded — so the reader can reconcile rows vs count.
+        let row_count = out
+            .lines()
+            .filter(|l| l.starts_with("  ") && l.contains('['))
+            .count();
+        assert_eq!(row_count, 3, "all rows incl. fixtures print:\n{out}");
+        let footer = out.lines().find(|l| l.starts_with("—")).expect("footer");
+        let (fp, fc) = parse_phrase(footer);
+        assert_eq!((fp, fc), (1, 0), "footer counts only production:\n{out}");
+        assert!(
+            footer.contains("(+2 test-fixture excluded)"),
+            "footer discloses the excluded fixtures it does not count:\n{out}"
+        );
+    }
+
+    #[test]
+    fn unknown_is_test_kept_in_headline_but_disclosed_never_invisible() {
+        // is_test None (no files row) → UNKNOWN: KEPT in the headline count (never demoted) but
+        // DISCLOSED, never silently treated as production (RULE #1).
+        let mut unknown = entry("provider", "GET", Some("/u"), "gen/x.ts");
+        unknown.is_test = None;
+        let out = render_surfaces(&[
+            entry("provider", "GET", Some("/a"), "backend/A.java"),
+            unknown,
+        ]);
+        assert!(
+            out.contains("2 providers, 0 consumers (test-status unknown for 1)"),
+            "unknown stays counted but is disclosed:\n{out}"
+        );
     }
 
     #[test]

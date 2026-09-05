@@ -784,8 +784,12 @@ pub fn render_summary(facts: &MapFacts, rendered: &[RenderedMapFile]) -> String 
             capped_name_list(&unmapped_names, UNMAPPED_SUMMARY_CAP),
         )
     };
+    // COHERENCE-3 (§2.3): NAME the basis on the file-maps total — "files mapped for symbols"
+    // (parse_status == parsed). This is a DIFFERENT basis from orient/check ("indexed") and
+    // stats/modules ("owned"), which is why its number differs; naming it makes that legible
+    // (the unmapped line below elaborates the coverage, distinct from `check` UNPARSED_FILES).
     format!(
-        "map: {} directory maps, {} file maps from snapshot {} [{}]\n\
+        "map: {} directory maps, {} file maps (files mapped for symbols) from snapshot {} [{}]\n\
          {}\n",
         dir_maps,
         file_maps,

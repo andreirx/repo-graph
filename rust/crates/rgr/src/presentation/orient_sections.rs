@@ -104,7 +104,11 @@ impl OrientResponse {
         };
 
         if let Some(files) = ev.get("file_count").and_then(|v| v.as_u64()) {
-            line.push_str(&format!(" · {} file{}", files, plural(files)));
+            // COHERENCE-3 (§2.3): NAME the basis — "indexed" (all indexed files, `COUNT(DISTINCT
+            // file_uid) FROM file_versions`). `check`'s "N files indexed" now derives from the SAME
+            // live count, so the two agree; `stats`/`modules`/`map` name their DIFFERENT bases, so
+            // five totals read as five bases, not five errors.
+            line.push_str(&format!(" · {} file{} indexed", files, plural(files)));
             if let Some(symbols) = ev.get("symbol_count").and_then(|v| v.as_u64()) {
                 line.push_str(&format!(", {} symbol{}", symbols, plural(symbols)));
             }
@@ -307,11 +311,43 @@ impl OrientResponse {
                         None => true,
                         Some(_) => test_only == Some(0) && unknown == Some(0),
                     };
+                    // COHERENCE-3 (§2.1): the anchor renders the REAL walk the SHARED `cycle_walk`
+                    // kernel precomputed (the SAME walk `cycles` draws) — NOT a ring fabricated from
+                    // the sorted member set (the audit's `apps -> backends -> backends -> …`). `walk`
+                    // present (the SQLite serving path) ⇒ the verified directed ring; absent
+                    // (LiveGraph/focus/truncated/non-SQLite — exactly where `cycles` renders `members
+                    // (unordered)`) ⇒ the honest unordered form "largest: N modules — rmap cycles",
+                    // never a fabricated ring (RULE #1).
                     let anchor = if draw_anchor {
-                        cycles
-                            .first()
-                            .and_then(|c| c.get("modules").and_then(|m| m.as_array()))
-                            .map(|mods| self.format_cycle_anchor(mods, 0))
+                        let first = cycles.first();
+                        // The honest unordered form (size + pointer), keyed on `length` — the
+                        // LiveGraph/focus/truncated/non-SQLite path where `cycles` itself renders
+                        // `members (unordered)`.
+                        let unordered = || {
+                            first
+                                .and_then(|c| c.get("length"))
+                                .and_then(|v| v.as_u64())
+                                .map(|n| {
+                                    format!("largest: {} module{} — rmap cycles", n, plural(n))
+                                })
+                        };
+                        match first.and_then(|c| c.get("walk")).and_then(|w| w.as_array()) {
+                            // A PRESENT, non-empty walk is the SQLite ordered-ring path: validate it
+                            // strictly (COHERENCE-3 review-1 #1). A well-formed ring renders; a
+                            // present-but-malformed walk (schema/wire drift) must NOT masquerade as
+                            // the clean unordered fallback nor as a fabricated ring — make the
+                            // unknown VISIBLE with its reason (STANDING HONESTY RULE #1), mirroring
+                            // the `type_only`-unavailable precedent below.
+                            Some(walk) if !walk.is_empty() => match self.format_cycle_anchor(walk) {
+                                Some(chain) => Some(chain),
+                                None => Some(
+                                    "cycle walk unreadable on this snapshot — run `rmap cycles`"
+                                        .to_string(),
+                                ),
+                            },
+                            // Absent / null / empty walk = legitimate absence ⇒ unordered form.
+                            _ => unordered(),
+                        }
                     } else {
                         None
                     };
@@ -460,8 +496,13 @@ impl OrientResponse {
                 Some(test) => format!(" ({test} test)"),
                 None => " (test count unavailable)".to_string(),
             };
+            // COHERENCE-3 (§2.3): NAME the basis on the per-row total — these are the files IN
+            // THIS package group (its directory/package subtree, Layer 0/1 topology). That is a
+            // DIFFERENT basis from the repo-wide "N files indexed" (`structure_line`) and from a
+            // module's "owned files" (`module_breakdown_section` / `modules list`), so a reader
+            // scanning the breakdown never conflates a group's size with the repo total.
             out.push_str(&bullet(&format!(
-                "{} — {} file{}{}",
+                "{} — {} file{} in group{}",
                 name,
                 files,
                 plural(files),
@@ -519,8 +560,13 @@ impl OrientResponse {
                 continue;
             };
             let label = OrientResponse::module_row_label(&rows, &effective_names, i);
+            // COHERENCE-3 (§2.3): NAME the basis — these are the files the declared/inferred module
+            // OWNS (`module_file_ownership`), the SAME basis `modules list` names as "owned files"
+            // (`module_shared::format_files_compact`) and a DIFFERENT basis from the package-group
+            // directory count above and the repo-wide "files indexed". Same word so the two module
+            // surfaces read as one basis.
             out.push_str(&bullet(&format!(
-                "{} — {} file{}",
+                "{} — {} owned file{}",
                 label,
                 files,
                 plural(files)

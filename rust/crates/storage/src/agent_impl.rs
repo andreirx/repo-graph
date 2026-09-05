@@ -882,6 +882,9 @@ impl AgentStorageRead for StorageConnection {
                         // headline this slice unifies — no test-only split is claimed here.
                         test_composition: None,
                         type_only: None,
+                        // COHERENCE-3: no walk precomputed on the focus/path-scoped read —
+                        // absence renders the unordered form (RULE #1).
+                        walk: None,
                     })
                 } else {
                     None
@@ -945,6 +948,9 @@ impl AgentStorageRead for StorageConnection {
                     // headline this slice unifies — no test-only split is claimed here.
                     test_composition: None,
                     type_only: None,
+                    // COHERENCE-3: no walk precomputed on the focus/path-scoped read — the walk
+                    // is a repo-headline decoration; absence renders the unordered form (RULE #1).
+                    walk: None,
                 });
             }
         }
@@ -1205,6 +1211,9 @@ impl AgentStorageRead for StorageConnection {
                         // headline this slice unifies — no test-only split is claimed here.
                         test_composition: None,
                         type_only: None,
+                        // COHERENCE-3: no walk precomputed on the focus/path-scoped read —
+                        // absence renders the unordered form (RULE #1).
+                        walk: None,
                     })
                 } else {
                     None
@@ -1263,6 +1272,9 @@ impl AgentStorageRead for StorageConnection {
                     // headline this slice unifies — no test-only split is claimed here.
                     test_composition: None,
                     type_only: None,
+                    // COHERENCE-3: no walk precomputed on the focus/path-scoped read — the walk
+                    // is a repo-headline decoration; absence renders the unordered form (RULE #1).
+                    walk: None,
                 });
             }
         }

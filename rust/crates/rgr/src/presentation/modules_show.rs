@@ -152,18 +152,22 @@ impl ModulesShowResponse {
         // COHERENCE-2 §2.4: `owned_file_count` (non-test) and `owned_test_file_count` (test) are
         // disjoint; the headline is the TOTAL so `(N test files)` reads as a SUBSET of it, the same
         // meaning `modules list` and `stats` use — never an addend the reader must sum.
+        // COHERENCE-3 §2.3: NAME the basis on the total — `owned` files (`module_file_ownership`),
+        // the SAME basis `modules list` names via `format_files_compact` and a DIFFERENT basis from
+        // the repo-wide "N files indexed" (orient/check), so the reader never conflates a module's
+        // size with the repo total.
         out.push_str("\nOwnership:\n");
         let total_files = self.rollups.owned_file_count + self.rollups.owned_test_file_count;
         if self.rollups.owned_test_file_count > 0 {
             out.push_str(&format!(
                 "  {} ({} test files)\n",
-                format_count(total_files, "file", "files"),
+                format_count(total_files, "owned file", "owned files"),
                 self.rollups.owned_test_file_count
             ));
         } else {
             out.push_str(&format!(
                 "  {}\n",
-                format_count(total_files, "file", "files")
+                format_count(total_files, "owned file", "owned files")
             ));
         }
 
@@ -497,16 +501,17 @@ mod tests {
         let resp = sample_show_response();
         let output = resp.render_human();
         assert!(output.contains("Ownership:"));
+        // COHERENCE-3 §2.3: the total NAMES its basis (`owned`), matching `modules list`.
         assert!(
-            output.contains("110 files"),
-            "total headline (100+10):\n{output}"
+            output.contains("110 owned files"),
+            "total headline (100+10) names its basis:\n{output}"
         );
         assert!(
             output.contains("10 test files"),
             "test subset clause:\n{output}"
         );
         assert!(
-            !output.contains("100 files"),
+            !output.contains("100 owned files"),
             "the non-test count must NOT be the headline (addend defect):\n{output}"
         );
     }

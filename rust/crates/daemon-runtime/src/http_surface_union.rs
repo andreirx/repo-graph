@@ -283,6 +283,47 @@ pub(crate) fn counts(rows: &[UnifiedHttpSurface]) -> (usize, usize) {
     (providers, consumers)
 }
 
+/// COHERENCE-3 (§2.2): the provider/consumer counts PARTITIONED by the stored `is_test` fact —
+/// the shape `orient`'s HTTP headline needs so it excludes test fixtures exactly as the `surfaces`
+/// command and the `boundaries summary` HTTP line do (all three then state the same production
+/// count). Test-fixture rows (`is_test == Some(true)`) are excluded from `providers`/`consumers`
+/// and tallied in `test_fixture_excluded`; unknown-`is_test` rows (`None`) STAY counted (never
+/// demoted) but are tallied in `test_status_unknown` so they are disclosed, never invisible
+/// (RULE #1). Classified ONLY from the stored fact — never a path heuristic (RULE #2).
+pub(crate) struct HttpSurfacePartition {
+    pub providers: usize,
+    pub consumers: usize,
+    pub test_fixture_excluded: usize,
+    pub test_status_unknown: usize,
+}
+
+pub(crate) fn counts_partitioned(rows: &[UnifiedHttpSurface]) -> HttpSurfacePartition {
+    let mut providers = 0;
+    let mut consumers = 0;
+    let mut test_fixture_excluded = 0;
+    let mut test_status_unknown = 0;
+    for r in rows {
+        if r.is_test == Some(true) {
+            test_fixture_excluded += 1;
+            continue;
+        }
+        if r.is_test.is_none() {
+            test_status_unknown += 1;
+        }
+        match r.direction.as_str() {
+            "provider" => providers += 1,
+            "consumer" => consumers += 1,
+            _ => {}
+        }
+    }
+    HttpSurfacePartition {
+        providers,
+        consumers,
+        test_fixture_excluded,
+        test_status_unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
