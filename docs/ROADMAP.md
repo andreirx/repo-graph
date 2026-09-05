@@ -74,8 +74,9 @@ hypotheses until that run speaks.
    seed-publish write window vs foreground open patience (django Busy bounce, measured);
    assess 301s hang under batch load (UNDIAGNOSED — not write-mutex contention, different
    DB); retention's VACUUM journal_mode=DELETE window. Re-scoped as DAEMON-RESIDUALS-1
-   — human-ratified Option A (2026-09-04) and, same day, retention fix (a) FK indexes +
-   chunking AND (b) rebuild-instead-of-delete when prunable dominates, plus a prevention
+   — human-ratified Option A (2026-09-04) and, same day, retention fix (a) [FK-index premise
+   RETRACTED 2026-09-05 — indexes exist since 001-initial.sql; operator grep missed the .sql
+   bootstrap; mechanism to be reproduced+measured] + chunking AND (b) rebuild-instead-of-delete when prunable dominates, plus a prevention
    set (snapshot hard cap with prune-on-commit, time budget → rebuild, cache sizing, doctor
    visibility, benchmark gate). PRODUCTION REBUILD DONE same day: 40 s reindex replaced a
    5h+ zero-progress prune; store 4,802 → 253 MB, snapshots 29 → 1. Diagnose the assess hang under reproduced

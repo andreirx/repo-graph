@@ -33,10 +33,15 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    the prune is NOT one transaction — `delete_snapshots_cascade` (prune.rs:186) runs ONE
    TRANSACTION PER SNAPSHOT: explicit `DELETE … WHERE snapshot_uid=?` on six orphan
    tables, then `DELETE FROM snapshots` which fires `ON DELETE CASCADE` across 37 FK child
-   tables. THE MECHANISM: 15 of those child tables have NO index on `snapshot_uid` —
-   including `nodes` (454k rows), `edges` (419k), `file_versions`, `symbol_call_degrees`,
-   `resolved_call_file_pairs` — so every cascade FULL-SCANS each unindexed child table,
-   per snapshot; each deleted row also updates every secondary index; the daemon's RSS is
+   tables. RETRACTED 2026-09-05 (builder diagnosis, operator-verified on the live DB via
+   PRAGMA index_list + EXPLAIN QUERY PLAN): every child table HAS a `snapshot_uid`-leading
+   index — most since `001-initial.sql`, which the operator's grep of `migrations/*.rs`
+   never saw, plus `sqlite_autoindex` from UNIQUE/PK constraints; only `declarations`
+   (small) scans. The cascade deletes already use index seeks. THE PRUNE'S MECHANISM IS
+   UNDIAGNOSED (candidates: per-row secondary-index maintenance across ~100k rows per
+   snapshot on a 4.8 GB file with a 2 MB page cache; FK RESTRICT checks on non-cascade
+   children; the `parent_snapshot_uid` update; WAL growth) — REPRODUCE AND MEASURE on a
+   representative multi-snapshot store before any causal fix ships; the daemon's RSS is
    ~32 MB (SQLite's default 2 MB page cache) against a 4.8 GB file → page-cache thrash.
    28 snapshots to delete (27 READY prunable + 1 failed; keep-set is current-state only)
    accumulated since 2026-05-28 because a pass this long NEVER COMPLETES before a daemon
@@ -46,9 +51,8 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
    the index took ~40 s (19:22:46 → 19:23:24); store 4,802 MB → 253 MB (19×); snapshots
    29 → 1; nodes 454k → 18k, edges 419k → 22k, extraction_edges 2.19M → 110k; orient
    serves. The prune it replaced had run 5h+ and committed nothing. This is the
-   measured case for (b): O(current) ≈ 40 s vs O(history × unindexed children) = never. Contract addendum for #4 (HUMAN-RATIFIED 2026-09-04: (a)+(b) — (c) optional; plus the prevention set in §2.6): (a) index the 15 unindexed FK child tables on
-   `snapshot_uid` (additive migration; each cascade becomes an index seek instead of a
-   full scan — the cheap, large win) + chunk within a snapshot with the write slot released
+   measured case for (b): O(current) ≈ 40 s vs O(history × unindexed children) = never. Contract addendum for #4 (HUMAN-RATIFIED 2026-09-04: (a)+(b) — (c) optional; plus the prevention set in §2.6): (a) the MEASURED mechanism(s) from a reproduction on a multi-snapshot store (the
+   FK-index migration is RETRACTED — indexes exist) + chunk within a snapshot with the write slot released
    between chunks, progress in `doctor`; and/or (b) REBUILD instead of DELETE when the
    prunable share dominates the store (copy the kept snapshot(s) into a fresh file and
    swap; O(current) instead of O(history × children); no VACUUM needed); and/or (c) make
@@ -80,7 +84,11 @@ thread-per-connection, 64-conn cap, typed Busy; single-writer per DB via
 3. **#3 under the coordinator**: preload/refresh acquire the repo coordinator's refresh
    (writer) guard; readers bound to an epoch keep their graph until release (the W-B
    epoch invariants FROZEN).
-4. **#4 chunked and guarded** (aligned with §1's escalation): the retention PRUNE runs
+4. **#4 reproduced, then chunked and guarded** (D2 Option C, 2026-09-05): FIRST reproduce
+   retention on a representative multi-snapshot store (6–8 isolated re-indexes of a
+   mid-size repo, or a snapshot-heavy fixture) and measure per phase (statement, table,
+   rows/s, cache behaviour) — the FK-index premise is RETRACTED; fix ONLY the measured
+   mechanism. THEN: the retention PRUNE runs
    as bounded transactions (≤N rows or ≤T ms of write-slot hold each; N/T stated and
    justified against the 450ms foreground patience), releasing the write slot between
    chunks so foreground reads interleave; `doctor` shows prune progress (rows done/total,
