@@ -142,6 +142,26 @@ impl DatabaseState {
             .try_lock()
             .map(|g| DbWriteGuard { _guard: g })
     }
+
+    /// DAEMON-RESIDUALS-1 (D1-A): acquire write access with BOUNDED patience.
+    ///
+    /// Returns `None` if `timeout` elapses while a concurrent write pass holds the lock — the
+    /// caller (a FOREGROUND write command: `assess`, `coverage`) then re-codes that as an honest,
+    /// holder-named [`repo_graph_daemon_transport::ErrorCode::Busy`] transient (via
+    /// [`crate::foreground_open::acquire_foreground_write`]) instead of blocking unbounded up to the
+    /// 300s client-timeout SYMPTOM. This is the #2 lock layer (the DB write mutex); the coordinator
+    /// refresh guard is the second layer, bounded by
+    /// [`repo_graph_daemon_policy::RepoCoordinator::acquire_refresh_timeout`].
+    ///
+    /// The unbounded [`Self::acquire_write`] is UNCHANGED and still used by the deliberate
+    /// long-running writes the client waits on (index / refresh / enrich / docs_extract) and by the
+    /// background passes' own `try_acquire_write` gating — only the two foreground quality/governance
+    /// write commands adopt the bounded variant.
+    pub fn acquire_write_timeout(&self, timeout: std::time::Duration) -> Option<DbWriteGuard<'_>> {
+        self.write_lock
+            .try_lock_for(timeout)
+            .map(|g| DbWriteGuard { _guard: g })
+    }
 }
 
 /// Guard that holds exclusive write access to a database.
@@ -1426,6 +1446,44 @@ mod tests {
 
         // try_acquire_write should fail while locked
         assert!(runtime.try_acquire_write().is_none());
+    }
+
+    /// DAEMON-RESIDUALS-1 (D1-A): the DB write mutex acquired with bounded patience must TIME OUT
+    /// (return `None`) when a concurrent holder has it — never block unbounded (the #2 mechanism the
+    /// two foreground write commands re-code as an honest `Busy`). Uncontended it acquires at once,
+    /// and it acquires again once the holder releases.
+    #[test]
+    fn db_acquire_write_timeout_is_bounded_under_contention() {
+        use std::time::{Duration, Instant};
+        let dir = tempdir().unwrap();
+        let db_path = create_test_db(dir.path(), "test-repo");
+        let daemon = DaemonState::new();
+        let runtime = daemon.get_or_create_db_runtime(&db_path).unwrap();
+
+        // Uncontended → acquires immediately.
+        assert!(runtime
+            .acquire_write_timeout(Duration::from_millis(50))
+            .is_some());
+
+        // Held → the bounded acquire returns None within a bounded window, never blocking.
+        let held = runtime.acquire_write();
+        let start = Instant::now();
+        let attempt = runtime.acquire_write_timeout(Duration::from_millis(80));
+        assert!(
+            attempt.is_none(),
+            "a held DB write lock must time out, not block"
+        );
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "acquire_write_timeout must be bounded, took {:?}",
+            start.elapsed()
+        );
+
+        // Released → acquires again.
+        drop(held);
+        assert!(runtime
+            .acquire_write_timeout(Duration::from_millis(50))
+            .is_some());
     }
 
     #[test]

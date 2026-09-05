@@ -365,6 +365,12 @@ coordinator guards for assess/coverage/…); DAEMON-RESIDUALS-2 = retention (rep
 measured remedy → rebuild path → prevention set); DAEMON-RESIDUALS-3 = seed-publish
 chunking + #2b LiveGraph coordinator guard + VACUUM guard. Order after ECONOMY-2 and the
 v0.17.0 release/audit: -2 then -3.
+SHIPPED: DAEMON-RESIDUALS-1 = D1-A (2026-09-05): foreground handlers (assess, coverage, …)
+no longer wait unboundedly — bounded patience + NAMED typed Busy on BOTH the DB write
+mutex and the coordinator guards, holder class + elapsed from the activity registry.
+Diagnosis evidenced (lock order + 1.30/1.44 s measured blocks), not reproduced at 301 s;
+enrich holding both exclusive guards for its whole run → ENRICH-GUARD-1. Rescoped by
+ruling A; -2 (retention) and -3 (seed chunking/#2b/VACUUM) staged.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

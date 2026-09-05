@@ -144,3 +144,96 @@ fn foreground_extracted_write_under_held_lock_is_busy_not_internal_error() {
     );
     assert_busy_transient(&err, &db_path);
 }
+
+// ── DAEMON-RESIDUALS-1 (D1-A): the IN-PROCESS write-mutex layer, through the real dispatcher ──
+//
+// The held-*file*-lock cases above trip the storage open (§2.2) and never reach D1-A's new branch:
+// a foreground WRITE handler takes `acquire_foreground_write` (the DB write mutex + coordinator
+// refresh) as its FIRST lock op, BEFORE opening storage. These cases hold the daemon's IN-PROCESS
+// `DatabaseState::write_lock` (the exact #2 block site) and drive `assess`/`coverage` through the
+// real dispatcher, proving the handler re-codes the contention as an honest, HOLDER-NAMED `Busy`
+// (with the ratified "started Nm ago" elapsed) within the bounded patience — never a block to the
+// 300s symptom, never `InternalError`.
+
+use repo_graph_daemon_runtime::activity::OpKind;
+
+/// Index `repo` in a dispatcher whose `DaemonState` we also hold, stamp an in-flight `index` on its
+/// DB (so the Busy can name a holder + elapsed), hold the IN-PROCESS write mutex, then dispatch
+/// `method`/`params`. Asserts the bounded, holder-named honest-`Busy` D1-A contract.
+fn assert_write_busy_under_held_inprocess_lock(
+    method: &str,
+    make_params: impl Fn(&tempfile::TempDir) -> serde_json::Value,
+) {
+    let (d, state, _root) = isolated_quiet_with_state();
+    let repo = make_repo();
+    let idx = dispatch_ok(
+        &d,
+        "index",
+        json!({ "repo_path": repo.path().to_string_lossy() }),
+    );
+    let (db_path, _uid) = coords(&idx);
+
+    // The SAME `Arc<DatabaseState>` the handler resolves (cached by canonical path).
+    let db_runtime = state
+        .get_or_create_db_runtime(Path::new(&db_path))
+        .expect("db runtime for the indexed repo");
+    // Stamp an in-flight index on this DB so the Busy names the holder class + elapsed (D1 wording).
+    // Key it on the runtime's CANONICAL db path — the exact path the handler passes to `busy_message`
+    // (`repo_state.db_path()`), which `ActivityRegistry::active_for_db` matches by exact PathBuf. The
+    // index-response `db_path` is the pre-canonical temp path (`/var/…` vs `/private/var/…` on macOS),
+    // which would silently miss the registry lookup and render the honest-unknown message instead.
+    let _op = state.activity().begin(
+        OpKind::Index,
+        repo.path().to_string_lossy().to_string(),
+        None,
+        db_runtime.db_path().to_path_buf(),
+    );
+    // Hold the in-process write mutex — the exact #2 block site, contended BEFORE any storage open.
+    let _held = db_runtime.acquire_write();
+
+    let start = std::time::Instant::now();
+    let err = dispatch_error(&d, method, make_params(&repo));
+    // Bounded: the handler waits at most FOREGROUND_WRITE_PATIENCE (3s) then returns Busy — it does
+    // NOT block up to the 300s client-timeout SYMPTOM. Generous ceiling to stay non-flaky on CI.
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "foreground write must be bounded (never the 300s symptom), took {:?}",
+        start.elapsed()
+    );
+    assert_busy_transient(&err, &db_path);
+    let msg = err["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("Busy error must carry a string `message`, got: {err}"));
+    assert!(
+        msg.contains("index"),
+        "must name the holder class (stored activity fact): {err}"
+    );
+    assert!(
+        msg.contains("started") && msg.contains("ago"),
+        "must render the holder elapsed (ratified D1 wording 'started Nm ago'): {err}"
+    );
+}
+
+/// `assess` (governance write) under a held in-process write mutex → honest holder-named `Busy`.
+#[test]
+fn assess_under_held_inprocess_write_lock_is_named_busy() {
+    assert_write_busy_under_held_inprocess_lock(
+        "assess",
+        |repo| json!({ "repo": repo.path().to_string_lossy() }),
+    );
+}
+
+/// `coverage` (quality write) under a held in-process write mutex → honest holder-named `Busy`.
+/// `coverage` validates a `report_path` file BEFORE the lock, so we hand it a real (dummy) file; the
+/// handler returns Busy at the write acquire before it ever parses the report.
+#[test]
+fn coverage_under_held_inprocess_write_lock_is_named_busy() {
+    assert_write_busy_under_held_inprocess_lock("coverage", |repo| {
+        let report = repo.path().join("cov.json");
+        std::fs::write(&report, "{}").expect("write dummy coverage report");
+        json!({
+            "repo": repo.path().to_string_lossy(),
+            "report_path": report.to_string_lossy(),
+        })
+    });
+}

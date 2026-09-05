@@ -59,10 +59,20 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
             );
         }
     };
-    let _db_write_guard = db_runtime.acquire_write();
-
-    // Then acquire repo refresh lock (blocks new readers, waits for active readers)
-    let _refresh_guard = repo_state.coordinator.acquire_refresh();
+    // DAEMON-RESIDUALS-1 (D1-A): take BOTH write guards (DB write mutex + coordinator refresh) with
+    // BOUNDED foreground patience — an honest, holder-named `Busy` transient under a concurrent write
+    // pass instead of an unbounded block up to the 300s client-timeout SYMPTOM (the #2 mechanism).
+    // No partial write on timeout — the measurement writes happen only after both guards are held.
+    let (_db_write_guard, _refresh_guard) = match crate::foreground_open::acquire_foreground_write(
+        &db_runtime,
+        &repo_state.coordinator,
+        state.activity(),
+        &db_path,
+        crate::foreground_open::FOREGROUND_WRITE_PATIENCE,
+    ) {
+        Ok(guards) => guards,
+        Err(detail) => return DispatchResult::error(&request.id, detail),
+    };
 
     // D-S = S-A (DAEMON-CONCURRENCY-IMPL-1): open one fresh per-operation connection for this
     // handler's SQLite reads. The coordinator guard above keeps it snapshot-consistent for the request.

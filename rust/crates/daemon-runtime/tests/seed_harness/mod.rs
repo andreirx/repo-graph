@@ -87,6 +87,23 @@ pub fn isolated_quiet() -> (ServiceDispatcher, TempDir) {
     isolated()
 }
 
+/// `isolated_quiet()` that ALSO hands back the `Arc<DaemonState>` the dispatcher was built on, so a
+/// test can reach the same in-process `DatabaseState` the handlers see and hold its write mutex —
+/// the seam DAEMON-RESIDUALS-1 D1-A needs to exercise `acquire_foreground_write`'s IN-PROCESS block
+/// site through the real dispatcher (a raw SQLite file lock, as the other seam tests use, trips the
+/// storage open first and never reaches the write-mutex layer). Passes are disabled process-globally
+/// as in `isolated_quiet()` so the ONLY writer contending is the test's held guard.
+pub fn isolated_quiet_with_state() -> (ServiceDispatcher, std::sync::Arc<DaemonState>, TempDir) {
+    repo_graph_daemon_runtime::seed::set_auto_seed_for_test(false);
+    repo_graph_daemon_runtime::enrich_pass::set_auto_enrich_for_test(false);
+    repo_graph_daemon_runtime::retention_pass::set_auto_retention_for_test(false);
+    let state_root = tempdir().expect("state root tempdir");
+    let registry = RepoRegistry::with_state_root(state_root.path())
+        .expect("isolated registry under temp root");
+    let state = std::sync::Arc::new(DaemonState::with_registry(registry));
+    (ServiceDispatcher::new(state.clone()), state, state_root)
+}
+
 pub fn run_git(cwd: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
         .args(args)

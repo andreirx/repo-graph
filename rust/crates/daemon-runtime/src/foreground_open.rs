@@ -22,15 +22,36 @@
 //!   *string* — rejected: that is name/text classification of a rendered message (a standing
 //!   honesty violation) and it cannot reach the activity registry to name the holder.
 //!
-//! Crate-private, well under the 500-line guardrail — pre-ratified by the slice packet.
+//! Crate-private. The unit coverage lives in the sibling child-module file `foreground_open/tests.rs`
+//! (relocated for DAEMON-RESIDUALS-1 review item 4 — the D1-A additions pushed the inline `mod tests`
+//! past the 500-line structural guardrail; a child module keeps `pub(crate)`/private access to this
+//! file while the production module stays well under the limit).
 
 use std::path::Path;
+use std::time::Duration;
 
+use repo_graph_daemon_policy::{RepoCoordinator, WriteGuard};
 use repo_graph_daemon_transport::{ErrorCode, ErrorDetail};
 use repo_graph_storage::StorageConnection;
 
 use crate::activity::{ActivityRegistry, OpKind};
-use crate::state::{open_existing_with_busy_retry, OpenError, OpenPatience, RepoState};
+use crate::state::{
+    open_existing_with_busy_retry, DatabaseState, DbWriteGuard, OpenError, OpenPatience, RepoState,
+};
+
+/// DAEMON-RESIDUALS-1 (D1-A): the bounded patience a FOREGROUND write command waits for the DB
+/// write mutex AND the repo coordinator's refresh guard before it re-codes the contention as an
+/// honest, holder-named [`ErrorCode::Busy`] transient (rather than blocking unbounded up to the
+/// 300s client-timeout SYMPTOM — the #2 mechanism).
+///
+/// 3s is chosen against measured evidence: it EXCEEDS the operator's measured persist block
+/// (1.30/1.44s) with ~2x margin, so brief write contention is waited out and completes normally
+/// rather than spuriously returning Busy; and it sits at ~1% of the 300s symptom threshold (a
+/// FROZEN value, §3 — not a knob), so a genuinely long holder (a full index/enrich/retention pass)
+/// yields a PROMPT named Busy the caller can retry. Recorded as a local calibration (non-blocking):
+/// the mechanism (bounded patience + named Busy on both layers) is the operator-ratified D1 Option C;
+/// only this duration is the builder's, tied to the measured block.
+pub(crate) const FOREGROUND_WRITE_PATIENCE: Duration = Duration::from_secs(3);
 
 /// FOREGROUND-LOCK-1 (§2.3): the outcome of a foreground open for a caller that renders a genuine
 /// NON-lock fault with its OWN pre-existing code + message (a secondary open whose historical text
@@ -106,24 +127,99 @@ pub(crate) fn open_repo_storage_for_request_split(
     }
 }
 
-/// The reader-frame exhausted-patience message: names the holder CLASS from the activity registry
-/// when the daemon knows an in-flight write op is on this DB, else states the honest unknown (a
-/// concurrent operation we cannot name — e.g. another read's migration-check write, which is not
-/// stamped in the registry). Either way it states safe-to-retry and includes the store path.
-fn busy_message(db_path: &Path, activity: &ActivityRegistry) -> String {
+/// DAEMON-RESIDUALS-1 (D1-A): acquire a FOREGROUND write command's coordination — the DB write
+/// mutex AND the repo coordinator's refresh guard — with BOUNDED patience, re-coding contention as
+/// an honest, holder-named [`ErrorCode::Busy`] transient instead of blocking unbounded (the #2
+/// mechanism: `assess`/`coverage` held on `db_runtime.acquire_write()` up to the 300s symptom).
+///
+/// Both layers use the same `patience` budget; a timeout on EITHER returns the SAME §2.2 holder-named
+/// [`busy_message`] the foreground-open choke uses (index|refresh|enrich|retention, honest unknown
+/// otherwise) — one Busy vocabulary across every foreground contention surface. On success the two
+/// guards are returned in acquisition order (DB write first, then refresh) so their Drop order
+/// (refresh, then DB write) matches the historical inline `let _db = …; let _refresh = …;`. A
+/// timeout on the coordinator refresh drops the already-held DB write guard as this returns Err — no
+/// leak, and NO partial write (the caller writes only after both guards are held).
+///
+/// Abstraction ledger:
+/// - **what:** the single choke a foreground write command uses to take its two write guards with
+///   bounded patience + honest Busy — the write-side peer of [`open_repo_storage_for_request`].
+/// - **concrete current users:** `handlers::governance::assess::handle_assess` and
+///   `handlers::quality::coverage::handle_coverage` (the two foreground quality/governance write
+///   commands whose unbounded lock order is the EVIDENCED #2 symptom).
+/// - **named axis:** none new — it composes the two ratified bounded primitives
+///   ([`DatabaseState::acquire_write_timeout`] + [`RepoCoordinator::acquire_refresh_timeout`]) and
+///   the FIXED Busy-vs-acquired outcome, reusing [`busy_message`]. `patience` is a parameter so a
+///   unit test can inject a short budget (the const drives production) — a real test seam.
+/// - **rejected simpler:** inline the two bounded acquires + Busy mapping at each of the two call
+///   sites — rejected: duplicates the correctness-sensitive dual-layer timeout + holder-naming, so a
+///   future budget/message change would have to be found at two places, and diverges from the
+///   open-choke seam.
+pub(crate) fn acquire_foreground_write<'a>(
+    db_runtime: &'a DatabaseState,
+    coordinator: &'a RepoCoordinator,
+    activity: &ActivityRegistry,
+    db_path: &Path,
+    patience: Duration,
+) -> Result<(DbWriteGuard<'a>, WriteGuard<'a>), ErrorDetail> {
+    // Layer 1: the DB write mutex (the #2 block site).
+    let db_guard = match db_runtime.acquire_write_timeout(patience) {
+        Some(g) => g,
+        None => {
+            return Err(ErrorDetail::new(
+                ErrorCode::Busy,
+                busy_message(db_path, activity),
+            ))
+        }
+    };
+    // Layer 2: the repo coordinator's refresh guard. Once the DB write mutex is held no other write
+    // pass can be mid-order, so this waits only for active readers to drain (bounded) — still
+    // bounded + named for defence in depth (D1 Option C: BOTH layers). On timeout `db_guard` drops
+    // here (lock released) as we return Err.
+    let refresh_guard = match coordinator.acquire_refresh_timeout(patience) {
+        Ok(g) => g,
+        Err(_timeout) => {
+            return Err(ErrorDetail::new(
+                ErrorCode::Busy,
+                busy_message(db_path, activity),
+            ))
+        }
+    };
+    Ok((db_guard, refresh_guard))
+}
+
+/// The reader-frame exhausted-patience message: names the holder CLASS **and how long it has been
+/// running** from the activity registry when the daemon knows an in-flight write op is on this DB,
+/// else states the honest unknown (a concurrent operation we cannot name — e.g. another read's
+/// migration-check write, which is not stamped in the registry). Either way it states safe-to-retry
+/// and includes the store path.
+///
+/// DAEMON-RESIDUALS-1 (D1-A): `pub(crate)` and reused by [`acquire_foreground_write`] so the DB
+/// write-mutex / coordinator-refresh timeout renders the SAME honest Busy vocabulary as the storage
+/// open choke — one message shape across every foreground contention layer. The holder ELAPSED is
+/// the ratified D1 wording ("… started Nm ago"): the operator can tell a brief persist from a long
+/// index/enrich pass without opening `doctor`.
+pub(crate) fn busy_message(db_path: &Path, activity: &ActivityRegistry) -> String {
     match activity.active_for_db(db_path) {
         // `op.kind.as_str()` is a STORED activity fact (index|refresh|enrich|retention), not a
-        // guess from a name — honest holder-class naming per §2.2.
+        // guess from a name — honest holder-class naming per §2.2. `op.started_secs_ago` is the
+        // op's monotonic elapsed (a stored fact, not a fallible read — HONESTY RULE 2).
         // review-2: Index/Refresh are USER-INITIATED operations, not background passes —
         // the holder-class wording follows the op kind (exhaustive; a new OpKind variant
         // must choose its wording here by compiler force, never a wildcard default).
         Some(op) => {
+            let elapsed = humanize_elapsed(op.started_secs_ago);
             let holder = match op.kind {
                 OpKind::Index | OpKind::Refresh => {
-                    format!("an in-progress {} operation", op.kind.as_str())
+                    format!(
+                        "an in-progress {} operation (started {elapsed} ago)",
+                        op.kind.as_str()
+                    )
                 }
                 OpKind::Enrich | OpKind::Retention => {
-                    format!("a background {} pass", op.kind.as_str())
+                    format!(
+                        "a background {} pass (started {elapsed} ago)",
+                        op.kind.as_str()
+                    )
                 }
             };
             format!(
@@ -140,212 +236,18 @@ fn busy_message(db_path: &Path, activity: &ActivityRegistry) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    //! Unit coverage for the two seams this module owns: the exhausted-patience MESSAGE
-    //! ([`busy_message`]) and the classification the wrapper performs on the retry MECHANISM's
-    //! typed outcome. The full `open_repo_storage_for_request` + real-dispatch reproducing race
-    //! lives in `tests/foreground_lock_seam.rs` (a held write lock + a real `find` dispatch), which
-    //! needs an indexed repo the unit layer cannot cheaply build.
-
-    use super::*;
-    use crate::activity::OpKind;
-    use repo_graph_storage::StorageConnection;
-    use std::time::{Duration, Instant};
-    use tempfile::tempdir;
-
-    /// Create a real migrated DB file and return its path (kept alive by the returned `TempDir`).
-    fn migrated_db() -> (tempfile::TempDir, std::path::PathBuf) {
-        let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join("repo.db");
-        // `open` creates + migrates; drop closes it so the file is a valid, unlocked DB.
-        let conn = StorageConnection::open(db_path.to_str().unwrap()).expect("create+migrate db");
-        drop(conn);
-        (dir, db_path)
-    }
-
-    /// Hold a raw SQLite WRITE lock on `db_path` for `hold`, on a detached thread. `BEGIN IMMEDIATE`
-    /// takes the reserved lock at once, so a concurrent `open_existing` migration-check write hits
-    /// `SQLITE_BUSY` immediately — the exact production shape. Returns once the lock is held.
-    fn hold_write_lock(db_path: &Path, hold: Duration) {
-        let path = db_path.to_path_buf();
-        let started = std::sync::Arc::new(std::sync::Barrier::new(2));
-        let started_c = started.clone();
-        std::thread::spawn(move || {
-            let conn = rusqlite::Connection::open(&path).expect("raw open");
-            conn.execute_batch("BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS _lk(x);")
-                .expect("acquire write lock");
-            started_c.wait();
-            std::thread::sleep(hold);
-            let _ = conn.execute_batch("COMMIT;");
-        });
-        started.wait();
-    }
-
-    // ── the exhausted-patience MESSAGE (§2.2) ────────────────────────────────
-
-    #[test]
-    fn busy_message_names_registered_holder_class() {
-        let activity = ActivityRegistry::new();
-        let db = Path::new("/db/x.db");
-        let _g = activity.begin(OpKind::Retention, "/repos/x", None, db.to_path_buf());
-        let msg = busy_message(db, &activity);
-        // `kind.as_str()` is a STORED fact, not a name guess.
-        assert!(
-            msg.contains("retention"),
-            "must name the holder class: {msg}"
-        );
-        assert!(msg.contains("retry"), "must state safe-to-retry: {msg}");
-        assert!(
-            msg.contains("/db/x.db"),
-            "must include the store path: {msg}"
-        );
-        assert!(!msg.contains("InternalError"), "never InternalError: {msg}");
-    }
-
-    #[test]
-    fn busy_message_is_honest_unknown_with_no_registered_op() {
-        let activity = ActivityRegistry::new(); // nothing registered
-        let db = Path::new("/db/y.db");
-        let msg = busy_message(db, &activity);
-        assert!(
-            msg.contains("concurrent operation"),
-            "unknown holder must render an honest unknown, not a fabricated op: {msg}"
-        );
-        assert!(msg.contains("retry") && msg.contains("/db/y.db"), "{msg}");
-    }
-
-    // ── the retry MECHANISM + wrapper classification (§2.1 / §2.2) ───────────
-
-    #[test]
-    fn lock_that_clears_within_patience_succeeds() {
-        let (_dir, db_path) = migrated_db();
-        // Held ~200ms — well inside the 450ms foreground budget.
-        hold_write_lock(&db_path, Duration::from_millis(200));
-        let start = Instant::now();
-        let result = open_existing_with_busy_retry(&db_path, OpenPatience::Foreground);
-        assert!(
-            result.is_ok(),
-            "a lock that clears within patience must succeed, got {:?}",
-            result.err().map(|e| e.to_string())
-        );
-        assert!(
-            start.elapsed() < Duration::from_millis(1500),
-            "foreground open must not stall for a background-length budget"
-        );
-    }
-
-    #[test]
-    fn lock_held_beyond_patience_is_locked_after_retries_and_bounded() {
-        let (_dir, db_path) = migrated_db();
-        // Held ~1.2s — outlives the 450ms foreground budget.
-        hold_write_lock(&db_path, Duration::from_millis(1200));
-        let start = Instant::now();
-        let err = open_existing_with_busy_retry(&db_path, OpenPatience::Foreground)
-            .expect_err("must exhaust patience");
-        assert!(
-            matches!(err, OpenError::LockedAfterRetries { .. }),
-            "an exhausted lock must classify as a transient, not Other: {err:?}"
-        );
-        // Foreground budget bound: 3 sleeps × 150ms = 450ms, plus open overhead — sub-second.
-        assert!(
-            start.elapsed() < Duration::from_millis(900),
-            "foreground patience must be sub-second, took {:?}",
-            start.elapsed()
-        );
-    }
-
-    #[test]
-    fn missing_db_is_other_immediately() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("does-not-exist.db");
-        let start = Instant::now();
-        let err = open_existing_with_busy_retry(&db_path, OpenPatience::Foreground)
-            .expect_err("missing db must fail");
-        assert!(
-            matches!(err, OpenError::Other(_)),
-            "a non-lock fault must not be retried as a lock: {err:?}"
-        );
-        assert!(
-            start.elapsed() < Duration::from_millis(150),
-            "a non-lock fault must surface immediately, not after the retry budget"
-        );
-    }
-
-    #[test]
-    fn background_budget_waits_longer_than_foreground() {
-        // Same locked DB, both budgets exhaust; Background (4×250ms) must exceed Foreground
-        // (3×150ms). Proves the parameterization actually differs by class.
-        let (_dir, db_path) = migrated_db();
-        hold_write_lock(&db_path, Duration::from_secs(5));
-        let t_fg = {
-            let s = Instant::now();
-            let _ = open_existing_with_busy_retry(&db_path, OpenPatience::Foreground);
-            s.elapsed()
-        };
-        let t_bg = {
-            let s = Instant::now();
-            let _ = open_existing_with_busy_retry(&db_path, OpenPatience::Background);
-            s.elapsed()
-        };
-        assert!(
-            t_bg > t_fg,
-            "background budget must wait longer: bg={t_bg:?} fg={t_fg:?}"
-        );
-    }
-
-    // ── §2.3: non-lock message preservation (review-1 item 2) ────────────────
-
-    /// A genuine non-lock fault surfaces the RAW storage error (no shared prefix), so a secondary
-    /// open with a DISTINCT pre-existing message (assess/coverage: "storage open failed: …";
-    /// enrich: "failed to open storage for enrichment: …") renders it under its OWN prefix via the
-    /// split path WITHOUT double-prefixing. If `Other` carried the shared prefix (build-1's shape),
-    /// those callers would emit "storage open failed: failed to open storage connection: …" — the
-    /// exact §2.3 message-change the reviewer flagged.
-    #[test]
-    fn non_lock_fault_carries_raw_error_without_shared_prefix() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("missing.db");
-        let err = open_existing_with_busy_retry(&db_path, OpenPatience::Foreground)
-            .expect_err("missing db must fail");
-        let raw = match err {
-            OpenError::Other(raw) => raw,
-            other => panic!("a missing db is a non-lock fault, must be Other, got {other:?}"),
-        };
-        assert!(
-            !raw.contains("failed to open storage connection"),
-            "Other must carry the RAW error, not the shared prefix (else callers double-prefix): {raw}"
-        );
-        assert!(
-            !raw.is_empty(),
-            "raw error must name the underlying cause: {raw}"
-        );
-        // A split caller re-applies its own prefix exactly once — the §2.3-preserved shape.
-        let rendered = format!("storage open failed: {raw}");
-        assert!(
-            !rendered.contains(": failed to open storage connection:"),
-            "the caller's own message must not sit on top of the shared prefix: {rendered}"
-        );
-    }
-
-    /// The shared render path — `OpenError`'s `Display`, used by `RepoState::storage()`'s ~140
-    /// `String` callers and the flat foreground choke `open_repo_storage_for_request` — re-applies
-    /// the historical "failed to open storage connection: …" prefix, so the PRIMARY-open message is
-    /// byte-identical to pre-slice even though the raw text now lives in the variant.
-    #[test]
-    fn shared_display_reapplies_historical_prefix() {
-        let other = OpenError::Other("database disk image is malformed".to_string());
-        assert_eq!(
-            other.to_string(),
-            "failed to open storage connection: database disk image is malformed"
-        );
-        let locked = OpenError::LockedAfterRetries {
-            attempts: 5,
-            last: "database is locked".to_string(),
-        };
-        assert_eq!(
-            locked.to_string(),
-            "failed to open storage connection: database is locked (after 5 bounded busy-retry attempts)"
-        );
+/// Human-readable elapsed rendering for the Busy holder identity (ratified D1 wording: "started
+/// Nm ago"). Whole seconds under a minute, whole minutes above — enough for the operator to tell a
+/// brief persist from a long index/enrich pass without opening `doctor`. `secs` is the op's stored
+/// monotonic elapsed (`ActiveOperationView::started_secs_ago`), never a fallible read, so there is
+/// no `unwrap_or(0)` / lossy fallback here (STANDING HONESTY RULE 2).
+fn humanize_elapsed(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m", secs / 60)
     }
 }
+
+#[cfg(test)]
+mod tests;
