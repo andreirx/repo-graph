@@ -50,7 +50,7 @@ shared-computation. Maturity: MATURE.
    `Unknown{reason}` unchanged. Exhaustive matches; both
    cycles and orient render the same state. Labels state the residual truthfully — a
    one-erased-edge cycle is not "gone", it is a chain.
-3. **Test-only partition on every headline that counts** — MOVED to COHERENCE-3:: surfaces/boundaries provider
+3. **Test-only partition on every headline that counts** — MOVED to COHERENCE-3: surfaces/boundaries provider
    and consumer headlines use the stored `is_test` fact exactly as cycles does
    (`N surfaces (+M test-fixture excluded)`), fixtures labeled in lists; unknown never
    invisible.
@@ -73,13 +73,14 @@ Never touch the operator's real state root. Do NOT commit.
 
 ## 4. Validation (SYNCHRONOUS; INCREMENTAL REPORT — binding)
 
-- Seam tests: orient-walk == cycles-walk (ordered and unordered cases); three-state
-  type-only on fixtures (all/any/none); surfaces headline partition; `(N test)` subset
-  pinned per renderer; same-basis totals agree.
-- Live proof (isolated state root, registry sha unchanged): django + FRAKTAG orient vs
-  cycles walks; FRAKTAG's cycle labeled "broken at runtime (1 of 2)"; vscode surfaces
-  headline with fixture exclusion; django modules list vs stats vs check totals
-  reconciled with stated bases. Before/after verbatim.
+- Seam tests (THIS SLICE): three-state type-only on fixtures — all type-only / type-only
+  chord with a remaining runtime cycle (→ HasRuntimeEdges) / type-only edges whose removal
+  leaves no runtime cycle (→ BreaksAtRuntime) / none; cycles and orient render the same
+  state; `(N test)` subset pinned per renderer; modules-list sums reconcile with check.
+- Live proof (isolated state root, registry sha unchanged): FRAKTAG's cycle — the SCC
+  check decides its state (report which); repo-graph's rgistr cycle still TypeOnly;
+  vscode `(N test)` on modules list vs stats vs check (retained read-only root). Gates
+  first, proofs small. Before/after verbatim.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 
 ## 5. Definition of done

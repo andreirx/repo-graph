@@ -239,7 +239,7 @@ destructive-edit family) · 2 HONESTY-GATE-2 (resources/trust/map fabrications; 
 invariant) · 3 CPP-SPAN-FIDELITY-1 (macro classes + span containment) · 4
 [HONESTY-GATE-1 SHIPPED — see below] ANCHORS-EVERYWHERE-1 (human addition: line numbers on every surface citing symbols/files,
 not only find — sequenced AFTER span fidelity so C++ anchors land on correct spans) · 5
-SEED-CHUNK-2 · 6 COHERENCE-2 · 7 DAEMON-CONCURRENCY-1 (human addition; SPEC slice first —
+SEED-CHUNK-2 · 6 COHERENCE-2 (split 2026-09-05: part 1 = type-only SCC-wide semantics + (N test) subset; part 2 = COHERENCE-3: walks, headline partitions, totals) · 7 DAEMON-CONCURRENCY-1 (human addition; SPEC slice first —
 foundational, decisions to ratify) · 8 ECONOMY-2 · carried minors.
 SHIPPED: HONESTY-GATE-1 9ea23df (2026-09-04): deps list never renders "unused" without an
 established basis — "no static import found" + a TRUE caveat (dynamic imports are
