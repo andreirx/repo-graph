@@ -29,7 +29,10 @@ SEED-CHUNK-1 landed the engine; three relevance defects remain:
    Python unless a decorator/framework marker exists). Store per chunk (additive column on
    seed_vectors or a sibling fact); render the partition header when both partitions are
    non-empty; unknown never invisible.
-2. **Declaration demotion, explicit and labeled.** A chunk whose span is a declaration
+2. **Declaration demotion, explicit and labeled** (PRECEDENCE, ratified 2026-09-05: the
+   production/test PARTITION is applied first; decl-below-impl holds WITHIN a partition —
+   a production declaration renders above a test-partition implementation of the same
+   name, still labeled `(decl)`; the test impl is a double, not the answer). A chunk whose span is a declaration
    without a body (prototype, interface member, header decl) ranks BELOW any
    body-bearing chunk of the same qualified name when both are present (impl above decl,
    deterministic tie-break), and renders `(decl)` so the agent knows. No suppression —
@@ -39,7 +42,10 @@ SEED-CHUNK-1 landed the engine; three relevance defects remain:
 3. **The --text referral renders whenever seeds serve** ("for exact text/comments/
    expressions: `find --text <query>`"), one line, not only on empty tiers.
 4. Floor/model/wall unchanged (SEEDCHUNK-FLOOR-2 ruling stands). JSON additive; exit
-   codes unchanged.
+   codes unchanged. Pre-034 vectors (no per-chunk facts) are REFUSED as classified — and
+   the daemon SCHEDULES a re-seed for that repo via the existing SeedCoordinator,
+   rendering "seeds re-embedding for per-chunk facts (pending)" meanwhile: an upgrade must
+   never leave a repo seedless without saying why and fixing itself.
 
 ## 3. Stop conditions
 
@@ -55,9 +61,13 @@ state root. Do NOT commit.
   test mod → production; decl-vs-impl ordering with the `(decl)` label; referral line
   present with non-empty seeds.
 - Live proof (isolated state root, registry sha unchanged): repo-graph #[test]-chunk
-  count in the test partition (expect ≈4,578 → all); `find "crash recovery"` on leveldb
+  count in the test partition (expect ≈4,578 → all) — proven with the AFTER binary on ONE
+  fresh isolated index + seed pass of repo-graph (~2 min; no before-binary for a count); `find "crash recovery"` on leveldb
   — `db_impl.cc:292` above `db_impl.h:113`; FRAKTAG "where are conversations persisted"
-  — declaration slots reduced, report the new top-10; `find fsync` shows the --text
+  — REFERRAL EVIDENCE ONLY (AMENDED 2026-09-05, ruling SC2-FRAKTAG-DOD: its dominant
+  entries are one-line interface PROPERTIES with no implementation counterpart — outside
+  decl demotion; measured unchanged, recorded honestly; short-chunk/property demotion →
+  SEED-CHUNK-3); `find fsync` shows the --text
   referral. Before/after verbatim.
 - Chunked cargo gates; consolidation witness; dogfood-isolated green.
 

@@ -318,6 +318,10 @@ malformed payload surfaced, never silently bare). LiveGraph rebuild keeps SQLite
 file+line together while swapping only the name (single-source invariant asserted).
 Growth 0.8–3.4%, anchor suffixes only. Reviewer spot-checked leveldb/FRAKTAG anchors
 against source. 42 files +1,015/−87; gates ALL GREEN; approved review-4.
+NAMED FOLLOW-UP (2026-09-05, SEED-CHUNK-2 ruling SC2-FRAKTAG-DOD): **SEED-CHUNK-3** —
+short-chunk / property demotion: one-line interface properties (FRAKTAG: 6 of 10 slots for
+"where are conversations persisted") have NO implementation counterpart, so decl demotion
+cannot reach them; a chunk-length/kind-aware ranking policy needs its own measured slice.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
