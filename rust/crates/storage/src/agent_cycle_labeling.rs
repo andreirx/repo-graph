@@ -208,7 +208,9 @@ mod tests {
     /// per-module-edge `is_type_only` fact via the SHARED kernel — the SAME derivation the `cycles`
     /// command calls — so the two surfaces cannot disagree (the route-agreement DoD). This exercises
     /// REAL storage reads (nodes + files + IMPORTS edges + the stamped `is_type_only` column): a pure
-    /// `import type` cycle labels `TypeOnly`; a cycle with one runtime edge labels `HasRuntimeEdges`.
+    /// `import type` cycle labels `TypeOnly`; a 2-cycle with one type-only + one runtime edge labels
+    /// `BreaksAtRuntime` (COHERENCE-2 §2.2 Option A — erasing the type-only edge leaves no runtime
+    /// cycle).
     #[test]
     fn orient_derives_per_cycle_type_only_from_the_stored_fact() {
         let mut storage: StorageConnection = fresh_storage();
@@ -295,8 +297,12 @@ mod tests {
         );
         assert_eq!(
             labeled[1].type_only,
-            Some(CycleTypeOnly::HasRuntimeEdges),
-            "a cycle with one runtime edge is a real runtime cycle"
+            Some(CycleTypeOnly::BreaksAtRuntime {
+                type_only: 1,
+                of: 2
+            }),
+            "a 2-cycle with one type-only + one runtime edge breaks at runtime (Option A): \
+             erasing the type-only edge leaves no runtime cycle"
         );
     }
 

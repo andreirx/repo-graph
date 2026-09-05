@@ -334,6 +334,15 @@ leveldb impl above its higher-scoring decl; FRAKTAG re-scoped to referral eviden
 (one-line PROPERTIES have no impl counterpart → SEED-CHUNK-3). Strain: two 120-min proof
 kills + a stash lost to a timeout; converged after closed-list steering. 19+4 files;
 gates ALL GREEN; approved review-4.
+SHIPPED: COHERENCE-2 part 1 (2026-09-05): type-only cycle verdicts are SCC-wide —
+`BreaksAtRuntime{k of n}` only when the runtime-only subgraph of the SCC is acyclic
+(Option A; the spec's literal any-edge rule would have fabricated "broken" claims on
+multi-cycle SCCs) — and rendered by one shared label function on cycles AND orient;
+`(N test)` is a subset on every renderer, modules-list sums reconcile with check, absent
+counts render "(test count unavailable)". Live: FRAKTAG's 5-module SCC → BreaksAtRuntime
+(3 of 10 edges type-only, no runtime cycle remains); rgistr stays TypeOnly. Split:
+walks / headline partitions / totals → COHERENCE-3 (spec + packet staged). 16 files
++1,070/−102; gates ALL GREEN; approved review-3.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 

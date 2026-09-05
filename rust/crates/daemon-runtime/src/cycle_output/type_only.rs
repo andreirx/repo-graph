@@ -124,9 +124,11 @@ mod tests {
         assert_eq!(verdict(&cycles[0]), Some(("type_only".into(), None)));
     }
 
-    /// A runtime edge ⇒ `has_runtime_edges` (no label at render).
+    /// COHERENCE-2 §2.2 (Option A): a 2-cycle with one `import type` edge BREAKS at runtime —
+    /// erasing that edge leaves only the runtime edge b->a (no cycle). (Was `has_runtime_edges`
+    /// under the old ALL-predicate; the false negative the slice removes.)
     #[test]
-    fn one_runtime_edge_makes_has_runtime_edges() {
+    fn one_type_only_edge_2cycle_breaks_at_runtime() {
         let mut cycles = vec![cyc(&[("a", "pkg/a"), ("b", "pkg/b")])];
         let edges = vec![
             ("a".into(), "b".into(), Some(TypeOnly)),
@@ -137,8 +139,37 @@ mod tests {
         attach_type_only_labels(&mut cycles, &edges, &files, &all);
         assert_eq!(
             verdict(&cycles[0]),
+            Some(("breaks_at_runtime".into(), None))
+        );
+        assert_eq!(cycles[0]["type_only"]["type_only"], serde_json::json!(1));
+        assert_eq!(cycles[0]["type_only"]["of"], serde_json::json!(2));
+    }
+
+    /// COHERENCE-2 §2.2 (Option A): a MIXED SCC {a,b,c} with a runtime 2-cycle a<->b and a type-only
+    /// chord b<->c stays `has_runtime_edges` — erasing the chord leaves a<->b intact. The type-only
+    /// count rides as detail (2 of 4). This is the review-0 case the ANY-predicate got wrong.
+    #[test]
+    fn mixed_scc_with_surviving_runtime_cycle_is_has_runtime_edges() {
+        let mut cycles = vec![cyc(&[("a", "pkg/a"), ("b", "pkg/b"), ("c", "pkg/c")])];
+        let edges = vec![
+            ("a".into(), "b".into(), Some(Runtime)),
+            ("b".into(), "a".into(), Some(Runtime)),
+            ("b".into(), "c".into(), Some(TypeOnly)),
+            ("c".into(), "b".into(), Some(TypeOnly)),
+        ];
+        let files = files_ts(&[("pkg/a/x.ts", Some("typescript"))]);
+        let all = vec![
+            "pkg/a".to_string(),
+            "pkg/b".to_string(),
+            "pkg/c".to_string(),
+        ];
+        attach_type_only_labels(&mut cycles, &edges, &files, &all);
+        assert_eq!(
+            verdict(&cycles[0]),
             Some(("has_runtime_edges".into(), None))
         );
+        assert_eq!(cycles[0]["type_only"]["type_only"], serde_json::json!(2));
+        assert_eq!(cycles[0]["type_only"]["of"], serde_json::json!(4));
     }
 
     /// Operator ruling 2a: a CORRUPT contributor surfaces its OWN reason (distinct from absent).

@@ -262,8 +262,11 @@ fn budget_saturated_true_with_many_package_groups() {
     // §2.4 (operator ruling 2): `--full` uncaps the package-group section, so a repo
     // with >50 package groups is COMPLETE at full (the old >50 gate is gone). All
     // modules shown, no fallback → complete.
+    // Rows carry all three REQUIRED contract fields (name/file_count/test_file_count) —
+    // the shape both producers actually emit; a row is well-formed only with all three
+    // (review-2: `test_file_count` is required, not optional).
     let groups: Vec<Value> = (0..60)
-        .map(|i| json!({"name": format!("g{i}"), "file_count": 1}))
+        .map(|i| json!({"name": format!("g{i}"), "file_count": 1, "test_file_count": 0}))
         .collect();
     let r = response(with_module_summary(
         json!({}),
@@ -418,6 +421,26 @@ fn budget_saturated_false_when_a_package_group_row_is_malformed() {
         json!({}),
         json!({
             "package_groups": [{"file_count": 2}],
+            "discovered_module_count": 0,
+            "top_modules": []
+        }),
+    ));
+    assert!(!r.budget_saturated());
+    assert!(!r
+        .render_human(OrientDepth::Full)
+        .contains("budget not reached"));
+}
+
+#[test]
+fn budget_saturated_false_when_a_package_group_row_lacks_test_file_count() {
+    // review-2: `test_file_count` is a REQUIRED contract field (both producers emit it
+    // unconditionally). A row with a valid `name`+`file_count` but NO `test_file_count` is
+    // schema drift the renderer now shows as `(test count unavailable)` — a degraded row, so
+    // completeness must be REFUSED (never "complete" over an unknown; standing honesty #1).
+    let r = response(with_module_summary(
+        json!({}),
+        json!({
+            "package_groups": [{"name": "core", "file_count": 2}],
             "discovered_module_count": 0,
             "top_modules": []
         }),

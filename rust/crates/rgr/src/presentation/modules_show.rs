@@ -149,17 +149,21 @@ impl ModulesShowResponse {
         out.push_str(&format!("Root: {}/\n", self.module.canonical_root_path));
 
         // ── Ownership ──────────────────────────────────────────────
+        // COHERENCE-2 §2.4: `owned_file_count` (non-test) and `owned_test_file_count` (test) are
+        // disjoint; the headline is the TOTAL so `(N test files)` reads as a SUBSET of it, the same
+        // meaning `modules list` and `stats` use — never an addend the reader must sum.
         out.push_str("\nOwnership:\n");
+        let total_files = self.rollups.owned_file_count + self.rollups.owned_test_file_count;
         if self.rollups.owned_test_file_count > 0 {
             out.push_str(&format!(
                 "  {} ({} test files)\n",
-                format_count(self.rollups.owned_file_count, "file", "files"),
+                format_count(total_files, "file", "files"),
                 self.rollups.owned_test_file_count
             ));
         } else {
             out.push_str(&format!(
                 "  {}\n",
-                format_count(self.rollups.owned_file_count, "file", "files")
+                format_count(total_files, "file", "files")
             ));
         }
 
@@ -486,12 +490,25 @@ mod tests {
     }
 
     #[test]
-    fn show_render_shows_ownership() {
+    fn show_render_shows_ownership_with_test_as_subset() {
+        // COHERENCE-2 §2.4: the fixture owns 100 non-test + 10 test files. The headline is the
+        // TOTAL (110) and `(10 test files)` is the SUBSET of it — never the old addend rendering
+        // that printed the non-test count (100) as the headline.
         let resp = sample_show_response();
         let output = resp.render_human();
         assert!(output.contains("Ownership:"));
-        assert!(output.contains("100 files"));
-        assert!(output.contains("10 test files"));
+        assert!(
+            output.contains("110 files"),
+            "total headline (100+10):\n{output}"
+        );
+        assert!(
+            output.contains("10 test files"),
+            "test subset clause:\n{output}"
+        );
+        assert!(
+            !output.contains("100 files"),
+            "the non-test count must NOT be the headline (addend defect):\n{output}"
+        );
     }
 
     #[test]

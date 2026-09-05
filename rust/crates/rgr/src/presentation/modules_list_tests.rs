@@ -92,6 +92,130 @@ fn sample_empty_list_response() -> ModulesListResponse {
     }
 }
 
+/// COHERENCE-2 §2.4: `modules list` renders `(N test)` as a SUBSET of the file total, matching
+/// `stats`/`check`/`modules show`. The fixture module owns 100 non-test + 10 test files, so the
+/// headline is the total (110) and `(10 test)` is the subset — NOT the old addend rendering that
+/// showed the non-test count (100) as the headline (which read as 110 when summed).
+#[test]
+fn list_render_file_count_is_total_with_test_subset() {
+    let resp = sample_list_response();
+    let output = resp.render_human();
+    assert!(
+        output.contains("110 files (10 test)"),
+        "total headline (100 non-test + 10 test) with test as subset:\n{output}"
+    );
+    assert!(
+        !output.contains("100 files"),
+        "the non-test count must NOT be the headline (the addend defect):\n{output}"
+    );
+    // The zero-test module renders the bare total, no clause.
+    assert!(
+        output.contains("20 files"),
+        "zero-test module bare total:\n{output}"
+    );
+}
+
+/// Sum the per-module file TOTALS a reader sees on the `modules list` rows — the `<N> files`
+/// headline of each row (NOT the `(M test)` subset, NOT the edge-list `file-level import` counts).
+/// `split_whitespace` collapses the `{:>20}` column padding; the only `… files` tokens are the row
+/// headlines (`format_files_compact` always renders a plain integer directly before `files`; the
+/// caveat/edge/note lines never render a bare `<int> files`).
+///
+/// review-1 #2: the parse is STRICT — a `<tok> files` whose `tok` is not a `usize` PANICS the test
+/// with a diagnostic. `.ok()` would silently drop a malformed headline from the sum, so the
+/// reconciliation could pass while under-counting the very total it is meant to pin. Failing loudly
+/// keeps the seam honest (STANDING HONESTY RULE #1: never swallow a fallible classified read).
+fn sum_rendered_file_totals(output: &str) -> usize {
+    let toks: Vec<&str> = output.split_whitespace().collect();
+    toks.windows(2)
+        .filter(|w| w[1] == "files")
+        .map(|w| {
+            w[0].parse::<usize>().unwrap_or_else(|e| {
+                panic!(
+                    "malformed `<N> files` row headline: token {:?} before `files` is not a count \
+                     ({e}); a silently-dropped headline would weaken the check reconciliation:\n{output}",
+                    w[0]
+                )
+            })
+        })
+        .sum()
+}
+
+/// COHERENCE-2 §2.4 (review-0 #2) — the modules-list ↔ check reconciliation SEAM at the presentation
+/// layer. `owned_file_count` (non-test) and `owned_test_file_count` (test) are DISJOINT per the
+/// module rollup, so a module's size is their SUM. This slice makes the row headline that TOTAL, so
+/// summing the rendered headlines yields the module-attributed indexed-file total — the SAME basis
+/// `check` reports as "`<N> files indexed`" (`agent::check::evaluate`'s `files_total`). The prior
+/// ADDEND rendering put the NON-TEST count in the headline, so the rendered sum undercounted by
+/// `Σ owned_test_file_count` and disagreed with `check` — the exact defect §2.4 names. This pins the
+/// presentation invariant; the daemon-data reconciliation on a real repo is the live proof (where any
+/// residual whole-repo basis gap between orient/stats/check/map totals is the separately-tracked
+/// concern #5, surfaced honestly, never hidden here).
+#[test]
+fn modules_list_rendered_file_totals_sum_to_the_check_indexed_basis() {
+    // An inventory of three fully-module-owned groups; tests are a subset of each.
+    let mut resp = sample_list_response();
+    resp.results = vec![
+        {
+            let mut e = identity_entry("core", "src/core", None);
+            e.owned_file_count = 100; // non-test
+            e.owned_test_file_count = 10; // test (subset of the 110 total)
+            e
+        },
+        {
+            let mut e = identity_entry("util", "src/util", None);
+            e.owned_file_count = 20;
+            e.owned_test_file_count = 0;
+            e
+        },
+        {
+            let mut e = identity_entry("api", "src/api", None);
+            e.owned_file_count = 50;
+            e.owned_test_file_count = 50; // a test-heavy module (the 907/1997 shape)
+            e
+        },
+    ];
+    resp.edges = Some(vec![]);
+
+    // The module-attributed indexed-file total — what `check` reports as "230 files indexed".
+    let owned_total: usize = resp
+        .results
+        .iter()
+        .map(|m| m.owned_file_count + m.owned_test_file_count)
+        .sum();
+    assert_eq!(owned_total, 230, "fixture: 110 + 20 + 100 owned files");
+    // The ADDEND (pre-slice) basis the defect summed: non-test headlines only.
+    let addend_total: usize = resp.results.iter().map(|m| m.owned_file_count).sum();
+    assert_eq!(
+        addend_total, 170,
+        "non-test-only sum (the old, undercounting basis)"
+    );
+
+    let output = resp.render_human();
+
+    // Each row is total-inclusive with the test count as a subset.
+    assert!(output.contains("110 files (10 test)"), "{output}");
+    assert!(output.contains("20 files"), "{output}");
+    assert!(output.contains("100 files (50 test)"), "{output}");
+
+    // The SUM of what the reader sees reconciles with the check indexed-file basis (230), NOT the
+    // old addend basis (170). This is the reconciliation the addend defect broke.
+    let rendered_sum = sum_rendered_file_totals(&output);
+    assert_eq!(
+        rendered_sum, owned_total,
+        "summing the rendered row totals reconciles with check's indexed-file basis:\n{output}"
+    );
+    assert_ne!(
+        rendered_sum, addend_total,
+        "the rendered sum is NO LONGER the undercounting non-test addend basis:\n{output}"
+    );
+    assert_eq!(
+        rendered_sum - addend_total,
+        60,
+        "the fix recovers exactly Σ(owned_test_file_count) = 60 the addend dropped:\n{output}"
+    );
+}
+
 /// review-0 item 2: two modules, zero cross-module IMPORTS, but HTTP links
 /// exist → the "boundaries may not be meaningful" hint MUST be suppressed and
 /// replaced with an honest pointer to `rmap boundaries links`.

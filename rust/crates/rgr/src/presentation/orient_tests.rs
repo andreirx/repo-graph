@@ -1884,3 +1884,281 @@ fn cross_surface_cycle_headlines_agree_unknown_present() {
         ),
     ]);
 }
+
+// ── COHERENCE-2 §2.2: type-only verdict rendered IDENTICALLY by cycles AND orient ─────────────
+
+/// The JSON shape the daemon emits for a `CycleTypeOnly` verdict (mirrors the agent producer's
+/// `#[serde(tag="kind")]`). Exhaustive match ⇒ a new verdict variant breaks this test helper.
+fn type_only_leaf_json(v: &crate::presentation::cycles::CycleTypeOnly) -> serde_json::Value {
+    use crate::presentation::cycles::CycleTypeOnly::*;
+    match v {
+        TypeOnly => serde_json::json!({ "kind": "type_only" }),
+        BreaksAtRuntime { type_only, of } => {
+            serde_json::json!({ "kind": "breaks_at_runtime", "type_only": type_only, "of": of })
+        }
+        HasRuntimeEdges { type_only, of } => {
+            serde_json::json!({ "kind": "has_runtime_edges", "type_only": type_only, "of": of })
+        }
+        Unknown { reason } => serde_json::json!({ "kind": "unknown", "reason": reason }),
+    }
+}
+
+/// COHERENCE-2 §2.2 (the operator-mandated "rendered identically by cycles AND orient" proof): for
+/// a given per-cycle verdict, `orient`'s human summary and the `cycles` command render the SAME
+/// label string — both via the ONE shared `cycles::type_only_label`. A verdict that carries a
+/// label (TypeOnly / BreaksAtRuntime / a mixed-but-cyclic HasRuntimeEdges) appears verbatim in
+/// BOTH outputs; the two surfaces cannot state a different runtime truth about one cycle.
+fn assert_type_only_surfaces_render_identically(v: crate::presentation::cycles::CycleTypeOnly) {
+    use crate::presentation::cycles::{Cycle, CycleNode, CyclesResponse};
+
+    let expected = crate::presentation::cycles::type_only_label(&v)
+        .expect("this verdict must carry a label for the identical-rendering proof");
+
+    // ── orient: one production cycle (no test-only/unknown ⇒ the anchor is drawn) carrying the
+    // verdict in its leaf; the human summary must render the shared label for the anchor. ──
+    let mut orient = minimal_response();
+    orient.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 1,
+            "production_count": 1,
+            "test_only_count": 0,
+            "unknown_count": 0,
+            "cycles": [{
+                "length": 2,
+                "modules": ["src/a", "src/b"],
+                "type_only": type_only_leaf_json(&v),
+            }],
+        }),
+    )];
+    let orient_out = orient.render_human(OrientDepth::Small);
+    assert!(
+        orient_out.contains(&expected),
+        "orient must render the shared type-only label `{expected}`:\n{orient_out}"
+    );
+
+    // ── cycles: the same verdict on the same single cycle. ──
+    let cycles_out = CyclesResponse {
+        repo_uid: "test-repo".to_string(),
+        display_name: None,
+        snapshot_uid: "snap-123".to_string(),
+        count: 1,
+        ts_type_only_caveat: false,
+        test_composition_note: None,
+        cycles: vec![Cycle {
+            nodes: vec![
+                CycleNode {
+                    node_id: "n1".to_string(),
+                    name: "a".to_string(),
+                    qualified_name: Some("src/a".to_string()),
+                    file: None,
+                },
+                CycleNode {
+                    node_id: "n2".to_string(),
+                    name: "b".to_string(),
+                    qualified_name: Some("src/b".to_string()),
+                    file: None,
+                },
+            ],
+            edges: None,
+            edges_truncated: None,
+            test_composition: None,
+            test_composition_unknown_reason: None,
+            type_only: Some(v),
+        }],
+    }
+    .render_human();
+    assert!(
+        cycles_out.contains(&expected),
+        "cycles must render the shared type-only label `{expected}`:\n{cycles_out}"
+    );
+}
+
+#[test]
+fn type_only_verdict_rendered_identically_by_cycles_and_orient() {
+    use crate::presentation::cycles::CycleTypeOnly;
+    // All three label-bearing states: the whole cycle vanishes; it breaks at runtime (Option A, no
+    // runtime cycle remains); a mixed SCC whose runtime cycle remains (type-only count as detail).
+    assert_type_only_surfaces_render_identically(CycleTypeOnly::TypeOnly);
+    assert_type_only_surfaces_render_identically(CycleTypeOnly::BreaksAtRuntime {
+        type_only: 1,
+        of: 2,
+    });
+    assert_type_only_surfaces_render_identically(CycleTypeOnly::HasRuntimeEdges {
+        type_only: 2,
+        of: 4,
+    });
+}
+
+/// review-0 #1: a MALFORMED `type_only` leaf (producer/mirror schema drift) must NOT panic the
+/// CLI. `orient`'s evidence is a raw `Value`, so the verdict is parsed at RENDER time — a schema
+/// mismatch here used to `.expect()`-panic (terminating the whole `orient`), unlike `cycles` which
+/// fails the typed transport decode into a handled error. The recoverable-input rule (and RULE #1)
+/// require a VISIBLE unknown-with-reason clause instead — never a crash, never a silent drop.
+#[test]
+fn orient_malformed_type_only_leaf_renders_unavailable_not_panic() {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 1,
+            "production_count": 1,
+            "test_only_count": 0,
+            "unknown_count": 0,
+            "cycles": [{
+                "length": 2,
+                "modules": ["src/a", "src/b"],
+                // A `kind` that matches NO CycleTypeOnly variant → serde decode fails at render time.
+                "type_only": { "kind": "not_a_real_variant", "type_only": 1, "of": 2 },
+            }],
+        }),
+    )];
+    // The call itself must not panic (the `.expect()` regression would abort here).
+    let out = r.render_human(OrientDepth::Small);
+    // The headline still renders (the cycle count + anchor are unaffected by the bad verdict).
+    assert!(
+        out.contains("1 import cycle (src/a -> src/b -> src/a)"),
+        "the cycle headline still renders around the unreadable verdict:\n{out}"
+    );
+    // The unknown is VISIBLE with its reason — not swallowed, not a fabricated verdict label.
+    assert!(
+        out.contains("`import type` status unavailable (cycle verdict unreadable"),
+        "a malformed verdict renders an explicit unavailable-with-reason clause:\n{out}"
+    );
+    // It must NOT masquerade as any of the real verdicts.
+    assert!(
+        !out.contains("vanishes at runtime") && !out.contains("breaks the cycle at runtime"),
+        "an unreadable verdict must not render as a real type-only claim:\n{out}"
+    );
+}
+
+/// review-1 #2: a `has_runtime_edges` leaf whose kind IS a real variant but whose REQUIRED counts
+/// are MISSING (producer/mirror schema drift) must ALSO render the visible unavailable clause on
+/// orient — never silently no-label. Before removing `#[serde(default)]` from the counts this
+/// payload decoded to the KNOWN pure-runtime `{0,0}` state (no label at all), hiding the drift; now
+/// it fails the render-time decode and takes orient's explicit unavailable-with-reason clause,
+/// matching the `cycles` typed-decode error path (both surfaces report the drift, neither invents 0).
+#[test]
+fn orient_has_runtime_edges_missing_counts_renders_unavailable_not_silent_zero() {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 1,
+            "production_count": 1,
+            "test_only_count": 0,
+            "unknown_count": 0,
+            "cycles": [{
+                "length": 2,
+                "modules": ["src/a", "src/b"],
+                // Real variant, REQUIRED counts absent → decode now fails (no more silent {0,0}).
+                "type_only": { "kind": "has_runtime_edges" },
+            }],
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("1 import cycle (src/a -> src/b -> src/a)"),
+        "the cycle headline still renders around the unreadable verdict:\n{out}"
+    );
+    assert!(
+        out.contains("`import type` status unavailable (cycle verdict unreadable"),
+        "a missing-count runtime verdict renders the explicit unavailable-with-reason clause:\n{out}"
+    );
+    assert!(
+        !out.contains("vanishes at runtime") && !out.contains("breaks the cycle at runtime"),
+        "a missing-count verdict must not render as any real type-only claim:\n{out}"
+    );
+}
+
+// ── COHERENCE-2 §2.4: `(N test)` is a SUBSET on the orient package-group headline too ─────────
+
+/// review-0 #2: the orient package-group breakdown prints `(N test)` — pin that it is a SUBSET of
+/// the group's file total (total-inclusive headline), matching `stats`/`modules list`/`check`, not
+/// the addend defect this slice kills. The group owns 100 files, 10 OF WHICH are tests → the
+/// headline is the total (100) with `(10 test)` as the subset (never `90 files`, never `110`).
+#[test]
+fn orient_package_group_test_count_is_a_subset_of_the_total() {
+    let mut r = minimal_response();
+    r.repo = "svc".to_string();
+    r.signals = vec![sig(
+        "MODULE_SUMMARY",
+        "low",
+        "module summary",
+        serde_json::json!({
+            "file_count": 120,
+            "discovered_module_count": 1,
+            "package_groups": [
+                // 10 of 100 files are tests — a genuine subset.
+                {"name": "core", "file_count": 100, "test_file_count": 10},
+                // A zero-test group renders the bare total, no clause.
+                {"name": "util", "file_count": 20, "test_file_count": 0}
+            ]
+        }),
+    )];
+    // Full depth renders the package-group breakdown section.
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains("core — 100 files (10 test)"),
+        "the group headline is the TOTAL (100) with the test count as a subset (10):\n{out}"
+    );
+    // The addend defect would show the non-test count (90) as the headline — forbidden.
+    assert!(
+        !out.contains("90 files"),
+        "the non-test count must NOT be the headline (addend defect):\n{out}"
+    );
+    // The zero-test group renders the bare total with no `(0 test)` noise.
+    assert!(
+        out.contains("util — 20 files") && !out.contains("20 files (0 test)"),
+        "a zero-test group renders the bare total:\n{out}"
+    );
+}
+
+/// review-2 (COHERENCE-2 iter 2): `test_file_count` is a REQUIRED field in the producer
+/// contract (`agent::PackageGroupEvidence.test_file_count: u64` — `#[derive(Serialize)]`, no
+/// `skip_serializing_if`; both the daemon LiveGraph route and the agent aggregator emit it
+/// unconditionally). So an ABSENT or non-u64 value is schema drift, NOT "zero tests recorded".
+/// The prior `.unwrap_or(0)` rendered that drift as a silent no-suffix — a false Layer-0
+/// "zero tests" claim. Pin that the renderer now shows an explicit `(test count unavailable)`
+/// clause instead, while the row's valid file total is still rendered.
+#[test]
+fn orient_package_group_absent_test_count_renders_unavailable_not_silent_zero() {
+    let mut r = minimal_response();
+    r.repo = "svc".to_string();
+    r.signals = vec![sig(
+        "MODULE_SUMMARY",
+        "low",
+        "module summary",
+        serde_json::json!({
+            "file_count": 120,
+            "discovered_module_count": 1,
+            "package_groups": [
+                // `test_file_count` ABSENT — schema drift, the unknown must be VISIBLE.
+                {"name": "core", "file_count": 100},
+                // A non-u64 `test_file_count` is equally malformed → same clause.
+                {"name": "util", "file_count": 20, "test_file_count": "oops"}
+            ]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Full);
+    // The row still renders its valid file total, with the unknown made VISIBLE.
+    assert!(
+        out.contains("core — 100 files (test count unavailable)"),
+        "an absent test_file_count must render an explicit unavailable clause:\n{out}"
+    );
+    assert!(
+        out.contains("util — 20 files (test count unavailable)"),
+        "a non-u64 test_file_count is malformed → same unavailable clause:\n{out}"
+    );
+    // The defect this kills: silently rendering the unknown as zero tests.
+    assert!(
+        !out.contains("(0 test)"),
+        "absent/malformed test count must NOT render as a silent zero:\n{out}"
+    );
+}

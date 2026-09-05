@@ -95,6 +95,19 @@ repo-graph-classification = { path = "../classification" }
 # has no dependency on this crate (no reverse edge).
 repo-graph-gate = { path = "../gate" }
 
+# Graph-algorithms — added in COHERENCE-2 (operator-RATIFIED 2026-09-05,
+# COH2-SCC-RUNTIME-SEMANTICS Option A: "re-run the SCC check on runtime edges —
+# reuse graph-algorithms' Tarjan, no new algorithm"). The type-only kernel
+# (`cycle_type_only`) decides the MIXED-SCC case by re-running Tarjan on the
+# cycle's runtime subgraph; that honesty-critical decision MUST live in the ONE
+# shared kernel both `cycles` and `orient` call, so it cannot be pushed to the
+# two callers without reintroducing the per-surface drift this module exists to
+# prevent. `repo-graph-algorithms` is a pure leaf (deps: std only), so
+# `agent → graph-algorithms` is outer(policy) → inner(algorithm) per the
+# dependency rule and cycle-free (no reverse edge) — the SAME ratified precedent
+# shape as `agent → classification` and `agent → gate` above.
+repo-graph-algorithms = { path = "../graph-algorithms" }
+
 [dev-dependencies]
 # Agent integration tests use a fake `AgentStorageRead` that
 # ALSO implements `GateStorageRead`, so the fake needs visibility

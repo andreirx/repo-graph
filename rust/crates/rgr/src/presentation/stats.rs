@@ -541,6 +541,48 @@ mod tests {
         }
     }
 
+    /// COHERENCE-2 §2.4 (review-0 #2): the `stats` package-group headline prints `files=N (M test)`
+    /// where `(M test)` is a SUBSET of the total N (total-inclusive headline) — the product-wide
+    /// meaning `modules list`/`modules show`/`orient`/`check` share. A group with 100 files, 10 of
+    /// them tests, renders `files=100 (10 test)` — never `files=90` (the non-test count) and never
+    /// `110` (an addend). Positive-count proof (the sample fixture's groups are all zero-test).
+    #[test]
+    fn render_human_package_group_test_count_is_a_subset_of_the_total() {
+        let mut resp = sample_stats();
+        // 10 of 100 files are tests — a genuine subset on the largest group.
+        resp.package_groups = vec![
+            StatsPackageGroup {
+                name: "core".to_string(),
+                file_count: 100,
+                test_file_count: 10,
+            },
+            StatsPackageGroup {
+                name: "util".to_string(),
+                file_count: 20,
+                test_file_count: 0,
+            },
+        ];
+        let output = resp.render_human();
+        let pkg_section = output
+            .split("Package groups (by size")
+            .nth(1)
+            .expect("package groups section present");
+        assert!(
+            pkg_section.contains("files=100 (10 test)"),
+            "the group headline is the TOTAL (100) with the test count as a subset (10):\n{output}"
+        );
+        // The addend defect would show the non-test count (90) as the headline — forbidden.
+        assert!(
+            !pkg_section.contains("files=90"),
+            "the non-test count must NOT be the headline (addend defect):\n{output}"
+        );
+        // A zero-test group renders the bare total with no `(0 test)` noise.
+        assert!(
+            pkg_section.contains("files=20") && !pkg_section.contains("files=20 (0 test)"),
+            "a zero-test group renders the bare total:\n{output}"
+        );
+    }
+
     #[test]
     fn render_human_sorts_directory_table_by_size_descending() {
         let resp = sample_stats();

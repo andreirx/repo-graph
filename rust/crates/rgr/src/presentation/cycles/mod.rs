@@ -132,10 +132,26 @@ pub struct Cycle {
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CycleTypeOnly {
-    /// EVERY edge in the cycle's walk is a TS/JS `import type` — the whole cycle vanishes at runtime.
+    /// EVERY edge in the cycle (SCC) is a TS/JS `import type` — the whole cycle vanishes at runtime.
     TypeOnly,
-    /// At least one edge is a confirmed runtime import — a real runtime cycle (rendered WITHOUT a label).
-    HasRuntimeEdges,
+    /// COHERENCE-2 §2.2 (Option A): SOME (not all) edges are `import type` AND erasing them leaves NO
+    /// directed cycle in the runtime subgraph — the cycle genuinely BREAKS at runtime (no runtime
+    /// cycle remains). `type_only`/`of` are SCC-edge counts, rendered as such — never a "residual
+    /// one-way coupling" claim the topology does not support.
+    BreaksAtRuntime { type_only: usize, of: usize },
+    /// A REAL runtime cycle: a directed cycle remains after every `import type` edge is erased. A
+    /// PURE runtime cycle is `type_only == 0` (rendered WITHOUT a label); a MIXED SCC whose runtime
+    /// subgraph is still cyclic carries `type_only > 0` as detail (COHERENCE-2 §2.2, Option A).
+    ///
+    /// COHERENCE-2 (review-1 #2): both counts are REQUIRED — no `#[serde(default)]`. The producer
+    /// (`agent::CycleTypeOnly`, `Serialize` with no `skip_serializing_if`) ALWAYS emits both fields,
+    /// even `type_only: 0` for a pure runtime cycle, so a missing field is producer/mirror schema
+    /// drift, NOT a pure-runtime cycle. Defaulting the absent count to `0` would render that drift as
+    /// the KNOWN pure-runtime state `{0, 0}` — a false-certainty Layer-0 claim that silently hides the
+    /// unknown and could suppress the mixed-SCC `k of n` detail. Requiring the field makes typed
+    /// `cycles` decoding fail into the handled response-parse `Result` (`error: failed to parse …`),
+    /// and makes orient's raw-`Value` decode take its explicit unavailable-with-reason clause. (RULE #1.)
+    HasRuntimeEdges { type_only: usize, of: usize },
     /// The verdict could not be computed (e.g. the snapshot was indexed before type-only tracking). The
     /// `reason` is reader-framed; the cycle is counted into the narrowed footer, NEVER demoted to runtime.
     Unknown { reason: String },
@@ -431,18 +447,44 @@ impl CyclesResponse {
     }
 }
 
+/// COHERENCE-2 §2.2: the ONE per-verdict type-only label string — the shared vocabulary home so
+/// `cycles` and `orient` render the SAME state IDENTICALLY (orient calls this via
+/// [`type_only_label`], pinned by the seam test). Exhaustive match; a new verdict variant
+/// deliberately breaks it.
+///
+/// - `TypeOnly` → the whole cycle vanishes at runtime.
+/// - `BreaksAtRuntime{k, n}` (Option A) → the cycle breaks at runtime (no runtime cycle remains);
+///   `k of n` are SCC-edge counts, stated as such — NOT a "residual one-way coupling" claim.
+/// - `HasRuntimeEdges{k, n}` with `k > 0` → a runtime cycle remains, `k of n` edges are type-only
+///   (carried as detail).
+/// - `HasRuntimeEdges{0, _}` → a pure runtime cycle → `None` (no label; byte-stable).
+/// - `Unknown` → `None` (surfaced in the narrowed footer, not as a per-cycle label).
+pub(crate) fn type_only_label(verdict: &CycleTypeOnly) -> Option<String> {
+    match verdict {
+        CycleTypeOnly::TypeOnly => Some("type-only (vanishes at runtime)".to_string()),
+        CycleTypeOnly::BreaksAtRuntime { type_only, of } => Some(format!(
+            "type-only breaks the cycle at runtime: {type_only} of {of} import edges are \
+             `import type` (no runtime cycle remains)"
+        )),
+        CycleTypeOnly::HasRuntimeEdges { type_only, of } if *type_only > 0 => Some(format!(
+            "runtime cycle remains: {type_only} of {of} import edges are `import type`"
+        )),
+        CycleTypeOnly::HasRuntimeEdges { .. } | CycleTypeOnly::Unknown { .. } => None,
+    }
+}
+
 /// TYPE-ONLY-IMPORTS-1: render the per-cycle type-only label for ONE cycle, shared by the
 /// production-listing loop AND the demoted test-only loop (review-0 item 2 — a test-only cycle can
-/// itself be type-only). The verdict is a sum type matched EXHAUSTIVELY: only `TypeOnly` gets a
-/// visible label; `HasRuntimeEdges` is a real runtime cycle (no label); `Unknown` is surfaced in the
-/// narrowed footer, not per-cycle here; `None` is the route/§5 absence (no field). A new variant
-/// deliberately breaks this match.
+/// itself be type-only). Delegates to the shared [`type_only_label`] so the wording cannot drift
+/// from `orient`. `None` (a pure runtime cycle, an `Unknown`, or the route/§5 absence) prints
+/// nothing here.
 fn push_type_only_label(out: &mut String, cycle: &Cycle) {
-    match &cycle.type_only {
-        Some(CycleTypeOnly::TypeOnly) => {
-            out.push_str("  type-only (vanishes at runtime)\n");
+    if let Some(verdict) = &cycle.type_only {
+        if let Some(label) = type_only_label(verdict) {
+            out.push_str("  ");
+            out.push_str(&label);
+            out.push('\n');
         }
-        Some(CycleTypeOnly::HasRuntimeEdges) | Some(CycleTypeOnly::Unknown { .. }) | None => {}
     }
 }
 

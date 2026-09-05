@@ -203,7 +203,13 @@ impl ModulesListResponse {
         let max_name_len = labels.iter().map(|l| l.len()).max().unwrap_or(10).max(10);
 
         for (module, name) in self.results.iter().zip(labels.iter()) {
-            let files = format_files_compact(module.owned_file_count, module.owned_test_file_count);
+            // COHERENCE-2 §2.4: `owned_file_count` is NON-test files and `owned_test_file_count`
+            // is test files (disjoint, per module_rollup). The headline must be the TOTAL owned
+            // files so `(N test)` reads as a SUBSET (as `stats`/`check` do), not an addend.
+            let files = format_files_compact(
+                module.owned_file_count + module.owned_test_file_count,
+                module.owned_test_file_count,
+            );
             let dead = format_dead_compact(module.dead_symbol_count);
             let violations = format_count(module.violation_count, "violation", "violations");
             let kind_conf = format_kind_confidence(&module.module_kind, module.confidence);

@@ -513,22 +513,115 @@ fn test_only_cycle_that_is_type_only_is_labeled_in_the_demoted_section() {
 }
 
 #[test]
-fn has_runtime_edges_cycle_is_not_labeled() {
-    // §4(b): a mixed cycle (≥1 runtime edge) is a real runtime cycle — NO label, no caveat.
+fn pure_runtime_cycle_is_not_labeled() {
+    // §4(b): a PURE runtime cycle (`type_only == 0`) is a real runtime cycle — NO label, no caveat
+    // (byte-stable).
     let mut r = minimal_response();
     r.count = 1;
     r.cycles = vec![cyc_type_only(
         vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
-        CycleTypeOnly::HasRuntimeEdges,
+        CycleTypeOnly::HasRuntimeEdges {
+            type_only: 0,
+            of: 2,
+        },
     )];
     let out = r.render_human();
     assert!(
         !out.contains("type-only"),
-        "a runtime cycle must NOT be labeled type-only:\n{out}"
+        "a pure runtime cycle must NOT be labeled type-only:\n{out}"
     );
     assert!(
         !out.contains("could not be evaluated"),
         "a confirmed runtime cycle raises no Unknown caveat:\n{out}"
+    );
+}
+
+#[test]
+fn has_runtime_edges_missing_counts_fails_to_decode_not_defaults_to_zero() {
+    // review-1 #2: a `has_runtime_edges` payload MISSING the required counts is producer/mirror
+    // schema drift, NOT a pure-runtime cycle. Typed `cycles` decode must FAIL (the error is surfaced
+    // by the response-parse `Result`), NEVER silently default to the KNOWN `{0, 0}` pure-runtime
+    // state — which would render a false-certain Layer-0 claim and could suppress mixed-SCC detail.
+    let missing = serde_json::json!({ "kind": "has_runtime_edges" });
+    assert!(
+        serde_json::from_value::<CycleTypeOnly>(missing).is_err(),
+        "missing type_only/of must be a decode ERROR, not a defaulted {{0,0}}"
+    );
+    // Guard the legitimate case the fix must NOT break: a COMPLETE pure-runtime payload (the producer
+    // always emits both, even `type_only: 0`) still decodes to the exact state.
+    let complete = serde_json::json!({ "kind": "has_runtime_edges", "type_only": 0, "of": 2 });
+    assert_eq!(
+        serde_json::from_value::<CycleTypeOnly>(complete).unwrap(),
+        CycleTypeOnly::HasRuntimeEdges {
+            type_only: 0,
+            of: 2
+        },
+        "a complete pure-runtime payload must still decode exactly"
+    );
+}
+
+#[test]
+fn mixed_scc_with_surviving_runtime_cycle_states_the_runtime_truth() {
+    // COHERENCE-2 §2.2 (Option A): a MIXED SCC whose runtime subgraph is still cyclic renders as a
+    // runtime cycle that REMAINS, with the type-only edge count as detail — NEVER a "breaks at
+    // runtime" / "residual one-way coupling" claim the topology does not support (the review-0 fix).
+    let mut r = minimal_response();
+    r.count = 1;
+    r.cycles = vec![cyc_type_only(
+        vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+        CycleTypeOnly::HasRuntimeEdges {
+            type_only: 2,
+            of: 4,
+        },
+    )];
+    let out = r.render_human();
+    assert!(
+        out.contains("runtime cycle remains: 2 of 4 import edges are `import type`"),
+        "a mixed-but-still-cyclic SCC states the runtime cycle remains with the type-only count:\n{out}"
+    );
+    assert!(
+        !out.contains("breaks the cycle at runtime"),
+        "a surviving runtime cycle must NOT claim it breaks:\n{out}"
+    );
+    assert!(
+        !out.contains("residual one-way coupling"),
+        "the false 'residual one-way coupling' claim is retired:\n{out}"
+    );
+}
+
+#[test]
+fn breaks_at_runtime_cycle_states_no_runtime_cycle_remains() {
+    // COHERENCE-2 §2.2 (Option A): a cycle whose runtime subgraph is acyclic BREAKS at runtime — it
+    // states the SCC-edge counts and that no runtime cycle remains, NOT "vanishes" and NOT the false
+    // "residual one-way coupling" claim.
+    let mut r = minimal_response();
+    r.count = 1;
+    r.cycles = vec![cyc_type_only(
+        vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
+        CycleTypeOnly::BreaksAtRuntime {
+            type_only: 1,
+            of: 2,
+        },
+    )];
+    let out = r.render_human();
+    assert!(
+        out.contains(
+            "type-only breaks the cycle at runtime: 1 of 2 import edges are `import type` (no \
+             runtime cycle remains)"
+        ),
+        "a broken cycle states it breaks at runtime with the SCC-edge counts:\n{out}"
+    );
+    assert!(
+        !out.contains("residual one-way coupling"),
+        "the false 'residual one-way coupling' claim is retired:\n{out}"
+    );
+    assert!(
+        !out.contains("vanishes at runtime"),
+        "a broken-but-not-vanished cycle must NOT claim it vanishes:\n{out}"
+    );
+    assert!(
+        !out.contains("could not be evaluated"),
+        "a fully-evaluated cycle raises no Unknown caveat:\n{out}"
     );
 }
 

@@ -327,6 +327,37 @@ impl OrientResponse {
                     {
                         line.push_str(&format!(" ({clause})"));
                     }
+                    // COHERENCE-2 §2.2: render the SAME type-only verdict label `cycles` renders,
+                    // for the anchor cycle we are showing as the example — via the SHARED
+                    // `cycles::type_only_label`, so the two surfaces render the state IDENTICALLY
+                    // (seam-pinned). Only when we drew the anchor (we are pointing at a specific
+                    // cycle, `cycles.first()`); the per-cycle verdict for every cycle also rides in
+                    // the JSON leaf. ABSENCE of the field is legitimate (LiveGraph route / non-TS §5
+                    // cycle) ⇒ no label — never a false claim.
+                    //
+                    // A PRESENT-but-unparseable verdict is producer/mirror schema drift. Unlike the
+                    // `cycles` renderer — where `type_only` is a TYPED field decoded at the transport
+                    // boundary, so a mismatch fails the whole response parse into a handled `Result`
+                    // (`error: failed to parse …`) — orient's evidence is an already-decoded raw
+                    // `Value`, so the mismatch surfaces only HERE, at render time. It must NOT
+                    // `.expect()`-panic the CLI on recoverable wire input (review-0 #1): per RULE #1
+                    // the unknown is made VISIBLE with its reason (never `.ok()`-swallowed), rendered
+                    // as an explicit type-only-unavailable clause the reader can act on.
+                    if draw_anchor {
+                        if let Some(tv) = cycles.first().and_then(|c| c.get("type_only")) {
+                            match serde_json::from_value::<super::cycles::CycleTypeOnly>(tv.clone()) {
+                                Ok(verdict) => {
+                                    if let Some(label) = super::cycles::type_only_label(&verdict) {
+                                        line.push_str(&format!(" — {label}"));
+                                    }
+                                }
+                                Err(_) => line.push_str(
+                                    " — `import type` status unavailable (cycle verdict unreadable \
+                                     on this snapshot — run `rmap cycles` for the per-cycle detail)",
+                                ),
+                            }
+                        }
+                    }
                     parts.push(line);
                 }
             }
@@ -413,16 +444,21 @@ impl OrientResponse {
                 malformed_groups += 1;
                 continue;
             };
-            // test_file_count is OPTIONAL by the evidence shape (absent = none
-            // recorded) — a payload-contract default, not a fabrication.
-            let test = g
-                .get("test_file_count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let test_suffix = if test > 0 {
-                format!(" ({test} test)")
-            } else {
-                String::new()
+            // review-2 (COHERENCE-2 iter 2): `test_file_count` is a REQUIRED field in
+            // the producer contract — `agent::PackageGroupEvidence.test_file_count: u64`
+            // is `#[derive(Serialize)]` with no `skip_serializing_if`, and BOTH producers
+            // (the daemon LiveGraph route `dispatch.rs` `json!{…,"test_file_count":…}` and
+            // the agent aggregator `module_summary`) emit it unconditionally, even for a
+            // zero-test group. So an ABSENT or non-u64 value is schema drift, NOT "no test
+            // files recorded". The prior `.unwrap_or(0)` rendered that drift as a silent
+            // no-suffix — a false Layer-0 "zero tests" claim (STANDING HONESTY RULE #1).
+            // Make the unknown VISIBLE with its reason; a truthful `0` stays suffix-less.
+            // The completeness gate (`package_group_row_wellformed`) also refuses to stamp
+            // "complete" for such a row, so the two surfaces agree on the degradation.
+            let test_suffix = match g.get("test_file_count").and_then(|v| v.as_u64()) {
+                Some(0) => String::new(),
+                Some(test) => format!(" ({test} test)"),
+                None => " (test count unavailable)".to_string(),
             };
             out.push_str(&bullet(&format!(
                 "{} — {} file{}{}",

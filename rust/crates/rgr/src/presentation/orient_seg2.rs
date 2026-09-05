@@ -144,14 +144,19 @@ fn module_row_wellformed(m: &serde_json::Value) -> bool {
         && m.get("file_count").and_then(|v| v.as_u64()).is_some()
 }
 
-/// A `package_groups` row is well-formed for rendering when it carries the fields
-/// `package_groups_section` READS as load-bearing: a `name` (string) and a `file_count`
-/// (u64). `test_file_count` is optional by design (absent → no test suffix). A row missing
-/// `name`/`file_count` renders `(unknown) — 0 files` (false-from-`unwrap_or`), so it blocks
-/// the completeness claim.
+/// A `package_groups` row is well-formed for rendering when it carries the three fields
+/// `package_groups_section` READS as load-bearing: `name` (string), `file_count` (u64),
+/// AND `test_file_count` (u64). All three are REQUIRED in the producer contract
+/// (`agent::PackageGroupEvidence` — every field a plain `u64`/`String`, `#[derive(Serialize)]`
+/// with no `skip_serializing_if`; both the daemon LiveGraph route and the agent aggregator
+/// emit `test_file_count` unconditionally). review-2 corrected the earlier "optional by
+/// design" comment: an absent/malformed `test_file_count` is schema drift, and the renderer
+/// now shows it as `(test count unavailable)` rather than a false-zero. A row missing ANY of
+/// the three is UNKNOWN → it blocks the completeness claim (standing honesty rule #1).
 fn package_group_row_wellformed(g: &serde_json::Value) -> bool {
     g.get("name").and_then(|v| v.as_str()).is_some()
         && g.get("file_count").and_then(|v| v.as_u64()).is_some()
+        && g.get("test_file_count").and_then(|v| v.as_u64()).is_some()
 }
 
 /// A `top_complex` row is well-formed for rendering when it carries a readable

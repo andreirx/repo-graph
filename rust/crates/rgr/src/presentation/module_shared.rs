@@ -43,16 +43,27 @@ pub fn format_count(count: usize, singular: &str, plural: &str) -> String {
     }
 }
 
-/// Format file count for list view (compact).
+/// Format a module's file count for the compact list view.
+///
+/// COHERENCE-2 §2.4: `(N test)` is a SUBSET clause product-wide. `total` is ALL files the module
+/// owns and `test` is how many OF them are tests (`test <= total`), matching `stats`
+/// (`files=3014 (2000 test)` = 2000 of 3014). It is NOT an addend — `total` already includes the
+/// test files, so a reader must never sum the two. This corrects `modules list`'s prior addend
+/// rendering (it passed the non-test count as the headline, so `907 files (1997 test)` read as
+/// 2904), which disagreed with `stats`/`check` about the same module's size.
 ///
 /// Examples:
-/// - "100 files"
-/// - "100 files (10 test)"
-pub fn format_files_compact(owned: usize, test: usize) -> String {
+/// - "100 files"           (total=100, test=0)
+/// - "100 files (10 test)" (total=100, of which 10 are tests)
+pub fn format_files_compact(total: usize, test: usize) -> String {
+    debug_assert!(
+        test <= total,
+        "COHERENCE-2 §2.4: `(N test)` is a subset — test ({test}) must not exceed total ({total})"
+    );
     if test > 0 {
-        format!("{} files ({} test)", owned, test)
+        format!("{} files ({} test)", total, test)
     } else {
-        format!("{} files", owned)
+        format!("{} files", total)
     }
 }
 
@@ -109,7 +120,9 @@ mod tests {
     }
 
     #[test]
-    fn format_files_compact_with_test() {
+    fn format_files_compact_with_test_is_a_subset() {
+        // COHERENCE-2 §2.4: the headline (100) is the TOTAL and (10 test) is the subset of it —
+        // a reader reads "10 of 100 are tests", never 100+10. Same meaning as `stats`.
         assert_eq!(format_files_compact(100, 10), "100 files (10 test)");
     }
 

@@ -26,10 +26,11 @@
 //!
 //! # Growth axis
 //!
-//! Variants FIXED (a cycle vanishes at runtime, has ≥1 runtime edge, or is unprovable — exactly
-//! three certainty states), operations GROWING (JSON emit in `daemon-runtime`; the `orient` leaf
-//! in the `agent` aggregator; the `cycles` + `orient` renderers). Fixed variants + growing
-//! operations ⇒ sum type + exhaustive match. A fourth state deliberately breaks every match.
+//! Variants FIXED (a cycle vanishes wholly, breaks at runtime, is a real runtime cycle, or is
+//! unprovable — four certainty states after COHERENCE-2's three-state split, SCC semantics per the
+//! operator ruling below), operations GROWING (JSON emit in `daemon-runtime`; the `orient` leaf in
+//! the `agent` aggregator; the `cycles` + `orient` renderers). Fixed variants + growing operations
+//! ⇒ sum type + exhaustive match. A fifth state deliberately breaks every match.
 //!
 //! The verdict basis is the stored per-module-edge `is_type_only` fact ONLY — NEVER a path/name
 //! heuristic (STANDING HONESTY RULE #2). A failed/absent/corrupt fact is `Unknown{reason}`, each
@@ -37,6 +38,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use repo_graph_algorithms::{find_sccs, DirectedEdge};
 use serde::Serialize;
 
 /// The `import type` disposition of ONE contributing MODULE→MODULE IMPORTS edge — the pure
@@ -60,22 +62,47 @@ pub enum EdgeTypeOnly {
 }
 
 /// The per-cycle runtime-vs-type-only verdict — the shared classification RESULT the serving
-/// computations attach to their cycle DTOs. Three mutually-exclusive certainty states ⇒ a sum
-/// type; `Unknown` carries the reader-framed reason (each cause its own string) and is NEVER
-/// demoted to a runtime claim.
+/// computations attach to their cycle DTOs. Four mutually-exclusive certainty states ⇒ a sum type
+/// (`TypeOnly` / `BreaksAtRuntime` / `HasRuntimeEdges` / `Unknown`); `Unknown` carries the
+/// reader-framed reason (each cause its own string) and is NEVER demoted to a runtime claim.
 ///
-/// Serialized as `{ "kind": <snake_case>[, "reason": <string>] }` — the EXACT JSON the `cycles`
+/// Serialized as `{ "kind": <snake_case>[, per-variant fields] }` — the EXACT JSON the `cycles`
 /// renderer (`rgr::presentation::cycles::CycleTypeOnly`) deserializes and the `orient` leaf
 /// (`CycleEvidence::type_only`) carries. `daemon-runtime` and `agent` serialize through THIS one
 /// type, so the two routes emit byte-identical JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CycleTypeOnly {
-    /// EVERY edge in the cycle's walk is a TS/JS `import type` — the whole cycle vanishes at runtime.
+    /// EVERY edge in the cycle (SCC) is a TS/JS `import type` — the whole cycle vanishes at runtime.
     TypeOnly,
-    /// ≥1 edge is a confirmed runtime import — a real runtime cycle (rendered WITHOUT a label).
-    HasRuntimeEdges,
-    /// The verdict could not be computed. NEVER demoted to `HasRuntimeEdges`.
+    /// COHERENCE-2 §2.2 — SEMANTICS RULED 2026-09-05 (COH2-SCC-RUNTIME-SEMANTICS, Option A): the
+    /// reported unit is an SCC. This state is emitted ONLY when SOME (not all) edges are
+    /// `import type` AND erasing those type-only edges leaves NO directed cycle in the remaining
+    /// runtime subgraph (the SCC/Tarjan check is re-run on the runtime edges). The cycle therefore
+    /// genuinely BREAKS at runtime — no runtime cycle remains. `type_only` of `of` are SCC-EDGE
+    /// counts (`1 <= type_only < of`), labeled as such — NEVER a "residual one-way coupling" claim
+    /// (that claim is not generally true for an SCC and was the review-0 defect). The old
+    /// ALL-predicate mislabeled type-only-containing cycles as plain runtime cycles (5 verified
+    /// false negatives, e.g. FRAKTAG's one-`import type`-edge 2-cycle → BreaksAtRuntime here).
+    BreaksAtRuntime {
+        /// How many of the SCC's `of` intra-cycle import edges are `import type` (≥1, `< of`).
+        type_only: usize,
+        /// The total number of intra-cycle (intra-SCC) import edges.
+        of: usize,
+    },
+    /// A REAL runtime cycle: a directed cycle remains after every `import type` edge is erased.
+    /// COHERENCE-2 §2.2 (Option A): a MIXED SCC — some `import type`, some runtime — lands here when
+    /// its runtime subgraph is still cyclic; the type-only count is carried as detail
+    /// (`type_only` of `of` SCC edges), NEVER a "breaks at runtime" claim. A PURE runtime cycle is
+    /// `type_only == 0` and is rendered WITHOUT a label (byte-stable).
+    HasRuntimeEdges {
+        /// How many of the SCC's `of` intra-cycle import edges are `import type` (0 for a pure
+        /// runtime cycle; ≥1 for a mixed SCC whose runtime subgraph is still cyclic).
+        type_only: usize,
+        /// The total number of intra-cycle (intra-SCC) import edges.
+        of: usize,
+    },
+    /// The verdict could not be computed. NEVER demoted to a runtime/breaks claim.
     Unknown { reason: String },
 }
 
@@ -132,37 +159,85 @@ pub fn ts_js_cycle_member_dirs(
     ts_members
 }
 
-/// The conjunctive verdict for ONE cycle, over its intra-SCC MODULE→MODULE IMPORTS edges'
-/// dispositions (`None` = the fact is absent / SQL `NULL`). A cycle is type-only iff EVERY edge in
-/// its walk is type-only; runtime dominates; a corrupt fact outranks a merely-absent one:
-///   - empty bucket ⇒ `Unknown` "cycle import edges unavailable" (cannot verify),
-///   - any `Some(Runtime)` ⇒ `HasRuntimeEdges` (a real runtime cycle),
-///   - else any `Some(Unreadable)` ⇒ `Unknown` "type-only fact unreadable" (a CORRUPT fact — a
-///     distinct truth from an absent one, operator ruling 2026-09-03 item 2a),
-///   - else any `None` ⇒ `Unknown` "indexed before type-only tracking" (never demoted — RULE #2),
-///   - else (all `Some(TypeOnly)`) ⇒ `TypeOnly` (the whole cycle vanishes at runtime).
+/// The runtime-vs-type-only verdict for ONE cycle (SCC), over its intra-SCC MODULE→MODULE IMPORTS
+/// edges as `(from_node_id, to_node_id, disposition)` (`None` disposition = the fact is absent / SQL
+/// `NULL`). The edge endpoints are needed — not just the dispositions — because the mixed case
+/// re-runs the SCC/cycle check on the runtime subgraph (Option A, below).
 ///
-/// The `Unknown` reason CARRIED here is what the renderer prints verbatim (operator ruling item
-/// 2b — no reason invention at the render site).
-pub fn classify_cycle_type_only(dispositions: &[Option<EdgeTypeOnly>]) -> CycleTypeOnly {
+/// COHERENCE-2 §2.2 — SEMANTICS RULED 2026-09-05 (COH2-SCC-RUNTIME-SEMANTICS, Option A): the reported
+/// unit is an SCC. The verdict over the KNOWN edge counts (`type_only` of `of` SCC edges):
+///   - `type_only == of` ⇒ `TypeOnly` (every edge vanishes — the whole cycle vanishes),
+///   - `type_only == 0`  ⇒ `HasRuntimeEdges{0, of}` (a pure runtime cycle — no label at render),
+///   - `0 < type_only < of` ⇒ MIXED: erase the type-only edges and re-run the SCC check
+///     (`find_sccs`) on the remaining RUNTIME edges. If that runtime subgraph has NO directed cycle
+///     ⇒ `BreaksAtRuntime{type_only, of}` (the cycle genuinely breaks at runtime — no runtime cycle
+///     remains); if it is STILL cyclic ⇒ `HasRuntimeEdges{type_only, of}` (a real runtime cycle
+///     remains, the type-only count carried as detail — never a "breaks" claim).
+///
+/// The mixed rule is the operator correction to the earlier literal ANY-edge wording, which was
+/// wrong for SCCs (an SCC can contain a runtime cycle plus a type-only chord — erasing the chord
+/// does not break it). We reuse graph-algorithms' Tarjan (`find_sccs`); no new algorithm.
+///
+/// The exact `type_only`/`of` counts are only knowable when EVERY edge's disposition is known. So
+/// any unknown edge makes the count unprovable and the verdict `Unknown` — NEVER demoted to a
+/// runtime/breaks claim (RULE #2). A corrupt fact outranks a merely-absent one (operator ruling
+/// 2026-09-03 item 2a); the reason CARRIED here is printed verbatim (item 2b — no reason invention
+/// at the render site).
+///   - empty edge set ⇒ `Unknown` "cycle import edges unavailable" (cannot verify).
+pub fn classify_cycle_type_only(scc_edges: &[(&str, &str, Option<EdgeTypeOnly>)]) -> CycleTypeOnly {
     use EdgeTypeOnly::*;
-    if dispositions.is_empty() {
-        CycleTypeOnly::Unknown {
+    let of = scc_edges.len();
+    if of == 0 {
+        return CycleTypeOnly::Unknown {
             reason: "cycle import edges unavailable".to_string(),
-        }
-    } else if dispositions.contains(&Some(Runtime)) {
-        CycleTypeOnly::HasRuntimeEdges
-    } else if dispositions.contains(&Some(Unreadable)) {
-        CycleTypeOnly::Unknown {
-            reason: "type-only fact unreadable".to_string(),
-        }
-    } else if dispositions.contains(&None) {
-        CycleTypeOnly::Unknown {
-            reason: "indexed before type-only tracking".to_string(),
-        }
-    } else {
-        CycleTypeOnly::TypeOnly
+        };
     }
+    // Any unknown edge ⇒ the exact k-of-n count is unprovable ⇒ Unknown (never demoted). Corrupt
+    // outranks merely-absent (operator ruling item 2a).
+    if scc_edges.iter().any(|(_, _, d)| *d == Some(Unreadable)) {
+        return CycleTypeOnly::Unknown {
+            reason: "type-only fact unreadable".to_string(),
+        };
+    }
+    if scc_edges.iter().any(|(_, _, d)| d.is_none()) {
+        return CycleTypeOnly::Unknown {
+            reason: "indexed before type-only tracking".to_string(),
+        };
+    }
+    // Every disposition is known (TypeOnly or Runtime): the counts are exact.
+    let type_only = scc_edges
+        .iter()
+        .filter(|(_, _, d)| *d == Some(TypeOnly))
+        .count();
+    if type_only == of {
+        CycleTypeOnly::TypeOnly
+    } else if type_only == 0 {
+        CycleTypeOnly::HasRuntimeEdges { type_only: 0, of }
+    } else if runtime_subgraph_is_cyclic(scc_edges) {
+        // A runtime cycle survives erasing the type-only edges — still a real runtime cycle.
+        CycleTypeOnly::HasRuntimeEdges { type_only, of }
+    } else {
+        // Erasing the type-only edges leaves an acyclic runtime subgraph — the cycle breaks.
+        CycleTypeOnly::BreaksAtRuntime { type_only, of }
+    }
+}
+
+/// Option A core: does a directed cycle remain among the SCC's RUNTIME edges (every non-`TypeOnly`
+/// edge) once the `import type` edges are erased? Re-uses graph-algorithms' Tarjan
+/// (`find_sccs`), whose `.cycles` are the size>1 SCCs of the runtime subgraph — non-empty ⇒ a
+/// runtime cycle remains. Caller guarantees every disposition is known, so the only edges dropped
+/// are the `import type` ones. Node identity is the `node_uid`; `find_sccs` infers nodes solely
+/// from the edges passed, so no pre-registration is needed.
+fn runtime_subgraph_is_cyclic(scc_edges: &[(&str, &str, Option<EdgeTypeOnly>)]) -> bool {
+    let runtime: Vec<DirectedEdge> = scc_edges
+        .iter()
+        .filter(|(_, _, d)| *d == Some(EdgeTypeOnly::Runtime))
+        .map(|(from, to, _)| DirectedEdge {
+            source: (*from).to_string(),
+            target: (*to).to_string(),
+        })
+        .collect();
+    !find_sccs(&runtime).cycles.is_empty()
 }
 
 /// Decorate a WHOLE cycle set with the per-cycle type-only verdict — the single function BOTH the
@@ -199,28 +274,32 @@ pub fn classify_cycles_type_only(
         }
     }
 
-    // Collect each cycle's intra-SCC edge dispositions (the FULL set — no render cap; the verdict
-    // must see every edge to claim "ALL are type-only").
-    let mut dispositions: Vec<Vec<Option<EdgeTypeOnly>>> = vec![Vec::new(); cycle_members.len()];
+    // Collect each cycle's intra-SCC edges as `(from, to, disposition)` (the FULL set — no render
+    // cap; the verdict must see every edge, both to claim "ALL are type-only" AND to re-run the SCC
+    // check on the runtime subgraph — Option A). Self-edges are dropped (a cycle needs ≥2 distinct
+    // members; a self-loop is never an intra-SCC contributor and would confuse the runtime SCC
+    // re-check).
+    let mut per_cycle_edges: Vec<Vec<(&str, &str, Option<EdgeTypeOnly>)>> =
+        vec![Vec::new(); cycle_members.len()];
     for (from, to, disp) in module_edges {
         if from == to {
             continue;
         }
         if let (Some(&fi), Some(&ti)) = (owner.get(*from), owner.get(*to)) {
             if fi == ti {
-                dispositions[fi].push(*disp);
+                per_cycle_edges[fi].push((*from, *to, *disp));
             }
         }
     }
 
     cycle_members
         .iter()
-        .zip(dispositions.iter())
-        .map(|(members, disp)| {
+        .zip(per_cycle_edges.iter())
+        .map(|(members, edges)| {
             // §5 gate: only TS/JS-member cycles carry a verdict.
             let is_ts = members.iter().any(|(_, q)| ts_member_dirs.contains(*q));
             if is_ts {
-                Some(classify_cycle_type_only(disp))
+                Some(classify_cycle_type_only(edges))
             } else {
                 None
             }
@@ -238,20 +317,116 @@ mod tests {
     }
 
     // ── verdict precedence (the honesty-critical kernel) ──────────────────────
+    //
+    // The kernel now takes SCC edges `(from, to, disposition)` — the mixed case re-runs the SCC
+    // check on the runtime subgraph (Option A). `e` builds a known-disposition edge; `unk` an
+    // absent-fact edge.
+
+    fn e<'a>(
+        from: &'a str,
+        to: &'a str,
+        d: EdgeTypeOnly,
+    ) -> (&'a str, &'a str, Option<EdgeTypeOnly>) {
+        (from, to, Some(d))
+    }
+    fn unk<'a>(from: &'a str, to: &'a str) -> (&'a str, &'a str, Option<EdgeTypeOnly>) {
+        (from, to, None)
+    }
 
     #[test]
     fn pure_type_only_is_type_only() {
+        // a <-> b, both `import type` — the whole 2-cycle vanishes.
         assert_eq!(
-            classify_cycle_type_only(&[Some(TypeOnly), Some(TypeOnly)]),
+            classify_cycle_type_only(&[e("a", "b", TypeOnly), e("b", "a", TypeOnly)]),
             CycleTypeOnly::TypeOnly
         );
     }
 
     #[test]
-    fn one_runtime_edge_dominates() {
+    fn all_runtime_is_has_runtime_edges() {
         assert_eq!(
-            classify_cycle_type_only(&[Some(TypeOnly), Some(Runtime), Some(Unreadable), None]),
-            CycleTypeOnly::HasRuntimeEdges
+            classify_cycle_type_only(&[e("a", "b", Runtime), e("b", "a", Runtime)]),
+            CycleTypeOnly::HasRuntimeEdges {
+                type_only: 0,
+                of: 2
+            }
+        );
+    }
+
+    #[test]
+    fn mixed_2cycle_breaks_at_runtime() {
+        // COHERENCE-2 §2.2 (Option A): a <-> b with one `import type` edge. Erase it and only the
+        // runtime edge b->a remains — no runtime cycle — so the cycle BREAKS at runtime. This is
+        // FRAKTAG's case. `k of n` are SCC-edge counts.
+        assert_eq!(
+            classify_cycle_type_only(&[e("a", "b", TypeOnly), e("b", "a", Runtime)]),
+            CycleTypeOnly::BreaksAtRuntime {
+                type_only: 1,
+                of: 2
+            }
+        );
+    }
+
+    #[test]
+    fn mixed_scc_with_surviving_runtime_cycle_is_has_runtime_edges() {
+        // COHERENCE-2 §2.2 (Option A — the review-0 fix): an SCC of {a,b,c} with a RUNTIME 2-cycle
+        // a<->b PLUS a type-only chord b->c->b. Erasing the type-only edges (b->c, c->b) leaves the
+        // runtime cycle a<->b intact — so this is a REAL runtime cycle, NOT "broken at runtime".
+        // The type-only count rides along as detail (2 of 4), never a false "residual one-way
+        // coupling" claim. The old ANY-predicate wrongly called this BreaksAtRuntime.
+        let edges = [
+            e("a", "b", Runtime),
+            e("b", "a", Runtime),
+            e("b", "c", TypeOnly),
+            e("c", "b", TypeOnly),
+        ];
+        assert_eq!(
+            classify_cycle_type_only(&edges),
+            CycleTypeOnly::HasRuntimeEdges {
+                type_only: 2,
+                of: 4
+            }
+        );
+    }
+
+    #[test]
+    fn mixed_scc_whose_runtime_subgraph_is_acyclic_breaks_at_runtime() {
+        // An SCC of {a,b,c} that is a single 3-ring a->b->c->a where a->b is `import type`. Erase it
+        // and b->c->a is a path, not a cycle — so the cycle BREAKS at runtime.
+        let edges = [
+            e("a", "b", TypeOnly),
+            e("b", "c", Runtime),
+            e("c", "a", Runtime),
+        ];
+        assert_eq!(
+            classify_cycle_type_only(&edges),
+            CycleTypeOnly::BreaksAtRuntime {
+                type_only: 1,
+                of: 3
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_edge_blocks_exact_count_even_beside_runtime() {
+        // With an unknown edge present the exact k-of-n is unprovable, so it is Unknown — never a
+        // demoted runtime or breaks claim (RULE #2). Corrupt outranks merely-absent.
+        assert_eq!(
+            classify_cycle_type_only(&[
+                e("a", "b", TypeOnly),
+                e("b", "c", Runtime),
+                e("c", "d", Unreadable),
+                unk("d", "a"),
+            ]),
+            CycleTypeOnly::Unknown {
+                reason: "type-only fact unreadable".to_string()
+            }
+        );
+        assert_eq!(
+            classify_cycle_type_only(&[e("a", "b", TypeOnly), e("b", "c", Runtime), unk("c", "a")]),
+            CycleTypeOnly::Unknown {
+                reason: "indexed before type-only tracking".to_string()
+            }
         );
     }
 
@@ -260,7 +435,11 @@ mod tests {
         // Operator ruling item 2a: a CORRUPT contributor surfaces its OWN reason, never collapsed
         // into the pre-tracking one, and outranks a merely-absent edge.
         assert_eq!(
-            classify_cycle_type_only(&[Some(TypeOnly), Some(Unreadable), None]),
+            classify_cycle_type_only(&[
+                e("a", "b", TypeOnly),
+                e("b", "c", Unreadable),
+                unk("c", "a")
+            ]),
             CycleTypeOnly::Unknown {
                 reason: "type-only fact unreadable".to_string()
             }
@@ -270,7 +449,7 @@ mod tests {
     #[test]
     fn absent_without_runtime_is_pre_tracking_unknown() {
         assert_eq!(
-            classify_cycle_type_only(&[Some(TypeOnly), None]),
+            classify_cycle_type_only(&[e("a", "b", TypeOnly), unk("b", "a")]),
             CycleTypeOnly::Unknown {
                 reason: "indexed before type-only tracking".to_string()
             }
@@ -295,8 +474,20 @@ mod tests {
             serde_json::json!({ "kind": "type_only" })
         );
         assert_eq!(
-            serde_json::to_value(CycleTypeOnly::HasRuntimeEdges).unwrap(),
-            serde_json::json!({ "kind": "has_runtime_edges" })
+            serde_json::to_value(CycleTypeOnly::HasRuntimeEdges {
+                type_only: 0,
+                of: 2
+            })
+            .unwrap(),
+            serde_json::json!({ "kind": "has_runtime_edges", "type_only": 0, "of": 2 })
+        );
+        assert_eq!(
+            serde_json::to_value(CycleTypeOnly::BreaksAtRuntime {
+                type_only: 1,
+                of: 2
+            })
+            .unwrap(),
+            serde_json::json!({ "kind": "breaks_at_runtime", "type_only": 1, "of": 2 })
         );
         assert_eq!(
             serde_json::to_value(CycleTypeOnly::Unknown {
@@ -380,14 +571,61 @@ mod tests {
     }
 
     #[test]
-    fn orchestrator_runtime_cycle() {
+    fn orchestrator_mixed_cycle_breaks_at_runtime() {
+        // COHERENCE-2 §2.2: one type-only + one runtime edge ⇒ BreaksAtRuntime (was HasRuntimeEdges
+        // under the old ALL-predicate — the false-negative the slice removes).
         let cyc = vec![members(&[("a", "pkg/a"), ("b", "pkg/b")])];
         let edges = vec![("a", "b", Some(TypeOnly)), ("b", "a", Some(Runtime))];
         let files = vec![("pkg/a/x.ts", Some("typescript"))];
         let all = vec!["pkg/a".to_string(), "pkg/b".to_string()];
         assert_eq!(
             classify_cycles_type_only(&cyc, &edges, &files, &all),
-            vec![Some(CycleTypeOnly::HasRuntimeEdges)]
+            vec![Some(CycleTypeOnly::BreaksAtRuntime {
+                type_only: 1,
+                of: 2
+            })]
+        );
+    }
+
+    #[test]
+    fn orchestrator_mixed_scc_with_surviving_runtime_cycle_is_has_runtime_edges() {
+        // COHERENCE-2 §2.2 (Option A) through the orchestrator: a single SCC {a,b,c} with a runtime
+        // 2-cycle a<->b and a type-only chord b<->c. Erasing the chord leaves a<->b intact ⇒ a real
+        // runtime cycle, type-only count carried as detail (2 of 4). One reported cycle group.
+        let cyc = vec![members(&[("a", "pkg/a"), ("b", "pkg/b"), ("c", "pkg/c")])];
+        let edges = vec![
+            ("a", "b", Some(Runtime)),
+            ("b", "a", Some(Runtime)),
+            ("b", "c", Some(TypeOnly)),
+            ("c", "b", Some(TypeOnly)),
+        ];
+        let files = vec![("pkg/a/x.ts", Some("typescript"))];
+        let all = vec![
+            "pkg/a".to_string(),
+            "pkg/b".to_string(),
+            "pkg/c".to_string(),
+        ];
+        assert_eq!(
+            classify_cycles_type_only(&cyc, &edges, &files, &all),
+            vec![Some(CycleTypeOnly::HasRuntimeEdges {
+                type_only: 2,
+                of: 4
+            })]
+        );
+    }
+
+    #[test]
+    fn orchestrator_all_runtime_cycle() {
+        let cyc = vec![members(&[("a", "pkg/a"), ("b", "pkg/b")])];
+        let edges = vec![("a", "b", Some(Runtime)), ("b", "a", Some(Runtime))];
+        let files = vec![("pkg/a/x.ts", Some("typescript"))];
+        let all = vec!["pkg/a".to_string(), "pkg/b".to_string()];
+        assert_eq!(
+            classify_cycles_type_only(&cyc, &edges, &files, &all),
+            vec![Some(CycleTypeOnly::HasRuntimeEdges {
+                type_only: 0,
+                of: 2
+            })]
         );
     }
 
