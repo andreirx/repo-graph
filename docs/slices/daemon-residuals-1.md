@@ -1,5 +1,14 @@
 # DAEMON-RESIDUALS-1 — the measured contention symptoms, each with its mechanism proven
 
+RESCOPED 2026-09-05 (operator ruling split-daemon-residuals-1, Option A): THIS slice's
+deliverable is the D1-A increment — bounded foreground patience + NAMED typed Busy on
+BOTH blocking layers (`DatabaseState::write_lock` and the `RepoCoordinator` guards) for
+the foreground handlers that took them unbounded (`assess`, `coverage`, …), plus the #2
+diagnosis (evidenced: lock order + measured 1.30/1.44 s blocks; not end-to-end reproduced
+at 301 s). The remaining residuals move to DAEMON-RESIDUALS-2 (retention: reproduce →
+measured remedy → prevention set) and DAEMON-RESIDUALS-3 (seed-publish chunking, #2b
+LiveGraph coordinator guard, VACUUM guard). ENRICH-GUARD-1 stays a separate follow-up.
+
 Status: SPECIFIED (2026-09-04) · Track: v0.16.0 audit queue #7 (human-ratified Option A,
 2026-09-04). CODE slice, diagnose-then-fix. Maturity: MATURE (daemon-runtime; frozen
 invariants below).

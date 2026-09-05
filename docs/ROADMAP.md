@@ -359,6 +359,12 @@ unboundedly (the assess 301 s hang: assess takes the write mutex FIRST). D1-A (b
 patience + named Busy on both layers) ships in DAEMON-RESIDUALS-1; the deeper fix —
 resolve without holding either exclusive guard, acquire both only for a verified atomic
 promotion — needs its own slice because it touches promotion atomicity.
+SPLIT (2026-09-05, ruling split-daemon-residuals-1 = A): DAEMON-RESIDUALS-1 → the shipped
+D1-A increment (bounded patience + named Busy on BOTH the DB write mutex and the
+coordinator guards for assess/coverage/…); DAEMON-RESIDUALS-2 = retention (reproduce →
+measured remedy → rebuild path → prevention set); DAEMON-RESIDUALS-3 = seed-publish
+chunking + #2b LiveGraph coordinator guard + VACUUM guard. Order after ECONOMY-2 and the
+v0.17.0 release/audit: -2 then -3.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
