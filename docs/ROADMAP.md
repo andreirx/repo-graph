@@ -468,6 +468,14 @@ surface. DECISION surfaced to the human: A keep the rebuild machinery (own slice
 discipline ratified first) vs B drop it — prove the async cap on a real multi-snapshot store
 with 035, doctor names the manual rebuild when a pass exceeds its budget. Operator
 recommendation B. IMPORT-RESOLUTION-JAVA-1 launched meanwhile (tree free).
+HUMAN RULING (2026-09-06): **B**, plus "keep the option of fully wiping and reindexing in the
+daemon — separate verb" → `rmap repo rebuild <path>` (spec §7): explicit `--yes`/confirm naming
+what is discarded, the daemon owns the coordination (FIFO Writing guard, NAMED Busy when a
+reader or a detached index holds it — the 2026-09-04 hazard), drops the repo's store
+atomically, indexes from scratch, additive wire method. DAEMON-RESIDUALS-2C = proof that the
+existing async cap holds at current+parent with 035 (leveldb multi-snapshot, concurrent read
+loop under the patience) + the verb + a REPORTING-ONLY retention budget (doctor names the
+overrun and the verb; "under 1s" for sub-second passes). Queued after JAVA-1.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
