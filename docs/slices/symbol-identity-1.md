@@ -47,8 +47,10 @@ nothing computes it. Never worked (e01386f, fda7adc).
 4. **A miss is not "Confidence: high".** `build_no_match` and the ambiguous arm derive their
    confidence from the same source the resolved path uses, or state `low`; the render never
    prints `high` beside `no_match`.
-5. **Movement measured (isolated; retained root as "before" where no reindex is needed —
-   items 1, 2, 4 need none; item 3 needs the C++ reindex from CPP-DECLARATORS-1):**
+5. **Movement measured (isolated; "before" = a COPY of the retained root served with auto
+   passes off, or a `git worktree` before-binary on a fresh isolated index — NEVER the retained
+   root itself (it is not read-only under a serving daemon, bitten 2026-09-07); items 1, 2, 4
+   need no reindex; item 3 needs the C++ reindex from CPP-DECLARATORS-1):**
    the four hand-off commands above before/after, verbatim; `explain get_response` (bare)
    still ambiguous with 8 candidates; `callers` on the resolved symbols returns what the
    resolved edges hold (the under-report itself is CPP-DECLARATORS-1's / the no-resolver gap's,

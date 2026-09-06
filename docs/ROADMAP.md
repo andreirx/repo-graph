@@ -563,7 +563,11 @@ discrimination, django boundaries zero-state (what cycles should print), map --d
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
 
-Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
+Open follow-ups awaiting ratification/scheduling: CPP-FNPTR-RETURN-1 (C extractor emits no node
+for a function returning a function pointer — `parenthesized_declarator` never handled; found by
+CPP-DECLARATORS-1's negative fixture 2026-09-07), CYCLES-POPULATION-1 (cycles runs over directory
+groups while modules list uses declared modules — found by IMPORT-RESOLUTION-RUST-1),
+RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
 timeout override.
 
