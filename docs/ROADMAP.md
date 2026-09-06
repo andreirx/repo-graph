@@ -449,7 +449,37 @@ kept, SQLite keeps enforcing integrity; the insert-path cost is MEASURED and rep
 §6). Relaunch queued behind IMPORT-RESOLUTION-RUST-1 (one relay per tree). Operator rulings: the diagnosis harness asserts its plans; the slice splits into
 increment 1 (mechanism + guard/index + benchmark gate) and increment 2 (rebuild path +
 prevention set); DAEMON-RESIDUALS-3 follows. Next horizon (human): how a diff maps to
-deltas in the in-memory representation and in SQLite — read-only characterisation launched. KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
+deltas in the in-memory representation and in SQLite — CHARACTERISED 2026-09-06
+(`docs/audits/2026-09-06-change-path-characterisation.md`): `rmap refresh` is per-file at
+EXTRACTION only (content-hash plan; changed files re-extracted, unchanged ROW-COPIED forward);
+resolution and every aggregate re-run whole-snapshot; snapshots are full row copies (a no-change
+django refresh ≈ 84–102 s ≈ a full index); identity is path-based with no rename tracking; no
+reverse-dependency map exists; the LiveGraph is a separate TS-only whole-partition store.
+CODEGRAPH COMPARISON (human request 2026-09-06; `docs/audits/2026-09-06-codegraph-vs-rmap.md`;
+codegraph 1.6.0 b9ca4b7, same corpus/metric as the zg round): rmap wins OVERVIEW 5–0 (module
+model, edges, cycles, surfaces, reliability floors; codegraph has no overview verb) and HONESTY
+(B+ vs C−: codegraph binds virtual/duck-typed calls to whichever same-named definition — a test
+mock, a GIS mixin — and prints a 20-row default as a total; rmap invented no edge); codegraph
+wins SYMBOL+CALLERS 3–1, CONCEPT 4–1 (verbatim bodies land the right file), IMPACT 3–0 (rmap
+has no file-level dependents / symbol impact), CHANGE HANDLING (one-file sync 0.5 s vs ~100 s
+no-change refresh). rmap economy 171 KB vs 483 KB for the same questions. NEW DEFECTS SURFACED
+(to ROOT-CAUSE before packeting, per practice): the find → explain/callers HAND-OFF is broken —
+`explain DBImpl::Recover` says "unresolved: no_match / Confidence: high" for the string `find`
+just resolved; `callers leveldb::DBImpl::Recover` ambiguous decl-vs-def; `callers
+OwnerController.processCreationForm` "symbol not found" while its own hint lists the FQN; only
+the full stable key works and then reports 0 callers where 1–3 exist (C++/Python); TS provider
+rows carry no line anchors. IMITATE candidates (mapped to outward surfaces): route-as-caller
+(rmap has the fact in find's http-surface rows), resolve-what-find-printed, bounded verbatim
+source on explain, file dependents + symbol impact with the LOW banner, second-scale
+incremental update (codegraph's edge-snapshot/re-attach/resurrect + replay benchmark is a
+measured, cheaper alternative to snapshot-stable identity), provider line anchors. codegraph
+STRUCTURE (same doc): TS engine 109k LOC owns resolution/storage/MCP; a 25k-LOC Rust kernel does
+parse+extract only (napi, optional, ABI-checked, per-file fallback); one mutable SQLite per
+repo, no snapshot history; id = sha256(path:kind:name:LINE); no LSP/SCIP; change tracking =
+fs.watch + content hash + changed-files-only re-extract + name-keyed edge re-attach; reverse
+index used for reporting only; one default MCP tool with a CHARACTER budget; never isError for
+expected conditions; README "full support" labels exceed its resolver for C#/Ruby/Swift/Dart/
+Scala. KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
 discrimination, django boundaries zero-state (what cycles should print), map --dry-run cap
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
