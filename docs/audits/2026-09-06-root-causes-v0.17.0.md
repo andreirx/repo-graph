@@ -558,3 +558,56 @@ B. doctor: rgr/src/commands/doctor/seed.rs:27-31 unavailable → passed: true ("
 - FIX: `else SKIPPED_REPOS+=(name)` in the :301 block (move the init from :351 above :301); optional skip_reason
   map (env:SMOKE_SKIP vs path-missing). Add a summary check passed∪failed∪skipped == internal∪legacy (:580).
 - VERIFICATION: SMOKE_SKIP=linux SMOKE_ONLY="linux leveldb" dry run → passed:[leveldb], skipped:[linux].
+
+---
+
+# §H — find → explain/callers hand-off + callers under-report (surfaced by the codegraph comparison, 2026-09-06)
+
+Two shared causes explain five of six; none is a regression (all trace to the features' original commits).
+
+(A) IDENTITY IS NOT ONE THING. A node carries `name` (short), `qualified_name` (meaning differs per extractor:
+C++ namespace-qualified cpp-extractor:1396-1408; Java package-qualified java-extractor:896-899; Python/Rust
+container-relative) and a stable-key segment (Java: container-relative, :250-253). Three consumers use three
+resolvers: `find` = case-insensitive SUBSTRING over name+qualified_name (storage/src/find_facts_reads.rs:157-166);
+`explain` = exact SHORT NAME only (agent/src/explain/mod.rs:185 → storage/src/agent_impl.rs:974 `n.name = ?`) —
+never qualified_name (the livegraph parity mirror documents this as intended, focus_resolver/mod.rs:257-260);
+`callers` = exact stable_key → exact qualified_name → exact name (storage/src/queries.rs:653-691). No `::`↔`.`
+normalisation anywhere on the query side. Hence H1 (`explain DBImpl::Recover` → no_match while find resolves;
+`explain BaseHandler.get_response` no_match while `callers` resolves it) and H3 (`callers
+OwnerController.processCreationForm` "not found" — a SUFFIX of qualified_name and equal to the stable-key segment,
+but no suffix step exists; the hint that lists the FQN comes from the embedding fallback, dispatch_seed.rs:177-208,
+not from lexical matching). "Confidence: high" on no_match is a STATIC LITERAL (explain/mod.rs:276 in
+build_no_match; :228 ambiguous arm; coherent.rs:334 "preserved verbatim (NOT recomputed)") — nothing computes it.
+FIX: explain uses storage.resolve_symbol; resolve_symbol gains ONE suffix step (qualified_name ends-with
+<sep><query>, sep ∈ {"::","."}, Ambiguous if >1) shared by all three; build_no_match stops asserting High.
+VERIFY: queries.rs:3751-3840 resolve_symbol tests; explain.rs:473-477 fixture.
+
+(B) A C++ METHOD'S DECLARATION AND DEFINITION ARE TWO NODES WITH ONE qualified_name AND NO STORED DISTINCTION
+(extract_method_declaration cpp-extractor:1515-1578, metadata = linkage only; extract_function :1357-1410) —
+free-function prototypes emit NO node (:1344-1353 routes only types), which is why CurrentFileName/ParseFileName/
+Log resolve uniquely. Combined with a resolver that binds calls by GLOBAL SHORT NAME and refuses any non-singleton
+(resolver.rs:646 pick_unambiguous over nodes_by_name; :737-748) and no C++/Python enrichment resolver
+(enrichment/src/contracts.rs:92-106: TypeScript|Rust|Java only). Hence H2 (`callers leveldb::DBImpl::Recover`
+ambiguous .h vs .cc — the hint "use qualified name" is self-defeating), H4 (`callers` via stable key → 0: the
+edge IS emitted — C++ field_expression target_key is the BARE field name "Recover", receiver discarded,
+:1638-1676; Python "self.get_response", python-extractor:1094-1106 — then DROPPED as ambiguous: 4 `Recover`
+candidates (DBImpl decl+def, VersionSet decl+def); 8 `get_response`; classified CallsFunctionAmbiguousOrMissing /
+CallsObjMethodNeedsTypeInfo into unresolved_edges, which `callers` never reads — queries.rs:695-720 reads
+resolved CALLS only), and H5 (`callees` omits NewDB/RecoverLogFile — NOT unique: declared in db_impl.h:108/:126 +
+defined in .cc → 2 nodes each → ambiguous; the list is not capped or deduped; Status::ok ×5 = one row per call
+site). Test that PINS the behaviour: resolver.rs:1395 ambiguous_name_stays_unresolved.
+FIX: CPP-DECLARATORS-1 item 2 extended to extract_method_declaration (forward_decl/declaration flag at :1573);
+resolve_symbol step 2/3 and pick_unambiguous filter !forward_decl before the len()==1 test (restores NewDB,
+RecoverLogFile, and collapses Recover 4→2); enclosing-class preference when the caller's qualified_name prefix
+matches exactly one candidate's container; C++ field_expression keeps `"receiver"` in metadata_json for a later
+type-aware step. Honest remainder: `impl->Recover` from DB::Open (not DBImpl) and `self.get_response` from
+WSGIHandler.__call__ (needs base-class walking) stay unresolved and are counted under the C++/Python no-resolver
+gap. Reindex required. VERIFY: cpp-extractor:2773 out_of_line_method (flag on the .h node); queries.rs
+resolve_symbol_prefers_definition_over_declaration; resolver.rs:1395 family (decl+def pair → def).
+
+H6 (independent): Express provider rows have no line because daemon-runtime/src/http_boundary_read.rs:202
+HARD-CODES `line: None` (comment :199-201 "no line_start in scope for this slice") while the line is already in
+project_surfaces.metadata_json.lineStart (express_detector.rs:264, :404-413). Blame aee8a42 (ANCHORS-EVERYWHERE-1
+threaded only the boundary_interaction_surfaces family). Fix = one expression reading metadata lineStart; no
+schema change, no reindex. VERIFY: http_boundary_read.rs:498-530 test helper; FRAKTAG `surfaces list` →
+`server.ts:45 [provider]`.
