@@ -14,6 +14,7 @@ mod epoch;
 mod lifecycle;
 mod narrow;
 mod prune;
+mod reproduce;
 mod types;
 
 use crate::connection::StorageConnection;
