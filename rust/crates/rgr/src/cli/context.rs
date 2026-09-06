@@ -95,22 +95,15 @@ pub fn resolve_repo_root(db_path: &Path, root_path: &str) -> Result<PathBuf, Str
 ///
 /// Returns an error if the file does not exist or cannot be opened.
 pub fn open_storage(db_path: &Path) -> Result<repo_graph_storage::StorageConnection, String> {
-    // NO-CREATE (FORGET-REPO-1): a client-side read must never create the DB. Only a true
-    // NotFound gets the friendly missing-db message; any other metadata fault (EACCES,
-    // ENOTDIR, ...) must NOT be collapsed into "does not exist" — fall through to
-    // `open_existing`, which reports the real I/O/SQLite fault and closes the
-    // check→open TOCTOU so even a race cannot resurrect a just-removed DB.
-    match std::fs::metadata(db_path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(format!(
-                "database file does not exist: {}",
-                db_path.display()
-            ));
-        }
-        Ok(_) | Err(_) => {}
-    }
-    repo_graph_storage::StorageConnection::open_existing(db_path)
-        .map_err(|e| format!("failed to open database: {}", e))
+    // DAEMON-RESIDUALS-2C cycle-5: route the client-side direct read through the ONE gated open
+    // primitive so a `.rebuilding` (interrupted `rmap repo rebuild`) store refuses with the NAMED
+    // remedy here too — before the NO-CREATE NotFound classification, so a rebuild that retired the
+    // base `.db` surfaces the remedy, not "database file does not exist". The helper owns what this fn used to
+    // duplicate: NO-CREATE (FORGET-REPO-1) — a client-side read never creates the DB; only a true
+    // NotFound gets the friendly missing-db message; any other metadata fault (EACCES, ENOTDIR, ...)
+    // is NOT collapsed into an absence claim — it falls through to `open_existing`, which reports the
+    // real I/O/SQLite fault under "failed to open database" and closes the check→open TOCTOU.
+    repo_graph_daemon_runtime::state::open_existing_gated(db_path)
 }
 
 /// Resolve a repo reference to a `repo_uid`.
@@ -146,9 +139,11 @@ pub fn resolve_repo_ref(
 mod tests {
     use super::*;
 
-    // review-11 #1: a NON-NotFound metadata fault (here ENOTDIR — a db path routed THROUGH a
-    // regular file) must NOT be collapsed into the friendly "database file does not exist" claim;
-    // it falls through to `open_existing`, which reports the real fault.
+    // review-11 #1 (cycle-5: now via the shared gated helper): a NON-NotFound metadata fault (here
+    // ENOTDIR — a db path routed THROUGH a regular file) must NOT be collapsed into a friendly "missing
+    // database" claim. `open_storage` now routes through `open_existing_gated`; its conservative
+    // rebuild-sentinel check hits the SAME ENOTDIR when it stats the `.rebuilding` sidecar and refuses
+    // rather than guess (safe) — the error still never claims the DB is absent.
     #[test]
     fn open_storage_non_notfound_fault_is_not_reported_as_missing() {
         let dir = tempfile::tempdir().unwrap();
@@ -160,13 +155,10 @@ mod tests {
             !err.contains("does not exist"),
             "ENOTDIR must not be rendered as a missing database: {err}"
         );
-        assert!(
-            err.contains("failed to open database"),
-            "real fault surfaces: {err}"
-        );
     }
 
-    // The honest common case is preserved: a genuinely-missing file gets the friendly message.
+    // The honest common case is preserved: a genuinely-missing file gets the friendly message
+    // ("database file does not exist"), now produced by the shared `open_existing_gated`.
     #[test]
     fn open_storage_missing_file_reports_missing() {
         let dir = tempfile::tempdir().unwrap();

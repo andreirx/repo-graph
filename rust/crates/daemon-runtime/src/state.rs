@@ -307,27 +307,14 @@ impl RepoState {
     /// Validates that the repo actually exists in the database before
     /// returning success. This prevents silent failures at query time.
     pub fn open(db_path: &Path, repo_uid: &str) -> Result<Self, String> {
-        // review-10: classify with `fs::metadata`, NOT `exists()`. `exists()` collapses every
-        // metadata fault (permission denied, ENOTDIR on an ancestor) into `false`, which would
-        // mislabel a real I/O fault as "database not found". Only a genuine NotFound is that
-        // fast-path absence message; any other stat fault falls through to `open_existing`, which
-        // reports the true fault (`Sqlite`) rather than a false absence.
-        match std::fs::metadata(db_path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(format!("database not found: {}", db_path.display()));
-            }
-            _ => {}
-        }
-
-        // DAEMON-CONCURRENCY-IMPL-1 (D-S = S-A): open a connection ONLY to validate
-        // the repo exists at load time; it is dropped at the end of this fn. Reads
-        // open their own connection per operation (see `storage()`) — `RepoState`
-        // holds NO shared `!Sync` connection, which is what makes it `Send + Sync`.
-        // FORGET-REPO-1: NO-CREATE (`open_existing`) — a load must never recreate a
-        // DB removed out-of-band between the `exists()` check above and this open;
-        // only the index/create path may create.
-        let validation_conn = StorageConnection::open_existing(db_path)
-            .map_err(|e| format!("failed to open database: {}", e))?;
+        // DAEMON-CONCURRENCY-IMPL-1 (D-S = S-A): open a connection ONLY to validate the repo exists
+        // at load time; it is dropped at the end of this fn. Reads open their own connection per
+        // operation (see `storage()`) — `RepoState` holds NO shared `!Sync` connection, which is
+        // what makes it `Send + Sync`. Routed through the ONE gated open primitive
+        // ([`open_existing_gated`]) so the rebuild-sentinel refusal and the NO-CREATE friendly
+        // classification (NotFound → "database file does not exist") live in a single place, never
+        // re-checked per caller (DAEMON-RESIDUALS-2C cycle-5 ruling).
+        let validation_conn = open_existing_gated(db_path)?;
 
         // Validate repo exists in the database
         match validation_conn.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
@@ -522,6 +509,43 @@ impl std::fmt::Display for OpenError {
     }
 }
 
+/// The SINGLE gated store-open every non-retry daemon + rgr read/reconcile/enrich/validation path
+/// funnels through (DAEMON-RESIDUALS-2C cycle-5 ruling). Three cycles each found a NEW per-caller
+/// bypass (`load_repo` → `reconcile` → `enrich_pass`) because the sentinel check was applied per
+/// caller; the fix is ONE gated open primitive, not a check every caller must remember.
+///
+/// Order matters: the rebuild-sentinel refusal is checked FIRST, BEFORE the NO-CREATE NotFound
+/// classification, so an interrupted `rmap repo rebuild` that already retired the base `.db` surfaces
+/// the NAMED remedy rather than a misleading "database file does not exist" (the cycle-3 REAL DEFECT).
+/// It then owns the NO-CREATE friendly classification that `RepoState::open` and rgr's `open_storage`
+/// used to each duplicate: only a genuine NotFound gets "database file does not exist"; any other
+/// metadata fault (EACCES, ENOTDIR) falls through to the real storage error under "failed to open
+/// database", never collapsed into a false absence (the review-10/review-11 contract, in one place).
+///
+/// `repo rebuild` is the ONLY store open allowed to BYPASS this — it is the remedy for a sentinelled
+/// store, so it reindexes via `compose::open` (the create path, not `open_existing`) and never calls
+/// this fn; see `rebuild::handle_repo_rebuild`. The bounded-retry serving primitive
+/// [`open_existing_with_busy_retry`] shares the same sentinel authority but keeps its own RAW-error
+/// loop (§2.3). Every OTHER direct `StorageConnection::open_existing` in daemon-runtime/src and
+/// rgr/src routes here — a property a test enumerates so the next bypass fails CI, not review.
+pub fn open_existing_gated(db_path: &Path) -> Result<StorageConnection, String> {
+    // Sentinel FIRST — wins over the NotFound message below (cycle-3 remedy ordering).
+    crate::rebuild::refuse_if_rebuild_interrupted(db_path)?;
+    // NO-CREATE (FORGET-REPO-1): classify with `fs::metadata`, NOT `exists()`. Only a genuine
+    // NotFound is the friendly absence message; any other stat fault falls through to `open_existing`,
+    // which reports the true fault rather than a false absence.
+    match std::fs::metadata(db_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "database file does not exist: {}",
+                db_path.display()
+            ));
+        }
+        _ => {}
+    }
+    StorageConnection::open_existing(db_path).map_err(|e| format!("failed to open database: {}", e))
+}
+
 /// The bounded-busy-retry open shared by every patience class (foreground dispatch via
 /// [`RepoState::storage`], background seed via [`RepoState::storage_with_busy_retry`], retention
 /// directly by `db_path`). SQLite returns `SQLITE_BUSY` IMMEDIATELY — bypassing its 5s busy handler
@@ -533,6 +557,24 @@ pub(crate) fn open_existing_with_busy_retry(
     db_path: &Path,
     patience: OpenPatience,
 ) -> Result<StorageConnection, OpenError> {
+    // DAEMON-RESIDUALS-2C §7 (HUMAN RULING, cycle 2 — detect-and-name): this is the single choke point
+    // every SERVING store-open funnels through — `RepoState::storage()`/`storage_with_busy_retry()`
+    // (all coordinated read handlers via `foreground_open`), the seed pass, and the retention pass. If a
+    // `rmap repo rebuild` was interrupted, the store carries a `.rebuilding` sentinel and its files may
+    // be mid-retire or a partial fresh index — REFUSE with the NAMED reason rather than serve a partial
+    // store (frozen invariant: readers never see partial writes). Checked BEFORE any open attempt.
+    // `handle_repo_rebuild` (the remedy) does NOT reach here while its sentinel is up: when the
+    // sentinel is present it selects its coordinator via `loaded_repo_by_uid` (a cache lookup, no
+    // open), and reindexes via `compose::open` (create path); it only serves through this primitive
+    // AFTER it has removed the sentinel.
+    //
+    // This shares the ONE sentinel AUTHORITY (`rebuild::refuse_if_rebuild_interrupted`) with the
+    // general gated primitive [`open_existing_gated`]; it keeps its OWN check + RAW-error open loop
+    // rather than delegating, because it must return the un-prefixed storage error (§2.3) so callers
+    // re-apply their own prefix — routing through the friendly `open_existing_gated` would double it.
+    if let Err(reason) = crate::rebuild::refuse_if_rebuild_interrupted(db_path) {
+        return Err(OpenError::Other(reason));
+    }
     let mut last_err = String::new();
     for attempt in 0..patience.attempts() {
         if attempt > 0 {
@@ -937,6 +979,18 @@ impl DaemonState {
     /// the existing state. Different databases with the same repo_uid
     /// are tracked separately.
     pub fn load_repo(&self, db_path: &Path, repo_uid: &str) -> Result<Arc<RepoState>, String> {
+        // DAEMON-RESIDUALS-2C cycle-5: this is a PRE-CANONICALIZATION guard, NOT the store-open gate.
+        // The open itself is gated once, in `RepoState::open` → `open_existing_gated` below. But
+        // `RepoKey::new` (next line) canonicalizes `db_path` BEFORE any open, and `canonicalize` FAILS
+        // on a path whose file is absent — an interrupted `rmap repo rebuild` may have retired the base
+        // `.db`, so without this early check the load would surface "cannot canonicalize db path"
+        // instead of the NAMED remedy (regressing the cycle-3 REAL DEFECT). The single gated open
+        // helper cannot cover a path-resolution step that precedes every open, so the ONE sentinel
+        // authority (`refuse_if_rebuild_interrupted`) is consulted here too. `handle_repo_rebuild` (the
+        // remedy) does NOT reach this path while its sentinel is up: it selects its coordinator via
+        // `loaded_repo_by_uid`/a standalone coordinator and only reloads here AFTER the sentinel clears.
+        crate::rebuild::refuse_if_rebuild_interrupted(db_path)?;
+
         let key = RepoKey::new(db_path, repo_uid)?;
 
         // Check if already loaded

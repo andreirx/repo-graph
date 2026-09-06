@@ -60,6 +60,7 @@ pub fn print_usage() {
     eprintln!("  rmap repo info [repo] [--json]         Show repo details (default: cwd)");
     eprintln!("  rmap repo alias <repo> <alias>         Set or change alias");
     eprintln!("  rmap repo remove <repo> [--keep-db]    Forget repo: registry + database + .rgr/ (destructive; --keep-db keeps the DB file)");
+    eprintln!("  rmap repo rebuild <repo> [--yes]       Discard the store and reindex from scratch (destructive; keeps the registry entry)");
     eprintln!();
     eprintln!("Agent orientation (resolve repo from cwd):");
     eprintln!("  rmap orient [--focus <path>] [--budget small|medium|large] [--full]");

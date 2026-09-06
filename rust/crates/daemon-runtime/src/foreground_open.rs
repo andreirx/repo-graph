@@ -178,13 +178,34 @@ pub(crate) fn acquire_foreground_write<'a>(
     let refresh_guard = match coordinator.acquire_refresh_timeout(patience) {
         Ok(g) => g,
         Err(_timeout) => {
+            // Layer-2 timeout is PROVABLY a concurrent READER: we already hold the DB write mutex, so no
+            // other WRITER can be mid-order on the coordinator — only active readers can still hold it,
+            // draining. NAME THAT KIND (DAEMON-RESIDUALS-2C cycle-3 ruling `reader_busy_identity_age` = A):
+            // pure readers are not activity-registry ops, so there is no holder identity/age to render
+            // (that would need a new tracking surface — out of scope). Distinct from the Layer-1
+            // ([`busy_message`]) writer case, which keeps holder + elapsed (D1-A).
             return Err(ErrorDetail::new(
                 ErrorCode::Busy,
-                busy_message(db_path, activity),
-            ))
+                reader_busy_message(db_path),
+            ));
         }
     };
     Ok((db_guard, refresh_guard))
+}
+
+/// The Layer-2 (coordinator) reader-held Busy: a concurrent READ is holding this repo's store. Distinct
+/// from [`busy_message`] (Layer-1, a WRITER holder we can often name + age). Once the DB write mutex is
+/// held no other writer can hold the coordinator, so a coordinator-refresh timeout is provably a reader —
+/// we NAME THE KIND rather than fabricate an identity (DAEMON-RESIDUALS-2C cycle-3 ruling: pure readers
+/// carry no registry identity/age; a holder surface for them is out of scope). Honest holder-CLASS naming
+/// (§2.2) for the reader case. The exact clause "a concurrent READ is holding this repo's store — retry in
+/// a moment" is asserted verbatim by the reader-held rebuild Busy test.
+pub(crate) fn reader_busy_message(db_path: &Path) -> String {
+    format!(
+        "the store is momentarily busy: a concurrent READ is holding this repo's store — \
+         retry in a moment. (store: {})",
+        db_path.display()
+    )
 }
 
 /// The reader-frame exhausted-patience message: names the holder CLASS **and how long it has been

@@ -114,7 +114,6 @@ use enrichment::{
 };
 use jdtls_resolver::{JdtlsConfig, JdtlsResolver};
 use parking_lot::{Mutex, MutexGuard};
-use repo_graph_storage::StorageConnection;
 use rust_analyzer_resolver::RustAnalyzerResolver;
 use tsserver_resolver::{group_by_project_root, locate_tsserver, TsServerResolver};
 
@@ -783,8 +782,11 @@ pub fn run_enrich_pass(
     // Resolve the latest READY snapshot + the repo root (the pipeline uses the same root). A fresh
     // connection scoped to this probe; the pipeline opens its own (it takes ownership).
     let (snapshot_uid, present, ts_contexts, language_counts) = {
-        // NO-CREATE (FORGET-REPO-1): auto-enrich probes an EXISTING indexed DB; never create.
-        let storage = StorageConnection::open_existing(db_path).map_err(|e| e.to_string())?;
+        // The ONE gated open primitive (DAEMON-RESIDUALS-2C cycle-5): refuses a `.rebuilding` store
+        // with the NAMED reason before opening, and is otherwise NO-CREATE (FORGET-REPO-1) — auto-enrich
+        // probes an EXISTING indexed DB; never create. This is the seam that used to be a bypass
+        // (review-4): enrich no longer raw-opens the store.
+        let storage = crate::state::open_existing_gated(db_path)?;
         let snapshot = storage
             .get_latest_snapshot(repo_uid)
             .map_err(|e| e.to_string())?
@@ -950,8 +952,11 @@ pub fn run_enrich_pass(
         .with_promotion()
         .with_languages(to_run.clone());
 
-    // NO-CREATE (FORGET-REPO-1): the enrich pipeline writes an EXISTING indexed DB; never create.
-    let pipeline_storage = StorageConnection::open_existing(db_path).map_err(|e| e.to_string())?;
+    // The ONE gated open primitive (DAEMON-RESIDUALS-2C cycle-5): refuses a `.rebuilding` store, and
+    // is otherwise NO-CREATE (FORGET-REPO-1) — the enrich pipeline writes an EXISTING indexed DB;
+    // never create. (In practice the probe open above already refused a sentinelled store; this second
+    // open is gated too so no enrichment storage open can ever bypass the sentinel.)
+    let pipeline_storage = crate::state::open_existing_gated(db_path)?;
     let mut pipeline = EnrichmentPipeline::with_registry(pipeline_storage, registry);
     let report = pipeline
         .run_cancellable(repo_uid, &snapshot_uid, &config, cancel)
@@ -1296,6 +1301,7 @@ fn funnel_headline_note(funnel: Option<&PromotionFunnel>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use repo_graph_storage::StorageConnection;
 
     // ── auto_enrich_enabled: the opt-out switch (default ON) ───────────────────────────────────
 
@@ -2019,6 +2025,51 @@ mod tests {
         assert!(
             lines.iter().any(|l| l.contains("op enrich failed")),
             "a failed run's start is CLOSED by a failed outcome: {lines:?}"
+        );
+    }
+
+    // review-4 / cycle-5 regression: the enrich pass MUST NOT open a store whose `rmap repo rebuild`
+    // was interrupted (it used to raw-open `StorageConnection::open_existing`, review-4's finding). Now
+    // both of its opens route through the ONE gated primitive `state::open_existing_gated`, so a
+    // `.rebuilding` sentinel makes the very first probe open refuse with the NAMED reason and the pass
+    // returns that error — no enrichment storage open bypasses the sentinel. Proves the HELPER via the
+    // enrich caller (the caller has no sentinel awareness of its own).
+    #[test]
+    fn run_enrich_pass_refuses_a_sentinelled_store_via_the_gated_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("enrich_sentinel.db");
+        // An otherwise-intact indexed store (presence of the sentinel is what the gate keys on).
+        {
+            let storage = StorageConnection::open(&db_path).unwrap();
+            storage
+                .add_repo(&repo_graph_storage::types::Repo {
+                    repo_uid: "enrich-sentinel-repo".to_string(),
+                    name: "enrich-sentinel-repo".to_string(),
+                    root_path: ".".to_string(),
+                    default_branch: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    metadata_json: None,
+                })
+                .unwrap();
+        }
+        // A crashed rebuild leaves the sentinel sidecar beside the store.
+        std::fs::File::create(crate::rebuild::rebuild_sentinel_path(&db_path)).unwrap();
+
+        let repo_root = tempfile::tempdir().unwrap();
+        let never = |_: EnrichmentLanguage, _: &[PathBuf]| false;
+        let no_cancel = || false;
+        let err = run_enrich_pass(
+            &db_path,
+            "enrich-sentinel-repo",
+            repo_root.path(),
+            None,
+            &never,
+            &no_cancel,
+        )
+        .expect_err("enrich must refuse a sentinelled store");
+        assert!(
+            err.contains(crate::rebuild::REBUILD_INTERRUPTED_REASON),
+            "the enrich refusal carries the exact ruling-named reason: {err}"
         );
     }
 }

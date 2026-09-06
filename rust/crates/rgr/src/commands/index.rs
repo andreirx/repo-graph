@@ -26,7 +26,7 @@ const LONG_OP_READ_TIMEOUT_SECS: u64 = 300;
 /// index trips the contract-C path deterministically instead of waiting 5 minutes; (2) an operator on
 /// a slow machine / flaky link can widen the stall window. Default (unset / unparsable) = 300s. A
 /// value of 0 is clamped to 1 (the transport rejects a 0-duration read timeout).
-fn long_op_read_timeout_secs() -> u64 {
+pub(crate) fn long_op_read_timeout_secs() -> u64 {
     match std::env::var("RMAP_LONG_OP_READ_TIMEOUT_SECS") {
         Ok(v) => v
             .trim()
@@ -339,7 +339,11 @@ pub fn run_index(args: &[String]) -> ExitCode {
 ///
 /// This is the fix for the field bug where a live 160k-file index printed "timed out after 300s"
 /// and exited as a failure while `rmapd` kept indexing.
-fn report_long_op_timeout(repo_path_canon: &Path, op_label: &str, timeout_secs: u64) -> ExitCode {
+pub(crate) fn report_long_op_timeout(
+    repo_path_canon: &Path,
+    op_label: &str,
+    timeout_secs: u64,
+) -> ExitCode {
     let repo_str = repo_path_canon.to_string_lossy();
 
     // A short-timeout `daemon_info` probe on a fresh connection.

@@ -32,8 +32,33 @@
 //! storage connection to be held inside `Arc<RepoState>` without interior
 //! mutability wrappers.
 
+use std::time::Instant;
+
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
+
+/// DAEMON-RESIDUALS-2C §7 (reporting-only budget): the outcome of a chunked prune that may have been
+/// stopped early at a chunk boundary because a caller-supplied time budget was exhausted.
+///
+/// Abstraction ledger:
+/// - **what:** a small value carrying a chunked prune's count PLUS whether it stopped short.
+/// - **concrete current users:** `prune_prunable_snapshots_budgeted` (returns it) and
+///   `daemon-runtime::retention_pass::run_retention_pass` (reads `budget_remaining` into the pass
+///   outcome doctor renders). The unbudgeted `prune_prunable_snapshots`/`prune_non_ready_snapshots`
+///   keep their `i64`/`Vec` returns unchanged.
+/// - **named axis:** none — one verb, one shape. `budget_remaining` is an `Option` because "stopped
+///   short" and "completed" are distinct outcomes the reader must tell apart (Option, never a
+///   sentinel `0`/`-1`).
+/// - **rejected simpler:** return a bare `i64` and infer overrun from a re-count — rejected: a
+///   re-count races a concurrent write and cannot distinguish "budget stopped it" from "nothing left".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PruneOutcome {
+    /// Snapshots actually pruned (chunks committed) this call.
+    pub pruned_count: i64,
+    /// `Some(remaining)` when the time budget tripped at a chunk boundary and `remaining` prunable
+    /// snapshots were left for a later pass; `None` when the prune ran to completion.
+    pub budget_remaining: Option<i64>,
+}
 
 impl StorageConnection {
     /// Prune the READY snapshots marked as prunable for a repo.
@@ -96,6 +121,24 @@ impl StorageConnection {
     ///
     /// The number of snapshots pruned (counted before deletion).
     pub fn prune_prunable_snapshots(&self, repo_uid: &str) -> Result<i64, StorageError> {
+        // Unbudgeted: run to completion (behaviour-preserving for every pre-existing caller).
+        Ok(self
+            .prune_prunable_snapshots_budgeted(repo_uid, None)?
+            .pruned_count)
+    }
+
+    /// DAEMON-RESIDUALS-2C §7: [`prune_prunable_snapshots`] with an optional REPORTING-ONLY time
+    /// budget. When `deadline` is `Some` and it is passed at a per-snapshot chunk boundary, the prune
+    /// STOPS (never mid-chunk — the current snapshot's transaction has already committed) and returns
+    /// how many prunable snapshots were left. It never fails, never rolls back committed chunks, and
+    /// never flips into automatic machinery: the leftover is simply reported (doctor renders it and
+    /// points at `rmap repo rebuild`), and the next pass resumes on whatever remains prunable. Re-run
+    /// safety is identical to [`prune_prunable_snapshots`].
+    pub fn prune_prunable_snapshots_budgeted(
+        &self,
+        repo_uid: &str,
+        deadline: Option<Instant>,
+    ) -> Result<PruneOutcome, StorageError> {
         let conn = self.connection();
 
         // Collect prunable snapshot UIDs first.
@@ -110,8 +153,17 @@ impl StorageConnection {
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
-        self.delete_snapshots_cascade(&snapshot_uids)?;
-        Ok(snapshot_uids.len() as i64)
+        let total = snapshot_uids.len() as i64;
+        let pruned = self.delete_snapshots_cascade(&snapshot_uids, deadline)?;
+        let budget_remaining = if pruned < total {
+            Some(total - pruned)
+        } else {
+            None
+        };
+        Ok(PruneOutcome {
+            pruned_count: pruned,
+            budget_remaining,
+        })
     }
 
     /// DAEMON-VISIBILITY-1 (F3, operator Option A): delete every NON-READY (interrupted / failed /
@@ -143,7 +195,8 @@ impl StorageConnection {
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
-        self.delete_snapshots_cascade(&snapshot_uids)?;
+        // Non-READY orphan reclaim is unbudgeted (small, one-time cleanup — not the 5h hang source).
+        self.delete_snapshots_cascade(&snapshot_uids, None)?;
         Ok(snapshot_uids)
     }
 
@@ -200,9 +253,18 @@ impl StorageConnection {
     /// orphan-cleanup table set (tables lacking `ON DELETE CASCADE` on `snapshot_uid`) lives in ONE
     /// place. Per-snapshot transactions avoid giant single-statement deletes that can hang on tables
     /// with 1M+ rows; each snapshot is removed atomically. No-op on an empty input.
-    fn delete_snapshots_cascade(&self, snapshot_uids: &[String]) -> Result<(), StorageError> {
+    /// Returns the number of snapshots actually deleted. Normally that is `snapshot_uids.len()`; it is
+    /// LESS only when `deadline` (DAEMON-RESIDUALS-2C §7 reporting-only budget) was passed at a chunk
+    /// boundary, in which case the loop stops after the last fully-committed snapshot (never mid-chunk,
+    /// so per-snapshot atomicity is preserved). `None` deadline = run to completion (all callers'
+    /// pre-existing behaviour).
+    fn delete_snapshots_cascade(
+        &self,
+        snapshot_uids: &[String],
+        deadline: Option<Instant>,
+    ) -> Result<i64, StorageError> {
         if snapshot_uids.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         let conn = self.connection();
 
@@ -245,8 +307,19 @@ impl StorageConnection {
         // transactions are the "chunked deletes": each snapshot commits independently, so
         // the SQLite write lock is released between chunks and a waiting foreground writer
         // can interleave (DAEMON-RESIDUALS-2 §6 "write slot released between chunks").
-        let result = (|| -> Result<(), StorageError> {
+        let result = (|| -> Result<i64, StorageError> {
+            let mut deleted: i64 = 0;
             for snapshot_uid in snapshot_uids {
+                // DAEMON-RESIDUALS-2C §7: check the reporting-only budget at the CHUNK BOUNDARY —
+                // BEFORE opening the next snapshot's transaction, never mid-chunk. So a snapshot is
+                // never half-deleted by the budget: either its whole cascade committed or it was not
+                // started. Stopping here leaves it prunable for the next pass (re-run safe).
+                if let Some(deadline) = deadline {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                }
+
                 // Begin transaction for this snapshot's deletion.
                 let tx = conn.unchecked_transaction()?;
 
@@ -272,8 +345,9 @@ impl StorageConnection {
                 )?;
 
                 tx.commit()?;
+                deleted += 1;
             }
-            Ok(())
+            Ok(deleted)
         })();
 
         // Restore the prior cache_size regardless of the prune outcome. `prev_cache` is
@@ -286,7 +360,13 @@ impl StorageConnection {
             .execute_batch(&format!("PRAGMA cache_size = {prev_cache};"))
             .map_err(StorageError::from);
 
-        result.and(restore)
+        // Same precedence as before (prune error primary; a restore failure surfaces only on a
+        // successful prune), but carry the deleted COUNT through on full success.
+        match (result, restore) {
+            (Err(e), _) => Err(e),
+            (Ok(_), Err(e)) => Err(e),
+            (Ok(count), Ok(())) => Ok(count),
+        }
     }
 }
 

@@ -298,14 +298,42 @@ fn retention_probe(response: &serde_json::Value) -> ProbeResult {
                 .and_then(|v| v.as_u64())
                 .map(humanize_secs_ago)
                 .unwrap_or_else(|| "recently".to_string());
-            // DAEMON-RESIDUALS-2 §2.4: how long the last pass ran — the "is retention keeping up?"
-            // signal. Basis is stated in the word "ran" (measured wall-clock of the last pass, not an
-            // estimate). Absent on an older daemon that predates the field → no clause (never a
-            // fabricated 0s). A genuine 0-second pass (nothing to prune, sub-second) also omits it —
-            // "ran 0s" would read as a stall; the honest signal there is the "nothing to prune" text.
+            // DAEMON-RESIDUALS-2 §2.4 + 2C §7: how long the last pass ran — the "is retention keeping
+            // up?" signal. Basis is stated in the word "ran" (measured wall-clock, not an estimate).
+            // Absent on an older daemon that predates the field → no clause (never a fabricated 0s).
+            // A genuine SUB-SECOND pass (`duration_secs == 0`) now renders "ran under 1s" rather than
+            // omitting the clause (2C reviewer note): the honest signal is "it ran and finished fast",
+            // NOT silence a reader could misread as "no clause emitted / unknown".
             let took = match lr.get("duration_secs").and_then(|v| v.as_u64()) {
-                Some(secs) if secs > 0 => {
-                    format!(" (last pass ran {})", humanize_duration_secs(secs))
+                Some(0) => " (last pass ran under 1s)".to_string(),
+                Some(secs) => format!(" (last pass ran {})", humanize_duration_secs(secs)),
+                None => String::new(),
+            };
+            // DAEMON-RESIDUALS-2C §7: the REPORTING-ONLY budget overrun. Present only when the last
+            // pass stopped its prune at a chunk boundary because the time budget was exhausted. Basis:
+            // the measured leftover count + the configured budget (both daemon-recorded facts). Points
+            // at the recovery verb — never automatic machinery.
+            let overrun = match lr.get("budget_overrun") {
+                Some(ov) if ov.is_object() => {
+                    // Present ⇒ the last pass aborted at a chunk boundary on the time budget. Both
+                    // terms are part of the SAME daemon contract (`retention_pass::BudgetOverrun::
+                    // to_json`); a fallible read of either must NOT coerce to a fabricated `0`
+                    // (STANDING HONESTY RULE 2 — matches `not_attempted_clause` in this file). A
+                    // "0s budget"/"0 snapshots" would misreport the very overrun this clause exists
+                    // to surface, so a malformed value renders an honest unknown-with-reason instead.
+                    match (
+                        ov.get("budget_secs").and_then(|v| v.as_u64()),
+                        ov.get("remaining_prunable").and_then(|v| v.as_i64()),
+                    ) {
+                        (Some(budget), Some(remaining)) => format!(
+                            "; retention exceeded its {budget}s budget — {remaining} snapshot(s) \
+                             still awaiting cleanup (basis: measured leftover) — run `rmap repo \
+                             rebuild <path>`"
+                        ),
+                        _ => "; retention exceeded its time budget — overrun details unavailable \
+                              (malformed daemon value) — run `rmap repo rebuild <path>`"
+                            .to_string(),
+                    }
                 }
                 _ => String::new(),
             };
@@ -323,6 +351,9 @@ fn retention_probe(response: &serde_json::Value) -> ProbeResult {
                     let reason = match vacuum_status {
                         Some("deferred_readers_active") => " — repo was being read",
                         Some("below_threshold") => " — below threshold",
+                        // DAEMON-RESIDUALS-2C §7: the pass stopped on its time budget before the VACUUM
+                        // stage; the `overrun` clause (appended after) names the leftover + the verb.
+                        Some("skipped_budget_overrun") => " — retention time budget reached",
                         _ => "",
                     };
                     format!(
@@ -330,7 +361,7 @@ fn retention_probe(response: &serde_json::Value) -> ProbeResult {
                     )
                 }
             };
-            format!("{base}{took}")
+            format!("{base}{took}{overrun}")
         }
         // Field present-but-null, or absent (older daemon) → no pass has completed yet.
         _ => "cleanup: none yet".to_string(),
@@ -1241,30 +1272,108 @@ mod tests {
         );
     }
 
-    // DAEMON-RESIDUALS-2 §2.4: an older daemon without `duration_secs`, and a genuine sub-second
-    // pass, both OMIT the duration clause — "ran 0s" would read as a stall, so it is never fabricated.
+    // DAEMON-RESIDUALS-2 §2.4: an OLDER daemon without `duration_secs` OMITS the clause (unknown is
+    // never fabricated). DAEMON-RESIDUALS-2C §7 (reviewer note): a genuine SUB-SECOND pass
+    // (`duration_secs == 0`) now renders "ran under 1s" — an honest "ran and finished fast", never an
+    // omitted clause a reader could misread as unknown, and never "ran 0s" (which reads as a stall).
     #[test]
-    fn retention_probe_omits_duration_when_absent_or_zero() {
+    fn retention_probe_absent_omits_but_subsecond_renders_under_1s() {
         let older = json!({ "last_retention": {
             "pruned_count": 1, "reclaimed_bytes": 1_000_000_u64, "vacuum_status": "ran",
             "finished_secs_ago": 5
         }});
         assert!(
             !retention_probe(&older).message.contains("last pass ran"),
-            "no duration field → no clause: {}",
+            "no duration field (older daemon) → no clause: {}",
             retention_probe(&older).message
         );
         let subsecond = json!({ "last_retention": {
             "pruned_count": 1, "reclaimed_bytes": 1_000_000_u64, "vacuum_status": "ran",
             "finished_secs_ago": 5, "duration_secs": 0
         }});
+        let msg = retention_probe(&subsecond).message;
         assert!(
-            !retention_probe(&subsecond)
-                .message
-                .contains("last pass ran"),
-            "a 0s pass omits the clause (never 'ran 0s'): {}",
-            retention_probe(&subsecond).message
+            msg.contains("(last pass ran under 1s)"),
+            "a sub-second pass renders 'under 1s', never omitted or '0s': {msg}"
         );
+        assert!(!msg.contains("ran 0s"), "never 'ran 0s': {msg}");
+    }
+
+    // DAEMON-RESIDUALS-2C §7: the reporting-only budget overrun renders with its basis and points at
+    // the recovery verb — even when the pass pruned some snapshots before the budget tripped.
+    #[test]
+    fn retention_probe_renders_budget_overrun_pointing_at_rebuild() {
+        let overran = json!({ "last_retention": {
+            "pruned_count": 2, "non_ready_reclaimed": 0, "reclaimed_bytes": 0,
+            "vacuum_status": "below_threshold", "finished_secs_ago": 4, "duration_secs": 0,
+            "budget_overrun": { "budget_secs": 30, "remaining_prunable": 7 }
+        }});
+        let msg = retention_probe(&overran).message;
+        assert!(
+            msg.contains("exceeded its 30s budget"),
+            "names the budget: {msg}"
+        );
+        assert!(
+            msg.contains("7 snapshot(s) still awaiting cleanup"),
+            "names the leftover: {msg}"
+        );
+        assert!(
+            msg.contains("basis: measured leftover"),
+            "states the basis: {msg}"
+        );
+        assert!(
+            msg.contains("rmap repo rebuild <path>"),
+            "points at the verb: {msg}"
+        );
+        // No overrun field → no clause (never fabricated).
+        let clean = json!({ "last_retention": {
+            "pruned_count": 1, "reclaimed_bytes": 0, "vacuum_status": "below_threshold",
+            "finished_secs_ago": 4, "duration_secs": 0
+        }});
+        assert!(
+            !retention_probe(&clean).message.contains("budget"),
+            "no overrun field → no budget clause: {}",
+            retention_probe(&clean).message
+        );
+    }
+
+    // review-0 item 2 (HONESTY RULE 2): a `budget_overrun` object present but with a
+    // missing/malformed term must render an honest unknown-with-reason clause — NEVER a fabricated
+    // "0s budget" or "0 snapshot(s)".
+    #[test]
+    fn retention_probe_budget_overrun_malformed_fields_render_unavailable_not_zero() {
+        // `remaining_prunable` missing; `budget_secs` present.
+        let missing = json!({ "last_retention": {
+            "pruned_count": 0, "reclaimed_bytes": 0, "vacuum_status": "below_threshold",
+            "finished_secs_ago": 4, "duration_secs": 0,
+            "budget_overrun": { "budget_secs": 30 }
+        }});
+        let msg = retention_probe(&missing).message;
+        assert!(
+            msg.contains("overrun details unavailable (malformed daemon value)"),
+            "malformed overrun → unknown-with-reason: {msg}"
+        );
+        assert!(
+            !msg.contains("0 snapshot(s)") && !msg.contains("30s budget"),
+            "no fabricated leftover/budget on a malformed overrun: {msg}"
+        );
+        assert!(
+            msg.contains("rmap repo rebuild <path>"),
+            "still points at the recovery verb: {msg}"
+        );
+
+        // Both terms the wrong type.
+        let wrong_type = json!({ "last_retention": {
+            "pruned_count": 0, "reclaimed_bytes": 0, "vacuum_status": "below_threshold",
+            "finished_secs_ago": 4, "duration_secs": 0,
+            "budget_overrun": { "budget_secs": "soon", "remaining_prunable": "lots" }
+        }});
+        let msg = retention_probe(&wrong_type).message;
+        assert!(
+            msg.contains("overrun details unavailable (malformed daemon value)"),
+            "wrong-typed overrun terms → unknown-with-reason: {msg}"
+        );
+        assert!(!msg.contains("0s budget"), "never a fabricated 0s: {msg}");
     }
 
     // The duration humaniser reads plainly across the ranges the field symptom spans (seconds →

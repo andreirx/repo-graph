@@ -278,6 +278,17 @@ pub fn collect_snapshot_facts(state: &DaemonState, db_path: &Path, repo_uid: &st
         return in_use_facts(db_size_bytes, &op);
     }
 
+    // DAEMON-RESIDUALS-2C §7 (HUMAN RULING, cycle 2 — detect-and-name): if a `rmap repo rebuild` was
+    // interrupted, the store carries a `.rebuilding` sentinel and must not be served. Check the sentinel
+    // FILE directly (deterministic; no matching on our own error text) BEFORE attempting the open, so
+    // doctor renders a dedicated "rebuild interrupted" line rather than the generic read-error. The
+    // gated open primitives (`state::open_existing_gated` / `open_existing_with_busy_retry`, which
+    // every serving/read/reconcile/enrich open routes through) are the enforcement authority; this is
+    // the doctor-visibility mirror.
+    if crate::rebuild::sentinel_present(db_path) {
+        return facts_rebuild_interrupted(db_size_bytes);
+    }
+
     // Idle path: open the DB read-only and enumerate every snapshot's state.
     let repo_state = match state.load_repo(db_path, repo_uid) {
         Ok(rs) => rs,
@@ -368,6 +379,20 @@ fn facts_read_error(db_size_bytes: u64, reason: &str) -> Value {
         "in_use_by_daemon": false,
         "snapshots": Value::Null,
         "read_error": reason,
+    })
+}
+
+/// DAEMON-RESIDUALS-2C §7 (HUMAN RULING, cycle 2): the storage facts for a store whose rebuild sentinel
+/// is present — an INTERRUPTED `rmap repo rebuild`. Distinct from [`facts_read_error`] (corrupt/absent)
+/// and the lock case: `rebuild_interrupted: true` is the flag `storage_probe` renders as a dedicated
+/// FAIL naming the recovery verb; `read_error` carries the exact reason for the generic-render fallback.
+fn facts_rebuild_interrupted(db_size_bytes: u64) -> Value {
+    json!({
+        "db_size_bytes": db_size_bytes,
+        "in_use_by_daemon": false,
+        "snapshots": Value::Null,
+        "rebuild_interrupted": true,
+        "read_error": crate::rebuild::REBUILD_INTERRUPTED_REASON,
     })
 }
 

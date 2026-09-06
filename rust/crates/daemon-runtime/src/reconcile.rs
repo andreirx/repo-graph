@@ -28,6 +28,12 @@
 //! (2) the non-blocking DB write lock is free. Both are non-blocking, so reconciliation NEVER stalls a
 //! reader and NEVER touches a DB a live op owns; the storage-side `status='building'` guard is the
 //! final backstop against a snapshot that finalized in the race window.
+//!
+//! A store whose `rmap repo rebuild` was interrupted carries a `.rebuilding` sentinel and must be
+//! opened by NOTHING but the rebuild verb. Reconciliation does NOT re-check that itself
+//! (DAEMON-RESIDUALS-2C cycle-5): its storage open routes through the ONE gated open primitive
+//! `state::open_existing_gated`, which refuses a sentinelled store — so the boot sweep (which calls us
+//! directly, bypassing `load_repo`) yields empty on that refusal, leaving the store untouched.
 
 use std::path::{Path, PathBuf};
 
@@ -62,6 +68,13 @@ pub fn reconcile_repo(
     repo_uid: &str,
     repo_display: &str,
 ) -> Vec<String> {
+    // DAEMON-RESIDUALS-2C cycle-5: NO per-caller sentinel gate here. Reconciliation's storage open is
+    // routed through the ONE gated open primitive (`open_existing_gated`, below), which refuses a
+    // sentinelled store — so the boot sweep [`reconcile_all_repos`] (which calls us DIRECTLY, bypassing
+    // `load_repo`) cannot open a `.rebuilding` store and flip its `building` snapshots. A refusal
+    // arrives as an `Err` from the open and is treated exactly like a missing DB: yield empty, nothing
+    // reconciled, store UNTOUCHED (the frozen invariant — only `repo rebuild` may open a sentinelled
+    // store). The interrupted state stays visible via `rmap doctor` (`facts_rebuild_interrupted`).
     // Gate 1 — never touch a DB a live op (index/refresh/enrich/retention) is writing. At boot this is
     // always clear; on load it catches an in-flight op on this repo.
     if state.activity().active_for_db(db_path).is_some() {
@@ -79,11 +92,12 @@ pub fn reconcile_repo(
         Some(g) => g,
         None => return Vec::new(),
     };
-    // NO-CREATE (FORGET-REPO-1): `open_existing` runs migrations (an older DB is fully migrated
-    // before the flip UPDATE touches it) but never materialises a missing file — a registered repo
-    // whose DB vanished (out-of-band delete, or a forget that won the write-lock race) must not be
-    // resurrected as an empty orphan here; a missing DB simply yields nothing to reconcile.
-    let storage = match StorageConnection::open_existing(db_path) {
+    // The ONE gated open primitive (DAEMON-RESIDUALS-2C cycle-5): refuses a `.rebuilding` store, and
+    // is otherwise NO-CREATE (FORGET-REPO-1) — it runs migrations (an older DB is fully migrated before
+    // the flip UPDATE touches it) but never materialises a missing file. A registered repo whose DB
+    // vanished (out-of-band delete, or a forget that won the write-lock race) — OR a sentinelled store
+    // mid-rebuild — must not be resurrected/mutated here; either Err simply yields nothing to reconcile.
+    let storage = match crate::state::open_existing_gated(db_path) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -294,6 +308,63 @@ mod tests {
                 .any(|l| l.contains("op refresh interrupted (daemon restart)")
                     && l.contains(&refresh_uid)),
             "refresh orphan logged with the refresh op label: {lines:?}"
+        );
+    }
+
+    // review-3 regression, cycle-5 reframed to prove the HELPER (not a per-caller gate): a registered
+    // store whose `rmap repo rebuild` was interrupted carries a `.rebuilding` sentinel. The boot sweep
+    // calls `reconcile_repo` DIRECTLY (not through `load_repo`'s gate), so the ONLY thing standing
+    // between it and the store is the gated open primitive `open_existing_gated` that `reconcile_repo`
+    // now routes through. Proof: nothing is reconciled and the `building` snapshot stays UNTOUCHED (not
+    // flipped) — i.e. the store was never opened for a write. Uses an on-disk DB (the sentinel is a real
+    // sidecar file). The interrupted state remains visible to operators via `rmap doctor`
+    // (`facts_rebuild_interrupted`); reconciliation itself yields silently, exactly as it does for a
+    // missing DB — no per-caller sentinel awareness remains here.
+    #[test]
+    fn reconcile_repo_refuses_a_sentinelled_store_via_the_gated_open() {
+        use repo_graph_storage::connection::StorageConnection as Conn;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let repo = "recon-sentinel-repo";
+        let db_path = dir.path().join(format!("{repo}.db"));
+
+        // Seed an on-disk store with a repo and a `building` snapshot (the crash-orphan the boot sweep
+        // would otherwise flip), then drop the connection so the file is closed.
+        let building_uid = {
+            let storage = Conn::open(&db_path).expect("create on-disk store");
+            storage
+                .add_repo(&Repo {
+                    repo_uid: repo.to_string(),
+                    name: repo.to_string(),
+                    root_path: ".".to_string(),
+                    default_branch: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    metadata_json: None,
+                })
+                .expect("add repo");
+            building_snapshot(&storage, repo, "full")
+        };
+
+        // A crashed `rmap repo rebuild` leaves the sentinel sidecar; presence is what the gate keys on.
+        std::fs::File::create(crate::rebuild::rebuild_sentinel_path(&db_path))
+            .expect("write sentinel");
+        assert!(crate::rebuild::sentinel_present(&db_path));
+
+        let state = DaemonState::new();
+        let reconciled = reconcile_repo(&state, &db_path, repo, repo);
+        assert!(
+            reconciled.is_empty(),
+            "a sentinelled store is refused, nothing reconciled: {reconciled:?}"
+        );
+
+        // The `building` snapshot is UNTOUCHED (the store was never opened for a write) — the gated
+        // open refused, so the boot sweep left the store exactly as the pending rebuild expects it.
+        let storage = Conn::open_existing(&db_path).expect("reopen store");
+        assert_eq!(
+            storage.get_snapshot(&building_uid).unwrap().unwrap().status,
+            "building",
+            "the building snapshot must remain untouched behind the sentinel"
         );
     }
 

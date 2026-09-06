@@ -255,6 +255,55 @@ fn bloat_node(snapshot_uid: &str, node_uid: &str) -> crate::types::GraphNode {
     }
 }
 
+// DAEMON-RESIDUALS-2C §7 (reporting-only budget): with NO deadline the budgeted prune runs to
+// completion (identical to the unbudgeted path); with an ALREADY-PASSED deadline it stops at the very
+// first chunk boundary, pruning nothing and REPORTING every prunable snapshot as remaining — the store
+// is untouched (per-snapshot atomicity: never a half-deleted snapshot) and a later unbudgeted pass
+// finishes the job (re-run safe).
+#[test]
+fn budgeted_prune_none_completes_but_expired_deadline_aborts_and_reports_remaining() {
+    use std::time::{Duration, Instant};
+
+    let storage = setup_storage();
+    insert_repo(&storage, "r1");
+    insert_current_epoch_snapshot(&storage, "s1", "r1", None, "2025-01-01T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s2", "r1", None, "2025-01-02T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s3", "r1", None, "2025-01-03T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s4", "r1", None, "2025-01-04T00:00:00Z");
+    storage.classify_repo_retention("r1").unwrap();
+    assert_eq!(storage.get_retention_stats("r1").unwrap().prunable, 3);
+
+    // Expired deadline → abort at the first chunk boundary: 0 pruned, all 3 reported remaining.
+    let past = Instant::now() - Duration::from_secs(1);
+    let aborted = storage
+        .prune_prunable_snapshots_budgeted("r1", Some(past))
+        .unwrap();
+    assert_eq!(
+        aborted.pruned_count, 0,
+        "budget stopped it before any chunk"
+    );
+    assert_eq!(
+        aborted.budget_remaining,
+        Some(3),
+        "every prunable snapshot is reported as remaining"
+    );
+    // Nothing was corrupted: all 4 snapshots (3 prunable + current) are still present.
+    assert_eq!(storage.get_retention_stats("r1").unwrap().total, 4);
+
+    // A later unbudgeted (None) pass finishes the job — the leftover is prunable again, re-run safe.
+    let done = storage
+        .prune_prunable_snapshots_budgeted("r1", None)
+        .unwrap();
+    assert_eq!(done.pruned_count, 3);
+    assert_eq!(
+        done.budget_remaining, None,
+        "ran to completion → no leftover"
+    );
+    let after = storage.get_retention_stats("r1").unwrap();
+    assert_eq!(after.prunable, 0);
+    assert_eq!(after.total, 1);
+}
+
 #[test]
 fn prune_prunable_snapshots_deletes_marked() {
     let storage = setup_storage();

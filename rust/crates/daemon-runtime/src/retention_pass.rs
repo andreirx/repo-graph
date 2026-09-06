@@ -179,6 +179,29 @@ fn auto_retention_enabled_from(val: Option<&str>) -> bool {
     }
 }
 
+/// DAEMON-RESIDUALS-2C §7: the REPORTING-ONLY retention time budget. When set, a pass that has spent
+/// this long stops its chunked READY prune at the next chunk boundary and REPORTS the leftover (doctor
+/// renders it + points at `rmap repo rebuild`); it never rolls back committed chunks and never flips
+/// into automatic machinery (the next pass resumes on what remains). Unset (the default) = no budget,
+/// so the async prune-on-commit cap behaviour PROVEN in increment 2C is unchanged.
+///
+/// Env `RMAP_RETENTION_BUDGET_SECS` (consistent with the daemon's env-config precedent). A parse
+/// failure or a value of `0` is honoured verbatim — `0` means "budget expired immediately", the seam
+/// the forced-slow-pass doctor proof uses.
+pub fn retention_budget() -> Option<Duration> {
+    retention_budget_from(std::env::var("RMAP_RETENTION_BUDGET_SECS").ok().as_deref())
+}
+
+/// Pure core of [`retention_budget`] (env value in, budget out) — unit-tested without mutating the
+/// process-global environment. `None`/blank/non-numeric = no budget; a valid non-negative integer =
+/// that many seconds (including `0`).
+fn retention_budget_from(val: Option<&str>) -> Option<Duration> {
+    match val {
+        Some(v) => v.trim().parse::<u64>().ok().map(Duration::from_secs),
+        None => None,
+    }
+}
+
 /// The honest fate of the threshold-gated VACUUM in one pass. Three distinct outcomes the reader must
 /// be able to tell apart — never collapsed into a bare "the file didn't shrink":
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +216,14 @@ pub enum VacuumStatus {
     /// VACUUM rather than take the SQLite exclusive lock out from under it (which would `SQLITE_BUSY`
     /// the reader). The rows are already pruned; the freed pages recycle; the next pass retries.
     DeferredReadersActive,
+    /// DAEMON-RESIDUALS-2C §7 (operator ruling, cycle 2): the pass STOPPED at a chunk boundary because
+    /// its reporting-only time budget was exhausted, so the VACUUM stage was never REACHED — the
+    /// reclaimable freelist was not even measured. This is a distinct fate from
+    /// [`SkippedBelowThreshold`](Self::SkippedBelowThreshold) (which DID measure and found the file not
+    /// majority-dead): naming it separately keeps the outcome from claiming a measurement it never took
+    /// (STANDING HONESTY RULE 2). `reclaimable_bytes`/`reclaimed_bytes` are therefore `0` = not
+    /// measured here (the `budget_overrun` field carries the reader-facing signal doctor renders).
+    SkippedBudgetOverrun,
 }
 
 impl VacuumStatus {
@@ -202,6 +233,7 @@ impl VacuumStatus {
             VacuumStatus::Ran => "ran",
             VacuumStatus::SkippedBelowThreshold => "below_threshold",
             VacuumStatus::DeferredReadersActive => "deferred_readers_active",
+            VacuumStatus::SkippedBudgetOverrun => "skipped_budget_overrun",
         }
     }
 }
@@ -235,6 +267,21 @@ pub struct RetentionPassOutcome {
     /// `rmap doctor` cleanup line can state how long the last pass ran — the honesty surface for a
     /// backlog that is (or is not) draining under the retention bound.
     pub pass_duration_secs: u64,
+    /// DAEMON-RESIDUALS-2C §7 (reporting-only budget): `Some` when the pass's chunked READY prune was
+    /// stopped early because the time budget was exhausted at a chunk boundary. Carries the configured
+    /// budget and how many prunable snapshots were left for a later pass. `None` = no budget set, or
+    /// the prune finished within it. Reporting only — the leftover is surfaced (doctor points at
+    /// `rmap repo rebuild <path>`), never auto-escalated.
+    pub budget_overrun: Option<BudgetOverrun>,
+}
+
+/// DAEMON-RESIDUALS-2C §7: the reported overrun of a retention pass's reporting-only time budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BudgetOverrun {
+    /// The configured budget the pass exceeded (`RMAP_RETENTION_BUDGET_SECS`).
+    pub budget_secs: u64,
+    /// Prunable READY snapshots left unpruned when the pass stopped at the chunk boundary.
+    pub remaining_prunable: i64,
 }
 
 impl RetentionPassOutcome {
@@ -278,6 +325,13 @@ impl RetentionReport {
             "db_size_bytes": self.outcome.db_size_after,
             "duration_secs": self.outcome.pass_duration_secs,
             "finished_secs_ago": self.at.elapsed().as_secs(),
+            // DAEMON-RESIDUALS-2C §7: present only when the reporting-only budget tripped. `null`
+            // otherwise (unknown/none — never a fabricated 0). doctor renders the overrun clause +
+            // the `rmap repo rebuild` pointer from these fields.
+            "budget_overrun": self.outcome.budget_overrun.map(|o| serde_json::json!({
+                "budget_secs": o.budget_secs,
+                "remaining_prunable": o.remaining_prunable,
+            })),
         })
     }
 }
@@ -309,6 +363,7 @@ pub fn run_retention_pass(
     db_path: &Path,
     repo_uid: &str,
     coordinator: &RepoCoordinator,
+    budget: Option<Duration>,
 ) -> Result<RetentionPassOutcome, StorageError> {
     // DAEMON-RESIDUALS-2 §2.4: time the whole pass so `rmap doctor` can report how long the last
     // cleanup ran (the "is retention keeping up?" signal). Wall clock, not CPU — it includes the
@@ -321,7 +376,44 @@ pub fn run_retention_pass(
     //    via WAL snapshot isolation, so the prune NEVER blocks a reader even when it is slow
     //    (REFRESH-HANG-1's row-delete cost). The coordinator is engaged ONLY for the VACUUM below.
     storage.classify_repo_retention(repo_uid)?;
-    let pruned_count = storage.prune_prunable_snapshots(repo_uid)?;
+    // DAEMON-RESIDUALS-2C §7: apply the reporting-only budget to the chunked READY prune. The deadline
+    // is measured from the WHOLE pass start (so "the pass exceeded its budget"), checked at each chunk
+    // boundary inside `prune_prunable_snapshots_budgeted`. `None` budget → run to completion (the
+    // proven cap behaviour). A trip stops at a boundary and reports the leftover — never rolls back.
+    // `budget` is a PARAMETER (dependency injection) so tests drive it deterministically; production
+    // passes `retention_budget()` (see `try_retention_attempt`).
+    let deadline = budget.map(|b| pass_start + b);
+    let prune = storage.prune_prunable_snapshots_budgeted(repo_uid, deadline)?;
+    let pruned_count = prune.pruned_count;
+    let budget_overrun = match (budget, prune.budget_remaining) {
+        (Some(b), Some(remaining)) => Some(BudgetOverrun {
+            budget_secs: b.as_secs(),
+            remaining_prunable: remaining,
+        }),
+        _ => None,
+    };
+
+    // DAEMON-RESIDUALS-2C §7 (operator ruling, cycle 2): a pass that OVERRAN its reporting-only budget
+    // STOPS at the chunk boundary — it does NOT go on to reclaim non-READY orphans, narrow baseline
+    // stamps, or VACUUM (review-1 gap 1: those stages MUST NOT run after `budget_overrun` is set). The
+    // leftover is reported (doctor points at `rmap repo rebuild`); the next unbudgeted pass resumes on
+    // whatever remains. Return immediately with every downstream stage explicitly NOT-run — never a
+    // fabricated measurement (the reclaimable freelist is not even read; `vacuum` names the honest
+    // "stage not reached" fate). `db_size_after` is a cheap filesystem stat, kept honest.
+    if let Some(overrun) = budget_overrun {
+        return Ok(RetentionPassOutcome {
+            pruned_count,
+            non_ready_reclaimed: 0,
+            narrowed_count: 0,
+            narrowed_rows: 0,
+            reclaimable_bytes: 0,
+            vacuum: VacuumStatus::SkippedBudgetOverrun,
+            reclaimed_bytes: 0,
+            db_size_after: file_size(db_path),
+            pass_duration_secs: pass_start.elapsed().as_secs(),
+            budget_overrun: Some(overrun),
+        });
+    }
 
     // 2. Reclaim orphaned non-READY (interrupted/failed) snapshots in the SAME pass (slice §2 — the
     //    DAEMON-VISIBILITY-1 reclaim, re-run here since the retention pass already holds the gates).
@@ -380,6 +472,7 @@ pub fn run_retention_pass(
         reclaimed_bytes,
         db_size_after: file_size(db_path),
         pass_duration_secs: pass_start.elapsed().as_secs(),
+        budget_overrun,
     })
 }
 
@@ -449,7 +542,13 @@ pub fn try_retention_attempt(
     // DAEMON-CRASH-RECOVERY-1 (F8): the op-START line for retention (the outcome is logged by
     // `run_auto_retention`'s summary line). Emitted only once both gates passed and the pass truly runs.
     crate::oplog::log_op_start("retention", repo_uid, None);
-    match run_retention_pass(&storage, db_path, repo_uid, &repo_state.coordinator) {
+    match run_retention_pass(
+        &storage,
+        db_path,
+        repo_uid,
+        &repo_state.coordinator,
+        retention_budget(),
+    ) {
         Ok(outcome) => RetentionAttempt::Ran(outcome),
         Err(e) => RetentionAttempt::Failed(e.to_string()),
     }
@@ -529,6 +628,15 @@ fn run_auto_retention(state: &DaemonState, db_path: &Path, repo_uid: &str, repo_
 /// EC-M7: when the pass narrowed baseline stamps, the line names them too — cost changes are never
 /// silent.
 pub fn summarize_outcome(o: &RetentionPassOutcome) -> String {
+    // DAEMON-RESIDUALS-2C §7: if the reporting-only budget tripped, name the overrun and point at the
+    // recovery verb — never silently drop the leftover.
+    let budget_suffix = match o.budget_overrun {
+        Some(ov) => format!(
+            "; retention exceeded its {}s budget — {} snapshot(s) still awaiting cleanup, run `rmap repo rebuild <path>`",
+            ov.budget_secs, ov.remaining_prunable
+        ),
+        None => String::new(),
+    };
     let removed = o.total_removed();
     let narrowed_suffix = if o.narrowed_count > 0 {
         format!(
@@ -538,30 +646,39 @@ pub fn summarize_outcome(o: &RetentionPassOutcome) -> String {
     } else {
         String::new()
     };
-    if removed == 0 {
+    let base = if removed == 0 {
         if o.narrowed_count > 0 {
             // Nothing pruned, but stamps were narrowed — say what happened.
-            return format!(
+            format!(
                 "narrowed {} baseline mark(s) to provenance stamps ({} graph rows removed)",
                 o.narrowed_count, o.narrowed_rows
-            );
+            )
+        } else {
+            "nothing to prune".to_string()
         }
-        return "nothing to prune".to_string();
-    }
-    match o.vacuum {
-        VacuumStatus::Ran => format!(
-            "pruned {removed} snapshot(s), reclaimed {} on disk{narrowed_suffix}",
-            format_bytes(o.reclaimed_bytes)
-        ),
-        VacuumStatus::SkippedBelowThreshold => format!(
-            "pruned {removed} snapshot(s) ({} reclaimable, VACUUM skipped — below threshold, pages recycle){narrowed_suffix}",
-            format_bytes(o.reclaimable_bytes)
-        ),
-        VacuumStatus::DeferredReadersActive => format!(
-            "pruned {removed} snapshot(s) ({} reclaimable, VACUUM deferred — repo was being read; retries next pass){narrowed_suffix}",
-            format_bytes(o.reclaimable_bytes)
-        ),
-    }
+    } else {
+        match o.vacuum {
+            VacuumStatus::Ran => format!(
+                "pruned {removed} snapshot(s), reclaimed {} on disk{narrowed_suffix}",
+                format_bytes(o.reclaimed_bytes)
+            ),
+            VacuumStatus::SkippedBelowThreshold => format!(
+                "pruned {removed} snapshot(s) ({} reclaimable, VACUUM skipped — below threshold, pages recycle){narrowed_suffix}",
+                format_bytes(o.reclaimable_bytes)
+            ),
+            VacuumStatus::DeferredReadersActive => format!(
+                "pruned {removed} snapshot(s) ({} reclaimable, VACUUM deferred — repo was being read; retries next pass){narrowed_suffix}",
+                format_bytes(o.reclaimable_bytes)
+            ),
+            // DAEMON-RESIDUALS-2C §7: the pass stopped on its budget before the VACUUM stage — the
+            // `budget_suffix` (appended below) names the overrun + points at the recovery verb, so the
+            // base line just states what was pruned, with no VACUUM clause (nothing was measured).
+            VacuumStatus::SkippedBudgetOverrun => {
+                format!("pruned {removed} snapshot(s){narrowed_suffix}")
+            }
+        }
+    };
+    format!("{base}{budget_suffix}")
 }
 
 /// Coarse human byte formatter for the daemon-log line (doctor formats its own via `format_size`).
@@ -662,6 +779,173 @@ mod tests {
         for on in ["1", "true", "on", "yes", "enabled", ""] {
             assert!(auto_retention_enabled_from(Some(on)), "{on:?} must stay ON");
         }
+    }
+
+    // ── DAEMON-RESIDUALS-2C §7: the reporting-only budget ──────────────────────────────────────
+
+    #[test]
+    fn retention_budget_from_parses_seconds_or_none() {
+        assert_eq!(retention_budget_from(None), None);
+        assert_eq!(retention_budget_from(Some("")), None, "blank → no budget");
+        assert_eq!(
+            retention_budget_from(Some("nope")),
+            None,
+            "non-numeric → no budget"
+        );
+        assert_eq!(
+            retention_budget_from(Some("30")),
+            Some(Duration::from_secs(30))
+        );
+        // `0` is honoured verbatim (the forced-slow-pass seam), NOT treated as "unset".
+        assert_eq!(
+            retention_budget_from(Some("0")),
+            Some(Duration::from_secs(0))
+        );
+        assert_eq!(
+            retention_budget_from(Some(" 5 ")),
+            Some(Duration::from_secs(5))
+        );
+    }
+
+    // A zero budget trips at the first chunk boundary: the pass prunes nothing, REPORTS the leftover
+    // in the outcome, and the doctor JSON carries `budget_overrun` — reporting only, no rollback, the
+    // snapshots stay prunable for a later (unbudgeted) pass. Proven with the budget as a PARAMETER (no
+    // env / global-state race).
+    #[test]
+    fn zero_budget_aborts_and_reports_overrun_in_outcome_and_json() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("budget.db");
+        {
+            let mut storage = StorageConnection::open(&db_path).unwrap();
+            add_repo(&storage, "r1");
+            let s1 = ready_snapshot(&mut storage, "r1", None, 0); // prunable (older)
+            let s2 = ready_snapshot(&mut storage, "r1", Some(&s1), 0); // parent
+            let _s3 = ready_snapshot(&mut storage, "r1", Some(&s2), 0); // current
+        }
+        let storage = StorageConnection::open(&db_path).unwrap();
+        let outcome = run_retention_pass(
+            &storage,
+            &db_path,
+            "r1",
+            &RepoCoordinator::new(),
+            Some(Duration::from_secs(0)),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.pruned_count, 0, "zero budget → nothing pruned");
+        let overrun = outcome.budget_overrun.expect("overrun reported");
+        assert_eq!(overrun.budget_secs, 0);
+        assert_eq!(
+            overrun.remaining_prunable, 1,
+            "the one prunable snapshot is left"
+        );
+        // The still-prunable snapshot is untouched on disk.
+        assert_eq!(
+            storage.get_retention_stats("r1").unwrap().prunable,
+            1,
+            "reporting only: the leftover stays prunable (no rollback, no auto-escalation)"
+        );
+        // The doctor JSON carries the overrun; a later report renders it.
+        let json = RetentionReport::new("r1".to_string(), outcome).to_json();
+        let bo = json.get("budget_overrun").unwrap();
+        assert_eq!(bo["budget_secs"].as_u64(), Some(0));
+        assert_eq!(bo["remaining_prunable"].as_i64(), Some(1));
+
+        // Sanity: with NO budget the same store prunes the one prunable snapshot to completion.
+        let done =
+            run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new(), None).unwrap();
+        assert_eq!(done.pruned_count, 1);
+        assert!(done.budget_overrun.is_none(), "no budget → no overrun");
+    }
+
+    // DAEMON-RESIDUALS-2C §7 (operator ruling, cycle 2; review-1 gap 1): a pass that OVERRUNS its
+    // budget STOPS at the chunk boundary and runs NO downstream stage — no non-READY orphan reclaim,
+    // no baseline narrowing, no VACUUM (the freelist is not even measured). Proven with a store that
+    // has BOTH a prunable READY snapshot AND a non-READY orphan: a zero budget must leave the orphan
+    // untouched and report `SkippedBudgetOverrun`, whereas an unbudgeted pass reclaims it.
+    #[test]
+    fn budget_overrun_stops_before_non_ready_reclaim_and_vacuum() {
+        use repo_graph_storage::types::CreateSnapshotInput;
+
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("overrun.db");
+        {
+            let mut storage = StorageConnection::open(&db_path).unwrap();
+            add_repo(&storage, "r1");
+            // Chained READY current/parent + an older prunable READY (bloated so a VACUUM WOULD fire
+            // if the pass ever reached that stage — it must not).
+            let s1 = ready_snapshot(&mut storage, "r1", None, 8_000); // prunable (older), bloated
+            let s2 = ready_snapshot(&mut storage, "r1", Some(&s1), 0); // parent
+            let _s3 = ready_snapshot(&mut storage, "r1", Some(&s2), 0); // current
+                                                                        // A non-READY orphan (never marked ready) — reclaimed ONLY by the non-READY stage.
+            storage
+                .create_snapshot(&CreateSnapshotInput {
+                    repo_uid: "r1".to_string(),
+                    kind: "full".to_string(),
+                    basis_ref: None,
+                    basis_commit: None,
+                    parent_snapshot_uid: None,
+                    label: None,
+                    toolchain_json: None,
+                })
+                .unwrap();
+        }
+
+        let storage = StorageConnection::open(&db_path).unwrap();
+        let non_ready_before = storage
+            .list_snapshots("r1")
+            .unwrap()
+            .iter()
+            .filter(|s| s.status != "ready")
+            .count();
+        assert_eq!(non_ready_before, 1, "one non-READY orphan seeded");
+
+        // Zero budget → the pass trips at the first chunk boundary and returns immediately.
+        let outcome = run_retention_pass(
+            &storage,
+            &db_path,
+            "r1",
+            &RepoCoordinator::new(),
+            Some(Duration::from_secs(0)),
+        )
+        .unwrap();
+
+        assert!(outcome.budget_overrun.is_some(), "budget tripped");
+        assert_eq!(
+            outcome.vacuum,
+            VacuumStatus::SkippedBudgetOverrun,
+            "VACUUM stage never reached — the honest fate, not a measured skip"
+        );
+        assert_eq!(
+            outcome.non_ready_reclaimed, 0,
+            "NO non-READY reclaim after the budget tripped"
+        );
+        assert_eq!(outcome.narrowed_count, 0, "NO baseline narrowing");
+        assert_eq!(outcome.reclaimed_bytes, 0, "NO VACUUM");
+        assert_eq!(
+            outcome.reclaimable_bytes, 0,
+            "the freelist was not measured (stage not reached)"
+        );
+        // The orphan is UNTOUCHED — the non-READY stage did not run.
+        let non_ready_after = storage
+            .list_snapshots("r1")
+            .unwrap()
+            .iter()
+            .filter(|s| s.status != "ready")
+            .count();
+        assert_eq!(
+            non_ready_after, 1,
+            "the non-READY orphan survives the budget-aborted pass"
+        );
+
+        // Contrast: an UNBUDGETED pass on the same store reclaims the orphan (proving the abort above
+        // was the budget, not a store that had nothing to reclaim).
+        let done =
+            run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new(), None).unwrap();
+        assert_eq!(
+            done.non_ready_reclaimed, 1,
+            "with no budget the orphan IS reclaimed"
+        );
     }
 
     // ── the pass core ─────────────────────────────────────────────────────────────────────────
@@ -776,7 +1060,7 @@ mod tests {
         // A fresh idle coordinator: no reader is active, so the VACUUM proceeds (this test proves the
         // prune/keep-set + reclaim, not the reader interaction — that is the two new tests below).
         let outcome =
-            run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new()).unwrap();
+            run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new(), None).unwrap();
 
         assert_eq!(
             outcome.pruned_count, 1,
@@ -820,7 +1104,8 @@ mod tests {
         };
 
         let storage = StorageConnection::open(&db_path).unwrap();
-        let _ = run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new()).unwrap();
+        let _ =
+            run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new(), None).unwrap();
 
         let stats = storage.get_retention_stats("r1").unwrap();
         assert_eq!(stats.baseline_user, 1, "the user-marked baseline survives");
@@ -977,7 +1262,8 @@ mod tests {
             let size_before = file_size(&db_path);
             let storage = StorageConnection::open(&db_path).unwrap();
             let outcome =
-                run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new()).unwrap();
+                run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new(), None)
+                    .unwrap();
 
             assert_eq!(
                 outcome.pruned_count, 1,
@@ -1011,7 +1297,8 @@ mod tests {
             let size_before = file_size(&db_path);
             let storage = StorageConnection::open(&db_path).unwrap();
             let outcome =
-                run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new()).unwrap();
+                run_retention_pass(&storage, &db_path, "r1", &RepoCoordinator::new(), None)
+                    .unwrap();
 
             assert_eq!(outcome.pruned_count, 1);
             assert_eq!(
@@ -1080,7 +1367,7 @@ mod tests {
         // VACUUM; this scoping keeps the deferred pass's own connection from lingering into the next.)
         let outcome = {
             let storage = StorageConnection::open(&db_path).unwrap();
-            run_retention_pass(&storage, &db_path, "r1", &repo_state.coordinator).unwrap()
+            run_retention_pass(&storage, &db_path, "r1", &repo_state.coordinator, None).unwrap()
         };
 
         // The prune HAPPENED (rows gone) but the VACUUM DEFERRED — the reader was never disturbed.
@@ -1115,7 +1402,7 @@ mod tests {
         drop(read_guard);
         let outcome2 = {
             let storage = StorageConnection::open(&db_path).unwrap();
-            run_retention_pass(&storage, &db_path, "r1", &repo_state.coordinator).unwrap()
+            run_retention_pass(&storage, &db_path, "r1", &repo_state.coordinator, None).unwrap()
         };
         assert_eq!(
             outcome2.vacuum,

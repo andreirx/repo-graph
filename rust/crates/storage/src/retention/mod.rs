@@ -53,6 +53,7 @@ pub use narrow::{
     CascadeChild, FamilyRows, NarrowedBaseline, SnapshotFamilyCost, STAMP_KEEP_AUTHORITY_TABLES,
     STAMP_KEEP_MEASUREMENT_TABLES, STAMP_NARROW_CASCADE_CHILDREN, STAMP_NARROW_TABLES,
 };
+pub use prune::PruneOutcome;
 pub use types::{RetentionClass, RetentionStats, CURRENT_CACHE_EPOCH};
 
 #[cfg(test)]

@@ -72,6 +72,56 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
         };
     }
 
+    // DAEMON-RESIDUALS-2C §7 (HUMAN RULING, cycle 2 — detect-and-name): an interrupted `rmap repo
+    // rebuild` left the store's `.rebuilding` sentinel in place, so the daemon refuses to serve it. A
+    // genuine health FAIL, but with the specific reason + recovery verb (the reason string carries
+    // "run `rmap repo rebuild <path>` again"), NOT the generic "cannot read snapshots".
+    // Producer contract (daemon-runtime `snapshot_facts::facts_rebuild_interrupted`, review-6 item 1):
+    // the daemon emits `rebuild_interrupted` in exactly ONE place, always the literal `true`, and OMITS
+    // it for every non-interrupted store (healthy / idle / in-use / lock / read-error). So the wire
+    // representation is TWO-STATE — omitted OR literal `true` — and ABSENCE is the authoritative
+    // representation of "not an interrupted rebuild" (the "absence has one representation" contract):
+    // fall through, NEVER a FAIL. Honesty rule 2 (cycle-5 / review-7) governs every PRESENT value: the
+    // ONLY legal present value is `true`; ANY other present value — a literal `false` (contract-illegal:
+    // the producer never emits `false`) or a non-bool — is a MALFORMED field, rendered as a NAMED
+    // unavailable state and NEVER silently treated as "not interrupted" (that would let a malformed
+    // daemon reply falsely assert storage health while a genuinely interrupted store hid). `true` with a
+    // missing/malformed `read_error` NAMES the reason gap rather than fabricating the recovery sentence.
+    match response.get("rebuild_interrupted") {
+        // Absent (the producer omits it for every non-interrupted store) → not interrupted; fall through.
+        None => {}
+        // The ONE legal present shape: literal `true` for a sentinel'd store → the interrupted FAIL.
+        Some(serde_json::Value::Bool(true)) => {
+            // The daemon emits `read_error` alongside `rebuild_interrupted: true` carrying the exact
+            // NAMED reason. If it is absent or not a string, NAME that gap — never fabricate it.
+            let details = match response.get("read_error").and_then(|v| v.as_str()) {
+                Some(reason) => reason.to_string(),
+                None => "rebuild interrupted, but its reason is unavailable \
+                         (malformed daemon field `read_error`)"
+                    .to_string(),
+            };
+            return ProbeResult {
+                name: "storage".to_string(),
+                passed: false,
+                message: format!("db: {size_human}, rebuild interrupted — not served"),
+                details: Some(details),
+            };
+        }
+        // Any OTHER present value — a contract-illegal `false`, or a non-bool — is MALFORMED. Say so;
+        // never guess "not interrupted" (review-7 required change 2 + honesty rule 2).
+        Some(_) => {
+            return ProbeResult {
+                name: "storage".to_string(),
+                passed: false,
+                message: format!("db: {size_human}, rebuild status unavailable"),
+                details: Some(
+                    "rebuild status unavailable (malformed daemon field `rebuild_interrupted`)"
+                        .to_string(),
+                ),
+            };
+        }
+    }
+
     // Read error (DB absent/corrupt): a genuine health failure (contract E's "error" case).
     if let Some(reason) = response.get("read_error").and_then(|v| v.as_str()) {
         return ProbeResult {
@@ -552,6 +602,134 @@ mod tests {
             !probe.message.to_lowercase().contains("cannot read"),
             "must not read as a corrupt-DB failure: {}",
             probe.message
+        );
+    }
+
+    // DAEMON-RESIDUALS-2C §7 (HUMAN RULING, cycle 2): an interrupted `rmap repo rebuild` (sentinel
+    // present) renders a dedicated FAIL naming the recovery verb — NOT the generic "cannot read
+    // snapshots", and NOT the transient lock reader-frame.
+    #[test]
+    fn rebuild_interrupted_renders_a_named_fail_pointing_at_the_verb() {
+        let response = json!({
+            "db_size_bytes": 4096,
+            "in_use_by_daemon": false,
+            "rebuild_interrupted": true,
+            "read_error": "rebuild interrupted — run `rmap repo rebuild <path>` again",
+            "snapshots": serde_json::Value::Null,
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(!probe.passed, "an interrupted rebuild is a genuine FAIL");
+        assert!(
+            probe.message.contains("rebuild interrupted"),
+            "message names the interruption: {}",
+            probe.message
+        );
+        let details = probe.details.expect("reason detail");
+        assert!(
+            details.contains("run `rmap repo rebuild <path>` again"),
+            "details point at the recovery verb: {details}"
+        );
+    }
+
+    // Producer omission contract (review-6 item 1): a well-formed idle reply that OMITS
+    // `rebuild_interrupted` is NOT interrupted — the daemon emits the field only as `true` for a
+    // sentinel'd store (`snapshot_facts::facts_rebuild_interrupted`) and omits it otherwise. Absence
+    // must render the normal healthy idle storage line, never a spurious "unavailable"/interrupted FAIL.
+    #[test]
+    fn absent_rebuild_interrupted_is_not_interrupted_and_stays_healthy() {
+        let response = json!({
+            "db_size_bytes": 1_000_000_u64,
+            "in_use_by_daemon": false,
+            "total_snapshots": 1,
+            "ready_snapshots": 1,
+            "prunable_snapshots": 0,
+            "interrupted_snapshots": [],
+            "snapshots": [
+                { "state": "ready", "outcome": "completed 2026-07-02T10:05:00Z", "created_at": "2026-07-02T10:00:00Z" }
+            ],
+            // no `rebuild_interrupted` field — the normal producer shape for a healthy store
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(
+            probe.passed,
+            "an omitted rebuild_interrupted is healthy, not a FAIL: {probe:?}"
+        );
+        assert!(
+            probe.message.contains("1 snapshot"),
+            "renders the normal idle line: {}",
+            probe.message
+        );
+        assert!(
+            !probe.message.to_lowercase().contains("rebuild")
+                && !probe.message.to_lowercase().contains("unavailable"),
+            "absence must not render a rebuild/unavailable clause: {}",
+            probe.message
+        );
+    }
+
+    // Honesty rule 2 (cycle-5): a MALFORMED `rebuild_interrupted` field (not a bool) must render a
+    // NAMED unavailable state — never be silently treated as "not interrupted" (the old
+    // `unwrap_or(false)` behavior, which would hide a real interrupted store).
+    #[test]
+    fn malformed_rebuild_interrupted_field_renders_named_unavailable_not_false() {
+        let response = json!({
+            "db_size_bytes": 4096,
+            "in_use_by_daemon": false,
+            "rebuild_interrupted": "yes", // malformed: a string, not a bool
+            "snapshots": serde_json::Value::Null,
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(!probe.passed, "a malformed rebuild status is not a pass");
+        let details = probe.details.expect("named unavailable detail");
+        assert!(
+            details.contains("malformed daemon field `rebuild_interrupted`"),
+            "names the malformed field, never guesses 'not interrupted': {details}"
+        );
+    }
+
+    // review-7 required change 2: a present `rebuild_interrupted: false` is CONTRACT-ILLEGAL (the
+    // producer emits the field ONLY as literal `true`, or omits it — a two-state wire representation), so
+    // `false` is a malformed daemon reply. It must render the NAMED unavailable state, never fall through
+    // to a healthy pass (the old `Some(false) => {}`), which would let a malformed reply assert storage
+    // health while a genuinely interrupted store hid (honesty rule 2).
+    #[test]
+    fn false_rebuild_interrupted_is_contract_illegal_and_renders_named_unavailable() {
+        let response = json!({
+            "db_size_bytes": 4096,
+            "in_use_by_daemon": false,
+            "rebuild_interrupted": false, // contract-illegal: the producer never emits `false`
+            "snapshots": serde_json::Value::Null,
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(
+            !probe.passed,
+            "a contract-illegal `false` is a malformed reply, not a healthy pass: {probe:?}"
+        );
+        let details = probe.details.expect("named unavailable detail");
+        assert!(
+            details.contains("malformed daemon field `rebuild_interrupted`"),
+            "names the malformed field, never silently treats `false` as not-interrupted: {details}"
+        );
+    }
+
+    // Honesty rule 2 (cycle-5): `rebuild_interrupted: true` with a MISSING/malformed `read_error` must
+    // NAME the reason gap — never fabricate the recovery-reason string (the old `unwrap_or(<literal>)`).
+    #[test]
+    fn interrupted_with_missing_reason_names_the_gap_not_a_fabricated_reason() {
+        let response = json!({
+            "db_size_bytes": 4096,
+            "in_use_by_daemon": false,
+            "rebuild_interrupted": true,
+            // no `read_error` field at all
+            "snapshots": serde_json::Value::Null,
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(!probe.passed, "still a FAIL");
+        let details = probe.details.expect("reason detail");
+        assert!(
+            details.contains("reason is unavailable")
+                && details.contains("malformed daemon field `read_error`"),
+            "names the missing-reason gap rather than fabricating a verb sentence: {details}"
         );
     }
 

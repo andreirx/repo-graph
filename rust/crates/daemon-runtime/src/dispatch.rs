@@ -421,6 +421,10 @@ impl Dispatcher for ServiceDispatcher {
             "repo_info" => self.handle_repo_info(request),
             "repo_alias" => self.handle_repo_alias(request),
             "repo_remove" => self.handle_repo_remove(request),
+            // DAEMON-RESIDUALS-2C §7: wipe-and-reindex verb. Additive method mirroring
+            // `maintenance_gc`'s registration (wire envelope untouched). Long op (reindex) → carries
+            // the progress `emitter`, like `index`/`refresh`.
+            "repo_rebuild" => crate::rebuild::handle_repo_rebuild(&self.state, request, emitter),
 
             // ── Read operations ─────────────────────────────────────
             "callers" => self.handle_callers(request),
@@ -2785,8 +2789,13 @@ impl ServiceDispatcher {
     /// reply therefore only states `queued` / `disabled` (final numbers surface on doctor — the
     /// ratified never-on-foreground invariant). `db_path` MUST be the SAME path this handler stamped
     /// into the activity registry, so each pass's gate-1 `active_for_db` check matches.
-    fn finish_write_with_maintenance(
-        &self,
+    /// DAEMON-RESIDUALS-2C: taken by `state: &Arc<DaemonState>` (was `&self`) and `pub(crate)` so the
+    /// `rmap repo rebuild` verb (`crate::rebuild`) reuses the SAME post-write maintenance chain
+    /// (enrich → seed → retention) index/refresh queue — a rebuild's fresh snapshot must chain the
+    /// async prune-on-commit exactly as an index does, not a divergent copy. Associated fn (no `self`)
+    /// so it stays inside this impl next to `handle_index`/`handle_refresh` while being crate-callable.
+    pub(crate) fn finish_write_with_maintenance(
+        state: &Arc<DaemonState>,
         request_id: &str,
         mut response: serde_json::Value,
         db_path: &Path,
@@ -2797,7 +2806,7 @@ impl ServiceDispatcher {
             // Enrichment chains the tail (enrich → seed → retention, spec §5) on
             // completion — one queued call covers all three passes in order.
             crate::enrich_pass::spawn_auto_enrich(
-                Arc::clone(&self.state),
+                Arc::clone(state),
                 db_path.to_path_buf(),
                 repo_uid.to_string(),
                 repo_display,
@@ -2806,12 +2815,7 @@ impl ServiceDispatcher {
         } else {
             // Enrichment off → it will NOT chain the tail, so trigger the
             // seed → retention tail directly here (EMBED-SEED-IMPL-1, spec §5).
-            crate::seed_pass::chain_seed_then_retention(
-                &self.state,
-                db_path,
-                repo_uid,
-                &repo_display,
-            );
+            crate::seed_pass::chain_seed_then_retention(state, db_path, repo_uid, &repo_display);
             "disabled"
         };
         // Seed runs (chained after enrich, or directly above) iff seeding is enabled.
@@ -2835,7 +2839,7 @@ impl ServiceDispatcher {
     /// Merge an `auto_pass` state token into a named reply block, preserving any fields the block
     /// already carries (e.g. retention's foreground `classify_retention_only` counts). The CLI
     /// completion report reads `<block>.auto_pass` (see `rgr::commands::index::format_*_line`).
-    fn annotate_auto_pass(response: &mut serde_json::Value, block: &str, state: &str) {
+    pub(crate) fn annotate_auto_pass(response: &mut serde_json::Value, block: &str, state: &str) {
         match response.get_mut(block).and_then(|v| v.as_object_mut()) {
             Some(obj) => {
                 obj.insert("auto_pass".to_string(), serde_json::json!(state));
@@ -2939,6 +2943,20 @@ impl ServiceDispatcher {
             }
             resolved
         };
+
+        // DAEMON-RESIDUALS-2C §7 (HUMAN RULING, cycle 2 — detect-and-name): index uses the CREATE path
+        // (`compose::open`), which the gated OPEN primitives (`open_existing_gated` /
+        // `open_existing_with_busy_retry`) cannot cover — so consult the sentinel authority HERE if a
+        // prior `rmap repo rebuild` for this store was interrupted. Indexing into a store whose files are
+        // mid-retire / partial-fresh would write on top of that residue; the remedy is the rebuild verb
+        // (which does not pass through this handler). A fresh repo has no sentinel, so first indexes are
+        // unaffected.
+        if let Err(reason) = crate::rebuild::refuse_if_rebuild_interrupted(&db_path) {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::StateUnavailable, reason),
+            );
+        }
 
         // Acquire DB write coordination (DB file may not exist yet)
         let db_runtime = match self.state.get_or_create_db_runtime_for_new_db(&db_path) {
@@ -3211,7 +3229,8 @@ impl ServiceDispatcher {
                                 );
                                 // Retention still queues: the background pass opens its own storage
                                 // connection, so this per-op read failure does not block cleanup.
-                                return self.finish_write_with_maintenance(
+                                return Self::finish_write_with_maintenance(
+                                    &self.state,
                                     &request.id,
                                     response,
                                     &db_path,
@@ -3247,7 +3266,8 @@ impl ServiceDispatcher {
                 };
 
                 // SNAPSHOT-RETENTION-1: queue the background retention pass (never foreground).
-                self.finish_write_with_maintenance(
+                Self::finish_write_with_maintenance(
+                    &self.state,
                     &request.id,
                     response,
                     &db_path,
@@ -3579,7 +3599,8 @@ impl ServiceDispatcher {
                 // SNAPSHOT-RETENTION-1: queue the background retention pass for the refreshed repo
                 // (never foreground). `canonical_db_path` is the SAME path stamped into the activity
                 // registry above, so the pass's gate-1 contention check matches.
-                self.finish_write_with_maintenance(
+                Self::finish_write_with_maintenance(
+                    &self.state,
                     &request.id,
                     response,
                     canonical_db_path,

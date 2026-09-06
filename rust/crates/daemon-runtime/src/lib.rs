@@ -124,6 +124,7 @@ pub mod reconcile;
 // (`pub(crate)`, like `module_degradation`/`reader_context`) — NOT a public API boundary: nothing
 // outside daemon-runtime consumes it (deterministic workspace grep for `reclaim::` found only
 // `crate::reclaim::` callers). See the module ledger in reclaim.rs.
+pub(crate) mod rebuild; // DAEMON-RESIDUALS-2C §7: `rmap repo rebuild` wipe-and-reindex verb (crate-private)
 pub(crate) mod reclaim;
 pub mod registry;
 pub mod resource_metrics;
@@ -162,6 +163,11 @@ mod activity_visibility_tests;
 pub use dispatch::ServiceDispatcher;
 pub use registry::{RegistryEntry, RegistryError, RepoRegistry};
 pub use state::{DaemonState, RepoKey, RepoState, StateRootMode};
+
+// Test seam re-export: `rebuild` is `pub(crate)`, so expose ONLY this one `#[doc(hidden)]` fault
+// injector (review-7) at the crate root for `tests/repo_rebuild.rs`, without widening the module.
+#[doc(hidden)]
+pub use rebuild::set_fail_sentinel_removal_for_test;
 
 use std::path::PathBuf;
 use std::sync::Arc;

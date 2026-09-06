@@ -128,4 +128,7 @@ mark_baseline          = FC8
 unmark_baseline        = FC8
 repo_alias             = FC8
 repo_remove            = FC8
+# DAEMON-RESIDUALS-2C §7: `repo_rebuild` discards the store and REINDEXES from scratch, so it produces
+# exactly the same fact classes an `index` does (FC0 extraction … FC8 operational/provenance).
+repo_rebuild           = FC0, FC1, FC2a, FC2b, FC3, FC4, FC6, FC8
 maintenance_gc         = FC8
