@@ -57,10 +57,17 @@ Two defects, one extractor family, both field-visible on v0.17.0:
    function-pointer returns always go through `parenthesized_declarator`
    (negative fixture `int (*getHandler(int x))(double)` → `getHandler`, unchanged).
    `signature` derives from the corrected name automatically.
-2. **Forward declaration is a stored fact.** On the `BodyProbe::ForwardDecl` / `None` paths
-   of `type_span_and_body_close`, the emitted type node carries additive
-   `metadata_json {"forward_decl": true}`. Definitions carry nothing new. Schema shape
-   unchanged.
+2. **A declaration is a stored fact — types AND methods.** On the `BodyProbe::ForwardDecl` /
+   `None` paths of `type_span_and_body_close`, the emitted type node carries additive
+   `metadata_json {"forward_decl": true}`. AMENDED 2026-09-06 (root cause §H-B): the in-class
+   METHOD prototype emitted by `extract_method_declaration` (:1515-1578, "No body for
+   declarations") carries the same flag — today it is a second node with the SAME
+   qualified_name as the out-of-line definition, which makes `callers leveldb::DBImpl::Recover`
+   ambiguous and drops every `NewDB` / `RecoverLogFile` call as a non-singleton. Definitions
+   carry nothing new. Schema shape unchanged. Also: C++ `field_expression` calls keep the
+   receiver text in `metadata_json {"receiver": "impl"}` (today the target_key is the bare field
+   name and the receiver is discarded, :1638-1676) — input for a later type-aware step, stated,
+   not consumed here.
 3. **Definition first, everywhere identity is chosen.**
    - find Facts: `find_fact_symbols` selects `metadata_json`; `rank_key`
      (`daemon-runtime/src/find_facts/rank.rs:166-180`) gains a `decl_rank` between the
@@ -68,9 +75,18 @@ Two defects, one extractor family, both field-visible on v0.17.0:
      forward-decl rows render `(decl)` (the tag seeds already use).
    - seeds: `classify::is_declaration` consults `forward_decl` so a type chunk is `(decl)` and
      demotes under its definition exactly as callables do (SEED-CHUNK-2 mechanism).
-   - resolution: `resolve_symbol` step 2/3 and `pick_unambiguous` prefer the unique
-     non-forward-decl candidate when exactly ONE exists among same-name candidates;
-     >1 non-decl candidates stay ambiguous (honest). This restores the inheritance edges.
+   - resolution: `resolve_symbol` step 2/3 and `pick_unambiguous` (`indexer/src/resolver.rs:
+     737-748`) filter `forward_decl` candidates BEFORE the singleton test, for types and
+     methods; >1 non-decl candidates stay ambiguous (honest). This restores the inheritance
+     edges AND the C++ call edges to methods declared in a header and defined once
+     (`NewDB`, `RecoverLogFile`: 2 → 1 candidate). AMENDED 2026-09-06: add an enclosing-class
+     preference in `resolve_call_target` — when the CALLER node's qualified-name prefix
+     (`leveldb::DBImpl::Open` → `leveldb::DBImpl`) matches exactly one remaining candidate's
+     container, pick it. The honest remainder — a call from outside the class to a name defined
+     in several classes (`impl->Recover` from `DB::Open`: DBImpl vs VersionSet) — stays
+     unresolved and is COUNTED in the build report as the C++ no-resolver gap; the test that
+     pins refusal (`resolver.rs:1395 ambiguous_name_stays_unresolved`) keeps its meaning for
+     genuinely ambiguous names.
 4. **Stable-key transition**: names change for the affected functions → ONE reindex
    transition (FIND-KIND-MISLABEL-1 / CPP-SPAN-FIDELITY-1 precedent); churn counted and
    reported per corpus repo.

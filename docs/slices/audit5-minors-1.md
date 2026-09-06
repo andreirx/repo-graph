@@ -15,6 +15,7 @@ Outward surface named per item. Six independent causes; none is a regression.
 | F4 | `trust` opens with `Posture: Unavailable (Unavailable)` / `Resident: no` on 28/28 repos — a line that reads the same everywhere | root posture = MEET over the LiveGraph half (`trust_coherence.rs:43`; D-T6), which is resident only after the hidden `rmap dev livegraph-refresh` (TS-only, in-memory, lost on restart) — a constant carrying no information about the repo (`trust.rs:128-136, 227-242`) |
 | F5 | `doctor` prints `[ok] vector store: unavailable` and `28/28 checks` green | `doctor/seed.rs:27-31,138` returns `passed: true` for every seed state; tone follows `passed`; the only `[note]` override exists for enrichment (`summary.rs:131`), none for seeds |
 | F6 | smoke `00-meta.json` lists linux in `legacy_repos` but in none of passed/failed/skipped | `scripts/smoke-validation-repos.sh:301-312` drops `SMOKE_SKIP` repos from the run arrays without appending to `SKIPPED_REPOS`; `LEGACY_JSON` (:521-524) is built from the pre-filter list |
+| F7 (added 2026-09-06, root cause §H6) | `surfaces list` Express provider rows print `packages/api/src/server.ts  [provider]` with no line while consumer rows carry one | `daemon-runtime/src/http_boundary_read.rs:202` hard-codes `line: None` for the `project_surfaces` family ("no line_start in scope for this slice", blame aee8a42) although the detector already stores it in `metadata_json.lineStart` (`express_detector.rs:264, 404-413`) |
 
 ## 2. Contract
 
@@ -42,6 +43,9 @@ Outward surface named per item. Six independent causes; none is a regression.
   `27 ok · 1 note`.
 - **F6** `SMOKE_SKIP` repos land in `skipped` with `skip_reason: env`; the script's summary
   asserts `passed ∪ failed ∪ skipped == internal ∪ legacy`.
+- **F7** `project_surface_to_input` reads `metadata_json.lineStart` (absent or 0 → `None`, never
+  a fabricated line); FRAKTAG `surfaces list` renders `packages/api/src/server.ts:45  [provider]`
+  for `app.get('/api/knowledge-bases', …)`; provider rows with lines counted before/after (0/47 → 47/47).
 
 ## 3. Stop conditions
 
