@@ -18,6 +18,12 @@ Maturity: MATURE.
    against the 450 ms patience), slot released between chunks; the FORGET-vs-SEED and
    generation-supersede invariants hold across chunk boundaries (a superseded generation
    abandons its remaining chunks).
+   ALSO (v0.17.0 smoke evidence, 2026-09-06): the seed pass is NOT an `OpKind` in the
+   activity registry, so a foreground open bounced by its publish renders the GENERIC
+   "a concurrent operation is holding it" while `assess` bounced by enrich renders the
+   NAMED "a background enrich pass (started 43s ago)". Register the seed pass as an
+   activity (`OpKind::Seed`, exhaustive matches) so its Busy is named like every other
+   holder — unknown holder never invisible.
 2. Preload/refresh acquire the coordinator's refresh guard; epoch-bound readers keep their
    graph until release (W-B invariants frozen).
 3. The VACUUM window runs under the repo's writer guard; foreground opens receive the
