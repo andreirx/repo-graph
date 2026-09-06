@@ -407,14 +407,30 @@ did not); surfaces "0 project surfaces" beside 235 real routes + test rows first
 --full marker false (D7); fixture App.java → repo-level Spring fact (D9); FRAKTAG seeds return
 decls not the write path (D11); complexity headline = symbol cx under a file label (D12);
 boundaries 0/772 anchors (D14); `dead` exit 2 + "error:" on a correct refusal.
-PROPOSED QUEUE (awaiting human ordering): CLAIM-INVARIANT-1 (one rule: no absence/
-exclusivity/completeness/confidence claim where a same-snapshot signal disconfirms it; sites
-D1/D2/D8/D10/D15) → MODULE-EDGE-COHERENCE-1 + JAVA-MODULE-ATTRIBUTION-1 (consume trust's
-internal-reference evidence first; then package-root → Maven/Gradle modules) → DEPS-NEGATIVE-1
-(Python static-import resolution + negative gate on unattributed buckets) → CPP-FACTS-2 (D3 +
-decl-as-Facts D4) → TOTALS-1 (D5/D6/D7/D9/D12 + COH-2 orient drop + (N test) legend) →
-ECONOMY-3 (list budgets) → dead exit code + smoke linux manifest; DAEMON-RESIDUALS-2/-3 staged
-(already ratified). KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
+WITHDRAWN QUEUE (human directive 2026-09-06: root-cause before packeting): the first proposed
+queue (CLAIM-INVARIANT-1 → …) was symptom-labelled. ROOT CAUSES RECORDED
+(`docs/audits/2026-09-06-root-causes-v0.17.0.md`, five read-only investigations, code-cited):
+A. D1+D10 = the resolver has NO stage mapping Rust `use <crate>::` / Java FQN specifiers to files
+(never worked; June smoke already 0; MODULE-EDGES-1 verified on C++ only) + grpc-java
+`projectDir` unparsed; renderers' zero branches consult only the HTTP link count. B. D2 = the
+index-time classifier exact-matches the FULL dotted specifier (`asgiref.sync` ≠ `asgiref`;
+`import sqlparse` matches) → asgiref's edges sit in `unknown`, a fourth bucket NO headline counts
+(the "419 could contain it" premise was false); reconcile emits the negative while the bindings
+are in memory; HONESTY-GATE-1 relabeled and canonized the false row as a test fixture. C. D3 =
+both C/C++ `extract_function_name`s return the macro token for `M(name)(args)` and ignore the
+ERROR child for attribute-macro shapes; D4 = bodiless `class X;` emits an unflagged symbol, no
+decl column on nodes, and `pick_unambiguous` DROPS every inheritance edge to a 70×-declared
+class. D. D5 = three file-count bases (file_versions all rows / OWNS on FILE nodes with a "/" /
+manifest ownership incl. root "."; grpc-java 290 = 96 config + 194 proto, exact); D12 dedup-by-
+file; D7 = ECONOMY-2 REGRESSION (byte-equality with large while the group fallback is capped at
+a fixed 12) — D7 and D12 are PINNED BY TESTS asserting the defect; D6 "project surfaces" = the
+catalog after HTTP is lifted out; D9 inference rows never join files.is_test; COH-2 orient gate.
+E. D11 = property seed documents are ~90% their qualified name (doc_comment: None). F. isolated
+one-file causes (docs kind order/"license"=has-header; boundaries groups never read their
+line; not-found path passes repo_uid None; doctor seed probe always passed; SMOKE_SKIP never
+appends to SKIPPED_REPOS). G. by-design renderings dropping the qualifier (check `ceiling`
+marker dropped at the CLI DTO; trust root posture MEET over a dev-only LiveGraph; dead exit 2
+frozen). Cause-cut slices proposed to the human — see the audit doc. KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
 discrimination, django boundaries zero-state (what cycles should print), map --dry-run cap
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
