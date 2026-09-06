@@ -431,6 +431,18 @@ line; not-found path passes repo_uid None; doctor seed probe always passed; SMOK
 appends to SKIPPED_REPOS). G. by-design renderings dropping the qualifier (check `ceiling`
 marker dropped at the CLI DTO; trust root posture MEET over a dev-only LiveGraph; dead exit 2
 frozen). Cause-cut slices proposed to the human — see the audit doc.
+SHIPPED: IMPORT-RESOLUTION-RUST-1 (2026-09-06, 6 cycles): the declared Cargo catalog crosses
+the compose→indexer boundary as a raw DTO; a pure resolver stage maps `use other_crate::…` to
+the defining file (crate root + `<segs>.rs` / `mod.rs` / shorten / `lib.rs` / `main.rs`), gated
+on Rust-extractor provenance; one `_`→`-` canonicalisation replaces three copies (the fourth,
+config.rs, is the OPPOSITE transform — name-vs-semantics catch by the builder); modules-list
+and cycles zero-states print resolved AND unresolved counts (cycles names its population
+"directory groups" — the two-crate fixture has four; cycles-over-directories vs modules-list-
+over-declared-modules recorded as a FOLLOW-UP). repo-graph: 0 → 129 cross-crate edges,
+unresolved imports 7,528 → 4,789, trust's first-party lines shrink by exactly the resolved
+count; `map --dry-run` moves a cross-crate import to `indexer/src/storage_port.rs`; leveldb
+byte-stable bar the permitted clause. Cycle 3 fixed a builder-caught honesty defect (a storage
+read failure rendered as "older daemon — reindex"). Four additive wire fields.
 RATIFIED (human 2026-09-06): fix at the cause, never a query-time gate or zero-state wording
 over a known index-time defect ("no reindex is not a reward"). ORDER: IMPORT-RESOLUTION-RUST-1
 → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 →
