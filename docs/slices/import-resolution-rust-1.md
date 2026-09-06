@@ -93,8 +93,14 @@ real state root; every rmap call isolated; never stash. Do NOT commit.
   (`a` with a `path` dependency on `b`; `a/src/lib.rs` uses `b::util::helper` and
   `b::Thing`; `b/src/util.rs`, `b/src/lib.rs`). Integration test asserts: both IMPORTS edges
   resolve to `b/src/util.rs` and `b/src/lib.rs`; `imports_file_not_found == 0`; one
-  MODULE→MODULE edge a→b; `modules list` renders it; `cycles` renders "over 2 modules / 1
-  resolved import edge". Unit tests for the pure stage: nested module → `mod.rs`; shortened
+  MODULE→MODULE edge a→b; `modules list` renders it; `cycles` renders "over 4 directory
+  groups / 1 resolved import edge". AMENDED 2026-09-06 (cycle-4 finding): `cycles` runs over
+  the indexer's per-directory MODULE nodes (the population `stats` already calls "directory
+  groups"), not over declared crates — the two-crate fixture has four directory groups
+  (`a`, `a/src`, `b`, `b/src`). The zero-state names that population by the term the user
+  already sees ("directory groups"), never a bare "modules" that `modules list` would read
+  as crates. The cross-surface divergence (cycles over directory groups vs modules list over
+  declared modules) is recorded as a follow-up, not changed here. Unit tests for the pure stage: nested module → `mod.rs`; shortened
   path → parent file; unknown crate → None; `[lib] name` override; canonicalisation.
 - Live proof (isolated; registry sha identical before/after; repo-graph indexed ONCE
   before and ONCE after — the retained audit root may serve as "before"): the §2.6 table.
