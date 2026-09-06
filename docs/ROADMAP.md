@@ -489,6 +489,22 @@ Movement (isolated before/after): kafka module edges 1 → 5,602 (42,482 file-im
 111, not 1,624; 4 real cycles), hadoop 51 → 16,780 (Maven still unparsed — inferred dir
 modules), langchain4j 0 → 3,029, spring-petclinic 0 → 8; leveldb and repo-graph (129)
 byte-stable.
+SHIPPED: DAEMON-RESIDUALS-2C (2026-09-07, 1f77e36, 9 cycles + operator close-out on one
+comment word): `rmap repo rebuild <path>` — the wipe-and-reindex verb the human asked to keep:
+explicit `--yes` naming what is discarded; the daemon owns the coordination (FIFO Writing guard;
+NAMED Busy — "a concurrent READ is holding this repo's store" for readers, holder + age for
+writers); retire-by-rename with rollback/restore; the sentinel `<store>.rebuilding` = "never
+serve a partial store" (human ruling detect-and-name), enforced at the ONE gated store open
+(three per-caller bypasses found by review before the seam moved — load_repo, boot reconcile,
+enrich pass — now a call-site enumeration test fails CI on the next one); the remedy works on
+any partial state incl. an absent `.db`; a failed sentinel unlink is a named non-success;
+`symbols_total` additive; the no-op `--progress` flag removed. Reporting-only retention
+budget: aborts at the chunk boundary, doctor names the overrun with its basis and the verb;
+sub-second passes render "under 1s". The existing async cap PROVEN on isolated leveldb: 7
+re-indexes → 1 snapshot after each; concurrent reads 57–68 ms vs the 450 ms patience. The
+reader-held live race could not be provoked (reads are sub-second) — proven at the dispatch
+layer by ruling. DAEMON-RESIDUALS-2 is COMPLETE (increments 1, 2B observability, 2C);
+DAEMON-RESIDUALS-3 remains staged. CPP-DECLARATORS-1 launched next.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
