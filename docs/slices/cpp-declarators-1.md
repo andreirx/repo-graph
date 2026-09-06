@@ -55,7 +55,7 @@ Two defects, one extractor family, both field-visible on v0.17.0:
    `parameters` → the name is its LAST identifier; earlier identifiers → `macro_tokens`.
    Both are unambiguous: a function returning a function is invalid C/C++, and
    function-pointer returns always go through `parenthesized_declarator`
-   (negative fixture `int (*getHandler(int x))(double)` → `getHandler`, unchanged).
+   (negative fixture `int (*getHandler(int x))(double)`: AMENDED 2026-09-07 — the C extractor emits NO node for a function-pointer-returning function today (pre-existing absence, `parenthesized_declarator` never handled); the fixture asserts only that the new unwrap does NOT misfire on that shape — no macro name, no `macro_tokens`; extracting `getHandler` is a separate cause, filed as a follow-up, out of scope here).
    `signature` derives from the corrected name automatically.
 2. **A declaration is a stored fact — types AND methods.** On the `BodyProbe::ForwardDecl` /
    `None` paths of `type_span_and_body_close`, the emitted type node carries additive
@@ -87,6 +87,14 @@ Two defects, one extractor family, both field-visible on v0.17.0:
      unresolved and is COUNTED in the build report as the C++ no-resolver gap; the test that
      pins refusal (`resolver.rs:1395 ambiguous_name_stays_unresolved`) keeps its meaning for
      genuinely ambiguous names.
+     AMENDED 2026-09-07 (cycle-2 finding, operator ruling mapped outward): when the exact-NAME
+     candidates are exactly one TYPE (CLASS/STRUCT/ENUM/INTERFACE/TRAIT) plus CONSTRUCTOR(s)
+     whose container is that type, a bare-name query resolves to the TYPE — a bare name means
+     the type in every language's model, and constructors are named after it — and the render
+     adds one line naming the constructor's own cursor ("1 constructor also matches: explain
+     '<Type>::<Type>'" / the stable key) so a constructor query is never hidden. Any other
+     mixed candidate set stays ambiguous. `explain CGHeroInstance` therefore resolves to
+     `lib/mapObjects/CGHeroInstance.h:55` and points at the constructor.
 4. **Stable-key transition**: names change for the affected functions → ONE reindex
    transition (FIND-KIND-MISLABEL-1 / CPP-SPAN-FIDELITY-1 precedent); churn counted and
    reported per corpus repo.
