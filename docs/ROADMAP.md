@@ -443,6 +443,17 @@ unresolved imports 7,528 → 4,789, trust's first-party lines shrink by exactly 
 count; `map --dry-run` moves a cross-crate import to `indexer/src/storage_port.rs`; leveldb
 byte-stable bar the permitted clause. Cycle 3 fixed a builder-caught honesty defect (a storage
 read failure rendered as "older daemon — reindex"). Four additive wire fields.
+SHIPPED: DAEMON-RESIDUALS-2 increment 1 (2026-09-06, 255b315, 4 cycles; DR-1 = B by human):
+migration 035 adds the four single-column FK-child indexes with a schema-derived completeness
+gate; the EXPLAIN harness now ASSERTS SCAN-before/SEARCH-after; chunked per-snapshot prune
+with the write slot released between chunks (per-chunk atomicity documented truthfully and
+trigger-tested — the old doc claimed single-transaction all-or-nothing) and the maintenance
+cache_size (restore failure surfaced, not swallowed); retention BENCHMARK GATE (3×1,200-node
+snapshots pruned in 0.108 s under a 10 s bound; the same shape took 374 s before). MEASURED
+insert-path cost on a real repo-graph index: +0.46 s (+5.1%, single run, noisy; synthetic
++14.3%), store +7.0 MiB (+2.7%). Increment 2 = DAEMON-RESIDUALS-2B (rebuild path +
+`maintenance rebuild`, snapshot cap + prune-on-commit, time budget → rebuild, doctor fields)
+launched next; JAVA-1 follows.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
