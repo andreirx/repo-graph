@@ -454,6 +454,20 @@ insert-path cost on a real repo-graph index: +0.46 s (+5.1%, single run, noisy; 
 +14.3%), store +7.0 MiB (+2.7%). Increment 2 = DAEMON-RESIDUALS-2B (rebuild path +
 `maintenance rebuild`, snapshot cap + prune-on-commit, time budget → rebuild, doctor fields)
 launched next; JAVA-1 follows.
+DAEMON-RESIDUALS-2B (increment 2) cycle 1 (2026-09-06): SHIPPED the observability part
+(600da87 — doctor renders the prunable share with its basis and the last-pass duration);
+the builder STOPPED on the rest, correctly: (i) the snapshot cap + prune-on-commit ALREADY
+EXIST — every index/refresh commit chains enrich → seed → retention asynchronously
+(dispatch.rs finish_write_with_maintenance) and the keep-set is already current + parent
+(retention/classify.rs) — production reached 29 snapshots because the prune never FINISHED,
+which 035 fixed; a synchronous prune at commit would break the frozen "never on the
+foreground path" invariant for no outward gain; (ii) the rebuild path + time-budget → rebuild
+is a safety net whose premise (a prune that cannot keep up) the diagnosis removed, and it
+costs a ~40-table filtered copy + atomic file swap under the writer guard — a new corruption
+surface. DECISION surfaced to the human: A keep the rebuild machinery (own slice, swap
+discipline ratified first) vs B drop it — prove the async cap on a real multi-snapshot store
+with 035, doctor names the manual rebuild when a pass exceeds its budget. Operator
+recommendation B. IMPORT-RESOLUTION-JAVA-1 launched meanwhile (tree free).
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
