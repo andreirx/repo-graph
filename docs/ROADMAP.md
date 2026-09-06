@@ -430,7 +430,25 @@ one-file causes (docs kind order/"license"=has-header; boundaries groups never r
 line; not-found path passes repo_uid None; doctor seed probe always passed; SMOKE_SKIP never
 appends to SKIPPED_REPOS). G. by-design renderings dropping the qualifier (check `ceiling`
 marker dropped at the CLI DTO; trust root posture MEET over a dev-only LiveGraph; dead exit 2
-frozen). Cause-cut slices proposed to the human — see the audit doc. KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
+frozen). Cause-cut slices proposed to the human — see the audit doc.
+RATIFIED (human 2026-09-06): fix at the cause, never a query-time gate or zero-state wording
+over a known index-time defect ("no reindex is not a reward"). ORDER: IMPORT-RESOLUTION-RUST-1
+→ IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 →
+SEED-CHUNK-3 → AUDIT5-MINORS-1 → EXIT-CODES-1 (specs `docs/slices/<name>.md`; the two
+IMPORT-RESOLUTION specs follow a seam investigation). G1 (check verdict qualifier) and G2
+(LiveGraph residency) DROPPED as instrument navel-gazing — "the map is not the territory";
+the constant LiveGraph posture lines leave the human trust output (AUDIT5-MINORS-1 F4).
+DAEMON-RESIDUALS-2 cycle 1 (2026-09-06): the builder MEASURED the retention mechanism — the
+FK cascade's per-node child lookups (edges.source/target_node_uid, unresolved_edges.
+source_node_uid, nodes.parent_node_uid) are full SCANs because every index is composite
+with snapshot_uid leading → O(nodes × child rows) per snapshot (68 MB toy: 374 s; 512 MB
+cache 265 s; FK-OFF explicit deletes 0.52 s; single-column FK indexes 0.84 s). This
+reconciles the 2026-09-05 retraction: the indexes EXIST but do not serve the cascade.
+BLOCKED on DR-1 (FK-off explicit closure + guard vs additive FK indexes) — human ruling
+pending; operator rulings: the diagnosis harness asserts its plans; the slice splits into
+increment 1 (mechanism + guard/index + benchmark gate) and increment 2 (rebuild path +
+prevention set); DAEMON-RESIDUALS-3 follows. Next horizon (human): how a diff maps to
+deltas in the in-memory representation and in SQLite — read-only characterisation launched. KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
 discrimination, django boundaries zero-state (what cycles should print), map --dry-run cap
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
