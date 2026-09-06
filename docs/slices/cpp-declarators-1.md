@@ -100,6 +100,18 @@ Two defects, one extractor family, both field-visible on v0.17.0:
    IMPLEMENTS/INSTANTIATES resolved-edge count before/after (expect a large rise — state
    the number). Non-C/C++ repos byte-stable (repo-graph, FRAKTAG, django orient).
 
+6. **C++ inheritance edges resolve (AMENDED 2026-09-06, cycle-1 finding — the root-cause
+   report's one UNDETERMINED).** The C++ extractor emits `: public Base` as `Implements` targeting
+   CLASS/STRUCT nodes, but `indexer/src/resolver.rs::filter_by_edge_affinity` keeps only
+   `subtype == "INTERFACE"` candidates for `Implements` BEFORE the singleton test — so every C++
+   inheritance edge was dropped by AFFINITY, not (only) by declaration ambiguity; §2.3's "restores
+   the inheritance edges" rested on that unverified premise. RULED (operator, mapped outward: a
+   user asking `explain CGHeroInstance` / the type hierarchy on any C++ repo gets real base
+   classes instead of none): for edges whose provenance is the C/C++ extractor, `Implements`
+   affinity admits CLASS and STRUCT (C++ "implements" IS inheritance); all other languages'
+   affinity is byte-identical (regression test: a TS `implements` edge still admits INTERFACE
+   only). Then the decl filter and the singleton test apply as §2.3 states.
+
 ## 3. Stop conditions
 
 Frozen: storage schema SHAPE (metadata_json keys are additive; no new columns), exit codes,
