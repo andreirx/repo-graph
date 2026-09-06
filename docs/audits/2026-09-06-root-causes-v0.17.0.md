@@ -611,3 +611,11 @@ project_surfaces.metadata_json.lineStart (express_detector.rs:264, :404-413). Bl
 threaded only the boundary_interaction_surfaces family). Fix = one expression reading metadata lineStart; no
 schema change, no reindex. VERIFY: http_boundary_read.rs:498-530 test helper; FRAKTAG `surfaces list` →
 `server.ts:45 [provider]`.
+
+### §C addendum (2026-09-06, CPP-DECLARATORS-1 cycle 1) — the UNDETERMINED in D4(d) is DETERMINED
+`indexer/src/resolver.rs::filter_by_edge_affinity` keeps only `subtype == "INTERFACE"` candidates for
+`Implements` BEFORE `pick_unambiguous`'s singleton test; the C++ extractor emits `: public Base` as
+`Implements` targeting CLASS/STRUCT nodes. So EVERY C++ inheritance edge was dropped by AFFINITY —
+independent of the 70-forward-decl ambiguity. Two causes stacked: affinity (never worked for C++) then
+ambiguity. Ruled (operator, mapped outward): provenance-gated C++ affinity admits CLASS/STRUCT
+(spec §2.6); other languages byte-identical with a regression test.
