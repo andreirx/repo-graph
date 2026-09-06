@@ -42,7 +42,7 @@ nothing computes it. Never worked (e01386f, fda7adc).
    resolve; a bare `Recover` on leveldb stays ambiguous (4 candidates → 2 after
    CPP-DECLARATORS-1's decl filter → still 2: DBImpl vs VersionSet).
 3. **Decl/def tie-break.** When the candidates differ only by declaration-vs-definition
-   (the CPP-DECLARATORS-1 flag), the definition wins; `callers leveldb::DBImpl::Recover` no
+   (the CPP-DECLARATORS-1 flag), the definition wins; and when the exact-name candidates are exactly one TYPE plus its constructors, the type wins with a rendered pointer to the constructor (rule ratified in CPP-DECLARATORS-1 §2.3, 2026-09-07 — this slice inherits it in the shared resolver, it does not re-decide it); `callers leveldb::DBImpl::Recover` no
    longer says "ambiguous … hint: use qualified name" for a qualified name.
 4. **A miss is not "Confidence: high".** `build_no_match` and the ambiguous arm derive their
    confidence from the same source the resolved path uses, or state `low`; the render never
