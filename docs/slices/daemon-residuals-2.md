@@ -112,8 +112,16 @@ startup readers held the coordinator, then `index`), as ONE daemon operation:
   FIFO-fairly, bounces with a NAMED Busy if a read or a detached index holds it (the
   2026-09-04 hazard: an index persisting into the old store — `doctor` visibility of it is
   part of this verb's proof), never deletes under a reader;
-- drops the store file(s) atomically for that repo only, then indexes from scratch on the same
-  connection lifecycle `index` uses; reports the new snapshot uid, files, symbols, duration;
+- retires the repo's store files (`.db`, `-wal`, `-shm`, `.vec`) and indexes from scratch on the
+  same connection lifecycle `index` uses; reports the new snapshot uid, files, symbols, duration.
+  AMENDED 2026-09-06 (cycle-2 finding; HUMAN RULING "detect and name"): the retire is NOT
+  atomic across the multi-file store and the product does not claim it is. The guarantee is
+  **never serve a partial store**: a sentinel `<store>.rebuilding` is written (and synced) BEFORE
+  the first rename and removed AFTER the reindex commits and the retired copies are discarded;
+  any open of a store whose sentinel is present REFUSES with a NAMED reason ("rebuild
+  interrupted — run `rmap repo rebuild <path>` again") and `doctor` renders the same; a crash
+  mid-rebuild costs the user one re-run of the verb they invoked. No startup recovery protocol,
+  no store-layout migration (the reviewer's heavier options were declined on blast radius).
 - exit/`--json` shape additive; wire: an additive method mirroring `maintenance_gc`'s
   registration (the wire envelope is untouched).
 Outward surface: the recovery that took an operator with shell access and a retry loop becomes
