@@ -1,0 +1,8 @@
+# Fixture: two-crate Cargo workspace for IMPORT-RESOLUTION-RUST-1.
+# Crate `a` has a path dependency on crate `b` and imports across the
+# crate boundary (`use b::util::helper` and `use b::Thing`). Proves the
+# resolver's Rust-crate import stage maps a non-relative `use <crate>::…`
+# to the file that defines it.
+[workspace]
+members = ["a", "b"]
+resolver = "2"

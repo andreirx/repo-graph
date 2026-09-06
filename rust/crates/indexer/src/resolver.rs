@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 
+use repo_graph_classification::canonicalize_cargo_package_name;
 use repo_graph_classification::types::{
     ImportBinding, ImportKind, SourceLocation, UnresolvedEdgeCategory,
 };
@@ -26,6 +27,15 @@ use repo_graph_classification::types::{
 use crate::include_resolver::{IncludeResolutionMap, ResolutionStatus};
 use crate::storage_port::TypeOnlyDisposition;
 use crate::types::{EdgeType, ExtractedEdge, Resolution};
+
+/// Provenance prefix of the Rust extractor (`ExtractedEdge.extractor`), whose
+/// value is `rust-core:<version>` (see `rust-extractor::EXTRACTOR_NAME`). The
+/// declared-Rust-crate import stage is gated to edges carrying this prefix so a
+/// non-Rust IMPORTS edge cannot resolve to a `.rs` file. Prefix (not the exact
+/// version string) so the gate survives extractor version bumps. The indexer does
+/// not depend on the rust-extractor crate (no dependency edge); the string is the
+/// stable cross-boundary contract already present on every extracted edge.
+const RUST_EXTRACTOR_PREFIX: &str = "rust-core:";
 
 // ── Resolution outcome ───────────────────────────────────────────
 
@@ -80,6 +90,13 @@ pub struct ResolverIndex {
     pub file_to_module: HashMap<String, String>,
     /// v1.1 include resolver with conventional + configured roots.
     pub include_resolver: Option<IncludeResolutionMap>,
+    /// IMPORT-RESOLUTION-RUST-1 §2.2: declared Rust crate import-name → crate root
+    /// (repo-relative). Keyed by the SHARED canonical form
+    /// (`canonicalize_cargo_package_name`), so an import spelled `repo_graph_storage`
+    /// matches a package declared `repo-graph-storage`. Built by the orchestrator from
+    /// `IndexOptions.declared_modules` (cargo ecosystem only). Empty when no crates were
+    /// declared → the Rust-crate import stage is a no-op.
+    pub rust_crate_roots: HashMap<String, String>,
 }
 
 /// A resolved edge — the symbolic `target_key` has been replaced
@@ -288,12 +305,22 @@ fn resolve_target(
             // Fallback: v1.0 same-directory resolution + other stages.
             let tu_includes =
                 source_file_uid.and_then(|fuid| index.per_file_include_resolution.get(fuid));
+            // Gate the declared-Rust-crate stage (3.5) to edges emitted by the Rust
+            // extractor. In a hybrid repo a non-Rust IMPORTS edge (e.g. a TS
+            // `import cli from …` or a C++ `namespace::` reference) whose first segment
+            // happens to match a declared Cargo package name would otherwise resolve to
+            // that crate's `.rs` file, changing non-Rust extractor behaviour and
+            // violating the frozen byte-stability invariant. `ExtractedEdge.extractor`
+            // is the existing provenance fact; the Rust family is `rust-core:<ver>`.
+            let is_rust_import = edge.extractor.starts_with(RUST_EXTRACTOR_PREFIX);
             match resolve_import_target(
                 &edge.target_key,
                 &index.nodes_by_stable_key,
                 &index.file_resolution,
                 &edge.repo_uid,
                 tu_includes,
+                &index.rust_crate_roots,
+                is_rust_import,
             ) {
                 Some(uid) => TargetResolution::Resolved(uid),
                 None => TargetResolution::Unresolved,
@@ -379,6 +406,8 @@ fn resolve_import_target(
     file_resolution: &HashMap<String, String>,
     repo_uid: &str,
     tu_include_resolution: Option<&HashMap<String, String>>,
+    rust_crate_roots: &HashMap<String, String>,
+    is_rust_import: bool,
 ) -> Option<String> {
     // Stage 1: direct stable-key lookup.
     if let Some(node) = nodes_by_stable_key.get(target_key) {
@@ -401,6 +430,25 @@ fn resolve_import_target(
         }
     }
 
+    // Stage 3.5 (IMPORT-RESOLUTION-RUST-1 §2.2): declared Rust crate import.
+    // A non-relative `use <crate>::…` was emitted with the raw specifier as its
+    // target_key (`b::util`, `repo_graph_storage::crud`). Map its leading crate segment
+    // to a declared crate root and generate candidate FILE keys under `<root>/src/`.
+    // Runs ONLY after stages 1–3 miss (they never map a crate name to a directory), and
+    // BEFORE the repo-prefix fallback (which is skipped anyway for a `::` key at stage 4).
+    // Gated to Rust-extractor edges (`is_rust_import`): a non-Rust IMPORTS edge whose
+    // leading segment matches a declared Cargo crate must NOT resolve to a `.rs` file
+    // (frozen non-Rust byte-stability invariant).
+    if is_rust_import {
+        if let Some(resolved_key) =
+            resolve_rust_crate_import(target_key, rust_crate_roots, file_resolution, repo_uid)
+        {
+            if let Some(node) = nodes_by_stable_key.get(&resolved_key) {
+                return Some(node.node_uid.clone());
+            }
+        }
+    }
+
     // Stage 4: repo-prefix fallback for bare header names.
     if !target_key.contains(':') {
         let constructed_key = format!("{}:{}:FILE", repo_uid, target_key);
@@ -415,6 +463,73 @@ fn resolve_import_target(
     }
 
     None
+}
+
+/// IMPORT-RESOLUTION-RUST-1 §2.2: resolve a non-relative Rust `use <crate>::…` IMPORTS
+/// target_key to the FILE stable key that defines it, via the declared-crate catalog.
+///
+/// PURE candidate generation: `(target_key, catalog, file set, repo_uid) → Option<file
+/// stable key>`. No I/O. The `file set` is the identity `file_resolution` map (a key is
+/// present iff that FILE exists in the snapshot); the returned value is the resolved FILE
+/// stable key the caller looks up in `nodes_by_stable_key`.
+///
+/// For `first::rest…` where `first` (canonicalised `_`→`-`) names a declared crate and
+/// `segs` is the remainder (the path minus the crate name), candidates are generated under
+/// `<crate_root>/src/` in this order — `<segs>.rs`, `<segs>/mod.rs`, then the last segment
+/// is dropped and the pair repeats, ending at the crate entrypoint `src/lib.rs` (a bin-only
+/// crate has no `lib.rs`, so `src/main.rs` is tried next). The FIRST candidate present in
+/// the file set wins. The crate's own `crate::`/`super::`/`self::` paths are relative and
+/// were already turned into `:FILE` keys by the extractor — they never reach here.
+fn resolve_rust_crate_import(
+    target_key: &str,
+    rust_crate_roots: &HashMap<String, String>,
+    file_resolution: &HashMap<String, String>,
+    repo_uid: &str,
+) -> Option<String> {
+    if rust_crate_roots.is_empty() {
+        return None;
+    }
+    let mut segs = target_key.split("::");
+    let first = segs.next()?;
+    if first.is_empty() {
+        return None;
+    }
+    let canonical = canonicalize_cargo_package_name(first);
+    let crate_root = rust_crate_roots.get(&canonical)?;
+
+    // `<crate_root>/src`, collapsing a "." (or empty) root crate to a bare `src`.
+    let src_prefix = if crate_root == "." || crate_root.is_empty() {
+        "src".to_string()
+    } else {
+        format!("{}/src", crate_root)
+    };
+
+    let probe = |rel_path: &str| -> Option<String> {
+        let key = format!("{}:{}:FILE", repo_uid, rel_path);
+        file_resolution.get(&key).cloned()
+    };
+
+    let rest: Vec<&str> = segs.collect();
+    let mut remaining = rest.as_slice();
+    loop {
+        if remaining.is_empty() {
+            // Crate entrypoint: lib.rs (library) then main.rs (bin-only).
+            for entry in ["lib.rs", "main.rs"] {
+                if let Some(hit) = probe(&format!("{}/{}", src_prefix, entry)) {
+                    return Some(hit);
+                }
+            }
+            return None;
+        }
+        let joined = remaining.join("/");
+        if let Some(hit) = probe(&format!("{}/{}.rs", src_prefix, joined)) {
+            return Some(hit);
+        }
+        if let Some(hit) = probe(&format!("{}/{}/mod.rs", src_prefix, joined)) {
+            return Some(hit);
+        }
+        remaining = &remaining[..remaining.len() - 1];
+    }
 }
 
 // ── CALLS resolution ─────────────────────────────────────────────
@@ -1228,6 +1343,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1260,6 +1376,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -1287,6 +1404,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -1305,6 +1423,206 @@ mod tests {
         );
     }
 
+    // ── resolve_rust_crate_import (IMPORT-RESOLUTION-RUST-1 §2.2) ─────
+
+    /// Build a file_resolution identity map for a set of repo-relative paths (mirrors
+    /// `build_file_resolution_map`'s identity entries, which is all this stage probes).
+    fn file_set(paths: &[&str], repo_uid: &str) -> HashMap<String, String> {
+        paths
+            .iter()
+            .map(|p| {
+                let k = format!("{}:{}:FILE", repo_uid, p);
+                (k.clone(), k)
+            })
+            .collect()
+    }
+
+    fn crate_roots(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(n, r)| (n.to_string(), r.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn rust_crate_import_leaf_module_file() {
+        // `use b::util::helper` → target_key "b::util" → b/src/util.rs.
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/util.rs", "b/src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("b::util", &roots, &files, "r1"),
+            Some("r1:b/src/util.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_bare_crate_hits_lib_rs() {
+        // `use b::Thing` → target_key "b" → the crate entrypoint b/src/lib.rs.
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/util.rs", "b/src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("b", &roots, &files, "r1"),
+            Some("r1:b/src/lib.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_nested_prefers_mod_rs() {
+        // `crud/foo` with only `crud/mod.rs` present: the leaf `crud/foo.rs` and
+        // `crud/foo/mod.rs` miss, then the path shortens to `crud` → `crud/mod.rs`.
+        let roots = crate_roots(&[("repo-graph-storage", "rust/crates/storage")]);
+        let files = file_set(
+            &[
+                "rust/crates/storage/src/crud/mod.rs",
+                "rust/crates/storage/src/lib.rs",
+            ],
+            "r1",
+        );
+        // Import path uses underscores; canonicalisation maps it to the declared name.
+        assert_eq!(
+            resolve_rust_crate_import("repo_graph_storage::crud::foo", &roots, &files, "r1"),
+            Some("r1:rust/crates/storage/src/crud/mod.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_shortened_to_parent_file() {
+        // `crud::foo` where only `crud.rs` exists: leaf misses, shorten to `crud` → crud.rs.
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/crud.rs", "b/src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("b::crud::foo", &roots, &files, "r1"),
+            Some("r1:b/src/crud.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_canonicalisation_underscore_to_hyphen() {
+        // Declared `repo-graph-storage`, imported `repo_graph_storage`.
+        let roots = crate_roots(&[("repo-graph-storage", "s")]);
+        let files = file_set(&["s/src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("repo_graph_storage", &roots, &files, "r1"),
+            Some("r1:s/src/lib.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_root_crate_uses_bare_src() {
+        // A `.`-rooted crate: candidates live under bare `src/`, not `./src/`.
+        let roots = crate_roots(&[("thing", ".")]);
+        let files = file_set(&["src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("thing", &roots, &files, "r1"),
+            Some("r1:src/lib.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_bin_only_falls_back_to_main_rs() {
+        // No lib.rs present → the entrypoint probe falls through to main.rs.
+        let roots = crate_roots(&[("cli", "cli")]);
+        let files = file_set(&["cli/src/main.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("cli", &roots, &files, "r1"),
+            Some("r1:cli/src/main.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_unknown_crate_is_none() {
+        // `serde` is an external dep, not a declared workspace crate → unresolved.
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("serde::Serialize", &roots, &files, "r1"),
+            None
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_unknown_module_falls_back_to_crate_root() {
+        // §2.2 candidate order ENDS at the crate entrypoint: `use b::Thing` where `Thing`
+        // is a type in lib.rs (target_key "b") — and equally an unknown submodule path —
+        // shortens to the crate root and resolves to lib.rs. This is intended: it points
+        // the agent at the right crate even when the exact module file can't be pinned.
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/lib.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("b::missing", &roots, &files, "r1"),
+            Some("r1:b/src/lib.rs:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_no_entrypoint_is_none() {
+        // Declared crate, target module absent AND no lib.rs/main.rs entrypoint present →
+        // genuinely unresolved (the probe exhausts every candidate).
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/util.rs"], "r1");
+        assert_eq!(
+            resolve_rust_crate_import("b::missing", &roots, &files, "r1"),
+            None
+        );
+    }
+
+    /// Build a `nodes_by_stable_key` map with a FILE node for each given file stable key
+    /// (the stage returns a FILE key that `resolve_import_target` looks up here).
+    fn file_nodes(file_keys: &[&str]) -> HashMap<String, ResolverNode> {
+        file_keys
+            .iter()
+            .map(|k| {
+                (
+                    k.to_string(),
+                    ResolverNode {
+                        node_uid: format!("uid::{}", k),
+                        stable_key: k.to_string(),
+                        name: k.to_string(),
+                        qualified_name: None,
+                        kind: "FILE".into(),
+                        subtype: None,
+                        file_uid: Some(k.to_string()),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stage_3_5_gated_off_for_non_rust_imports() {
+        // Review-2 item (1) / operator cycle-3 note (1): in a hybrid repo a non-Rust
+        // IMPORTS edge whose leading segment matches a DECLARED Cargo crate with a real
+        // candidate file must NOT resolve to that `.rs` file. The declared-crate stage is
+        // gated on Rust-extractor provenance; the frozen non-Rust byte-stability invariant
+        // depends on this.
+        let roots = crate_roots(&[("b", "b")]);
+        let files = file_set(&["b/src/util.rs", "b/src/lib.rs"], "r1");
+        let nodes = file_nodes(&["r1:b/src/util.rs:FILE", "r1:b/src/lib.rs:FILE"]);
+
+        // Non-Rust edge (is_rust_import = false): stage 3.5 does not run → unresolved,
+        // even though the crate + candidate file exist.
+        assert_eq!(
+            resolve_import_target("b::util", &nodes, &files, "r1", None, &roots, false),
+            None,
+            "a non-Rust IMPORTS edge must not resolve via the declared-Rust-crate stage"
+        );
+
+        // Control: the SAME inputs from a Rust edge (is_rust_import = true) DO resolve —
+        // proving the None above is the gate, not a missing fixture.
+        assert_eq!(
+            resolve_import_target("b::util", &nodes, &files, "r1", None, &roots, true),
+            Some("uid::r1:b/src/util.rs:FILE".to_string()),
+            "the identical Rust IMPORTS edge must resolve to the defining file"
+        );
+    }
+
+    #[test]
+    fn rust_crate_import_empty_catalog_is_noop() {
+        let roots = HashMap::new();
+        let files = file_set(&["b/src/lib.rs"], "r1");
+        assert_eq!(resolve_rust_crate_import("b", &roots, &files, "r1"), None);
+    }
+
     // ── Distinctive fallback branches ────────────────────────
 
     #[test]
@@ -1321,6 +1639,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1351,6 +1670,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1387,6 +1707,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1428,6 +1749,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -1487,6 +1809,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         // The target module exports "readFile", NOT "rf".
         index
@@ -1550,6 +1873,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         // The target module exports "helper".
         index
@@ -1620,6 +1944,7 @@ mod tests {
             stable_key_to_uid: HashMap::new(),
             file_to_module: HashMap::new(),
             include_resolver: None,
+            rust_crate_roots: HashMap::new(),
         };
         // There exists a "readFile" function globally.
         index

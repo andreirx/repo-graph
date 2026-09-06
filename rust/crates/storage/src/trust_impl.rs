@@ -126,7 +126,10 @@ fn load_file_signals(
 /// as a repo-owned `foo-bar` (the review-0 defect). Not a name-prefix heuristic — an exact
 /// normalized equality between two parsed-manifest facts.
 fn canonicalize_cargo_name(name: &str) -> String {
-    name.replace('_', "-")
+    // IMPORT-RESOLUTION-RUST-1 §2.3: one canonicalisation, defined in `classification`
+    // (the crate storage already depends on). This local alias keeps the cargo-only
+    // matcher's call sites readable; the `_`→`-` implementation lives in exactly one place.
+    repo_graph_classification::canonicalize_cargo_package_name(name)
 }
 
 /// TRUST-FIRSTPARTY-1: classifies a resolved dependency name as FIRST-PARTY (a package THIS repo's

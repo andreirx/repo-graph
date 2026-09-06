@@ -1870,6 +1870,8 @@ fn seam_cycles_response(
         cycles,
         ts_type_only_caveat: false,
         test_composition_note: None,
+        module_count: None,
+        module_edge_count: None,
     }
 }
 
@@ -2026,6 +2028,8 @@ fn seam_walk_cycles_response(
         cycles: vec![cycle],
         ts_type_only_caveat: false,
         test_composition_note: None,
+        module_count: None,
+        module_edge_count: None,
     }
 }
 
@@ -2179,6 +2183,8 @@ fn assert_type_only_surfaces_render_identically(v: crate::presentation::cycles::
         count: 1,
         ts_type_only_caveat: false,
         test_composition_note: None,
+        module_count: None,
+        module_edge_count: None,
         cycles: vec![Cycle {
             nodes: vec![
                 CycleNode {

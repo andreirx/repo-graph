@@ -111,6 +111,10 @@ perf-trace = []
 
 [dev-dependencies]
 tempfile = "3"
+# IMPORT-RESOLUTION-RUST-1: the workspace-fixture integration test asserts the
+# DERIVED cross-module edge through the production module-graph fact path. Test-only
+# (dev) edge — module-queries does not depend on repo-index, so no runtime cycle.
+repo-graph-module-queries = { path = "../module-queries" }
 # Raw-row inspection for the EC-1 M-3a parity suite
 # (tests/call_aggregate_parity.rs): the persisted-vs-live comparison
 # reads the SQLite artifact directly through a second connection —

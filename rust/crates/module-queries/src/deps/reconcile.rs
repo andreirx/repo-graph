@@ -255,7 +255,8 @@ fn normalize_self_name(name: &str, ecosystem: &str) -> String {
             }
             out
         }
-        "cargo" => name.replace('_', "-"),
+        // IMPORT-RESOLUTION-RUST-1 §2.3: the single shared `_`→`-` canonicalisation.
+        "cargo" => repo_graph_classification::canonicalize_cargo_package_name(name),
         _ => name.to_string(),
     }
 }

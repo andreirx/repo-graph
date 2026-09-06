@@ -709,6 +709,126 @@ fn index_rust_crate_receives_cargo_deps() {
     }
 }
 
+// ── Cross-crate import resolution (IMPORT-RESOLUTION-RUST-1) ──────
+
+fn rust_workspace_fixture_path() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("rust")
+        .join("workspace")
+}
+
+/// A non-relative `use other_crate::…` resolves to the file that defines it, the derived
+/// cross-module edge appears, and no import lands in `imports_file_not_found`.
+#[test]
+fn cross_crate_use_resolves_to_defining_file() {
+    use repo_graph_classification::types::UnresolvedEdgeCategory;
+    use repo_graph_trust::storage_port::{CountByClassificationInput, TrustStorageRead};
+
+    let repo_path = rust_workspace_fixture_path();
+    assert!(
+        repo_path.join("a/src/lib.rs").exists(),
+        "workspace fixture not found at {:?}",
+        repo_path
+    );
+
+    let mut storage = StorageConnection::open_in_memory().unwrap();
+    let result = index_into_storage(
+        &repo_path,
+        &mut storage,
+        "rust-workspace",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
+
+    // ── (1) File-level resolution: both `use b::…` edges hit b's files ──
+    // `use b::util::helper` → b/src/util.rs ; `use b::Thing` → b/src/lib.rs.
+    let imports = storage
+        .get_resolved_imports_for_snapshot(&result.snapshot_uid)
+        .unwrap();
+    let a_lib = "rust-workspace:a/src/lib.rs";
+    let targets: Vec<&str> = imports
+        .iter()
+        .filter(|i| i.source_file_uid == a_lib)
+        .map(|i| i.target_file_uid.as_str())
+        .collect();
+    assert!(
+        targets.contains(&"rust-workspace:b/src/util.rs"),
+        "`use b::util::helper` must resolve to b/src/util.rs; resolved cross-crate targets = {:?}",
+        targets
+    );
+    assert!(
+        targets.contains(&"rust-workspace:b/src/lib.rs"),
+        "`use b::Thing` must resolve to b/src/lib.rs; resolved cross-crate targets = {:?}",
+        targets
+    );
+
+    // ── (2) Nothing lands in imports_file_not_found ──
+    let unresolved_imports: u64 = TrustStorageRead::count_unresolved_edges_by_classification(
+        &storage,
+        &CountByClassificationInput {
+            snapshot_uid: result.snapshot_uid.clone(),
+            filter_categories: vec![UnresolvedEdgeCategory::ImportsFileNotFound],
+        },
+    )
+    .unwrap()
+    .iter()
+    .map(|row| row.count)
+    .sum();
+    assert_eq!(
+        unresolved_imports, 0,
+        "no IMPORTS edge should remain imports_file_not_found after crate resolution"
+    );
+
+    // ── (3) One derived MODULE→MODULE edge a → b ──
+    let facts =
+        repo_graph_module_queries::load_module_graph_facts(&storage, &result.snapshot_uid).unwrap();
+    let ab_edges: Vec<(&str, &str)> = facts
+        .edges
+        .iter()
+        .map(|e| {
+            (
+                e.source_canonical_path.as_str(),
+                e.target_canonical_path.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        ab_edges,
+        vec![("a", "b")],
+        "expected exactly one cross-module edge a → b, got {:?}",
+        ab_edges
+    );
+
+    // ── (4) Cycles response shape: the §4 zero-state clause the fixture drives ──
+    // IMPORT-RESOLUTION-RUST-1 §4 (operator ruling cycle-4, `cycles-module-count-semantics` = C):
+    // the daemon's SQLite cycles handler builds `module_count` / `module_edge_count` from EXACTLY
+    // these two storage reads (dispatch.rs:2558-2559). Asserting them here proves the fixture
+    // yields (4, 1) through the real production reads, so the rendered zero-state is
+    // "over 4 directory groups / 1 resolved import edge" (the cycles-presenter unit test
+    // `zero_state_renders_two_crate_fixture_clause_verbatim` pins the rendering of those numbers).
+    // 4 = the per-directory MODULE nodes `a`, `a/src`, `b`, `b/src` that `find_cycles` runs its SCC
+    // over — the same population `stats` prints as "directory groups"; 1 = the resolved a → b edge.
+    let module_count = storage
+        .module_qualified_names(&result.snapshot_uid)
+        .unwrap()
+        .len();
+    assert_eq!(
+        module_count, 4,
+        "cycles module_count = per-directory MODULE nodes (a, a/src, b, b/src)"
+    );
+    let module_edge_count = storage
+        .module_import_edges(&result.snapshot_uid)
+        .unwrap()
+        .len();
+    assert_eq!(
+        module_edge_count, 1,
+        "exactly one resolved cross-module import edge feeds the cycles SCC graph"
+    );
+}
+
 // ── Python extraction ────────────────────────────────────────────
 
 fn python_fixture_path() -> PathBuf {

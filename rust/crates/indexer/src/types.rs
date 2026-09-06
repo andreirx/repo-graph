@@ -524,6 +524,43 @@ pub struct IndexOptions<'a> {
     /// these are checked BEFORE conventional roots (include/, inc/,
     /// src/include/). Per c-include-resolution-v1.1.md.
     pub c_include_roots: Vec<String>,
+    /// IMPORT-RESOLUTION-RUST-1 §2.1: the declared-module catalog, carried as RAW data
+    /// across the compose→indexer boundary so the resolver's Rust-crate import stage can
+    /// map a non-relative `use <crate>::…` to the file that defines it. `compose.rs` fills
+    /// this from the Cargo manifests it already parsed (BOTH the index and refresh paths);
+    /// the resolver builds a canonical-name → crate-root lookup from it. No manifest structs
+    /// and no storage rows cross the boundary — just [`DeclaredModule`] (boundary rule).
+    /// Empty for callers that declare no modules; a non-cargo `ecosystem` is ignored by the
+    /// (cargo-only) stage this slice ships (the field is the named extension point for the
+    /// ratified Java/C follow-on slices).
+    pub declared_modules: Vec<DeclaredModule>,
+}
+
+/// IMPORT-RESOLUTION-RUST-1 §2.1: a declared module, as RAW data crossing the
+/// compose→indexer boundary. Deliberately NOT a manifest struct or storage row — the
+/// three scalars the resolver's declared-module import stage needs, nothing more.
+///
+/// - what: the boundary DTO for one declared module (currently one producer: `compose.rs`
+///   from parsed Cargo manifests).
+/// - concrete current users: filled by `repo_index::compose`; consumed by the indexer
+///   resolver's Rust-crate import stage (`resolver::resolve_rust_crate_import`).
+/// - axis of variation: `ecosystem` — the field that lets the ratified next slices (Java,
+///   then C) add their own declared-module resolution without a new boundary type. Kept a
+///   `String` because it is raw boundary data, not a closed domain sum the core matches on.
+/// - rejected simpler: threading `CargoModule` directly (a manifest struct crossing the
+///   boundary — forbidden by the boundary rule) or the storage candidate rows (persisted
+///   only AFTER the snapshot is READY, unavailable at resolution time).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredModule {
+    /// Package ecosystem. `"cargo"` for this slice; the stage acts only on that value.
+    pub ecosystem: String,
+    /// The import-facing module name (Cargo package name, or `[lib] name` when it
+    /// overrides). Matched against an import specifier's first segment THROUGH the shared
+    /// `_`/`-` canonicalisation, so either separator spelling resolves.
+    pub name: String,
+    /// Crate root directory, repo-relative (e.g. `"rust/crates/storage"`, or `"."` for a
+    /// root crate). Candidate FILE keys are generated under `<canonical_root>/src/`.
+    pub canonical_root: String,
 }
 
 /// Result of contract schema extraction (CS-1+).

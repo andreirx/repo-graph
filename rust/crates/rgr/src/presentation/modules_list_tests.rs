@@ -77,6 +77,8 @@ fn sample_list_response() -> ModulesListResponse {
                 import_count: 10,
             },
         ]),
+        unresolved_import_count: Some(0),
+        unresolved_import_degraded: None,
     }
 }
 
@@ -89,7 +91,56 @@ fn sample_empty_list_response() -> ModulesListResponse {
         http_boundary_link_count: Some(0),
         http_boundary_link_degraded: None,
         edges: Some(vec![]),
+        unresolved_import_count: Some(0),
+        unresolved_import_degraded: None,
     }
+}
+
+/// A `modules list` response shaped like the two-crate Rust fixture (`a` uses `b` via two
+/// `use b::…` imports that both resolve into `b`): exactly one cross-module edge `a → b`
+/// with 2 file-level imports, and zero unresolved imports.
+fn two_crate_fixture_response() -> ModulesListResponse {
+    ModulesListResponse {
+        command: "modules list".to_string(),
+        repo: "rust-workspace".to_string(),
+        snapshot: "snap_fixture".to_string(),
+        // The two fixture crates as modules (non-empty results so the renderer reaches the
+        // cross-module edge section rather than the "no modules" early return).
+        results: vec![
+            identity_entry("a", "a", Some("a/Cargo.toml")),
+            identity_entry("b", "b", Some("b/Cargo.toml")),
+        ],
+        http_boundary_link_count: Some(0),
+        http_boundary_link_degraded: None,
+        edges: Some(vec![ModuleEdgeEntry {
+            source: "a".to_string(),
+            target: "b".to_string(),
+            import_count: 2,
+        }]),
+        unresolved_import_count: Some(0),
+        unresolved_import_degraded: None,
+    }
+}
+
+#[test]
+fn two_crate_fixture_renders_a_to_b_edge_verbatim() {
+    // Review-2 item (2) / operator cycle-3 note (2): the two-crate fixture's resolved
+    // cross-module edge must render as `a → b` (U+2192) verbatim, and the count line must
+    // report exactly one cross-module dependency with NO "(M imports unresolved)" clause
+    // (unresolved == 0 → the clause is correctly suppressed).
+    let out = two_crate_fixture_response().render_human();
+    assert!(
+        out.contains("a \u{2192} b (2 file-level imports)"),
+        "expected the fixture edge `a → b (2 file-level imports)` verbatim, got:\n{out}"
+    );
+    assert!(
+        out.contains("1 cross-module dependency detected."),
+        "expected the singular one-edge count line, got:\n{out}"
+    );
+    assert!(
+        !out.contains("imports unresolved"),
+        "unresolved == 0 must suppress the unresolved clause, got:\n{out}"
+    );
 }
 
 /// COHERENCE-2 §2.4: `modules list` renders `(N test)` as a SUBSET of the file total, matching
@@ -288,6 +339,37 @@ fn list_render_http_link_read_degraded_suppresses_meaningless_hint() {
     assert!(
         output.contains("UNKNOWN") && output.contains("degraded"),
         "degraded read shown honestly as unknown:\n{output}"
+    );
+}
+
+/// review-1 honesty fix: a FAILED unresolved-import count read on the CURRENT daemon carries a
+/// degradation reason (`unresolved_import_degraded`) alongside the `None` count. Rendered through
+/// the DTO, the note must state the true read-failure cause and must NOT blame an "older daemon"
+/// or recommend a reindex — a reindex does not fix a storage read error.
+#[test]
+fn list_render_unresolved_read_failure_does_not_blame_older_daemon() {
+    let mut resp = sample_list_response();
+    resp.edges = Some(vec![]); // authoritative KNOWN-zero cross-module deps → zero-state note path
+    resp.http_boundary_link_count = Some(0); // non-degraded HTTP read → reach the unresolved branch
+    resp.unresolved_import_count = None; // read failed → UNKNOWN, never a false zero
+    resp.unresolved_import_degraded =
+        Some("unresolved-import count read failed: database is locked".to_string());
+    let output = resp.render_human();
+    assert!(
+        output.contains("read failed") && output.contains("database is locked"),
+        "must state the true read-failure cause:\n{output}"
+    );
+    assert!(
+        !output.contains("older daemon"),
+        "a current-daemon read failure must NOT be blamed on an older daemon:\n{output}"
+    );
+    assert!(
+        !output.contains("reindex"),
+        "a reindex does not fix a storage read error; must not recommend it:\n{output}"
+    );
+    assert!(
+        !output.contains("Module boundaries may not be meaningful"),
+        "must not claim intra-module when the unresolved count is UNKNOWN:\n{output}"
     );
 }
 
@@ -725,6 +807,8 @@ fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
         http_boundary_link_count: Some(0),
         http_boundary_link_degraded: None,
         edges: Some(vec![]),
+        unresolved_import_count: Some(0),
+        unresolved_import_degraded: None,
     }
 }
 

@@ -271,6 +271,7 @@ pub(crate) mod blast_radius;
 pub mod boundary_evaluator;
 pub(crate) mod boundary_matcher;
 pub mod boundary_parser;
+pub mod cargo_name;
 pub mod coverage_matcher;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
@@ -294,6 +295,7 @@ pub mod weighted_neighbors;
 
 pub use blast_radius::derive_blast_radius;
 pub use boundary_matcher::{compute_matcher_key, match_boundary_facts};
+pub use cargo_name::canonicalize_cargo_package_name;
 pub use framework_boundary::detect_framework_boundary;
 pub use framework_entrypoints::detect_lambda_entrypoints;
 pub use spring_liveness::{classify_spring_liveness, SpringLivenessInference, SpringNodeInput};

@@ -288,6 +288,7 @@ pub fn index_repo<
         hook,
         &empty_resource_keys,
         &options.c_include_roots,
+        &options.declared_modules,
         options.basis_diagnostic.as_ref(),
     ) {
         Ok(mut result) => {
@@ -474,6 +475,7 @@ fn run_pipeline<S: IndexerStoragePort>(
     mut hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
     copied_resource_keys: &HashMap<String, crate::storage_port::CopiedResourceNodeKey>,
     c_include_roots: &[String],
+    declared_modules: &[crate::types::DeclaredModule],
     basis_diagnostic: Option<&serde_json::Value>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
     let now_iso = created_at.to_string();
@@ -870,6 +872,24 @@ fn run_pipeline<S: IndexerStoragePort>(
     let include_resolution_map =
         build_include_resolution_map(all_file_paths, repo_uid, &include_config);
 
+    // IMPORT-RESOLUTION-RUST-1 §2.2: canonical crate import-name → crate root, from the
+    // declared-module catalog carried across the compose→indexer boundary. Keyed by the
+    // SHARED `_`→`-` canonicalisation so `repo_graph_storage` matches `repo-graph-storage`.
+    // Cargo ecosystem only this slice; a later ecosystem's entry is simply not consumed by
+    // the (cargo-only) Rust-crate import stage. On a collision (two declared crates with the
+    // same canonical import name) last-writer-wins is acceptable — the candidate probe still
+    // only resolves to a file that exists.
+    let rust_crate_roots: HashMap<String, String> = declared_modules
+        .iter()
+        .filter(|m| m.ecosystem == "cargo")
+        .map(|m| {
+            (
+                repo_graph_classification::canonicalize_cargo_package_name(&m.name),
+                m.canonical_root.clone(),
+            )
+        })
+        .collect();
+
     let mut index = ResolverIndex {
         nodes_by_stable_key: HashMap::new(),
         nodes_by_name: HashMap::new(),
@@ -879,6 +899,7 @@ fn run_pipeline<S: IndexerStoragePort>(
         stable_key_to_uid: HashMap::new(),
         file_to_module: HashMap::new(),
         include_resolver: Some(include_resolution_map),
+        rust_crate_roots,
     };
 
     for node in &resolver_nodes {
@@ -1929,6 +1950,7 @@ pub fn refresh_repo<
         hook,
         &copied_resource_keys,
         &options.c_include_roots,
+        &options.declared_modules,
         options.basis_diagnostic.as_ref(),
     ) {
         Ok(mut result) => {

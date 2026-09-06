@@ -2603,6 +2603,12 @@ fn serve_cycles_sqlite(
         "count": count,
         "backend_used": "sqlite",
         "fallback_reason": fallback_reason.as_str(),
+        // IMPORT-RESOLUTION-RUST-1 §2.5: the module count and the resolved cross-module import
+        // edge count, so the zero-state can say "over N modules / E resolved import edges"
+        // instead of a bare "no cycles" that hides an EMPTY graph. Both are already in hand
+        // (`qualified`/`module_edges`) — no new read.
+        "module_count": qualified.len(),
+        "module_edge_count": module_edges.len(),
         // The blanket repo-level caveat is RETIRED on the SQLite route (the fact is now computed
         // per cycle); the renderer derives any residual hedge from the per-cycle `type_only` verdicts
         // (a narrowed footer only where genuine Unknown remains).

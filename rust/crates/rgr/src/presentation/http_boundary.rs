@@ -479,7 +479,27 @@ pub(crate) fn render_surfaces_degraded(reason: &str) -> String {
 ///   as the Layer-3 heuristic it is (route match, not runtime-proven);
 /// - `Some(0)` → genuinely no boundaries → the original "may not be meaningful"
 ///   hint.
-pub(crate) fn render_modules_note(link_count: Option<usize>, degraded: Option<&str>) -> String {
+pub(crate) fn render_modules_note(
+    link_count: Option<usize>,
+    degraded: Option<&str>,
+    unresolved_imports: Option<u64>,
+    unresolved_degraded: Option<&str>,
+) -> String {
+    // IMPORT-RESOLUTION-RUST-1 §2.5: a KNOWN non-zero unresolved-import count takes
+    // precedence. The modules DO import across crates — resolution just failed for those
+    // edges — so the honest signal is "import resolution is LOW", NOT "boundaries may not be
+    // meaningful". This replaces the misleading intra-module hint (root cause D1).
+    if let Some(m) = unresolved_imports {
+        if m > 0 {
+            let plural = if m == 1 { "" } else { "s" };
+            return format!(
+                "\nnote: no cross-module dependencies RESOLVED, but {} import{} did not resolve \
+                 to a file — import resolution is LOW here (the count above is resolved \
+                 file→file imports only). See `rmap trust` for the attribution.\n",
+                m, plural,
+            );
+        }
+    }
     match (degraded.is_some(), link_count) {
         (true, _) | (_, None) => {
             "\nnote: whether these modules talk over HTTP/REST is UNKNOWN — the \
@@ -497,8 +517,33 @@ pub(crate) fn render_modules_note(link_count: Option<usize>, degraded: Option<&s
             )
         }
         (false, Some(_)) => {
-            "\nhint: all imports are intra-module. Module boundaries may not be meaningful yet.\n"
-                .to_string()
+            // "all imports are intra-module" is honest ONLY when we KNOW zero imports failed
+            // to resolve. `Some(0)` → the genuine intra-module case. `None` → we cannot confirm
+            // it, so we do not make the claim — but the CAUSE of the `None` matters and must be
+            // rendered truthfully (review-1 honesty fix): a `None` from a current-daemon read
+            // failure is NOT an "older daemon", and telling the user to reindex would be wrong.
+            if unresolved_imports == Some(0) {
+                "\nhint: all imports are intra-module. Module boundaries may not be meaningful yet.\n"
+                    .to_string()
+            } else if let Some(reason) = unresolved_degraded {
+                // `None` count + a labelled degradation → the connected (current) daemon computed
+                // the count but the read FAILED. State the true cause and remediation; never
+                // blame an older daemon, never recommend a reindex (it does not fix a read error).
+                format!(
+                    "\nnote: no cross-module dependencies resolved; whether unresolved imports \
+                     remain is UNKNOWN — the unresolved-import count read failed ({}). Retry \
+                     when storage is available.\n",
+                    reason,
+                )
+            } else {
+                // `None` count with no degradation reason → the field is genuinely absent: an
+                // older daemon that predates the unresolved-import count. Here upgrade+reindex
+                // helps.
+                "\nnote: no cross-module dependencies resolved; whether unresolved imports \
+                 remain is UNKNOWN (older daemon predating the unresolved-import count) — \
+                 upgrade the daemon and reindex to get it.\n"
+                    .to_string()
+            }
         }
     }
 }
@@ -897,7 +942,8 @@ mod tests {
 
     #[test]
     fn modules_note_heuristic_is_honest_layer3() {
-        let out = render_modules_note(Some(3), None);
+        // Zero unresolved imports (known) → the HTTP-link heuristic path is reached.
+        let out = render_modules_note(Some(3), None, Some(0), None);
         assert!(
             out.contains("likely connected via HTTP route match"),
             "{out}"
@@ -912,7 +958,8 @@ mod tests {
 
     #[test]
     fn modules_note_zero_links_keeps_meaningless_hint() {
-        let out = render_modules_note(Some(0), None);
+        // Intra-module hint is honest ONLY when the unresolved-import count is a known 0.
+        let out = render_modules_note(Some(0), None, Some(0), None);
         assert!(
             out.contains("Module boundaries may not be meaningful"),
             "{out}"
@@ -921,14 +968,75 @@ mod tests {
 
     #[test]
     fn modules_note_degraded_or_none_is_unknown() {
-        let out = render_modules_note(None, Some("db locked"));
+        let out = render_modules_note(None, Some("db locked"), Some(0), None);
         assert!(out.contains("UNKNOWN") && out.contains("degraded"), "{out}");
         assert!(
             !out.contains("Module boundaries may not be meaningful"),
             "{out}"
         );
         // A `None` count with no reason string is also a failed read → unknown.
-        let out2 = render_modules_note(None, None);
+        let out2 = render_modules_note(None, None, Some(0), None);
         assert!(out2.contains("UNKNOWN"), "{out2}");
+    }
+
+    #[test]
+    fn modules_note_unresolved_imports_replace_meaningless_hint() {
+        // IMPORT-RESOLUTION-RUST-1 §2.5: a known non-zero unresolved-import count takes
+        // precedence over BOTH the HTTP note and the intra-module hint.
+        let out = render_modules_note(Some(0), None, Some(7), None);
+        assert!(out.contains("7 imports did not resolve"), "{out}");
+        assert!(out.contains("import resolution is LOW"), "{out}");
+        assert!(
+            !out.contains("Module boundaries may not be meaningful"),
+            "the misleading hint must be gone when imports are unresolved: {out}"
+        );
+    }
+
+    #[test]
+    fn modules_note_unknown_unresolved_does_not_claim_intra_module() {
+        // `None` unresolved count, NO degradation reason → a genuinely older daemon. We must NOT
+        // claim "all imports intra-module", and here upgrade+reindex is the honest remediation.
+        let out = render_modules_note(Some(0), None, None, None);
+        assert!(
+            !out.contains("Module boundaries may not be meaningful"),
+            "must not claim intra-module when the unresolved count is UNKNOWN: {out}"
+        );
+        assert!(out.contains("UNKNOWN"), "{out}");
+        assert!(
+            out.contains("older daemon"),
+            "an absent count+reason IS the older-daemon case: {out}"
+        );
+    }
+
+    #[test]
+    fn modules_note_read_failure_does_not_blame_older_daemon() {
+        // review-1 honesty fix: a `None` unresolved count that carries a degradation REASON is a
+        // current-daemon read failure — NOT an older daemon. The render must state the true cause
+        // and must NOT (a) blame an "older daemon" or (b) recommend a reindex (a reindex does not
+        // fix a storage read error). `link_count = Some(0)` reaches the unresolved-count branch
+        // (a non-degraded HTTP read), isolating the unresolved-count cause disambiguation.
+        let out = render_modules_note(
+            Some(0),
+            None,
+            None,
+            Some("unresolved-import count read failed: database is locked"),
+        );
+        assert!(out.contains("UNKNOWN"), "must render UNKNOWN: {out}");
+        assert!(
+            out.contains("read failed") && out.contains("database is locked"),
+            "must state the true read-failure cause: {out}"
+        );
+        assert!(
+            !out.contains("older daemon"),
+            "a current-daemon read failure must NOT be blamed on an older daemon: {out}"
+        );
+        assert!(
+            !out.contains("reindex"),
+            "a reindex does not fix a storage read error; must not recommend it: {out}"
+        );
+        assert!(
+            !out.contains("Module boundaries may not be meaningful"),
+            "must not claim intra-module when the count is UNKNOWN: {out}"
+        );
     }
 }

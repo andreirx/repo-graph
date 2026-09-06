@@ -87,6 +87,17 @@ pub struct CyclesResponse {
     /// than pretend uniformity. Absent on the SQLite route, which classifies per cycle instead.
     #[serde(default)]
     pub test_composition_note: Option<String>,
+    /// IMPORT-RESOLUTION-RUST-1 §2.5: number of modules in the snapshot. `None` = the serving
+    /// path did not provide it (the SQLite-free LiveGraph fastpath, which does not read the
+    /// module catalog) — the zero-state then omits the size clause rather than fabricate a 0.
+    #[serde(default)]
+    pub module_count: Option<u64>,
+    /// IMPORT-RESOLUTION-RUST-1 §2.5: number of RESOLVED cross-module import edges (the graph
+    /// Tarjan ran over). `None` = not provided by the serving path. A zero here with a non-zero
+    /// `module_count` means the module graph is EMPTY (no resolved cross-module imports), which
+    /// is a DIFFERENT statement from "acyclic".
+    #[serde(default)]
+    pub module_edge_count: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,7 +233,43 @@ impl CyclesResponse {
             .partition(|c| c.composition() == CycleComposition::TestOnly);
 
         if main.is_empty() && fixtures.is_empty() {
-            out.push_str("No module-level cycles found.\n");
+            // IMPORT-RESOLUTION-RUST-1 §2.5: state the graph the acyclicity was computed OVER.
+            // A "no cycles" over an EMPTY module graph (E == 0) is not the same claim as "no
+            // cycles over a real graph" — the former means resolution produced no cross-module
+            // edges. When the counts are known, say them; when a serving path omitted them
+            // (SQLite-free fastpath), keep the bare message rather than fabricate a size.
+            //
+            // IMPORT-RESOLUTION-RUST-1 §4 (operator ruling cycle-4, `cycles-module-count-semantics`
+            // = C): `module_count` is the per-directory MODULE-node population `find_cycles` runs its
+            // SCC over (dispatch.rs:2558 = `module_qualified_names().len()`) — the SAME set `stats`
+            // already prints as "directory groups". The clause NAMES it "directory group(s)", never a
+            // bare "modules", because `modules list`/`orient` roll those directory nodes up to declared
+            // packages and would read "modules" as a DIFFERENT (smaller) population. The
+            // directory-groups-vs-declared-modules divergence is a recorded cross-surface follow-up.
+            match (self.module_count, self.module_edge_count) {
+                (Some(n), Some(0)) => {
+                    out.push_str(&format!(
+                        "No module-level cycles found over {} directory group{} / 0 resolved import \
+                         edges — the cross-module import graph is EMPTY (no imports resolved to a \
+                         module). See `rmap trust` for import resolution.\n",
+                        n,
+                        if n == 1 { "" } else { "s" },
+                    ));
+                }
+                (Some(n), Some(e)) => {
+                    out.push_str(&format!(
+                        "No module-level cycles found over {} directory group{} / {} resolved import \
+                         edge{}.\n",
+                        n,
+                        if n == 1 { "" } else { "s" },
+                        e,
+                        if e == 1 { "" } else { "s" },
+                    ));
+                }
+                _ => {
+                    out.push_str("No module-level cycles found.\n");
+                }
+            }
             self.push_test_composition_note(&mut out);
             return out.trim_end().to_string();
         }

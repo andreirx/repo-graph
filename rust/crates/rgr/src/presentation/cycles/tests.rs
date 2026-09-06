@@ -12,6 +12,8 @@ fn minimal_response() -> CyclesResponse {
         count: 0,
         ts_type_only_caveat: false,
         test_composition_note: None,
+        module_count: None,
+        module_edge_count: None,
     }
 }
 
@@ -220,6 +222,86 @@ fn render_shows_repo_display_name() {
 fn render_shows_no_cycles_message() {
     let out = minimal_response().render_human();
     assert!(out.contains("No module-level cycles found"));
+}
+
+#[test]
+fn zero_state_states_module_and_edge_counts() {
+    // IMPORT-RESOLUTION-RUST-1 §2.5 / §4 (cycle-4 ruling C): the zero-state names the graph the
+    // acyclicity was computed over by the population term the product already prints in `stats`
+    // ("directory groups"), never a bare "modules".
+    let mut r = minimal_response();
+    r.module_count = Some(59);
+    r.module_edge_count = Some(120);
+    let out = r.render_human();
+    assert!(
+        out.contains("over 59 directory groups / 120 resolved import edges"),
+        "{out}"
+    );
+    // Guard against the retired bare-"modules" wording (would collide with `modules list`).
+    assert!(!out.contains("over 59 modules"), "{out}");
+}
+
+#[test]
+fn zero_state_renders_two_crate_fixture_clause_verbatim() {
+    // IMPORT-RESOLUTION-RUST-1 §4 (operator ruling cycle-4, `cycles-module-count-semantics` = C):
+    // the two-crate Rust fixture drives module_count == 4 (the per-directory MODULE nodes `a`,
+    // `a/src`, `b`, `b/src` that `find_cycles` runs its SCC over — dispatch.rs:2558) and exactly
+    // one resolved cross-module import edge. The ratified §4 clause is therefore
+    // "over 4 directory groups / 1 resolved import edge" — verbatim.
+    //
+    // The integration test `cross_crate_use_resolves_to_defining_file` proves the fixture actually
+    // yields (module_count, module_edge_count) == (4, 1) through the real storage reads the daemon
+    // uses; this pins that those numbers RENDER as the ratified clause. It also covers the SINGULAR
+    // edge branch (no plural "s"), whose only sibling coverage is the plural (120) and empty (0).
+    let mut r = minimal_response();
+    r.module_count = Some(4);
+    r.module_edge_count = Some(1);
+    let out = r.render_human();
+    assert!(
+        out.contains("over 4 directory groups / 1 resolved import edge"),
+        "expected the ratified two-crate-fixture §4 clause, got:\n{out}"
+    );
+    // Guard the singular: the plural "edges" must NOT appear for e == 1.
+    assert!(
+        !out.contains("1 resolved import edges"),
+        "e == 1 must render singular 'edge', not 'edges':\n{out}"
+    );
+    // Guard against the retired bare-"modules" wording.
+    assert!(
+        !out.contains("4 modules"),
+        "population is named 'directory groups', never bare 'modules':\n{out}"
+    );
+    // Not the EMPTY-graph claim (that is the e == 0 branch, a different meaning).
+    assert!(
+        !out.contains("EMPTY"),
+        "1 edge is not an empty graph:\n{out}"
+    );
+}
+
+#[test]
+fn zero_state_names_empty_graph_when_no_resolved_edges() {
+    // E == 0 over N>0 directory groups means the module import graph is EMPTY — a distinct
+    // claim from "acyclic". Must NOT read as a clean acyclic result.
+    let mut r = minimal_response();
+    r.module_count = Some(59);
+    r.module_edge_count = Some(0);
+    let out = r.render_human();
+    assert!(
+        out.contains("59 directory groups / 0 resolved import edges"),
+        "{out}"
+    );
+    assert!(out.contains("EMPTY"), "{out}");
+}
+
+#[test]
+fn zero_state_without_counts_keeps_bare_message() {
+    // The SQLite-free LiveGraph fastpath omits the counts → bare message, no fabricated size.
+    let out = minimal_response().render_human();
+    assert!(out.contains("No module-level cycles found"));
+    assert!(
+        !out.contains("over"),
+        "no size clause when counts absent: {out}"
+    );
 }
 
 #[test]

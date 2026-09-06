@@ -77,6 +77,14 @@ pub struct CargoModule {
     pub manifest_path: String,
     /// True if discovered via [workspace].members pattern
     pub is_workspace_member: bool,
+    /// IMPORT-RESOLUTION-RUST-1 §2.4: the `[lib] name` override, when the manifest sets one.
+    /// A library crate is imported under this name instead of the package name (e.g.
+    /// `[lib] name = "foo_lib"` → `use foo_lib::…`). `None` when absent — the import name
+    /// then defaults to the package name. `[lib] path` is deliberately NOT parsed (stated
+    /// limitation): the resolver probes the conventional `src/lib.rs`/`src/main.rs`
+    /// entrypoints, which covers default layouts without carrying a path across the frozen
+    /// boundary DTO.
+    pub lib_name: Option<String>,
 }
 
 /// Result of parsing a Cargo.toml manifest.
@@ -111,6 +119,16 @@ pub struct CargoEvidencePayload {
 struct CargoToml {
     package: Option<PackageSection>,
     workspace: Option<WorkspaceSection>,
+    /// `[lib]` target section. Only `name` is consumed (IMPORT-RESOLUTION-RUST-1 §2.4);
+    /// every other `[lib]` field (`path`, `crate-type`, …) is undeclared and serde ignores
+    /// it, so it never affects parsing.
+    lib: Option<LibSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LibSection {
+    /// `[lib] name` — overrides the import name of the crate's library target.
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,6 +187,9 @@ pub fn parse_cargo_toml(
     let mut modules = Vec::new();
     let mut workspace_members = Vec::new();
     let is_workspace_root = parsed.workspace.is_some();
+    // `[lib] name` override (IMPORT-RESOLUTION-RUST-1 §2.4). Captured before `parsed.package`
+    // is moved below; a manifest with no `[lib]` (or no `name` in it) leaves this `None`.
+    let lib_name = parsed.lib.as_ref().and_then(|l| l.name.clone());
 
     // Derive crate root from manifest path.
     // "Cargo.toml" -> "."
@@ -210,6 +231,7 @@ pub fn parse_cargo_toml(
             version,
             manifest_path: manifest_path.to_string(),
             is_workspace_member: false, // Will be updated by caller if discovered via workspace
+            lib_name,
         });
     }
 
@@ -460,6 +482,36 @@ version = "0.2.0"
     }
 
     #[test]
+    fn parse_lib_name_override() {
+        // IMPORT-RESOLUTION-RUST-1 §2.4: `[lib] name` overrides the import name.
+        let content = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[lib]
+name = "my_lib"
+path = "src/entry.rs"
+"#;
+        let result = parse_cargo_toml(content, "Cargo.toml").unwrap();
+        assert_eq!(result.modules.len(), 1);
+        assert_eq!(result.modules[0].package_name, "my-crate");
+        // The `[lib] name` is captured; `[lib] path` is ignored (undeclared → serde skips).
+        assert_eq!(result.modules[0].lib_name, Some("my_lib".to_string()));
+    }
+
+    #[test]
+    fn parse_no_lib_section_leaves_lib_name_none() {
+        let content = r#"
+[package]
+name = "plain"
+version = "0.1.0"
+"#;
+        let result = parse_cargo_toml(content, "Cargo.toml").unwrap();
+        assert_eq!(result.modules[0].lib_name, None);
+    }
+
+    #[test]
     fn parse_workspace_root() {
         let content = r#"
 [workspace]
@@ -564,6 +616,7 @@ license.workspace      = true
             version: None, // workspace-inherited, unresolved by the single-manifest parser
             manifest_path: "rust/crates/rgr/Cargo.toml".to_string(),
             is_workspace_member: true,
+            lib_name: None,
         };
         let (candidate, evidence) = to_storage_inputs(&inheriting, "repo-1", "snap-1");
 
@@ -642,6 +695,7 @@ version.workspace = true
             version: Some("1.0.0".to_string()),
             manifest_path: "crates/my-crate/Cargo.toml".to_string(),
             is_workspace_member: true,
+            lib_name: None,
         };
 
         let (candidate, evidence) = to_storage_inputs(&module, "repo-1", "snap-1");

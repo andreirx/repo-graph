@@ -462,8 +462,8 @@ pub(crate) fn resolve_declared_dependency(
     if has_package_dependency(declared, base) {
         return Some(base.to_string());
     }
-    // Rust hyphen normalization: my_crate → my-crate.
-    let hyphenated = base.replace('_', "-");
+    // Rust hyphen normalization: my_crate → my-crate (the single shared canonicalisation).
+    let hyphenated = crate::cargo_name::canonicalize_cargo_package_name(base);
     if hyphenated != base && has_package_dependency(declared, &hyphenated) {
         return Some(hyphenated);
     }

@@ -2553,6 +2553,10 @@ impl ServiceDispatcher {
                 // Blanket caveat RETIRED on the SQLite route — the fact is now per-cycle (`type_only`);
                 // the renderer derives any residual hedge from those verdicts.
                 "ts_type_only_caveat": false,
+                // IMPORT-RESOLUTION-RUST-1 §2.5: module count + resolved cross-module import edge
+                // count so the zero-state states the graph size (already in hand, no new read).
+                "module_count": qualified.len(),
+                "module_edge_count": module_edges.len(),
             }),
         )
     }
@@ -9254,6 +9258,41 @@ impl ServiceDispatcher {
                 Err(reason) => (None, Some(reason)),
             };
 
+        // IMPORT-RESOLUTION-RUST-1 §2.5: the count of IMPORTS edges that never resolved to a
+        // file (`imports_file_not_found`). The modules-list zero-state must say this honest
+        // number instead of the misleading "all imports are intra-module" hint whenever it is
+        // non-zero. A FAILED read is UNKNOWN (`None`), never 0 — a false 0 would restore the
+        // wrong hint off a read error (VISION: unknown is never zero). Sum across the
+        // classification split (external/first-party/unknown) since every imports_file_not_found
+        // row is an unresolved import regardless of how it was attributed.
+        //
+        // review-1 honesty fix: a FAILED read on THIS (current) daemon is distinct from an
+        // OLDER daemon that never computes the count. Both would surface as `None` at the
+        // presenter, but they have different truthful causes and remediations. So — exactly as
+        // the sibling `http_boundary_link_count` read above (`Err(reason) => (None, Some(...))`)
+        // — carry a labelled degradation reason alongside the `None` count. The presenter uses
+        // its presence to render the read-failure truth instead of falsely blaming an "older
+        // daemon" and recommending a reindex. Older-daemon = BOTH fields absent (serde default);
+        // read-failure = null count + `Some(reason)`.
+        let (unresolved_import_count, unresolved_import_degraded): (Option<u64>, Option<String>) = {
+            use repo_graph_trust::storage_port::{
+                CountByClassificationInput, TrustStorageRead, UnresolvedEdgeCategory,
+            };
+            match TrustStorageRead::count_unresolved_edges_by_classification(
+                &storage,
+                &CountByClassificationInput {
+                    snapshot_uid: snapshot.snapshot_uid.clone(),
+                    filter_categories: vec![UnresolvedEdgeCategory::ImportsFileNotFound],
+                },
+            ) {
+                Ok(rows) => (Some(rows.iter().map(|r| r.count).sum()), None),
+                Err(e) => (
+                    None,
+                    Some(format!("unresolved-import count read failed: {e}")),
+                ),
+            }
+        };
+
         // Build response
         let mut response = serde_json::json!({
             "command": "modules list",
@@ -9270,12 +9309,27 @@ impl ServiceDispatcher {
             "sanity_metrics": sanity_metrics,
             "warnings": warnings,
             "http_boundary_link_count": http_boundary_link_count,
+            // IMPORT-RESOLUTION-RUST-1 §2.5: unresolved-import count beside the edges.
+            // `null` = UNKNOWN (read failed / older daemon), never a false 0.
+            "unresolved_import_count": unresolved_import_count,
         });
         if let (serde_json::Value::Object(ref mut map), Some(reason)) =
             (&mut response, &http_boundary_link_degraded)
         {
             map.insert(
                 "http_boundary_link_degraded".to_string(),
+                serde_json::json!(reason),
+            );
+        }
+        // review-1 honesty fix: emit the unresolved-import degradation reason additively (only
+        // when the read failed). Its PRESENCE tells the presenter the `None` count came from a
+        // current-daemon read failure — not an older daemon — so it renders the true cause and
+        // does not recommend a spurious reindex. Additive-only: wire-protocol frozen invariant.
+        if let (serde_json::Value::Object(ref mut map), Some(reason)) =
+            (&mut response, &unresolved_import_degraded)
+        {
+            map.insert(
+                "unresolved_import_degraded".to_string(),
                 serde_json::json!(reason),
             );
         }

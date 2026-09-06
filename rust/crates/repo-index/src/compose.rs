@@ -60,7 +60,7 @@ use repo_graph_indexer::routing;
 use repo_graph_indexer::settings_gradle::{self, GradleModule};
 use repo_graph_indexer::storage_port::{SnapshotLifecyclePort, UpdateSnapshotStatusInput};
 use repo_graph_indexer::types::{
-    IndexOptions, IndexPhase, IndexProgressEvent, IndexResult, SnapshotStatus,
+    DeclaredModule, IndexOptions, IndexPhase, IndexProgressEvent, IndexResult, SnapshotStatus,
 };
 use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_policy_facts::{
@@ -756,6 +756,27 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
 /// 4. Deduplicate by crate_root to avoid double-counting
 ///
 /// This fixes repos where Rust code lives in a subdirectory (e.g., rust/Cargo.toml).
+/// IMPORT-RESOLUTION-RUST-1 §2.1: project the parsed Cargo modules into the raw
+/// declared-module catalog DTO carried across the compose→indexer boundary. Runs on BOTH
+/// the index and refresh paths so the resolver's Rust-crate import stage always has the
+/// catalog. The import-facing `name` is the `[lib] name` override when present, else the
+/// package name (matched THROUGH the shared `_`/`-` canonicalisation on the far side).
+fn declared_modules_from_cargo(cargo: &CargoExtractionResult) -> Vec<DeclaredModule> {
+    cargo
+        .modules
+        .iter()
+        .map(|m| DeclaredModule {
+            ecosystem: "cargo".to_string(),
+            name: m
+                .module
+                .lib_name
+                .clone()
+                .unwrap_or_else(|| m.module.package_name.clone()),
+            canonical_root: m.module.crate_root.clone(),
+        })
+        .collect()
+}
+
 fn extract_cargo_modules(
     repo_path: &Path,
     cargo_toml_files: &std::collections::HashMap<String, String>,
@@ -3394,6 +3415,9 @@ pub fn index_into_storage_with_progress(
             )?,
             edge_batch_size: options.edge_batch_size,
             c_include_roots: options.c_include_roots.clone(),
+            // IMPORT-RESOLUTION-RUST-1 §2.1: carry the declared-crate catalog so the
+            // resolver can map cross-crate `use` paths to files (index path).
+            declared_modules: declared_modules_from_cargo(&prepared.cargo_modules),
             on_progress: Some(&mut indexer_progress_callback),
             ..IndexOptions::default()
         };
@@ -3862,6 +3886,9 @@ pub fn refresh_into_storage_with_progress(
         )?,
         edge_batch_size: options.edge_batch_size,
         c_include_roots: options.c_include_roots.clone(),
+        // IMPORT-RESOLUTION-RUST-1 §2.1: carry the declared-crate catalog (refresh path,
+        // symmetric with the index path — spec §3 requires threading it here too).
+        declared_modules: declared_modules_from_cargo(&prepared.cargo_modules),
         on_progress: Some(&mut indexer_progress_callback),
         ..IndexOptions::default()
     };

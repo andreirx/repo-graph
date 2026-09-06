@@ -123,6 +123,21 @@ pub struct ModulesListResponse {
     /// pre-slice rollup-derived count line is preserved, never a false zero.
     #[serde(default)]
     pub edges: Option<Vec<ModuleEdgeEntry>>,
+    /// IMPORT-RESOLUTION-RUST-1 §2.5: count of IMPORTS edges that never resolved to a file
+    /// (`imports_file_not_found`). Rendered beside the cross-module edge count, and — in the
+    /// zero-state — used to gate the "all imports are intra-module" hint: that hint is honest
+    /// ONLY when this is `Some(0)`. `None` = UNKNOWN (older daemon, or the read failed); a
+    /// non-zero value replaces the misleading hint with the honest unresolved count.
+    #[serde(default)]
+    pub unresolved_import_count: Option<u64>,
+    /// IMPORT-RESOLUTION-RUST-1 §2.5 (review-1 honesty fix): reader-framed degradation when the
+    /// unresolved-import count read FAILED on the connected (current) daemon. Its PRESENCE
+    /// disambiguates the two causes of a `None` [`Self::unresolved_import_count`]: `Some(reason)`
+    /// = a current-daemon read failure (render the true cause, do NOT blame an "older daemon" or
+    /// recommend a reindex); absent (`None`) with a `None` count = a genuinely older daemon that
+    /// never computes the count. Mirrors [`Self::http_boundary_link_degraded`].
+    #[serde(default)]
+    pub unresolved_import_degraded: Option<String>,
 }
 
 impl ModulesListResponse {
@@ -296,12 +311,15 @@ impl ModulesListResponse {
         if edges.is_empty() {
             out.push_str("No cross-module dependencies detected.\n");
             if self.results.len() > 1 {
-                // HTTP-BOUNDARY-1: the Layer-3 boundary note (heuristic-HTTP-link
-                // vs meaningless-boundaries vs failed-read-unknown) is decided in
-                // the crate-private `http_boundary` presenter — kept off this file.
+                // HTTP-BOUNDARY-1 + IMPORT-RESOLUTION-RUST-1 §2.5: the Layer-3 boundary note.
+                // The "all imports are intra-module" hint is honest ONLY when the
+                // unresolved-import count is a known 0; a non-zero count prints the honest
+                // unresolved figure instead (import resolution is LOW, not "no boundaries").
                 out.push_str(&super::http_boundary::render_modules_note(
                     self.http_boundary_link_count,
                     self.http_boundary_link_degraded.as_deref(),
+                    self.unresolved_import_count,
+                    self.unresolved_import_degraded.as_deref(),
                 ));
             }
             return;
@@ -313,6 +331,18 @@ impl ModulesListResponse {
             "cross-module dependency",
             "cross-module dependencies",
         ));
+        // IMPORT-RESOLUTION-RUST-1 §2.5: the unresolved-import count beside the edge count,
+        // so the resolved figure is never read as the whole import story. Shown only when
+        // KNOWN and non-zero (Some(0)/None add nothing).
+        if let Some(m) = self.unresolved_import_count {
+            if m > 0 {
+                out.push_str(&format!(
+                    " ({} import{} unresolved)",
+                    m,
+                    if m == 1 { "" } else { "s" }
+                ));
+            }
+        }
         out.push_str(" detected.\n");
 
         let mut sorted: Vec<&ModuleEdgeEntry> = edges.iter().collect();
@@ -374,6 +404,8 @@ impl ModulesListResponse {
                 out.push_str(&super::http_boundary::render_modules_note(
                     self.http_boundary_link_count,
                     self.http_boundary_link_degraded.as_deref(),
+                    self.unresolved_import_count,
+                    self.unresolved_import_degraded.as_deref(),
                 ));
             }
         } else {

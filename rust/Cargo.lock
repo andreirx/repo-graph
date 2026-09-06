@@ -2472,6 +2472,7 @@ dependencies = [
  "repo-graph-cpp-extractor",
  "repo-graph-indexer",
  "repo-graph-java-extractor",
+ "repo-graph-module-queries",
  "repo-graph-policy-facts",
  "repo-graph-python-extractor",
  "repo-graph-rust-extractor",
