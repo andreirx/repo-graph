@@ -383,6 +383,42 @@ round five; DAEMON-RESIDUALS-2/-3 staged after.
 Infra: serial-daemon contention MEASURED under batch (301s assess hang; Busy bounce; the
 chunk seed pass is a new long writer) — DAEMON-CONCURRENCY-1 price rising.
 
+RELEASED v0.17.0 (2026-09-06, 28b2ff6). AUDIT ROUND FIVE (2026-09-06, `docs/audits/
+2026-09-06-per-command-usefulness-v0.17.0.md`; smoke 2026-09-06T03-20-35Z, 26 passed, two
+typed NAMED-Busy bounces retested clean; 32 supplemental probes; three-perspective gate,
+ground-truth-verified with stated searches). Whole product HIT C+→B−, EVIDENCE C+→B,
+HONESTY C−→C+, ECONOMY C→B−; `find` vs zg now B−/B+/B/A− (level HIT, leads the rest).
+Every TARGETED v0.16.0 fabrication verified dead (phantom writers → mode unknown; Next.js
+two-signal gate with amodx's true basis kept; storybook 13+111=124; JDK-only edges →
+"External / unresolved (11)"; vscode .env retraction confirmed; C++ --text 6/6 exact;
+map --dry-run reconciles). VERDICT (codex-adjudicated, adopting the matrix grader over the
+judge's "new absence class"): THE CLASS RELOCATED to the command-summary layer — the product
+now fabricates authoritative absence/architecture claims from low-trust graphs: `modules
+list` says "all imports are intra-module" on 18/28 repos INCLUDING repo-graph's own 59-crate
+workspace while `trust` on the SAME snapshot lists 2,821 internal references and every module
+zero-connectivity-suspicious (D1, CRITICAL — stronger than any v0.16.0 instance); django deps
+"no static import: asgiref" against 42 static sites (D2, CRITICAL — HONESTY-GATE-1's own
+invariant violated: the caveat's escape hatches do not apply); `cycles`/`explain` bare zeros
+where trust says LOW (D8/D10); check PASS at 27% vs FAIL at 24% (D15). The repair was applied
+PER SURFACE, not as an invariant. Also: C/C++ macro-wrapped FUNCTION names still erased (D3,
+26 rows); C++ forward decls rendered as definitions and outranking them (D4, vcmi 7/8);
+three irreconcilable file totals per snapshot (D5 — COHERENCE-3 labels landed, reconciliation
+did not); surfaces "0 project surfaces" beside 235 real routes + test rows first (D6); zvec
+--full marker false (D7); fixture App.java → repo-level Spring fact (D9); FRAKTAG seeds return
+decls not the write path (D11); complexity headline = symbol cx under a file label (D12);
+boundaries 0/772 anchors (D14); `dead` exit 2 + "error:" on a correct refusal.
+PROPOSED QUEUE (awaiting human ordering): CLAIM-INVARIANT-1 (one rule: no absence/
+exclusivity/completeness/confidence claim where a same-snapshot signal disconfirms it; sites
+D1/D2/D8/D10/D15) → MODULE-EDGE-COHERENCE-1 + JAVA-MODULE-ATTRIBUTION-1 (consume trust's
+internal-reference evidence first; then package-root → Maven/Gradle modules) → DEPS-NEGATIVE-1
+(Python static-import resolution + negative gate on unattributed buckets) → CPP-FACTS-2 (D3 +
+decl-as-Facts D4) → TOTALS-1 (D5/D6/D7/D9/D12 + COH-2 orient drop + (N test) legend) →
+ECONOMY-3 (list budgets) → dead exit code + smoke linux manifest; DAEMON-RESIDUALS-2/-3 staged
+(already ratified). KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause
+discrimination, django boundaries zero-state (what cycles should print), map --dry-run cap
+discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
+ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
+
 Open follow-ups awaiting ratification/scheduling: RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
 timeout override.
