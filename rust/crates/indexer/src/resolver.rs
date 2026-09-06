@@ -37,6 +37,15 @@ use crate::types::{EdgeType, ExtractedEdge, Resolution};
 /// stable cross-boundary contract already present on every extracted edge.
 const RUST_EXTRACTOR_PREFIX: &str = "rust-core:";
 
+/// Provenance prefix of the Java extractor (`ExtractedEdge.extractor`), whose value is
+/// `java-core:<version>` (see `java-extractor::EXTRACTOR_NAME`). The declared-Java-import
+/// suffix stage (IMPORT-RESOLUTION-JAVA-1) is gated to edges carrying this prefix so a
+/// non-Java IMPORTS edge (a TS/Python/Rust dotted specifier) can never resolve to a `.java`
+/// file — the frozen non-Java byte-stability invariant. Prefix (not the exact version) so the
+/// gate survives extractor version bumps. The indexer does not depend on the java-extractor
+/// crate; the string is the stable cross-boundary contract already on every extracted edge.
+const JAVA_EXTRACTOR_PREFIX: &str = "java-core:";
+
 // ── Resolution outcome ───────────────────────────────────────────
 
 /// Result of attempting to resolve an edge target.
@@ -47,6 +56,14 @@ enum TargetResolution {
     Unresolved,
     /// Multiple candidates matched exactly (C/C++ include ambiguity).
     Ambiguous(Vec<String>),
+    /// IMPORT-RESOLUTION-JAVA-1: a Java `import pkg.*` wildcard — names a package, not a single
+    /// type, so it has no single target file. Stays unresolved with the NAMED, COUNTED basis
+    /// `ImportsWildcard` (never silently mis-resolved).
+    JavaWildcard,
+    /// IMPORT-RESOLUTION-JAVA-1: a Java FQN import whose path suffix matched MORE THAN ONE
+    /// indexed `.java` file (shaded/duplicated copies). Stays unresolved with the NAMED, COUNTED
+    /// basis `ImportsAmbiguousSuffix`.
+    JavaAmbiguousSuffix,
 }
 
 // ── Resolver types ───────────────────────────────────────────────
@@ -97,7 +114,30 @@ pub struct ResolverIndex {
     /// `IndexOptions.declared_modules` (cargo ecosystem only). Empty when no crates were
     /// declared → the Rust-crate import stage is a no-op.
     pub rust_crate_roots: HashMap<String, String>,
+    /// IMPORT-RESOLUTION-JAVA-1 §2.1: the Java suffix index — every indexed `.java` file's
+    /// basename → the repo-relative paths of files with that basename. Built once per index from
+    /// the same file list stages 1-4 already use (`build_java_suffix_index`), needs no
+    /// source-root knowledge. A Java FQN import `a.b.C` is resolved by finding the file whose
+    /// path ends at a directory boundary with the suffix `a/b/C.java` (shortening trailing
+    /// segments for nested classes / static members). Empty when no `.java` files were indexed →
+    /// the Java import stage is a no-op.
+    pub java_suffix_index: JavaSuffixIndex,
 }
+
+/// IMPORT-RESOLUTION-JAVA-1 §2.1: the Java suffix index. Keyed by file basename (e.g.
+/// `"Util.java"`), value = repo-relative paths of every indexed `.java` file with that basename.
+///
+/// - what: the pure lookup structure for the Java FQN-import resolution stage. One current
+///   producer (`build_java_suffix_index`, called from the orchestrator's resolver-index build)
+///   and one current consumer (`resolve_java_suffix`).
+/// - axis of variation: none introduced — a plain map, not an abstraction. Basename-bucketed
+///   (rather than a full suffix→file map) so a lookup scans only the handful of files sharing a
+///   class name, and memory is one entry per file instead of one per path-tail. Identical match
+///   semantics to a suffix map; smaller and clearer.
+/// - rejected simpler: reusing `file_resolution` (keyed by full stable key, no suffix matching) —
+///   a Java import carries a package-qualified name, never a repo-relative path, so no stable-key
+///   or extensionless lookup can ever hit it (exactly the D1/§A root cause).
+pub type JavaSuffixIndex = HashMap<String, Vec<String>>;
 
 /// A resolved edge — the symbolic `target_key` has been replaced
 /// with a concrete `target_node_uid`.
@@ -239,6 +279,31 @@ pub fn resolve_edges(
                     source_file_uid,
                 });
             }
+            // IMPORT-RESOLUTION-JAVA-1: the two NAMED Java-import failure bases. Their category
+            // is set HERE (not via `categorize_unresolved_edge`, which defaults imports to
+            // `ImportsFileNotFound`) so the limitation is stated and COUNTED, never mis-resolved.
+            TargetResolution::JavaWildcard => {
+                let source_file_uid = index
+                    .node_uid_to_file_uid
+                    .get(&edge.source_node_uid)
+                    .cloned();
+                still_unresolved.push(CategorizedUnresolvedEdge {
+                    edge: edge.clone(),
+                    category: UnresolvedEdgeCategory::ImportsWildcard,
+                    source_file_uid,
+                });
+            }
+            TargetResolution::JavaAmbiguousSuffix => {
+                let source_file_uid = index
+                    .node_uid_to_file_uid
+                    .get(&edge.source_node_uid)
+                    .cloned();
+                still_unresolved.push(CategorizedUnresolvedEdge {
+                    edge: edge.clone(),
+                    category: UnresolvedEdgeCategory::ImportsAmbiguousSuffix,
+                    source_file_uid,
+                });
+            }
             TargetResolution::Unresolved => {
                 let category = categorize_unresolved_edge(edge);
                 let source_file_uid = index
@@ -323,6 +388,18 @@ fn resolve_target(
                 is_rust_import,
             ) {
                 Some(uid) => TargetResolution::Resolved(uid),
+                // Stage 5 (IMPORT-RESOLUTION-JAVA-1 §2.1): declared Java FQN import. Runs ONLY
+                // after stages 1-4 miss (a dotted FQN never keys a stable key / extensionless
+                // path / include / crate root) and ONLY for Java-extractor edges — a non-Java
+                // dotted specifier must never resolve to a `.java` file (frozen non-Java
+                // byte-stability invariant). Returns the NAMED wildcard / ambiguous-suffix bases
+                // directly so they are counted, not folded into `ImportsFileNotFound`.
+                None if edge.extractor.starts_with(JAVA_EXTRACTOR_PREFIX) => resolve_java_import(
+                    &edge.target_key,
+                    &index.java_suffix_index,
+                    &index.nodes_by_stable_key,
+                    &edge.repo_uid,
+                ),
                 None => TargetResolution::Unresolved,
             }
         }
@@ -530,6 +607,118 @@ fn resolve_rust_crate_import(
         }
         remaining = &remaining[..remaining.len() - 1];
     }
+}
+
+// ── Java FQN import resolution (IMPORT-RESOLUTION-JAVA-1) ─────────
+
+/// Outcome of the pure Java suffix lookup — the ratified
+/// `(key, index) → Option<file key>` stage widened to carry the ambiguous case honestly.
+#[derive(Debug, PartialEq, Eq)]
+enum JavaSuffixLookup {
+    /// Exactly one indexed `.java` file matched the suffix. Carries its repo-relative path.
+    Resolved(String),
+    /// More than one indexed `.java` file matched the suffix (shaded / duplicated copies).
+    Ambiguous,
+    /// No indexed `.java` file matched any suffix (down to the bare class name).
+    NotFound,
+}
+
+/// IMPORT-RESOLUTION-JAVA-1 §2.1: resolve a Java FQN IMPORTS `target_key` to a `.java` FILE
+/// node UID via the suffix index. Wildcard and ambiguous imports return their NAMED
+/// unresolved bases (counted, never mis-resolved). The wildcard test is here (not in the pure
+/// `resolve_java_suffix`) because it is a property of the target_key, not of the file set.
+fn resolve_java_import(
+    target_key: &str,
+    java_suffix_index: &JavaSuffixIndex,
+    nodes_by_stable_key: &HashMap<String, ResolverNode>,
+    repo_uid: &str,
+) -> TargetResolution {
+    // `import pkg.*` (and `import static pkg.*`) — a package, not a single type.
+    if target_key.ends_with(".*") {
+        return TargetResolution::JavaWildcard;
+    }
+    match resolve_java_suffix(target_key, java_suffix_index) {
+        JavaSuffixLookup::Resolved(rel_path) => {
+            let key = format!("{}:{}:FILE", repo_uid, rel_path);
+            match nodes_by_stable_key.get(&key) {
+                Some(node) => TargetResolution::Resolved(node.node_uid.clone()),
+                // The path came from the index (built from the same file list the FILE nodes
+                // come from), so a missing FILE node should not happen; stay unresolved rather
+                // than fabricate a target.
+                None => TargetResolution::Unresolved,
+            }
+        }
+        JavaSuffixLookup::Ambiguous => TargetResolution::JavaAmbiguousSuffix,
+        JavaSuffixLookup::NotFound => TargetResolution::Unresolved,
+    }
+}
+
+/// IMPORT-RESOLUTION-JAVA-1 §2.1: the PURE suffix stage — `(dotted key, suffix index) →
+/// resolution`. No I/O, no source-root knowledge.
+///
+/// For a key `a.b.C.D`: try the boundary suffix `a/b/C/D.java`, then drop the last segment and
+/// retry (`a/b/C.java` — a nested class or a static member of `C`), down to the bare class name.
+/// A single boundary match resolves; multiple matches are `Ambiguous`; a level with candidates
+/// that none match is skipped (shorten and continue); exhausting all levels is `NotFound`. An
+/// ambiguous FULL match short-circuits (it is genuinely ambiguous — do not shorten past it).
+fn resolve_java_suffix(target_key: &str, java_suffix_index: &JavaSuffixIndex) -> JavaSuffixLookup {
+    let segs: Vec<&str> = target_key.split('.').collect();
+    if segs.iter().any(|s| s.is_empty()) {
+        // A malformed key (leading/trailing/double dot) — nothing to resolve.
+        return JavaSuffixLookup::NotFound;
+    }
+    // Shorten from the full FQN down to the bare class name (index 0..=end).
+    for end in (1..=segs.len()).rev() {
+        let sub = &segs[..end];
+        let class = sub[end - 1];
+        let basename = format!("{}.java", class);
+        let Some(paths) = java_suffix_index.get(&basename) else {
+            // No file with this class name at this level — shorten and retry.
+            continue;
+        };
+        let suffix = format!("{}.java", sub.join("/"));
+        let mut matched: Option<&String> = None;
+        let mut match_count = 0usize;
+        for path in paths {
+            if path_has_boundary_suffix(path, &suffix) {
+                match_count += 1;
+                if matched.is_none() {
+                    matched = Some(path);
+                }
+            }
+        }
+        match match_count {
+            0 => continue,
+            1 => return JavaSuffixLookup::Resolved(matched.unwrap().clone()),
+            _ => return JavaSuffixLookup::Ambiguous,
+        }
+    }
+    JavaSuffixLookup::NotFound
+}
+
+/// True iff `path` ends with `suffix` at a directory boundary — either the whole path equals
+/// `suffix`, or `path` ends with `/<suffix>`. The boundary guard stops `common/Foo.java` from
+/// matching a file whose basename is `UncommonFoo.java`.
+fn path_has_boundary_suffix(path: &str, suffix: &str) -> bool {
+    path == suffix
+        || (path.len() > suffix.len()
+            && path.ends_with(suffix)
+            && path.as_bytes()[path.len() - suffix.len() - 1] == b'/')
+}
+
+/// IMPORT-RESOLUTION-JAVA-1 §2.1: build the Java suffix index from the snapshot's file list.
+/// One pass; a `.java` file's basename → all repo-relative paths carrying it. Non-`.java` files
+/// are ignored (the stage only ever resolves to `.java` targets).
+pub fn build_java_suffix_index(file_paths: &[String]) -> JavaSuffixIndex {
+    let mut index: JavaSuffixIndex = HashMap::new();
+    for path in file_paths {
+        if !path.ends_with(".java") {
+            continue;
+        }
+        let basename = path.rsplit('/').next().unwrap_or(path).to_string();
+        index.entry(basename).or_default().push(path.clone());
+    }
+    index
 }
 
 // ── CALLS resolution ─────────────────────────────────────────────
@@ -1329,6 +1518,110 @@ mod tests {
         assert_eq!(strip_extension("src/util.cpp"), "src/util.cpp");
     }
 
+    // ── Java suffix stage (IMPORT-RESOLUTION-JAVA-1) ─────────
+
+    fn java_index(paths: &[&str]) -> JavaSuffixIndex {
+        build_java_suffix_index(&paths.iter().map(|p| p.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn java_suffix_resolves_by_package_path() {
+        let idx = java_index(&["clients/src/main/java/org/apache/kafka/common/Foo.java"]);
+        assert_eq!(
+            resolve_java_suffix("org.apache.kafka.common.Foo", &idx),
+            JavaSuffixLookup::Resolved(
+                "clients/src/main/java/org/apache/kafka/common/Foo.java".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn java_suffix_shortens_for_nested_class() {
+        // `org.x.Outer.Inner` — no `Inner.java`; shortening finds `Outer.java`.
+        let idx = java_index(&["core/src/main/java/org/x/Outer.java"]);
+        assert_eq!(
+            resolve_java_suffix("org.x.Outer.Inner", &idx),
+            JavaSuffixLookup::Resolved("core/src/main/java/org/x/Outer.java".to_string())
+        );
+        // A static member import (`org.x.Outer.CONSTANT`) resolves the same way.
+        assert_eq!(
+            resolve_java_suffix("org.x.Outer.CONSTANT", &idx),
+            JavaSuffixLookup::Resolved("core/src/main/java/org/x/Outer.java".to_string())
+        );
+    }
+
+    #[test]
+    fn java_suffix_ambiguous_when_shaded() {
+        // Two files with the same package-qualified name (a shaded copy) → ambiguous, counted.
+        let idx = java_index(&[
+            "netty/src/main/java/io/grpc/netty/Handler.java",
+            "netty/shaded/src/main/java/io/grpc/netty/Handler.java",
+        ]);
+        assert_eq!(
+            resolve_java_suffix("io.grpc.netty.Handler", &idx),
+            JavaSuffixLookup::Ambiguous
+        );
+    }
+
+    #[test]
+    fn java_suffix_not_found_for_external() {
+        let idx = java_index(&["core/src/main/java/org/x/Foo.java"]);
+        // An external dependency's FQN — no matching `.java` file in the corpus.
+        assert_eq!(
+            resolve_java_suffix("com.google.common.collect.ImmutableList", &idx),
+            JavaSuffixLookup::NotFound
+        );
+    }
+
+    #[test]
+    fn java_suffix_boundary_guard_rejects_mid_filename() {
+        // `common/Foo.java` must NOT match a file whose basename is `UncommonFoo.java`.
+        let idx = java_index(&["a/b/pkg/Foo.java"]);
+        // Import `x.Foo` → suffix `x/Foo.java`; the only `Foo.java` is under `.../pkg/`, so the
+        // boundary suffix `x/Foo.java` does not match `a/b/pkg/Foo.java`.
+        assert_eq!(
+            resolve_java_suffix("x.Foo", &idx),
+            JavaSuffixLookup::NotFound
+        );
+    }
+
+    #[test]
+    fn java_import_wildcard_is_named_basis() {
+        let idx = java_index(&["core/src/main/java/org/x/Foo.java"]);
+        let empty_nodes: HashMap<String, ResolverNode> = HashMap::new();
+        assert!(matches!(
+            resolve_java_import("org.x.*", &idx, &empty_nodes, "r1"),
+            TargetResolution::JavaWildcard
+        ));
+    }
+
+    #[test]
+    fn java_import_resolves_to_file_node() {
+        let idx = java_index(&["core/src/main/java/org/x/Foo.java"]);
+        let node = make_node(
+            "fileFoo",
+            "r1:core/src/main/java/org/x/Foo.java:FILE",
+            "Foo.java",
+            None,
+            None,
+        );
+        let mut nodes = HashMap::new();
+        nodes.insert(node.stable_key.clone(), node);
+        assert!(matches!(
+            resolve_java_import("org.x.Foo", &idx, &nodes, "r1"),
+            TargetResolution::Resolved(uid) if uid == "fileFoo"
+        ));
+    }
+
+    #[test]
+    fn build_java_suffix_index_ignores_non_java() {
+        let idx = java_index(&["src/A.java", "src/B.ts", "src/c.py", "src/nested/A.java"]);
+        // Two `A.java`, no bucket for non-java files.
+        assert_eq!(idx.get("A.java").map(|v| v.len()), Some(2));
+        assert!(!idx.contains_key("B.ts"));
+        assert!(!idx.contains_key("c.py"));
+    }
+
     // ── resolve_edges integration ────────────────────────────
 
     #[test]
@@ -1344,6 +1637,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1377,6 +1671,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -1405,6 +1700,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -1640,6 +1936,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1671,6 +1968,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1708,6 +2006,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -1750,6 +2049,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -1810,6 +2110,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         // The target module exports "readFile", NOT "rf".
         index
@@ -1874,6 +2175,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         // The target module exports "helper".
         index
@@ -1945,6 +2247,7 @@ mod tests {
             file_to_module: HashMap::new(),
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
         };
         // There exists a "readFile" function globally.
         index

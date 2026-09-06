@@ -9275,20 +9275,55 @@ impl ServiceDispatcher {
         // daemon" and recommending a reindex. Older-daemon = BOTH fields absent (serde default);
         // read-failure = null count + `Some(reason)`.
         let (unresolved_import_count, unresolved_import_degraded): (Option<u64>, Option<String>) = {
-            use repo_graph_trust::storage_port::{
-                CountByClassificationInput, TrustStorageRead, UnresolvedEdgeCategory,
-            };
+            use repo_graph_trust::storage_port::{CountByClassificationInput, TrustStorageRead};
+            // IMPORT-RESOLUTION-JAVA-1 (review-1 item 1): count ALL unresolved-import categories,
+            // not only `imports_file_not_found`. Java adds `imports_wildcard` +
+            // `imports_ambiguous_suffix`; filtering to the single legacy category undercounted the
+            // honest "M imports unresolved" figure on Java repos. The category set is the shared
+            // `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` (single source of truth with the storage
+            // regression test); it deliberately excludes the C/C++ `imports_ambiguous_match` basis
+            // to keep non-Java repos byte-stable.
             match TrustStorageRead::count_unresolved_edges_by_classification(
                 &storage,
                 &CountByClassificationInput {
                     snapshot_uid: snapshot.snapshot_uid.clone(),
-                    filter_categories: vec![UnresolvedEdgeCategory::ImportsFileNotFound],
+                    filter_categories:
+                        repo_graph_classification::types::MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES
+                            .to_vec(),
                 },
             ) {
                 Ok(rows) => (Some(rows.iter().map(|r| r.count).sum()), None),
                 Err(e) => (
                     None,
                     Some(format!("unresolved-import count read failed: {e}")),
+                ),
+            }
+        };
+
+        // IMPORT-RESOLUTION-JAVA-1 (review-1 item 3): the count of Gradle `projectDir` relocations
+        // written in an UNSUPPORTED form (anything but `"$rootDir/<path>" [as File]`). These are
+        // COUNTED at index time and stored under `gradle_projectdir_unhandled` in the extraction-
+        // diagnostics blob; here we read it back so the presenter can STATE the limitation (those
+        // modules kept their include-derived root and may under-own files), not merely store it.
+        // `Some(n>0)` → warn; `Ok(None)` = key absent (no unhandled form — the corpus-universal
+        // case — or an older daemon) → nothing; a FAILED read carries a labelled degradation
+        // (honesty rule #1: a fallible rendered read is never silently dropped to a false "clean").
+        let (gradle_projectdir_unhandled, gradle_projectdir_unhandled_degraded): (
+            Option<u64>,
+            Option<String>,
+        ) = {
+            use repo_graph_trust::storage_port::TrustStorageRead;
+            match TrustStorageRead::get_snapshot_extraction_diagnostics(
+                &storage,
+                &snapshot.snapshot_uid,
+            ) {
+                Ok(blob) => match parse_gradle_projectdir_unhandled(blob.as_deref()) {
+                    Ok(n) => (n, None),
+                    Err(reason) => (None, Some(reason)),
+                },
+                Err(e) => (
+                    None,
+                    Some(format!("extraction diagnostics unreadable ({e})")),
                 ),
             }
         };
@@ -9312,6 +9347,10 @@ impl ServiceDispatcher {
             // IMPORT-RESOLUTION-RUST-1 §2.5: unresolved-import count beside the edges.
             // `null` = UNKNOWN (read failed / older daemon), never a false 0.
             "unresolved_import_count": unresolved_import_count,
+            // IMPORT-RESOLUTION-JAVA-1 §2.2 (review-1 item 3): count of unsupported-form Gradle
+            // `projectDir` relocations. `null`/absent = none (or older daemon); `> 0` → the
+            // presenter renders a warning that those modules kept their include-derived root.
+            "gradle_projectdir_unhandled": gradle_projectdir_unhandled,
         });
         if let (serde_json::Value::Object(ref mut map), Some(reason)) =
             (&mut response, &http_boundary_link_degraded)
@@ -9333,8 +9372,39 @@ impl ServiceDispatcher {
                 serde_json::json!(reason),
             );
         }
+        // review-1 item 3: emit the projectDir-diagnostic read-failure reason additively (only when
+        // the diagnostics blob could not be read/parsed). Its PRESENCE lets the presenter state the
+        // Gradle-ownership coverage as UNKNOWN rather than silently implying "all handled".
+        if let (serde_json::Value::Object(ref mut map), Some(reason)) =
+            (&mut response, &gradle_projectdir_unhandled_degraded)
+        {
+            map.insert(
+                "gradle_projectdir_unhandled_degraded".to_string(),
+                serde_json::json!(reason),
+            );
+        }
 
         DispatchResult::success(&request.id, response)
+    }
+}
+
+/// IMPORT-RESOLUTION-JAVA-1 (review-1 item 3): extract the `gradle_projectdir_unhandled` count
+/// from an extraction-diagnostics blob. Pure (operates on the JSON string) so the absent-blob /
+/// absent-key / malformed-key / valid-key distinctions are unit-testable without storage. Mirrors
+/// [`crate::index_basis_probe::parse_basis_outcome`]:
+///   - blob absent, or present but WITHOUT the key → `Ok(None)` (no unhandled form / older daemon);
+///   - blob not valid JSON, or the value not a non-negative integer → `Err` (rendered as a
+///     labelled UNKNOWN, never silently dropped to a false "clean" — honesty rule #1);
+///   - key present and a `u64` → `Ok(Some(n))`.
+fn parse_gradle_projectdir_unhandled(blob: Option<&str>) -> Result<Option<u64>, String> {
+    let Some(s) = blob else { return Ok(None) };
+    let value: serde_json::Value = serde_json::from_str(s)
+        .map_err(|e| format!("extraction diagnostics not valid JSON ({e})"))?;
+    match value.get(repo_graph_repo_index::compose::GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY) {
+        None => Ok(None),
+        Some(v) => v.as_u64().map(Some).ok_or_else(|| {
+            format!("gradle_projectdir_unhandled diagnostic malformed (not a non-negative integer): {v}")
+        }),
     }
 }
 
@@ -9839,6 +9909,45 @@ pub(crate) use crate::reader_context::{
     dominant_deps_ecosystem, relationship_next_action_line_or_read_error,
     relationship_reliability_is_low, resource_uncovered_material_languages,
 };
+
+#[cfg(test)]
+mod gradle_projectdir_unhandled_parse_tests {
+    //! IMPORT-RESOLUTION-JAVA-1 (review-1 item 3): pin the pure parse of the
+    //! `gradle_projectdir_unhandled` diagnostics key that the `modules list` read path uses,
+    //! covering the four cases without touching storage. A malformed/absent value must never
+    //! silently become a false "clean" (honesty rule #1).
+    use super::parse_gradle_projectdir_unhandled;
+    use repo_graph_repo_index::compose::GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY;
+
+    #[test]
+    fn absent_blob_is_none() {
+        assert_eq!(parse_gradle_projectdir_unhandled(None), Ok(None));
+    }
+
+    #[test]
+    fn blob_without_key_is_none() {
+        // The corpus-universal case (grpc-java 41/41 handled → key never written).
+        let blob = r#"{"deps_manifests":[],"index_basis":{"outcome":"clean"}}"#;
+        assert_eq!(parse_gradle_projectdir_unhandled(Some(blob)), Ok(None));
+    }
+
+    #[test]
+    fn present_key_is_count() {
+        let blob = format!(r#"{{"{GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY}":3}}"#);
+        assert_eq!(parse_gradle_projectdir_unhandled(Some(&blob)), Ok(Some(3)));
+    }
+
+    #[test]
+    fn invalid_json_is_err_not_silent_none() {
+        assert!(parse_gradle_projectdir_unhandled(Some("not-json{")).is_err());
+    }
+
+    #[test]
+    fn malformed_value_is_err_not_silent_none() {
+        let blob = format!(r#"{{"{GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY}":"lots"}}"#);
+        assert!(parse_gradle_projectdir_unhandled(Some(&blob)).is_err());
+    }
+}
 
 #[cfg(test)]
 mod http_boundary_filter_tests {

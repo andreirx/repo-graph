@@ -829,6 +829,112 @@ fn cross_crate_use_resolves_to_defining_file() {
     );
 }
 
+// ── Cross-package Java import resolution (IMPORT-RESOLUTION-JAVA-1) ─
+
+fn java_multi_project_fixture_path() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("java")
+        .join("multi-project")
+}
+
+/// A Java `import a.b.C` (and the nested-class form `a.b.C.D`) resolves by path suffix to the
+/// file that defines it; a wildcard import stays unresolved with the NAMED, COUNTED
+/// `imports_wildcard` basis; a `projectDir`-relocated project owns its files; and the resolved
+/// cross-package import yields one MODULE→MODULE edge app → core.
+#[test]
+fn cross_package_java_import_resolves_by_suffix() {
+    let repo_path = java_multi_project_fixture_path();
+    assert!(
+        repo_path
+            .join("app/src/main/java/org/x/app/Main.java")
+            .exists(),
+        "java multi-project fixture not found at {:?}",
+        repo_path
+    );
+
+    let mut storage = StorageConnection::open_in_memory().unwrap();
+    let result = index_into_storage(
+        &repo_path,
+        &mut storage,
+        "java-multi",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
+
+    // ── (1) BOTH non-wildcard imports resolve to the relocated Util.java ──
+    // `import org.x.core.Util` and `import org.x.core.Util.Inner` (nested class → suffix-shortens
+    // to Util.java) BOTH resolve to libs/core/src/main/java/org/x/core/Util.java. The two are
+    // distinct IMPORTS edges (distinct FQN target_key), and `get_resolved_imports_for_snapshot`
+    // is non-DISTINCT (storage/src/crud/module_edges_support.rs), so both surface as rows — we
+    // assert EXACTLY two Main.java → Util.java resolutions (not merely that Util.java is present:
+    // a `contains` check would pass even if only `Util` resolved while `Util.Inner` did not).
+    let imports = storage
+        .get_resolved_imports_for_snapshot(&result.snapshot_uid)
+        .unwrap();
+    let main_file = "java-multi:app/src/main/java/org/x/app/Main.java";
+    let util_file = "java-multi:libs/core/src/main/java/org/x/core/Util.java";
+    let targets: Vec<&str> = imports
+        .iter()
+        .filter(|i| i.source_file_uid == main_file)
+        .map(|i| i.target_file_uid.as_str())
+        .collect();
+    let main_to_util = targets.iter().filter(|t| **t == util_file).count();
+    assert_eq!(
+        main_to_util, 2,
+        "BOTH `import org.x.core.Util` and `import org.x.core.Util.Inner` must resolve to \
+         the relocated Util.java (exactly two edges); resolved targets from Main.java = {:?}",
+        targets
+    );
+
+    // ── (2) The wildcard import is unresolved with the NAMED, COUNTED basis ──
+    assert_eq!(
+        result.unresolved_breakdown.get("imports_wildcard"),
+        Some(&1),
+        "the single `import org.x.core.*` must be counted as imports_wildcard; breakdown = {:?}",
+        result.unresolved_breakdown
+    );
+
+    // ── (3) One derived MODULE→MODULE edge app → core (canonical libs/core) ──
+    let facts =
+        repo_graph_module_queries::load_module_graph_facts(&storage, &result.snapshot_uid).unwrap();
+    let edges: Vec<(&str, &str)> = facts
+        .edges
+        .iter()
+        .map(|e| {
+            (
+                e.source_canonical_path.as_str(),
+                e.target_canonical_path.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        edges,
+        vec![("app", "libs/core")],
+        "expected exactly one cross-module edge app → core (relocated to libs/core), got {:?}",
+        edges
+    );
+
+    // ── (4) The projectDir-relocated `core` project owns its files ──
+    let core = facts
+        .modules()
+        .iter()
+        .find(|m| m.display_name.as_deref() == Some("core"))
+        .expect("core module present");
+    assert_eq!(
+        core.canonical_root_path, "libs/core",
+        "projectDir relocation must set core's physical root to libs/core"
+    );
+    let core_files = facts.files_for_module(&core.module_candidate_uid);
+    assert!(
+        core_files.iter().any(|f| f.file_uid == util_file),
+        "relocated core module must own libs/core/.../Util.java; owned = {:?}",
+        core_files.iter().map(|f| &f.file_uid).collect::<Vec<_>>()
+    );
+}
+
 // ── Python extraction ────────────────────────────────────────────
 
 fn python_fixture_path() -> PathBuf {

@@ -1305,6 +1305,89 @@ mod tests {
         assert_eq!(rows[0].count, 1);
     }
 
+    /// IMPORT-RESOLUTION-JAVA-1 (review-1 item 1) regression: the `modules list` headline count
+    /// (`M imports unresolved`) must include ALL THREE unresolved-import categories — the legacy
+    /// `imports_file_not_found` PLUS Java's `imports_wildcard` and `imports_ambiguous_suffix` —
+    /// and must EXCLUDE unrelated categories (calls, and the C/C++ `imports_ambiguous_match` that
+    /// is deliberately out of this headline for byte-stability). This drives the SAME shared
+    /// `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` the dispatch count uses, so a revert of the
+    /// dispatch filter to a single category (the regressed state) fails here.
+    #[test]
+    fn modules_list_unresolved_import_count_includes_all_three_import_categories() {
+        use repo_graph_classification::types::MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES;
+
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        insert_dummy_node(&mut storage, &snap_uid, "n1");
+
+        // One edge in EACH of the three headline import categories …
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_notfound",
+            "n1",
+            "external_library_candidate",
+            "imports_file_not_found",
+            "specifier_matches_package_dependency",
+        );
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_wildcard",
+            "n1",
+            "unknown",
+            "imports_wildcard",
+            "unknown",
+        );
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_ambig_suffix",
+            "n1",
+            "unknown",
+            "imports_ambiguous_suffix",
+            "unknown",
+        );
+        // … plus two edges that MUST NOT be counted: a CALLS edge, and the C/C++
+        // `imports_ambiguous_match` basis deliberately excluded from this headline.
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_calls",
+            "n1",
+            "unknown",
+            "calls_function_ambiguous_or_missing",
+            "unknown",
+        );
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_ambig_match",
+            "n1",
+            "unknown",
+            "imports_ambiguous_match",
+            "unknown",
+        );
+
+        let total: u64 = TrustStorageRead::count_unresolved_edges_by_classification(
+            &storage,
+            &CountByClassificationInput {
+                snapshot_uid: snap_uid,
+                filter_categories: MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES.to_vec(),
+            },
+        )
+        .unwrap()
+        .iter()
+        .map(|r| r.count)
+        .sum();
+
+        assert_eq!(
+            total, 3,
+            "the headline count sums the three import categories and excludes calls + \
+             imports_ambiguous_match"
+        );
+    }
+
     // ── query_unresolved_edges ───────────────────────────────
 
     #[test]

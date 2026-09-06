@@ -76,6 +76,14 @@ pub struct SettingsGradleParseResult {
     pub root_project: Option<GradleModule>,
     /// Subprojects declared via `include` statements
     pub subprojects: Vec<GradleModule>,
+    /// IMPORT-RESOLUTION-JAVA-1 §2.2 / STANDING HONESTY RULE 3: the number of
+    /// `project(...).projectDir = <rhs>` assignments whose `<rhs>` is NOT the handled
+    /// `"$rootDir/<path>"` form (e.g. `new File(rootDir, …)`, `file('x')`). These are
+    /// COUNTED, never guessed — the affected module keeps its include-derived root rather
+    /// than a mis-resolved one, and the count is surfaced through the extraction-diagnostics
+    /// blob so a repo using an unhandled form shows the limitation instead of silent wrong
+    /// ownership. Zero for the current corpus (grpc-java uses the handled form for all 41).
+    pub unhandled_project_dirs: usize,
 }
 
 /// Evidence payload for settings.gradle-derived modules.
@@ -120,6 +128,13 @@ pub fn parse_settings_gradle(content: &str, settings_path: &str) -> SettingsGrad
     // Extract project renames.
     let renames = extract_project_renames(content);
 
+    // IMPORT-RESOLUTION-JAVA-1 §2.2: `projectDir` relocations. grpc-java declares 41 projects
+    // whose physical directory differs from their Gradle path (`project(':grpc-api').projectDir =
+    // "$rootDir/api"`); without this the relocated modules own zero files and the root project
+    // owns everything (D10 ownership defect). Keyed by normalized Gradle path (no leading `:`).
+    // `unhandled_project_dirs` counts assignments in an UNhandled form (STANDING HONESTY RULE 3).
+    let (project_dirs, unhandled_project_dirs) = extract_project_dirs(content);
+
     // Extract included subprojects.
     let included_paths = extract_include_paths(content);
 
@@ -127,11 +142,21 @@ pub fn parse_settings_gradle(content: &str, settings_path: &str) -> SettingsGrad
     let subprojects: Vec<GradleModule> = included_paths
         .into_iter()
         .map(|gradle_path| {
-            let project_root = gradle_path_to_filesystem(&gradle_path);
+            // The include-derived filesystem root (Gradle-path → path). The `display_name` stays
+            // anchored to THIS (the include name), even when `projectDir` relocates the files.
+            let include_root = gradle_path_to_filesystem(&gradle_path);
             let display_name = renames
                 .get(&gradle_path)
                 .cloned()
-                .unwrap_or_else(|| directory_basename(&project_root));
+                .unwrap_or_else(|| directory_basename(&include_root));
+
+            // A `projectDir = "$rootDir/<path>"` relocation overrides the physical root that owns
+            // this project's files; otherwise the include-derived root stands.
+            let normalized_gradle_path = gradle_path.trim_start_matches(':').to_string();
+            let project_root = project_dirs
+                .get(&normalized_gradle_path)
+                .cloned()
+                .unwrap_or(include_root);
 
             GradleModule {
                 gradle_path: format!(":{}", gradle_path),
@@ -156,6 +181,7 @@ pub fn parse_settings_gradle(content: &str, settings_path: &str) -> SettingsGrad
     SettingsGradleParseResult {
         root_project,
         subprojects,
+        unhandled_project_dirs,
     }
 }
 
@@ -187,6 +213,62 @@ fn extract_project_renames(content: &str) -> HashMap<String, String> {
     }
 
     renames
+}
+
+/// IMPORT-RESOLUTION-JAVA-1 §2.2: extract `projectDir` relocations of the seen form
+/// `project(':x').projectDir = "$rootDir/<path>" [as File]`.
+///
+/// Returns `(map, unhandled_count)`:
+/// - `map`: normalized Gradle path (no leading `:`) → repo-relative filesystem path (the
+///   `<path>` after `$rootDir/`). This is the ONLY `projectDir` form RESOLVED — it is the one
+///   grpc-java uses for all 41 relocations (incl. nested `netty/shaded`,
+///   `gcp-observability/interop`).
+/// - `unhandled_count`: how many `project(...).projectDir = <rhs>` assignments used a DIFFERENT
+///   `<rhs>` (e.g. `new File(rootDir, …)`, `file('x')`, a non-`$rootDir` string). These are
+///   NEVER guessed — the module keeps its include-derived root rather than a mis-resolved one —
+///   but they ARE COUNTED (STANDING HONESTY RULE 3) so the limitation is stated, not silent.
+///
+/// Detection is a single deterministic pass: one regex matches EVERY `projectDir =` assignment
+/// and captures its right-hand side; each RHS is then classified as handled (matches the
+/// `"$rootDir/<path>"` shape → inserted into the map) or unhandled (counted). Partitioning in
+/// one pass makes handled + unhandled a clean cover with no double-counting. No unhandled form
+/// exists in the current corpus (grpc-java 41/41 handled; kafka & spring-petclinic declare none).
+fn extract_project_dirs(content: &str) -> (HashMap<String, String>, usize) {
+    let mut dirs = HashMap::new();
+    let mut unhandled = 0usize;
+
+    // Matches ANY `project(':x').projectDir = <rhs to end of line>` (`.` does not cross `\n`),
+    // so the RHS is classified below rather than filtered out by the match itself.
+    let assign_re =
+        match Regex::new(r#"project\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*projectDir\s*=\s*(.+)"#) {
+            Ok(re) => re,
+            Err(_) => return (dirs, unhandled),
+        };
+    // The handled RHS is EXACTLY the ratified form `"$rootDir/<path>" [as File]`: a `$rootDir/`
+    // string literal (single or double quoted), optionally followed by ` as File`, and NOTHING
+    // else (anchored with `$`). Anchoring the tail is a HONESTY requirement (review-1 item 2): a
+    // RHS like `"$rootDir/api" + suffix` or `"$rootDir/api".toString()` is a DIFFERENT, unratified
+    // expression whose real target we do NOT know — matching only its prefix would silently
+    // mis-relocate the module (STANDING HONESTY RULE 3). Such forms fall through to the
+    // `unhandled` count instead, and the module keeps its include-derived root. Capture group 1
+    // is the repo-relative `<path>`.
+    let handled_rhs_re = match Regex::new(r#"^['"]\$rootDir/([^'"]+)['"](?:\s+as\s+File)?$"#) {
+        Ok(re) => re,
+        Err(_) => return (dirs, unhandled),
+    };
+
+    for cap in assign_re.captures_iter(content) {
+        let gradle_path = cap[1].trim_start_matches(':').to_string();
+        let rhs = cap[2].trim();
+        match handled_rhs_re.captures(rhs) {
+            Some(rhs_cap) => {
+                dirs.insert(gradle_path, rhs_cap[1].to_string());
+            }
+            None => unhandled += 1,
+        }
+    }
+
+    (dirs, unhandled)
 }
 
 /// Extract included subproject paths from `include` statements.
@@ -552,6 +634,139 @@ include 'app', 'lib'
         assert_eq!(payload.gradle_path, ":connect:api");
         assert_eq!(payload.project_root, "connect/api");
         assert!(!payload.is_root);
+    }
+
+    #[test]
+    fn parse_grpc_projectdir_relocation_verbatim() {
+        // IMPORT-RESOLUTION-JAVA-1 §2.2: the exact form from grpc-java's settings.gradle.
+        // `:grpc-api` is included but its files live at `api/` (relocated); the module must own
+        // `api`, keep display name `grpc-api` (the include name, NOT the relocated basename),
+        // and nested relocations (`netty/shaded`, `gcp-observability/interop`) must work.
+        let content = r#"
+include ":grpc-api"
+include ":grpc-netty-shaded"
+include ":grpc-gcp-observability:interop"
+
+project(':grpc-api').projectDir = "$rootDir/api" as File
+project(':grpc-netty-shaded').projectDir = "$rootDir/netty/shaded" as File
+project(':grpc-gcp-observability:interop').projectDir = "$rootDir/gcp-observability/interop" as File
+rootProject.name = 'grpc'
+"#;
+        let result = parse_settings_gradle(content, "settings.gradle");
+
+        // All three relocations use the handled `"$rootDir/<path>"` form → none unhandled.
+        assert_eq!(
+            result.unhandled_project_dirs, 0,
+            "grpc-java's projectDir form is fully handled"
+        );
+
+        let api = result
+            .subprojects
+            .iter()
+            .find(|p| p.display_name == "grpc-api")
+            .expect("grpc-api module present");
+        assert_eq!(
+            api.project_root, "api",
+            "projectDir relocates the physical root"
+        );
+        assert_eq!(
+            api.display_name, "grpc-api",
+            "display_name stays the include-derived name, not the relocated basename"
+        );
+
+        let shaded = result
+            .subprojects
+            .iter()
+            .find(|p| p.display_name == "grpc-netty-shaded")
+            .expect("grpc-netty-shaded module present");
+        assert_eq!(
+            shaded.project_root, "netty/shaded",
+            "nested relocation honoured"
+        );
+
+        let interop = result
+            .subprojects
+            .iter()
+            .find(|p| p.project_root == "gcp-observability/interop")
+            .expect("nested gradle-path relocation honoured");
+        // display_name is the include-derived name via the existing rule (directory basename of
+        // the Gradle-path root `grpc-gcp-observability/interop`), NOT the relocated root's basename.
+        assert_eq!(interop.display_name, "interop");
+    }
+
+    #[test]
+    fn unhandled_projectdir_forms_are_counted_not_guessed() {
+        // Forms other than `"$rootDir/<path>"` are NOT resolved, so they are never silently
+        // mis-resolved (STANDING HONESTY RULE 3): the project keeps its include-derived root.
+        // But they ARE COUNTED so the limitation is stated, not silently dropped.
+        let content = r#"
+include ":a"
+project(':a').projectDir = new File(rootDir, "somewhere")
+project(':a').projectDir = file('elsewhere')
+"#;
+        // Neither form matches the handled RHS → no relocation is invented, both are counted.
+        let (dirs, unhandled) = extract_project_dirs(content);
+        assert!(
+            dirs.is_empty(),
+            "no relocation invented for unhandled forms"
+        );
+        assert_eq!(unhandled, 2, "both unhandled projectDir forms are counted");
+
+        // A handled form ALONGSIDE an unhandled one: the handled one resolves, the other counts.
+        let mixed = r#"
+project(':x').projectDir = "$rootDir/api" as File
+project(':y').projectDir = file('elsewhere')
+"#;
+        let (dirs, unhandled) = extract_project_dirs(mixed);
+        assert_eq!(dirs.get("x").map(String::as_str), Some("api"));
+        assert_eq!(unhandled, 1, "the file('…') form is counted, not resolved");
+
+        // review-1 item 2: an RHS that merely STARTS with the handled `"$rootDir/<path>"` string
+        // but continues with a trailing expression (concatenation, method call, extra tokens) is
+        // NOT the ratified form. It must be counted as unhandled — never prefix-matched into a
+        // guessed relocation — so the module keeps its include-derived root.
+        let trailing = r#"
+project(':a').projectDir = "$rootDir/api" + "/sub"
+project(':b').projectDir = "$rootDir/api".toString()
+project(':c').projectDir = "$rootDir/api"extra
+"#;
+        let (dirs, unhandled) = extract_project_dirs(trailing);
+        assert!(
+            dirs.is_empty(),
+            "a trailing expression after the string is NOT the ratified form → no relocation"
+        );
+        assert_eq!(
+            unhandled, 3,
+            "each trailing-expression RHS is counted as unhandled, not prefix-matched"
+        );
+
+        // End-to-end through `parse_settings_gradle`: the included project with a trailing-
+        // expression projectDir keeps its include-derived root and the count is carried.
+        let trailing_included = r#"
+include ':api'
+project(':api').projectDir = "$rootDir/relocated" + suffix
+"#;
+        let result = parse_settings_gradle(trailing_included, "settings.gradle");
+        assert_eq!(result.unhandled_project_dirs, 1);
+        let api = result
+            .subprojects
+            .iter()
+            .find(|p| p.display_name == "api")
+            .expect("module :api present");
+        assert_eq!(
+            api.project_root, "api",
+            "an unhandled trailing-expression projectDir keeps the include-derived root"
+        );
+
+        // The parse result carries the count; `:a` keeps its include-derived root `a`.
+        let result = parse_settings_gradle(content, "settings.gradle");
+        assert_eq!(result.unhandled_project_dirs, 2);
+        let a = result
+            .subprojects
+            .iter()
+            .find(|p| p.display_name == "a")
+            .expect("module :a present");
+        assert_eq!(a.project_root, "a");
     }
 
     #[test]

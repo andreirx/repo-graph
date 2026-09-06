@@ -70,8 +70,16 @@ pub fn classify_unresolved_edge(
         return internal(UnresolvedEdgeBasisCode::ThisReceiverImpliesInternal);
     }
 
-    // IMPORTS_FILE_NOT_FOUND: classify by import kind.
-    if category == UnresolvedEdgeCategory::ImportsFileNotFound {
+    // IMPORTS_FILE_NOT_FOUND (and the Java wildcard / ambiguous-suffix bases,
+    // IMPORT-RESOLUTION-JAVA-1): classify by import kind. A Java wildcard or
+    // ambiguous-suffix import is still an unresolved import — it should carry
+    // the same first-party/external attribution as any other unresolved import
+    // so trust and the deps view treat it honestly (its NAMED failure basis
+    // lives on the orthogonal category axis, preserved for counting).
+    if category == UnresolvedEdgeCategory::ImportsFileNotFound
+        || category == UnresolvedEdgeCategory::ImportsWildcard
+        || category == UnresolvedEdgeCategory::ImportsAmbiguousSuffix
+    {
         return classify_unresolved_import(edge, snapshot_signals, file_signals);
     }
 

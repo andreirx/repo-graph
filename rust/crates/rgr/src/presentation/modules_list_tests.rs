@@ -79,6 +79,8 @@ fn sample_list_response() -> ModulesListResponse {
         ]),
         unresolved_import_count: Some(0),
         unresolved_import_degraded: None,
+        gradle_projectdir_unhandled: None,
+        gradle_projectdir_unhandled_degraded: None,
     }
 }
 
@@ -93,6 +95,8 @@ fn sample_empty_list_response() -> ModulesListResponse {
         edges: Some(vec![]),
         unresolved_import_count: Some(0),
         unresolved_import_degraded: None,
+        gradle_projectdir_unhandled: None,
+        gradle_projectdir_unhandled_degraded: None,
     }
 }
 
@@ -119,6 +123,8 @@ fn two_crate_fixture_response() -> ModulesListResponse {
         }]),
         unresolved_import_count: Some(0),
         unresolved_import_degraded: None,
+        gradle_projectdir_unhandled: None,
+        gradle_projectdir_unhandled_degraded: None,
     }
 }
 
@@ -140,6 +146,68 @@ fn two_crate_fixture_renders_a_to_b_edge_verbatim() {
     assert!(
         !out.contains("imports unresolved"),
         "unresolved == 0 must suppress the unresolved clause, got:\n{out}"
+    );
+}
+
+/// IMPORT-RESOLUTION-JAVA-1 §2.2 (review-1 item 3): a KNOWN non-zero unsupported-`projectDir`
+/// count renders a user-visible caveat naming the count, so the limitation is STATED (not merely
+/// stored in the diagnostics blob). This is the end-to-end user-visibility proof for the read
+/// path added in dispatch.
+#[test]
+fn gradle_projectdir_unhandled_renders_caveat() {
+    let mut resp = sample_list_response();
+    resp.gradle_projectdir_unhandled = Some(2);
+    let out = resp.render_human();
+    assert!(
+        out.contains("2 Gradle projectDir relocations use an unsupported form"),
+        "the unsupported-projectDir count must be stated in the rendered output, got:\n{out}"
+    );
+    assert!(
+        out.contains("file ownership may be understated"),
+        "the caveat must explain the ownership consequence, got:\n{out}"
+    );
+}
+
+/// The count of 1 renders in the singular ("relocation … kept … its").
+#[test]
+fn gradle_projectdir_unhandled_singular_render() {
+    let mut resp = sample_list_response();
+    resp.gradle_projectdir_unhandled = Some(1);
+    let out = resp.render_human();
+    assert!(
+        out.contains("1 Gradle projectDir relocation use")
+            || out.contains("1 Gradle projectDir relocation "),
+        "singular count renders, got:\n{out}"
+    );
+    assert!(
+        out.contains("its file ownership"),
+        "singular pronoun, got:\n{out}"
+    );
+}
+
+/// Absent count (the corpus-universal case, and every non-Gradle repo) renders NOTHING about
+/// projectDir → non-Gradle `modules list` output stays byte-identical.
+#[test]
+fn gradle_projectdir_unhandled_absent_renders_nothing() {
+    let out = sample_list_response().render_human();
+    assert!(
+        !out.contains("projectDir"),
+        "no projectDir caveat when the count is absent, got:\n{out}"
+    );
+}
+
+/// A FAILED diagnostics read (degraded) renders the coverage as UNKNOWN with the reason —
+/// never a silent implied "all handled" (honesty rule #1).
+#[test]
+fn gradle_projectdir_unhandled_degraded_renders_unknown() {
+    let mut resp = sample_list_response();
+    resp.gradle_projectdir_unhandled = None;
+    resp.gradle_projectdir_unhandled_degraded = Some("blob not valid JSON".to_string());
+    let out = resp.render_human();
+    assert!(
+        out.contains("Gradle projectDir relocation coverage is unknown")
+            && out.contains("blob not valid JSON"),
+        "a failed diagnostics read must render an unknown-coverage note with the reason, got:\n{out}"
     );
 }
 
@@ -809,6 +877,8 @@ fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
         edges: Some(vec![]),
         unresolved_import_count: Some(0),
         unresolved_import_degraded: None,
+        gradle_projectdir_unhandled: None,
+        gradle_projectdir_unhandled_degraded: None,
     }
 }
 

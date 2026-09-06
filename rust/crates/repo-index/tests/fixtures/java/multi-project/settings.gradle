@@ -1,0 +1,7 @@
+rootProject.name = 'multi'
+
+include ':core', ':app'
+
+// IMPORT-RESOLUTION-JAVA-1 §2.2: `:core` is included but its files live under libs/core
+// (a projectDir relocation, the grpc-java shape). The `core` module must own libs/core.
+project(':core').projectDir = "$rootDir/libs/core" as File

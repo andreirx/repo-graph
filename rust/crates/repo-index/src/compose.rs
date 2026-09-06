@@ -354,6 +354,12 @@ pub struct GradleExtractionResult {
     pub modules: Vec<ExtractedGradleModule>,
     /// Whether the repo root has a settings.gradle
     pub has_root_settings: bool,
+    /// IMPORT-RESOLUTION-JAVA-1 §2.2 / STANDING HONESTY RULE 3: count of
+    /// `project(...).projectDir = <rhs>` assignments in an UNhandled RHS form (anything but
+    /// `"$rootDir/<path>"`). Surfaced in the extraction-diagnostics blob (key
+    /// `gradle_projectdir_unhandled`) when > 0 so a repo using an unhandled form shows the
+    /// limitation rather than silently receiving include-derived (possibly wrong) ownership.
+    pub unhandled_project_dirs: usize,
 }
 
 /// Extracted inferred module with provenance info (rust-module-parity Phase 3).
@@ -1129,6 +1135,9 @@ fn extract_gradle_modules(
     // Parse settings file
     let parsed = settings_gradle::parse_settings_gradle(settings_content, settings_path);
 
+    // Carry the unhandled-`projectDir`-form count for honest degradation reporting (§2.2).
+    result.unhandled_project_dirs = parsed.unhandled_project_dirs;
+
     // Add root project
     if let Some(root_module) = parsed.root_project {
         result.modules.push(ExtractedGradleModule {
@@ -1826,6 +1835,18 @@ pub(crate) const DEPS_MANIFESTS_DIAG_KEY: &str = "deps_manifests";
 /// this signal (denominator unknown → coverage line omitted, never a fabricated count).
 pub(crate) const DEPS_MANIFESTS_PRESENT_DIAG_KEY: &str = "deps_manifests_present";
 
+/// IMPORT-RESOLUTION-JAVA-1 §2.2 / STANDING HONESTY RULE 3: diagnostics-blob key for the count
+/// of `settings.gradle` `project(...).projectDir = <rhs>` assignments in an UNhandled RHS form
+/// (anything but `"$rootDir/<path>"`). Written ONLY when the count is > 0 (an absent key means
+/// "no unhandled form", the corpus-universal case: grpc-java 41/41 handled), so every existing
+/// snapshot keeps its diagnostics blob byte-for-byte unchanged. PRESENT ⇒ that many relocations
+/// could not be resolved and were left at their include-derived root — an honest, stated
+/// limitation rather than silent wrong ownership.
+/// `pub` (review-1 item 3): the daemon reads this SAME key back at `modules list` time to render
+/// the unhandled-`projectDir` warning, so writer (here) and reader (dispatch) share one constant
+/// and can never drift — mirroring `INDEX_BASIS_DIAG_KEY`'s writer/reader sharing.
+pub const GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY: &str = "gradle_projectdir_unhandled";
+
 /// Build the combined pre-Ready diagnostics fragment for `IndexOptions.basis_diagnostic`:
 /// the index-basis outcome (if any) PLUS the parsed-manifest provenance (§2.2). Returns `None`
 /// only when BOTH are empty, so a normal index with no manifests and a read git HEAD keeps its
@@ -1835,6 +1856,7 @@ fn index_options_diagnostic(
     outcome: Option<&BasisOutcome>,
     manifest_records: &[crate::manifest_deps::ManifestRecord],
     manifests_present: &std::collections::BTreeMap<String, usize>,
+    gradle_projectdir_unhandled: usize,
 ) -> Result<Option<serde_json::Value>, ComposeError> {
     let mut obj = serde_json::Map::new();
     if let Some(basis) = basis_outcome_diagnostic(outcome)? {
@@ -1843,6 +1865,16 @@ fn index_options_diagnostic(
                 obj.insert(k.clone(), v.clone());
             }
         }
+    }
+
+    // §2.2/HONESTY-3: an unhandled `projectDir` form was seen but not resolved — STATE the count.
+    // Written ONLY when > 0 so every repo without such a form (the whole current corpus) keeps
+    // its diagnostics blob byte-for-byte unchanged.
+    if gradle_projectdir_unhandled > 0 {
+        obj.insert(
+            GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY.to_string(),
+            serde_json::json!(gradle_projectdir_unhandled),
+        );
     }
     // Record provenance whenever the deps resolvers ran (even zero manifests: an empty list is a
     // POSITIVE "tracked, none parsed" signal distinct from a pre-slice absent key).
@@ -3412,6 +3444,7 @@ pub fn index_into_storage_with_progress(
                 options.basis_outcome.as_ref(),
                 &prepared.manifest_records,
                 &prepared.manifests_present,
+                prepared.gradle_modules.unhandled_project_dirs,
             )?,
             edge_batch_size: options.edge_batch_size,
             c_include_roots: options.c_include_roots.clone(),
@@ -3883,6 +3916,7 @@ pub fn refresh_into_storage_with_progress(
             options.basis_outcome.as_ref(),
             &prepared.manifest_records,
             &prepared.manifests_present,
+            prepared.gradle_modules.unhandled_project_dirs,
         )?,
         edge_batch_size: options.edge_batch_size,
         c_include_roots: options.c_include_roots.clone(),
@@ -5762,6 +5796,84 @@ public interface Service {
             !cc_rows.is_empty(),
             "expected cyclomatic_complexity measurements for Java methods; got none"
         );
+    }
+
+    // ── IMPORT-RESOLUTION-JAVA-1 §2.2: unhandled projectDir form is counted + stated ──
+
+    /// A Gradle repo whose `settings.gradle` declares ONE `projectDir` relocation in an
+    /// unhandled RHS form (`file('elsewhere')`) — not the resolved `"$rootDir/<path>"` shape.
+    fn make_java_unhandled_projectdir_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(
+            root.join("settings.gradle"),
+            "rootProject.name = 'u'\n\
+             include ':a'\n\
+             project(':a').projectDir = file('elsewhere')\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("a/src/main/java/com/x")).unwrap();
+        fs::write(
+            root.join("a/src/main/java/com/x/A.java"),
+            "package com.x;\npublic class A {}\n",
+        )
+        .unwrap();
+
+        dir
+    }
+
+    #[test]
+    fn unhandled_projectdir_form_is_stated_in_extraction_diagnostics() {
+        use repo_graph_trust::TrustStorageRead;
+
+        // (1) A repo WITH an unhandled `projectDir` form → the count is STATED in the blob.
+        let fixture = make_java_unhandled_projectdir_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "u-unhandled",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+
+        let diag =
+            TrustStorageRead::get_snapshot_extraction_diagnostics(&storage, &result.snapshot_uid)
+                .unwrap()
+                .expect("diagnostics blob present after a normal index");
+        let value: serde_json::Value = serde_json::from_str(&diag).unwrap();
+        assert_eq!(
+            value
+                .get(GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY)
+                .and_then(|v| v.as_u64()),
+            Some(1),
+            "the single unhandled projectDir form must be counted + stated in the diagnostics \
+             blob, not silently dropped; blob = {value}"
+        );
+
+        // (2) A repo with NO unhandled form (no settings.gradle at all) → the key is ABSENT,
+        // proving the diagnostic is honest (present only when there IS a limitation) and that
+        // every existing snapshot keeps its blob byte-for-byte unchanged.
+        let clean = make_java_fixture_repo();
+        let mut storage2 = StorageConnection::open_in_memory().unwrap();
+        let result2 = index_into_storage(
+            clean.path(),
+            &mut storage2,
+            "u-clean",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let diag2 =
+            TrustStorageRead::get_snapshot_extraction_diagnostics(&storage2, &result2.snapshot_uid)
+                .unwrap();
+        if let Some(json_str) = diag2 {
+            let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            assert!(
+                v.get(GRADLE_PROJECTDIR_UNHANDLED_DIAG_KEY).is_none(),
+                "no unhandled form → key must be ABSENT; blob = {v}"
+            );
+        }
     }
 
     // ── Spring liveness inference integration ────────────────────

@@ -138,6 +138,21 @@ pub struct ModulesListResponse {
     /// never computes the count. Mirrors [`Self::http_boundary_link_degraded`].
     #[serde(default)]
     pub unresolved_import_degraded: Option<String>,
+    /// IMPORT-RESOLUTION-JAVA-1 §2.2 (review-1 item 3): count of `settings.gradle`
+    /// `projectDir` relocations written in an UNSUPPORTED form (anything but the ratified
+    /// `"$rootDir/<path>" [as File]`). `Some(n>0)` → those modules kept their include-derived
+    /// root and may under-own files: a rendered warning STATES the limitation instead of
+    /// silently mis-owning. `Some(0)` never occurs (the count is written only when > 0);
+    /// `None` = no unhandled form (the corpus-universal case) or an older daemon → nothing
+    /// rendered. Zero on every non-Gradle repo → byte-stable elsewhere.
+    #[serde(default)]
+    pub gradle_projectdir_unhandled: Option<u64>,
+    /// IMPORT-RESOLUTION-JAVA-1 §2.2 (review-1 item 3): reader-framed degradation when the
+    /// extraction-diagnostics blob could not be read/parsed to obtain the count above.
+    /// PRESENT → the Gradle-ownership coverage is UNKNOWN (rendered as such), never silently
+    /// implied "all handled". Mirrors [`Self::unresolved_import_degraded`].
+    #[serde(default)]
+    pub gradle_projectdir_unhandled_degraded: Option<String>,
 }
 
 impl ModulesListResponse {
@@ -289,6 +304,14 @@ impl ModulesListResponse {
             ));
         }
 
+        // ── Gradle projectDir ownership caveat (IMPORT-RESOLUTION-JAVA-1 §2.2) ──
+        // A `settings.gradle` `projectDir` relocation in an unsupported form was seen but not
+        // resolved, so the affected module(s) kept their include-derived root and may
+        // under-own files. STATE it (never silently mis-own). Shown only when KNOWN and
+        // non-zero, or when the diagnostics read FAILED (coverage unknown) — absent on every
+        // repo without such a form, so non-Gradle output is byte-identical.
+        self.render_gradle_projectdir_caveat(&mut out);
+
         // ── Cross-module dependency edges (MODULE-EDGES-1 §2.1) ─────
         // The count line and the edge list below come from ONE array (`self.edges`),
         // so they can never disagree. An OLDER daemon omits the field (UNKNOWN) → the
@@ -369,6 +392,35 @@ impl ModulesListResponse {
         }
         if let Some(remainder) = budget_remainder_line(sorted.len(), shown) {
             out.push_str(&remainder);
+        }
+    }
+
+    /// IMPORT-RESOLUTION-JAVA-1 §2.2 (review-1 item 3): render the unsupported-`projectDir`
+    /// caveat. A KNOWN non-zero count → a warning that names how many relocations were left at
+    /// their include-derived root (so their file ownership is a LOWER-reliability guess). A
+    /// FAILED diagnostics read → the coverage is UNKNOWN, stated as such. Both branches are
+    /// silent on repos with no such form (the count is absent) → byte-identical elsewhere.
+    fn render_gradle_projectdir_caveat(&self, out: &mut String) {
+        if let Some(n) = self.gradle_projectdir_unhandled {
+            if n > 0 {
+                out.push_str(&format!(
+                    "\nnote: {} Gradle projectDir relocation{} use an unsupported form and could \
+                     not be resolved; the affected module{} kept the include-derived directory, so \
+                     {} file ownership may be understated.\n",
+                    n,
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "its" } else { "their" },
+                ));
+                return;
+            }
+        }
+        if let Some(reason) = &self.gradle_projectdir_unhandled_degraded {
+            out.push_str(&format!(
+                "\nnote: Gradle projectDir relocation coverage is unknown — the extraction \
+                 diagnostics could not be read ({reason}); module file ownership may be \
+                 understated for relocated projects.\n",
+            ));
         }
     }
 

@@ -890,6 +890,11 @@ fn run_pipeline<S: IndexerStoragePort>(
         })
         .collect();
 
+    // IMPORT-RESOLUTION-JAVA-1 §2.1: the Java suffix index, built once from the SAME full file
+    // list (copied-forward + fresh) the other resolution maps use. Needs no source-root
+    // knowledge; empty (a no-op) when the snapshot has no `.java` files.
+    let java_suffix_index = crate::resolver::build_java_suffix_index(all_file_paths);
+
     let mut index = ResolverIndex {
         nodes_by_stable_key: HashMap::new(),
         nodes_by_name: HashMap::new(),
@@ -900,6 +905,7 @@ fn run_pipeline<S: IndexerStoragePort>(
         file_to_module: HashMap::new(),
         include_resolver: Some(include_resolution_map),
         rust_crate_roots,
+        java_suffix_index,
     };
 
     for node in &resolver_nodes {

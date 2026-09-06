@@ -268,6 +268,19 @@ pub enum UnresolvedEdgeCategory {
     /// Multiple indexed headers match the include specifier exactly.
     /// C/C++ v1.1: ambiguity from conventional/configured root overlap.
     ImportsAmbiguousMatch,
+    /// A Java `import pkg.*` wildcard (IMPORT-RESOLUTION-JAVA-1). A wildcard
+    /// names a package, not a single type, so it has no single target file —
+    /// it stays unresolved with this NAMED basis and is COUNTED, never
+    /// silently mis-resolved (STANDING HONESTY RULE 3). Serialized
+    /// `"imports_wildcard"` — the spec's `wildcard_import` basis.
+    ImportsWildcard,
+    /// A Java FQN import whose path suffix matched MORE THAN ONE indexed
+    /// `.java` file (IMPORT-RESOLUTION-JAVA-1) — e.g. a shaded/duplicated copy
+    /// (grpc `netty/shaded`). Ambiguous suffixes stay unresolved with this
+    /// NAMED basis and are COUNTED. Serialized `"imports_ambiguous_suffix"` —
+    /// the spec's `ambiguous_suffix` basis. Distinct from
+    /// `ImportsAmbiguousMatch` (C/C++ include-root overlap).
+    ImportsAmbiguousSuffix,
     InstantiatesClassNotFound,
     ImplementsInterfaceNotFound,
     CallsThisWildcardMethodNeedsTypeInfo,
@@ -301,10 +314,38 @@ impl UnresolvedEdgeCategory {
     pub fn is_imports_category(self) -> bool {
         matches!(
             self,
-            Self::ImportsFileNotFound | Self::ImportsAmbiguousMatch
+            Self::ImportsFileNotFound
+                | Self::ImportsAmbiguousMatch
+                | Self::ImportsWildcard
+                | Self::ImportsAmbiguousSuffix
         )
     }
 }
+
+/// The unresolved-edge categories the `modules list` headline counts as "M imports
+/// unresolved" (IMPORT-RESOLUTION-RUST-1 §2.5, extended by IMPORT-RESOLUTION-JAVA-1 for the
+/// two Java bases). Single source of truth so the dispatch count and its regression test can
+/// never disagree — the sole current production caller is `handle_modules_list`
+/// (`daemon-runtime/src/dispatch.rs`), and `count_unresolved_by_modules_list_categories`
+/// pins the semantics.
+///
+/// This is a DELIBERATE SUBSET of [`UnresolvedEdgeCategory::is_imports_category`], NOT all of
+/// it: it EXCLUDES `ImportsAmbiguousMatch` (the C/C++ include-root-overlap basis). That basis
+/// is out of scope for this slice, and adding it would change the headline count on C/C++
+/// repos, breaking this slice's "other ecosystems byte-stable" requirement. The three
+/// categories here are all zero on non-Java repos, so this set is additive on Java and a
+/// no-op elsewhere. STATED limitation: unresolved C/C++ `imports_ambiguous_match` edges are
+/// still excluded from this headline (pre-slice behavior, unchanged).
+///
+/// Abstraction one-liner — what: a shared category set; users: the modules-list count in
+/// dispatch + its storage regression test; axis: the exact set of "unresolved import"
+/// categories, which grew this slice; rejected simpler alternative: two independent inline
+/// lists (dispatch + test) that could silently drift, defeating the regression's purpose.
+pub const MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES: [UnresolvedEdgeCategory; 3] = [
+    UnresolvedEdgeCategory::ImportsFileNotFound,
+    UnresolvedEdgeCategory::ImportsWildcard,
+    UnresolvedEdgeCategory::ImportsAmbiguousSuffix,
+];
 
 // ── UnresolvedEdgeClassification ──────────────────────────────────
 
