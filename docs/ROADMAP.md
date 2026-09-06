@@ -476,6 +476,19 @@ atomically, indexes from scratch, additive wire method. DAEMON-RESIDUALS-2C = pr
 existing async cap holds at current+parent with 035 (leveldb multi-snapshot, concurrent read
 loop under the patience) + the verb + a REPORTING-ONLY retention budget (doctor names the
 overrun and the verb; "under 1s" for sub-second passes). Queued after JAVA-1.
+SHIPPED: IMPORT-RESOLUTION-JAVA-1 (2026-09-06, dc07527, 3 cycles): a Java `import a.b.C`
+resolves to the file defining `C` via a once-per-index suffix index over the file list
+(nested-class / static-member imports shorten until a file matches); wildcard and
+ambiguous-suffix imports stay unresolved with NAMED, COUNTED bases (max wildcard 0.52% hadoop,
+max ambiguous 0.10% kafka — the 5 grpc-java ambiguities are exactly the `netty/shaded`
+copies); `settings.gradle` `projectDir` relocations honoured with a strict grammar (unhandled
+forms counted and surfaced on modules list, never prefix-guessed); the modules-list unresolved
+count covers all three import categories through one shared constant with a regression test.
+Movement (isolated before/after): kafka module edges 1 → 5,602 (42,482 file-imports resolved;
+67 modules; 13 module cycles), grpc-java 0 → 814 (43 modules OWN their files; root `grpc` owns
+111, not 1,624; 4 real cycles), hadoop 51 → 16,780 (Maven still unparsed — inferred dir
+modules), langchain4j 0 → 3,029, spring-petclinic 0 → 8; leveldb and repo-graph (129)
+byte-stable.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
