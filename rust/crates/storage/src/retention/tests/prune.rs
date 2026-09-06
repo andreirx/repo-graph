@@ -354,3 +354,190 @@ fn prune_prunable_leaves_non_ready_orphan_for_the_vacuum_path() {
         "the READY snapshot survives"
     );
 }
+
+// DAEMON-RESIDUALS-2 §6 (review-1, item 2): `delete_snapshots_cascade` bumps the maintenance
+// connection's `PRAGMA cache_size` for the delete loop and MUST restore the caller's prior value
+// afterwards — on BOTH a successful prune and a failed one — so the enlarged maintenance cache does
+// not linger across the rest of the maintenance operation's work on that same connection. The
+// restore is no longer swallowed (`let _ =` → propagated), so these also assert the connection is
+// left in the caller's original cache state.
+fn cache_size(storage: &super::StorageConnection) -> i64 {
+    storage
+        .connection()
+        .query_row("PRAGMA cache_size", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn prune_restores_prior_cache_size_on_success() {
+    let storage = setup_storage();
+    insert_repo(&storage, "r1");
+    // Independent snapshots → classify keeps only the current; the rest prune (matches
+    // `prune_prunable_snapshots_deletes_marked`).
+    insert_current_epoch_snapshot(&storage, "s1", "r1", None, "2025-01-01T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s2", "r1", None, "2025-01-02T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s3", "r1", None, "2025-01-03T00:00:00Z");
+    storage.classify_repo_retention("r1").unwrap();
+
+    // A NON-default prior cache_size (7 MiB). Distinct from the maintenance value the prune sets
+    // for a tiny store (the 2 MiB MIN_KIB clamp → -2000), so a missing restore is observable.
+    storage
+        .connection()
+        .execute_batch("PRAGMA cache_size = -7000;")
+        .unwrap();
+    assert_eq!(cache_size(&storage), -7000);
+
+    let pruned = storage.prune_prunable_snapshots("r1").unwrap();
+    assert!(pruned >= 1, "fixture must have prunable snapshots");
+
+    assert_eq!(
+        cache_size(&storage),
+        -7000,
+        "cache_size must be restored to the caller's prior value after a successful prune"
+    );
+}
+
+/// Insert one `unresolved_edges` row for `snapshot_uid`, sourced from `node_uid`. `unresolved_edges`
+/// is one of the orphan-cleanup tables the prune deletes EXPLICITLY inside each per-snapshot chunk's
+/// transaction (it has no `ON DELETE CASCADE` on `snapshot_uid`), so it is the row that proves a
+/// failed chunk's in-transaction deletes are rolled back. Its `source_node_uid` FK requires the node
+/// to already exist (migration_007).
+fn insert_unresolved_edge(
+    storage: &super::StorageConnection,
+    edge_uid: &str,
+    snapshot_uid: &str,
+    node_uid: &str,
+) {
+    storage
+        .connection()
+        .execute(
+            "INSERT INTO unresolved_edges \
+             (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, resolution, \
+              extractor, category, classification, classifier_version, basis_code, observed_at) \
+             VALUES (?1, ?2, 'r1', ?3, 'target::key', 'CALLS', 'unresolved', 'test', \
+                     'external', 'unresolved', 1, 'none', '2025-01-01T00:00:00Z')",
+            rusqlite::params![edge_uid, snapshot_uid, node_uid],
+        )
+        .unwrap();
+}
+
+// DAEMON-RESIDUALS-2 §4 (review-2, item 2): the prune is CHUNKED one transaction per snapshot, NOT
+// all-or-nothing across snapshots. This proves the ratified per-snapshot atomicity ACROSS a chunk
+// boundary: when a LATER snapshot's delete fails after an earlier snapshot has already committed,
+// (a) the earlier chunk STAYS deleted (the prune is not rolled back wholesale), and (b) the failing
+// chunk's whole transaction — including the orphan-table (`unresolved_edges`) rows it had already
+// deleted inside that same transaction — rolls back. Guards against the false all-snapshots-atomic
+// contract the stale doc claimed returning unnoticed.
+#[test]
+fn prune_chunk_boundary_preserves_per_snapshot_atomicity_on_failure() {
+    let mut storage = setup_storage();
+    insert_repo(&storage, "r1");
+    // Three independent prunable snapshots (+ current s4) — same fixture shape as
+    // `prune_prunable_snapshots_deletes_marked`: classify → s1/s2/s3 prunable, s4 current.
+    for (uid, day) in [("s1", "01"), ("s2", "02"), ("s3", "03"), ("s4", "04")] {
+        insert_current_epoch_snapshot(
+            &storage,
+            uid,
+            "r1",
+            None,
+            &format!("2025-01-{day}T00:00:00Z"),
+        );
+    }
+    // Give each prunable snapshot a dependent orphan row (unresolved_edges); its FK needs a node.
+    for uid in ["s1", "s2", "s3"] {
+        let node_uid = format!("{uid}-node");
+        storage.insert_nodes(&[bloat_node(uid, &node_uid)]).unwrap();
+        insert_unresolved_edge(&storage, &format!("{uid}-edge"), uid, &node_uid);
+    }
+    storage.classify_repo_retention("r1").unwrap();
+    let stats_before = storage.get_retention_stats("r1").unwrap();
+    assert_eq!(stats_before.prunable, 3);
+    assert_eq!(stats_before.total, 4);
+
+    // Fail deterministically on the SECOND chunk, independent of the (unordered) delete order: a
+    // BEFORE DELETE trigger on `snapshots` counts deletions in `_prune_probe` and RAISE(ABORT)s once
+    // the second is attempted. `snapshots` is deleted exactly once per chunk (after that chunk's
+    // orphan deletes), so chunk 1 commits (n 0→1, no raise) and chunk 2 raises (n 1→2) → its
+    // per-snapshot transaction is dropped without commit → ROLLBACK; the loop then returns Err, so
+    // chunk 3 is never reached.
+    storage
+        .connection()
+        .execute_batch(
+            "CREATE TABLE _prune_probe (n INTEGER NOT NULL);\
+             INSERT INTO _prune_probe VALUES (0);\
+             CREATE TRIGGER fail_on_second_chunk BEFORE DELETE ON snapshots \
+             BEGIN \
+               UPDATE _prune_probe SET n = n + 1; \
+               SELECT RAISE(ABORT, 'forced failure on a later prune chunk') \
+                 WHERE (SELECT n FROM _prune_probe) >= 2; \
+             END;",
+        )
+        .unwrap();
+
+    let result = storage.prune_prunable_snapshots("r1");
+    assert!(
+        result.is_err(),
+        "the forced later-chunk failure must surface, not be swallowed"
+    );
+
+    // (a) Exactly ONE snapshot committed-deleted; the failed + unreached prunable snapshots and the
+    //     current one remain. The prune was NOT rolled back wholesale.
+    let stats_after = storage.get_retention_stats("r1").unwrap();
+    assert_eq!(
+        stats_after.total, 3,
+        "one committed chunk deleted its snapshot; 3 of 4 snapshots remain"
+    );
+    assert_eq!(
+        stats_after.prunable, 2,
+        "one prunable snapshot committed-deleted; two prunable snapshots remain"
+    );
+
+    // (b) Per-chunk atomicity of the orphan cleanup: exactly ONE unresolved_edge is gone (the
+    //     committed chunk's). The FAILING chunk had already deleted its own unresolved_edge inside
+    //     its transaction, but the per-snapshot rollback RESTORED it — so 2 of the original 3 remain,
+    //     NOT 1. This is the airtight proof that the failed chunk's in-transaction deletes reverted.
+    let remaining_orphans: i64 = storage
+        .connection()
+        .query_row("SELECT COUNT(*) FROM unresolved_edges", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        remaining_orphans, 2,
+        "only the committed chunk's orphan row is gone; the failed chunk's orphan delete rolled back"
+    );
+}
+
+#[test]
+fn prune_restores_prior_cache_size_on_failure() {
+    let storage = setup_storage();
+    insert_repo(&storage, "r1");
+    insert_current_epoch_snapshot(&storage, "s1", "r1", None, "2025-01-01T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s2", "r1", None, "2025-01-02T00:00:00Z");
+    insert_current_epoch_snapshot(&storage, "s3", "r1", None, "2025-01-03T00:00:00Z");
+    storage.classify_repo_retention("r1").unwrap();
+
+    storage
+        .connection()
+        .execute_batch("PRAGMA cache_size = -7000;")
+        .unwrap();
+    assert_eq!(cache_size(&storage), -7000);
+
+    // Force a mid-prune failure: drop the first orphan-cleanup table the cascade deletes from
+    // (`unresolved_edges`), so the very first `DELETE FROM unresolved_edges …` inside the per-snapshot
+    // transaction errors AFTER the cache_size has been bumped. This exercises the restore-on-error path.
+    storage
+        .connection()
+        .execute_batch("DROP TABLE unresolved_edges;")
+        .unwrap();
+
+    let err = storage.prune_prunable_snapshots("r1");
+    assert!(
+        err.is_err(),
+        "prune must surface the forced delete failure, not swallow it"
+    );
+
+    assert_eq!(
+        cache_size(&storage),
+        -7000,
+        "cache_size must be restored to the caller's prior value even when the prune fails"
+    );
+}

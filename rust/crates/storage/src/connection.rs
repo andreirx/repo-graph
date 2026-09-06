@@ -459,7 +459,7 @@ mod tests {
     fn open_in_memory_returns_a_fully_initialized_connection() {
         let storage = StorageConnection::open_in_memory().expect("open_in_memory must succeed");
 
-        // Verify all 33 migrations have been applied by checking
+        // Verify all migrations have been applied by checking
         // the schema_migrations table count.
         let count: i64 = storage
             .connection()
@@ -468,8 +468,8 @@ mod tests {
             })
             .expect("query schema_migrations");
         assert_eq!(
-            count, 34,
-            "open_in_memory must run all 34 migrations before returning"
+            count, 35,
+            "open_in_memory must run all 35 migrations before returning"
         );
     }
 
@@ -548,7 +548,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 34);
+        assert_eq!(count, 35);
     }
 
     #[test]
@@ -599,7 +599,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            migration_count, 34,
+            migration_count, 35,
             "re-open must not duplicate schema_migrations rows"
         );
     }
@@ -678,7 +678,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 34);
+        assert_eq!(count, 35);
     }
 
     // ── Connection accessor tests ─────────────────────────────
@@ -693,7 +693,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 34);
+        assert_eq!(count, 35);
     }
 
     #[test]

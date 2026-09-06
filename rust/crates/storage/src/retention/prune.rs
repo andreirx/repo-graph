@@ -1,8 +1,10 @@
 //! Retention pruning logic.
 //!
 //! This module implements snapshot pruning - the deletion of snapshots
-//! marked as `prunable`. All operations are transactional to ensure
-//! atomic cleanup.
+//! marked as `prunable`. Deletion is CHUNKED one transaction per snapshot
+//! (`delete_snapshots_cascade`): each snapshot's cleanup is atomic, but the
+//! prune as a whole is not a single transaction — see the per-snapshot
+//! (not global) contract on [`StorageConnection::prune_prunable_snapshots`].
 //!
 //! # FK Constraints
 //!
@@ -36,9 +38,9 @@ use crate::error::StorageError;
 impl StorageConnection {
     /// Prune the READY snapshots marked as prunable for a repo.
     ///
-    /// This deletes the snapshot rows and all dependent data. The operation
-    /// is **atomic**: either all prunable READY snapshots are deleted (along
-    /// with their dependent rows), or the database is unchanged.
+    /// This deletes each prunable READY snapshot's row and all its dependent
+    /// data. See the chunked, per-snapshot transactional contract below — this
+    /// is deliberately NOT all-or-nothing across snapshots.
     ///
     /// # Why the `status = 'ready'` guard (DAEMON-CRASH-RECOVERY-1, review-1)
     ///
@@ -57,16 +59,31 @@ impl StorageConnection {
     /// non-READY path for reclaim. Behaviour-preserving for every pre-existing
     /// caller (all prior prunable rows are READY).
     ///
-    /// # Transactional Guarantee
+    /// # Transactional contract (chunked, NOT all-or-nothing)
     ///
-    /// The prune sequence runs in a single transaction:
-    /// 1. Count prunable snapshots (outside transaction, for return value)
-    /// 2. Delete orphan rows from tables without CASCADE
-    /// 3. Clear self-referencing parent_snapshot_uid links
-    /// 4. Delete the prunable snapshot rows
-    /// 5. Commit
+    /// Deletion is deliberately NOT one transaction over all prunable
+    /// snapshots. It is CHUNKED one transaction per snapshot
+    /// (`delete_snapshots_cascade`); within each chunk the sequence is:
+    /// 1. Delete this snapshot's orphan rows from tables without `ON DELETE
+    ///    CASCADE` on `snapshot_uid`
+    /// 2. Clear self-referencing `parent_snapshot_uid` links to this snapshot
+    /// 3. Delete this snapshot's row (FK cascade removes its `nodes`/`edges`)
+    /// 4. Commit — then the SQLite write lock is released before the next
+    ///    snapshot, so a waiting foreground writer can interleave
+    ///    (DAEMON-RESIDUALS-2 §6, "write slot released between chunks")
     ///
-    /// If any step fails, the transaction rolls back and no changes persist.
+    /// The guarantee is therefore PER SNAPSHOT, not global:
+    /// - each snapshot is removed atomically — never its row without its
+    ///   dependent rows, nor its dependent rows without its row;
+    /// - if a later snapshot's delete fails, the snapshots ALREADY committed
+    ///   in earlier chunks STAY deleted (the prune is not rolled back
+    ///   wholesale); the failing snapshot's own transaction rolls back in
+    ///   full — including the orphan deletes it had already run in that same
+    ///   chunk — and the error is returned; snapshots not yet reached are
+    ///   left intact.
+    ///
+    /// Re-running the prune after a partial failure is safe: it re-selects
+    /// whatever prunable snapshots still remain.
     ///
     /// # Concurrency
     ///
@@ -189,6 +206,29 @@ impl StorageConnection {
         }
         let conn = self.connection();
 
+        // ── Maintenance page cache, sized to the store, scoped to this prune ──
+        //
+        // DAEMON-RESIDUALS-2 §6 (ratified): size the page cache to the store for the
+        // duration of the prune, so the FK-cascade child-table pages (edges,
+        // unresolved_edges, nodes) stay resident instead of being re-faulted from disk.
+        // Measured MARGINAL on its own (374 s → 265 s on a 68 MB / 4-snapshot fixture) —
+        // the migration-035 single-column FK-child indexes are the primary fix
+        // (374 s → 0.84 s); the cache sizing is ratified belt-and-suspenders alongside.
+        //
+        // Scoped and restored: `cache_size` is a connection-level setting. This is the
+        // caller-supplied per-operation maintenance connection — both production callers
+        // hand us a FRESH connection opened for the maintenance op
+        // (`retention_pass::run_retention_pass` via `open_existing_with_busy_retry`;
+        // `handlers::inventory::retention` via `open_repo_storage_for_request`), NOT a
+        // long-lived serving connection. It is still not exclusive to this delete: within
+        // one retention pass the same connection also runs classify, the non-READY reclaim,
+        // narrow, the reclaimable-bytes probe and (guarded) VACUUM. So we bump the cache
+        // only for the delete loop and restore the prior value afterwards, so the enlarged
+        // maintenance cache does not linger across the rest of that operation's work.
+        let prev_cache: i64 = conn.query_row("PRAGMA cache_size", [], |row| row.get(0))?;
+        let target_kib = maintenance_cache_kib(conn)?;
+        conn.execute_batch(&format!("PRAGMA cache_size = -{target_kib};"))?;
+
         // Tables without ON DELETE CASCADE on snapshot_uid FK.
         // Must delete explicitly before deleting the snapshot.
         let orphan_cleanup_tables = [
@@ -200,34 +240,68 @@ impl StorageConnection {
             "boundary_interaction_links",
         ];
 
-        for snapshot_uid in snapshot_uids {
-            // Begin transaction for this snapshot's deletion.
-            let tx = conn.unchecked_transaction()?;
+        // Run the per-snapshot cascade with the enlarged cache, capturing the outcome so
+        // the cache_size is restored on both success and failure. Per-snapshot
+        // transactions are the "chunked deletes": each snapshot commits independently, so
+        // the SQLite write lock is released between chunks and a waiting foreground writer
+        // can interleave (DAEMON-RESIDUALS-2 §6 "write slot released between chunks").
+        let result = (|| -> Result<(), StorageError> {
+            for snapshot_uid in snapshot_uids {
+                // Begin transaction for this snapshot's deletion.
+                let tx = conn.unchecked_transaction()?;
 
-            // Delete orphan rows for this specific snapshot
-            for table in &orphan_cleanup_tables {
+                // Delete orphan rows for this specific snapshot
+                for table in &orphan_cleanup_tables {
+                    tx.execute(
+                        &format!("DELETE FROM {} WHERE snapshot_uid = ?1", table),
+                        rusqlite::params![snapshot_uid],
+                    )?;
+                }
+
+                // Clear parent_snapshot_uid references to this snapshot
                 tx.execute(
-                    &format!("DELETE FROM {} WHERE snapshot_uid = ?1", table),
+                    "UPDATE snapshots SET parent_snapshot_uid = NULL \
+                     WHERE parent_snapshot_uid = ?1",
                     rusqlite::params![snapshot_uid],
                 )?;
+
+                // Delete the snapshot itself
+                tx.execute(
+                    "DELETE FROM snapshots WHERE snapshot_uid = ?1",
+                    rusqlite::params![snapshot_uid],
+                )?;
+
+                tx.commit()?;
             }
+            Ok(())
+        })();
 
-            // Clear parent_snapshot_uid references to this snapshot
-            tx.execute(
-                "UPDATE snapshots SET parent_snapshot_uid = NULL \
-                 WHERE parent_snapshot_uid = ?1",
-                rusqlite::params![snapshot_uid],
-            )?;
+        // Restore the prior cache_size regardless of the prune outcome. `prev_cache` is
+        // SQLite's own reported value (negative = KiB, positive = pages), valid to feed
+        // straight back. STANDING HONESTY RULE 2: we do NOT swallow a restore failure. The
+        // prune outcome is primary — if the delete loop failed, that error is returned and
+        // is the meaningful one; only if the prune succeeded does a restore failure surface,
+        // so a connection left with the wrong cache_size is never reported as a clean prune.
+        let restore = conn
+            .execute_batch(&format!("PRAGMA cache_size = {prev_cache};"))
+            .map_err(StorageError::from);
 
-            // Delete the snapshot itself
-            tx.execute(
-                "DELETE FROM snapshots WHERE snapshot_uid = ?1",
-                rusqlite::params![snapshot_uid],
-            )?;
-
-            tx.commit()?;
-        }
-
-        Ok(())
+        result.and(restore)
     }
+}
+
+/// Page-cache size in KiB for a maintenance prune: the store's own size, clamped to
+/// `[default 2 MiB, 512 MiB]`.
+///
+/// DAEMON-RESIDUALS-2 §6: the maintenance connection sizes its cache to the store so the
+/// FK-cascade child-table pages stay resident. The upper clamp bounds memory on a
+/// multi-GB store (the operator's was 4.8 GB — an unclamped cache would try to hold the
+/// whole file); the lower clamp never shrinks below SQLite's 2 MiB default.
+fn maintenance_cache_kib(conn: &rusqlite::Connection) -> Result<i64, StorageError> {
+    let page_count: i64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+    let store_kib = (page_count.max(0) as i128 * page_size.max(0) as i128) / 1024;
+    const MIN_KIB: i128 = 2_000; // SQLite's default cache (2 MiB), never smaller
+    const MAX_KIB: i128 = 512 * 1024; // 512 MiB ceiling, bounds memory on a multi-GB store
+    Ok(store_kib.clamp(MIN_KIB, MAX_KIB) as i64)
 }
