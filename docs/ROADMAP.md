@@ -444,8 +444,9 @@ source_node_uid, nodes.parent_node_uid) are full SCANs because every index is co
 with snapshot_uid leading → O(nodes × child rows) per snapshot (68 MB toy: 374 s; 512 MB
 cache 265 s; FK-OFF explicit deletes 0.52 s; single-column FK indexes 0.84 s). This
 reconciles the 2026-09-05 retraction: the indexes EXIST but do not serve the cascade.
-BLOCKED on DR-1 (FK-off explicit closure + guard vs additive FK indexes) — human ruling
-pending; operator rulings: the diagnosis harness asserts its plans; the slice splits into
+DR-1 RULED BY HUMAN 2026-09-06: **B** — additive single-column FK indexes, FK-ON cascade
+kept, SQLite keeps enforcing integrity; the insert-path cost is MEASURED and reported (spec
+§6). Relaunch queued behind IMPORT-RESOLUTION-RUST-1 (one relay per tree). Operator rulings: the diagnosis harness asserts its plans; the slice splits into
 increment 1 (mechanism + guard/index + benchmark gate) and increment 2 (rebuild path +
 prevention set); DAEMON-RESIDUALS-3 follows. Next horizon (human): how a diff maps to
 deltas in the in-memory representation and in SQLite — read-only characterisation launched. KEEP: dead's refusal, gate's vacuous-pass, inferences' three-way cause

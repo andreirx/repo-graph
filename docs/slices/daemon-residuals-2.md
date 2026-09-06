@@ -52,5 +52,37 @@ real state root. Do NOT commit.
 Mechanism measured and named; the measured fix + rebuild path + prevention set shipped
 under the frozen invariants; benchmark gate green; gates green.
 
+## 6. Ratification after cycle 1 (2026-09-06)
+
+**Mechanism MEASURED (cycle 1, harness `storage/src/retention/tests/reproduce.rs`, e957aeb):**
+the FK cascade from `DELETE FROM snapshots` → `nodes` performs, per deleted node, child lookups
+on `edges.source_node_uid`, `edges.target_node_uid`, `unresolved_edges.source_node_uid`,
+`nodes.parent_node_uid` that are full SCANs — every existing index on those tables is composite
+with `snapshot_uid` leading and cannot serve a bare child-column predicate (proved
+size-independently via `EXPLAIN QUERY PLAN`). Cost O(nodes × child rows) per snapshot.
+Toy store (4 snapshots, 8,000 nodes + 16,000 edges each, 68 MB, pruning 2): current 374.5 s;
++512 MB cache 264.9 s; FK-ON pre-delete children (V1) ~200 s then FK error; FK-OFF explicit
+deletes (V2) 0.52 s; single-column FK indexes (V3) 0.84 s (+0.29 s one-time build). This
+RECONCILES the 2026-09-05 retraction: the indexes exist, and do not serve the cascade. §2.2's
+"chunking + cache sizing" pair is measured-insufficient on its own.
+
+**DR-1 — HUMAN RULING: B.** An additive migration adds single-column indexes on the measured
+FK child columns (the four above, plus any other snapshot-scoped FK child column the schema
+introspection finds); the existing FK-ON cascade prune is kept; SQLite keeps enforcing
+integrity. Chunked per-snapshot deletes with the write slot released between chunks and the
+maintenance `cache_size` remain ratified alongside. The slice MEASURES the insert-path cost of
+the new indexes (index and refresh wall time on the harness corpus and one isolated
+repo-graph index, before/after) and the store-size delta, and REPORTS them verbatim — the
+human's expectation is "a little"; a material cost is surfaced, not absorbed.
+
+**DR-2 (operator rulings):** (i) the diagnosis harness ASSERTS what it proves — the EXPLAIN
+test asserts SCAN on the four bare predicates before the migration and SEARCH after; the
+timing harness records the phases the contract names (§2.1) and becomes the seed of the
+benchmark gate; (ii) SPLIT: **increment 1** = the B migration + assertion-bearing harness +
+chunked/cache-sized prune + retention benchmark gate (storage crate, self-contained);
+**increment 2** = rebuild path + `rmap maintenance rebuild` (additive maintenance DTO variant,
+never a new wire message) + snapshot hard cap + prune-on-commit + time budget → rebuild +
+doctor fields. Increment 1 ships first; §5's DoD is met by both together.
+
 CORPUS PATHS: leveldb at ../legacy-codebases/leveldb; FRAKTAG at ../FRAKTAG; repo-graph is
 THIS repo.
