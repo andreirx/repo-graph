@@ -84,5 +84,47 @@ chunked/cache-sized prune + retention benchmark gate (storage crate, self-contai
 never a new wire message) + snapshot hard cap + prune-on-commit + time budget → rebuild +
 doctor fields. Increment 1 ships first; §5's DoD is met by both together.
 
+## 7. Ratification after increment 2 cycle 1 (2026-09-06) — HUMAN RULING B + a wipe-and-reindex verb
+
+Increment 2's cycle 1 shipped the doctor observability (600da87) and stopped on the rest with two
+findings the operator verified in code: (i) the snapshot hard cap and prune-on-commit ALREADY
+EXIST — every index/refresh commit chains enrich → seed → retention asynchronously
+(`daemon-runtime/src/dispatch.rs` `finish_write_with_maintenance`) and the keep-set is already
+current + parent, everything else prunable (`storage/src/retention/classify.rs`); production
+reached 29 snapshots because the prune never FINISHED, which migration 035 fixed at the cause;
+(ii) the copy-kept-snapshots-and-swap rebuild path + time-budget → rebuild was ratified against
+an undiagnosed mechanism whose premise the diagnosis removed, and would add a ~40-table
+filtered copy + atomic file swap under the writer guard — a new corruption surface.
+
+**HUMAN RULING: B.** §2.3 (copy-and-swap rebuild, `maintenance rebuild`) and the "time budget →
+rebuild flip" in §2.4 are RETIRED. The cap and prune-on-commit are NOT re-implemented; they
+are PROVEN. Retained from §2.4: the doctor fields (shipped) and a retention time budget that
+ABORTS at a chunk boundary and REPORTS (doctor + the pass outcome name the overrun and point
+at the verb below) — it never flips into automatic machinery.
+
+**HUMAN ADDITION: a wipe-and-reindex verb in the daemon — `rmap repo rebuild <path>`.** The
+operation the operator performed by hand on 2026-09-04 (`repo remove` with a retry loop while
+startup readers held the coordinator, then `index`), as ONE daemon operation:
+- explicit intent: `--yes` or an interactive confirmation; the confirmation text names what is
+  discarded (every snapshot incl. human baseline stamps, seed vectors, measurements,
+  inferences, the LiveGraph residency) and that the registry entry is kept;
+- coordination is the daemon's, not the operator's: acquires the repo's `Writing` guard
+  FIFO-fairly, bounces with a NAMED Busy if a read or a detached index holds it (the
+  2026-09-04 hazard: an index persisting into the old store — `doctor` visibility of it is
+  part of this verb's proof), never deletes under a reader;
+- drops the store file(s) atomically for that repo only, then indexes from scratch on the same
+  connection lifecycle `index` uses; reports the new snapshot uid, files, symbols, duration;
+- exit/`--json` shape additive; wire: an additive method mirroring `maintenance_gc`'s
+  registration (the wire envelope is untouched).
+Outward surface: the recovery that took an operator with shell access and a retry loop becomes
+one command a user can run when `doctor` tells them retention overran.
+
+**Increment 2C (DAEMON-RESIDUALS-2C) = B's proof + the verb + the reporting-only budget:**
+prove on an isolated multi-snapshot leveldb store (6–8 isolated re-indexes) that the async
+prune-on-commit holds the store at current + parent with 035, with a concurrent foreground read
+loop under the patience (the daemon-level proof deferred from increment 1); `rmap repo rebuild`
+live on the same store with a reader holding the coordinator (named Busy) and then clear
+(success, new snapshot); the budget overrun rendered in doctor on a forced slow pass.
+
 CORPUS PATHS: leveldb at ../legacy-codebases/leveldb; FRAKTAG at ../FRAKTAG; repo-graph is
 THIS repo.
