@@ -229,6 +229,12 @@ pub struct RetentionPassOutcome {
     pub reclaimed_bytes: u64,
     /// DB file size after the pass.
     pub db_size_after: u64,
+    /// DAEMON-RESIDUALS-2 §2.4 (doctor "is retention keeping up?"): wall-clock the whole pass took —
+    /// classify + chunked prune + non-READY reclaim + narrow + (guarded) VACUUM. Measured around the
+    /// pass body in [`run_retention_pass`]. Surfaced verbatim on `daemon_info.last_retention` so the
+    /// `rmap doctor` cleanup line can state how long the last pass ran — the honesty surface for a
+    /// backlog that is (or is not) draining under the retention bound.
+    pub pass_duration_secs: u64,
 }
 
 impl RetentionPassOutcome {
@@ -270,6 +276,7 @@ impl RetentionReport {
             "vacuum_status": self.outcome.vacuum.as_str(),
             "reclaimed_bytes": self.outcome.reclaimed_bytes,
             "db_size_bytes": self.outcome.db_size_after,
+            "duration_secs": self.outcome.pass_duration_secs,
             "finished_secs_ago": self.at.elapsed().as_secs(),
         })
     }
@@ -303,6 +310,12 @@ pub fn run_retention_pass(
     repo_uid: &str,
     coordinator: &RepoCoordinator,
 ) -> Result<RetentionPassOutcome, StorageError> {
+    // DAEMON-RESIDUALS-2 §2.4: time the whole pass so `rmap doctor` can report how long the last
+    // cleanup ran (the "is retention keeping up?" signal). Wall clock, not CPU — it includes the
+    // per-chunk write-slot release and the VACUUM, which is exactly the duration the operator cares
+    // about (how long the store was churning).
+    let pass_start = Instant::now();
+
     // 1. Ratified keep-set, then prune the READY snapshots it marks prunable. These are ordinary WAL
     //    writes: a concurrent reader (holding the coordinator read-lock) sees the pre-delete snapshot
     //    via WAL snapshot isolation, so the prune NEVER blocks a reader even when it is slow
@@ -366,6 +379,7 @@ pub fn run_retention_pass(
         vacuum,
         reclaimed_bytes,
         db_size_after: file_size(db_path),
+        pass_duration_secs: pass_start.elapsed().as_secs(),
     })
 }
 
@@ -932,6 +946,15 @@ mod tests {
         assert!(
             state.last_retention_json().is_some(),
             "the retention report is still recorded for doctor"
+        );
+        // DAEMON-RESIDUALS-2 §2.4: the recorded `last_retention` JSON carries the pass DURATION field
+        // that `rmap doctor` renders as "(last pass ran …)". Asserting the KEY is a number (not a
+        // specific value — a sub-second test pass truncates to 0s) closes the daemon→doctor wiring at
+        // the exact JSON boundary the render test consumes.
+        let lr = state.last_retention_json().unwrap();
+        assert!(
+            lr.get("duration_secs").and_then(|v| v.as_u64()).is_some(),
+            "last_retention carries the pass duration for doctor: {lr}"
         );
     }
 

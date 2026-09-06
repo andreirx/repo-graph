@@ -107,7 +107,15 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
         // F: an interrupted snapshot is a FACT to surface, never a silent "N snapshots".
         message.push_str(&format!(", {} interrupted", interrupted.len()));
     } else if prunable > 0 {
-        message.push_str(&format!(" ({prunable} prunable)"));
+        // DAEMON-RESIDUALS-2 §2.4: the prunable SHARE — how much of the store is awaiting cleanup —
+        // is the "is retention keeping up?" signal. Basis is STATED ("by snapshot count"): per-snapshot
+        // BYTES are not tracked (the snapshots table has only *_total counts), so the share is over
+        // snapshot count, not disk. A high share on a large store means the background pass is behind
+        // (the DAEMON-RESIDUALS-2 field state) — `rmap maintenance prune` forces it.
+        message.push_str(&format!(
+            " ({prunable} prunable{})",
+            prunable_share_clause(prunable, total)
+        ));
     }
 
     // Details (F1): name EVERY snapshot's reader-frame state + outcome — a READY snapshot's
@@ -173,6 +181,18 @@ pub(super) fn storage_probe_from_facts(response: &serde_json::Value) -> ProbeRes
             Some(detail_lines.join("\n        "))
         },
     }
+}
+
+/// DAEMON-RESIDUALS-2 §2.4: the prunable-share clause for the doctor storage line, e.g.
+/// " — 27 of 29 snapshots (93%) awaiting cleanup". Basis is snapshot COUNT (per-snapshot bytes are
+/// not tracked), stated in the words "snapshots … awaiting cleanup". Empty when `total` is 0
+/// (unknown/degenerate — never a fabricated "0% "). Pure/testable.
+fn prunable_share_clause(prunable: i64, total: i64) -> String {
+    if total <= 0 || prunable <= 0 {
+        return String::new();
+    }
+    let pct = (prunable as f64 / total as f64 * 100.0).round() as i64;
+    format!(" — {prunable} of {total} snapshots ({pct}%) awaiting cleanup")
 }
 
 /// RECON-M-R3a: the `witness_ledger` doctor probe from the `storage_health` facts — the
@@ -735,6 +755,49 @@ mod tests {
         assert!(
             details.contains("occurrence delta: c → d (syntax 1, compiler 3)"),
             "{details}"
+        );
+    }
+
+    // DAEMON-RESIDUALS-2 §2.4: the prunable-share clause states the share WITH its basis (snapshot
+    // count), and degrades to empty (never a fabricated "0%") when total/prunable are degenerate.
+    #[test]
+    fn prunable_share_clause_states_share_with_basis() {
+        // The field symptom: a 29-snapshot store with 27 prunable → 93% awaiting cleanup.
+        assert_eq!(
+            prunable_share_clause(27, 29),
+            " — 27 of 29 snapshots (93%) awaiting cleanup"
+        );
+        // Rounds to nearest percent.
+        assert_eq!(
+            prunable_share_clause(1, 3),
+            " — 1 of 3 snapshots (33%) awaiting cleanup"
+        );
+        // Degenerate inputs → empty (unknown, never a false 0%).
+        assert_eq!(prunable_share_clause(0, 5), "");
+        assert_eq!(prunable_share_clause(3, 0), "");
+    }
+
+    // The storage line renders the prunable SHARE (not a bare count) so "is retention keeping up?" is
+    // legible; interrupted snapshots still take precedence (they are the louder fact).
+    #[test]
+    fn storage_line_renders_prunable_share() {
+        let response = json!({
+            "db_size_bytes": 4_800_000_000_u64,
+            "in_use_by_daemon": false,
+            "total_snapshots": 29,
+            "ready_snapshots": 29,
+            "prunable_snapshots": 27,
+            "interrupted_snapshots": [],
+            "snapshots": [],
+        });
+        let probe = storage_probe_from_facts(&response);
+        assert!(probe.passed);
+        assert!(
+            probe
+                .message
+                .contains("27 prunable — 27 of 29 snapshots (93%) awaiting cleanup"),
+            "the storage line states the prunable share with its basis: {}",
+            probe.message
         );
     }
 

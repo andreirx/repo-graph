@@ -153,6 +153,20 @@ fn humanize_count(n: u64) -> String {
     }
 }
 
+/// Humanise a measured DURATION (how long something ran) — distinct from [`humanize_secs_ago`]
+/// (how long ago something finished), which carries an "ago" frame this must not. Sub-minute stays
+/// in seconds; longer renders "Nm Ns" / "Nh Nm" so a multi-hour pass (the DAEMON-RESIDUALS-2 field
+/// symptom) reads plainly.
+fn humanize_duration_secs(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 /// Humanise an elapsed duration for "started N ago".
 fn humanize_secs_ago(secs: u64) -> String {
     if secs < 60 {
@@ -284,7 +298,18 @@ fn retention_probe(response: &serde_json::Value) -> ProbeResult {
                 .and_then(|v| v.as_u64())
                 .map(humanize_secs_ago)
                 .unwrap_or_else(|| "recently".to_string());
-            if removed == 0 {
+            // DAEMON-RESIDUALS-2 §2.4: how long the last pass ran — the "is retention keeping up?"
+            // signal. Basis is stated in the word "ran" (measured wall-clock of the last pass, not an
+            // estimate). Absent on an older daemon that predates the field → no clause (never a
+            // fabricated 0s). A genuine 0-second pass (nothing to prune, sub-second) also omits it —
+            // "ran 0s" would read as a stall; the honest signal there is the "nothing to prune" text.
+            let took = match lr.get("duration_secs").and_then(|v| v.as_u64()) {
+                Some(secs) if secs > 0 => {
+                    format!(" (last pass ran {})", humanize_duration_secs(secs))
+                }
+                _ => String::new(),
+            };
+            let base = if removed == 0 {
                 format!("cleanup: last pass had nothing to prune, {ago}")
             } else {
                 let ran = matches!(vacuum_status, Some("ran"))
@@ -304,7 +329,8 @@ fn retention_probe(response: &serde_json::Value) -> ProbeResult {
                         "cleanup: pruned {removed} snapshot(s) (disk reclaim deferred{reason}), {ago}"
                     )
                 }
-            }
+            };
+            format!("{base}{took}")
         }
         // Field present-but-null, or absent (older daemon) → no pass has completed yet.
         _ => "cleanup: none yet".to_string(),
@@ -1190,7 +1216,8 @@ mod tests {
         let response = json!({
             "last_retention": {
                 "repo": "my-repo", "pruned_count": 1, "non_ready_reclaimed": 0,
-                "reclaimed_bytes": 1_610_612_736_u64, "vacuum_status": "ran", "finished_secs_ago": 45
+                "reclaimed_bytes": 1_610_612_736_u64, "vacuum_status": "ran", "finished_secs_ago": 45,
+                "duration_secs": 8100
             }
         });
         let probe = retention_probe(&response);
@@ -1206,6 +1233,48 @@ mod tests {
             probe.message
         );
         assert!(probe.message.contains("45s ago"), "{}", probe.message);
+        // DAEMON-RESIDUALS-2 §2.4: the last-pass duration renders with its basis ("ran"), humanised.
+        assert!(
+            probe.message.contains("(last pass ran 2h 15m)"),
+            "the cleanup line states how long the last pass ran: {}",
+            probe.message
+        );
+    }
+
+    // DAEMON-RESIDUALS-2 §2.4: an older daemon without `duration_secs`, and a genuine sub-second
+    // pass, both OMIT the duration clause — "ran 0s" would read as a stall, so it is never fabricated.
+    #[test]
+    fn retention_probe_omits_duration_when_absent_or_zero() {
+        let older = json!({ "last_retention": {
+            "pruned_count": 1, "reclaimed_bytes": 1_000_000_u64, "vacuum_status": "ran",
+            "finished_secs_ago": 5
+        }});
+        assert!(
+            !retention_probe(&older).message.contains("last pass ran"),
+            "no duration field → no clause: {}",
+            retention_probe(&older).message
+        );
+        let subsecond = json!({ "last_retention": {
+            "pruned_count": 1, "reclaimed_bytes": 1_000_000_u64, "vacuum_status": "ran",
+            "finished_secs_ago": 5, "duration_secs": 0
+        }});
+        assert!(
+            !retention_probe(&subsecond)
+                .message
+                .contains("last pass ran"),
+            "a 0s pass omits the clause (never 'ran 0s'): {}",
+            retention_probe(&subsecond).message
+        );
+    }
+
+    // The duration humaniser reads plainly across the ranges the field symptom spans (seconds →
+    // multi-hour), and carries no "ago" frame.
+    #[test]
+    fn humanize_duration_secs_reads_plainly() {
+        assert_eq!(humanize_duration_secs(8), "8s");
+        assert_eq!(humanize_duration_secs(75), "1m 15s");
+        assert_eq!(humanize_duration_secs(8100), "2h 15m");
+        assert!(!humanize_duration_secs(45).contains("ago"));
     }
 
     #[test]
