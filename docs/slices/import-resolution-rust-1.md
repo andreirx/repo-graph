@@ -43,18 +43,22 @@ trust's first-party attribution reads and (ii) what makes trust's Import-graph L
    identity map. The stage is a pure function `(key, catalog, file set) → Option<file key>`
    with no I/O (core purity; it is also the shape a future reverse map derives from). The
    crate's own `crate::` paths are unchanged (they already resolve).
-3. **One canonicalisation.** `_`/`-` canonicalisation exists four times
-   (`storage/src/trust_impl.rs:128-130`, `module-queries/src/deps/reconcile.rs:258`,
-   `repo-index/src/config.rs:384,417`, `classification/src/unresolved_classifier.rs:466`).
-   The slice defines it ONCE in a crate all four can import without adding a dependency edge
-   (the graph must stay a DAG — storage already depends on indexer, so indexer or a leaf crate;
-   state the choice) and replaces the copies. If no such crate exists without a new edge,
-   STOP + DECISION_REQUIRED.
+3. **One canonicalisation — of the `_`→`-` EQUALITY family.** The `_`→`-` canonicalisation
+   used for name equality exists three times (`storage/src/trust_impl.rs:128-130`,
+   `module-queries/src/deps/reconcile.rs:258`, `classification/src/unresolved_classifier.rs:
+   466`) plus the new stage; the slice defines it ONCE in a crate all can import without a new
+   dependency edge (chosen: `classification::cargo_name`) and replaces those copies.
+   AMENDED 2026-09-06 (cycle-1 finding, name-vs-semantics): `repo-index/src/config.rs:384,417`
+   is NOT a copy — it performs the OPPOSITE transform (`-`→`_`) to build the underscore-form
+   `PackageDependencySet` that `has_package_dependency` compares against; folding it would
+   invert its output. It stays as is; the two families are documented at the shared function.
 4. **Manifest facts the stage needs are parsed; the rest is stated.** The Cargo reader gains
-   `[lib] name` (overrides the import name) and `[[bin]] path` detection sufficient for §2.2;
-   `[dependencies] foo = { package = "bar" }` renames and `[lib] path` overrides stay unparsed
-   and are STATED as a limitation in the build report with the count of manifests in the
-   corpus that use them (grep), not silently mis-resolved.
+   `[lib] name` (overrides the import name). AMENDED 2026-09-06: bin-only crates are resolved
+   by the stage's entrypoint probe (`src/lib.rs`, then `src/main.rs`) — the frozen DTO carries
+   no bin path; custom `[[bin]] path` values, `[dependencies] foo = { package = "bar" }` renames
+   and `[lib] path` overrides stay unparsed and are STATED as a limitation in the build report
+   with the count of manifests in the corpus that use them (repo-graph: 0 / 0 / 0 custom;
+   2 default `[[bin]]` covered by the probe), not silently mis-resolved.
 5. **The output reflects the resolution (deep-vertical).** `modules list` prints the edge
    count and, on the same line, the unresolved-import count the handler already computes
    (`facts.diagnostics`) — `N cross-module dependencies (M imports unresolved)`; the "all
