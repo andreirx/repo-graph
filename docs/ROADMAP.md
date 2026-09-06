@@ -443,6 +443,11 @@ unresolved imports 7,528 → 4,789, trust's first-party lines shrink by exactly 
 count; `map --dry-run` moves a cross-crate import to `indexer/src/storage_port.rs`; leveldb
 byte-stable bar the permitted clause. Cycle 3 fixed a builder-caught honesty defect (a storage
 read failure rendered as "older daemon — reindex"). Four additive wire fields.
+QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
+(in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
+codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
+EXIT-CODES-1; DAEMON-RESIDUALS-2 increment 2 and DAEMON-RESIDUALS-3 interleave after -2
+increment 1 per the earlier ratification (-2 then -3).
 RATIFIED (human 2026-09-06): fix at the cause, never a query-time gate or zero-state wording
 over a known index-time defect ("no reindex is not a reward"). ORDER: IMPORT-RESOLUTION-RUST-1
 → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 →
