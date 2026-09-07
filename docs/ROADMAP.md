@@ -558,6 +558,13 @@ after DEPS-CLASSIFIER-1B, which was mid-build on opus-4-8); reviews on GPT — `
 `gpt-5.6-sol` on escalations/strain (operator's call, model named in the review record). Every ship
 line from here records BUILDER + REVIEWER models so cycle counts and strain can be compared against
 the opus-4-8 slices above.
+HUMAN RULING (2026-09-07, on the audit's modules grades): module boundaries are the best-DOCUMENTED
+part of any repo and not algorithmically decidable (module vs sub-module) — STOP digging into module
+discovery; instead the modules surfaces DESCRIBE THE METHOD used on this repo and RECOMMEND reading the
+repo's own docs / tree for orientation, repo-specifically. A repo-side "memo" layer for agent
+declarations was considered and DECLINED (noise / repeats the docs; an agent calls once and works
+with the data + recommendation). → MODULES-METHOD-1 (spec `docs/slices/modules-method-1.md`), slotted
+after HEADLINE-TRUTH-1; CYCLES-POPULATION-1 CLOSED (the population is stated). Module EDGE work stays.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
@@ -619,9 +626,7 @@ ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
 Open follow-ups awaiting ratification/scheduling: EXPLAIN-BASES-1 (no surface renders a type's
 base classes / implementors; the edges now exist — CPP-DECLARATORS-1, 2026-09-07), CPP-FNPTR-RETURN-1 (C extractor emits no node
 for a function returning a function pointer — `parenthesized_declarator` never handled; found by
-CPP-DECLARATORS-1's negative fixture 2026-09-07), CYCLES-POPULATION-1 (cycles runs over directory
-groups while modules list uses declared modules — found by IMPORT-RESOLUTION-RUST-1),
-RESOURCE-DYNAMIC-PATH-1, docs
+CPP-DECLARATORS-1's negative fixture 2026-09-07), RESOURCE-DYNAMIC-PATH-1, docs
 residual-bucket taxonomy, ARMED-POSITIVE firing-boundary smoke protocol, linux per-repo
 timeout override.
 
