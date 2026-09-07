@@ -53,6 +53,10 @@ Two defects, one extractor family, both field-visible on v0.17.0:
    `metadata_json.macro_tokens` (the key the class path already uses, `:1133-1150`);
    (b) after the unwrap, an `ERROR` child of the `function_declarator` immediately preceding
    `parameters` → the name is its LAST identifier; earlier identifiers → `macro_tokens`.
+   AMENDED 2026-09-07 (cycle-3 finding): shape (b) exists ONLY under tree-sitter-cpp — the pinned
+   tree-sitter-c 0.23.4 never yields an ERROR child in that position (8 constructs probed, zero C
+   shape-(b) rows in the corpus), so the C extractor implements shape (a) only and its shape-(b)
+   branch was removed as code for an imagined variation; the C test proves no misfire.
    Both are unambiguous: a function returning a function is invalid C/C++, and
    function-pointer returns always go through `parenthesized_declarator`
    (negative fixture `int (*getHandler(int x))(double)`: AMENDED 2026-09-07 — the C extractor emits NO node for a function-pointer-returning function today (pre-existing absence, `parenthesized_declarator` never handled); the fixture asserts only that the new unwrap does NOT misfire on that shape — no macro name, no `macro_tokens`; extracting `getHandler` is a separate cause, filed as a follow-up, out of scope here).
@@ -106,7 +110,10 @@ Two defects, one extractor family, both field-visible on v0.17.0:
    shows `lib/mapObjects/CGHeroInstance.h:55` FIRST among CLASS rows with the 70 others
    tagged `(decl)`; `explain CGHeroInstance` resolves (no 71-row ambiguity); vcmi
    IMPLEMENTS/INSTANTIATES resolved-edge count before/after (expect a large rise — state
-   the number). Non-C/C++ repos byte-stable (repo-graph, FRAKTAG, django orient).
+   the number). AMENDED 2026-09-07: the inheritance proof is graph-level (the counts) plus the
+   restored edges shown on ONE existing surface that consumes them, named in the report; `explain`
+   has no inheritance section today — if no surface renders a type's bases, that is filed as
+   EXPLAIN-BASES-1, not built here. Non-C/C++ repos byte-stable (repo-graph, FRAKTAG, django orient).
 
 6. **C++ inheritance edges resolve (AMENDED 2026-09-06, cycle-1 finding — the root-cause
    report's one UNDETERMINED).** The C++ extractor emits `: public Base` as `Implements` targeting
