@@ -98,5 +98,22 @@ asgiref reads `used`; each row's status carries a computed basis; every present 
 named; the shared head-reduction is the only one in the tree; counts moved and reported;
 Java/Rust/hadoop byte-stable; gates green.
 
+## 6. Sequencing (operator ruling DEPS-CLASSIFIER-1-SEQUENCING, 2026-09-07)
+
+One relay run cannot carry eight substrate edit sites, four corpus reindexes and a spec-mandated
+STOP trigger. Executed as TWO increments, each deep-vertical (user-visible on its own):
+- **Increment 1 (DEPS-CLASSIFIER-1)**: §2.1 the ONE shared head reduction (classification crate;
+  `normalize.rs` delegates) + the classifier using it; §2.2's Python half (import edge specifier
+  agrees with the binding — dotted — or the storage query reads `metadata_json.specifier`); §2.3
+  the computed per-row basis and the fixture replacement; §2.4's "also present, below
+  materiality" ecosystem line. Outward: django's `deps list` reads `asgiref — used (29 import
+  sites, 136 call sites)`; the caveat becomes a basis. Proof: ONE isolated django index (after)
+  vs a copy of the retained root (before); kafka + repo-graph byte-stability from copies.
+- **Increment 2 (DEPS-CLASSIFIER-1B)**: §2.2's TS half — a bare-package `import` emits an IMPORTS
+  edge (unresolved external candidate), `require('x')` literal → binding, `import type` →
+  binding with `is_type_only` surviving the storage read — plus the two-root-manifests
+  canonical-path collision. The §3 STOP trigger (trust/`check` movement on TS repos) lives HERE
+  and is measured on storybook + FRAKTAG before any widening.
+
 CORPUS PATHS: django, storybook, zvec-grep, hadoop at ../legacy-codebases/<name>; repo-graph
 is THIS repo.
