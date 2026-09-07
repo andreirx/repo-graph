@@ -521,6 +521,22 @@ resolves; leveldb `callers leveldb::DBImpl::Recover` ambiguous → 1 real caller
 duckdb zstd / poco pcre2+expat subtrees; leveldb key churn 0; FRAKTAG byte-stable. Strain: three
 cycles lost to an over-heavy proof protocol (operator lesson recorded); `explain` has NO
 inheritance section — filed EXPLAIN-BASES-1. SYMBOL-IDENTITY-1 launched next.
+SHIPPED: SYMBOL-IDENTITY-1 (2026-09-07, f5cfe1e; reviewed by claude-opus-4-6 — Codex quota interim
+by human directive): what `find` prints, `explain`/`callers`/`callees` accept. ONE shared resolver:
+exact stable_key → qualified_name → name → a qualified-SUFFIX step (`qualified_name` ends with
+`::`/`.` + query; one hit resolves, >1 lists candidates with files, 0 not-found) with the
+CPP-DECLARATORS-1 decl/def filter; measured 29–31 ms warm on django's 78k symbols (index search on
+the snapshot's SYMBOL rows, not a scan). `explain` routes through a new `AgentStorageRead::
+resolve_symbol` port method returning a raw `Resolved | Ambiguous | NotFound` DTO, delegated to
+SQLite by the daemon decorator (ruling EXPLAIN-RESOLVER-ROUTING = B: the dev-only LiveGraph
+"nodes-free on green" invariant amended for explain's resolution step; `resolve_symbol_name` stays
+name-only for orient + the parity cert, its comment de-lied); type-beats-constructor collapse on
+the ambiguous set; a miss or ambiguity renders `Confidence: low`, never the old static `high`.
+Movement: `explain DBImpl::Recover` no_match/high → resolved (ambiguous(2) listed at low; the
+definition after the CPP flag); `callers OwnerController.processCreationForm` "symbol not found" →
+`OwnerController.java:77`. Process: the Codex reviewer failed 4×/cycle on a usage-limit lockout
+(until Sep 10); the interim Claude reviewer's approval was mis-parsed as `unknown` by the relay
+because of a stray preamble (agent-manager TD-017). DEPS-CLASSIFIER-1 launched next.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
