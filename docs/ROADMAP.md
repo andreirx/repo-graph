@@ -537,6 +537,22 @@ definition after the CPP flag); `callers OwnerController.processCreationForm` "s
 `OwnerController.java:77`. Process: the Codex reviewer failed 4×/cycle on a usage-limit lockout
 (until Sep 10); the interim Claude reviewer's approval was mis-parsed as `unknown` by the relay
 because of a stray preamble (agent-manager TD-017). DEPS-CLASSIFIER-1 launched next.
+SHIPPED: DEPS-CLASSIFIER-1 increment 1 (2026-09-07, 09071cf; reviewed by claude-opus-4-6 — Codex
+quota interim): a declared dependency is "used" when ANY of its modules is imported. ONE shared head
+reduction (`classification::dep_reduce`: Python head + PEP 503, npm scope/subpath, Rust `::`) now
+serves the index-time classifier (import path AND call-path Rule 5b) and the query-time
+normalizers — the demonstrated duplication that earned the module; Python import edges read the
+dotted specifier from metadata (the slash/dot mismatch); per-package computed basis `used (N
+import sites, M call sites)`; the canonized false fixture replaced by the true row; the "also
+present" ecosystem line already existed (DEPS-ATTRIB-2) and is wired. django before: asgiref's
+153 edges all `unknown`, trust never attributing a library call to it → after: `used: asgiref (51
+import sites, 131 call sites), sqlparse (4, 8) · no static import: tzdata` (truly unused). Rust
+byte-stable (retained copy, no reindex); kafka byte-stability not run (kafka is not in the operator
+registry — the Java branch is untouched and unit-covered). Sequencing ruling: one relay run could
+not carry the TS substrate half + four reindexes + the §3 STOP trigger → increment 2
+(DEPS-CLASSIFIER-1B: TS bare-import IMPORTS edge, `require` binding, `import type` surviving the
+storage read, the two-root-manifests collision) launched next with the STOP measurement on
+storybook + FRAKTAG quarantined there.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
