@@ -553,6 +553,11 @@ not carry the TS substrate half + four reindexes + the §3 STOP trigger → incr
 (DEPS-CLASSIFIER-1B: TS bare-import IMPORTS edge, `require` binding, `import type` surviving the
 storage read, the two-root-manifests collision) launched next with the STOP measurement on
 storybook + FRAKTAG quarantined there.
+MODEL TRIAL (human directive 2026-09-07): builder `claude-opus-4-6` "for a while" (from the launch
+after DEPS-CLASSIFIER-1B, which was mid-build on opus-4-8); reviews on GPT — `gpt-5.6-terra` default,
+`gpt-5.6-sol` on escalations/strain (operator's call, model named in the review record). Every ship
+line from here records BUILDER + REVIEWER models so cycle counts and strain can be compared against
+the opus-4-8 slices above.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
