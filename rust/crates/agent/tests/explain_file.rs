@@ -29,6 +29,7 @@ fn seed_file_repo(fake: &mut FakeAgentStorage) {
             file_count: 1,
             symbol_count: 3,
             languages: vec!["typescript".into()],
+            tracked_only_count: 0,
         },
     );
 }

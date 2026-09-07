@@ -340,6 +340,8 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
         production_count: None,
         test_only_count: None,
         unknown_count: None,
+        // Module-focus cycles are not test-composition-labeled → no production example.
+        production_type_only: None,
         cycles: top,
     };
 

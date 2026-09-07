@@ -59,6 +59,7 @@ fn file_focus_module_summary_is_one_file() {
             file_count: 1,
             symbol_count: 5,
             languages: vec!["typescript".into()],
+            tracked_only_count: 0,
         },
     );
     let result = orient(

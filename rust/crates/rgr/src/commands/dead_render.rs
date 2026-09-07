@@ -85,6 +85,10 @@ impl DeadCausesFacts {
 pub struct FrameworkFacts {
     pub detectors: Vec<DetectorFact>,
     pub total_inferences: u64,
+    /// HEADLINE-TRUTH-1 (D9): total inferences from test fixtures across all detectors.
+    /// Additive field — absent from older daemon responses, defaulted to 0.
+    #[serde(default)]
+    pub total_test_inferences: u64,
     /// Present (as an object with a `message`) ONLY when `total_inferences == 0` — the
     /// honest zero-state line built server-side from the snapshot's language mix. When
     /// `total_inferences == 0` this MUST be `Some`; `DeadCausesFacts::validate` enforces
@@ -109,6 +113,10 @@ pub struct DetectorFact {
     #[allow(dead_code)]
     pub applicable: bool,
     pub count: u64,
+    /// HEADLINE-TRUTH-1 (D9): how many of this detector's inferences come from test
+    /// fixtures. Additive field — absent from older daemon responses, defaulted to 0.
+    #[serde(default)]
+    pub test_count: u64,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +135,9 @@ pub struct PresenceFacts {
 /// - Any detector with a produced count → name it with its count and state the true
 ///   defect (evidence EXISTS but is not consumed). This is the anti-stale line: it can
 ///   NEVER say "missing React detector" for a snapshot that carries React inferences.
+/// - HEADLINE-TRUTH-1 (D9): when a detector has test-fixture inferences, annotate the
+///   count: `Spring: 14 (1 in test fixtures)`. When ALL inferences across all detectors
+///   are test fixtures, the line does NOT cite them as a dead-code suppression cause.
 /// - Zero inferences → the server's honest zero-state message (names the reader's
 ///   languages + which detectors this build has), verbatim.
 fn framework_line(f: &FrameworkFacts) -> String {
@@ -135,15 +146,41 @@ fn framework_line(f: &FrameworkFacts) -> String {
             .detectors
             .iter()
             .filter(|d| d.count > 0)
-            .map(|d| format!("{}: {}", d.label, d.count))
+            .map(|d| {
+                if d.test_count > 0 {
+                    format!(
+                        "{}: {} ({} in test fixtures)",
+                        d.label, d.count, d.test_count
+                    )
+                } else {
+                    format!("{}: {}", d.label, d.count)
+                }
+            })
             .collect();
+        // D9: when ALL inferences are from test fixtures, they do not indicate dead
+        // production code — do not cite them as a dead-code suppression cause.
+        let all_test = f.total_test_inferences > 0 && f.total_test_inferences == f.total_inferences;
         if named.is_empty() {
             // total>0 but no per-detector attribution (e.g. an inference kind outside
             // the catalog): state the total honestly rather than a fabricated family.
+            if all_test {
+                format!(
+                    "Framework liveness inferences exist ({} total) but all are from \
+                     test fixtures — they do not indicate dead production code.",
+                    f.total_inferences
+                )
+            } else {
+                format!(
+                    "Framework liveness inferences exist ({} total) but are not wired \
+                     into deadness scoring — runtime-owned symbols would read as dead.",
+                    f.total_inferences
+                )
+            }
+        } else if all_test {
             format!(
-                "Framework liveness inferences exist ({} total) but are not wired \
-                 into deadness scoring — runtime-owned symbols would read as dead.",
-                f.total_inferences
+                "Framework liveness inferences exist ({}) but all are from \
+                 test fixtures — they do not indicate dead production code.",
+                named.join(", ")
             )
         } else {
             format!(
@@ -494,6 +531,90 @@ mod tests {
         assert!(
             bad.is_err(),
             "an `empty` object without `message` must not parse"
+        );
+    }
+
+    // ── D9: test-fixture partition in framework line ──────────────────────────
+
+    /// D9 contract: `Spring: 1 (1 in test fixtures)` when all of a detector's
+    /// inferences come from test fixtures.
+    #[test]
+    fn d9_framework_line_annotates_detector_with_test_count() {
+        let facts = fw_facts(serde_json::json!({
+            "detectors": [
+                {"label": "Spring", "applicable": true, "count": 1, "test_count": 1},
+            ],
+            "total_inferences": 1, "total_test_inferences": 1,
+            "empty": null, "uncovered_note": null,
+        }));
+        let out = render_derived(&facts);
+        assert!(
+            out.contains("Spring: 1 (1 in test fixtures)"),
+            "annotates detector count with test partition: {out}"
+        );
+    }
+
+    /// D9: when ALL inferences are from test fixtures, the line does NOT cite them
+    /// as a dead-code cause ("not wired into deadness scoring" would be misleading).
+    #[test]
+    fn d9_all_test_fixtures_does_not_cite_dead_code_cause() {
+        let facts = fw_facts(serde_json::json!({
+            "detectors": [
+                {"label": "Spring", "applicable": true, "count": 1, "test_count": 1},
+            ],
+            "total_inferences": 1, "total_test_inferences": 1,
+            "empty": null, "uncovered_note": null,
+        }));
+        let out = render_derived(&facts);
+        assert!(
+            !out.contains("not wired into deadness scoring"),
+            "all-test-fixture inferences should not be cited as a cause: {out}"
+        );
+        assert!(
+            out.contains("all are from test fixtures"),
+            "names the true situation: {out}"
+        );
+    }
+
+    /// D9: mixed (some test, some not) keeps the "not wired" message and annotates.
+    #[test]
+    fn d9_mixed_test_and_production_keeps_not_wired_message() {
+        let facts = fw_facts(serde_json::json!({
+            "detectors": [
+                {"label": "Spring", "applicable": true, "count": 14, "test_count": 1},
+            ],
+            "total_inferences": 14, "total_test_inferences": 1,
+            "empty": null, "uncovered_note": null,
+        }));
+        let out = render_derived(&facts);
+        assert!(
+            out.contains("Spring: 14 (1 in test fixtures)"),
+            "annotates: {out}"
+        );
+        assert!(
+            out.contains("not wired into deadness scoring"),
+            "still cites the cause (non-test inferences exist): {out}"
+        );
+    }
+
+    /// D9: zero test_count (absent from older daemon) → no annotation, no behavior change.
+    #[test]
+    fn d9_absent_test_count_defaults_to_zero_no_annotation() {
+        // Simulates an older daemon response without test_count fields.
+        let facts = fw_facts(serde_json::json!({
+            "detectors": [
+                {"label": "Spring", "applicable": true, "count": 14},
+            ],
+            "total_inferences": 14, "empty": null, "uncovered_note": null,
+        }));
+        let out = render_derived(&facts);
+        assert!(
+            out.contains("Spring: 14") && !out.contains("test fixtures"),
+            "no test annotation when field is absent: {out}"
+        );
+        assert!(
+            out.contains("not wired into deadness scoring"),
+            "original message preserved: {out}"
         );
     }
 }

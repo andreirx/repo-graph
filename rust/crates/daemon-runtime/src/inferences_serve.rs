@@ -296,6 +296,9 @@ fn record_json(i: InferenceListRow) -> serde_json::Value {
         "confidence": i.confidence,
         "extractor": i.extractor,
         "created_at": i.created_at,
+        // HEADLINE-TRUTH-1 (§2.5 D9): additive field from the files.is_test JOIN.
+        // `null` when the join produced no row (malformed key / missing file).
+        "is_test": i.is_test,
     });
     if let Some(err) = value_error {
         if let serde_json::Value::Object(ref mut map) = record {
@@ -406,6 +409,7 @@ mod tests {
             confidence: 0.9,
             extractor: "test:1.0".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
+            is_test: Some(false),
         }
     }
 
@@ -541,8 +545,11 @@ mod tests {
         assert_eq!(hook["line"], 7);
     }
 
+    /// HEADLINE-TRUTH-1 (review-0 #4): legacy/pre-anchor Spring payloads that carry no
+    /// `line_start` render `line: null` — never a fabricated 0. This test covers the
+    /// LEGACY producer case; the new producer path (with `line_start`) is tested below.
     #[test]
-    fn spring_row_has_file_but_no_line_never_fabricates_zero() {
+    fn spring_legacy_payload_without_line_start_renders_null_line() {
         // Spring bean value carries no line_start → line is null, not 0.
         let bean = record_json(row(
             "inf-3",
@@ -552,6 +559,54 @@ mod tests {
         ));
         assert_eq!(bean["file"], "src/main/java/App.java");
         assert_eq!(bean["line"], serde_json::Value::Null, "no fabricated 0");
+    }
+
+    /// HEADLINE-TRUTH-1 (§2.5 D9, review-0 #4): Spring classifier NOW writes `line_start`
+    /// via the node's location. Verify it renders as the `line` anchor.
+    #[test]
+    fn spring_payload_with_line_start_renders_anchor() {
+        let bean = record_json(row(
+            "inf-5",
+            "repo_01abc:src/main/java/App.java#AppConfig:SYMBOL:CLASS",
+            "spring_container_managed",
+            r#"{"annotation":"@Configuration","reason":"stereotype","line_start":42}"#,
+        ));
+        assert_eq!(bean["file"], "src/main/java/App.java");
+        assert_eq!(bean["line"], 42, "line_start must flow to the line anchor");
+    }
+
+    /// HEADLINE-TRUTH-1 (§2.5 D9, review-0 #4): the `is_test` JOIN result renders in
+    /// the record JSON. A test-fixture file's inference carries `is_test: true`.
+    #[test]
+    fn is_test_true_flows_to_record_json() {
+        let mut r = row(
+            "inf-6",
+            "repo_01abc:src/test/java/AppTest.java#AppTest:SYMBOL:CLASS",
+            "spring_container_managed",
+            r#"{"annotation":"@SpringBootTest","reason":"stereotype","line_start":10}"#,
+        );
+        r.is_test = Some(true);
+        let json = record_json(r);
+        assert_eq!(json["is_test"], true, "is_test must flow through the JOIN");
+    }
+
+    /// The `is_test: None` case (join produced no row — malformed key or missing file)
+    /// renders as `null`, not a fabricated false.
+    #[test]
+    fn is_test_none_renders_as_null() {
+        let mut r = row(
+            "inf-7",
+            "repo_01abc:orphan#Missing:SYMBOL:CLASS",
+            "spring_container_managed",
+            r#"{"annotation":"@Service","reason":"stereotype"}"#,
+        );
+        r.is_test = None;
+        let json = record_json(r);
+        assert_eq!(
+            json["is_test"],
+            serde_json::Value::Null,
+            "absent join result → null, not false"
+        );
     }
 
     #[test]
@@ -628,6 +683,51 @@ mod tests {
         assert_eq!(resp["truncated"], true);
         assert_eq!(resp["limit"], 2);
         assert_eq!(resp["results"].as_array().unwrap().len(), 2);
+    }
+
+    /// HEADLINE-TRUTH-1 (§2.5 D9, review-1 #3): composed-pipeline test proving
+    /// the Spring classifier's `line_start` reaches the serve layer's JSON as
+    /// `App.java:42 [test]`. This feeds ACTUAL classifier output (not hand-written
+    /// payload) through the record_json pipe, closing the gap the reviewer flagged.
+    #[test]
+    fn spring_classifier_line_start_reaches_serve_record_as_file_line_test() {
+        use repo_graph_classification::spring_liveness::{
+            classify_spring_liveness, SpringNodeInput,
+        };
+
+        // Run the REAL classifier on a node with line_start.
+        let nodes = vec![SpringNodeInput {
+            stable_key: "repo_01abc:src/test/java/App.java#App:SYMBOL:CLASS".to_string(),
+            kind: "SYMBOL".to_string(),
+            subtype: Some("CLASS".to_string()),
+            metadata_json: Some(r#"{"annotations":[{"name":"Configuration"}]}"#.to_string()),
+            line_start: Some(42),
+        }];
+        let inferences = classify_spring_liveness(&nodes);
+        assert_eq!(inferences.len(), 1, "classifier must produce one inference");
+
+        // Feed the classifier's ACTUAL output through the serve path.
+        let mut inference_row = row(
+            "composed-1",
+            &inferences[0].target_stable_key,
+            &inferences[0].kind,
+            &inferences[0].value_json,
+        );
+        inference_row.is_test = Some(true); // simulates the storage JOIN result
+
+        let json = record_json(inference_row);
+        assert_eq!(
+            json["file"], "src/test/java/App.java",
+            "file extracted from classifier's target_stable_key"
+        );
+        assert_eq!(
+            json["line"], 42,
+            "line_start from classifier reaches serve record"
+        );
+        assert_eq!(
+            json["is_test"], true,
+            "is_test from storage JOIN flows through"
+        );
     }
 
     #[test]

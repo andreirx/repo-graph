@@ -195,7 +195,14 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
 
     let mut noted_dual: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
+    // HEADLINE-TRUTH-1 (§2.4 D6): emit a section header before the first test fixture row
+    // so fixtures are visually separated (the sort already pushes them last).
+    let mut test_section_emitted = false;
     for (s, count) in &groups {
+        if s.is_test == Some(true) && !test_section_emitted {
+            out.push_str("  test fixtures (excluded from counts):\n");
+            test_section_emitted = true;
+        }
         let route = match &s.route {
             Some(r) => r.clone(),
             // §3: an unknown route shows its recorded reason, never a bare
@@ -280,8 +287,13 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
 
 /// SURFACES-DEDUP-1 (§2.1): collapse surfaces that are IDENTICAL in every field the
 /// human row renders — `(direction, method, route, file, is_test, framework,
-/// route_unknown_reason, conflict)` — into `(representative, count)` pairs, in the same
-/// deterministic `(direction, method, route, file)` order the pre-slice loop used.
+/// route_unknown_reason, conflict)` — into `(representative, count)` pairs.
+///
+/// HEADLINE-TRUTH-1 (§2.4 D6): the ORDER is providers → consumers → test fixtures
+/// (not the pre-slice lexical "consumer" < "provider"). `is_test` leads the sort key
+/// so fixtures section last; within non-test, providers precede consumers. This is
+/// the display order; the headline/footer aggregation (`HttpSurfaceAggregation`) is
+/// over the unsorted full set and is unaffected.
 ///
 /// `module` is deliberately NOT part of the collapse key: it never appears on the row (it
 /// feeds only the per-route dual note, computed over the FULL entry set), and a single file
@@ -296,7 +308,7 @@ fn collapse_identical(
     surfaces: &[HttpBoundarySurfaceEntry],
 ) -> Vec<(&HttpBoundarySurfaceEntry, usize)> {
     let mut refs: Vec<&HttpBoundarySurfaceEntry> = surfaces.iter().collect();
-    refs.sort_by(|a, b| line_key(a).cmp(&line_key(b)));
+    refs.sort_by(|a, b| display_sort_key(a).cmp(&display_sort_key(b)));
 
     let mut groups: Vec<(&HttpBoundarySurfaceEntry, usize)> = Vec::new();
     for s in refs {
@@ -323,6 +335,45 @@ type LineKey<'a> = (
     Option<&'a str>, // route_unknown_reason
     Option<&'a str>, // conflict
 );
+
+/// HEADLINE-TRUTH-1 (§2.4 D6): the display-order sort key — `is_test` FIRST
+/// (non-test before test), then direction as a numeric ordinal (provider=0 <
+/// consumer=1, NOT lexical "consumer" < "provider"), then the identity fields.
+/// This ensures the rendered section order is: providers → consumers → test
+/// fixtures. The `line_key` (unchanged) is still used for identity-based collapse
+/// dedup: two rows collapse IFF `line_key(a) == line_key(b)`.
+#[allow(clippy::type_complexity)] // intentional composite sort key — a type alias adds no clarity
+fn display_sort_key(
+    s: &HttpBoundarySurfaceEntry,
+) -> (
+    u8,
+    u8,
+    &str,
+    Option<&str>,
+    &str,
+    Option<u64>,
+    Option<&str>,
+    Option<&str>,
+    Option<&str>,
+) {
+    let test_ord: u8 = if s.is_test == Some(true) { 1 } else { 0 };
+    let dir_ord: u8 = match s.direction.as_str() {
+        "provider" => 0,
+        "consumer" => 1,
+        _ => 2,
+    };
+    (
+        test_ord,
+        dir_ord,
+        s.http_method.as_str(),
+        s.route.as_deref(),
+        s.source_file.as_str(),
+        s.line,
+        s.framework.as_deref(),
+        s.route_unknown_reason.as_deref(),
+        s.conflict.as_deref(),
+    )
+}
 
 fn line_key(s: &HttpBoundarySurfaceEntry) -> LineKey<'_> {
     (
@@ -649,12 +700,50 @@ mod tests {
             out.contains("[test]"),
             "fixture still listed, labeled:\n{out}"
         );
+        // HEADLINE-TRUTH-1 (§2.4 D6): the fixture row appears under a section header.
+        assert!(
+            out.contains("test fixtures (excluded from counts):"),
+            "fixture section header present:\n{out}"
+        );
         // COHERENCE-3 (review-0 item 3): the footer shows the SAME production phrase AND the SAME
         // exclusion clause as the headline — byte-identical, never a bare "2 surfaces" sitting
         // silently below the listed `[test]` fixture row.
         assert!(
             out.contains("— 2 HTTP surfaces: 1 provider, 1 consumer (+1 test-fixture excluded) —"),
             "footer matches the headline production phrase AND discloses the exclusion:\n{out}"
+        );
+    }
+
+    /// HEADLINE-TRUTH-1 (§2.4 D6): row order is providers → consumers → test fixtures.
+    /// Pre-slice, the sort was lexical `direction` ("consumer" < "provider") and `is_test`
+    /// was field 6 — so fixtures interleaved and consumers preceded providers.
+    #[test]
+    fn d6_row_order_providers_then_consumers_then_fixtures() {
+        let mut fixture = entry("provider", "GET", Some("/fx"), "test/fixtures/srv.js");
+        fixture.is_test = Some(true);
+        let surfaces = vec![
+            entry("consumer", "GET", Some("/a"), "web/a.ts"), // consumer
+            fixture,                                          // test-fixture
+            entry("provider", "GET", Some("/b"), "backend/B.java"), // provider
+        ];
+        let out = render_surfaces(&surfaces);
+        let provider_pos = out.find("[provider]").expect("provider row");
+        let consumer_pos = out.find("[consumer]").expect("consumer row");
+        let fixture_header_pos = out
+            .find("test fixtures (excluded from counts):")
+            .expect("fixture section header");
+        let test_row_pos = out.find("[test]").expect("test row");
+        assert!(
+            provider_pos < consumer_pos,
+            "providers must precede consumers:\n{out}"
+        );
+        assert!(
+            consumer_pos < fixture_header_pos,
+            "consumers must precede the fixtures section:\n{out}"
+        );
+        assert!(
+            fixture_header_pos < test_row_pos,
+            "fixture section header must precede fixture rows:\n{out}"
         );
     }
 

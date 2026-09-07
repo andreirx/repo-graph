@@ -50,6 +50,12 @@ fn canonical_cycle_shape(mut v: serde_json::Value) -> serde_json::Value {
                     ev.remove("production_count");
                     ev.remove("test_only_count");
                     ev.remove("unknown_count");
+                    // HEADLINE-TRUTH-1 (COH-2, review-3 #3): the pre-truncation first-production
+                    // `type_only` verdict is the SAME kind of ROUTE-CONDITIONAL additive
+                    // decoration as the split — present on the SQLite serve (the composition +
+                    // verdict are reachable), absent on the M-2 LiveGraph serve. OUTSIDE the
+                    // CYCLES-B certified shape, so project it off before the byte-parity compare.
+                    ev.remove("production_type_only");
                     // TYPE-ONLY-IMPORTS-1: the per-cycle `type_only` verdict is the SAME kind of
                     // ROUTE-CONDITIONAL additive decoration as the split — present on the SQLite
                     // serve (the fact is reachable), absent on the M-2 LiveGraph serve (the warm
@@ -61,6 +67,12 @@ fn canonical_cycle_shape(mut v: serde_json::Value) -> serde_json::Value {
                         for cyc in cycles.iter_mut() {
                             if let Some(obj) = cyc.as_object_mut() {
                                 obj.remove("type_only");
+                                // HEADLINE-TRUTH-1 (COH-2): the per-cycle `test_composition`
+                                // discriminant is ROUTE-CONDITIONAL — present on the SQLite serve
+                                // (the `is_test` fact is reachable), absent on the M-2 LiveGraph
+                                // serve (no `is_test` in the warm path). OUTSIDE the CYCLES-B
+                                // certified shape, so project it off before the parity compare.
+                                obj.remove("test_composition");
                                 // COHERENCE-3: the per-cycle `walk` is the SAME kind of
                                 // ROUTE-CONDITIONAL additive decoration — present on the SQLite
                                 // serve (the intra-SCC edges are reachable), absent on the M-2

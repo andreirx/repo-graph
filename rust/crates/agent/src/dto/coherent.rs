@@ -722,6 +722,7 @@ mod tests {
             production_count: None,
             test_only_count: None,
             unknown_count: None,
+            production_type_only: None,
             cycles: vec![crate::dto::signal::CycleEvidence {
                 length: 2,
                 modules: vec!["a".to_string(), "b".to_string()],

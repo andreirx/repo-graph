@@ -498,6 +498,18 @@ pub struct ImportCyclesEvidence {
     /// 0-as-unknown — absence is `None`, a known-zero is `Some(0)` (Fact Certainty Model).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unknown_count: Option<u64>,
+    /// HEADLINE-TRUTH-1 (COH-2, review-3 #3): the `type_only` verdict of the FIRST production
+    /// cycle in canonical order, computed over the WHOLE cycle set BEFORE the top-N truncation
+    /// of [`Self::cycles`]. The orient renderer prints this verdict when a split is active — the
+    /// production cycle whose verdict it must render can rank BEYOND the top-N carried in
+    /// `cycles[]` (a repo whose first N canonical cycles are all test-only), so searching the
+    /// truncated `cycles[]` would silently lose the verdict. `Some` only on the SQLite path where
+    /// cycles are test-composition-labeled AND a strictly-production cycle exists that carries a
+    /// TS/JS verdict; `None` otherwise (LiveGraph/focus, no production cycle, or a non-TS
+    /// production cycle). Additive: `None` is omitted from JSON (byte-identical for existing
+    /// consumers). Serialized as `{ "kind": <snake_case>[, …] }`, the SAME shape `cycles` emits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub production_type_only: Option<crate::cycle_type_only::CycleTypeOnly>,
     pub cycles: Vec<CycleEvidence>,
 }
 
@@ -642,6 +654,11 @@ pub struct ModuleSummaryEvidence {
     pub file_count: u64,
     pub symbol_count: u64,
     pub languages: Vec<String>,
+    /// HEADLINE-TRUTH-1 (§2.1): count of files that are config/contract/failed —
+    /// tracked in file_versions but without SYMBOL-bearing FILE nodes. ADDITIVE wire
+    /// field; `0` on the LiveGraph/cert path (those paths don't carry parse_status).
+    #[serde(default)]
+    pub tracked_only_count: u64,
 
     // ── Module discovery data (present when module_candidates exist) ─
     /// Count of discovered modules. `None` when module discovery data
@@ -1915,6 +1932,7 @@ mod tests {
             production_count: None,
             test_only_count: None,
             unknown_count: None,
+            production_type_only: None,
             cycles: vec![],
         });
         assert_eq!(s.code, SignalCode::ImportCycles);
@@ -1945,6 +1963,7 @@ mod tests {
             file_count: 10,
             symbol_count: 100,
             languages: vec!["rust".into()],
+            tracked_only_count: 0,
             discovered_module_count: None,
             module_kinds: None,
             top_modules: Vec::new(),
@@ -1964,6 +1983,7 @@ mod tests {
             file_count: 50,
             symbol_count: 200,
             languages: vec!["typescript".into(), "rust".into()],
+            tracked_only_count: 0,
             discovered_module_count: Some(5),
             module_kinds: Some(ModuleKindBreakdown {
                 declared: 3,
@@ -2145,6 +2165,7 @@ mod tests {
             production_count: None,
             test_only_count: None,
             unknown_count: None,
+            production_type_only: None,
             cycles: vec![CycleEvidence {
                 length: 2,
                 modules: vec!["m1".into(), "m2".into()],
@@ -2177,6 +2198,7 @@ mod tests {
             production_count: Some(2),
             test_only_count: Some(0),
             unknown_count: Some(0),
+            production_type_only: None,
             cycles: vec![
                 CycleEvidence {
                     length: 2,

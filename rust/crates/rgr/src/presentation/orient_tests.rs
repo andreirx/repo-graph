@@ -414,17 +414,46 @@ fn small_structure_line_names_modules() {
     );
 }
 
+/// HEADLINE-TRUTH-1 (§2.1, review-4 #2): the RENDERED reconciliation — orient's header
+/// states the one file universe as `200 files indexed (150 source; 50 config/contract/
+/// unreadable, tracked only)`, where source is `file_count − tracked_only_count` computed
+/// by the presenter. This is the rendered form of the identity `200 = 150 + 50`; the
+/// agent-side `check_repo.rs` test pins the numeric identity, this pins the string.
+#[test]
+fn header_renders_indexed_source_tracked_only_split() {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "MODULE_SUMMARY",
+        "info",
+        "module summary",
+        serde_json::json!({
+            "file_count": 200,
+            "symbol_count": 3600,
+            "tracked_only_count": 50,
+            "discovered_module_count": 2,
+            "package_groups": [
+                {"name": "core", "file_count": 150, "test_file_count": 0}
+            ]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("200 files indexed (150 source; 50 config/contract/unreadable, tracked only)"),
+        "header must render the reconciled split 200 = 150 source + 50 tracked-only:\n{out}"
+    );
+}
+
 #[test]
 fn small_complexity_centers_are_named() {
     // §3.2: NAME the top complex files, not "342 exceed threshold".
     let out = nginx_like().render_human(OrientDepth::Small);
     assert!(
-        out.contains("Complexity centers: src/http/ngx_http_upstream.c (cx 89)"),
-        "small must NAME the complexity centers:\n{out}"
+        out.contains("Complexity centers: src/http/ngx_http_upstream.c — ngx_http_upstream_process_header (cx 89)"),
+        "small must NAME the complexity centers (file — symbol):\n{out}"
     );
     // top-3 at small; the rest are pointed to (honest, not dropped).
-    assert!(out.contains("src/core/ngx_resolver.c (cx 67)"));
-    assert!(out.contains("src/http/v2/ngx_http_v2.c (cx 61)"));
+    assert!(out.contains("src/core/ngx_resolver.c — ngx_resolver_process_response (cx 67)"));
+    assert!(out.contains("src/http/v2/ngx_http_v2.c — ngx_http_v2_state_headers (cx 61)"));
     assert!(
         out.contains("+339 more above threshold — rmap hotspots"),
         "must honestly point to the remaining 342-3 centers:\n{out}"
@@ -845,8 +874,12 @@ fn budget_trades_depth_small_subset_of_full() {
     // The dense headline is present at BOTH tiers (budget never strips it).
     assert!(small.contains("package groups: http, core, event, os, stream, mail"));
     assert!(full.contains("package groups: http, core, event, os, stream, mail"));
-    assert!(small.contains("src/http/ngx_http_upstream.c (cx 89)"));
-    assert!(full.contains("src/http/ngx_http_upstream.c (cx 89)"));
+    assert!(
+        small.contains("src/http/ngx_http_upstream.c — ngx_http_upstream_process_header (cx 89)")
+    );
+    assert!(
+        full.contains("src/http/ngx_http_upstream.c — ngx_http_upstream_process_header (cx 89)")
+    );
 
     // FULL adds DEPTH small does not have: the package-group topology breakdown
     // AND the (separately-labelled) declared/inferred module breakdown, the
@@ -1077,6 +1110,92 @@ fn cycle_headline_uses_exclusion_aware_split_when_present() {
     assert!(
         !out.contains("->"),
         "no example walk beside the split headline:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 (COH-2): the type-only verdict label MUST survive a test-only partition.
+/// Before the fix, `draw_anchor = false` (due to test-only cycles in the split) suppressed
+/// BOTH the anchor example AND the type-only verdict — losing the "type-only (vanishes at
+/// runtime)" label from orient while `cycles` still showed it. Now the verdict is read from
+/// the aggregator-computed `production_type_only` (the first PRODUCTION cycle's verdict, found
+/// over the WHOLE set before truncation) regardless of `draw_anchor`.
+#[test]
+fn coh2_type_only_verdict_survives_test_only_partition() {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 2,
+            "production_count": 1,
+            "test_only_count": 1,
+            // The producer ships the first production cycle's verdict here (pre-truncation).
+            "production_type_only": { "kind": "type_only" },
+            "cycles": [
+                // First cycle is test-only (demoted — the reason anchor is suppressed).
+                {
+                    "length": 2,
+                    "modules": ["tests/a", "tests/b"],
+                },
+                // Second cycle is production WITH a type-only verdict.
+                {
+                    "length": 2,
+                    "modules": ["src/core", "src/graph"],
+                    "type_only": { "kind": "type_only" },
+                },
+            ],
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    // The anchor is still suppressed (cannot prove first entry is production without per-cycle
+    // composition traversal, which the anchor-drawing path does not do).
+    assert!(
+        !out.contains("->"),
+        "anchor still suppressed with the split:\n{out}"
+    );
+    // But the type-only verdict label MUST survive — read from the first production cycle.
+    assert!(
+        out.contains("type-only (vanishes at runtime)"),
+        "COH-2: type-only verdict must survive the test-only partition:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 (COH-2, review-3 #3): the production cycle whose verdict orient renders can
+/// rank BEYOND the top-N carried in `cycles[]`. The aggregator truncates `cycles[]` to the top
+/// three canonical cycles; when the first three are all test-only, the production cycle is NOT in
+/// the leaf. The verdict must then come from the pre-truncation `production_type_only` field —
+/// searching the truncated `cycles[]` (the pre-fix path) would silently lose it.
+///
+/// FAIL-FIRST: against the pre-fix renderer (which searched `cycles[]` for a `production` entry)
+/// this fixture — three test-only leaves, NO production entry in `cycles[]` — renders no verdict.
+#[test]
+fn coh2_type_only_verdict_read_from_field_when_production_cycle_truncated_out() {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 4,
+            "production_count": 1,
+            "test_only_count": 3,
+            // The pre-truncation verdict of the first PRODUCTION cycle (ranked 4th, truncated OUT).
+            "production_type_only": { "kind": "type_only" },
+            // `cycles[]` is the top-3 leaf — here all three are test-only (the production cycle
+            // ranked beyond CYCLE_TOP_N and is absent from this array). The verdict therefore
+            // CANNOT come from `cycles[]`; it must come from `production_type_only`.
+            "cycles": [
+                { "length": 2, "modules": ["tests/a", "tests/b"] },
+                { "length": 2, "modules": ["tests/c", "tests/d"] },
+                { "length": 2, "modules": ["tests/e", "tests/f"] },
+            ],
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("type-only (vanishes at runtime)"),
+        "COH-2: verdict must be read from `production_type_only`, not the truncated `cycles[]`:\n{out}"
     );
 }
 
@@ -1530,8 +1649,8 @@ fn full_complexity_breakdown_complete_headline_bounded() {
         .lines()
         .find(|l| l.starts_with("Complexity centers:"))
         .expect("headline complexity line present");
-    assert!(headline.contains("src/f0.c (cx 90)"));
-    assert!(headline.contains("src/f4.c (cx 86)"));
+    assert!(headline.contains("src/f0.c — fn0 (cx 90)"));
+    assert!(headline.contains("src/f4.c — fn4 (cx 86)"));
     assert!(
         !headline.contains("src/f5.c"),
         "headline is bounded at top-5, not all 8:\n{headline}"
@@ -2401,5 +2520,88 @@ fn orient_package_group_absent_test_count_renders_unavailable_not_silent_zero() 
     assert!(
         !out.contains("(0 test)"),
         "absent/malformed test count must NOT render as a silent zero:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 (§2.6): when orient at medium+ depth contains BOTH the subset
+/// notation `(N test)` (package-group rows) AND the addend notation `(+N test-only
+/// excluded)` (cycles headline), a legend line distinguishes the two so the reader
+/// never confuses "of which" with "in addition to".
+#[test]
+fn legend_distinguishes_subset_and_addend_test_notations() {
+    let mut r = minimal_response();
+    r.signals = vec![
+        // MODULE_SUMMARY with test files → package-group row "(10 test)" (subset).
+        sig(
+            "MODULE_SUMMARY",
+            "info",
+            "module summary",
+            serde_json::json!({
+                "file_count": 120,
+                "discovered_module_count": 2,
+                "package_groups": [
+                    {"name": "core", "file_count": 100, "test_file_count": 10},
+                    {"name": "util", "file_count": 20, "test_file_count": 0}
+                ]
+            }),
+        ),
+        // IMPORT_CYCLES with a test-only split → "(+1 test-only excluded)" (addend).
+        sig(
+            "IMPORT_CYCLES",
+            "medium",
+            "cycles",
+            serde_json::json!({
+                "cycle_count": 2,
+                "production_count": 1,
+                "test_only_count": 1,
+                "cycles": [{ "length": 2, "modules": ["core", "graph"] }]
+            }),
+        ),
+    ];
+    // Medium depth renders BOTH the headline (cycles) and key structure (package groups).
+    let out = r.render_human(OrientDepth::Medium);
+    assert!(
+        out.contains("(10 test)"),
+        "subset notation must appear in package-group row:\n{out}"
+    );
+    assert!(
+        out.contains("+1 test-only excluded"),
+        "addend notation must appear in cycles headline:\n{out}"
+    );
+    assert!(
+        out.contains("(N test) = of which"),
+        "legend line must distinguish the two notations:\n{out}"
+    );
+    assert!(
+        out.contains("(+N … excluded) = N additional"),
+        "legend line must explain the addend form:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 (§2.6): when only ONE notation form appears (e.g. cycles addend
+/// but no package-group rows with test files), no legend is needed — it would be
+/// noise without context.
+#[test]
+fn no_legend_when_only_addend_form_present() {
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "cycles",
+        serde_json::json!({
+            "cycle_count": 2,
+            "production_count": 1,
+            "test_only_count": 1,
+            "cycles": [{ "length": 2, "modules": ["core", "graph"] }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Medium);
+    assert!(
+        out.contains("+1 test-only excluded"),
+        "addend notation present:\n{out}"
+    );
+    assert!(
+        !out.contains("(N test) = of which"),
+        "legend must NOT render when only one notation form is present:\n{out}"
     );
 }

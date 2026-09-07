@@ -81,6 +81,8 @@ fn sample_list_response() -> ModulesListResponse {
         unresolved_import_degraded: None,
         gradle_projectdir_unhandled: None,
         gradle_projectdir_unhandled_degraded: None,
+        directory_group_file_count: None,
+        root_level_file_count: None,
     }
 }
 
@@ -97,6 +99,8 @@ fn sample_empty_list_response() -> ModulesListResponse {
         unresolved_import_degraded: None,
         gradle_projectdir_unhandled: None,
         gradle_projectdir_unhandled_degraded: None,
+        directory_group_file_count: None,
+        root_level_file_count: None,
     }
 }
 
@@ -125,6 +129,8 @@ fn two_crate_fixture_response() -> ModulesListResponse {
         unresolved_import_degraded: None,
         gradle_projectdir_unhandled: None,
         gradle_projectdir_unhandled_degraded: None,
+        directory_group_file_count: None,
+        root_level_file_count: None,
     }
 }
 
@@ -208,6 +214,137 @@ fn gradle_projectdir_unhandled_degraded_renders_unknown() {
         out.contains("Gradle projectDir relocation coverage is unknown")
             && out.contains("blob not valid JSON"),
         "a failed diagnostics read must render an unknown-coverage note with the reason, got:\n{out}"
+    );
+}
+
+// ── HEADLINE-TRUTH-1 (§2.1, review-0 #1): Σ owned footer ────────────────────────────
+
+/// HEADLINE-TRUTH-1 §2.1, review-4 #1: when Σ owned > grouped AND the store PROVES the
+/// excess equals the root-level count, the footer names root-level files. The comparison
+/// is Σ owned vs the directory-group total (stats `total_files`), reconciled against the
+/// proven `root_level_file_count`.
+#[test]
+fn modules_list_footer_names_root_level_when_owned_exceeds_grouped() {
+    let mut resp = sample_list_response();
+    // Σ owned = (100+10) + (20+0) = 130. grouped = 125 → excess 5; the store proves 5
+    // root-level files → reconciles → footer names 5.
+    resp.directory_group_file_count = Some(125);
+    resp.root_level_file_count = Some(5);
+    let out = resp.render_human();
+    assert!(
+        out.contains("130 owned files across 2 modules (5 root-level"),
+        "the footer must name the root-level count:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 §2.1, review-4 #1 (COUNTEREXAMPLE): when Σ owned > grouped but the
+/// store's PROVEN root-level count does NOT equal the excess, the footer must NOT claim
+/// "root-level, owned by root manifest" — it surfaces the residual as an unreconciled
+/// ownership/grouping discrepancy. This is the defect the operator ruling forbids:
+/// labelling `Σ owned − grouped` as root-level without proving `files.path` without '/'.
+#[test]
+fn modules_list_footer_surfaces_residual_when_excess_does_not_match_proven_root_level() {
+    let mut resp = sample_list_response();
+    // Σ owned = 130, grouped = 125 → excess 5, but the store proves only 2 root-level.
+    resp.directory_group_file_count = Some(125);
+    resp.root_level_file_count = Some(2);
+    let out = resp.render_human();
+    assert!(
+        !out.contains("root-level, owned by root manifest"),
+        "must NOT make the false reconciled root-level claim when excess != proven:\n{out}"
+    );
+    assert!(
+        out.contains("do not reconcile (5 \u{2260} 2)"),
+        "must surface the unreconciled residual with both numbers:\n{out}"
+    );
+    assert!(
+        out.contains("proves 2 root-level file"),
+        "must state the proven root-level count:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 §2.1, review-4 #1: when the proven root-level count is UNKNOWN
+/// (older daemon / read failure) the footer is suppressed entirely — never a claim from
+/// an unproven excess (honesty rule #1).
+#[test]
+fn modules_list_footer_absent_when_root_level_unknown() {
+    let mut resp = sample_list_response();
+    // Σ owned = 130 > grouped 125, but the proven root-level count is unavailable.
+    resp.directory_group_file_count = Some(125);
+    resp.root_level_file_count = None;
+    let out = resp.render_human();
+    assert!(
+        !out.contains("root-level"),
+        "no footer when the proven root-level count is unknown:\n{out}"
+    );
+}
+
+/// When Σ owned <= grouped, no root-level files to name → no footer.
+#[test]
+fn modules_list_footer_absent_when_owned_does_not_exceed_grouped() {
+    let mut resp = sample_list_response();
+    // Σ owned = 130, grouped = 130 → no excess, so no footer regardless of proven count.
+    resp.directory_group_file_count = Some(130);
+    resp.root_level_file_count = Some(0);
+    let out = resp.render_human();
+    assert!(
+        !out.contains("root-level"),
+        "no footer when owned <= grouped:\n{out}"
+    );
+}
+
+/// When Σ owned < grouped (all owned files are in directory groups and then some),
+/// no footer — this is the normal case for repos without root-level files.
+#[test]
+fn modules_list_footer_absent_when_owned_less_than_grouped() {
+    let mut resp = sample_list_response();
+    // Σ owned = 130, grouped = 200 → owned < grouped → no footer.
+    resp.directory_group_file_count = Some(200);
+    resp.root_level_file_count = Some(0);
+    let out = resp.render_human();
+    assert!(
+        !out.contains("root-level"),
+        "no footer when owned < grouped:\n{out}"
+    );
+}
+
+/// When directory_group_file_count is absent, no footer (unknown gap, rule #1).
+#[test]
+fn modules_list_footer_absent_when_grouped_unknown() {
+    let resp = sample_list_response(); // directory_group_file_count: None
+    let out = resp.render_human();
+    assert!(
+        !out.contains("root-level"),
+        "no footer when grouped is unknown:\n{out}"
+    );
+}
+
+/// django shape: Σ owned = 3015 (two Django modules), grouped = 3014. The footer
+/// names 1 root-level file (Gruntfile.js).
+#[test]
+fn modules_list_footer_django_shape_names_one_root_level() {
+    let mut resp = identity_response(vec![
+        {
+            let mut e = identity_entry("Django", ".", Some("pyproject.toml"));
+            e.owned_file_count = 2500;
+            e.owned_test_file_count = 10;
+            e
+        },
+        {
+            let mut e = identity_entry("Django", "django/other", Some("pyproject.toml"));
+            e.owned_file_count = 505;
+            e.owned_test_file_count = 0;
+            e
+        },
+    ]);
+    // Σ owned = 2510 + 505 = 3015, grouped = 3014 → excess 1; store proves 1 root-level
+    // (Gruntfile.js) → reconciles.
+    resp.directory_group_file_count = Some(3014);
+    resp.root_level_file_count = Some(1);
+    let out = resp.render_human();
+    assert!(
+        out.contains("3015 owned files across 2 modules (1 root-level"),
+        "django footer must name 1 root-level file:\n{out}"
     );
 }
 
@@ -879,6 +1016,8 @@ fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
         unresolved_import_degraded: None,
         gradle_projectdir_unhandled: None,
         gradle_projectdir_unhandled_degraded: None,
+        directory_group_file_count: None,
+        root_level_file_count: None,
     }
 }
 

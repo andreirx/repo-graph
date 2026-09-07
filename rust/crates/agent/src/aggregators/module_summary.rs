@@ -127,6 +127,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 file_count: summary.file_count,
                 symbol_count: summary.symbol_count,
                 languages: summary.languages,
+                tracked_only_count: summary.tracked_only_count,
                 discovered_module_count: Some(ms.discovered_module_count),
                 module_kinds: Some(ModuleKindBreakdown {
                     declared: ms.declared_count,
@@ -147,6 +148,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 file_count: summary.file_count,
                 symbol_count: summary.symbol_count,
                 languages: summary.languages,
+                tracked_only_count: summary.tracked_only_count,
                 discovered_module_count: None,
                 module_kinds: None,
                 top_modules: Vec::new(),
@@ -184,6 +186,7 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
         file_count: summary.file_count,
         symbol_count: summary.symbol_count,
         languages: summary.languages,
+        tracked_only_count: 0, // file-scoped
         discovered_module_count: None,
         module_kinds: None,
         top_modules: Vec::new(),
@@ -219,6 +222,7 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
         file_count: summary.file_count,
         symbol_count: summary.symbol_count,
         languages: summary.languages,
+        tracked_only_count: 0, // path-scoped
         discovered_module_count: None,
         module_kinds: None,
         top_modules: Vec::new(),

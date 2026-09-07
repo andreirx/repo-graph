@@ -280,23 +280,24 @@ impl SurfacesListResponse {
         out.push_str("Surfaces\n\n");
 
         // -- Count --
-        // HTTP-SURFACE-COHERENCE-1 §2.3: this counts the PROJECT-surface catalog
-        // only (backend/cli/lib …). When an HTTP section is ALSO present, the noun
-        // is made explicit ("N project surfaces") so the top line can never read
-        // "0 surfaces" above a populated HTTP section (the audit's glamCRM
-        // contradiction). With no HTTP section there is nothing to contradict, so
-        // the plain "N surfaces" wording is kept — no-HTTP repos stay byte-stable.
+        // HEADLINE-TRUTH-1 (§2.4 D6): the "project surfaces" line is OMITTED when its
+        // count is 0 and HTTP surfaces are present — a "0 project surfaces" headline
+        // above 235 real routes is the contradiction the audit measured. With a non-zero
+        // count, or no HTTP section, the line stays (no-HTTP repos byte-stable).
         let http_present = !self.http_boundary_surfaces.is_empty()
             || self.http_boundary_surfaces_degraded.is_some();
-        let (sing, plur) = if http_present {
-            ("project surface", "project surfaces")
-        } else {
-            ("surface", "surfaces")
-        };
-        out.push_str(&format!(
-            "{}\n",
-            format_count(self.count as usize, sing, plur)
-        ));
+        let omit_zero_project_line = http_present && self.count == 0;
+        if !omit_zero_project_line {
+            let (sing, plur) = if http_present {
+                ("project surface", "project surfaces")
+            } else {
+                ("surface", "surfaces")
+            };
+            out.push_str(&format!(
+                "{}\n",
+                format_count(self.count as usize, sing, plur)
+            ));
+        }
 
         // -- Active filters --
         let mut filters = Vec::new();
@@ -750,12 +751,12 @@ mod tests {
         );
     }
 
-    /// §2.3: the glamCRM contradiction — ZERO project surfaces with a populated
-    /// HTTP section must NOT headline "0 surfaces" above the HTTP rows. The top
-    /// count is explicitly scoped ("0 project surfaces") and the HTTP section
-    /// carries its own coherent provider count, so an agent is never misled.
+    /// HEADLINE-TRUTH-1 (§2.4 D6): ZERO project surfaces with a populated HTTP section
+    /// must NOT headline "0 project surfaces" above the HTTP rows (the audit's glamCRM
+    /// contradiction). The "project surfaces" line is OMITTED when its count is 0 and HTTP
+    /// surfaces are present. The HTTP section carries its own coherent provider count.
     #[test]
-    fn list_render_top_count_scoped_not_contradicting_http_section() {
+    fn list_render_zero_project_surfaces_line_omitted_when_http_present() {
         let mut resp = sample_empty_list_response();
         resp.degradation = None;
         resp.results = vec![];
@@ -779,8 +780,15 @@ mod tests {
             },
         ];
         let output = resp.render_human();
-        // Top line is scoped to PROJECT surfaces, not a bare "0 surfaces".
-        assert!(output.contains("0 project surfaces"), "{output}");
+        // The "project surfaces" line is OMITTED, not printed as "0 project surfaces".
+        assert!(
+            !output.contains("0 project surfaces"),
+            "zero-project-surface line must be omitted when HTTP present:\n{output}"
+        );
+        assert!(
+            !output.contains("0 surfaces"),
+            "no zero-surface line at all:\n{output}"
+        );
         // The HTTP section reports the real provider count below.
         assert!(
             output.contains("HTTP/REST API surfaces: 2 providers"),

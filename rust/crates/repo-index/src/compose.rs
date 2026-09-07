@@ -1632,6 +1632,9 @@ fn persist_spring_liveness_inferences(
             kind: n.kind.clone(),
             subtype: n.subtype.clone(),
             metadata_json: n.metadata_json.clone(),
+            // HEADLINE-TRUTH-1 (§2.5 D9): project the node's source line into the
+            // classifier input so it can emit `line_start` in the inference value.
+            line_start: n.location.as_ref().map(|l| l.line_start as u64),
         })
         .collect();
 

@@ -190,6 +190,7 @@ mod tests {
                 file_count: 1,
                 symbol_count: 1,
                 languages: vec![],
+                tracked_only_count: 0,
                 discovered_module_count: None,
                 module_kinds: None,
                 top_modules: Vec::new(),
@@ -211,6 +212,7 @@ mod tests {
                 production_count: None,
                 test_only_count: None,
                 unknown_count: None,
+                production_type_only: None,
                 cycles: vec![],
             }),
         ]

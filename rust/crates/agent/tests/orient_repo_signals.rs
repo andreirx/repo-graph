@@ -53,6 +53,7 @@ fn module_summary_is_always_emitted_with_db_counts() {
             file_count: 42,
             symbol_count: 307,
             languages: vec!["rust".into(), "typescript".into()],
+            tracked_only_count: 0,
         },
     );
     let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();

@@ -56,6 +56,7 @@ fn seed_depth_repo() -> FakeAgentStorage {
             file_count: 512,
             symbol_count: 4096,
             languages: vec!["rust".into(), "typescript".into()],
+            tracked_only_count: 0,
         },
     );
 

@@ -117,6 +117,7 @@ impl AgentStorageRead for FakeStorage {
             file_count: 0,
             symbol_count: 0,
             languages: Vec::new(),
+            tracked_only_count: 0,
         })
     }
 
@@ -171,6 +172,7 @@ impl AgentStorageRead for FakeStorage {
             file_count: 0,
             symbol_count: 0,
             languages: Vec::new(),
+            tracked_only_count: 0,
         })
     }
 
@@ -183,6 +185,7 @@ impl AgentStorageRead for FakeStorage {
             file_count: 0,
             symbol_count: 0,
             languages: Vec::new(),
+            tracked_only_count: 0,
         })
     }
 

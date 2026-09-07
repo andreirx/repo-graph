@@ -103,6 +103,10 @@ pub struct SpringNodeInput {
     /// Raw metadata_json string from the node.
     /// Expected shape: `{"annotations": [{"name": "Service"}, ...]}`
     pub metadata_json: Option<String>,
+    /// HEADLINE-TRUTH-1 (§2.5 D9): the node's source location start line, projected
+    /// into `value_json.line_start` so the inference serve path can anchor `file:line`
+    /// (matching React inferences which already carry it).
+    pub line_start: Option<u64>,
 }
 
 // ── Output DTOs ──────────────────────────────────────────────────────
@@ -231,15 +235,23 @@ pub fn classify_spring_liveness(nodes: &[SpringNodeInput]) -> Vec<SpringLiveness
                         .iter()
                         .find(|(name, _, _)| *name == simple_name)
                     {
+                        // HEADLINE-TRUTH-1 (§2.5 D9): include line_start in value_json
+                        // so the inference serve path can anchor `file:line`.
+                        let mut value = serde_json::json!({
+                            "annotation": format!("@{}", simple_name),
+                            "convention": convention,
+                            "reason": reason
+                        });
+                        if let Some(line) = node.line_start {
+                            value
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("line_start".to_string(), serde_json::json!(line));
+                        }
                         results.push(SpringLivenessInference {
                             target_stable_key: node.stable_key.clone(),
                             kind: "spring_container_managed".to_string(),
-                            value_json: serde_json::json!({
-                                "annotation": format!("@{}", simple_name),
-                                "convention": convention,
-                                "reason": reason
-                            })
-                            .to_string(),
+                            value_json: value.to_string(),
                             confidence: 0.95,
                             basis_json: serde_json::json!({
                                 "convention": convention,
@@ -257,15 +269,21 @@ pub fn classify_spring_liveness(nodes: &[SpringNodeInput]) -> Vec<SpringLiveness
                     let simple_name = ann.simple_name.as_str();
                     if simple_name == SPRING_BEAN_ANNOTATION.0 {
                         let (_, convention, reason) = SPRING_BEAN_ANNOTATION;
+                        let mut value = serde_json::json!({
+                            "annotation": format!("@{}", simple_name),
+                            "convention": convention,
+                            "reason": reason
+                        });
+                        if let Some(line) = node.line_start {
+                            value
+                                .as_object_mut()
+                                .unwrap()
+                                .insert("line_start".to_string(), serde_json::json!(line));
+                        }
                         results.push(SpringLivenessInference {
                             target_stable_key: node.stable_key.clone(),
                             kind: "spring_container_managed".to_string(),
-                            value_json: serde_json::json!({
-                                "annotation": format!("@{}", simple_name),
-                                "convention": convention,
-                                "reason": reason
-                            })
-                            .to_string(),
+                            value_json: value.to_string(),
                             confidence: 0.95,
                             basis_json: serde_json::json!({
                                 "convention": convention,
@@ -302,6 +320,7 @@ mod tests {
             kind: "SYMBOL".to_string(),
             subtype: Some("CLASS".to_string()),
             metadata_json: Some(annotations_json.to_string()),
+            line_start: Some(42),
         }
     }
 
@@ -311,6 +330,7 @@ mod tests {
             kind: "SYMBOL".to_string(),
             subtype: Some("METHOD".to_string()),
             metadata_json: Some(annotations_json.to_string()),
+            line_start: Some(100),
         }
     }
 
@@ -336,6 +356,14 @@ mod tests {
             .value_json
             .contains(r#""convention":"spring_service""#));
         assert!(results[0].value_json.contains(r#""reason":"#));
+        // HEADLINE-TRUTH-1 (§2.5 D9): line_start from the node's location must
+        // appear in value_json so the inference serve path can render `file:line`.
+        // make_class_node seeds line_start=42.
+        assert!(
+            results[0].value_json.contains(r#""line_start":42"#),
+            "line_start must flow from node input to value_json: {}",
+            results[0].value_json
+        );
         assert!(results[0]
             .basis_json
             .contains(r#""convention":"spring_service""#));
@@ -447,6 +475,7 @@ mod tests {
             kind: "SYMBOL".to_string(),
             subtype: Some("CLASS".to_string()),
             metadata_json: None,
+            line_start: None,
         }];
 
         let results = classify_spring_liveness(&nodes);
@@ -471,6 +500,7 @@ mod tests {
             kind: "FILE".to_string(),
             subtype: None,
             metadata_json: Some(r#"{"annotations":[{"name":"Service"}]}"#.to_string()),
+            line_start: None,
         }];
 
         let results = classify_spring_liveness(&nodes);
@@ -484,6 +514,7 @@ mod tests {
             kind: "SYMBOL".to_string(),
             subtype: Some("CLASS".to_string()),
             metadata_json: Some("not valid json".to_string()),
+            line_start: None,
         }];
 
         let results = classify_spring_liveness(&nodes);
@@ -533,6 +564,7 @@ mod tests {
             kind: "SYMBOL".to_string(),
             subtype: Some("INTERFACE".to_string()),
             metadata_json: Some(r#"{"annotations":[{"name":"Repository"}]}"#.to_string()),
+            line_start: None,
         }];
 
         let results = classify_spring_liveness(&nodes);

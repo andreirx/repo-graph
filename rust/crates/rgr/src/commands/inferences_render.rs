@@ -231,9 +231,15 @@ fn symbol_at(r: &Value) -> String {
 
     let file = r.get("file").and_then(|v| v.as_str());
     let line = r.get("line").and_then(|v| v.as_u64());
+    // HEADLINE-TRUTH-1 (§2.5 D9): append `[test]` when the inference is in a test file.
+    let test_label = if r.get("is_test").and_then(|v| v.as_bool()) == Some(true) {
+        " [test]"
+    } else {
+        ""
+    };
     match (file, line) {
-        (Some(f), Some(l)) => format!("{name} ({}:{l})", basename(f)),
-        (Some(f), None) => format!("{name} ({})", basename(f)),
+        (Some(f), Some(l)) => format!("{name} ({}:{l}){test_label}", basename(f)),
+        (Some(f), None) => format!("{name} ({}){test_label}", basename(f)),
         (None, _) => name,
     }
 }
@@ -451,6 +457,59 @@ mod tests {
         assert!(
             out.contains("(malformed value)"),
             "value_error surfaced: {out}"
+        );
+    }
+
+    // ── HEADLINE-TRUTH-1 (§2.5 D9, review-0 #4): [test] label on test-fixture inferences ──
+
+    /// When a record carries `is_test: true`, the CLI renders `[test]` after the location.
+    #[test]
+    fn test_fixture_inference_renders_test_label() {
+        let mut rec = record(
+            "spring_container_managed",
+            "src/test/java/AppTest.java",
+            "AppTest",
+            json!({"annotation":"@SpringBootTest","reason":"stereotype","line_start":10}),
+        );
+        if let Value::Object(m) = &mut rec {
+            m.insert("is_test".to_string(), json!(true));
+        }
+        let result = json!({
+            "count": 1, "returned": 1, "truncated": false, "limit": 1,
+            "detectors": json!([
+                {"detector":"spring","label":"Spring","subjects":"container-managed beans",
+                 "kinds":["spring_container_managed"],"applicable":true,"count":1}
+            ]),
+            "empty": Value::Null, "results": [rec],
+        });
+        let out = render(&result, true);
+        assert!(
+            out.contains("[test]"),
+            "test-fixture inference must carry the [test] label:\n{out}"
+        );
+    }
+
+    /// When `is_test` is false or absent, no `[test]` label appears.
+    #[test]
+    fn non_test_inference_has_no_test_label() {
+        let rec = record(
+            "spring_container_managed",
+            "src/main/java/App.java",
+            "AppConfig",
+            json!({"annotation":"@Configuration","reason":"stereotype","line_start":5}),
+        );
+        let result = json!({
+            "count": 1, "returned": 1, "truncated": false, "limit": 1,
+            "detectors": json!([
+                {"detector":"spring","label":"Spring","subjects":"container-managed beans",
+                 "kinds":["spring_container_managed"],"applicable":true,"count":1}
+            ]),
+            "empty": Value::Null, "results": [rec],
+        });
+        let out = render(&result, true);
+        assert!(
+            !out.contains("[test]"),
+            "non-test inference must NOT carry the [test] label:\n{out}"
         );
     }
 }

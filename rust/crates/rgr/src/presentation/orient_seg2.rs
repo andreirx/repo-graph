@@ -478,6 +478,22 @@ impl OrientResponse {
         true
     }
 
+    /// HEADLINE-TRUTH-1 (§2.3): count of directory-group rows elided by the fixed cap.
+    /// Returns 0 when no fallback is present or nothing was elided. Used by the `--full`
+    /// marker to name the elision count when `budget_saturated()` is false.
+    pub(super) fn dir_group_elided_count(&self) -> usize {
+        let Some(fb) = &self.directory_group_fallback else {
+            return 0;
+        };
+        if fb.unavailable.is_some() {
+            return 0;
+        }
+        match (fb.groups.as_ref(), fb.total) {
+            (Some(groups), Some(total)) if total > groups.len() => total - groups.len(),
+            _ => 0,
+        }
+    }
+
     /// ORIENT-SEGMENT-2 §2.2: the rendered label for module row `idx` (`rows[idx]`).
     /// Renders `name [disambiguator]` ONLY when there is a genuine disambiguation need
     /// — a name COLLISION with another shown row, or (for a manifest-DECLARED module)

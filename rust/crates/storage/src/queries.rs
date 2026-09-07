@@ -403,6 +403,11 @@ pub struct InferenceListRow {
     pub confidence: f64,
     pub extractor: String,
     pub created_at: String,
+    /// HEADLINE-TRUTH-1 (§2.5 D9): the `files.is_test` fact for the inference's
+    /// source file, joined at query time (frozen invariant: via a JOIN, not a column
+    /// on `inferences`). `None` when the join produces no row (malformed key / missing
+    /// file). Rendered as `[test]` by the CLI; `dead` partitions fixtures by this.
+    pub is_test: Option<bool>,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -2625,7 +2630,12 @@ impl StorageConnection {
         snapshot_uid: &str,
         kind_filter: Option<&str>,
     ) -> Result<Vec<InferenceListRow>, StorageError> {
+        // HEADLINE-TRUTH-1 (§2.5 D9): LEFT JOIN nodes → files to project `files.is_test`.
+        // Frozen invariant: `is_test` via a JOIN, not a column on `inferences`.
+        // LEFT JOINs: a malformed key or missing file → is_test = NULL → `None`
+        // (never fabricated, never a silent omission).
         let map_row = |row: &rusqlite::Row| {
+            let is_test_raw: Option<i64> = row.get(7)?;
             Ok(InferenceListRow {
                 inference_uid: row.get(0)?,
                 target_stable_key: row.get(1)?,
@@ -2634,17 +2644,22 @@ impl StorageConnection {
                 confidence: row.get(4)?,
                 extractor: row.get(5)?,
                 created_at: row.get(6)?,
+                is_test: is_test_raw.map(|v| v != 0),
             })
         };
 
         match kind_filter {
             Some(kind) => {
                 let mut stmt = self.connection().prepare(
-                    "SELECT inference_uid, target_stable_key, kind, value_json,
-					        confidence, extractor, created_at
-					 FROM inferences
-					 WHERE snapshot_uid = ? AND kind = ?
-					 ORDER BY kind, target_stable_key",
+                    "SELECT i.inference_uid, i.target_stable_key, i.kind, i.value_json,
+                            i.confidence, i.extractor, i.created_at,
+                            f.is_test
+                     FROM inferences i
+                     LEFT JOIN nodes n ON i.target_stable_key = n.stable_key
+                                      AND i.snapshot_uid = n.snapshot_uid
+                     LEFT JOIN files f ON n.file_uid = f.file_uid
+                     WHERE i.snapshot_uid = ? AND i.kind = ?
+                     ORDER BY i.kind, i.target_stable_key",
                 )?;
                 let rows = stmt.query_map(rusqlite::params![snapshot_uid, kind], map_row)?;
                 rows.collect::<Result<Vec<_>, _>>()
@@ -2652,11 +2667,15 @@ impl StorageConnection {
             }
             None => {
                 let mut stmt = self.connection().prepare(
-                    "SELECT inference_uid, target_stable_key, kind, value_json,
-					        confidence, extractor, created_at
-					 FROM inferences
-					 WHERE snapshot_uid = ?
-					 ORDER BY kind, target_stable_key",
+                    "SELECT i.inference_uid, i.target_stable_key, i.kind, i.value_json,
+                            i.confidence, i.extractor, i.created_at,
+                            f.is_test
+                     FROM inferences i
+                     LEFT JOIN nodes n ON i.target_stable_key = n.stable_key
+                                      AND i.snapshot_uid = n.snapshot_uid
+                     LEFT JOIN files f ON n.file_uid = f.file_uid
+                     WHERE i.snapshot_uid = ?
+                     ORDER BY i.kind, i.target_stable_key",
                 )?;
                 let rows = stmt.query_map(rusqlite::params![snapshot_uid], map_row)?;
                 rows.collect::<Result<Vec<_>, _>>()

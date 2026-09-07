@@ -90,10 +90,18 @@ pub fn handle_dead_causes(state: &DaemonState, request: &Request) -> DispatchRes
         }
     };
     let mut per_kind: BTreeMap<String, u64> = BTreeMap::new();
+    // HEADLINE-TRUTH-1 (§2.5 D9): partition test-fixture inferences so the framework
+    // line can report "Spring: 1 (1 in test fixtures)" and not cite fixture-only
+    // inferences as a dead-code suppression cause.
+    let mut per_kind_test: BTreeMap<String, u64> = BTreeMap::new();
     for i in &inferences {
         *per_kind.entry(i.kind.clone()).or_insert(0) += 1;
+        if i.is_test == Some(true) {
+            *per_kind_test.entry(i.kind.clone()).or_insert(0) += 1;
+        }
     }
     let total_inferences = inferences.len() as u64;
+    let total_test_inferences: u64 = per_kind_test.values().sum();
 
     // Snapshot language mix drives detector applicability + the honest zero-state line.
     // RENDERED, so a read failure is surfaced, never treated as "no languages".
@@ -111,7 +119,22 @@ pub fn handle_dead_causes(state: &DaemonState, request: &Request) -> DispatchRes
             }
         };
     // Reuse the SAME catalog + honesty logic as `inferences_list` (one source of truth).
-    let detectors = crate::inferences_serve::build_detectors(&languages, &per_kind);
+    let mut detectors = crate::inferences_serve::build_detectors(&languages, &per_kind);
+    // HEADLINE-TRUTH-1 (§2.5 D9): inject per-detector test_count from `per_kind_test`.
+    // Each detector JSON carries a `kinds` array; we sum the test counts for those kinds
+    // to produce an ADDITIVE `test_count` field alongside the existing `count`.
+    for det in &mut detectors {
+        if let Some(kinds) = det.get("kinds").and_then(|v| v.as_array()) {
+            let tc: u64 = kinds
+                .iter()
+                .filter_map(|k| k.as_str())
+                .map(|k| per_kind_test.get(k).copied().unwrap_or(0))
+                .sum();
+            det.as_object_mut()
+                .expect("detector is a JSON object")
+                .insert("test_count".to_string(), serde_json::json!(tc));
+        }
+    }
     let framework_empty = if total_inferences == 0 {
         crate::inferences_serve::empty_state(&languages)
     } else {
@@ -164,6 +187,8 @@ pub fn handle_dead_causes(state: &DaemonState, request: &Request) -> DispatchRes
         "framework": {
             "detectors": detectors,
             "total_inferences": total_inferences,
+            // HEADLINE-TRUTH-1 (§2.5 D9): additive fields for the test-fixture partition.
+            "total_test_inferences": total_test_inferences,
             "empty": framework_empty,
             "uncovered_note": uncovered_note,
         },

@@ -505,6 +505,7 @@ fn build_orient_envelope_repo_focus_cycles_leaf_is_livegraph() {
             production_count: None,
             test_only_count: None,
             unknown_count: None,
+            production_type_only: None,
             cycles: Vec::new(),
         })],
     );
@@ -543,6 +544,7 @@ fn build_orient_envelope_emits_producer_unavailable_limit_without_livegraph() {
             production_count: None,
             test_only_count: None,
             unknown_count: None,
+            production_type_only: None,
             cycles: Vec::new(),
         })],
     );
@@ -920,6 +922,7 @@ fn build_orient_envelope_module_summary_leaf_follows_actual_serve() {
             file_count: 3,
             symbol_count: 2,
             languages: vec!["typescript".to_string()],
+            tracked_only_count: 0,
             discovered_module_count: None,
             module_kinds: None,
             top_modules: Vec::new(),

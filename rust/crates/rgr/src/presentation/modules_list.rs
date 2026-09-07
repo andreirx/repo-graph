@@ -153,6 +153,22 @@ pub struct ModulesListResponse {
     /// implied "all handled". Mirrors [`Self::unresolved_import_degraded`].
     #[serde(default)]
     pub gradle_projectdir_unhandled_degraded: Option<String>,
+    /// HEADLINE-TRUTH-1 (§2.1, review-1 #1): directory-group total (sum of file_count
+    /// across all directory groups = stats `total_files`). When Σ owned across modules
+    /// exceeds this total, the footer names the gap as root-level files (owned by the
+    /// root manifest but not in any directory group because their path has no `/`).
+    /// `None` = unknown (older daemon / read failure) → no footer.
+    #[serde(default)]
+    pub directory_group_file_count: Option<u64>,
+    /// HEADLINE-TRUTH-1 (§2.1, review-4 #1): the PROVEN root-level SOURCE file count from
+    /// the store (`files.path` without `/`, config/failed/contract excluded — the same
+    /// source universe `Σ owned` ranges over). The footer names root-level files ONLY when
+    /// `Σ owned − grouped` equals THIS count — proving the excess IS the root-level source
+    /// files, never assuming it. A mismatch surfaces the residual instead of a false
+    /// "root-level" claim (the operator ruling: prove it, do not assume). `None` = unknown
+    /// (older daemon / read failure) → no footer.
+    #[serde(default)]
+    pub root_level_file_count: Option<u64>,
 }
 
 impl ModulesListResponse {
@@ -253,6 +269,60 @@ impl ModulesListResponse {
                 kind_conf,
                 width = max_name_len
             ));
+        }
+
+        // ── HEADLINE-TRUTH-1 (§2.1, review-4 #1): Σ owned footer, PROVEN ───
+        // The directory-group total (stats `total_files`) counts files with OWNS edges
+        // whose path contains `/`. Manifest ownership (Σ owned) also covers root-level
+        // files (the root manifest `.` matches files without `/`). So the EXCESS of
+        // Σ owned over grouped SHOULD be exactly the root-level files. review-4 #1: do
+        // NOT assume that — the store PROVES the root-level count (`files.path` without
+        // `/`, carried as `root_level_file_count`). The footer names root-level files
+        // ONLY when `Σ owned − grouped` equals that proven count; a mismatch surfaces the
+        // residual instead of mislabelling an ownership/grouping discrepancy as
+        // root-level. BOTH counts must be known (`None` on either → no footer, honest
+        // rule #1).
+        if let (Some(grouped), Some(proven_root_level)) =
+            (self.directory_group_file_count, self.root_level_file_count)
+        {
+            let sigma_owned: u64 = self
+                .results
+                .iter()
+                .map(|m| (m.owned_file_count + m.owned_test_file_count) as u64)
+                .sum();
+            if sigma_owned > grouped {
+                let excess = sigma_owned - grouped;
+                if excess == proven_root_level {
+                    // Reconciles: the excess IS the proven root-level files.
+                    out.push_str(&format!(
+                        "\nnote: Σ {} owned files across {} modules ({} root-level, owned by root \
+                         manifest but not in any directory group).\n",
+                        sigma_owned,
+                        self.results.len(),
+                        proven_root_level,
+                    ));
+                } else {
+                    // Does NOT reconcile: the store proves a DIFFERENT root-level count than
+                    // the excess. Surface the residual honestly — never claim "root-level"
+                    // for an unexplained ownership/grouping discrepancy (review-4 #1).
+                    out.push_str(&format!(
+                        "\nnote: Σ {} owned files across {} modules exceed the {} directory-grouped \
+                         total by {}, but the store proves {} root-level file{} (path without '/'); \
+                         these do not reconcile ({} \u{2260} {}), so the excess is not attributable \
+                         to root-level files alone — run `rmap check` (possible ownership/grouping \
+                         discrepancy).\n",
+                        sigma_owned,
+                        self.results.len(),
+                        grouped,
+                        excess,
+                        proven_root_level,
+                        if proven_root_level == 1 { "" } else { "s" },
+                        excess,
+                        proven_root_level,
+                    ));
+                }
+            }
+            // sigma_owned <= grouped → no excess to name → no footer.
         }
 
         // ── Unreferenced-symbol caveat (OUTPUT-DOC-TRUTH-AUDIT-1) ───

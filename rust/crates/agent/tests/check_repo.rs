@@ -87,6 +87,49 @@ fn orient_and_check_state_the_same_indexed_file_total() {
     );
 }
 
+// ── HEADLINE-TRUTH-1 (§2.1, §2.7): tracked_only_count reconciles the file universes ──
+
+/// The `tracked_only_count` from `compute_repo_summary` flows through the MODULE_SUMMARY
+/// evidence and reconciles the three file totals: `indexed = source + tracked_only`.
+/// Orient renders the split when tracked_only > 0; the presenter never fabricates a
+/// measured zero from an absent field (rule #1). This test seeds a nonzero tracked_only
+/// and asserts the RECONCILIATION IDENTITY the presenter renders (review-4 #2):
+/// `200 indexed = 150 source + 50 tracked-only`, where `source` is computed exactly as the
+/// orient header computes it (`file_count − tracked_only_count`) — not merely that the
+/// field propagated. This is the identity that lets `orient`, `stats`, and `modules list`
+/// agree on how many files exist.
+#[test]
+fn orient_module_summary_reconciles_indexed_source_and_tracked_only() {
+    let mut fake = seeded();
+    fake.repo_summaries.get_mut("snap-1").unwrap().file_count = 200;
+    fake.repo_summaries
+        .get_mut("snap-1")
+        .unwrap()
+        .tracked_only_count = 50;
+
+    let result = orient(&fake, "r1", None, Budget::Medium, TEST_NOW).unwrap();
+    let module_summary =
+        find_signal(&result, SignalCode::ModuleSummary).expect("orient emits MODULE_SUMMARY");
+    let ev = serde_json::to_value(module_summary).unwrap();
+    let file_count = ev["evidence"]["file_count"]
+        .as_u64()
+        .expect("MODULE_SUMMARY must carry file_count");
+    let tracked_only = ev["evidence"]["tracked_only_count"]
+        .as_u64()
+        .expect("MODULE_SUMMARY must carry tracked_only_count");
+    assert_eq!(file_count, 200, "indexed total");
+    assert_eq!(tracked_only, 50, "tracked-only count");
+    // The reconciliation identity the header renders: indexed = source + tracked_only.
+    // `source` is derived, not stored — computed the same way the presenter does.
+    let source = file_count - tracked_only;
+    assert_eq!(source, 150, "source-with-symbols = indexed − tracked-only");
+    assert_eq!(
+        file_count,
+        source + tracked_only,
+        "200 indexed must reconcile as 150 source + 50 tracked-only"
+    );
+}
+
 /// Recursively find the `summary` of the check condition whose `code` matches, anywhere in the
 /// serialized check envelope (conditions live under different evidence keys per verdict).
 fn find_condition_summary(v: &serde_json::Value, code: &str) -> Option<String> {

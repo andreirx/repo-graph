@@ -231,6 +231,10 @@ pub struct AgentRepoSummary {
     pub file_count: u64,
     pub symbol_count: u64,
     pub languages: Vec<String>,
+    /// HEADLINE-TRUTH-1 (§2.1): count of files that are config, contract-schema, or
+    /// failed-to-parse — tracked in `file_versions` but lacking a SYMBOL-bearing FILE
+    /// node. `indexed = source_with_symbols + tracked_only_count`.
+    pub tracked_only_count: u64,
 }
 
 // ── Module discovery summary ─────────────────────────────────────
@@ -1109,6 +1113,26 @@ pub trait AgentStorageRead {
         _snapshot_uid: &str,
     ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
         Ok(Vec::new())
+    }
+
+    /// HEADLINE-TRUTH-1 (§2.1, review-4 #1): count the snapshot's ROOT-LEVEL SOURCE files —
+    /// tracked files whose `files.path` contains no `/`, RESTRICTED to the source universe
+    /// (config/failed/contract excluded — the `tracked_only` class). This is the PROVEN
+    /// quantity the `modules list` footer reconciles against: a directory group only exists
+    /// per directory, so a source file with a `/` is grouped and a root-level source file is
+    /// not (`resolver.rs` returns no OWNS edge for root-level files); `Σ owned` counts owned
+    /// SOURCE files, so the comparable proven count must exclude config too (a root-level
+    /// `package.json` is a manifest, not an owned source file — django, 2026-09-07). The
+    /// footer names root-level files ONLY when `Σ owned − grouped` equals THIS proven count;
+    /// otherwise it surfaces the residual rather than mislabelling an ownership/grouping
+    /// discrepancy as root-level (the operator ruling: prove it, do not assume).
+    ///
+    /// Default impl returns `Ok(0)` so the many `AgentStorageRead` test fakes need no stub;
+    /// the real adapter overrides it. The only production caller is `handle_modules_list`,
+    /// which uses the real SQLite adapter — a fake returning `0` cannot mislead the footer:
+    /// a `0` that fails to reconcile surfaces the residual (honest), never a false claim.
+    fn count_root_level_files(&self, _snapshot_uid: &str) -> Result<u64, AgentStorageError> {
+        Ok(0)
     }
 
     /// List the manifest-declared package boundaries (crate / workspace-package

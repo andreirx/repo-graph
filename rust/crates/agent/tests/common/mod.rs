@@ -200,6 +200,7 @@ impl FakeAgentStorage {
                 file_count: 0,
                 symbol_count: 0,
                 languages: Vec::new(),
+                tracked_only_count: 0,
             },
         );
         self.trust_summaries
@@ -310,6 +311,7 @@ impl AgentStorageRead for FakeAgentStorage {
                 file_count: 0,
                 symbol_count: 0,
                 languages: Vec::new(),
+                tracked_only_count: 0,
             }))
     }
 
@@ -410,6 +412,7 @@ impl AgentStorageRead for FakeAgentStorage {
                 file_count: 0,
                 symbol_count: 0,
                 languages: Vec::new(),
+                tracked_only_count: 0,
             }))
     }
 
@@ -428,6 +431,7 @@ impl AgentStorageRead for FakeAgentStorage {
                 file_count: 0,
                 symbol_count: 0,
                 languages: Vec::new(),
+                tracked_only_count: 0,
             }))
     }
 

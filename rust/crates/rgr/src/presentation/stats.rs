@@ -135,6 +135,21 @@ pub struct StatsResponse {
     /// W-BOTH with a current measured ledger; absent on the wire otherwise (R-0).
     #[serde(default)]
     pub witnesses: Option<serde_json::Value>,
+    /// HEADLINE-TRUTH-1 (§2.1 D5): the repo-level total indexed file count from
+    /// `compute_repo_summary`. When present, the stats Summary can name the gap
+    /// between directory-group-owned files and total indexed files — making the
+    /// three file totals reconcile instead of contradicting each other.
+    #[serde(default)]
+    pub indexed_file_count: Option<u64>,
+    /// HEADLINE-TRUTH-1 (cycle-4 ruling): set by the daemon ONLY when the repo-summary read
+    /// FAILED — distinct from an older daemon that never computes it. When `true`, the Summary
+    /// renders a NAMED unavailable clause instead of the ordinary grouped-total line: a failed
+    /// read cannot reconcile, and rendering the bare "in directory groups" line would falsely
+    /// read as "every indexed file is grouped" (STANDING HONESTY RULE #1 — a failure is not a
+    /// no-gap). Absent/`false` (older daemon, or a successful read) → the ordinary path, keyed on
+    /// `indexed_file_count`.
+    #[serde(default)]
+    pub repo_summary_unavailable: bool,
 }
 
 /// MODULE-MODEL-2 §13 D4/D7: one folded package group in the stats response — the
@@ -217,13 +232,61 @@ impl StatsResponse {
         let total_symbols: i64 = self
             .total_symbols
             .unwrap_or_else(|| self.stats.iter().map(|m| m.symbol_count).sum());
-        // COHERENCE-3 (§2.3): NAME the basis — this total is the files owned by a directory group
-        // (summed OWNS edges), which EXCLUDES files no directory node owns, so it differs from
-        // orient/check's "indexed" total by design. Naming it makes five totals read as five bases.
-        out.push_str(&format!(
-            "  total_files: {} (in directory groups)\n",
-            total_files
-        ));
+        // HEADLINE-TRUTH-1 (§2.1 D5): when the daemon provides the repo-level indexed
+        // file count, name the gap between directory-group-owned files and total indexed
+        // files so the three file totals reconcile instead of contradicting.
+        // `ungrouped` = files indexed but not owned by any directory group (root-level
+        // files, config/contract files with no directory node).
+        //
+        // REVIEW-0 #3: every case is explicit — indexed > grouped names the gap,
+        // indexed == grouped shows the simple label, indexed < grouped surfaces the
+        // non-reconciling residual (a data integrity issue — grouped files exceed
+        // indexed is structurally impossible unless a bug produces phantom ownership
+        // rows). ABSENT field → simple label (unknown, not measured-zero per rule #1).
+        // HEADLINE-TRUTH-1 (cycle-4 ruling): a FAILED repo-summary read renders a NAMED
+        // unavailable clause — the reconciliation cannot be computed, so we must NOT emit the
+        // ordinary "in directory groups" line (which reads as "all indexed files are grouped").
+        // Takes precedence over the `indexed_file_count` cases below (on failure it is None
+        // anyway, but the flag makes the failure explicit rather than conflated with absence).
+        if self.repo_summary_unavailable {
+            out.push_str(&format!(
+                "  total_files: {} (in directory groups; indexed-file total unavailable — repo summary read failed, cannot reconcile)\n",
+                total_files,
+            ));
+        } else {
+            match self.indexed_file_count {
+                Some(indexed) => {
+                    let indexed_i = indexed as i64;
+                    if indexed_i > total_files {
+                        let gap = indexed_i - total_files;
+                        out.push_str(&format!(
+                        "  total_files: {} (in directory groups; {} indexed files not in any group)\n",
+                        total_files, gap,
+                    ));
+                    } else if indexed_i < total_files {
+                        // Non-reconciling: more grouped files than indexed — surface it.
+                        let excess = total_files - indexed_i;
+                        out.push_str(&format!(
+                        "  total_files: {} (in directory groups; WARNING: exceeds {} indexed files by {} — data may be inconsistent)\n",
+                        total_files, indexed, excess,
+                    ));
+                    } else {
+                        // Exact match — all indexed files are in directory groups.
+                        out.push_str(&format!(
+                            "  total_files: {} (in directory groups)\n",
+                            total_files,
+                        ));
+                    }
+                }
+                None => {
+                    // Absent field → simple label (unknown gap, not measured zero).
+                    out.push_str(&format!(
+                        "  total_files: {} (in directory groups)\n",
+                        total_files,
+                    ));
+                }
+            }
+        }
         out.push_str(&format!("  total_symbols: {}\n", total_symbols));
         out.push('\n');
 
@@ -446,6 +509,8 @@ mod tests {
             relationship_next_action: None,
             root_manifest_limitation: None,
             witnesses: None,
+            indexed_file_count: None,
+            repo_summary_unavailable: false,
             // The daemon folds these 3 dirs (no manifest, shared `src` prefix) into
             // 3 package groups — pre-computed here since the client no longer folds.
             package_groups: vec![
@@ -658,6 +723,8 @@ mod tests {
             relationship_next_action: None,
             root_manifest_limitation: None,
             witnesses: None,
+            indexed_file_count: None,
+            repo_summary_unavailable: false,
             package_groups: vec![],
             stats: vec![],
         };
@@ -679,6 +746,8 @@ mod tests {
             relationship_next_action: None,
             root_manifest_limitation: None,
             witnesses: None,
+            indexed_file_count: None,
+            repo_summary_unavailable: false,
             package_groups: vec![],
             stats: vec![],
         };
@@ -712,6 +781,87 @@ mod tests {
         let resp = sample_stats(); // total_symbols: None
         let output = resp.render_human();
         assert!(output.contains("total_symbols: 1646"), "{output}"); // 892 + 634 + 120
+    }
+
+    // ── HEADLINE-TRUTH-1 (§2.1 D5) — indexed_file_count reconciles the three file totals ──────────
+
+    #[test]
+    fn render_human_names_ungrouped_files_when_indexed_exceeds_dir_total() {
+        // D5: when indexed_file_count > sum(directory group files), the gap is named
+        // so the reader sees the three file totals reconcile rather than contradict.
+        let mut resp = sample_stats(); // dir total = 45 + 38 + 10 = 93
+        resp.indexed_file_count = Some(110); // 17 files indexed but not in any group
+        let output = resp.render_human();
+        assert!(
+            output.contains(
+                "total_files: 93 (in directory groups; 17 indexed files not in any group)"
+            ),
+            "the gap between indexed and grouped must be named:\n{output}"
+        );
+    }
+
+    #[test]
+    fn render_human_no_ungrouped_note_when_indexed_equals_dir_total() {
+        // When every indexed file is in a directory group, no gap to report.
+        let mut resp = sample_stats();
+        resp.indexed_file_count = Some(93); // exactly matches dir total
+        let output = resp.render_human();
+        assert!(
+            output.contains("total_files: 93 (in directory groups)"),
+            "no gap → simple label:\n{output}"
+        );
+        assert!(
+            !output.contains("not in any group"),
+            "no noise when gap is zero:\n{output}"
+        );
+    }
+
+    /// HEADLINE-TRUTH-1 (cycle-4 ruling): a FAILED repo-summary read (daemon sets
+    /// `repo_summary_unavailable = true`, `indexed_file_count = None`) renders a NAMED unavailable
+    /// clause — NOT the ordinary "(in directory groups)" line, which would falsely read as "every
+    /// indexed file is grouped". A failure is not a no-gap (STANDING HONESTY RULE #1).
+    #[test]
+    fn render_human_names_unavailable_when_repo_summary_read_failed() {
+        let mut resp = sample_stats(); // dir total = 93
+        resp.repo_summary_unavailable = true;
+        resp.indexed_file_count = None; // the daemon omits it on failure
+        let output = resp.render_human();
+        assert!(
+            output.contains(
+                "total_files: 93 (in directory groups; indexed-file total unavailable — repo summary read failed, cannot reconcile)"
+            ),
+            "a failed read must render a NAMED unavailable clause:\n{output}"
+        );
+        // It must NOT render the plain grouped-total line (which reads as a clean reconciliation).
+        assert!(
+            !output.contains("total_files: 93 (in directory groups)\n"),
+            "the failure must not be conflated with the clean no-gap line:\n{output}"
+        );
+    }
+
+    #[test]
+    fn render_human_no_ungrouped_note_when_indexed_absent() {
+        // Defensive: absent field → the simpler label (never false zero).
+        let resp = sample_stats(); // indexed_file_count: None
+        let output = resp.render_human();
+        assert!(
+            output.contains("total_files: 93 (in directory groups)"),
+            "absent → simple label:\n{output}"
+        );
+    }
+
+    /// REVIEW-0 #3: when indexed < grouped, the non-reconciling residual is SURFACED,
+    /// not silently swallowed. Grouped files exceeding indexed is a data integrity
+    /// issue (structurally impossible in correct operation).
+    #[test]
+    fn render_human_warns_when_grouped_exceeds_indexed() {
+        let mut resp = sample_stats(); // dir total = 45 + 38 + 10 = 93
+        resp.indexed_file_count = Some(90); // less than grouped (93) → non-reconciling
+        let output = resp.render_human();
+        assert!(
+            output.contains("WARNING: exceeds 90 indexed files by 3"),
+            "non-reconciling residual must be surfaced:\n{output}"
+        );
     }
 
     // ── HONEST-DEGRADATION-IMPL-1 (D1) — LOW caveat + degenerate-unknown (human side) ─────────────
@@ -751,6 +901,8 @@ mod tests {
             relationship_next_action: None,
             root_manifest_limitation: None,
             witnesses: None,
+            indexed_file_count: None,
+            repo_summary_unavailable: false,
             package_groups: vec![],
             stats: vec![degenerate_module()],
         };
@@ -792,6 +944,8 @@ mod tests {
             relationship_next_action: None,
             root_manifest_limitation: None,
             witnesses: None,
+            indexed_file_count: None,
+            repo_summary_unavailable: false,
             package_groups: vec![],
             stats: vec![degenerate_module()],
         };

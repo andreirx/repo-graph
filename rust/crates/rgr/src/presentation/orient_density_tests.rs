@@ -405,16 +405,15 @@ fn rendered_numbers_are_budget_invariant_length_is_monotonic() {
     );
 }
 
-/// ANCHORS-EVERYWHERE-1 (§4): the orient complexity BREAKDOWN row (SYMBOL-level `file — symbol`)
-/// anchors `file:line` when a line is present, and renders the bare file when absent (never a
-/// fabricated line). The file-deduped HEADLINE (`Complexity centers:`) stays unanchored — a file
-/// rollup spans many symbols and has no single line.
+/// HEADLINE-TRUTH-1 (§2.2, flipped from ANCHORS-EVERYWHERE-1 §4): the complexity HEADLINE
+/// names the top-N SYMBOLS (no file dedup — a second symbol in the same file lists if it
+/// ranks), so the headline reads `file — symbol (cx N)`. Two centers in the same file
+/// both appear on the headline. The BREAKDOWN row is unchanged.
 #[test]
-fn complexity_breakdown_anchors_line_headline_stays_unanchored() {
+fn complexity_headline_names_symbols_not_file_rollup() {
     use serde_json::json;
     let mut r = nginx_like();
-    // Two centers in the SAME file (so the headline dedups to one file rollup): one carries a
-    // line, one does not.
+    // Two centers in the SAME file — both must appear on the headline (no dedup by file).
     let top = json!([
         {"symbol": "hot", "file": "src/a.c", "line": 42, "complexity": 40},
         {"symbol": "warm", "file": "src/a.c", "complexity": 30}
@@ -427,23 +426,69 @@ fn complexity_breakdown_anchors_line_headline_stays_unanchored() {
         }
     }
     let out = r.render_human(OrientDepth::Medium);
-    // Breakdown: the symbol WITH a line anchors `file:line — symbol`.
+    // Breakdown rows unchanged: file:line — symbol.
     assert!(
         out.contains("src/a.c:42 — hot (cx 40)"),
         "breakdown row anchors file:line:\n{out}"
     );
-    // The symbol WITHOUT a line renders the bare file (no fabricated anchor).
     assert!(
         out.contains("src/a.c — warm (cx 30)"),
         "breakdown row without a line renders bare file:\n{out}"
     );
-    // The dense HEADLINE names the file rollup WITHOUT a line.
+    // HEADLINE names the SYMBOL, not the file rollup — both symbols show.
     assert!(
-        out.contains("Complexity centers: src/a.c (cx 40)"),
-        "file-rollup headline is unanchored:\n{out}"
+        out.contains("Complexity centers: src/a.c — hot (cx 40)"),
+        "headline names the symbol:\n{out}"
+    );
+    // The second symbol in the same file also appears (no file dedup).
+    assert!(
+        out.contains("src/a.c — warm (cx 30)"),
+        "second symbol in same file appears:\n{out}"
+    );
+    // The old file-only rollup form must NOT appear.
+    assert!(
+        !out.contains("Complexity centers: src/a.c (cx 40)\n"),
+        "file-only rollup must not appear on headline:\n{out}"
+    );
+}
+
+/// HEADLINE-TRUTH-1 (STANDING HONESTY RULE #1, cycle-4 ruling): a `top_complex` entry whose
+/// `complexity` field is absent/malformed (producer/wire schema drift — the producer normally
+/// always emits the required `u64`) renders `cx unavailable`, NEVER a fabricated `cx 0` that reads
+/// as "measured, trivial" and would tell an agent a hot symbol is cold. Both the HEADLINE
+/// (`complexity_line`) and the BREAKDOWN (`complexity_breakdown_section`) route through the shared
+/// `complexity_cx_label`, so both surface the marker.
+///
+/// FAIL-FIRST: against the pre-fix `.unwrap_or(0)` this fixture rendered `cx 0` on both surfaces.
+#[test]
+fn complexity_malformed_evidence_renders_named_unavailable_not_cx_zero() {
+    use serde_json::json;
+    let mut r = nginx_like();
+    // The top entry is MALFORMED: no `complexity` key. A well-formed second entry proves the
+    // marker is per-row (the healthy row still renders its real cx).
+    let top = json!([
+        {"symbol": "mystery", "file": "src/x.c", "line": 7},
+        {"symbol": "known", "file": "src/y.c", "complexity": 33}
+    ]);
+    for leaf in &mut r.signals {
+        if leaf.value.code == "HIGH_COMPLEXITY" {
+            leaf.value.evidence = Some(json!({
+                "high_complexity_count": 2, "threshold": 20, "top_complex": top
+            }));
+        }
+    }
+    let out = r.render_human(OrientDepth::Medium);
+    assert!(
+        out.contains("cx unavailable"),
+        "malformed complexity must render a NAMED unavailable marker:\n{out}"
     );
     assert!(
-        !out.contains("Complexity centers: src/a.c:42"),
-        "the headline must not pick one symbol's line for the file rollup:\n{out}"
+        !out.contains("cx 0)"),
+        "malformed complexity must NEVER fabricate `cx 0`:\n{out}"
+    );
+    // The healthy row still renders its real value (marker is per-row, not global).
+    assert!(
+        out.contains("known (cx 33)"),
+        "a well-formed row still renders its real cx:\n{out}"
     );
 }

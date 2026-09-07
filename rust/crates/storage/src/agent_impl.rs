@@ -288,6 +288,23 @@ impl AgentStorageRead for StorageConnection {
             )
             .map_err(map_err("compute_repo_summary"))?;
 
+        // HEADLINE-TRUTH-1 (§2.1): count files that are config, contract-schema, or
+        // failed-to-parse — tracked in file_versions but not source-with-symbols.
+        // `parse_status IN ('config','failed')` covers config and read-failed;
+        // `extractor = 'contract-schema'` covers .proto and similar contract files.
+        // Both columns live on `file_versions` (not `files`).
+        let tracked_only_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT fv.file_uid) \
+                 FROM file_versions fv \
+                 WHERE fv.snapshot_uid = ? \
+                   AND (fv.parse_status IN ('config', 'failed') \
+                        OR fv.extractor = 'contract-schema')",
+                rusqlite::params![snapshot_uid],
+                |row| row.get(0),
+            )
+            .map_err(map_err("compute_repo_summary"))?;
+
         // languages: distinct, non-null, sorted ascending.
         let mut stmt = conn
             .prepare(
@@ -313,6 +330,7 @@ impl AgentStorageRead for StorageConnection {
             file_count: file_count.max(0) as u64,
             symbol_count: symbol_count.max(0) as u64,
             languages,
+            tracked_only_count: tracked_only_count.max(0) as u64,
         })
     }
 
@@ -747,6 +765,7 @@ impl AgentStorageRead for StorageConnection {
             file_count: file_count.max(0) as u64,
             symbol_count: symbol_count.max(0) as u64,
             languages,
+            tracked_only_count: 0, // path-scoped summary, not repo-level
         })
     }
 
@@ -805,6 +824,7 @@ impl AgentStorageRead for StorageConnection {
             file_count: file_count.max(0) as u64,
             symbol_count: symbol_count.max(0) as u64,
             languages,
+            tracked_only_count: 0, // file-scoped summary, not repo-level
         })
     }
 
@@ -1764,6 +1784,35 @@ impl AgentStorageRead for StorageConnection {
         // module_candidates ⋈ evidence.source_type). Body beside the other
         // discovery reads in `agent_orient_reads`.
         crate::agent_orient_reads::manifest_roots(self.connection(), snapshot_uid)
+    }
+
+    fn count_root_level_files(&self, snapshot_uid: &str) -> Result<u64, AgentStorageError> {
+        // HEADLINE-TRUTH-1 (§2.1, review-4 #1): PROVEN count of root-level SOURCE files —
+        // DISTINCT tracked files in this snapshot whose `files.path` has no `/`, RESTRICTED
+        // to the SOURCE universe (excluding config/failed/contract, the `tracked_only`
+        // class). The restriction is load-bearing and empirically grounded (django,
+        // 2026-09-07): a root-level `package.json`/`pyproject.toml` is a config manifest,
+        // NOT an owned source file, so it is not counted in the module rollup's `Σ owned`.
+        // The footer reconciles `Σ owned − grouped` against THIS count, and both sides must
+        // therefore range over the SAME source universe — counting config files here would
+        // make django's proven root-level (3) disagree with its excess (1: `Gruntfile.js`,
+        // the sole root-level *source* file) and falsely trip the residual clause. The
+        // exclusion predicate is the exact negation of `tracked_only_count`.
+        let count: i64 = self
+            .connection()
+            .query_row(
+                "SELECT COUNT(DISTINCT f.file_uid) \
+                 FROM files f \
+                 JOIN file_versions fv ON fv.file_uid = f.file_uid \
+                 WHERE fv.snapshot_uid = ? \
+                   AND f.path NOT LIKE '%/%' \
+                   AND NOT (fv.parse_status IN ('config', 'failed') \
+                            OR fv.extractor = 'contract-schema')",
+                rusqlite::params![snapshot_uid],
+                |row| row.get(0),
+            )
+            .map_err(map_err("count_root_level_files"))?;
+        Ok(count.max(0) as u64)
     }
 
     fn get_boundary_links_freshness(

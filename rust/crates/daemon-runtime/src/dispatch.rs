@@ -1834,12 +1834,31 @@ impl ServiceDispatcher {
         // per-module row-sum (rows are module-owned; a sum loses symbols in unowned files). On a
         // summary error we OMIT the field rather than inject 0 — a false zero is the very bug we fix.
         // D4 + D5 (IMPL-2) share the repo-level summary: D4 needs the all-SYMBOL count, D5 the languages.
-        let repo_summary = repo_graph_agent::AgentStorageRead::compute_repo_summary(
+        // HEADLINE-TRUTH-1 review-1 #2: no `.ok()` — explicit match. The repo summary feeds
+        // the stats renderer's `total_symbols` and `indexed_file_count`. A read failure →
+        // both are None (honest unknown, not false zero); the reason is logged.
+        let repo_summary = match repo_graph_agent::AgentStorageRead::compute_repo_summary(
             &storage,
             &snapshot.snapshot_uid,
-        )
-        .ok();
+        ) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!(
+                    "warning: repo summary read failed for stats ({}): {e}; \
+                     total_symbols and indexed_file_count will be absent",
+                    repo_uid,
+                );
+                None
+            }
+        };
         let total_symbols_field: Option<u64> = repo_summary.as_ref().map(|s| s.symbol_count);
+        // HEADLINE-TRUTH-1 (§2.1): the indexed file count for stats to compute ungrouped.
+        let indexed_file_count: Option<u64> = repo_summary.as_ref().map(|s| s.file_count);
+        // HEADLINE-TRUTH-1 (cycle-4 ruling): a FAILED repo-summary read is None here (the match
+        // above logged the error). Signal that failure DISTINCTLY on the wire so the stats
+        // renderer can name it — an omitted `indexed_file_count` alone conflates "read failed"
+        // with "older daemon / no gap", which the honesty rule forbids.
+        let repo_summary_unavailable: bool = repo_summary.is_none();
 
         // D1 + D5 (IMPL-2) share the snapshot reliability overlay (the SAME axis `trust`/`orient`
         // consume), computed ONCE here. Overlay-assembly failure -> None -> no caveat / no next-action: we
@@ -1980,6 +1999,8 @@ impl ServiceDispatcher {
                             relationship_next_action.as_deref(),
                             &manifest_roots,
                             witnesses_field.as_ref(),
+                            indexed_file_count,
+                            repo_summary_unavailable,
                         );
                         DispatchResult::success(&request.id, v)
                     }
@@ -2010,6 +2031,8 @@ impl ServiceDispatcher {
                     relationship_next_action.as_deref(),
                     &manifest_roots,
                     witnesses_field.as_ref(),
+                    indexed_file_count,
+                    repo_summary_unavailable,
                 );
                 return DispatchResult::success(&request.id, v);
             }
@@ -2033,6 +2056,8 @@ impl ServiceDispatcher {
                             relationship_next_action.as_deref(),
                             &manifest_roots,
                             witnesses_field.as_ref(),
+                            indexed_file_count,
+                            repo_summary_unavailable,
                         );
                         DispatchResult::success(&request.id, v)
                     }
@@ -2133,6 +2158,8 @@ impl ServiceDispatcher {
             relationship_next_action.as_deref(),
             &manifest_roots,
             witnesses_field.as_ref(),
+            indexed_file_count,
+            repo_summary_unavailable,
         );
         DispatchResult::success(&request.id, body)
     }
@@ -2154,6 +2181,11 @@ impl ServiceDispatcher {
     /// `manifest_roots` `orient` uses — so the two surfaces cannot diverge. Folded here (one point, all
     /// four engine paths) reading `body["stats"]`. The JSON carries the WHOLE set; the human renderer
     /// bounds it (top-N + omission). Empty `manifest_roots` → directory/JVM grouping (honest degradation).
+    // HEADLINE-TRUTH-1 (cycle-4): a Main-style JSON-injection wiring helper — each param is one
+    // additive field forwarded onto the stats body from the ONE stats handler. Bundling into a DTO
+    // is not earned (single caller family, heterogeneous injection params); the `#[allow]` keeps the
+    // wiring flat rather than inventing a params struct that only this helper would use.
+    #[allow(clippy::too_many_arguments)]
     fn inject_stats_summary_fields(
         body: &mut serde_json::Value,
         total_symbols: Option<u64>,
@@ -2161,12 +2193,29 @@ impl ServiceDispatcher {
         relationship_next_action: Option<&str>,
         manifest_roots: &[repo_graph_agent::ManifestRoot],
         witnesses: Option<&serde_json::Value>,
+        indexed_file_count: Option<u64>,
+        repo_summary_unavailable: bool,
     ) {
         let Some(obj) = body.as_object_mut() else {
             return;
         };
         if let Some(total) = total_symbols {
             obj.insert("total_symbols".to_string(), serde_json::json!(total));
+        }
+        // HEADLINE-TRUTH-1 (§2.1): additive field for stats renderer to compute ungrouped.
+        // Injected here (not after the engine match) so EVERY engine path (auto, livegraph,
+        // compare, sqlite) carries it — the auto path returns early before the post-match code.
+        if let Some(indexed) = indexed_file_count {
+            obj.insert("indexed_file_count".to_string(), serde_json::json!(indexed));
+        }
+        // HEADLINE-TRUTH-1 (cycle-4 ruling): inject the failure marker ONLY when the read failed
+        // (byte-identical output otherwise — an older/successful path carries no flag, and the
+        // reader defaults it to `false`).
+        if repo_summary_unavailable {
+            obj.insert(
+                "repo_summary_unavailable".to_string(),
+                serde_json::json!(true),
+            );
         }
         // RECON-M-R3a (g1u): the additive, coverage-labeled union call block — OMITTED when
         // absent (never an empty/zero placeholder; R-0 byte-identity outside W-BOTH).
@@ -9349,6 +9398,49 @@ impl ServiceDispatcher {
             }
         };
 
+        // HEADLINE-TRUTH-1 (§2.1, review-1 #1): the directory-group total (sum of
+        // file_count across all directory groups = stats `total_files`). The modules
+        // footer compares Σ owned vs this grouped total to name root-level files.
+        // Computed from `list_directory_groups` — the SAME data path stats uses
+        // (storage_port.rs:1106 documents the identity). Read failure → None (honest
+        // unknown, never false zero; review-1 #2: no `.ok()` — explicit match).
+        let directory_group_file_count: Option<u64> =
+            match repo_graph_agent::AgentStorageRead::list_directory_groups(
+                &storage,
+                &snapshot.snapshot_uid,
+            ) {
+                Ok(groups) => Some(groups.iter().map(|g| g.file_count).sum()),
+                Err(e) => {
+                    eprintln!(
+                        "warning: directory-group read failed for modules footer ({}): {e}; \
+                     rendering as unknown",
+                        repo_uid,
+                    );
+                    None
+                }
+            };
+
+        // HEADLINE-TRUTH-1 (§2.1, review-4 #1): the PROVEN root-level file count
+        // (`files.path` without '/'). The presenter names root-level files ONLY when
+        // `Σ owned − grouped` equals THIS count; otherwise it surfaces the residual rather
+        // than labelling an ownership/grouping discrepancy as root-level. Read failure →
+        // None (honest unknown → no footer; never a false zero, honesty rule #1).
+        let root_level_file_count: Option<u64> =
+            match repo_graph_agent::AgentStorageRead::count_root_level_files(
+                &storage,
+                &snapshot.snapshot_uid,
+            ) {
+                Ok(n) => Some(n),
+                Err(e) => {
+                    eprintln!(
+                        "warning: root-level file read failed for modules footer ({}): {e}; \
+                     rendering as unknown",
+                        repo_uid,
+                    );
+                    None
+                }
+            };
+
         // Build response
         let mut response = serde_json::json!({
             "command": "modules list",
@@ -9372,6 +9464,11 @@ impl ServiceDispatcher {
             // `projectDir` relocations. `null`/absent = none (or older daemon); `> 0` → the
             // presenter renders a warning that those modules kept their include-derived root.
             "gradle_projectdir_unhandled": gradle_projectdir_unhandled,
+            // HEADLINE-TRUTH-1 (§2.1, review-1 #1): directory-group total for the Σ owned footer.
+            "directory_group_file_count": directory_group_file_count,
+            // HEADLINE-TRUTH-1 (§2.1, review-4 #1): PROVEN root-level count the footer
+            // reconciles `Σ owned − grouped` against before naming root-level files.
+            "root_level_file_count": root_level_file_count,
         });
         if let (serde_json::Value::Object(ref mut map), Some(reason)) =
             (&mut response, &http_boundary_link_degraded)

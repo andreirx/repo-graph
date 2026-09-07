@@ -38,6 +38,24 @@ fn headline_split(cycles: &[AgentCycle]) -> Option<CyclePartition> {
     }
 }
 
+/// HEADLINE-TRUTH-1 (COH-2, review-3 #3): the `type_only` verdict of the FIRST strictly-production
+/// cycle in canonical order — found over the WHOLE cycle set, called BEFORE the `CYCLE_TOP_N`
+/// truncation. When the first N canonical cycles are all test-only, the production cycle whose
+/// verdict `orient` renders ranks beyond the truncation; carrying it here (not recovering it from
+/// the truncated `cycles[]` leaf) is what lets the verdict survive. Matches the orient renderer's
+/// old search semantics: strictly [`CycleTestComposition::Production`] (NOT `Unknown`, which is
+/// counted in the headline but is not a proven-production example). `None` when no cycle is
+/// labeled production (LiveGraph/focus paths, or an all-test-only/unknown set), or when the first
+/// production cycle carries no TS/JS verdict — honest absence, never a fabricated verdict.
+fn first_production_type_only(
+    cycles: &[AgentCycle],
+) -> Option<crate::cycle_type_only::CycleTypeOnly> {
+    cycles
+        .iter()
+        .find(|c| matches!(c.test_composition, Some(CycleTestComposition::Production)))
+        .and_then(|c| c.type_only.clone())
+}
+
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
@@ -67,6 +85,9 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
     // ORIENT-CYCLES-DISAGREE-1: partition BEFORE the top-3 truncation — the split is over the
     // WHOLE cycle set, not the rendered anchors.
     let split = headline_split(&cycles);
+    // HEADLINE-TRUTH-1 (COH-2, review-3 #3): the first production cycle's verdict, found over
+    // the WHOLE set BEFORE truncation — so it survives even when the top-N are all test-only.
+    let production_type_only = first_production_type_only(&cycles);
     let top: Vec<CycleEvidence> = cycles
         .into_iter()
         .take(CYCLE_TOP_N)
@@ -89,6 +110,7 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
         production_count: split.map(|p| p.production_count),
         test_only_count: split.map(|p| p.test_only_count),
         unknown_count: split.map(|p| p.unknown_count),
+        production_type_only,
         cycles: top,
     };
 
@@ -135,6 +157,9 @@ pub fn aggregate_path_cancellable<S: AgentStorageRead + ?Sized>(
     // the repo headline the slice unifies) — so `test_composition` is `None` here and the split
     // is `None`. The evidence then carries only the raw total, byte-identical to before.
     let split = headline_split(&cycles);
+    // Path-scoped cycles are NOT test-composition-labeled (focus route), so no cycle is
+    // `Production` → `None`; computed before the move for uniformity with the repo-level path.
+    let production_type_only = first_production_type_only(&cycles);
     let top: Vec<CycleEvidence> = cycles
         .into_iter()
         .take(CYCLE_TOP_N)
@@ -157,6 +182,7 @@ pub fn aggregate_path_cancellable<S: AgentStorageRead + ?Sized>(
         production_count: split.map(|p| p.production_count),
         test_only_count: split.map(|p| p.test_only_count),
         unknown_count: split.map(|p| p.unknown_count),
+        production_type_only,
         cycles: top,
     };
 
@@ -207,5 +233,53 @@ mod tests {
         assert_eq!(headline_split(&mixed), None);
         // Fully-unlabeled (LiveGraph/focus path) is also None.
         assert_eq!(headline_split(&[cyc(None)]), None);
+    }
+
+    /// A test cycle carrying BOTH a composition and a type-only verdict.
+    fn cyc_v(
+        comp: Option<CycleTestComposition>,
+        verdict: Option<crate::cycle_type_only::CycleTypeOnly>,
+    ) -> AgentCycle {
+        AgentCycle {
+            length: 2,
+            modules: vec!["a".into(), "b".into()],
+            test_composition: comp,
+            type_only: verdict,
+            walk: None,
+        }
+    }
+
+    #[test]
+    fn first_production_verdict_found_past_the_top_n_truncation() {
+        // HEADLINE-TRUTH-1 (COH-2, review-3 #3): the FIRST production cycle ranks at index 3 —
+        // BEYOND the `CYCLE_TOP_N = 3` slice that becomes the rendered `cycles[]` leaf. Because
+        // this helper runs over the WHOLE set before truncation, the production verdict is still
+        // recovered (before the fix the renderer searched only the truncated top-3 and lost it).
+        use crate::cycle_type_only::CycleTypeOnly;
+        let cycles = vec![
+            cyc_v(Some(CycleTestComposition::TestOnly), None),
+            cyc_v(Some(CycleTestComposition::TestOnly), None),
+            cyc_v(Some(CycleTestComposition::TestOnly), None),
+            // The 4th (first PRODUCTION) cycle carries the type-only verdict.
+            cyc_v(
+                Some(CycleTestComposition::Production),
+                Some(CycleTypeOnly::TypeOnly),
+            ),
+        ];
+        assert!(cycles.len() > CYCLE_TOP_N, "fixture must exceed the top-N");
+        assert_eq!(
+            first_production_type_only(&cycles),
+            Some(CycleTypeOnly::TypeOnly),
+            "the production verdict must be found over the WHOLE set, not the truncated top-N"
+        );
+    }
+
+    #[test]
+    fn first_production_verdict_is_none_when_no_production_cycle() {
+        // All test-only / unlabeled → no production example → None (never fabricated).
+        assert_eq!(
+            first_production_type_only(&[cyc(Some(CycleTestComposition::TestOnly)), cyc(None),]),
+            None
+        );
     }
 }

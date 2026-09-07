@@ -316,30 +316,38 @@ impl OrientResponse {
                 "\n[--full for the complete breakdown; rmap hotspots / modules / cycles to drill down]\n",
             );
         } else if matches!(depth, OrientDepth::Full) {
-            if self.render_body(OrientDepth::Large) == out {
-                // ECONOMY-2 §2.2 (review-2 finding 1): `--full` produced BYTE-IDENTICAL output
-                // to `--budget large` (both long tails sit under `large`'s cap), so it silently
-                // repeated large's bytes with no marker — the zvec-grep defect. Say so
-                // explicitly. This identical-to-large check takes PRECEDENCE over the
-                // completeness line: the spec's "`--full` identical to `large` → one-line
-                // notice" is UNCONDITIONAL, so it fires even on a repo that is ALSO complete
-                // (nothing elided). "nothing further to show" is a COMPARATIVE claim (full vs
-                // large), always TRUE when the two bodies match — whether or not the repo is
-                // saturated; any elided section did so identically in large and carries its own
-                // `… and N more` line.
-                out.push_str("\n[--full identical to --budget large (nothing further to show)]\n");
-            } else if self.budget_saturated() {
-                // ORIENT-SEGMENT-2 §2.4: a saturated ladder (nothing elided anywhere) states
-                // so. ECONOMY-2 §2.2 keeps the tie EXACT — `budget_saturated` is cap-aware, so
-                // this line renders ONLY when no long tail elided at the `--full` cap. Reached
-                // only when `--full` is NOT identical to `large` (the branch above wins that
-                // overlap), i.e. when `--full` genuinely EXPANDED a long tail beyond `large`'s
-                // cap and showed everything (51–200 groups/complexity, otherwise complete) —
-                // `--full` MEANS something on such repos.
+            let identical_to_large = self.render_body(OrientDepth::Large) == out;
+            if self.budget_saturated() {
+                // HEADLINE-TRUTH-1 (§2.3): truly complete — nothing elided anywhere.
+                // This fires whether or not full == large (a complete small repo is
+                // complete; a complete repo that expanded past large is also complete).
                 out.push_str("\n[budget not reached — output complete]\n");
+            } else if identical_to_large {
+                // HEADLINE-TRUTH-1 (§2.3, fix for D7 / ECONOMY-2 REGRESSION): `--full`
+                // is byte-identical to `--budget large` BUT something is still elided
+                // (budget_saturated is false). The old "nothing further to show" was a
+                // lie — the directory-group fallback cap is FIXED and `--full` cannot
+                // expand it. Name the elision.
+                let elided = self.dir_group_elided_count();
+                if elided > 0 {
+                    out.push_str(&format!(
+                        "\n[--full identical to --budget large — {} group row{} elided by \
+                         the fixed cap; see stats]\n",
+                        elided,
+                        if elided == 1 { "" } else { "s" },
+                    ));
+                } else {
+                    // Identical to large, not saturated, no dir-group elision — some
+                    // other section elides (docs, complexity). Per-section lines carry
+                    // the remainder; we state what we know.
+                    out.push_str(
+                        "\n[--full identical to --budget large (some rows elided; \
+                         see per-section indicators above)]\n",
+                    );
+                }
             }
-            // else: `--full` elided MORE than `large` — the per-section `… and N more —
-            // <where>` lines carry the remainder; no false terminal completeness claim.
+            // else: `--full` differs from `large` AND is not saturated — the per-section
+            // `… and N more — <where>` lines carry the remainder; no false terminal claim.
         }
 
         out.trim_end().to_string()
@@ -482,6 +490,27 @@ impl OrientResponse {
             if !complexity.is_empty() {
                 out.push('\n');
                 out.push_str(&complexity);
+            }
+        }
+
+        // ── HEADLINE-TRUTH-1 (§2.6): test-notation legend ─────────
+        // Two parenthetical test-composition notations coexist in orient:
+        //   • package-group rows: "(N test)" = OF WHICH N are test files (subset)
+        //   • cycles/surfaces headlines: "(+N test-only excluded)" = N MORE excluded
+        //     from the count (addend)
+        // When both appear in the output, a legend line distinguishes them so the
+        // reader is never misled. Checked on the rendered output (data-driven, not
+        // hardcoded): the "(N test)" form only comes from package-group rows; the
+        // "+…excluded" form only from cycle/surface exclusion clauses.
+        if depth.shows_detail() {
+            let has_subset = out.contains(" test)");
+            let has_addend =
+                out.contains("test-only excluded") || out.contains("test-fixture excluded");
+            if has_subset && has_addend {
+                out.push_str(
+                    "\nnote: (N test) = of which N are test; \
+                     (+N … excluded) = N additional, not in the count above.\n",
+                );
             }
         }
 

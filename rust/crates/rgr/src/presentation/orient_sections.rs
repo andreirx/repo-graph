@@ -30,6 +30,22 @@ fn module_short_name(path: &str) -> &str {
     path.rsplit('/').find(|s| !s.is_empty()).unwrap_or(path)
 }
 
+/// HEADLINE-TRUTH-1 (STANDING HONESTY RULE #1, cycle-4 ruling): the `cx N` token for one
+/// complexity row, or a NAMED-unavailable marker when the `complexity` field is absent /
+/// non-integer on this evidence. `ComplexSymbolEvidence.complexity` is a REQUIRED `u64` the
+/// producer always emits, so absence here is producer/wire schema drift — surfaced as
+/// `cx unavailable`, NEVER a fabricated `cx 0` (which reads as "measured, trivial" and would
+/// tell an agent a hot symbol is cold). Two current callers render this token — the dense
+/// headline (`complexity_line`) and the breakdown section (`complexity_breakdown_section`) —
+/// so the marker is shared and cannot drift between them; the rejected simpler alternative was
+/// the inline `.unwrap_or(0)` both used, which fabricates the false-zero this fixes.
+fn complexity_cx_label(entry: &serde_json::Value) -> String {
+    match entry.get("complexity").and_then(|v| v.as_u64()) {
+        Some(cx) => format!("cx {cx}"),
+        None => "cx unavailable".to_string(),
+    }
+}
+
 /// The labelled declared/inferred-module count phrase from a MODULE_SUMMARY
 /// payload — e.g. `1 declared module`, `5 inferred modules`, `3 modules`. The
 /// `module_candidates` notion (Layer 1/2), kept DISTINCT from the package
@@ -104,11 +120,39 @@ impl OrientResponse {
         };
 
         if let Some(files) = ev.get("file_count").and_then(|v| v.as_u64()) {
-            // COHERENCE-3 (§2.3): NAME the basis — "indexed" (all indexed files, `COUNT(DISTINCT
-            // file_uid) FROM file_versions`). `check`'s "N files indexed" now derives from the SAME
-            // live count, so the two agree; `stats`/`modules`/`map` name their DIFFERENT bases, so
-            // five totals read as five bases, not five errors.
-            line.push_str(&format!(" · {} file{} indexed", files, plural(files)));
+            // HEADLINE-TRUTH-1 (§2.1): one file universe, stated once. The header
+            // names the split: `N files indexed (M source; K config/contract/unreadable,
+            // tracked only)` when tracked-only > 0. COHERENCE-3 basis naming preserved.
+            //
+            // REVIEW-0 #2: NEVER `.unwrap_or(0)` — an ABSENT tracked_only_count is
+            // UNKNOWN, not measured-zero (standing honesty rule #1). NEVER
+            // `saturating_sub` — tracked_only > files is corrupt data that must
+            // surface, not be masked. Both branches use explicit `Option` + checked
+            // arithmetic.
+            match ev.get("tracked_only_count").and_then(|v| v.as_u64()) {
+                Some(tracked_only) if tracked_only > 0 => {
+                    if tracked_only > files {
+                        // Corrupt/malformed: tracked-only exceeds indexed total.
+                        // Surface the malformation — never mask it.
+                        line.push_str(&format!(
+                            " · {} file{} indexed (tracked-only count {} exceeds total — data malformed)",
+                            files, plural(files), tracked_only,
+                        ));
+                    } else {
+                        let source = files - tracked_only;
+                        line.push_str(&format!(
+                            " · {} file{} indexed ({} source; {} config/contract/unreadable, tracked only)",
+                            files, plural(files), source, tracked_only,
+                        ));
+                    }
+                }
+                Some(_) | None => {
+                    // tracked_only == 0 (all source) or ABSENT (unknown split) →
+                    // either way, no split to name. The `files indexed` count alone
+                    // is honest in both cases.
+                    line.push_str(&format!(" · {} file{} indexed", files, plural(files)));
+                }
+            }
             if let Some(symbols) = ev.get("symbol_count").and_then(|v| v.as_u64()) {
                 line.push_str(&format!(", {} symbol{}", symbols, plural(symbols)));
             }
@@ -148,37 +192,34 @@ impl OrientResponse {
         line
     }
 
-    /// The dense COMPLEXITY-CENTERS line: NAMED files (deduped, highest
-    /// complexity per file), capped by depth, with an honest "+N more"
-    /// pointer to `rmap hotspots`. `None` when no symbol exceeds the
-    /// threshold (or measurements are unavailable).
+    /// HEADLINE-TRUTH-1 (§2.2): the dense COMPLEXITY-CENTERS line names the top-N
+    /// SYMBOLS (no file dedup — a second center in the same file lists if it ranks),
+    /// capped by depth, with an honest "+N more" pointer to `rmap hotspots`. `None`
+    /// when no symbol exceeds the threshold (or measurements are unavailable).
     pub(super) fn complexity_line(&self, depth: OrientDepth) -> Option<String> {
         let ev = self.signal_evidence("HIGH_COMPLEXITY")?;
         let top = ev.get("top_complex").and_then(|v| v.as_array())?;
         let cap = depth.complexity_center_cap();
 
         let mut shown: Vec<String> = Vec::new();
-        let mut seen: Vec<String> = Vec::new();
         for entry in top {
             if shown.len() >= cap {
                 break;
             }
-            let cx = entry
-                .get("complexity")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let label = match entry.get("file").and_then(|v| v.as_str()) {
-                Some(f) => f.to_string(),
-                None => match entry.get("symbol").and_then(|v| v.as_str()) {
-                    Some(sym) => sym.to_string(),
-                    None => continue,
-                },
+            // HEADLINE-TRUTH-1 (honesty rule #1): a NAMED marker when `complexity` is
+            // absent/malformed — never a fabricated `cx 0`. See `complexity_cx_label`.
+            let cx = complexity_cx_label(entry);
+            // HEADLINE-TRUTH-1: the headline names the SYMBOL, not just the file.
+            // Format: `file — symbol (cx N)` when both are present.
+            let file = entry.get("file").and_then(|v| v.as_str());
+            let symbol = entry.get("symbol").and_then(|v| v.as_str());
+            let label = match (file, symbol) {
+                (Some(f), Some(s)) => format!("{f} — {s} ({cx})"),
+                (Some(f), None) => format!("{f} ({cx})"),
+                (None, Some(s)) => format!("{s} ({cx})"),
+                (None, None) => continue,
             };
-            if seen.contains(&label) {
-                continue;
-            }
-            seen.push(label.clone());
-            shown.push(format!("{} (cx {})", label, cx));
+            shown.push(label);
         }
         if shown.is_empty() {
             return None;
@@ -227,10 +268,9 @@ impl OrientResponse {
         let mut out = heading("Complexity centers (by cyclomatic complexity)");
         let mut shown: u64 = 0;
         for entry in top.iter().take(limit) {
-            let cx = entry
-                .get("complexity")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            // HEADLINE-TRUTH-1 (honesty rule #1): the shared NAMED-unavailable marker — never a
+            // fabricated `cx 0` on malformed evidence (was `.unwrap_or(0)`; cycle-4 ruling).
+            let cx = complexity_cx_label(entry);
             let file = entry.get("file").and_then(|v| v.as_str());
             let symbol = entry.get("symbol").and_then(|v| v.as_str());
             // ANCHORS-EVERYWHERE-1 (Tier 1): anchor the file at the symbol's start line
@@ -240,9 +280,9 @@ impl OrientResponse {
             // spans many symbols and has no single line.
             let line_no = entry.get("line").and_then(|v| v.as_u64());
             let row = match (file, symbol) {
-                (Some(f), Some(s)) => format!("{} — {s} (cx {cx})", anchor(f, line_no)),
-                (Some(f), None) => format!("{} (cx {cx})", anchor(f, line_no)),
-                (None, Some(s)) => format!("{s} (cx {cx})"),
+                (Some(f), Some(s)) => format!("{} — {s} ({cx})", anchor(f, line_no)),
+                (Some(f), None) => format!("{} ({cx})", anchor(f, line_no)),
+                (None, Some(s)) => format!("{s} ({cx})"),
                 (None, None) => continue,
             };
             out.push_str(&bullet(&row));
@@ -309,9 +349,9 @@ impl OrientResponse {
                 let has_disclosure =
                     matches!(test_only, Some(n) if n > 0) || matches!(unknown, Some(n) if n > 0);
                 if headline > 0 || has_disclosure {
-                    // Anchor honesty: `cycles[]` carries no per-cycle composition, so with a split
-                    // its first entry may be a demoted test-only/unknown ring — misrepresenting the
-                    // example beside a production headline. Draw ONLY when there is no split
+                    // Anchor honesty: with a split, the first entry in `cycles[]` (top-3) may be a
+                    // demoted test-only/unknown ring — misrepresenting the example beside a
+                    // production headline. Draw ONLY when there is no split
                     // (`production` absent = unsplit LiveGraph/focus path) OR the split POSITIVELY
                     // confirms zero test-only AND zero unknown; explicit `Option` match (review-4 #4:
                     // never `unwrap_or(0)`, which reads an ABSENT count as known-zero — RULE #1).
@@ -372,24 +412,36 @@ impl OrientResponse {
                         line.push_str(&format!(" ({clause})"));
                     }
                     // COHERENCE-2 §2.2: render the SAME type-only verdict label `cycles` renders,
-                    // for the anchor cycle we are showing as the example — via the SHARED
-                    // `cycles::type_only_label`, so the two surfaces render the state IDENTICALLY
-                    // (seam-pinned). Only when we drew the anchor (we are pointing at a specific
-                    // cycle, `cycles.first()`); the per-cycle verdict for every cycle also rides in
-                    // the JSON leaf. ABSENCE of the field is legitimate (LiveGraph route / non-TS §5
-                    // cycle) ⇒ no label — never a false claim.
+                    // via the SHARED `cycles::type_only_label`, so the two surfaces render the
+                    // state IDENTICALLY (seam-pinned). The per-cycle verdict rides in each
+                    // cycle's JSON leaf.
                     //
-                    // A PRESENT-but-unparseable verdict is producer/mirror schema drift. Unlike the
-                    // `cycles` renderer — where `type_only` is a TYPED field decoded at the transport
-                    // boundary, so a mismatch fails the whole response parse into a handled `Result`
-                    // (`error: failed to parse …`) — orient's evidence is an already-decoded raw
-                    // `Value`, so the mismatch surfaces only HERE, at render time. It must NOT
-                    // `.expect()`-panic the CLI on recoverable wire input (review-0 #1): per RULE #1
-                    // the unknown is made VISIBLE with its reason (never `.ok()`-swallowed), rendered
-                    // as an explicit type-only-unavailable clause the reader can act on.
-                    if draw_anchor {
-                        if let Some(tv) = cycles.first().and_then(|c| c.get("type_only")) {
-                            match serde_json::from_value::<super::cycles::CycleTypeOnly>(tv.clone()) {
+                    // HEADLINE-TRUTH-1 (COH-2): the verdict must render even when `draw_anchor`
+                    // is false (test-only/unknown cycles suppress the anchor example).
+                    //
+                    // ABSENCE of the verdict is legitimate (LiveGraph route / non-TS cycle) ⇒ no
+                    // label — never a false claim. A PRESENT-but-unparseable verdict is
+                    // producer/mirror schema drift; per RULE #1 the unknown is made VISIBLE with
+                    // its reason (never `.ok()`-swallowed).
+                    {
+                        // review-3 #3 / review-4 #3: when a split is active the production cycle
+                        // whose verdict we render may rank BEYOND the top-N carried in `cycles[]`
+                        // (a repo whose first N canonical cycles are all test-only). The aggregator
+                        // computes the first production cycle's verdict over the WHOLE set BEFORE
+                        // truncation and ships it as `production_type_only` — read THAT. There is no
+                        // `cycles[]` fallback: it would search the TRUNCATED leaf, the exact loss
+                        // this field fixes, and every current producer that labels cycles also sets
+                        // `production_type_only` (they populate both together or neither), so a
+                        // per-cycle fallback recovers nothing an honest `None` would not. When
+                        // `draw_anchor` is true (unsplit / all-production) the anchor cycle IS the
+                        // example, so `cycles.first()`'s verdict is authoritative.
+                        let verdict_value: Option<serde_json::Value> = if draw_anchor {
+                            cycles.first().and_then(|c| c.get("type_only")).cloned()
+                        } else {
+                            ev.get("production_type_only").cloned()
+                        };
+                        if let Some(tv) = verdict_value {
+                            match serde_json::from_value::<super::cycles::CycleTypeOnly>(tv) {
                                 Ok(verdict) => {
                                     if let Some(label) = super::cycles::type_only_label(&verdict) {
                                         line.push_str(&format!(" — {label}"));

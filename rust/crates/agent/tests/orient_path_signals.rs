@@ -232,6 +232,7 @@ fn path_focus_module_summary_scoped_to_prefix() {
             file_count: 10,
             symbol_count: 50,
             languages: vec!["typescript".into()],
+            tracked_only_count: 0,
         },
     );
     let result = orient(

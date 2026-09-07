@@ -750,14 +750,12 @@ fn saturated_line_renders_only_at_full_when_complete() {
 }
 
 #[test]
-fn saturated_and_identical_to_large_prefers_identical_notice() {
-    // review-2 finding 1: when `--full` is BYTE-IDENTICAL to `--budget large` AND the repo is
-    // otherwise complete (budget_saturated), the identical-to-large notice takes PRECEDENCE
-    // over `[budget not reached — output complete]` — the spec's "`--full` identical to `large`
-    // → one-line notice" is UNCONDITIONAL. A small complete repo (0 package groups, no
-    // complexity long tail) renders the same bytes at `large` and `--full`, so full == large;
-    // docs present within cap keeps the documentation axis known-complete. (The prior code
-    // checked `budget_saturated()` first and printed "output complete" here — the defect.)
+fn saturated_and_identical_to_large_renders_complete() {
+    // HEADLINE-TRUTH-1 (§2.3, flipped): when `--full` is BYTE-IDENTICAL to `--budget large`
+    // AND the repo is truly complete (budget_saturated), the output says "output complete" —
+    // because nothing was elided. The old "nothing further to show" wording was correct
+    // ONLY when nothing was elided; since it IS truly complete here, "output complete" is
+    // the truthful marker.
     let r = response(with_docs(
         with_module_summary(
             json!({}),
@@ -771,21 +769,18 @@ fn saturated_and_identical_to_large_prefers_identical_notice() {
     );
     let full = r.render_human(OrientDepth::Full);
     assert!(
-        full.contains("[--full identical to --budget large (nothing further to show)]"),
-        "identical notice takes precedence over the completeness line:\n{full}"
-    );
-    assert!(
-        !full.contains("budget not reached — output complete"),
-        "the identical notice REPLACES the completeness line when full == large:\n{full}"
+        full.contains("budget not reached — output complete"),
+        "truly complete repo says so:\n{full}"
     );
 }
 
 #[test]
-fn full_identical_to_large_renders_the_notice_not_a_false_complete() {
-    // ECONOMY-2 (§2.2): when `--full`'s body is BYTE-IDENTICAL to `--budget large`'s (both
-    // long tails under `large`'s cap) but something ELSE elided (here the directory-group
-    // fallback: 1 shown of 42) — the zvec-grep defect was a silent unmarked repeat of
-    // `large`. `--full` now says so explicitly, and does NOT claim completeness.
+fn full_identical_to_large_with_elided_groups_names_the_elision() {
+    // HEADLINE-TRUTH-1 (§2.3, flipped): when `--full`'s body is BYTE-IDENTICAL to
+    // `--budget large`'s BUT directory groups are elided (1 shown of 42), the marker
+    // must name the elision — never claim "nothing further to show". The old test
+    // PINNED the false "nothing further to show" wording; the truthful marker says
+    // how many rows the fixed cap still elides.
     let r = response(with_module_summary(
         json!({
             "directory_group_fallback": {
@@ -797,18 +792,20 @@ fn full_identical_to_large_renders_the_notice_not_a_false_complete() {
     ));
     assert!(!r.budget_saturated(), "the fallback elides → not saturated");
     let full = r.render_human(OrientDepth::Full);
+    // The truthful marker names the elided count.
     assert!(
-        full.contains("[--full identical to --budget large (nothing further to show)]"),
-        "the comparative notice replaces the silent repeat: {full}"
+        full.contains("41 group rows elided"),
+        "the marker names the elision count:\n{full}"
     );
+    // Must NOT claim "nothing further to show" when rows are elided.
     assert!(
-        !full.contains("budget not reached"),
-        "the identical notice is NOT a completeness claim: {full}"
+        !full.contains("nothing further to show"),
+        "must not claim nothing further to show when groups are elided:\n{full}"
     );
-    // The elided directory fallback still carries its own honest omission line.
+    // The per-section elision line is still there.
     assert!(
         full.contains("and 41 more group"),
-        "elision line present: {full}"
+        "elision line present:\n{full}"
     );
 }
 

@@ -306,10 +306,13 @@ fn summary_parts<'a>(
 pub(crate) fn repo_summary_from_inventory(inv: &StructuralInventoryAnswer) -> AgentRepoSummary {
     let (file_count, symbol_count, languages) =
         summary_parts(inv.files.iter(), inv.unattributed_symbols);
+    // HEADLINE-TRUTH-1 (§2.1): the inventory path does not carry parse_status, so
+    // tracked_only_count is 0 here — the SQLite fallback populates it.
     AgentRepoSummary {
         file_count,
         symbol_count,
         languages,
+        tracked_only_count: 0,
     }
 }
 
@@ -330,6 +333,7 @@ pub(crate) fn path_summary_from_inventory(
         file_count,
         symbol_count,
         languages,
+        tracked_only_count: 0, // path-scoped summary
     }
 }
 
@@ -345,6 +349,7 @@ pub(crate) fn file_summary_from_inventory(
         file_count,
         symbol_count,
         languages,
+        tracked_only_count: 0, // file-scoped summary
     }
 }
 
