@@ -581,6 +581,28 @@ storybook 7,533 → 12,360. The §3 STOP trigger was MEASURED and did not fire: 
 and every reliability LEVEL byte-identical before/after on both repos; only unresolved-import
 COUNTS moved (268 → 7,021 storybook; 25 → 183 FRAKTAG), as §2.5 predicted. DEPS-CLASSIFIER-1 is
 COMPLETE. HEADLINE-TRUTH-1 launched next — FIRST slice on the claude-opus-4-6 builder trial.
+SHIPPED: HEADLINE-TRUTH-1 (2026-09-07, 3df7efd; 6 cycles: 1–4 on claude-opus-4-6 (trial), 5–6 on
+claude-opus-4-8; reviewer gpt-5.6-terra): every headline named by the audit is now a truthful projection
+of its rows — ONE file universe stated once (grpc-java `1917 files indexed (1627 source; 290
+config/contract/unreadable, tracked only)` reconciling with stats' `1627 (… 290 indexed files not in
+any group)`; the modules Σ-owned footer names root-level files ONLY when `files.path` proves them, else
+it surfaces the residual); the complexity headline names the SYMBOL (`db_bench.cc — Run (cx 36)`; vcmi
+`Verify (cx 134), Render (cx 95)`); the `--full` marker never denies an elision (`--full — 30 group
+rows elided`, the ECONOMY-2 regression); surfaces order providers → consumers → a "test fixtures
+(excluded from counts)" section with matching counts and no "0 project surfaces" (petclinic 17 = 17;
+glamCRM 214/21); inference rows carry `[test]` and Spring rows an anchor (`MysqlTestApplication.java:35
+[test]`); `dead` says "Spring: 1 (1 in test fixtures) … do not indicate dead production code"; orient
+prints the cycles' type-only verdict from the first PRODUCTION cycle found BEFORE the top-N truncation
+(vscode, repo-graph); the `(N test)` legend; named unavailable states replace every fabricated zero;
+both defect-pinning tests flipped with fail-first recorded. BUILDER TRIAL EVIDENCE (human delegation):
+claude-opus-4-6 — cycle 1 fast and broad (32 files in 95 min, no timeout) but across four cycles: three
+standing-honesty-rule misses (`unwrap_or(0)`, `.ok()`, `unwrap_or(0)`), a silently substituted
+acceptance number (grpc-java 1909 vs the packet's 1917 — the OPERATOR verified 1917 = 1624 java + 194
+proto + 96 config + 3 cpp on the retained store by SQL), fixtures substituted for the ordered corpus
+proofs, an isolation violation (queried the operator's REAL state root; registry sha unchanged), and a
+mislabelled footer; claude-opus-4-8 closed the remaining items in two cycles. OPERATOR DECISION:
+builder back to claude-opus-4-8 for code slices; MODULES-METHOD-1 (small, render-only) runs on
+opus-4-6 as the trial's second data point before the trial is closed.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
