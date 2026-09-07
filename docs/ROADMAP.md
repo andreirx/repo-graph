@@ -565,6 +565,22 @@ repo's own docs / tree for orientation, repo-specifically. A repo-side "memo" la
 declarations was considered and DECLINED (noise / repeats the docs; an agent calls once and works
 with the data + recommendation). → MODULES-METHOD-1 (spec `docs/slices/modules-method-1.md`), slotted
 after HEADLINE-TRUTH-1; CYCLES-POPULATION-1 CLOSED (the population is stated). Module EDGE work stays.
+SHIPPED: DEPS-CLASSIFIER-1B increment 2 (2026-09-07, d333214; builder claude-opus-4-8, reviewer
+gpt-5.6-terra + operator close-out on two gate reruns — the single failure was the known wall-clock
+lock-patience flake under build load): a bare-package TS/JS import emits an IMPORTS edge (npm usage
+evidence no longer calls-only); `require('literal')` → binding (exactly one string argument — the
+reviewer caught a first cut that accepted any string anywhere); `import type` → binding with
+`is_type_only` surviving the storage read, rendered as the `type-only` basis and counted as
+declared everywhere (one exhaustive predicate — `deps why` and the "also present" totals had
+drifted); the two-root-manifests canonical-path collision resolved (django `deps list --ecosystem
+npm` renders its 6 devDeps). Movement (fresh increment-1-binary BEFORE vs new AFTER, isolated):
+FRAKTAG `packages/ui` used 5 → 19; storybook root `used 16 · no static import found 108` → `used 39
+· type-only 3 · no static import found 82` (267 flips repo-wide; five ground-truthed incl. `express`
+via require and `@storybook/server-webpack5` correctly type-only); histograms: external candidates
+storybook 7,533 → 12,360. The §3 STOP trigger was MEASURED and did not fire: `check --full` verdicts
+and every reliability LEVEL byte-identical before/after on both repos; only unresolved-import
+COUNTS moved (268 → 7,021 storybook; 25 → 183 FRAKTAG), as §2.5 predicted. DEPS-CLASSIFIER-1 is
+COMPLETE. HEADLINE-TRUTH-1 launched next — FIRST slice on the claude-opus-4-6 builder trial.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
