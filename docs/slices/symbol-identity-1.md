@@ -34,6 +34,20 @@ nothing computes it. Never worked (e01386f, fda7adc).
    mapping `Ambiguous(keys)` to its existing up-to-5-candidate focus; `resolve_symbol_name`
    (name-only) is retired or reduced to a thin call. The livegraph focus resolver's parity
    comment (`focus_resolver/mod.rs:257-260`) is updated to the new contract.
+   AMENDED 2026-09-07 (cycle-1 finding; ruling EXPLAIN-RESOLVER-ROUTING = B, mapped outward):
+   in the daemon, explain's `resolve_symbol_name` is served by the `OrientServeDecorator` from the
+   LiveGraph on green, pinned by a panicking spy ("explain SYMBOL-focus nodes-free on green",
+   COHERENCE-LEAF-SERVE-IMPL-2) — and the LG↔SQLite parity cert enumerates only short names and
+   keys, so a suffix-aware SQLite resolver beside a name-only LG resolver would diverge invisibly.
+   RULING: the `AgentStorageRead` port gains `resolve_symbol`; explain calls it; the decorator
+   DELEGATES it to SQLite (precedent: `count_symbol_definitions_by_name`); `resolve_symbol_name`
+   stays name-only for orient + the cert (its parity comment rewritten to say it is no longer
+   explain's resolver). The "nodes-free on green" invariant is AMENDED for explain's resolution
+   step only — LiveGraph residency is a dev-only path (hidden `rmap dev livegraph-refresh`,
+   TS-only, never in production), so no user-visible output changes; what users gain is an
+   `explain` that resolves every row `find` prints, on every repo, with no false not-found.
+   Options A (lift the ladder into the LG resolver + extend the cert) and C (two-step hybrid)
+   were declined on blast radius and on §2.1's one-resolver contract respectively.
 2. **A qualified suffix resolves.** `resolve_symbol` gains ONE step after the exact-name miss:
    `qualified_name` equals the query OR ends with `<sep><query>` where `<sep>` is the language's
    separator (`::` or `.`); exactly one hit resolves; more than one → `Ambiguous` listing the
