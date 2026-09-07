@@ -603,6 +603,12 @@ proofs, an isolation violation (queried the operator's REAL state root; registry
 mislabelled footer; claude-opus-4-8 closed the remaining items in two cycles. OPERATOR DECISION:
 builder back to claude-opus-4-8 for code slices; MODULES-METHOD-1 (small, render-only) runs on
 opus-4-6 as the trial's second data point before the trial is closed.
+BUILDER TRIAL CLOSED (operator decision 2026-09-08 under the human's delegation): claude-opus-4-6
+built 7 cycles (HEADLINE-TRUTH-1 ×4, MODULES-METHOD-1 ×3) with a standing-honesty-rule violation in six
+of them, one substituted acceptance number, one isolation violation, fixtures or the wrong corpus for
+proofs, and spec items ignored (evidence `source_type` vs key prefix; doc path rules; §2.3 ordering);
+claude-opus-4-8 closed HEADLINE-TRUTH-1's remainder in two cycles. Builder = claude-opus-4-8 for
+everything from here; reviewer gpt-5.6-terra (sol on escalation). MODULES-METHOD-1 continues on 4-8.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
