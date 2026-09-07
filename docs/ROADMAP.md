@@ -505,6 +505,22 @@ re-indexes → 1 snapshot after each; concurrent reads 57–68 ms vs the 450 ms 
 reader-held live race could not be provoked (reads are sub-second) — proven at the dispatch
 layer by ruling. DAEMON-RESIDUALS-2 is COMPLETE (increments 1, 2B observability, 2C);
 DAEMON-RESIDUALS-3 remains staged. CPP-DECLARATORS-1 launched next.
+SHIPPED: CPP-DECLARATORS-1 (2026-09-07, 5c3ec2d, 7 cycles + operator close-out): macro-wrapped
+C/C++ function names recovered (`M(name)(args)` in both extractors; the attribute-macro shape is
+C++-only — the pinned tree-sitter-c never yields it, so the C branch was removed as code for an
+imagined variation); a declaration is a STORED fact (`forward_decl` on bodiless types AND in-class
+method prototypes; a corrupt carrier is a named Unreadable state, excluded from the decl tier and
+counted — never a `(decl)` fact); definition-first in find, seeds and resolution; C++ `Implements`
+affinity admits CLASS/STRUCT under extractor provenance (the root-cause report's one UNDETERMINED:
+inheritance edges were dropped by affinity BEFORE ambiguity); enclosing-class call preference;
+receiver text kept in metadata; a bare type name beats its own constructors with a rendered
+pointer to the constructor. MOVEMENT (clean worktree baselines): vcmi resolved IMPLEMENTS edges
+2 → 852; `find CGHeroInstance` definition first above `(decl)` rows; `explain CGHeroInstance`
+resolves; leveldb `callers leveldb::DBImpl::Recover` ambiguous → 1 real caller, callees 16 → 21
+(`NewDB`, `RecoverLogFile` restored); macro-named complexity rows → 0 on the hadoop uriparser /
+duckdb zstd / poco pcre2+expat subtrees; leveldb key churn 0; FRAKTAG byte-stable. Strain: three
+cycles lost to an over-heavy proof protocol (operator lesson recorded); `explain` has NO
+inheritance section — filed EXPLAIN-BASES-1. SYMBOL-IDENTITY-1 launched next.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
@@ -563,7 +579,8 @@ discrimination, django boundaries zero-state (what cycles should print), map --d
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
 
-Open follow-ups awaiting ratification/scheduling: CPP-FNPTR-RETURN-1 (C extractor emits no node
+Open follow-ups awaiting ratification/scheduling: EXPLAIN-BASES-1 (no surface renders a type's
+base classes / implementors; the edges now exist — CPP-DECLARATORS-1, 2026-09-07), CPP-FNPTR-RETURN-1 (C extractor emits no node
 for a function returning a function pointer — `parenthesized_declarator` never handled; found by
 CPP-DECLARATORS-1's negative fixture 2026-09-07), CYCLES-POPULATION-1 (cycles runs over directory
 groups while modules list uses declared modules — found by IMPORT-RESOLUTION-RUST-1),
