@@ -375,12 +375,15 @@ impl NodeStorePort for StorageConnection {
     }
 
     fn query_resolver_nodes(&self, snapshot_uid: &str) -> Result<Vec<ResolverNode>, StorageError> {
-        // Slim query — only the 7 fields ResolverNode needs.
+        // Slim query — the fields ResolverNode needs. CPP-DECLARATORS-1 §2.3 adds
+        // `metadata_json` so the resolver can read `forward_decl` (a bodiless declaration)
+        // and prefer definitions before the singleton test.
         let mut stmt = self.connection().prepare(
-            "SELECT node_uid, stable_key, name, qualified_name, kind, subtype, file_uid \
+            "SELECT node_uid, stable_key, name, qualified_name, kind, subtype, file_uid, metadata_json \
 			 FROM nodes WHERE snapshot_uid = ?",
         )?;
         let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            let metadata_json: Option<String> = row.get(7)?;
             Ok(ResolverNode {
                 node_uid: row.get(0)?,
                 stable_key: row.get(1)?,
@@ -389,6 +392,9 @@ impl NodeStorePort for StorageConnection {
                 kind: row.get(4)?,
                 subtype: row.get(5)?,
                 file_uid: row.get(6)?,
+                forward_decl: repo_graph_indexer::resolver::metadata_forward_decl(
+                    metadata_json.as_deref(),
+                ),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()

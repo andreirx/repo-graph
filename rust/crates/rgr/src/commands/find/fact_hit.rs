@@ -100,6 +100,22 @@ pub(super) fn render_fact_hit(
         Some(k) => format!("  [{k}]"),
         None => String::new(),
     };
+    // CPP-DECLARATORS-1 (§2.3): a SYMBOL hit that is a bodiless DECLARATION renders the
+    // `(decl)` tag (the same tag the seed tier uses). OPTIONAL + defaults false: a
+    // present-but-non-bool `forward_decl` is MALFORMED — surfaced, never silently coerced
+    // (STANDING HONESTY RULE 1). Absent → not a decl (the common case).
+    let decl_label = match h.get("forward_decl") {
+        None | Some(serde_json::Value::Bool(false)) => "",
+        Some(serde_json::Value::Bool(true)) => "  (decl)",
+        // CPP-DECLARATORS-1 review-4 #4: a CORRUPT stored `metadata_json.forward_decl` carrier
+        // surfaces as the NAMED `"unreadable"` degradation — the row still renders (visible),
+        // but NEVER as a positive `(decl)` fact (STANDING HONESTY RULE 1: corrupt metadata is a
+        // named failure, not silently a declaration).
+        Some(serde_json::Value::String(s)) if s == "unreadable" => "  (decl status unreadable)",
+        Some(_) => {
+            return "    (malformed fact hit: forward_decl present but not a bool)\n".to_string()
+        }
+    };
     let mut line = match (path, path_unknown_reason) {
         (Some(_), Some(_)) => {
             return "    (malformed fact hit: both path and path_unknown_reason present)\n"
@@ -108,14 +124,14 @@ pub(super) fn render_fact_hit(
         // A concrete owning path distinct from the display (the `file` class's path
         // equals its display, so it is not repeated), rendered as the `path:line` anchor.
         (Some(p), None) if p != display => {
-            format!("    {display}  — {}{kind_label}\n", anchored(p))
+            format!("    {display}  — {}{kind_label}{decl_label}\n", anchored(p))
         }
-        (Some(_), None) => format!("    {display}{kind_label}\n"),
+        (Some(_), None) => format!("    {display}{kind_label}{decl_label}\n"),
         // The class HAS a path dimension but this hit's path is unknown — shown WITH
         // its reason (review-4 item 2), never omitted.
-        (None, Some(reason)) => format!("    {display}  — path unknown ({reason})\n"),
+        (None, Some(reason)) => format!("    {display}  — path unknown ({reason}){decl_label}\n"),
         // No path dimension at all (dependency, framework): a clean identity line.
-        (None, None) => format!("    {display}\n"),
+        (None, None) => format!("    {display}{decl_label}\n"),
     };
     // FIND-EVIDENCE-1 (§2.2): the ONE evidence line, derived by the daemon from STORED
     // facts only (doc-comment first line, else signature). ABSENT (skip-serialized) →
@@ -469,6 +485,76 @@ mod tests {
         );
         assert_eq!(shell_quote_arg("a b"), "'a b'");
         assert_eq!(shell_quote_arg("a'b"), "'a'\\''b'");
+    }
+
+    // ── CPP-DECLARATORS-1 (§2.3): (decl) tag on a forward-declaration symbol ──
+
+    #[test]
+    fn forward_decl_symbol_renders_decl_tag() {
+        let h = json!({
+            "display": "CGHeroInstance", "path": "AI/decl.h", "line": 3, "forward_decl": true,
+            "key": "vcmi:AI/decl.h#CGHeroInstance:SYMBOL:CLASS",
+            "next": "explain vcmi:AI/decl.h#CGHeroInstance:SYMBOL:CLASS"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("(decl)"),
+            "forward-decl row tagged (decl): {out}"
+        );
+    }
+
+    #[test]
+    fn definition_symbol_has_no_decl_tag() {
+        // forward_decl absent (a definition) → no `(decl)` tag.
+        let h = json!({
+            "display": "CGHeroInstance", "path": "lib/CGHeroInstance.h", "line": 55,
+            "key": "vcmi:lib/CGHeroInstance.h#CGHeroInstance:SYMBOL:CLASS",
+            "next": "explain vcmi:lib/CGHeroInstance.h#CGHeroInstance:SYMBOL:CLASS"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            !out.contains("(decl)"),
+            "definition row has no (decl): {out}"
+        );
+    }
+
+    #[test]
+    fn non_bool_forward_decl_is_malformed() {
+        let h = json!({
+            "display": "x", "path": "src/x.ts", "forward_decl": "yes",
+            "key": "r:src/x.ts:x:SYMBOL", "next": "explain r:src/x.ts:x:SYMBOL"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("malformed fact hit: forward_decl present but not a bool"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn unreadable_forward_decl_is_named_degradation_not_decl() {
+        // review-4 #4: a CORRUPT stored `metadata_json.forward_decl` carrier reaches the wire as
+        // the NAMED `"unreadable"` (never coerced to `true`). The row renders (visible) with a
+        // NAMED degradation, and is NEVER presented as a positive `(decl)` fact.
+        let h = json!({
+            "display": "CGHeroInstance", "path": "AI/decl.h", "line": 3, "forward_decl": "unreadable",
+            "key": "vcmi:AI/decl.h#CGHeroInstance:SYMBOL:CLASS",
+            "next": "explain vcmi:AI/decl.h#CGHeroInstance:SYMBOL:CLASS"
+        });
+        let out = render_fact_hit(&h, &["explain"], true, None);
+        assert!(
+            out.contains("(decl status unreadable)"),
+            "corrupt metadata surfaces the NAMED degradation: {out}"
+        );
+        assert!(
+            !out.contains("(decl)"),
+            "corrupt metadata is NEVER rendered as a positive (decl) fact: {out}"
+        );
+        assert!(
+            !out.contains("forward_decl present but not a bool"),
+            "the KNOWN unreadable state is its own named degradation, not the generic \
+             non-bool wire-malformed message: {out}"
+        );
     }
 
     // ── FIND-EVIDENCE-1: path:line anchor (§2.1) ────────────────────────────────

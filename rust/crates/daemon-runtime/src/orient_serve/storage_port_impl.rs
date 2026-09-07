@@ -255,6 +255,21 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             .get_symbol_context(snapshot_uid, symbol_stable_key)
     }
 
+    // CPP-DECLARATORS-1 §2.3 (constructor-collision completeness proof): the uncapped
+    // definition count is NOT served from the LiveGraph (no such answer class) and MUST reach
+    // the real adapter — the trait DEFAULT is `Ok(None)`, and an unforwarded `None` makes the
+    // explain type-vs-constructor collapse treat the candidate window as possibly-truncated and
+    // stay ambiguous forever (caught by the vcmi live proof: `explain CGHeroInstance` never
+    // resolved to the type). A plain delegation, like the other non-served reads below.
+    fn count_symbol_definitions_by_name(
+        &self,
+        snapshot_uid: &str,
+        name: &str,
+    ) -> Result<Option<u64>, AgentStorageError> {
+        self.inner
+            .count_symbol_definitions_by_name(snapshot_uid, name)
+    }
+
     fn find_symbol_callers(
         &self,
         snapshot_uid: &str,

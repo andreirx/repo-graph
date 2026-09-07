@@ -318,6 +318,11 @@ pub(crate) struct FactHit {
     /// invented preview (the zg arbitrary-line defect is the anti-pattern). `None` =
     /// neither stored → no evidence line (visibly absent). Symbol class only today.
     pub evidence: Option<String>,
+    /// CPP-DECLARATORS-1 (§2.3, review-4 #4): the SYMBOL hit's stored forward-decl truth-state
+    /// ([`repo_graph_storage::find_facts_reads::ForwardDeclFact`]) — `ForwardDecl` renders
+    /// `(decl)`, `Unreadable` a NAMED degradation (never `(decl)`), both ranked below a
+    /// definition. `Definition` for every non-symbol class and every definition.
+    pub forward_decl: repo_graph_storage::find_facts_reads::ForwardDeclFact,
 }
 
 /// The hits of ONE fact class after dedup + display cap.

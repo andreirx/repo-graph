@@ -74,6 +74,37 @@ pub struct SeedCorpusEntry {
     /// The owning file's `file_versions.content_hash` pin (the copy-forward key +
     /// the source/snapshot-race admission check).
     pub content_hash: String,
+    /// CPP-DECLARATORS-1 (§2.3): the 3-state classification of the node's stored
+    /// `metadata_json.forward_decl`. A genuine [`ForwardDecl`](SeedForwardDecl::ForwardDecl)
+    /// lets the seed classifier label a TYPE chunk `(decl)` and demote it under its definition
+    /// (the same mechanism SEED-CHUNK-2 applies to span-structural callables). A CORRUPT carrier
+    /// ([`Unreadable`](SeedForwardDecl::Unreadable)) NEVER forces `(decl)` — it is excluded from
+    /// the decl tier and counted (`BuildReport.forward_decl_unreadable`), so corrupt metadata is
+    /// never presented as a positive declaration fact (STANDING HONESTY RULE 1). `Definition` for
+    /// every non-C++ node (their extractors set no such key).
+    pub forward_decl: SeedForwardDecl,
+}
+
+/// CPP-DECLARATORS-1 (§2.3): the 3-state read of a chunk's stored `metadata_json.forward_decl`
+/// as it crosses the seed corpus boundary. Mirrors the indexer's `ForwardDeclRead` (which the
+/// `storage` adapter maps FROM — the pure seed crate never depends on the indexer), so a CORRUPT
+/// carrier is a DISTINCT truth from an absent one and is never collapsed into `ForwardDecl`.
+///
+/// Dispatch axis: the 3 mutually-exclusive truth-states of the stored flag — fixed variants,
+/// exhaustive match at the one consumer (`build_store`). A sum type, NOT a `bool` (which could not
+/// represent `Unreadable` and made corrupt metadata masquerade as a `(decl)` — the review-5 defect).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedForwardDecl {
+    /// No carrier, valid JSON without the key, or `forward_decl: false` — a definition (a KNOWN,
+    /// readable fact: this node is not a forward declaration). The span heuristic still governs
+    /// callables downstream.
+    Definition,
+    /// `metadata_json` carries `forward_decl: true` — a bodiless declaration. Forces `(decl)`.
+    ForwardDecl,
+    /// The carrier was PRESENT but UNREADABLE (did not parse, or a non-boolean `forward_decl`
+    /// value). NEVER forces `(decl)` — excluded from the decl tier and COUNTED, so corrupt
+    /// metadata is never rendered as a positive declaration fact (STANDING HONESTY RULE 1).
+    Unreadable,
 }
 
 /// The corpus for a repo's current READY snapshot. `snapshot_uid` is `None` when

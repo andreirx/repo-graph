@@ -29,6 +29,7 @@ fn symbol_hit(key: &str) -> FactHit {
         next_command: None,
         line: Some(1),
         evidence: None,
+        forward_decl: repo_graph_storage::find_facts_reads::ForwardDeclFact::Definition,
     }
 }
 
@@ -87,6 +88,7 @@ fn listing_class_hit_omits_cursor_raw() {
             next_command: None,
             line: None,
             evidence: None,
+            forward_decl: repo_graph_storage::find_facts_reads::ForwardDeclFact::Definition,
         },
     );
     let v = serde_json::to_value(fact_groups(&[dep], "repo_abc123")).expect("serialize");

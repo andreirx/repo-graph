@@ -5,6 +5,7 @@
 //! zero candidates + one labeled `summary` line — never an error.
 
 use repo_graph_agent::dto::envelope::{ModuleHint, NextCommand};
+use repo_graph_storage::find_facts_reads::ForwardDeclFact;
 use serde_json::{json, Value};
 
 use super::query::{DegradeReason, SemanticResult};
@@ -103,6 +104,13 @@ pub struct FindFactHit {
     /// preview. ABSENT when neither is stored. Optional + skip → byte-compatible.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// CPP-DECLARATORS-1 (§2.3, review-4 #4) additive: the SYMBOL hit's stored forward-decl
+    /// truth-state. `ForwardDecl` serializes as `true` (rendered `(decl)`); a CORRUPT carrier
+    /// serializes as the NAMED string `"unreadable"` (rendered as a degradation, NEVER `(decl)`
+    /// — STANDING HONESTY RULE 1); `Definition` (the default) SKIP-serializes so every existing
+    /// hit's JSON is byte-identical.
+    #[serde(skip_serializing_if = "ForwardDeclFact::is_definition")]
+    pub forward_decl: ForwardDeclFact,
     /// The runnable `rmap` invocation (WITHOUT the `rmap` prefix) that takes the
     /// reader from THIS hit to its rendering — `explain <key>` / `map <path>` for the
     /// argument-taking classes, the whole-listing command for the `… list` classes.
@@ -353,6 +361,7 @@ fn fact_groups(facts: &[ClassOutcome], repo_uid: &str) -> Vec<FindFactGroup> {
                             // only today; `None` elsewhere → skip-serialized).
                             line: h.line,
                             evidence: h.evidence.clone(),
+                            forward_decl: h.forward_decl,
                         }
                     })
                     .collect(),

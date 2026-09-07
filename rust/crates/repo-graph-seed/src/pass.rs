@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::classify;
 use crate::document::{build_chunk_document, MAX_BODY_LINES};
 use crate::hash::content_hash;
-use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedVectorEntry};
+use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedForwardDecl, SeedVectorEntry};
 use crate::rank::l2_normalize;
 
 /// Batch size — 32 documents per embed call (spike `spike.py:98`). The cancel token
@@ -68,6 +68,11 @@ pub struct BuildReport {
     pub drifted: usize,
     /// Chunks beyond the corpus cap, embedded by nobody this pass (spec §8.4).
     pub corpus_omitted: usize,
+    /// CPP-DECLARATORS-1 (§2.3): admitted chunks whose stored `metadata_json.forward_decl` was
+    /// PRESENT but UNREADABLE (corrupt carrier). These are EXCLUDED from the decl tier — a
+    /// corrupt carrier never forces `(decl)` (STANDING HONESTY RULE 1) — and counted here so the
+    /// degradation is reported (oplog line), never silently swallowed.
+    pub forward_decl_unreadable: usize,
 }
 
 /// Slice the span source for a node from its file's lines. 1-indexed inclusive
@@ -128,6 +133,9 @@ where
     let mut admitted: Vec<SeedVectorEntry> = Vec::new();
     let mut docs: Vec<String> = Vec::new(); // parallel to `admitted`, for pending slots
     let mut drifted = 0usize;
+    // CPP-DECLARATORS-1 (§2.3): admitted chunks with a corrupt `forward_decl` carrier — excluded
+    // from the decl tier (never forced `(decl)`) and reported.
+    let mut forward_decl_unreadable = 0usize;
 
     // Prior index: (stable_key, content_hash) → &vector (dim-matched only).
     let prior_by_key: HashMap<(&str, &str), &Vec<f32>> = prior
@@ -189,7 +197,21 @@ where
                 classify::structural_is_test(lang, &file_lines, ls as usize, &test_regions)
             });
             let is_test = chunk.is_test || structural_test;
-            let is_decl = classify::is_declaration(&chunk.path, chunk.subtype.as_deref(), &span);
+            // CPP-DECLARATORS-1 (§2.3): ONLY a genuine `ForwardDecl` forces a TYPE chunk `(decl)`.
+            // A CORRUPT carrier (`Unreadable`) is EXCLUDED from the decl tier and counted — corrupt
+            // metadata is never rendered as a positive `(decl)` fact (STANDING HONESTY RULE 1). A
+            // `Definition` (and the excluded `Unreadable`) still let the span heuristic classify a
+            // callable structurally, which is a STRUCTURAL fact, not the corrupt metadata.
+            let force_decl = match chunk.forward_decl {
+                SeedForwardDecl::ForwardDecl => true,
+                SeedForwardDecl::Definition => false,
+                SeedForwardDecl::Unreadable => {
+                    forward_decl_unreadable += 1;
+                    false
+                }
+            };
+            let is_decl =
+                classify::is_declaration(&chunk.path, chunk.subtype.as_deref(), &span, force_decl);
             let vector_row = SeedVectorEntry {
                 node_uid: chunk.node_uid.clone(),
                 stable_key: chunk.stable_key.clone(),
@@ -232,6 +254,7 @@ where
                 reused,
                 drifted,
                 corpus_omitted,
+                forward_decl_unreadable,
             },
         };
     }
@@ -284,6 +307,7 @@ where
         reused,
         drifted,
         corpus_omitted,
+        forward_decl_unreadable,
     };
     BuildOutcome::Built {
         entries: admitted,

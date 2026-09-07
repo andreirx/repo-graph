@@ -699,8 +699,9 @@ fn extract_type(
 
     // Span: balanced-brace recovery from source. `true_close` is the byte just
     // past the real closing `}` — the boundary between the body's own members
-    // and any definitions the parser swallowed past it.
-    let (location, true_close) = type_span_and_body_close(frag, construct, src);
+    // and any definitions the parser swallowed past it. `is_forward_decl` marks a
+    // bodiless `class X;` (CPP-DECLARATORS-1 §2.2) — stored, ranked below its definition.
+    let (location, true_close, is_forward_decl) = type_span_and_body_close(frag, construct, src);
 
     ctx.nodes.push(ExtractedNode {
         node_uid: uuid::Uuid::new_v4().to_string(),
@@ -717,7 +718,7 @@ fn extract_type(
         signature: None,
         visibility: Some(Visibility::Export),
         doc_comment: extract_doc_comment(construct, src),
-        metadata_json: type_metadata_json(&linkage_meta, &macros),
+        metadata_json: build_node_metadata(&linkage_meta, &macros, is_forward_decl),
     });
 
     // Base classes (IMPLEMENTS). Only recoverable when the base clause parsed as
@@ -898,11 +899,16 @@ fn type_body_node<'a>(
 /// close_line]`. A `;` before any `{` → forward/opaque declaration → the single
 /// declaration line. Unbalanced braces (genuinely unparseable) → NO span: the
 /// declaration is emitted as a visible absence, never a guessed range.
+///
+/// The third return element is `is_forward_decl` (CPP-DECLARATORS-1 §2.2): `true` on the
+/// `ForwardDecl` (`class X;`) and `None` (`;` just outside the node) paths — a bodiless
+/// DECLARATION, not a definition; `false` for a body (balanced OR unbalanced — an
+/// unbalanced body is a genuine definition we could not span, never a forward decl).
 fn type_span_and_body_close(
     frag: &tree_sitter::Node,
     construct: &tree_sitter::Node,
     src: &[u8],
-) -> (Option<SourceLocation>, Option<usize>) {
+) -> (Option<SourceLocation>, Option<usize>, bool) {
     let start_byte = frag.start_byte();
     let start_line = (frag.start_position().row + 1) as i64;
     let start_col = frag.start_position().column as i64;
@@ -920,6 +926,7 @@ fn type_span_and_body_close(
                     col_end: 0,
                 }),
                 None,
+                true,
             )
         }
         BodyProbe::Body { open } => match balanced_brace_end(src, open, src.len()) {
@@ -933,10 +940,12 @@ fn type_span_and_body_close(
                         col_end: 0,
                     }),
                     Some(close_byte),
+                    false,
                 )
             }
-            // Unbalanced → honest absence, no swallowing span.
-            None => (None, None),
+            // Unbalanced → honest absence, no swallowing span. A body was present
+            // (we found the `{`) so this is NOT a forward decl — just unspanned.
+            None => (None, None, false),
         },
         // No body and no terminator in range: a forward/opaque declaration whose
         // `;` sits just outside the specifier node (`class Foo;`). Its location is
@@ -950,6 +959,7 @@ fn type_span_and_body_close(
                 col_end: frag.end_position().column as i64,
             }),
             None,
+            true,
         ),
     }
 }
@@ -1130,9 +1140,24 @@ fn line_of(src: &[u8], pos: usize) -> usize {
 /// symbol's single `metadata_json`. Additive: with no macros and no linkage the
 /// result is `None` (byte-identical to a plain type before this slice); macros
 /// are recorded under `macro_tokens` alongside any linkage facts.
-fn type_metadata_json(linkage: &LinkageMetadata, macros: &[String]) -> Option<String> {
+/// Build a symbol node's `metadata_json` from its linkage metadata plus the ADDITIVE
+/// CPP-DECLARATORS-1 keys: `macro_tokens` (wrapping macros stripped off the name, spec
+/// §2.1) and `forward_decl` (a bodiless declaration — a type forward-decl or an in-class
+/// method prototype, spec §2.2/§2.3). All keys are additive to the linkage object; the
+/// SHAPE is unchanged (no new columns). Returns `None` only when there is nothing to
+/// record (no linkage, no macros, not a decl) — so the common case stays byte-identical.
+///
+/// Note (name-honesty): this replaces the former `type_metadata_json`, which was already
+/// used ONLY for the macro/linkage merge and is now shared by the function/method paths
+/// too — the old `type_` prefix no longer matches its behavior. Local private rename,
+/// single crate, all call sites updated in this change.
+fn build_node_metadata(
+    linkage: &LinkageMetadata,
+    macros: &[String],
+    forward_decl: bool,
+) -> Option<String> {
     let linkage_json = linkage.to_json();
-    if macros.is_empty() {
+    if macros.is_empty() && !forward_decl {
         return linkage_json;
     }
     let mut obj = match linkage_json
@@ -1142,15 +1167,20 @@ fn type_metadata_json(linkage: &LinkageMetadata, macros: &[String]) -> Option<St
         Some(Ok(serde_json::Value::Object(map))) => map,
         _ => serde_json::Map::new(),
     };
-    obj.insert(
-        "macro_tokens".to_string(),
-        serde_json::Value::Array(
-            macros
-                .iter()
-                .map(|m| serde_json::Value::String(m.clone()))
-                .collect(),
-        ),
-    );
+    if !macros.is_empty() {
+        obj.insert(
+            "macro_tokens".to_string(),
+            serde_json::Value::Array(
+                macros
+                    .iter()
+                    .map(|m| serde_json::Value::String(m.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    if forward_decl {
+        obj.insert("forward_decl".to_string(), serde_json::Value::Bool(true));
+    }
     serde_json::to_string(&serde_json::Value::Object(obj)).ok()
 }
 
@@ -1360,7 +1390,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
         None => return,
     };
 
-    let (name, qualified_prefix) = extract_function_name(&declarator, src);
+    let (name, qualified_prefix, macro_tokens) = extract_function_name(&declarator, src);
     if name.is_empty() {
         return;
     }
@@ -1434,7 +1464,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
         signature,
         visibility: Some(visibility),
         doc_comment: extract_doc_comment(node, src),
-        metadata_json: linkage_meta.to_json(),
+        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, false),
     });
 
     // Extract calls and compute metrics
@@ -1459,7 +1489,7 @@ fn extract_method(
         None => return,
     };
 
-    let (name, _) = extract_function_name(&declarator, src);
+    let (name, _, macro_tokens) = extract_function_name(&declarator, src);
     if name.is_empty() {
         return;
     }
@@ -1502,7 +1532,8 @@ fn extract_method(
         signature,
         visibility: Some(visibility),
         doc_comment: extract_doc_comment(node, src),
-        metadata_json: linkage_meta.to_json(),
+        // An in-class method DEFINITION (has a body) is not a declaration.
+        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, false),
     });
 
     if let Some(body) = node.child_by_field_name("body") {
@@ -1528,7 +1559,7 @@ fn extract_method_declaration(
         None => return,
     };
 
-    let (name, _) = extract_function_name(&declarator, src);
+    let (name, _, macro_tokens) = extract_function_name(&declarator, src);
     if name.is_empty() {
         return;
     }
@@ -1569,7 +1600,10 @@ fn extract_method_declaration(
         signature,
         visibility: Some(visibility),
         doc_comment: extract_doc_comment(node, src),
-        metadata_json: linkage_meta.to_json(),
+        // CPP-DECLARATORS-1 §2.2 (root cause §H-B): an in-class method PROTOTYPE is a
+        // bodiless DECLARATION — flagged so it ranks below (and no longer makes ambiguous)
+        // its out-of-line definition. Same qualified_name/stable_key as today.
+        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, true),
     });
 
     // No body for declarations, so no calls or metrics
@@ -1622,6 +1656,11 @@ fn extract_call(
         None => return,
     };
 
+    // The receiver text of a `field_expression` call (`impl` in `impl->Recover()`),
+    // CPP-DECLARATORS-1 §2.2: STORED on the edge for a later type-aware resolver step —
+    // NOT consumed here (today the target_key is still the bare field name).
+    let mut receiver: Option<String> = None;
+
     // Extract callee based on type
     let target_name = match function.kind() {
         "identifier" => {
@@ -1642,6 +1681,14 @@ fn extract_call(
                 try_resolve_stream_open(node, &function, src, source_node_uid, ctx)
             {
                 ctx.resolved_callsites.push(callsite);
+            }
+
+            // Keep the receiver expression text (the object/ptr before `.`/`->`).
+            if let Some(arg) = function.child_by_field_name("argument") {
+                let text = arg.utf8_text(src).unwrap_or("");
+                if !text.is_empty() {
+                    receiver = Some(text.to_string());
+                }
             }
 
             if let Some(field) = function.child_by_field_name("field") {
@@ -1665,6 +1712,12 @@ fn extract_call(
         return;
     }
 
+    // `calleeName` is unchanged; `receiver` is ADDITIVE (skipped when absent) so existing
+    // consumers see a byte-identical edge for non-field calls.
+    let metadata = match &receiver {
+        Some(r) => serde_json::json!({ "calleeName": target_name, "receiver": r }),
+        None => serde_json::json!({ "calleeName": target_name }),
+    };
     ctx.edges.push(ExtractedEdge {
         edge_uid: uuid::Uuid::new_v4().to_string(),
         snapshot_uid: ctx.snapshot_uid.into(),
@@ -1675,13 +1728,26 @@ fn extract_call(
         resolution: Resolution::Static,
         extractor: EXTRACTOR_NAME.into(),
         location: Some(location_from_node(node)),
-        metadata_json: Some(serde_json::json!({ "calleeName": target_name }).to_string()),
+        metadata_json: Some(metadata.to_string()),
     });
 }
 
 // ── Helper: extract function name from declarator ────────────────
 
-fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> (String, Option<String>) {
+/// Returns `(name, qualified_prefix, macro_tokens)`. `qualified_prefix` is the `Class::`
+/// / `ns::` scope of a qualified declarator (unchanged); `macro_tokens` are the wrapping
+/// macros stripped off a macro-wrapped definition (CPP-DECLARATORS-1 spec §2.1) — never
+/// the name. Two proven tree-sitter 0.23.4 shapes, detected at each `function_declarator`
+/// before the normal unwrap (identical to the C extractor's):
+///   (a) `M(name)(args)` — inner function_declarator whose declarator is the macro `M`
+///       and whose single parameter is the bare `type_identifier` name.
+///   (b) attribute macro(s) — an `ERROR` child before `parameters` whose LAST identifier
+///       is the real name; earlier identifiers + the declarator-position macro → macros.
+fn extract_function_name(
+    declarator: &tree_sitter::Node,
+    src: &[u8],
+) -> (String, Option<String>, Vec<String>) {
+    let mut macros: Vec<String> = Vec::new();
     let mut current = *declarator;
 
     // Unwrap function_declarator, pointer_declarator, reference_declarator
@@ -1689,6 +1755,23 @@ fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> (String,
         current.kind(),
         "function_declarator" | "pointer_declarator" | "reference_declarator"
     ) {
+        if current.kind() == "function_declarator" {
+            // Shape (a): inner function_declarator as a macro call `M(name)`.
+            if let Some((name, macro_tok)) = macro_call_shape(&current, src) {
+                macros.push(macro_tok);
+                return (name, None, macros);
+            }
+            // Shape (b): ERROR child before `parameters` holding the real name.
+            if let Some((name, error_macros)) = error_child_name(&current, src) {
+                if let Some(d) = current.child_by_field_name("declarator") {
+                    if d.kind() == "identifier" {
+                        macros.push(d.utf8_text(src).unwrap_or("").to_string());
+                    }
+                }
+                macros.extend(error_macros);
+                return (name, None, macros);
+            }
+        }
         if let Some(inner) = current.child_by_field_name("declarator") {
             current = inner;
         } else {
@@ -1697,9 +1780,11 @@ fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> (String,
     }
 
     match current.kind() {
-        "identifier" | "field_identifier" => {
-            (current.utf8_text(src).unwrap_or("").to_string(), None)
-        }
+        "identifier" | "field_identifier" => (
+            current.utf8_text(src).unwrap_or("").to_string(),
+            None,
+            macros,
+        ),
         "qualified_identifier" | "scoped_identifier" => {
             // Class::method or ns::func
             let scope = current.child_by_field_name("scope");
@@ -1713,20 +1798,90 @@ fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> (String,
                 .and_then(|s| s.utf8_text(src).ok())
                 .map(|s| s.trim_end_matches("::").to_string());
 
-            (name_str, prefix)
+            (name_str, prefix, macros)
         }
-        "destructor_name" => (current.utf8_text(src).unwrap_or("").to_string(), None),
+        "destructor_name" => (
+            current.utf8_text(src).unwrap_or("").to_string(),
+            None,
+            macros,
+        ),
         _ => {
             // Try to find identifier child
             let mut cursor = current.walk();
             for child in current.children(&mut cursor) {
                 if child.kind() == "identifier" || child.kind() == "field_identifier" {
-                    return (child.utf8_text(src).unwrap_or("").to_string(), None);
+                    return (child.utf8_text(src).unwrap_or("").to_string(), None, macros);
                 }
             }
-            (String::new(), None)
+            (String::new(), None, macros)
         }
     }
+}
+
+/// CPP-DECLARATORS-1 shape (a): see the C extractor's twin. `fd` is a
+/// `function_declarator`; if its `declarator` is an inner `function_declarator` whose own
+/// `declarator` is a bare macro identifier and whose single parameter is a bare
+/// `type_identifier`, return `(real_name, macro_token)`.
+fn macro_call_shape(fd: &tree_sitter::Node, src: &[u8]) -> Option<(String, String)> {
+    let inner = fd.child_by_field_name("declarator")?;
+    if inner.kind() != "function_declarator" {
+        return None;
+    }
+    let macro_id = inner.child_by_field_name("declarator")?;
+    if macro_id.kind() != "identifier" {
+        return None;
+    }
+    let params = inner.child_by_field_name("parameters")?;
+    let name = single_bare_type_identifier(&params, src)?;
+    Some((name, macro_id.utf8_text(src).ok()?.to_string()))
+}
+
+/// The text of the sole `parameter_declaration` in `params` iff it is a bare
+/// `type_identifier` with no declarator, else `None`.
+fn single_bare_type_identifier(params: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    let mut cursor = params.walk();
+    let decls: Vec<tree_sitter::Node> = params
+        .children(&mut cursor)
+        .filter(|c| c.kind() == "parameter_declaration")
+        .collect();
+    let [decl] = decls.as_slice() else {
+        return None;
+    };
+    if decl.child_by_field_name("declarator").is_some() {
+        return None;
+    }
+    let ty = decl.child_by_field_name("type")?;
+    if ty.kind() != "type_identifier" {
+        return None;
+    }
+    Some(ty.utf8_text(src).ok()?.to_string())
+}
+
+/// CPP-DECLARATORS-1 shape (b): the `ERROR` child of `fd` that is the IMMEDIATE predecessor of
+/// its `parameters` → `(last_identifier_as_name, earlier_identifiers_as_macros)`.
+///
+/// review-3 #5: the immediate-predecessor test is strict, not "the last ERROR that ends before
+/// `parameters`". The only proven shape (b) is
+/// `function_declarator(declarator: identifier, ERROR(...), parameters)` — the ERROR sits
+/// directly before `parameters` with nothing between them. `parameters.prev_sibling()` is that
+/// exact slot; if it is not an `ERROR`, this is NOT shape (b) (a THIRD shape with an earlier,
+/// non-adjacent ERROR must not misfire — spec §3 forbids covering a third shape with a
+/// heuristic). Returning `None` here leaves the normal unwrap to name the declarator.
+fn error_child_name(fd: &tree_sitter::Node, src: &[u8]) -> Option<(String, Vec<String>)> {
+    let params = fd.child_by_field_name("parameters")?;
+    let error = params.prev_sibling()?;
+    if error.kind() != "ERROR" {
+        return None;
+    }
+    let mut idents: Vec<String> = Vec::new();
+    let mut ec = error.walk();
+    for child in error.children(&mut ec) {
+        if child.kind() == "identifier" || child.kind() == "type_identifier" {
+            idents.push(child.utf8_text(src).unwrap_or("").to_string());
+        }
+    }
+    let name = idents.pop()?;
+    Some((name, idents))
 }
 
 fn extract_declarator_name(declarator: &tree_sitter::Node, src: &[u8]) -> String {
@@ -2414,6 +2569,216 @@ mod tests {
         assert!(
             meta.contains("\"macro_tokens\":[\"DLL_LINKAGE\"]"),
             "macro recorded additively, got {meta:?}",
+        );
+    }
+
+    // ── CPP-DECLARATORS-1: macro-wrapped FUNCTION names + forward decls ──
+
+    #[test]
+    fn error_sibling_of_declarator_does_not_trigger_macro_name_extraction() {
+        // CPP-DECLARATORS-1 §2.1(b), review-3 #5. Shape (b) fires ONLY when the `ERROR` is the
+        // IMMEDIATE predecessor of `parameters` INSIDE the `function_declarator`. Here a leading
+        // junk macro parses as an `ERROR` that is a SIBLING of the `function_declarator` (a child
+        // of `function_definition`), NOT its pre-`parameters` child:
+        //   function_definition(type, ERROR(MYAPI), declarator: function_declarator(
+        //       declarator: identifier "foo", parameters))
+        // so `parameters.prev_sibling()` is the `foo` identifier, not the `ERROR`. The strict
+        // `prev_sibling` test rejects it (the loose "last ERROR ending before parameters" test
+        // this replaced could latch such an ERROR when it lived one nesting level up) → the name
+        // is recovered as `foo` with NO `macro_tokens`, and `MYAPI` is never a symbol name.
+        //
+        // Empirical note (18 constructs probed against the pinned tree-sitter-cpp 0.23.4): whenever
+        // an `ERROR` is a CHILD of the `function_declarator` the grammar places it directly before
+        // `parameters`, so a non-adjacent fd-internal ERROR is unreachable; the reachable "other
+        // ERROR" is exactly this sibling shape, which the strict test must reject.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, "int MYAPI foo(int x) { return 0; }\n", "src/a.cpp");
+
+        let f = sym(&result, "foo");
+        assert_eq!(
+            f.name, "foo",
+            "the declarator identifier is the name, not the errored macro",
+        );
+        assert!(
+            !result.nodes.iter().any(|n| n.name == "MYAPI"),
+            "a sibling-ERROR macro must never become a symbol name",
+        );
+        let meta = f.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            !meta.contains("macro_tokens"),
+            "no shape-(b) misfire ⇒ no macro_tokens recorded, got {meta:?}",
+        );
+    }
+
+    #[test]
+    fn zstd_attribute_macro_function_name_is_the_declarator_not_the_macros() {
+        // §2.1(b) — the four-line zstd header VERBATIM from
+        // duckdb/third_party/zstd/compress/zstd_opt.cpp:589-592. The name is the
+        // declarator identifier, NEVER FORCE_INLINE_TEMPLATE / ZSTD_ALLOW_POINTER_OVERFLOW_ATTR.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "FORCE_INLINE_TEMPLATE\nZSTD_ALLOW_POINTER_OVERFLOW_ATTR\nU32\nZSTD_insertBtAndGetAllMatches (ZSTD_match_t* matches) { return 0; }\n",
+            "zstd/compress/zstd_opt.cpp",
+        );
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "ZSTD_insertBtAndGetAllMatches"),
+            "real name extracted; symbols = {:?}",
+            result
+                .nodes
+                .iter()
+                .filter(|n| n.kind == NodeKind::Symbol)
+                .map(|n| &n.name)
+                .collect::<Vec<_>>()
+        );
+        for macro_name in [
+            "FORCE_INLINE_TEMPLATE",
+            "ZSTD_ALLOW_POINTER_OVERFLOW_ATTR",
+            "U32",
+        ] {
+            assert!(
+                !result.nodes.iter().any(|n| n.name == macro_name),
+                "{macro_name} must never be the function name",
+            );
+        }
+        // The wrapping macros are recorded additively under `macro_tokens` (operator ruling
+        // 2026-09-07: assert macro_tokens on BOTH shape-(b) tests), never as the name.
+        let f = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "ZSTD_insertBtAndGetAllMatches")
+            .expect("real name extracted");
+        let meta = f.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            meta.contains("\"macro_tokens\":[")
+                && meta.contains("ZSTD_ALLOW_POINTER_OVERFLOW_ATTR"),
+            "shape (b) must record the wrapping macros under macro_tokens, got {meta:?}",
+        );
+        assert!(
+            !meta.contains("ZSTD_insertBtAndGetAllMatches"),
+            "the real name must never leak into macro_tokens, got {meta:?}",
+        );
+    }
+
+    #[test]
+    fn macro_call_shape_function_name_pcre2_priv() {
+        // §2.1(a) `M(name)(args)` in C++.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "int PRIV(check_escape)(int *p) { return 0; }\n",
+            "pcre2/pcre2_compile.cpp",
+        );
+        let f = sym(&result, "check_escape");
+        assert_eq!(f.subtype, Some(NodeSubtype::Function));
+        assert!(f
+            .metadata_json
+            .as_deref()
+            .unwrap_or("")
+            .contains("\"macro_tokens\":[\"PRIV\"]"));
+        assert!(!result.nodes.iter().any(|n| n.name == "PRIV"));
+    }
+
+    #[test]
+    fn forward_decl_class_is_flagged_definition_is_not() {
+        // §2.2: `class Foo;` then `class Foo { int x; };` → TWO nodes with the same
+        // qualified_name; only the FIRST (the forward declaration) carries forward_decl.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, "class Foo;\nclass Foo { int x; };\n", "src/f.cpp");
+
+        let foos: Vec<&ExtractedNode> = result
+            .nodes
+            .iter()
+            .filter(|n| n.name == "Foo" && n.subtype == Some(NodeSubtype::Class))
+            .collect();
+        assert_eq!(foos.len(), 2, "one decl + one definition: {foos:#?}");
+        // The forward declaration is on line 1, its definition on line 2.
+        let decl = foos
+            .iter()
+            .find(|n| n.location.as_ref().map(|l| l.line_start) == Some(1))
+            .expect("forward-decl node on line 1");
+        let def = foos
+            .iter()
+            .find(|n| n.location.as_ref().map(|l| l.line_start) == Some(2))
+            .expect("definition node on line 2");
+        assert!(
+            decl.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("\"forward_decl\":true"),
+            "the forward declaration carries forward_decl: {:?}",
+            decl.metadata_json
+        );
+        assert!(
+            !def.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("forward_decl"),
+            "the definition carries NO forward_decl: {:?}",
+            def.metadata_json
+        );
+    }
+
+    #[test]
+    fn in_class_method_prototype_is_flagged_out_of_line_def_is_not() {
+        // §2.2 / root cause §H-B: the in-class prototype is a bodiless DECLARATION
+        // (forward_decl); the out-of-line definition is not — same qualified_name.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class C {\n  int Recover();\n};\nint C::Recover() { return 0; }\n",
+            "src/c.cpp",
+        );
+        let recovers: Vec<&ExtractedNode> = result
+            .nodes
+            .iter()
+            .filter(|n| n.qualified_name.as_deref() == Some("C::Recover"))
+            .collect();
+        assert_eq!(recovers.len(), 2, "prototype + definition: {recovers:#?}");
+        assert_eq!(
+            recovers
+                .iter()
+                .filter(|n| n
+                    .metadata_json
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("\"forward_decl\":true"))
+                .count(),
+            1,
+            "exactly one (the prototype) is a declaration: {recovers:#?}",
+        );
+    }
+
+    #[test]
+    fn field_expression_call_keeps_receiver_in_metadata() {
+        // §2.2: `impl->Recover()` keeps the receiver text (stored, not consumed).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "void f(C* impl) { impl->Recover(); }\n",
+            "src/call.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| e.edge_type == EdgeType::Calls && e.target_key == "Recover")
+            .expect("a Calls edge to Recover");
+        assert!(
+            call.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("\"receiver\":\"impl\""),
+            "receiver stored: {:?}",
+            call.metadata_json
         );
     }
 

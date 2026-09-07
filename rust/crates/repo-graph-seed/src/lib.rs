@@ -44,6 +44,6 @@ pub mod rank;
 pub use hash::content_hash;
 pub use ports::{
     EmbedError, Embedder, SeedCorpus, SeedCorpusEntry, SeedCorpusError, SeedCorpusRead,
-    SeedVectorEntry, StoredSeedVectors,
+    SeedForwardDecl, SeedVectorEntry, StoredSeedVectors,
 };
 pub use rank::{best_score, rank, RankedCandidate, NEAR_TIE_EPSILON};

@@ -898,6 +898,7 @@ fn run_pipeline<S: IndexerStoragePort>(
     let mut index = ResolverIndex {
         nodes_by_stable_key: HashMap::new(),
         nodes_by_name: HashMap::new(),
+        nodes_by_uid: HashMap::new(),
         node_uid_to_file_uid: HashMap::new(),
         file_resolution: file_resolution_map,
         per_file_include_resolution: per_file_include_map,
@@ -920,6 +921,9 @@ fn run_pipeline<S: IndexerStoragePort>(
             .entry(node.name.clone())
             .or_default()
             .push(node.clone());
+        index
+            .nodes_by_uid
+            .insert(node.node_uid.clone(), node.clone());
         if let Some(ref fuid) = node.file_uid {
             index
                 .node_uid_to_file_uid
@@ -2404,6 +2408,9 @@ mod tests {
                             .and_then(|v| v.as_str().map(|s| s.to_string()))
                     }),
                     file_uid: n.file_uid.clone(),
+                    forward_decl: crate::resolver::metadata_forward_decl(
+                        n.metadata_json.as_deref(),
+                    ),
                 })
                 .collect())
         }

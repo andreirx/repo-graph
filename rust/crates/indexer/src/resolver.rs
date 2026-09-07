@@ -46,6 +46,83 @@ const RUST_EXTRACTOR_PREFIX: &str = "rust-core:";
 /// crate; the string is the stable cross-boundary contract already on every extracted edge.
 const JAVA_EXTRACTOR_PREFIX: &str = "java-core:";
 
+/// Provenance prefixes of the C and C++ extractors (`ExtractedEdge.extractor`), whose
+/// values are `c-core:<version>` / `cpp-core:<version>` (see the two extractors'
+/// `EXTRACTOR_NAME`). CPP-DECLARATORS-1 §2.6 (operator ruling A, 2026-09-06): an
+/// `Implements` edge from THESE extractors is C/C++ inheritance (`: public Base`), whose
+/// base is a CLASS/STRUCT node — so its affinity filter admits CLASS/STRUCT, NOT the
+/// interface-only rule every other language keeps. Gated by prefix (not exact version) so
+/// the gate survives version bumps; the indexer takes no dependency on either extractor
+/// crate — the string is the stable cross-boundary provenance already on every edge.
+const C_EXTRACTOR_PREFIX: &str = "c-core:";
+const CPP_EXTRACTOR_PREFIX: &str = "cpp-core:";
+
+/// Does this edge's provenance make it a C/C++ inheritance `Implements` edge (spec §2.6)?
+fn is_c_family_extractor(extractor: &str) -> bool {
+    extractor.starts_with(C_EXTRACTOR_PREFIX) || extractor.starts_with(CPP_EXTRACTOR_PREFIX)
+}
+
+/// CPP-DECLARATORS-1 §2.3: classification of a node's stored `forward_decl` metadata.
+///
+/// Mirrors the `TypeOnlyDisposition` honesty pattern (operator ruling 2026-09-03 item 2a):
+/// a CORRUPT carrier is a DISTINCT truth from an absent one and is NEVER collapsed into the
+/// same branch as a definition (STANDING HONESTY RULE 1 — never swallow a fallible read whose
+/// result is classified). `serde_json::from_str(...).ok()` did exactly that and is forbidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardDeclRead {
+    /// `metadata_json` carries `forward_decl: true` — a bodiless declaration.
+    ForwardDecl,
+    /// No carrier, valid JSON without the key, or `forward_decl: false` — a definition
+    /// (a KNOWN, readable fact: this node is not a forward declaration).
+    Definition,
+    /// The carrier was PRESENT but UNREADABLE: `metadata_json` did not parse as JSON, or its
+    /// `forward_decl` value was present but not a boolean. A NAMED error, DISTINCT from
+    /// `Definition` — a node whose forward-decl fact cannot be read is never assumed to be a
+    /// definition.
+    Unreadable,
+}
+
+/// CPP-DECLARATORS-1 §2.3 (AMENDED 2026-09-07): classify the stored `metadata_json.forward_decl`
+/// of a node WITHOUT swallowing a parse error. `Unreadable` is a named outcome, never folded into
+/// `Definition`.
+pub fn classify_forward_decl(metadata_json: Option<&str>) -> ForwardDeclRead {
+    // No carrier at all ⇒ the fact is ABSENT, which for forward_decl means a definition
+    // (only forward declarations stamp the key). This is a KNOWN read, not a swallowed error.
+    let Some(raw) = metadata_json else {
+        return ForwardDeclRead::Definition;
+    };
+    // A carrier that does not parse is CORRUPT — NAMED, not silently a definition.
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return ForwardDeclRead::Unreadable,
+    };
+    match value.get("forward_decl") {
+        // Valid JSON without the key ⇒ the node was never stamped ⇒ a definition.
+        None => ForwardDeclRead::Definition,
+        Some(serde_json::Value::Bool(true)) => ForwardDeclRead::ForwardDecl,
+        Some(serde_json::Value::Bool(false)) => ForwardDeclRead::Definition,
+        // Key present but not a boolean ⇒ a CORRUPT value, distinct from a definition.
+        Some(_) => ForwardDeclRead::Unreadable,
+    }
+}
+
+/// CPP-DECLARATORS-1 §2.3: does this node's stored metadata mark it a bodiless DECLARATION?
+///
+/// Shared by the resolver index build (`storage::query_resolver_nodes`) so
+/// `ResolverNode.forward_decl` is derived once from the same rule everywhere. Built on
+/// [`classify_forward_decl`], so a malformed carrier is NEVER treated as a definition:
+/// `Unreadable` collapses to `true` (a declaration), the conservative direction — a node whose
+/// forward-decl fact cannot be read is filtered/demoted before the singleton test and can never
+/// masquerade as the authoritative definition (STANDING HONESTY RULE 1). `false` for every
+/// non-C++ node (their extractors set no such key ⇒ `Definition`).
+pub fn metadata_forward_decl(metadata_json: Option<&str>) -> bool {
+    match classify_forward_decl(metadata_json) {
+        ForwardDeclRead::ForwardDecl => true,
+        ForwardDeclRead::Definition => false,
+        ForwardDeclRead::Unreadable => true,
+    }
+}
+
 // ── Resolution outcome ───────────────────────────────────────────
 
 /// Result of attempting to resolve an edge target.
@@ -79,6 +156,13 @@ pub struct ResolverNode {
     pub kind: String,
     pub subtype: Option<String>,
     pub file_uid: Option<String>,
+    /// CPP-DECLARATORS-1 (spec §2.3): the node is a bodiless DECLARATION — a C++ type
+    /// forward-decl (`class X;`) or an in-class method prototype — read from the stored
+    /// `metadata_json.forward_decl`. A declaration is filtered out BEFORE the singleton
+    /// test in [`pick_unambiguous`], so a class declared many times + defined once
+    /// resolves to its definition, and the header prototype no longer makes a call
+    /// ambiguous. `false` for every non-C++ node (their extractors set no such key).
+    pub forward_decl: bool,
 }
 
 /// The in-memory index used for edge resolution. Built from
@@ -92,6 +176,13 @@ pub struct ResolverIndex {
     pub nodes_by_stable_key: HashMap<String, ResolverNode>,
     /// Name → all nodes with that name (may be ambiguous).
     pub nodes_by_name: HashMap<String, Vec<ResolverNode>>,
+    /// Node UID → node. CPP-DECLARATORS-1 §2.3 (AMENDED): the enclosing-class preference
+    /// needs the CALLER node's `qualified_name` from its `source_node_uid`, and no other
+    /// map is keyed by uid (`stable_key_to_uid` is the reverse). One concrete current user
+    /// (`resolve_call_target`'s C/C++ enclosing-class step); a plain map, not an
+    /// abstraction. Rejected simpler: inverting `stable_key_to_uid` per call — O(n) in the
+    /// resolution hot path.
+    pub nodes_by_uid: HashMap<String, ResolverNode>,
     /// Source node UID → file UID (for import-binding and
     /// include-path resolution).
     pub node_uid_to_file_uid: HashMap<String, String>,
@@ -406,8 +497,10 @@ fn resolve_target(
         EdgeType::Calls => option_to_resolution(resolve_call_target(
             &edge.target_key,
             &edge.source_node_uid,
+            &edge.extractor,
             &index.nodes_by_stable_key,
             &index.nodes_by_name,
+            &index.nodes_by_uid,
             &index.file_resolution,
             import_bindings_by_file,
             &index.node_uid_to_file_uid,
@@ -416,11 +509,13 @@ fn resolve_target(
             &edge.target_key,
             &index.nodes_by_name,
             edge.edge_type,
+            &edge.extractor,
         )),
         EdgeType::Implements => option_to_resolution(resolve_named_target(
             &edge.target_key,
             &index.nodes_by_name,
             edge.edge_type,
+            &edge.extractor,
         )),
         // State-boundary edges (SB-4-pre): target_key is a stable
         // key (e.g. `myservice:fs:/etc/app.yaml:FS_PATH`), not a
@@ -437,6 +532,7 @@ fn resolve_target(
                     &edge.target_key,
                     &index.nodes_by_name,
                     edge.edge_type,
+                    &edge.extractor,
                 ))
             }
         }
@@ -463,6 +559,7 @@ fn resolve_target(
             &edge.target_key,
             &index.nodes_by_name,
             edge.edge_type,
+            &edge.extractor,
         )),
     }
 }
@@ -723,11 +820,16 @@ pub fn build_java_suffix_index(file_paths: &[String]) -> JavaSuffixIndex {
 
 // ── CALLS resolution ─────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)] // resolver hot-path fn threading the index's maps
+                                     // by reference; bundling them into a struct would add
+                                     // a type with no other user (not earned).
 fn resolve_call_target(
     target_key: &str,
     source_node_uid: &str,
+    extractor: &str,
     _nodes_by_stable_key: &HashMap<String, ResolverNode>,
     nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+    nodes_by_uid: &HashMap<String, ResolverNode>,
     file_resolution: &HashMap<String, String>,
     import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
     node_uid_to_file_uid: &HashMap<String, String>,
@@ -770,7 +872,7 @@ fn resolve_call_target(
                                         .cloned()
                                         .collect();
                                     if let Some(uid) =
-                                        pick_unambiguous(Some(&in_file), EdgeType::Calls)
+                                        pick_unambiguous(Some(&in_file), EdgeType::Calls, false)
                                     {
                                         return Some(uid);
                                     }
@@ -818,22 +920,45 @@ fn resolve_call_target(
         } else {
             // "this.repo.findById" style (3+ parts starting with "this")
             if prefix == "this" && parts.len() >= 3 {
-                if let Some(uid) = pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls)
+                if let Some(uid) =
+                    pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls, false)
                 {
                     return Some(uid);
                 }
             }
 
             // "obj.method()" — try method name (only for non-import objects).
-            if let Some(uid) = pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls) {
+            if let Some(uid) =
+                pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls, false)
+            {
                 return Some(uid);
             }
         }
     }
 
-    // Simple function call: "classifyMedia".
-    if let Some(uid) = pick_unambiguous(nodes_by_name.get(target_key), EdgeType::Calls) {
+    // Simple function call: "classifyMedia". A C++ `field_expression` call
+    // (`impl->Recover()`) also lands here — the extractor's target_key is the bare
+    // method name (the receiver is stored, not consumed yet).
+    if let Some(uid) = pick_unambiguous(nodes_by_name.get(target_key), EdgeType::Calls, false) {
         return Some(uid);
+    }
+
+    // CPP-DECLARATORS-1 §2.3 (AMENDED): when the bare-name lookup is AMBIGUOUS, apply the
+    // enclosing-class preference — GATED to C/C++ edges so non-C/C++ resolution stays
+    // byte-identical (the DoD's "non-C/C++ byte-stable"). A method defined in several
+    // classes resolves to the one whose container matches the CALLER's container
+    // (`leveldb::DBImpl::Open` calling `Recover` → `leveldb::DBImpl::Recover`); a call
+    // from outside all of them stays unresolved (the honest, counted remainder).
+    if is_c_family_extractor(extractor) {
+        if let Some(candidates) = nodes_by_name.get(target_key) {
+            let pool = resolution_pool(candidates, EdgeType::Calls, false);
+            if pool.len() > 1 {
+                let caller = nodes_by_uid.get(source_node_uid);
+                if let Some(uid) = enclosing_class_preference(&pool, caller) {
+                    return Some(uid);
+                }
+            }
+        }
     }
 
     // ── Named import resolution ───────────────────────────────────────
@@ -859,7 +984,9 @@ fn resolve_call_target(
                                 })
                                 .cloned()
                                 .collect();
-                            if let Some(uid) = pick_unambiguous(Some(&in_file), EdgeType::Calls) {
+                            if let Some(uid) =
+                                pick_unambiguous(Some(&in_file), EdgeType::Calls, false)
+                            {
                                 return Some(uid);
                             }
                         }
@@ -913,42 +1040,122 @@ fn resolve_named_target(
     target_key: &str,
     nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
     edge_type: EdgeType,
+    extractor: &str,
 ) -> Option<String> {
-    pick_unambiguous(nodes_by_name.get(target_key), edge_type)
+    // CPP-DECLARATORS-1 §2.6: only a C/C++ `Implements` edge widens affinity to CLASS/STRUCT.
+    let c_family_implements = edge_type == EdgeType::Implements && is_c_family_extractor(extractor);
+    pick_unambiguous(
+        nodes_by_name.get(target_key),
+        edge_type,
+        c_family_implements,
+    )
 }
 
 // ── Affinity filtering + singleton check ─────────────────────────
 
-/// Apply declaration-space affinity filtering then check for an
-/// unambiguous singleton result.
+/// Apply declaration-space affinity filtering, drop bodiless DECLARATIONS
+/// (CPP-DECLARATORS-1 §2.3), then check for an unambiguous singleton result.
+///
+/// `c_family_implements` (spec §2.6): the edge is a C/C++ `Implements` (inheritance)
+/// edge, so its affinity admits CLASS/STRUCT — see [`filter_by_edge_affinity`]. Always
+/// `false` for Calls and for non-C/C++ Implements (byte-identical to before).
 ///
 /// Mirror of `pickUnambiguous` from `repo-indexer.ts:2854`.
-fn pick_unambiguous(candidates: Option<&Vec<ResolverNode>>, edge_type: EdgeType) -> Option<String> {
+fn pick_unambiguous(
+    candidates: Option<&Vec<ResolverNode>>,
+    edge_type: EdgeType,
+    c_family_implements: bool,
+) -> Option<String> {
     let candidates = candidates?;
     if candidates.is_empty() {
         return None;
     }
-
-    let filtered = filter_by_edge_affinity(candidates, edge_type);
-    if filtered.len() == 1 {
-        return Some(filtered[0].node_uid.clone());
+    let pool = resolution_pool(candidates, edge_type, c_family_implements);
+    if pool.len() == 1 {
+        return Some(pool[0].node_uid.clone());
     }
-
     None
+}
+
+/// The candidate pool a name lookup resolves against: the affinity-filtered set with
+/// bodiless DECLARATIONS removed (CPP-DECLARATORS-1 §2.3). Definitions are preferred —
+/// a class declared 70× + defined 1× collapses to the one definition, and a header
+/// method prototype no longer makes its out-of-line definition ambiguous. Falls back to
+/// the full affinity set only when EVERY surviving candidate is a declaration (a symbol
+/// with no definition indexed still resolves unambiguously to its lone prototype rather
+/// than silently dropping the edge). Shared by [`pick_unambiguous`] (singleton test) and
+/// the Calls enclosing-class preference (which needs the SAME pool to disambiguate).
+fn resolution_pool(
+    candidates: &[ResolverNode],
+    edge_type: EdgeType,
+    c_family_implements: bool,
+) -> Vec<&ResolverNode> {
+    let filtered = filter_by_edge_affinity(candidates, edge_type, c_family_implements);
+    let non_decl: Vec<&ResolverNode> = filtered
+        .iter()
+        .copied()
+        .filter(|n| !n.forward_decl)
+        .collect();
+    if non_decl.is_empty() {
+        filtered
+    } else {
+        non_decl
+    }
+}
+
+/// CPP-DECLARATORS-1 §2.3 (AMENDED): the enclosing-class preference for an otherwise
+/// ambiguous C++ method call. When the CALLER's qualified-name container
+/// (`leveldb::DBImpl::Open` → `leveldb::DBImpl`) matches EXACTLY ONE candidate's own
+/// container, that candidate is the call target. A call from OUTSIDE the class to a name
+/// defined in several classes (`impl->Recover` from `leveldb::DB::Open`) matches none and
+/// stays unresolved — the honest remainder, counted as the C++ no-resolver gap. `caller`
+/// is the source node; `pool` is the already affinity+decl-filtered ambiguous set.
+fn enclosing_class_preference(
+    pool: &[&ResolverNode],
+    caller: Option<&ResolverNode>,
+) -> Option<String> {
+    let caller_container = qualified_container(caller?.qualified_name.as_deref()?)?;
+    let mut matches = pool.iter().filter(|c| {
+        c.qualified_name.as_deref().and_then(qualified_container) == Some(caller_container)
+    });
+    let first = matches.next()?;
+    if matches.next().is_none() {
+        Some(first.node_uid.clone())
+    } else {
+        None
+    }
+}
+
+/// The container of a `::`-qualified name — everything before the LAST `::` segment
+/// (`leveldb::DBImpl::Recover` → `leveldb::DBImpl`). `None` when the name has no `::`
+/// (a free function has no enclosing class).
+fn qualified_container(qualified_name: &str) -> Option<&str> {
+    qualified_name.rfind("::").map(|i| &qualified_name[..i])
 }
 
 /// Filter candidates by declaration-space affinity. Returns only
 /// candidates in the correct space for the edge type.
 ///
+/// `c_family_implements` (CPP-DECLARATORS-1 §2.6, operator ruling A): when the
+/// `Implements` edge comes from the C/C++ extractor, C++ "implements" IS inheritance and
+/// its base is a CLASS/STRUCT node, so those subtypes are admitted; for every other
+/// language `Implements` keeps its interface-only rule (byte-identical — regression test
+/// `affinity_implements_filters_to_interface`).
+///
 /// Mirror of `filterByEdgeAffinity` from `repo-indexer.ts:3049`.
 pub fn filter_by_edge_affinity(
     candidates: &[ResolverNode],
     edge_type: EdgeType,
+    c_family_implements: bool,
 ) -> Vec<&ResolverNode> {
     match edge_type {
         EdgeType::Instantiates => candidates
             .iter()
             .filter(|n| n.subtype.as_deref() == Some("CLASS"))
+            .collect(),
+        EdgeType::Implements if c_family_implements => candidates
+            .iter()
+            .filter(|n| matches!(n.subtype.as_deref(), Some("CLASS") | Some("STRUCT")))
             .collect(),
         EdgeType::Implements => candidates
             .iter()
@@ -1245,6 +1452,28 @@ mod tests {
             kind: "SYMBOL".into(),
             subtype: subtype.map(|s| s.into()),
             file_uid: file_uid.map(|s| s.into()),
+            forward_decl: false,
+        }
+    }
+
+    /// A resolver node with an explicit `qualified_name` and `forward_decl` flag —
+    /// CPP-DECLARATORS-1 §2.3 tests (decl-vs-definition preference; enclosing class).
+    fn make_qn_node(
+        uid: &str,
+        name: &str,
+        qualified_name: &str,
+        subtype: Option<&str>,
+        forward_decl: bool,
+    ) -> ResolverNode {
+        ResolverNode {
+            node_uid: uid.into(),
+            stable_key: uid.into(),
+            name: name.into(),
+            qualified_name: Some(qualified_name.into()),
+            kind: "SYMBOL".into(),
+            subtype: subtype.map(|s| s.into()),
+            file_uid: None,
+            forward_decl,
         }
     }
 
@@ -1297,6 +1526,54 @@ mod tests {
         assert_eq!(import_edge_type_only(&e), Some(Unreadable));
     }
 
+    // ── classify_forward_decl (CPP-DECLARATORS-1 §2.3, honesty rule 1) ──
+
+    #[test]
+    fn forward_decl_classification_reads_the_stamped_key() {
+        use ForwardDeclRead::*;
+        // Stamped `forward_decl: true` ⇒ a bodiless declaration.
+        assert_eq!(
+            classify_forward_decl(Some(r#"{"forward_decl":true}"#)),
+            ForwardDecl
+        );
+        // Stamped `forward_decl: false` ⇒ a definition.
+        assert_eq!(
+            classify_forward_decl(Some(r#"{"forward_decl":false}"#)),
+            Definition
+        );
+        // Valid JSON without the key (any other node) ⇒ a definition (never stamped).
+        assert_eq!(
+            classify_forward_decl(Some(r#"{"macro_tokens":["URI_FUNC"]}"#)),
+            Definition
+        );
+        // No carrier at all ⇒ a definition.
+        assert_eq!(classify_forward_decl(None), Definition);
+    }
+
+    #[test]
+    fn forward_decl_malformed_metadata_is_unreadable_not_a_definition() {
+        // Operator ruling 2026-09-07: a malformed carrier is a NAMED error at the
+        // classification site, NEVER "treated as a definition" (STANDING HONESTY RULE 1).
+        // The prior `serde_json::from_str(...).ok()` collapsed it into `false` (definition).
+        use ForwardDeclRead::*;
+        // Present but unparseable JSON ⇒ Unreadable, DISTINCT from a definition.
+        assert_eq!(classify_forward_decl(Some("{not json")), Unreadable);
+        // Present, valid JSON, but `forward_decl` is the wrong type ⇒ Unreadable (corrupt value).
+        assert_eq!(
+            classify_forward_decl(Some(r#"{"forward_decl":"yes"}"#)),
+            Unreadable
+        );
+        // The bool collapse used by the resolver index build maps Unreadable to a DECLARATION
+        // (filtered/demoted), never a definition — a corrupt node cannot masquerade as the
+        // authoritative definition.
+        assert!(metadata_forward_decl(Some("{not json")));
+        assert!(metadata_forward_decl(Some(r#"{"forward_decl":"yes"}"#)));
+        // And the readable cases still collapse correctly.
+        assert!(metadata_forward_decl(Some(r#"{"forward_decl":true}"#)));
+        assert!(!metadata_forward_decl(Some(r#"{"forward_decl":false}"#)));
+        assert!(!metadata_forward_decl(None));
+    }
+
     // ── filter_by_edge_affinity ──────────────────────────────
 
     #[test]
@@ -1305,7 +1582,7 @@ mod tests {
             make_node("n1", "k1", "Foo", Some("CLASS"), None),
             make_node("n2", "k2", "Foo", Some("INTERFACE"), None),
         ];
-        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Instantiates);
+        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Instantiates, false);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].node_uid, "n1");
     }
@@ -1316,7 +1593,7 @@ mod tests {
             make_node("n1", "k1", "Bar", Some("CLASS"), None),
             make_node("n2", "k2", "Bar", Some("INTERFACE"), None),
         ];
-        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Implements);
+        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Implements, false);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].node_uid, "n2");
     }
@@ -1328,9 +1605,228 @@ mod tests {
             make_node("n2", "k2", "doStuff", Some("TYPE_ALIAS"), None),
             make_node("n3", "k3", "doStuff", Some("INTERFACE"), None),
         ];
-        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Calls);
+        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Calls, false);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].node_uid, "n1");
+    }
+
+    // ── CPP-DECLARATORS-1 §2.6: C/C++ Implements admits CLASS/STRUCT ──
+
+    #[test]
+    fn affinity_cpp_implements_admits_class_and_struct() {
+        // Operator ruling A: a C/C++ inheritance `Implements` edge admits CLASS/STRUCT
+        // bases (no C++ INTERFACE subtype exists) — the whole reason inheritance edges
+        // resolve now.
+        let nodes = vec![
+            make_node("n1", "k1", "Base", Some("CLASS"), None),
+            make_node("n2", "k2", "Base", Some("STRUCT"), None),
+            make_node("n3", "k3", "Base", Some("FUNCTION"), None),
+        ];
+        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Implements, true);
+        assert_eq!(
+            filtered.len(),
+            2,
+            "CLASS + STRUCT admitted, FUNCTION dropped"
+        );
+        assert!(filtered.iter().all(|n| n.node_uid != "n3"));
+    }
+
+    #[test]
+    fn affinity_non_cpp_implements_stays_interface_only_regression() {
+        // The frozen non-C/C++ invariant: a TS `implements` edge (c_family_implements =
+        // false) still admits INTERFACE ONLY — CLASS is dropped, byte-identical to before.
+        let nodes = vec![
+            make_node("n1", "k1", "Bar", Some("CLASS"), None),
+            make_node("n2", "k2", "Bar", Some("INTERFACE"), None),
+        ];
+        let filtered = filter_by_edge_affinity(&nodes, EdgeType::Implements, false);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].subtype.as_deref(), Some("INTERFACE"));
+    }
+
+    // ── CPP-DECLARATORS-1 §2.3: forward-decl preference in pick_unambiguous ──
+
+    #[test]
+    fn one_definition_plus_n_forward_decls_resolves_to_the_definition() {
+        // A class declared 70× (forward_decl) + defined once → the affinity+decl pool
+        // collapses to the single definition, so the C++ inheritance edge resolves.
+        let mut candidates = vec![make_qn_node(
+            "def",
+            "CGHeroInstance",
+            "CGHeroInstance",
+            Some("CLASS"),
+            false,
+        )];
+        for i in 0..70 {
+            candidates.push(make_qn_node(
+                &format!("decl{i}"),
+                "CGHeroInstance",
+                "CGHeroInstance",
+                Some("CLASS"),
+                true,
+            ));
+        }
+        // C/C++ Implements admission on.
+        assert_eq!(
+            pick_unambiguous(Some(&candidates), EdgeType::Implements, true),
+            Some("def".to_string()),
+        );
+    }
+
+    #[test]
+    fn two_definitions_stay_ambiguous() {
+        // Two genuine definitions (no decl to filter) → honestly unresolved.
+        let candidates = vec![
+            make_qn_node("d1", "Foo", "a::Foo", Some("CLASS"), false),
+            make_qn_node("d2", "Foo", "b::Foo", Some("CLASS"), false),
+        ];
+        assert_eq!(
+            pick_unambiguous(Some(&candidates), EdgeType::Implements, true),
+            None,
+        );
+    }
+
+    #[test]
+    fn method_call_prototype_plus_definition_resolves_to_definition() {
+        // leveldb: `NewDB` declared in db_impl.h (prototype) + defined in .cc → 2 → 1.
+        let candidates = vec![
+            make_qn_node("proto", "NewDB", "leveldb::NewDB", Some("METHOD"), true),
+            make_qn_node("def", "NewDB", "leveldb::NewDB", Some("METHOD"), false),
+        ];
+        assert_eq!(
+            pick_unambiguous(Some(&candidates), EdgeType::Calls, false),
+            Some("def".to_string()),
+        );
+    }
+
+    #[test]
+    fn lone_declaration_still_resolves_when_no_definition_indexed() {
+        // A symbol with ONLY a prototype (no definition in the snapshot) still resolves
+        // unambiguously to its lone declaration — the decl filter falls back to the full
+        // set when nothing non-decl remains, rather than dropping the edge.
+        let candidates = vec![make_qn_node(
+            "proto",
+            "OnlyDecl",
+            "ns::OnlyDecl",
+            Some("METHOD"),
+            true,
+        )];
+        assert_eq!(
+            pick_unambiguous(Some(&candidates), EdgeType::Calls, false),
+            Some("proto".to_string()),
+        );
+    }
+
+    // ── CPP-DECLARATORS-1 §2.3 (AMENDED): enclosing-class preference ──
+
+    #[test]
+    fn enclosing_class_preference_resolves_ambiguous_method_by_caller_container() {
+        // `leveldb::DBImpl::Open` calling `Recover` → the DBImpl candidate wins over the
+        // VersionSet candidate; gated to C/C++ edges.
+        let dbimpl = make_qn_node(
+            "r_dbimpl",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let versionset = make_qn_node(
+            "r_vs",
+            "Recover",
+            "leveldb::VersionSet::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let caller = make_qn_node(
+            "open",
+            "Open",
+            "leveldb::DBImpl::Open",
+            Some("METHOD"),
+            false,
+        );
+
+        let mut index = empty_index();
+        index
+            .nodes_by_name
+            .insert("Recover".into(), vec![dbimpl.clone(), versionset.clone()]);
+        index.nodes_by_uid.insert("open".into(), caller);
+
+        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "open".into();
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "r_dbimpl");
+    }
+
+    #[test]
+    fn enclosing_class_preference_leaves_outside_caller_unresolved() {
+        // A caller OUTSIDE both classes (`leveldb::DB::Open` calling `Recover`) matches
+        // no candidate container → stays unresolved (the honest, counted remainder).
+        let dbimpl = make_qn_node(
+            "r_dbimpl",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let versionset = make_qn_node(
+            "r_vs",
+            "Recover",
+            "leveldb::VersionSet::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let caller = make_qn_node("open", "Open", "leveldb::DB::Open", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index
+            .nodes_by_name
+            .insert("Recover".into(), vec![dbimpl, versionset]);
+        index.nodes_by_uid.insert("open".into(), caller);
+
+        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "open".into();
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 0);
+        assert_eq!(result.still_unresolved.len(), 1);
+    }
+
+    #[test]
+    fn enclosing_class_preference_gated_off_for_non_cpp() {
+        // The SAME ambiguous shape from a non-C/C++ edge must NOT resolve via the
+        // enclosing-class preference — non-C/C++ resolution stays byte-identical.
+        let a = make_qn_node("a", "Recover", "pkg::A::Recover", Some("METHOD"), false);
+        let b = make_qn_node("b", "Recover", "pkg::B::Recover", Some("METHOD"), false);
+        let caller = make_qn_node("open", "Open", "pkg::A::Open", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("Recover".into(), vec![a, b]);
+        index.nodes_by_uid.insert("open".into(), caller);
+
+        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
+        edge.extractor = "rust-core:0.1.0".into();
+        edge.source_node_uid = "open".into();
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 0, "non-C/C++ stays ambiguous");
+    }
+
+    /// An empty resolver index for the CPP-DECLARATORS-1 resolution tests.
+    fn empty_index() -> ResolverIndex {
+        ResolverIndex {
+            nodes_by_stable_key: HashMap::new(),
+            nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
+            node_uid_to_file_uid: HashMap::new(),
+            file_resolution: HashMap::new(),
+            per_file_include_resolution: HashMap::new(),
+            stable_key_to_uid: HashMap::new(),
+            file_to_module: HashMap::new(),
+            include_resolver: None,
+            rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
+        }
     }
 
     // ── categorize_unresolved_edge ───────────────────────────
@@ -1630,6 +2126,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -1664,6 +2161,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -1693,6 +2191,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -1878,6 +2377,7 @@ mod tests {
                         kind: "FILE".into(),
                         subtype: None,
                         file_uid: Some(k.to_string()),
+                        forward_decl: false,
                     },
                 )
             })
@@ -1929,6 +2429,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -1961,6 +2462,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -1999,6 +2501,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -2042,6 +2545,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -2103,6 +2607,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -2168,6 +2673,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),
@@ -2240,6 +2746,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
             per_file_include_resolution: HashMap::new(),

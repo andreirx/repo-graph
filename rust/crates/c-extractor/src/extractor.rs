@@ -395,7 +395,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
         None => return,
     };
 
-    let name = extract_function_name(&declarator, src);
+    let (name, macro_tokens) = extract_function_name(&declarator, src);
     if name.is_empty() {
         return;
     }
@@ -418,6 +418,8 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
     let params = declarator.child_by_field_name("parameters");
     let signature = params.map(|p| format!("{}{}", name, p.utf8_text(src).unwrap_or("()")));
 
+    // CPP-DECLARATORS-1 (spec §2.1): the wrapping macro tokens are recorded ADDITIVELY
+    // under `macro_tokens` (the key the C++ type path already uses) — never as the name.
     ctx.nodes.push(ExtractedNode {
         node_uid: func_uid.clone(),
         snapshot_uid: ctx.snapshot_uid.into(),
@@ -433,7 +435,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
         signature,
         visibility: Some(visibility),
         doc_comment: extract_doc_comment(node, src),
-        metadata_json: None,
+        metadata_json: macro_tokens_json(&macro_tokens),
     });
 
     // Extract calls from function body and compute metrics
@@ -445,11 +447,37 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
     }
 }
 
-/// Extract function name from a declarator node
-fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> String {
-    // Handle function_declarator wrapping
+/// Extract a function's real name and any wrapping macro tokens from a declarator node.
+///
+/// CPP-DECLARATORS-1 (spec §2.1, AMENDED 2026-09-07 cycle-3): a macro-wrapped definition names
+/// the function by its declarator's identifier, NOT the macro token. The C extractor implements
+/// ONE proven tree-sitter-c 0.23.4 shape:
+///   (a) `M(name)(args)` — the outer `function_declarator`'s `declarator` is an INNER
+///       `function_declarator` whose `declarator` is the macro identifier `M` and whose
+///       single parameter is a bare `type_identifier` (the real `name`). The real name is
+///       that type_identifier; `M` → `macro_tokens`.
+/// The C++ extractor also handles a shape (b) (attribute macro before the name produces an
+/// `ERROR` child inside the `function_declarator`). That shape does NOT occur under the pinned
+/// tree-sitter-c 0.23.4: the same attribute-macro construct (zstd's four-line header, zstd is C)
+/// parses as a CLEAN `function_definition` whose declarator identifier is already the real name
+/// — 8 constructs probed, zero C shape-(b) rows across the v0.17.0 audit corpus. A C shape-(b)
+/// branch would be code for an imagined variation, so it is not implemented here (operator ruling
+/// `c_shape_b_contract` = B, 2026-09-07); `zstd_attribute_macro_c_grammar_recovers_name_without_shape_b_misfire`
+/// pins the observed C behaviour (name correct, no `macro_tokens`).
+/// Shape (a) is unambiguous: a function returning a function is invalid C, and function-pointer
+/// returns go through `parenthesized_declarator` (never this shape), so the negative
+/// `int (*getHandler(int x))(double)` does not misfire.
+fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> (String, Vec<String>) {
+    let mut macros: Vec<String> = Vec::new();
     let mut current = *declarator;
     while current.kind() == "function_declarator" || current.kind() == "pointer_declarator" {
+        if current.kind() == "function_declarator" {
+            // Shape (a): inner function_declarator as a macro call `M(name)`.
+            if let Some((name, macro_tok)) = macro_call_shape(&current, src) {
+                macros.push(macro_tok);
+                return (name, macros);
+            }
+        }
         if let Some(inner) = current.child_by_field_name("declarator") {
             current = inner;
         } else {
@@ -458,17 +486,65 @@ fn extract_function_name(declarator: &tree_sitter::Node, src: &[u8]) -> String {
     }
 
     if current.kind() == "identifier" {
-        current.utf8_text(src).unwrap_or("").to_string()
+        (current.utf8_text(src).unwrap_or("").to_string(), macros)
     } else {
         // Try to find identifier child
         let mut cursor = current.walk();
         for child in current.children(&mut cursor) {
             if child.kind() == "identifier" {
-                return child.utf8_text(src).unwrap_or("").to_string();
+                return (child.utf8_text(src).unwrap_or("").to_string(), macros);
             }
         }
-        String::new()
+        (String::new(), macros)
     }
+}
+
+/// CPP-DECLARATORS-1 shape (a): if `fd` (a `function_declarator`) has its `declarator`
+/// field set to an INNER `function_declarator` whose own `declarator` is a bare macro
+/// identifier and whose single parameter is a bare `type_identifier`, return
+/// `(real_name, macro_token)`. `None` when the shape does not match (the normal path).
+fn macro_call_shape(fd: &tree_sitter::Node, src: &[u8]) -> Option<(String, String)> {
+    let inner = fd.child_by_field_name("declarator")?;
+    if inner.kind() != "function_declarator" {
+        return None;
+    }
+    let macro_id = inner.child_by_field_name("declarator")?;
+    if macro_id.kind() != "identifier" {
+        return None;
+    }
+    let params = inner.child_by_field_name("parameters")?;
+    let name = single_bare_type_identifier(&params, src)?;
+    Some((name, macro_id.utf8_text(src).ok()?.to_string()))
+}
+
+/// The text of the sole `parameter_declaration` in `params` iff it is a bare
+/// `type_identifier` with no declarator (`(ToStringEngine)`), else `None`.
+fn single_bare_type_identifier(params: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    let mut cursor = params.walk();
+    let decls: Vec<tree_sitter::Node> = params
+        .children(&mut cursor)
+        .filter(|c| c.kind() == "parameter_declaration")
+        .collect();
+    let [decl] = decls.as_slice() else {
+        return None;
+    };
+    if decl.child_by_field_name("declarator").is_some() {
+        return None;
+    }
+    let ty = decl.child_by_field_name("type")?;
+    if ty.kind() != "type_identifier" {
+        return None;
+    }
+    Some(ty.utf8_text(src).ok()?.to_string())
+}
+
+/// Build the additive `{"macro_tokens":[…]}` metadata for a function node, or `None`
+/// when no wrapping macros were found (keeps the common case byte-identical: `None`).
+fn macro_tokens_json(macros: &[String]) -> Option<String> {
+    if macros.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({ "macro_tokens": macros }).to_string())
 }
 
 // ── Call extraction ──────────────────────────────────────────────
@@ -1028,6 +1104,174 @@ mod tests {
         // Only FILE node, no function symbol
         assert_eq!(result.nodes.len(), 1);
         assert_eq!(result.nodes[0].kind, NodeKind::File);
+    }
+
+    // ── CPP-DECLARATORS-1: macro-wrapped function names (both shapes) ──
+
+    #[test]
+    fn macro_call_shape_names_the_function_not_the_macro() {
+        // Shape (a) `M(name)(args)` — hadoop uriparser UriRecompose.c:87 verbatim.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "static URI_INLINE int URI_FUNC(ToStringEngine)(URI_CHAR * dest) { return 0; }\n",
+            "uriparser/UriRecompose.c",
+        );
+
+        assert!(
+            !result.nodes.iter().any(|n| n.name == "URI_FUNC"),
+            "the wrapper macro must never be the function name",
+        );
+        let f = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "ToStringEngine")
+            .expect("real name is the declarator identifier");
+        assert_eq!(f.subtype, Some(NodeSubtype::Function));
+        let meta = f.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            meta.contains("\"macro_tokens\":[\"URI_FUNC\"]"),
+            "macro recorded additively, got {meta:?}",
+        );
+    }
+
+    #[test]
+    fn macro_call_shape_pcre2_priv() {
+        // poco pcre2 `PRIV(check_escape)` verbatim shape.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "int\nPRIV(check_escape)(int *p)\n{\n  return 0;\n}\n",
+            "pcre2/pcre2_compile.c",
+        );
+        let f = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "check_escape")
+            .expect("check_escape is the real name");
+        assert_eq!(f.subtype, Some(NodeSubtype::Function));
+        assert!(f
+            .metadata_json
+            .as_deref()
+            .unwrap_or("")
+            .contains("\"macro_tokens\":[\"PRIV\"]"));
+    }
+
+    #[test]
+    fn macro_call_shape_expat_prefix() {
+        // poco expat `PREFIX(prologTok)` verbatim shape (a calling-convention macro
+        // sits in the return type; the name is still the declarator identifier).
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "static int PTRCALL\nPREFIX(prologTok)(int x) { return x; }\n",
+            "expat/xmltok.c",
+        );
+        assert!(result.nodes.iter().any(|n| n.name == "prologTok"));
+        assert!(!result.nodes.iter().any(|n| n.name == "PREFIX"));
+    }
+
+    #[test]
+    fn zstd_attribute_macro_c_grammar_recovers_name_without_shape_b_misfire() {
+        // FINDING (2026-09-07, pinned tree-sitter-c 0.23.4; operator ruling `c_shape_b_contract` = B):
+        // the attribute-macro-before-name construct that misfires in C++ (shape (b): an ERROR child
+        // INSIDE the `function_declarator`, declarator = a macro identifier) does NOT reproduce under
+        // the C grammar. tree-sitter-c recovers the SAME four-line zstd header
+        // (duckdb/third_party/zstd/compress/zstd_opt.cpp:589-592, zstd is C) as a clean
+        // `function_definition` — `type: U32`, `declarator: (function_declarator declarator:
+        // (identifier "ZSTD_insertBtAndGetAllMatches") …)` — so the name is ALREADY correct and
+        // there is nothing to strip. Because a C shape-(b) branch would only ever handle an imagined
+        // variation (8 constructs probed, zero C shape-(b) rows in the corpus), it was REMOVED from
+        // the C extractor; only shape (a) is implemented. This test pins the observed C behaviour:
+        // the name is correct and the C path does NOT misfire (no macro_tokens attached).
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "FORCE_INLINE_TEMPLATE\nZSTD_ALLOW_POINTER_OVERFLOW_ATTR\nU32\nZSTD_insertBtAndGetAllMatches (ZSTD_match_t* matches) { return 0; }\n",
+            "zstd/compress/zstd_opt.c",
+        );
+        let f = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "ZSTD_insertBtAndGetAllMatches")
+            .unwrap_or_else(|| {
+                panic!(
+                    "C grammar recovers the real name as the clean declarator; symbols = {:?}",
+                    result
+                        .nodes
+                        .iter()
+                        .map(|n| (&n.name, &n.subtype))
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(f.subtype, Some(NodeSubtype::Function));
+        // No shape (b) fired ⇒ no macro_tokens (C did not misfire; nothing to strip).
+        assert!(
+            !f.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("macro_tokens"),
+            "C recovers the name via the type position — no macro_tokens expected, got {:?}",
+            f.metadata_json,
+        );
+        // The attribute macros must never become the FUNCTION name.
+        for macro_name in ["ZSTD_ALLOW_POINTER_OVERFLOW_ATTR", "FORCE_INLINE_TEMPLATE"] {
+            assert!(
+                !result
+                    .nodes
+                    .iter()
+                    .any(|n| n.name == macro_name && n.subtype == Some(NodeSubtype::Function)),
+                "{macro_name} must never be the function name",
+            );
+        }
+    }
+
+    #[test]
+    fn function_pointer_return_does_not_misfire_a_macro_shape() {
+        // The negative fixture (spec §2.1, AMENDED 2026-09-07): a function-pointer-returning
+        // definition goes through `parenthesized_declarator`, which NEITHER macro shape (a)/(b)
+        // handles. Extracting `getHandler` from that construct is a SEPARATE pre-existing cause
+        // (parenthesized-declarator extraction, filed as a follow-up, out of scope here). This
+        // fixture asserts ONLY that the new unwrap does not MISFIRE on that shape: no node is
+        // named by a macro token, and no node carries the additive `macro_tokens` metadata.
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "int (*getHandler(int x))(double) { return 0; }\n",
+            "src/h.c",
+        );
+        // No macro-shape misfire (a): nothing carries `macro_tokens`.
+        assert!(
+            !result.nodes.iter().any(|n| n
+                .metadata_json
+                .as_deref()
+                .is_some_and(|m| m.contains("macro_tokens"))),
+            "function-pointer return must not attach macro_tokens: {:?}",
+            result
+                .nodes
+                .iter()
+                .map(|n| (&n.name, &n.metadata_json))
+                .collect::<Vec<_>>()
+        );
+        // No macro-shape misfire (b): no node is named after a bogus token the misfire could
+        // invent from this shape (the inner param type `double` / the parameter `x`).
+        assert!(
+            !result
+                .nodes
+                .iter()
+                .any(|n| n.name == "double" || n.name == "x"),
+            "function-pointer return must not invent a macro-derived name: {:?}",
+            result
+                .nodes
+                .iter()
+                .map(|n| (&n.name, &n.subtype))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

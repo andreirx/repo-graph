@@ -16,6 +16,7 @@
 //! Layer-2 observed-but-undeclared import is never laundered into an extracted fact.
 //! See [`dependencies`].
 
+use repo_graph_storage::find_facts_reads::ForwardDeclFact;
 use repo_graph_storage::StorageConnection;
 
 use super::{finalize, like_fetch_limit, rank, ClassHits, FactHit, HitPath};
@@ -58,6 +59,8 @@ pub(super) fn symbols(
             // per row here, read only for its PRESENCE by the tie-break comparator.
             line: r.line,
             evidence: rank::evidence_line(r.doc_comment.as_deref(), r.signature.as_deref()),
+            // CPP-DECLARATORS-1 §2.3: a forward declaration ranks below its definition.
+            forward_decl: r.forward_decl,
         })
         .collect();
     rank::sort_symbols(&mut views, query);
@@ -87,6 +90,8 @@ pub(super) fn symbols(
             // symbol class is the only one carrying a per-symbol span/doc today.
             line: v.line,
             evidence: v.evidence.clone(),
+            // CPP-DECLARATORS-1 §2.3: carried to the wire so the row renders `(decl)`.
+            forward_decl: v.forward_decl,
         })
         .collect();
     // Never saturated: the whole matching set was fetched, so `matched` is EXACT.
@@ -114,6 +119,7 @@ pub(super) fn files(
             // File-granular: no per-symbol span or doc — the path IS the anchor.
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         })
         .collect();
     Ok(finalize(hits, full, saturated))
@@ -145,6 +151,7 @@ pub(super) fn modules(
             // Module hits are directory/declaration-granular — no per-symbol line/doc.
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         })
         .collect();
     Ok(finalize(hits, full, saturated))
@@ -197,6 +204,7 @@ pub(super) fn http_surfaces(
                 // Route hits carry a source file, not a stored symbol span/doc.
                 line: None,
                 evidence: None,
+                forward_decl: ForwardDeclFact::Definition,
             }
         })
         .collect();
@@ -294,6 +302,7 @@ pub(super) fn dependencies(
             // A manifest package name carries no source span or doc-comment.
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         })
         .collect();
     Ok(finalize(hits, full, false))
@@ -331,6 +340,7 @@ pub(super) fn frameworks(
             // A framework inference kind spans many files: no single span/doc.
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         })
         .collect();
     Ok(finalize(hits, full, false))
@@ -395,6 +405,7 @@ pub(super) fn boundary_declarations(
             // A governance declaration is not anchored to a source span/doc-comment.
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         });
     }
     Ok(finalize(hits, full, saturated))

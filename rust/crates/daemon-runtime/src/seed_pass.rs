@@ -39,6 +39,10 @@ pub struct SeedReport {
     pub reused: usize,
     pub drifted: usize,
     pub corpus_omitted: usize,
+    /// CPP-DECLARATORS-1 (§2.3): admitted chunks whose stored `metadata_json.forward_decl` was
+    /// present but UNREADABLE — excluded from the decl tier (never forced `(decl)`) and reported
+    /// here so the degradation is visible, never silently swallowed (STANDING HONESTY RULE 1).
+    pub forward_decl_unreadable: usize,
 }
 
 /// Daemon-wide seed lifecycle coordination — per-repo trigger generation
@@ -359,12 +363,13 @@ fn run_auto_seed(
                     repo_uid,
                     None,
                     &format!(
-                        "{} (admitted {}, reused {}, drifted {}, omitted {})",
+                        "{} (admitted {}, reused {}, drifted {}, omitted {}, fwd_decl_unreadable {})",
                         report.outcome,
                         report.admitted,
                         report.reused,
                         report.drifted,
-                        report.corpus_omitted
+                        report.corpus_omitted,
+                        report.forward_decl_unreadable
                     ),
                 );
                 state.seed_coord().record_report(report);
@@ -535,6 +540,7 @@ fn try_seed_attempt(
                     reused: report.reused,
                     drifted: report.drifted,
                     corpus_omitted: report.corpus_omitted,
+                    forward_decl_unreadable: report.forward_decl_unreadable,
                 }),
                 PublishOutcome::Yielded => SeedAttempt::Yielded,
                 PublishOutcome::Superseded => SeedAttempt::Superseded,

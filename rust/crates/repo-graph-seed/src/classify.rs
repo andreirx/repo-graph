@@ -733,7 +733,19 @@ fn is_callable_subtype(subtype: Option<&str>) -> bool {
 /// no-brace-language symbol returns false. Structural — the extension only selects the
 /// syntax family (STANDING HONESTY RULE 2); the body decision is the brace, and the
 /// callable gate keeps a const/variable/type-alias from being mislabeled `(decl)`.
-pub fn is_declaration(path: &str, subtype: Option<&str>, span_source: &str) -> bool {
+pub fn is_declaration(
+    path: &str,
+    subtype: Option<&str>,
+    span_source: &str,
+    forward_decl: bool,
+) -> bool {
+    // CPP-DECLARATORS-1 (§2.3): a STORED `forward_decl` flag (a C++ type forward-decl or
+    // in-class method prototype) is authoritative — it makes a TYPE chunk `(decl)` too,
+    // which the callable-only span heuristic below can never reach. `false` for every
+    // non-C++ node, so the span heuristic still governs TS/Rust/Java callables unchanged.
+    if forward_decl {
+        return true;
+    }
     if !uses_brace_bodies(path) || !is_callable_subtype(subtype) {
         return false;
     }

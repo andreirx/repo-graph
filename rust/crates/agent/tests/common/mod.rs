@@ -104,6 +104,10 @@ pub struct FakeAgentStorage {
     // ── Symbol-focus seed data (Rust-45) ────────────────────
     pub symbol_name_results: HashMap<(String, String), Vec<AgentFocusCandidate>>,
     pub symbol_contexts: HashMap<(String, String), AgentSymbolContext>,
+    /// CPP-DECLARATORS-1 §2.3 (review-3 #4): uncapped definition count per (snapshot, name) for
+    /// `count_symbol_definitions_by_name`. Unseeded ⇒ `None` ⇒ completeness unproven ⇒ the
+    /// type-vs-constructor collapse stays ambiguous (mirrors a real adapter that hid definitions).
+    pub symbol_definition_counts: HashMap<(String, String), u64>,
     pub symbol_callers: HashMap<(String, String), Vec<AgentCallerRow>>,
     pub symbol_callees: HashMap<(String, String), Vec<AgentCalleeRow>>,
     pub cycles_involving_module: HashMap<(String, String), Vec<AgentCycle>>,
@@ -464,6 +468,16 @@ impl AgentStorageRead for FakeAgentStorage {
             .get(&key)
             .cloned()
             .unwrap_or_default())
+    }
+
+    fn count_symbol_definitions_by_name(
+        &self,
+        snapshot_uid: &str,
+        name: &str,
+    ) -> Result<Option<u64>, AgentStorageError> {
+        self.fail_if_forced("count_symbol_definitions_by_name")?;
+        let key = (snapshot_uid.to_string(), name.to_string());
+        Ok(self.symbol_definition_counts.get(&key).copied())
     }
 
     fn get_symbol_context(

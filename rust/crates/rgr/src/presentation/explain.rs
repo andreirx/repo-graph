@@ -104,6 +104,19 @@ pub struct ExplainResponse {
     /// daemon; then no drift line is shown.
     #[serde(default)]
     pub index_drift: Option<IndexDrift>,
+    /// CPP-DECLARATORS-1 §2.3 (2026-09-07): follow-up cursors the daemon attached when a bare
+    /// name resolved to its TYPE over its constructor(s) — the constructor's own `explain`
+    /// cursor, so a constructor query is NEVER hidden (operator ruling
+    /// `cpp_decl_explain_constructor_collision`). Explain populates `next` ONLY in that case;
+    /// every other explain answer sends an empty list ⇒ no section, byte-identical output.
+    /// `#[serde(default)]`: an older daemon omits the field ⇒ empty ⇒ nothing rendered.
+    #[serde(default)]
+    pub next: Vec<crate::presentation::orient_types::NextAction>,
+    /// CPP-DECLARATORS-1 §2.3 (review-3 #3): constructor cursors the daemon dropped from `next`
+    /// because the budget cap was hit. The counted header ("N constructor(s) also match") must
+    /// report the TRUE total, so it adds this to `next.len()`. Absent/`None` ⇒ nothing omitted.
+    #[serde(default)]
+    pub next_omitted_count: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +219,16 @@ impl ExplainResponse {
             }
         }
 
+        // ── CPP-DECLARATORS-1 §2.3: constructor(s) that also match the bare name ──
+        // When a bare name resolved to its TYPE over its constructor(s), surface the
+        // constructor's own `explain` cursor so a constructor query is never hidden. Empty on
+        // every other explain answer ⇒ nothing rendered (byte-identical).
+        let related = self.render_related_cursors();
+        if !related.is_empty() {
+            out.push_str(&related);
+            out.push('\n');
+        }
+
         // ── RECON-M-R4 (§5.5): the Layer-2 landing for this focus symbol ──
         // "This call likely resolves to X" hints + contested resolutions. Empty (nothing
         // appended) on zero-SCIP / non-symbol / no-hint answers — byte-identical there.
@@ -280,6 +303,38 @@ impl ExplainResponse {
             (None, Some(name)) => kv_line("Target", &format!("{} ({})", name, kind)),
             (None, None) => kv_line("Target", &format!("({})", kind)),
         }
+    }
+
+    /// CPP-DECLARATORS-1 §2.3 (review-4 #4): render the follow-up constructor cursor(s) the daemon
+    /// attached when a bare name resolved to its TYPE over its constructor(s). The RATIFIED form
+    /// (spec §2.3) is a SINGLE counted line — `N constructor(s) also match: explain '<cursor>'` —
+    /// grammatically singular/plural, reporting the TRUE total (`next.len()` plus any the budget
+    /// omitted), with the runnable `explain '<cursor>'` invocation(s) ON THE SAME LINE (comma-joined
+    /// when more than one), so a constructor query is never hidden. Each cursor is single-quoted
+    /// (a C++ qualified name / stable key carries no quote) and the verb comes from the action's
+    /// own `kind`. Empty `next` ⇒ empty string ⇒ no section (byte-identical to every other answer).
+    fn render_related_cursors(&self) -> String {
+        if self.next.is_empty() {
+            return String::new();
+        }
+        let total = self.next.len() + self.next_omitted_count.unwrap_or(0);
+        let (noun, verb) = if total == 1 {
+            ("constructor", "matches")
+        } else {
+            ("constructors", "match")
+        };
+        let cursors: Vec<String> = self
+            .next
+            .iter()
+            .map(|action| match &action.target {
+                Some(target) => format!("{} '{}'", action.kind, target),
+                None => action.reason.clone(),
+            })
+            .collect();
+        heading(&format!(
+            "{total} {noun} also {verb}: {}",
+            cursors.join(", ")
+        ))
     }
 
     /// ANCHORS-EVERYWHERE-1 (Tier 0): the target symbol's start line from the identity
@@ -445,6 +500,8 @@ mod tests {
             limits: vec![],
             layer2_resolution: None,
             index_drift: None,
+            next: vec![],
+            next_omitted_count: None,
         }
     }
 
@@ -660,6 +717,74 @@ mod tests {
             evidence: Some(ev),
         })];
         r
+    }
+
+    fn ctor_action(cursor: &str, type_name: &str) -> crate::presentation::orient_types::NextAction {
+        crate::presentation::orient_types::NextAction {
+            kind: "explain".to_string(),
+            repo: "test-repo".to_string(),
+            target: Some(cursor.to_string()),
+            reason: format!("constructor of {type_name}"),
+        }
+    }
+
+    #[test]
+    fn render_constructor_also_matches_counted_line_singular() {
+        // CPP-DECLARATORS-1 §2.3 (review-4 #4): ONE constructor rides on `next` → the ratified
+        // SINGLE-LINE form "1 constructor also matches: explain '<cursor>'" — count and the
+        // runnable cursor on ONE line (operator ruling: never hidden).
+        let mut r = symbol_target(Some(55));
+        r.next = vec![ctor_action(
+            "CGHeroInstance::CGHeroInstance",
+            "CGHeroInstance",
+        )];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("1 constructor also matches: explain 'CGHeroInstance::CGHeroInstance'"),
+            "ratified single-line form (count + quoted runnable cursor):\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_constructor_also_matches_counted_line_plural() {
+        // CPP-DECLARATORS-1 §2.3 (review-4 #4): TWO constructors → the line pluralizes to
+        // "2 constructors also match:" and BOTH cursors render on the same line (never hidden).
+        let mut r = symbol_target(Some(55));
+        r.next = vec![
+            ctor_action("Widget::Widget", "Widget"),
+            ctor_action("Widget::Widget", "Widget"),
+        ];
+        let out = r.render_human(false);
+        assert!(
+            out.contains(
+                "2 constructors also match: explain 'Widget::Widget', explain 'Widget::Widget'"
+            ),
+            "plural single-line form with both cursors:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_constructor_counted_line_reports_omitted_total() {
+        // review-4 #4: the count is the TRUE total — one rendered cursor plus two the budget
+        // dropped → "3 constructors also match:", with the one available cursor on the line.
+        let mut r = symbol_target(Some(55));
+        r.next = vec![ctor_action("Widget::Widget", "Widget")];
+        r.next_omitted_count = Some(2);
+        let out = r.render_human(false);
+        assert!(
+            out.contains("3 constructors also match: explain 'Widget::Widget'"),
+            "count = rendered + omitted, with the available cursor shown:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_no_next_omits_also_matches_section() {
+        // Every non-collapse explain answer has an empty `next` ⇒ no section (byte-identical).
+        let out = symbol_target(Some(55)).render_human(false);
+        assert!(
+            !out.contains("Also matches"),
+            "empty next ⇒ no section:\n{out}"
+        );
     }
 
     #[test]

@@ -667,27 +667,48 @@ impl StorageConnection {
         let by_qn = self
             .query_symbols_by_field(snapshot_uid, "qualified_name", query)
             .map_err(SymbolResolveError::Storage)?;
-        if by_qn.len() == 1 {
-            return Ok(by_qn.into_iter().next().unwrap());
-        }
-        if by_qn.len() > 1 {
-            let keys: Vec<String> = by_qn.iter().map(|s| s.stable_key.clone()).collect();
-            return Err(SymbolResolveError::Ambiguous(keys));
+        if let Some(r) = Self::pick_definition(by_qn) {
+            return r;
         }
 
         // Step 3: exact name.
         let by_name = self
             .query_symbols_by_field(snapshot_uid, "name", query)
             .map_err(SymbolResolveError::Storage)?;
-        if by_name.len() == 1 {
-            return Ok(by_name.into_iter().next().unwrap());
-        }
-        if by_name.len() > 1 {
-            let keys: Vec<String> = by_name.iter().map(|s| s.stable_key.clone()).collect();
-            return Err(SymbolResolveError::Ambiguous(keys));
+        if let Some(r) = Self::pick_definition(by_name) {
+            return r;
         }
 
         Err(SymbolResolveError::NotFound)
+    }
+
+    /// CPP-DECLARATORS-1 §2.3: choose the DEFINITION from a field-lookup result set,
+    /// filtering bodiless declarations BEFORE the singleton test. `None` when the set is
+    /// EMPTY (the caller falls through to the next resolution step). Otherwise: drop
+    /// forward-decl rows; if any DEFINITION remains, a lone one resolves and >1 is
+    /// `Ambiguous`; if EVERY row is a declaration (no definition indexed), fall back to the
+    /// full set so a lone prototype still resolves (and N pure decls stay `Ambiguous`,
+    /// honest). For non-C++ languages every `forward_decl` is `false`, so this is exactly
+    /// the previous len()==1 / >1 behavior — byte-identical.
+    fn pick_definition(
+        rows: Vec<(ResolvedSymbol, bool)>,
+    ) -> Option<Result<ResolvedSymbol, SymbolResolveError>> {
+        if rows.is_empty() {
+            return None;
+        }
+        let has_def = rows.iter().any(|(_, decl)| !*decl);
+        let mut pool: Vec<ResolvedSymbol> = rows
+            .into_iter()
+            .filter(|(_, decl)| !has_def || !*decl)
+            .map(|(sym, _)| sym)
+            .collect();
+        match pool.len() {
+            1 => Some(Ok(pool.pop().unwrap())),
+            _ => {
+                let keys: Vec<String> = pool.into_iter().map(|s| s.stable_key).collect();
+                Some(Err(SymbolResolveError::Ambiguous(keys)))
+            }
+        }
     }
 
     /// Find direct callers of a symbol (one hop).
@@ -3035,15 +3056,21 @@ impl StorageConnection {
         }
     }
 
+    /// Rows for a field lookup, each paired with its `forward_decl` flag (CPP-DECLARATORS-1
+    /// §2.3, read from `metadata_json`). `resolve_symbol` filters out declarations BEFORE
+    /// the singleton test, so a class declared 70× + defined once resolves to its
+    /// definition and a header method prototype no longer makes `explain`/`callers`
+    /// ambiguous. `forward_decl` is `false` for every non-C++ node (their extractors set
+    /// no such key), so this is byte-identical for other languages.
     fn query_symbols_by_field(
         &self,
         snapshot_uid: &str,
         field: &str,
         value: &str,
-    ) -> Result<Vec<ResolvedSymbol>, StorageError> {
+    ) -> Result<Vec<(ResolvedSymbol, bool)>, StorageError> {
         let sql = format!(
             "SELECT n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
-			        f.path, n.line_start, n.col_start
+			        f.path, n.line_start, n.col_start, n.metadata_json
 			 FROM nodes n
 			 LEFT JOIN files f ON n.file_uid = f.file_uid
 			 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' AND n.{} = ?
@@ -3052,16 +3079,20 @@ impl StorageConnection {
         );
         let mut stmt = self.connection().prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params![snapshot_uid, value], |row| {
-            Ok(ResolvedSymbol {
-                stable_key: row.get(0)?,
-                name: row.get(1)?,
-                qualified_name: row.get(2)?,
-                kind: row.get(3)?,
-                subtype: row.get(4)?,
-                file: row.get(5)?,
-                line: row.get(6)?,
-                column: row.get(7)?,
-            })
+            let metadata_json: Option<String> = row.get(8)?;
+            Ok((
+                ResolvedSymbol {
+                    stable_key: row.get(0)?,
+                    name: row.get(1)?,
+                    qualified_name: row.get(2)?,
+                    kind: row.get(3)?,
+                    subtype: row.get(4)?,
+                    file: row.get(5)?,
+                    line: row.get(6)?,
+                    column: row.get(7)?,
+                },
+                repo_graph_indexer::resolver::metadata_forward_decl(metadata_json.as_deref()),
+            ))
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
@@ -3812,6 +3843,125 @@ mod tests {
         let sym = result.unwrap();
         assert_eq!(sym.name, "serve");
         assert_eq!(sym.kind, "SYMBOL");
+    }
+
+    // ── CPP-DECLARATORS-1 §2.3: resolve_symbol prefers definition over declaration ──
+
+    #[allow(clippy::too_many_arguments)] // a test-only node inserter mirroring the nodes
+                                         // table columns; bundling them helps nothing.
+    fn insert_typed_node(
+        storage: &StorageConnection,
+        snapshot_uid: &str,
+        node_uid: &str,
+        stable_key: &str,
+        name: &str,
+        qualified_name: &str,
+        subtype: &str,
+        metadata_json: Option<&str>,
+    ) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, \
+                    qualified_name, kind, subtype, metadata_json) \
+                 VALUES (?, ?, 'r1', ?, ?, ?, 'SYMBOL', ?, ?)",
+                rusqlite::params![
+                    node_uid,
+                    snapshot_uid,
+                    stable_key,
+                    name,
+                    qualified_name,
+                    subtype,
+                    metadata_json
+                ],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn resolve_symbol_prefers_definition_over_forward_decls() {
+        // One definition + many forward decls of the same class name → the DEFINITION
+        // resolves, not AmbiguousSymbol (the D4 `explain CGHeroInstance` 71-row fix).
+        let (storage, snap) = setup_db_with_snapshot();
+        insert_typed_node(
+            &storage,
+            &snap,
+            "def",
+            "r1:lib/CGHeroInstance.h#CGHeroInstance:SYMBOL:CLASS",
+            "CGHeroInstance",
+            "CGHeroInstance",
+            "CLASS",
+            None,
+        );
+        for i in 0..5 {
+            insert_typed_node(
+                &storage,
+                &snap,
+                &format!("decl{i}"),
+                &format!("r1:AI/f{i}.h#CGHeroInstance:SYMBOL:CLASS:dup{i}"),
+                "CGHeroInstance",
+                "CGHeroInstance",
+                "CLASS",
+                Some(r#"{"forward_decl":true}"#),
+            );
+        }
+
+        // By qualified_name (step 2) and by short name (step 3) both land on the def.
+        let by_qn = storage.resolve_symbol(&snap, "CGHeroInstance").unwrap();
+        assert_eq!(
+            by_qn.stable_key,
+            "r1:lib/CGHeroInstance.h#CGHeroInstance:SYMBOL:CLASS"
+        );
+    }
+
+    #[test]
+    fn resolve_symbol_two_definitions_stay_ambiguous() {
+        // Two genuine definitions (no decl) → still AmbiguousSymbol (honest).
+        let (storage, snap) = setup_db_with_snapshot();
+        insert_typed_node(
+            &storage,
+            &snap,
+            "d1",
+            "r1:a.h#Foo:SYMBOL:CLASS",
+            "Foo",
+            "Foo",
+            "CLASS",
+            None,
+        );
+        insert_typed_node(
+            &storage,
+            &snap,
+            "d2",
+            "r1:b.h#Foo:SYMBOL:CLASS",
+            "Foo",
+            "Foo",
+            "CLASS",
+            None,
+        );
+        let result = storage.resolve_symbol(&snap, "Foo");
+        assert!(
+            matches!(result, Err(SymbolResolveError::Ambiguous(_))),
+            "two definitions stay ambiguous: {result:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_symbol_lone_declaration_still_resolves() {
+        // A symbol with ONLY a forward declaration (no definition indexed) still resolves
+        // to its lone declaration rather than NotFound.
+        let (storage, snap) = setup_db_with_snapshot();
+        insert_typed_node(
+            &storage,
+            &snap,
+            "only",
+            "r1:x.h#Opaque:SYMBOL:CLASS",
+            "Opaque",
+            "Opaque",
+            "CLASS",
+            Some(r#"{"forward_decl":true}"#),
+        );
+        let result = storage.resolve_symbol(&snap, "Opaque").unwrap();
+        assert_eq!(result.stable_key, "r1:x.h#Opaque:SYMBOL:CLASS");
     }
 
     // ── FILE name must NOT resolve through step 3 ───────────────

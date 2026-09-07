@@ -23,13 +23,16 @@ use repo_graph_gate::GateStorageRead;
 
 use crate::confidence::derive_repo_confidence;
 use crate::dto::budget::Budget;
-use crate::dto::envelope::{Confidence, Focus, OrientResult, EXPLAIN_COMMAND, ORIENT_SCHEMA};
+use crate::dto::envelope::{
+    Confidence, Focus, NextAction, NextKind, OrientResult, EXPLAIN_COMMAND, ORIENT_SCHEMA,
+};
 use crate::dto::signal::*;
 use crate::errors::{AgentStorageError, ExplainError};
 use crate::ordering;
 use crate::ranking;
 use crate::storage_port::{
-    AgentCancelCheck, AgentReliabilityLevel, AgentSnapshot, AgentStorageRead, AgentSymbolContext,
+    AgentCancelCheck, AgentFocusCandidate, AgentReliabilityLevel, AgentSnapshot, AgentStorageRead,
+    AgentSymbolContext,
 };
 
 /// Items cap per budget tier (medium minimum, large optional).
@@ -205,6 +208,59 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     }
                 }
                 _ => {
+                    // CPP-DECLARATORS-1 §2.3 (AMENDED 2026-09-07): when the surviving
+                    // candidates are exactly ONE type (class/struct/enum/interface) plus
+                    // constructor(s) of that type, a bare-name query resolves to the TYPE — a
+                    // bare name means the type in every language's model, and constructors are
+                    // named after it. The constructor cursor(s) are surfaced in `next` so a
+                    // constructor query is never HIDDEN (operator ruling
+                    // `cpp_decl_explain_constructor_collision`). Any other mixed candidate set
+                    // stays honestly ambiguous.
+                    if let Some((type_candidate, constructors)) =
+                        classify_type_constructor_collision(
+                            storage,
+                            snapshot_uid,
+                            target,
+                            &symbol_candidates,
+                        )?
+                    {
+                        if let Some(ctx) =
+                            storage.get_symbol_context(snapshot_uid, &type_candidate.stable_key)?
+                        {
+                            let mut result = explain_symbol(
+                                storage,
+                                &repo.name,
+                                &snapshot,
+                                &type_candidate.stable_key,
+                                &ctx,
+                                target,
+                                budget,
+                                now,
+                                cancel,
+                            )?;
+                            // Surface the constructor cursor(s) as `next` actions —
+                            // `explain_symbol` leaves `next` empty, so this is the sole writer.
+                            let cap = budget.max_next();
+                            let total = constructors.len();
+                            let mut actions: Vec<NextAction> = constructors
+                                .into_iter()
+                                .take(cap)
+                                .map(|hint| NextAction {
+                                    kind: NextKind::Explain,
+                                    repo: repo.name.clone(),
+                                    target: Some(hint.cursor),
+                                    // The counted "N constructor(s) also match" framing is added
+                                    // by the renderer; the per-cursor reason just names the owner.
+                                    reason: format!("constructor of {}", hint.type_name),
+                                })
+                                .collect();
+                            let omitted = total.saturating_sub(actions.len());
+                            result.next.append(&mut actions);
+                            result.next_truncated = Some(omitted > 0);
+                            result.next_omitted_count = (omitted > 0).then_some(omitted);
+                            return Ok(result);
+                        }
+                    }
                     // Ambiguous — return candidates.
                     let focus_candidates = symbol_candidates
                         .into_iter()
@@ -242,6 +298,106 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
             }
         }
     }
+}
+
+/// CPP-DECLARATORS-1 §2.3 (2026-09-07): a constructor cursor surfaced in `next` when a bare
+/// name resolved to its type. `cursor` is the `explain` target (the constructor's qualified
+/// name, or its stable key when unqualified); `type_name` names the owning type in the reason.
+struct ConstructorHint {
+    cursor: String,
+    type_name: String,
+}
+
+/// Is this a subtype that a bare name denotes directly (a TYPE)? Constructors are named after
+/// their type, so a bare-name query means the TYPE, not its constructor.
+fn is_type_subtype(subtype: &str) -> bool {
+    matches!(subtype, "CLASS" | "STRUCT" | "ENUM" | "INTERFACE" | "TRAIT")
+}
+
+/// CPP-DECLARATORS-1 §2.3 (AMENDED 2026-09-07): detect the "one type + its constructor(s)"
+/// candidate set. Returns `Some((type_candidate, constructor_hints))` iff the surviving
+/// candidates are EXACTLY one TYPE plus one-or-more CONSTRUCTORs of that type (nothing else),
+/// so a bare-name query resolves to the type while the constructor cursors stay visible. Any
+/// other mix (two types, a type + an unrelated function, a lone constructor) returns `None`
+/// and stays honestly ambiguous — this is the ratified collapse, NOT a general heuristic.
+///
+/// Classification uses each candidate's stored `subtype`/`qualified_name` (via
+/// `get_symbol_context`). If ANY candidate's context is missing, returns `None` (cannot
+/// classify safely → stay ambiguous).
+///
+/// review-3 #4 — the collapse is now proof-only, never inference:
+///   1. Completeness. `candidates` came through the `LIMIT 5` window of `resolve_symbol_name`;
+///      an unseen 6th exact-name definition could make a truncated `{type + constructors}` set
+///      look unambiguous. We require the UNCAPPED definition count for `name`
+///      (`count_symbol_definitions_by_name`) to equal the number of candidates classified — so a
+///      truncated window can NEVER satisfy the rule. Unknown count (adapter without the method)
+///      ⇒ stay ambiguous.
+///   2. Membership. Every constructor must carry a qualified name whose container equals the
+///      type's qualified name. A constructor (or the type) with NO qualified name is not proof of
+///      membership — it is an inference — so it now stays ambiguous instead of being accepted.
+fn classify_type_constructor_collision<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    name: &str,
+    candidates: &[AgentFocusCandidate],
+) -> Result<Option<(AgentFocusCandidate, Vec<ConstructorHint>)>, AgentStorageError> {
+    let mut the_type: Option<(AgentFocusCandidate, AgentSymbolContext)> = None;
+    let mut constructors: Vec<(AgentFocusCandidate, AgentSymbolContext)> = Vec::new();
+
+    for cand in candidates {
+        let Some(ctx) = storage.get_symbol_context(snapshot_uid, &cand.stable_key)? else {
+            return Ok(None); // Cannot classify one candidate → stay ambiguous.
+        };
+        let Some(subtype) = ctx.subtype.as_deref() else {
+            return Ok(None); // No subtype → not a type/constructor pattern.
+        };
+        if is_type_subtype(subtype) {
+            if the_type.is_some() {
+                return Ok(None); // More than one TYPE → genuinely ambiguous.
+            }
+            the_type = Some((cand.clone(), ctx));
+        } else if subtype == "CONSTRUCTOR" {
+            constructors.push((cand.clone(), ctx));
+        } else {
+            return Ok(None); // A non-type, non-constructor candidate → ambiguous.
+        }
+    }
+
+    let (Some((type_candidate, type_ctx)), false) = (the_type, constructors.is_empty()) else {
+        return Ok(None); // Need exactly one type AND at least one constructor.
+    };
+
+    // Completeness: the classified candidates must be the WHOLE definition universe for `name`.
+    // `resolve_symbol_name` capped at 5 and dropped forward declarations; if the uncapped
+    // definition count exceeds what we saw, the window hid a definition ⇒ cannot prove "exactly"
+    // ⇒ stay ambiguous. Unknown count (default-`None` adapter) is also unproven ⇒ ambiguous.
+    match storage.count_symbol_definitions_by_name(snapshot_uid, name)? {
+        Some(total) if total == candidates.len() as u64 => {}
+        _ => return Ok(None),
+    }
+
+    // Membership by PROOF: the type has a qualified name, and each constructor's container (its
+    // qualified name minus the trailing `::<name>`) equals it. Any missing qualified name, or a
+    // container that does not match, is not proof of membership → stay ambiguous.
+    let Some(type_qn) = type_ctx.qualified_name.as_deref() else {
+        return Ok(None); // No type qualified name → cannot prove any constructor belongs to it.
+    };
+    let mut hints = Vec::with_capacity(constructors.len());
+    for (_ctor_cand, ctor_ctx) in constructors {
+        let Some(ctor_qn) = ctor_ctx.qualified_name.as_deref() else {
+            return Ok(None); // Constructor without a qualified name → membership unproven.
+        };
+        match ctor_qn.rsplit_once("::") {
+            Some((container, _)) if container == type_qn => {}
+            _ => return Ok(None), // Constructor of a DIFFERENT type (or unqualified) → ambiguous.
+        }
+        hints.push(ConstructorHint {
+            cursor: ctor_qn.to_string(),
+            type_name: type_ctx.name.clone(),
+        });
+    }
+
+    Ok(Some((type_candidate, hints)))
 }
 
 fn extract_path_from_candidate(

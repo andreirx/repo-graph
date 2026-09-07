@@ -965,19 +965,32 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         name: &str,
     ) -> Result<Vec<AgentFocusCandidate>, AgentStorageError> {
+        // CPP-DECLARATORS-1 §2.3: `explain` resolves through THIS method (agent focus
+        // resolution), NOT `queries::resolve_symbol` — the root-cause D4(d) named the
+        // wrong site; §H(A) had it right (`agent_impl` `n.name = ?`). So the forward-decl
+        // preference must apply here too, or `explain CGHeroInstance` stays 71-way
+        // ambiguous. `fd` (a bodiless DECLARATION) is read from `metadata_json.forward_decl`
+        // via SQLite JSON1; DEFINITIONS are ordered first so the LIMIT window contains them
+        // (69 forward decls would otherwise crowd out the one definition), then declarations
+        // are dropped in Rust whenever any definition survived. `fd` is 0 for every non-C++
+        // node (their extractors set no such key), so this is byte-identical for other
+        // languages. The residual class-vs-constructor short-name collision (both real
+        // definitions) stays honestly ambiguous — the "unique non-decl wins" rule yields no
+        // unique winner, which is the correct outcome, not a heuristic (spec §3).
         let conn = self.connection();
         let mut stmt = conn
             .prepare(
-                "SELECT n.stable_key, n.kind, f.path, n.line_start \
+                "SELECT n.stable_key, n.kind, f.path, n.line_start, \
+				        COALESCE(json_extract(n.metadata_json, '$.forward_decl'), 0) AS fd \
 				 FROM nodes n \
 				 LEFT JOIN files f ON n.file_uid = f.file_uid \
 				 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' AND n.name = ? \
-				 ORDER BY n.stable_key ASC \
+				 ORDER BY fd ASC, n.stable_key ASC \
 				 LIMIT 5",
             )
             .map_err(map_err("resolve_symbol_name"))?;
 
-        let rows = stmt
+        let rows: Vec<(AgentFocusCandidate, bool)> = stmt
             .query_map(rusqlite::params![snapshot_uid, name], |row| {
                 let sk: String = row.get(0)?;
                 let _kind_str: String = row.get(1)?;
@@ -989,17 +1002,53 @@ impl AgentStorageRead for StorageConnection {
                     .get::<_, Option<i64>>(3)?
                     .filter(|v| *v > 0)
                     .map(|v| v as u64);
-                Ok(AgentFocusCandidate {
-                    stable_key: sk,
-                    kind: AgentFocusKind::Symbol,
-                    file,
-                    line,
-                })
+                let forward_decl: i64 = row.get(4)?;
+                Ok((
+                    AgentFocusCandidate {
+                        stable_key: sk,
+                        kind: AgentFocusKind::Symbol,
+                        file,
+                        line,
+                    },
+                    forward_decl != 0,
+                ))
             })
+            .map_err(map_err("resolve_symbol_name"))?
+            .collect::<Result<Vec<_>, _>>()
             .map_err(map_err("resolve_symbol_name"))?;
 
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(map_err("resolve_symbol_name"))
+        // Drop forward declarations whenever a definition survived (definitions preferred);
+        // if EVERY candidate is a declaration (no definition indexed), keep them all so the
+        // symbol still resolves to its lone prototype rather than vanishing.
+        let has_def = rows.iter().any(|(_, fd)| !*fd);
+        Ok(rows
+            .into_iter()
+            .filter(|(_, fd)| !has_def || !*fd)
+            .map(|(c, _)| c)
+            .collect())
+    }
+
+    fn count_symbol_definitions_by_name(
+        &self,
+        snapshot_uid: &str,
+        name: &str,
+    ) -> Result<Option<u64>, AgentStorageError> {
+        // CPP-DECLARATORS-1 §2.3 (review-3 #4): the UNCAPPED count of definition SYMBOL nodes
+        // with this exact name — the same universe `resolve_symbol_name` draws its capped window
+        // from, minus the forward declarations it drops (definitions are what a bare-name query
+        // collapses onto). The type-vs-constructor collapse compares this to the candidates it
+        // classified; a larger count means the `LIMIT 5` window hid a definition ⇒ stay ambiguous.
+        let count: i64 = self
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM nodes n \
+                 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' AND n.name = ? \
+                   AND COALESCE(json_extract(n.metadata_json, '$.forward_decl'), 0) = 0",
+                rusqlite::params![snapshot_uid, name],
+                |row| row.get(0),
+            )
+            .map_err(map_err("count_symbol_definitions_by_name"))?;
+        Ok(Some(count.max(0) as u64))
     }
 
     fn get_symbol_context(

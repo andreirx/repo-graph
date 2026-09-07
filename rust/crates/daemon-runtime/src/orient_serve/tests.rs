@@ -301,6 +301,40 @@ fn parity_orient_decorator_equals_sqlite_symbol_focus() {
     );
 }
 
+/// CPP-DECLARATORS-1 §2.3 regression (constructor-collision completeness proof). The explain
+/// type-vs-constructor collapse only fires when it can prove it saw the WHOLE definition universe,
+/// via `count_symbol_definitions_by_name`. That method has a trait DEFAULT of `Ok(None)`; the
+/// `OrientServeDecorator` (which explain runs through) MUST forward it to the real adapter, or the
+/// collapse stays ambiguous forever. This was caught by the vcmi live proof: `explain
+/// CGHeroInstance` never resolved to the type until the decorator forwarded this count. This test
+/// pins the delegation so a future trait addition cannot silently drop it back to the default.
+#[test]
+fn decorator_forwards_count_symbol_definitions_by_name() {
+    use repo_graph_agent::AgentStorageRead as _;
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let epoch = green_epoch(&f.state, &f.snapshot_uid);
+    let decorator = OrientServeDecorator::new(&f.state.livegraph, &storage, &epoch);
+
+    // The count is never LiveGraph-served, so the decorator must delegate regardless of cert
+    // state. The real adapter returns `Some(count)` (a COUNT(*) is always ≥ 0); an unforwarded
+    // method would return the default `None`.
+    let via_inner = storage
+        .count_symbol_definitions_by_name(&f.snapshot_uid, "calleeFn")
+        .expect("inner count ok");
+    let via_decorator = decorator
+        .count_symbol_definitions_by_name(&f.snapshot_uid, "calleeFn")
+        .expect("decorator count ok");
+    assert!(
+        via_inner.is_some(),
+        "the real SQLite adapter answers with Some(count)"
+    );
+    assert_eq!(
+        via_decorator, via_inner,
+        "the decorator must DELEGATE the count, never fall back to the trait default Ok(None)"
+    );
+}
+
 #[test]
 fn parity_orient_decorator_equals_sqlite_repo_focus() {
     // Repo focus emits no callers/callees + no focus resolution; the decorator still produces the

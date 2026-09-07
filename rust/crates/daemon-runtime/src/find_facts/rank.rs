@@ -56,6 +56,13 @@ pub(super) struct SymbolRank<'a> {
     /// borrow); the comparator only reads its PRESENCE (`is_some`) for tie-break (c2) —
     /// it allocates nothing during the sort. The mapper clones it into the hit.
     pub evidence: Option<String>,
+    /// CPP-DECLARATORS-1 (§2.3, review-4 #4): the symbol's stored forward-decl truth-state
+    /// ([`repo_graph_storage::find_facts_reads::ForwardDeclFact`]). Both `ForwardDecl` and
+    /// (conservatively) `Unreadable` rank BELOW a definition — `decl_rank`, placed between the
+    /// evidence tie-break (c2) and qualified-name length (d), so a definition wins an
+    /// otherwise-equal tie but the state never reorders rows that already differ on (a)–(c2).
+    /// `Definition` for every non-C++ symbol → byte-identical ordering for other languages.
+    pub forward_decl: repo_graph_storage::find_facts_reads::ForwardDeclFact,
 }
 
 /// FIND-EVIDENCE-1 (§2.2): derive the single evidence line from STORED facts only — the
@@ -157,6 +164,22 @@ fn evidence_rank(evidence: &Option<String>) -> u8 {
     }
 }
 
+/// Declaration rank (CPP-DECLARATORS-1 §2.3): `0` = a definition, `1` = a bodiless
+/// declaration (forward-decl / method prototype). Lower sorts first, so a definition
+/// outranks its own forward declaration — placed AFTER the (a)–(c2) relevance dimensions,
+/// so it only decides between a definition and a declaration that are otherwise equal
+/// (a class declared 70× + defined once shows the definition first). `Definition` everywhere
+/// for non-C++ symbols → byte-identical ordering. review-4 #4: a CORRUPT carrier
+/// (`Unreadable`) ranks like a declaration (BELOW a definition) — the conservative direction
+/// — while its NAMED degradation is surfaced separately at render (never as `(decl)`).
+fn decl_rank(forward_decl: repo_graph_storage::find_facts_reads::ForwardDeclFact) -> u8 {
+    use repo_graph_storage::find_facts_reads::ForwardDeclFact;
+    match forward_decl {
+        ForwardDeclFact::Definition => 0,
+        ForwardDeclFact::ForwardDecl | ForwardDeclFact::Unreadable => 1,
+    }
+}
+
 /// The total-order rank key for a symbol under `query`. `Ord` on the tuple encodes the
 /// rule precedence (a) → (e); lower is better. `path` maps to `(is_none, value)` so a
 /// KNOWN path sorts before an unknown/absent one, then lexicographically; `stable_key`
@@ -166,13 +189,14 @@ fn evidence_rank(evidence: &Option<String>) -> u8 {
 fn rank_key<'a>(
     s: &SymbolRank<'a>,
     query_lower: &str,
-) -> (u8, u8, u8, u8, usize, (bool, &'a str), &'a str) {
+) -> (u8, u8, u8, u8, u8, usize, (bool, &'a str), &'a str) {
     let qname_len = s.qualified_name.unwrap_or(s.name).len();
     (
         test_partition(s.is_test),
         kind_weight(s.subtype),
         match_quality(s.name, query_lower),
         evidence_rank(&s.evidence),
+        decl_rank(s.forward_decl),
         qname_len,
         (s.path.is_none(), s.path.unwrap_or("")),
         s.stable_key,
@@ -190,6 +214,7 @@ pub(super) fn sort_symbols(symbols: &mut [SymbolRank<'_>], query: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use repo_graph_storage::find_facts_reads::ForwardDeclFact;
 
     fn s<'a>(
         name: &'a str,
@@ -209,6 +234,7 @@ mod tests {
             // Default no-span / no-evidence; the evidence tie-break tests set it via `se`.
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         }
     }
 
@@ -229,6 +255,7 @@ mod tests {
             stable_key,
             line: None,
             evidence,
+            forward_decl: ForwardDeclFact::Definition,
         }
     }
 
@@ -508,6 +535,7 @@ mod tests {
             stable_key: "k_prod",
             line: None,
             evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
         };
         let test_doc = SymbolRank {
             name: "prune",
@@ -518,8 +546,42 @@ mod tests {
             stable_key: "k_test",
             line: None,
             evidence: Some("documented test helper".to_string()),
+            forward_decl: ForwardDeclFact::Definition,
         };
         assert_eq!(winner(prod_bare, test_doc, "prune"), "k_prod");
+    }
+
+    // ── CPP-DECLARATORS-1 (§2.3): definition ranks above its forward declaration ──
+
+    #[test]
+    fn definition_beats_forward_decl() {
+        // Two CLASS rows identical on (a)–(c2) and qname length; the DEFINITION
+        // (forward_decl=false) must sort before the forward declaration.
+        let def = SymbolRank {
+            name: "CGHeroInstance",
+            qualified_name: Some("CGHeroInstance"),
+            is_test: Some(false),
+            subtype: Some("CLASS"),
+            path: Some("lib/mapObjects/CGHeroInstance.h"),
+            stable_key: "k_def",
+            line: Some(55),
+            evidence: None,
+            forward_decl: ForwardDeclFact::Definition,
+        };
+        let decl = SymbolRank {
+            name: "CGHeroInstance",
+            qualified_name: Some("CGHeroInstance"),
+            is_test: Some(false),
+            subtype: Some("CLASS"),
+            // A path that sorts BEFORE the def's path, to prove decl_rank (c3) decides
+            // BEFORE the path tiebreak (e) — the def wins despite the later path.
+            path: Some("AI/decl.h"),
+            stable_key: "k_decl",
+            line: Some(1),
+            evidence: None,
+            forward_decl: ForwardDeclFact::ForwardDecl,
+        };
+        assert_eq!(winner(def, decl, "CGHeroInstance"), "k_def");
     }
 
     // ── (d) shorter qualified name before longer ──────────────────────────────────

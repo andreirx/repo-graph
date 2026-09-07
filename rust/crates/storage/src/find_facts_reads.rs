@@ -37,6 +37,65 @@
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
 
+/// CPP-DECLARATORS-1 (§2.3, review-4 #4): the RENDER-path projection of a symbol's stored
+/// `metadata_json.forward_decl` truth-state, carried storage → daemon → wire → renderer.
+///
+/// A raw boundary DTO, defined HERE (storage) rather than reusing the indexer
+/// `ForwardDeclRead`, because `daemon-runtime` has NO production dependency on the indexer
+/// crate (it is dev-only there — see `daemon-runtime/src/module_summary_cert/mod.rs`), so an
+/// indexer type cannot cross the storage→daemon boundary. Storage DOES prod-depend on indexer,
+/// so it maps `ForwardDeclRead` → this once, at the read.
+///
+/// Sole users: the find FACTS render chain (`FactSymbolRow` → daemon `SymbolRank`/`FactHit` →
+/// wire `FindFactHit` → rgr `fact_hit`). Axis: the 3 truth-states of a stored forward-decl
+/// carrier, kept DISTINCT through render so a CORRUPT carrier is a NAMED degradation, never a
+/// silent `(decl)` (STANDING HONESTY RULE 1). Rejected simpler: a `bool` (cannot represent
+/// `Unreadable` — the honesty defect itself) and putting `ForwardDeclRead` on the wire (would
+/// force a new daemon→indexer prod-dep edge — a boundary-touching change).
+///
+/// Serialization keeps the wire byte-identical for clean data: `Definition` skip-serializes
+/// (absent), `ForwardDecl` → JSON `true` (unchanged), and only a genuinely corrupt carrier
+/// emits the NAMED `"unreadable"` string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardDeclFact {
+    /// No carrier / valid JSON without the key / `forward_decl: false` — a definition.
+    Definition,
+    /// `forward_decl: true` — a bodiless declaration; renders `(decl)`.
+    ForwardDecl,
+    /// The carrier was PRESENT but UNREADABLE (unparseable JSON, or a non-boolean value) —
+    /// a NAMED error, never treated as a definition NOR silently rendered `(decl)`.
+    Unreadable,
+}
+
+impl ForwardDeclFact {
+    /// Map the indexer's classification to the render-path projection (identity on variants).
+    pub fn from_read(read: repo_graph_indexer::resolver::ForwardDeclRead) -> Self {
+        use repo_graph_indexer::resolver::ForwardDeclRead;
+        match read {
+            ForwardDeclRead::Definition => ForwardDeclFact::Definition,
+            ForwardDeclRead::ForwardDecl => ForwardDeclFact::ForwardDecl,
+            ForwardDeclRead::Unreadable => ForwardDeclFact::Unreadable,
+        }
+    }
+
+    /// Skip predicate: the common `Definition` case is absent on the wire (byte-stable).
+    pub fn is_definition(&self) -> bool {
+        matches!(self, ForwardDeclFact::Definition)
+    }
+}
+
+impl serde::Serialize for ForwardDeclFact {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            // `Definition` is skip-serialized by the DTO (`is_definition`); should it ever be
+            // serialized directly it is the honest `false`, never a fabricated decl.
+            ForwardDeclFact::Definition => serializer.serialize_bool(false),
+            ForwardDeclFact::ForwardDecl => serializer.serialize_bool(true),
+            ForwardDeclFact::Unreadable => serializer.serialize_str("unreadable"),
+        }
+    }
+}
+
 /// One matched SYMBOL node (fact class `symbol`, rendered by `explain`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactSymbolRow {
@@ -72,6 +131,14 @@ pub struct FactSymbolRow {
     /// FIND-EVIDENCE-1 (§2.2): the symbol's stored signature (`nodes.signature`) — the
     /// evidence line's FALLBACK when no doc-comment is stored. `None` when unstored.
     pub signature: Option<String>,
+    /// CPP-DECLARATORS-1 (§2.3, review-4 #4): the symbol's stored `metadata_json.forward_decl`
+    /// truth-state, as the tri-state [`ForwardDeclFact`] — NOT the lossy `bool`. `Definition`
+    /// (the common case: absent key / non-C++ symbol / `false`) renders no tag; `ForwardDecl`
+    /// ranks BELOW its definition and renders `(decl)`; `Unreadable` (a CORRUPT carrier) ranks
+    /// below a definition too BUT is surfaced as a NAMED degradation at render — never silently
+    /// rendered as `(decl)` (STANDING HONESTY RULE 1). Byte-identical wire for other languages
+    /// (they are always `Definition`).
+    pub forward_decl: ForwardDeclFact,
 }
 
 /// One matched file path (fact class `file`, rendered by `explain`).
@@ -155,7 +222,7 @@ impl StorageConnection {
         let needle = like_needle(query);
         let mut stmt = self.connection().prepare(
             "SELECT n.stable_key, n.name, n.qualified_name, f.path, f.is_test, n.subtype,
-                    n.line_start, n.doc_comment, n.signature
+                    n.line_start, n.doc_comment, n.signature, n.metadata_json
              FROM nodes n
              LEFT JOIN files f ON n.file_uid = f.file_uid
              WHERE n.snapshot_uid = ?1
@@ -185,6 +252,14 @@ impl StorageConnection {
                         line: row.get(6)?,
                         doc_comment: row.get(7)?,
                         signature: row.get(8)?,
+                        // review-4 #4: classify into the tri-state (never the lossy bool
+                        // collapse) so a CORRUPT carrier reaches the renderer as `Unreadable`
+                        // and is NAMED, not silently rendered `(decl)` (STANDING HONESTY RULE 1).
+                        forward_decl: ForwardDeclFact::from_read(
+                            repo_graph_indexer::resolver::classify_forward_decl(
+                                row.get::<_, Option<String>>(9)?.as_deref(),
+                            ),
+                        ),
                     })
                 },
             )?
@@ -331,5 +406,48 @@ mod tests {
     fn bind_limit_clamps_usize_max() {
         assert_eq!(bind_limit(10), 10);
         assert_eq!(bind_limit(usize::MAX), i64::MAX);
+    }
+
+    // ── CPP-DECLARATORS-1 review-4 #4: forward-decl tri-state wire projection ──
+
+    #[test]
+    fn forward_decl_fact_maps_from_read_variant_for_variant() {
+        use repo_graph_indexer::resolver::ForwardDeclRead;
+        assert_eq!(
+            ForwardDeclFact::from_read(ForwardDeclRead::Definition),
+            ForwardDeclFact::Definition
+        );
+        assert_eq!(
+            ForwardDeclFact::from_read(ForwardDeclRead::ForwardDecl),
+            ForwardDeclFact::ForwardDecl
+        );
+        // The CORRUPT carrier is preserved as its own NAMED state — never folded into
+        // `Definition` NOR `ForwardDecl` (STANDING HONESTY RULE 1).
+        assert_eq!(
+            ForwardDeclFact::from_read(ForwardDeclRead::Unreadable),
+            ForwardDeclFact::Unreadable
+        );
+    }
+
+    #[test]
+    fn forward_decl_fact_wire_serialization_is_byte_stable_for_clean_data() {
+        // A definition serializes as `false` (and the DTO skip-serializes it — absent on the
+        // wire), a declaration as the unchanged `true`, and ONLY a corrupt carrier as the
+        // NAMED `"unreadable"` — so clean-data JSON is byte-identical to the pre-tri-state wire.
+        assert!(ForwardDeclFact::Definition.is_definition());
+        assert!(!ForwardDeclFact::ForwardDecl.is_definition());
+        assert!(!ForwardDeclFact::Unreadable.is_definition());
+        assert_eq!(
+            serde_json::to_value(ForwardDeclFact::Definition).unwrap(),
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            serde_json::to_value(ForwardDeclFact::ForwardDecl).unwrap(),
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            serde_json::to_value(ForwardDeclFact::Unreadable).unwrap(),
+            serde_json::json!("unreadable")
+        );
     }
 }

@@ -16,6 +16,7 @@ fn hit(display: &str, path: HitPath, key: Option<&str>) -> FactHit {
         next_command: None,
         line: None,
         evidence: None,
+        forward_decl: repo_graph_storage::find_facts_reads::ForwardDeclFact::Definition,
     }
 }
 

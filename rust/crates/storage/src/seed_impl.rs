@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use rusqlite::OptionalExtension;
 
 use repo_graph_seed::{
-    SeedCorpus, SeedCorpusEntry, SeedCorpusError, SeedCorpusRead, SeedVectorEntry,
+    SeedCorpus, SeedCorpusEntry, SeedCorpusError, SeedCorpusRead, SeedForwardDecl, SeedVectorEntry,
     StoredSeedVectors,
 };
 
@@ -70,7 +70,7 @@ impl SeedCorpusRead for StorageConnection {
             .prepare(
                 "SELECT n.node_uid, n.stable_key, n.file_uid, f.path, n.qualified_name, \
                         n.doc_comment, n.line_start, n.line_end, f.is_test, fv.content_hash, \
-                        n.subtype \
+                        n.subtype, n.metadata_json \
                  FROM nodes n \
                  JOIN files f ON f.file_uid = n.file_uid \
                  JOIN file_versions fv \
@@ -86,6 +86,7 @@ impl SeedCorpusRead for StorageConnection {
         let rows = stmt
             .query_map(rusqlite::params![snapshot_uid, snapshot_uid], |row| {
                 let is_test_i: i64 = row.get(8)?;
+                let metadata_json: Option<String> = row.get(11)?;
                 Ok(SeedCorpusEntry {
                     node_uid: row.get(0)?,
                     stable_key: row.get(1)?,
@@ -98,6 +99,24 @@ impl SeedCorpusRead for StorageConnection {
                     is_test: is_test_i != 0,
                     content_hash: row.get(9)?,
                     subtype: row.get(10)?,
+                    // CPP-DECLARATORS-1 (§2.3): carry the 3-state read across the seed boundary.
+                    // A CORRUPT carrier must NOT collapse to `ForwardDecl` (the lossy
+                    // `metadata_forward_decl` bool did exactly that: Unreadable→true→`(decl)`,
+                    // review-5 item 2). Map the indexer's `ForwardDeclRead` (storage depends on
+                    // both crates — no new edge) to the seed-local `SeedForwardDecl`.
+                    forward_decl: match repo_graph_indexer::resolver::classify_forward_decl(
+                        metadata_json.as_deref(),
+                    ) {
+                        repo_graph_indexer::resolver::ForwardDeclRead::Definition => {
+                            SeedForwardDecl::Definition
+                        }
+                        repo_graph_indexer::resolver::ForwardDeclRead::ForwardDecl => {
+                            SeedForwardDecl::ForwardDecl
+                        }
+                        repo_graph_indexer::resolver::ForwardDeclRead::Unreadable => {
+                            SeedForwardDecl::Unreadable
+                        }
+                    },
                 })
             })
             .map_err(|e| SeedCorpusError::Read(e.to_string()))?;

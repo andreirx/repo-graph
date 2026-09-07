@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::hash::content_hash;
-use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedVectorEntry};
+use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedForwardDecl, SeedVectorEntry};
 use std::collections::HashMap;
 
 /// A fake embedder: returns a fixed 2-dim vector per input and records the docs it
@@ -56,6 +56,7 @@ fn chunk(
         line_end,
         is_test,
         content_hash: hash.to_string(),
+        forward_decl: SeedForwardDecl::Definition,
     }
 }
 
@@ -413,6 +414,62 @@ fn corpus_cap_omits_the_remainder() {
         BuildOutcome::Built { report, .. } => {
             assert_eq!(report.admitted, 2);
             assert_eq!(report.corpus_omitted, 3);
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
+}
+
+#[test]
+fn unreadable_forward_decl_is_excluded_from_decl_tier_and_counted() {
+    // CPP-DECLARATORS-1 (§2.3) / review-5 item 2: a CORRUPT `metadata_json.forward_decl` carrier
+    // (SeedForwardDecl::Unreadable) must NEVER force `(decl)` on a TYPE chunk (the span heuristic
+    // is callable-only, so nothing else sets it). It is EXCLUDED from the decl tier (is_decl=false)
+    // and COUNTED in the report — corrupt metadata is never rendered as a positive `(decl)` fact
+    // (STANDING HONESTY RULE 1). A genuine ForwardDecl on the SAME shape still forces `(decl)`.
+    let content = "class A {};\nclass B {};\n";
+    let h = content_hash(content);
+    let good = SeedCorpusEntry {
+        subtype: Some("CLASS".to_string()),
+        forward_decl: SeedForwardDecl::ForwardDecl,
+        ..chunk("good", "src/x.cpp", &h, Some(1), Some(1), false)
+    };
+    let corrupt = SeedCorpusEntry {
+        subtype: Some("CLASS".to_string()),
+        forward_decl: SeedForwardDecl::Unreadable,
+        ..chunk("corrupt", "src/x.cpp", &h, Some(2), Some(2), false)
+    };
+    let mut files = HashMap::new();
+    files.insert("src/x.cpp".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        vec![good, corrupt],
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::Built { entries, report } => {
+            let good_row = entries
+                .iter()
+                .find(|e| e.node_uid == "good")
+                .expect("good admitted");
+            let corrupt_row = entries
+                .iter()
+                .find(|e| e.node_uid == "corrupt")
+                .expect("corrupt admitted");
+            assert!(
+                good_row.is_decl,
+                "a genuine ForwardDecl type chunk is labeled (decl)"
+            );
+            assert!(
+                !corrupt_row.is_decl,
+                "a corrupt (Unreadable) carrier is EXCLUDED from the decl tier, never (decl)"
+            );
+            assert_eq!(
+                report.forward_decl_unreadable, 1,
+                "the corrupt carrier is counted exactly once (honest degradation report)"
+            );
         }
         other => panic!("expected Built, got {other:?}"),
     }

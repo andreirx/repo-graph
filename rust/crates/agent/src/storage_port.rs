@@ -835,6 +835,25 @@ pub trait AgentStorageRead {
         name: &str,
     ) -> Result<Vec<AgentFocusCandidate>, AgentStorageError>;
 
+    /// CPP-DECLARATORS-1 §2.3 (review-3 #4): total count of DEFINITION SYMBOL nodes
+    /// (`metadata_json.forward_decl` absent/0) whose `name` matches exactly — UNCAPPED, unlike
+    /// [`resolve_symbol_name`](Self::resolve_symbol_name) which caps at 5. The type-vs-constructor
+    /// collapse must prove it saw the WHOLE definition universe: a 6th exact-name definition hidden
+    /// by that cap could make a truncated `{one type + constructors}` window resolve to a type when
+    /// the real set is ambiguous. The caller collapses ONLY when this count equals the definition
+    /// candidates it classified.
+    ///
+    /// DEFAULT `Ok(None)` = "the adapter does not implement the count" ⇒ completeness is unproven
+    /// ⇒ the caller stays ambiguous (never collapses on faith). The real SQLite adapter overrides
+    /// with a `COUNT(*)`.
+    fn count_symbol_definitions_by_name(
+        &self,
+        _snapshot_uid: &str,
+        _name: &str,
+    ) -> Result<Option<u64>, AgentStorageError> {
+        Ok(None)
+    }
+
     /// Get context for a resolved SYMBOL node: file, module
     /// ownership (via OWNS edges), name, subtype, line_start.
     fn get_symbol_context(

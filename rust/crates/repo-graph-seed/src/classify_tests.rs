@@ -115,19 +115,24 @@ fn other_language_has_no_per_symbol_rule() {
 #[test]
 fn is_declaration_true_for_bodyless_callable_signatures() {
     assert!(
-        is_declaration("t.rs", Some("METHOD"), "fn foo(&self) -> u32;"),
+        is_declaration("t.rs", Some("METHOD"), "fn foo(&self) -> u32;", false),
         "rust trait method decl"
     );
     assert!(
-        is_declaration("db.h", Some("METHOD"), "virtual void Foo(int) = 0;"),
+        is_declaration("db.h", Some("METHOD"), "virtual void Foo(int) = 0;", false),
         "c++ pure virtual"
     );
     assert!(
-        is_declaration("db.h", Some("FUNCTION"), "void DoThing(const Slice& key);"),
+        is_declaration(
+            "db.h",
+            Some("FUNCTION"),
+            "void DoThing(const Slice& key);",
+            false
+        ),
         "c/c++ prototype"
     );
     assert!(
-        is_declaration("t.ts", Some("METHOD"), "bar(x: number): void;"),
+        is_declaration("t.ts", Some("METHOD"), "bar(x: number): void;", false),
         "ts interface member"
     );
 }
@@ -135,14 +140,15 @@ fn is_declaration_true_for_bodyless_callable_signatures() {
 #[test]
 fn is_declaration_false_for_body_bearing_spans() {
     assert!(
-        !is_declaration("t.rs", Some("FUNCTION"), "fn foo() -> u32 { 1 }"),
+        !is_declaration("t.rs", Some("FUNCTION"), "fn foo() -> u32 { 1 }", false),
         "rust impl"
     );
     assert!(
         !is_declaration(
             "db.cc",
             Some("METHOD"),
-            "void DoThing(const Slice& k) {\n  Work();\n}"
+            "void DoThing(const Slice& k) {\n  Work();\n}",
+            false
         ),
         "c++ impl"
     );
@@ -150,7 +156,8 @@ fn is_declaration_false_for_body_bearing_spans() {
         !is_declaration(
             "t.ts",
             Some("METHOD"),
-            "bar(x: number): void {\n  this.x = x;\n}"
+            "bar(x: number): void {\n  this.x = x;\n}",
+            false
         ),
         "ts method impl"
     );
@@ -161,7 +168,12 @@ fn is_declaration_ignores_braces_in_default_args_when_commented() {
     // A body brace is required for "impl"; a `{` only inside a comment must not read as
     // a body (sanitizer blanks it).
     assert!(
-        is_declaration("db.h", Some("FUNCTION"), "void f(int x /* = Foo{} */);"),
+        is_declaration(
+            "db.h",
+            Some("FUNCTION"),
+            "void f(int x /* = Foo{} */);",
+            false
+        ),
         "a brace inside a comment is not a body"
     );
 }
@@ -174,14 +186,46 @@ fn is_declaration_false_for_non_callable_subtypes() {
     assert!(!is_declaration(
         "t.rs",
         Some("CONSTANT"),
-        "const TABLE: &str = include_str!(\"t.toml\");"
+        "const TABLE: &str = include_str!(\"t.toml\");",
+        false
     ));
-    assert!(!is_declaration("t.rs", Some("VARIABLE"), "let x = foo();"));
+    assert!(!is_declaration(
+        "t.rs",
+        Some("VARIABLE"),
+        "let x = foo();",
+        false
+    ));
     assert!(!is_declaration(
         "t.rs",
         Some("TYPE_ALIAS"),
-        "type T = fn(u32);"
+        "type T = fn(u32);",
+        false
     ));
+}
+
+#[test]
+fn is_declaration_true_for_stored_forward_decl_type() {
+    // CPP-DECLARATORS-1 §2.3: a C++ TYPE forward declaration (a non-callable subtype the
+    // span heuristic can never reach) is a `(decl)` via the stored `forward_decl` flag.
+    assert!(
+        is_declaration(
+            "lib/CGHeroInstance.h",
+            Some("CLASS"),
+            "class CGHeroInstance;",
+            true
+        ),
+        "a stored forward_decl type chunk is a declaration"
+    );
+    // The definition of the SAME type (forward_decl = false) is NOT a declaration.
+    assert!(
+        !is_declaration(
+            "lib/CGHeroInstance.h",
+            Some("CLASS"),
+            "class CGHeroInstance { int x; };",
+            false
+        ),
+        "the definition is not a declaration"
+    );
 }
 
 #[test]
@@ -191,12 +235,14 @@ fn is_declaration_false_for_no_brace_language() {
     assert!(!is_declaration(
         "m.py",
         Some("FUNCTION"),
-        "def foo():\n    return 1"
+        "def foo():\n    return 1",
+        false
     ));
     assert!(!is_declaration(
         "m.py",
         Some("VARIABLE"),
-        "v = embed(batch)"
+        "v = embed(batch)",
+        false
     ));
 }
 
@@ -463,10 +509,15 @@ fn raw_string_body_brace_is_not_a_decl_body() {
     // still a declaration. (Extension picks the syntax family; the brace is structural.)
     let span = "fn proto(msg: &str = r#\"note { not a body }\"#);";
     assert!(
-        is_declaration("src/api.rs", Some("FUNCTION"), span),
+        is_declaration("src/api.rs", Some("FUNCTION"), span, false),
         "a brace inside a raw string is literal, not a real body — still a decl"
     );
     // And a real body still reads as an implementation.
     let impl_span = "fn real() -> u32 { 1 }";
-    assert!(!is_declaration("src/api.rs", Some("FUNCTION"), impl_span));
+    assert!(!is_declaration(
+        "src/api.rs",
+        Some("FUNCTION"),
+        impl_span,
+        false
+    ));
 }
