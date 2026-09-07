@@ -289,6 +289,11 @@ impl ExtractorPort for TsExtractor {
         // call extraction above.
         collect_dynamic_imports(&root, src, &mut ctx.import_observations);
 
+        // DEPS-CLASSIFIER-1B §2.2 item 2: a self-contained full-AST walk for CommonJS
+        // `const x = require('literal')` bindings (they can appear anywhere). Additive — emits only
+        // ImportBindings, the identifier→specifier fact the classifier uses to attribute later calls.
+        collect_require_bindings(&root, src, &mut ctx.import_bindings);
+
         Ok(ExtractionResult {
             nodes: ctx.nodes,
             edges: ctx.edges,
@@ -1398,13 +1403,36 @@ fn extract_import(
         location: Some(location),
     });
 
-    // EDGE (unchanged): only a relative + resolved import produces an IMPORTS edge.
-    let resolved_path = match resolved_path {
-        Some(p) => p,
-        None => return,
+    // EDGE. A relative import that RESOLVED to a file produces a resolved file→file IMPORTS edge
+    // (unchanged, target_key = `repo:path:FILE`). DEPS-CLASSIFIER-1B §2.2: a bare (non-relative)
+    // package import that is NOT type-only ALSO produces an IMPORTS edge whose target_key is the RAW
+    // specifier (`storybook/test`, `@storybook/react`) with NO resolvedPath. It cannot resolve to a
+    // file (node_modules is not indexed), so the resolver routes it to `unresolved_edges`, where the
+    // classifier's shared head reduction (`storybook/test` → `storybook`) marks it an
+    // external-library candidate — making npm usage evidence no longer calls-only. Two shapes emit
+    // NO edge (binding-only, unchanged): a relative import the extractor could not resolve (an
+    // internal path/alias, `resolved_path == None && is_relative`), and a type-only import
+    // (`import type …`) — the latter is surfaced through its `is_type_only` binding, not a value edge.
+    let (target_key, resolved_meta): (String, Option<String>) = match resolved_path {
+        Some(p) => (format!("{}:{}:FILE", repo_uid, p), Some(p)),
+        None => {
+            // No resolved file. Emit a bare-import external-candidate edge ONLY for a plain
+            // non-relative, non-type-only, non-re-export `import`. Skip: relative imports the
+            // extractor could not resolve (internal path/alias — no external edge); type-only
+            // imports (surfaced via the binding); and `export … from` re-exports (byte-stable —
+            // a non-relative re-export emitted no edge before, and widening re-exports is out of
+            // this slice's scope).
+            if is_relative || is_type_only || is_re_export {
+                return;
+            }
+            (raw_path.to_string(), None)
+        }
     };
 
-    let target_key = format!("{}:{}:FILE", repo_uid, resolved_path);
+    let metadata_json = match &resolved_meta {
+        Some(p) => serde_json::json!({ "rawPath": raw_path, "resolvedPath": p }),
+        None => serde_json::json!({ "rawPath": raw_path }),
+    };
 
     edges.push(ExtractedEdge {
         edge_uid: uuid::Uuid::new_v4().to_string(),
@@ -1416,13 +1444,7 @@ fn extract_import(
         resolution: Resolution::Static,
         extractor: EXTRACTOR_NAME.into(),
         location: Some(location),
-        metadata_json: Some(
-            serde_json::json!({
-                "rawPath": raw_path,
-                "resolvedPath": resolved_path,
-            })
-            .to_string(),
-        ),
+        metadata_json: Some(metadata_json.to_string()),
     });
 }
 
@@ -1472,6 +1494,142 @@ fn collect_dynamic_imports(
             stack.push(child);
         }
     }
+}
+
+/// Self-contained full-AST walk for CommonJS `require('literal')` bindings (DEPS-CLASSIFIER-1B
+/// §2.2 item 2). `require` sits in the call-noise list (`is_builtin_call`) so it never produces a
+/// CALLS edge; but `const foo = require('express')` DOES introduce a binding `foo → "express"`,
+/// which is exactly the identifier→specifier fact the classifier's Rule-5b uses to attribute a
+/// later `express()` call to the `express` package (the same evidence an ES `import express from
+/// "express"` provides). Before this, CommonJS usage was invisible to deps (storybook's
+/// server-kitchen-sink `require('express'/'cors'/'morgan')`). ADDITIVE: emits bindings only; it does
+/// not touch call/import extraction, and a `require` with no string-literal argument (dynamic path)
+/// or no bound identifier (bare side-effect `require('x')`) produces nothing. Relative requires
+/// (`require('./x')`) are carried with `is_relative = true` and dropped downstream like any relative
+/// binding.
+fn collect_require_bindings(
+    root: &tree_sitter::Node,
+    source: &[u8],
+    import_bindings: &mut Vec<ImportBinding>,
+) {
+    let mut stack = vec![*root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "variable_declarator" {
+            if let Some(specifier) = require_specifier(&node, source) {
+                let location = Some(location_from_node(&node));
+                let is_relative = specifier.starts_with('.');
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    match name_node.kind() {
+                        // `const foo = require('x')` → foo binds the whole module surface.
+                        "identifier" => {
+                            let ident = name_node.utf8_text(source).unwrap_or("").to_string();
+                            if !ident.is_empty() {
+                                import_bindings.push(ImportBinding {
+                                    identifier: ident,
+                                    specifier: specifier.clone(),
+                                    is_relative,
+                                    location,
+                                    is_type_only: false,
+                                    imported_name: None,
+                                    kind: ImportKind::Default,
+                                });
+                            }
+                        }
+                        // `const { a, b: c } = require('x')` → one Named binding per destructured
+                        // property (mirrors `import { a, b as c } from "x"`).
+                        "object_pattern" => {
+                            for (ident, imported) in
+                                collect_object_pattern_bindings(&name_node, source)
+                            {
+                                import_bindings.push(ImportBinding {
+                                    identifier: ident,
+                                    specifier: specifier.clone(),
+                                    is_relative,
+                                    location,
+                                    is_type_only: false,
+                                    imported_name: imported,
+                                    kind: ImportKind::Named,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let mut c = node.walk();
+        for child in node.children(&mut c) {
+            stack.push(child);
+        }
+    }
+}
+
+/// If `declarator`'s value is `require('literal')` with EXACTLY ONE static string argument, return
+/// the quote-stripped specifier. `None` for any non-require value, a non-literal argument, or any
+/// arity other than one.
+fn require_specifier(declarator: &tree_sitter::Node, source: &[u8]) -> Option<String> {
+    let value = declarator.child_by_field_name("value")?;
+    if value.kind() != "call_expression" {
+        return None;
+    }
+    let func = value.child_by_field_name("function")?;
+    if func.utf8_text(source).map(str::trim) != Ok("require") {
+        return None;
+    }
+    let args = value.child_by_field_name("arguments")?;
+    // Require EXACTLY one static string argument. `named_child*` skips the `(`/`)`/`,` punctuation,
+    // so this rejects `require(x)` (dynamic), `require("a", "b")` and `require(mode, "x")` (multi-arg
+    // — the earlier `.find(kind == "string")` would have grabbed the string and fabricated a false
+    // binding), and `require("a" + b)` / template strings (non-`string` node). Layer 0 must not
+    // manufacture dependency evidence from a computed require (review-0 item 2).
+    if args.named_child_count() != 1 {
+        return None;
+    }
+    let arg = args.named_child(0)?;
+    if arg.kind() != "string" {
+        return None;
+    }
+    let raw = arg.utf8_text(source).ok()?;
+    Some(raw.trim_matches(|c| c == '\'' || c == '"').to_string())
+}
+
+/// Collect `(local_identifier, imported_name)` pairs from an `object_pattern` (destructuring
+/// target). `{ a }` → `("a", Some("a"))`; `{ a: b }` → `("b", Some("a"))`. Rest/other elements are
+/// ignored. Used only by [`collect_require_bindings`].
+fn collect_object_pattern_bindings(
+    pattern: &tree_sitter::Node,
+    source: &[u8],
+) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    let mut c = pattern.walk();
+    for child in pattern.children(&mut c) {
+        match child.kind() {
+            // Shorthand `{ a }`.
+            "shorthand_property_identifier_pattern" => {
+                let name = child.utf8_text(source).unwrap_or("").to_string();
+                if !name.is_empty() {
+                    out.push((name.clone(), Some(name)));
+                }
+            }
+            // Renamed `{ a: b }` — key = imported name, value = local identifier.
+            "pair_pattern" => {
+                let imported = child
+                    .child_by_field_name("key")
+                    .and_then(|k| k.utf8_text(source).ok())
+                    .map(|s| s.to_string());
+                if let Some(value) = child.child_by_field_name("value") {
+                    if value.kind() == "identifier" {
+                        let local = value.utf8_text(source).unwrap_or("").to_string();
+                        if !local.is_empty() {
+                            out.push((local, imported));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Collect local identifier names from an `import_clause` node,
@@ -2442,26 +2600,60 @@ mod tests {
     }
 
     #[test]
-    fn non_relative_import_produces_binding_only() {
+    fn bare_package_import_produces_unresolved_edge_and_binding() {
+        // DEPS-CLASSIFIER-1B §2.2 item 1 (replaces `non_relative_import_produces_binding_only`,
+        // which canonized the calls-only-evidence defect R3): a bare (non-relative) package import
+        // now emits an UNRESOLVED IMPORTS edge whose target_key is the raw specifier and whose
+        // metadata carries rawPath but NO resolvedPath — so deps usage is no longer calls-only.
         let mut ext = TsExtractor::new();
         ext.initialize().unwrap();
         let result = extract_ok(&ext, r#"import express from "express";"#, "src/app.ts");
 
-        // No IMPORTS edge (non-relative).
-        assert_eq!(result.edges.len(), 0);
+        // Exactly one IMPORTS edge, target_key = the raw specifier (unresolved external candidate).
+        assert_eq!(result.edges.len(), 1);
+        let edge = &result.edges[0];
+        assert_eq!(edge.edge_type, EdgeType::Imports);
+        assert_eq!(edge.target_key, "express");
+        let meta: serde_json::Value =
+            serde_json::from_str(edge.metadata_json.as_ref().unwrap()).unwrap();
+        assert_eq!(meta["rawPath"], "express");
+        assert!(
+            meta.get("resolvedPath").is_none(),
+            "a bare import carries no resolvedPath"
+        );
 
-        // ImportBinding still produced.
+        // ImportBinding still produced (unchanged).
         assert_eq!(result.import_bindings.len(), 1);
         assert_eq!(result.import_bindings[0].identifier, "express");
         assert_eq!(result.import_bindings[0].specifier, "express");
         assert!(!result.import_bindings[0].is_relative);
-        // Default import: imported_name is None (no specific
-        // exported symbol; the whole module surface is imported).
         assert_eq!(result.import_bindings[0].imported_name, None);
     }
 
     #[test]
-    fn type_only_import_sets_is_type_only() {
+    fn bare_subpath_and_scoped_imports_produce_unresolved_edges() {
+        // The shapes that were resolution failures (R3): a subpath (`storybook/test`) and a scoped
+        // package (`@storybook/react`) both emit an edge with target_key = the raw specifier; the
+        // downstream classifier's shared head reduction maps them to `storybook` / `@storybook/react`.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "import { test } from \"storybook/test\";\nimport { Meta } from \"@storybook/react\";",
+            "src/Button.stories.ts",
+        );
+        let targets: Vec<&str> = result
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Imports)
+            .map(|e| e.target_key.as_str())
+            .collect();
+        assert!(targets.contains(&"storybook/test"), "got {targets:?}");
+        assert!(targets.contains(&"@storybook/react"), "got {targets:?}");
+    }
+
+    #[test]
+    fn relative_type_only_import_sets_is_type_only() {
         let mut ext = TsExtractor::new();
         ext.initialize().unwrap();
         let result = extract_ok(
@@ -2472,6 +2664,106 @@ mod tests {
 
         assert_eq!(result.import_bindings.len(), 1);
         assert!(result.import_bindings[0].is_type_only);
+        // A relative import that RESOLVES still emits its (unchanged) resolved file→file edge —
+        // type-only skipping applies only to the bare/unresolved branch.
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(result.edges[0].target_key, "r1:src/types:FILE");
+    }
+
+    #[test]
+    fn bare_type_only_import_is_binding_only_no_edge() {
+        // DEPS-CLASSIFIER-1B §2.2 item 3: a type-only bare import produces a binding flagged
+        // is_type_only and NO value IMPORTS edge — the deps surface renders it via the binding as
+        // `type-only import`, never as runtime `used`.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"import type { Meta } from "@storybook/react";"#,
+            "src/Button.stories.ts",
+        );
+        assert_eq!(result.import_bindings.len(), 1);
+        assert!(result.import_bindings[0].is_type_only);
+        assert_eq!(result.import_bindings[0].specifier, "@storybook/react");
+        assert!(!result.import_bindings[0].is_relative);
+        assert_eq!(
+            result.edges.len(),
+            0,
+            "a type-only import emits no value edge"
+        );
+    }
+
+    #[test]
+    fn require_string_literal_produces_binding() {
+        // DEPS-CLASSIFIER-1B §2.2 item 2: CommonJS `const x = require('literal')` produces a binding
+        // x → "express" (the identifier→specifier fact for later call attribution). `require` itself
+        // stays in the call-noise list, so no CALLS edge to `require` is emitted.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "const express = require('express');\nconst { Router } = require('express');",
+            "server.js",
+        );
+        let express = result
+            .import_bindings
+            .iter()
+            .find(|b| b.identifier == "express")
+            .expect("express binding");
+        assert_eq!(express.specifier, "express");
+        assert!(!express.is_relative);
+        let router = result
+            .import_bindings
+            .iter()
+            .find(|b| b.identifier == "Router")
+            .expect("Router binding");
+        assert_eq!(router.specifier, "express");
+        assert_eq!(router.imported_name.as_deref(), Some("Router"));
+        // No CALLS edge to `require`.
+        assert!(
+            !result
+                .edges
+                .iter()
+                .any(|e| e.edge_type == EdgeType::Calls && e.target_key.contains("require")),
+            "require stays call-noise"
+        );
+    }
+
+    #[test]
+    fn relative_require_is_marked_relative() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, "const local = require('./local');", "server.js");
+        let b = result
+            .import_bindings
+            .iter()
+            .find(|b| b.identifier == "local")
+            .expect("local binding");
+        assert_eq!(b.specifier, "./local");
+        assert!(b.is_relative);
+    }
+
+    #[test]
+    fn dynamic_and_multi_arg_require_produce_no_binding() {
+        // review-0 item 2: `require_specifier` must match its contract — exactly one static string
+        // argument. A computed require (`require(mode)`), a multi-arg call (`require(mode, "x")` or
+        // `require("a", "b")`), and a concatenation (`require("a" + b)`) are all dynamic; none may
+        // fabricate a binding, or the deps surface reports false Layer-0 dependency evidence.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "const a = require(mode);\n\
+             const b = require(mode, \"express\");\n\
+             const c = require(\"express\", \"extra\");\n\
+             const d = require(\"a\" + b);",
+            "server.js",
+        );
+        assert!(
+            result.import_bindings.is_empty(),
+            "no dynamic/multi-arg require may produce a binding, got: {:?}",
+            result.import_bindings
+        );
     }
 
     #[test]

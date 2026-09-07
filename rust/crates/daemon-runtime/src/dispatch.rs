@@ -6968,6 +6968,7 @@ impl ServiceDispatcher {
         fn format_category(cat: DependencyCategory) -> &'static str {
             match cat {
                 DependencyCategory::DeclaredAndUsed => "declared_and_used",
+                DependencyCategory::TypeOnlyImport => "type_only_import",
                 DependencyCategory::DeclaredButUnobserved => "declared_but_unobserved",
                 DependencyCategory::ObservedButUndeclared => "observed_but_undeclared",
                 DependencyCategory::FirstPartySelf => "first_party_self",
@@ -7069,11 +7070,10 @@ impl ServiceDispatcher {
         for summary in &reconciled.summaries {
             for entry in &summary.entries {
                 if entry.package == package_query {
-                    let declared = matches!(
-                        entry.category,
-                        DependencyCategory::DeclaredAndUsed
-                            | DependencyCategory::DeclaredButUnobserved
-                    );
+                    // Single source of truth for "declared" (review-1 finding 1): a `TypeOnlyImport`
+                    // is a declared manifest dependency too, so omitting it returned `declared:
+                    // false` alongside category `"type_only_import"` — a self-contradicting fact.
+                    let declared = entry.category.is_declared_manifest_dependency();
                     module_decl_info
                         .insert(&summary.module, (declared, format_category(entry.category)));
                 }

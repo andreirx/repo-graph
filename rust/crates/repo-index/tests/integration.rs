@@ -88,13 +88,16 @@ fn index_classifier_repo_from_disk() {
     // (target file doesn't exist) so it's in edges_unresolved.
     assert_eq!(result.edges_total, 1, "edges_total");
 
-    // edges_unresolved = 5:
+    // edges_unresolved = 7 (DEPS-CLASSIFIER-1B §2.2 item 1): non-relative `import` statements now
+    // emit an UNRESOLVED external-candidate IMPORTS edge, so npm usage is no longer calls-only:
     //   - debounce() → calls_function_ambiguous_or_missing
     //   - aliased() → calls_function_ambiguous_or_missing
     //   - relatively() → calls_function_ambiguous_or_missing
     //   - mysteryFunction() → calls_function_ambiguous_or_missing
-    //   - import "./local-nonexistent" → imports_file_not_found
-    assert_eq!(result.edges_unresolved, 5, "edges_unresolved");
+    //   - import "lodash" → imports_file_not_found (classifies external_library_candidate)   [NEW]
+    //   - import "@/lib/missing" → imports_file_not_found (classifies internal via tsconfig alias) [NEW]
+    //   - import "./local-nonexistent" → imports_file_not_found (relative, resolves-then-missing)
+    assert_eq!(result.edges_unresolved, 7, "edges_unresolved");
 
     // ── Exact unresolved breakdown ───────────────────────────
     assert_eq!(
@@ -107,10 +110,60 @@ fn index_classifier_repo_from_disk() {
     );
     assert_eq!(
         result.unresolved_breakdown.get("imports_file_not_found"),
-        Some(&1),
+        // 3: the two bare imports (lodash, @/lib/missing) + the relative-missing one. The CATEGORY is
+        // imports_file_not_found for all three; their CLASSIFICATIONS differ (external / internal /
+        // internal) — asserted directly below by grouping these IMPORTS edges by classification.
+        Some(&3),
         "breakdown: {:?}",
         result.unresolved_breakdown
     );
+
+    // ── Classification of the IMPORTS edges (DEPS-CLASSIFIER-1B §2.2 item 1) ──
+    // The three `imports_file_not_found` edges do NOT share a classification, and that split is the
+    // whole point of item 1's external-candidate contract: a bare-package `import "lodash"` is an
+    // EXTERNAL library candidate (npm usage evidence, not calls-only), while the `@/lib/missing`
+    // tsconfig-alias import and the `./local-nonexistent` relative import are INTERNAL candidates.
+    // Group the IMPORTS-family edges by classification and assert the exact split, so a regression
+    // that misclassified the bare import as internal (or dropped its edge entirely) fails here.
+    {
+        use repo_graph_classification::types::{
+            UnresolvedEdgeCategory, UnresolvedEdgeClassification,
+        };
+        use repo_graph_trust::storage_port::{CountByClassificationInput, TrustStorageRead};
+
+        let rows = TrustStorageRead::count_unresolved_edges_by_classification(
+            &storage,
+            &CountByClassificationInput {
+                snapshot_uid: result.snapshot_uid.clone(),
+                filter_categories: vec![UnresolvedEdgeCategory::ImportsFileNotFound],
+            },
+        )
+        .unwrap();
+        let count_of = |c: UnresolvedEdgeClassification| -> u64 {
+            rows.iter()
+                .filter(|r| r.classification == c)
+                .map(|r| r.count)
+                .sum()
+        };
+        // Exactly one external candidate among the imports: `lodash` (the only bare declared-package
+        // specifier; the alias and relative imports are both internal).
+        assert_eq!(
+            count_of(UnresolvedEdgeClassification::ExternalLibraryCandidate),
+            1,
+            "expected `import \"lodash\"` to be the sole external_library_candidate IMPORTS edge; \
+             rows = {:?}",
+            rows
+        );
+        // Exactly two internal candidates among the imports: `@/lib/missing` (tsconfig alias) and
+        // `./local-nonexistent` (relative).
+        assert_eq!(
+            count_of(UnresolvedEdgeClassification::InternalCandidate),
+            2,
+            "expected `@/lib/missing` (alias) and `./local-nonexistent` (relative) to be the two \
+             internal_candidate IMPORTS edges; rows = {:?}",
+            rows
+        );
+    }
 
     // ── Config signals ───────────────────────────────────────
     // Verify package.json deps were resolved. Query file signals.

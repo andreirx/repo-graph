@@ -50,6 +50,20 @@
     {
       "source": "r1:src/server.ts:FILE",
       "type": "IMPORTS",
+      "target": "express",
+      "location": {
+        "lineStart": 2,
+        "colStart": 0,
+        "lineEnd": 2,
+        "colEnd": 30
+      },
+      "metadata": {
+        "rawPath": "express"
+      }
+    },
+    {
+      "source": "r1:src/server.ts:FILE",
+      "type": "IMPORTS",
       "target": "r1:src/config:FILE",
       "location": {
         "lineStart": 1,

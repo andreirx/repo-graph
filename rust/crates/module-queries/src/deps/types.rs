@@ -11,6 +11,13 @@ use serde::{Deserialize, Serialize};
 pub enum DependencyCategory {
     /// In manifest AND observed in source imports.
     DeclaredAndUsed,
+    /// DEPS-CLASSIFIER-1B §2.2 item 3: in manifest, and the ONLY evidence of use is a type-only
+    /// import (`import type … from "pkg"`) — a compile-time type reference, not a runtime
+    /// dependency. Distinct from `DeclaredAndUsed` (a value import/call proves runtime use) and from
+    /// `DeclaredButUnobserved` (no import of any kind). A package with BOTH a value use and a
+    /// type-only import is `DeclaredAndUsed` (value use wins); this reaches only otherwise-unobserved
+    /// declared packages.
+    TypeOnlyImport,
     /// In manifest but no source imports found.
     DeclaredButUnobserved,
     /// Source imports exist but not in manifest.
@@ -26,6 +33,39 @@ pub enum DependencyCategory {
     RuntimeBuiltin,
     /// External-looking specifier, classification unclear.
     UnknownExternalLike,
+}
+
+impl DependencyCategory {
+    /// True iff this category represents a package DECLARED in the manifest (regardless of how — or
+    /// whether — it is observed in source). The three declared categories are `DeclaredAndUsed`
+    /// (value use), `TypeOnlyImport` (only a compile-time `import type`), and `DeclaredButUnobserved`
+    /// (no import at all). `ObservedButUndeclared`, `FirstPartySelf`, `RuntimeBuiltin`, and
+    /// `UnknownExternalLike` are NOT manifest-declared.
+    ///
+    /// Single source of truth for "is this a declared dependency", consumed by the `deps why`
+    /// declared-status flag (`daemon-runtime/dispatch.rs`) and the secondary-ecosystem declared
+    /// total (`daemon-runtime/deps_ecosystem_presence.rs`). The match is EXHAUSTIVE with no wildcard
+    /// arm on purpose: when a future `DependencyCategory` variant is added, the compiler forces every
+    /// declared/not-declared decision to be revisited here — the safeguard whose absence let
+    /// `TypeOnlyImport` (added in DEPS-CLASSIFIER-1B increment 1) silently read as not-declared at
+    /// two inline `matches!` sites (review-1 findings 1 and 2).
+    ///
+    /// Abstraction one-liner — what: a domain predicate on the category sum; users: the `deps why`
+    /// declared flag + the ecosystem-presence declared total (two concrete callers today); axis:
+    /// which categories count as "declared", a set that just grew by one variant and will grow
+    /// again; rejected simpler alternative: two independent inline `matches!` lists — exactly what
+    /// drifted out of sync and produced both review findings.
+    pub fn is_declared_manifest_dependency(self) -> bool {
+        match self {
+            DependencyCategory::DeclaredAndUsed
+            | DependencyCategory::TypeOnlyImport
+            | DependencyCategory::DeclaredButUnobserved => true,
+            DependencyCategory::ObservedButUndeclared
+            | DependencyCategory::FirstPartySelf
+            | DependencyCategory::RuntimeBuiltin
+            | DependencyCategory::UnknownExternalLike => false,
+        }
+    }
 }
 
 /// One observed external reference fed to reconciliation (DEPS-CLASSIFIER-1 §2.3).
@@ -221,6 +261,12 @@ impl ModuleDependencySummary {
             .len()
     }
 
+    /// DEPS-CLASSIFIER-1B §2.2 item 3: count of declared dependencies whose only evidence of use is
+    /// a type-only import.
+    pub fn type_only_import_count(&self) -> usize {
+        self.by_category(DependencyCategory::TypeOnlyImport).len()
+    }
+
     /// Count of observed but undeclared dependencies.
     pub fn observed_but_undeclared_count(&self) -> usize {
         self.by_category(DependencyCategory::ObservedButUndeclared)
@@ -273,4 +319,39 @@ pub struct DriftEntry {
     pub import_count: usize,
     /// Hint for resolution (e.g., "likely devDependency missing").
     pub hint: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Focused regression for review-1 findings 1 & 2: a `TypeOnlyImport` IS a declared manifest
+    /// dependency. The pre-fix inline `matches!` sites in `deps why` and the ecosystem-presence total
+    /// omitted it, returning `declared: false` for a package the manifest declares and understating
+    /// an ecosystem's declared count. This pins the full declared/not-declared partition so a future
+    /// variant cannot silently regress it (the match is exhaustive; adding a variant breaks this).
+    #[test]
+    fn is_declared_manifest_dependency_partitions_categories() {
+        for declared in [
+            DependencyCategory::DeclaredAndUsed,
+            DependencyCategory::TypeOnlyImport,
+            DependencyCategory::DeclaredButUnobserved,
+        ] {
+            assert!(
+                declared.is_declared_manifest_dependency(),
+                "{declared:?} must count as a declared manifest dependency"
+            );
+        }
+        for not_declared in [
+            DependencyCategory::ObservedButUndeclared,
+            DependencyCategory::FirstPartySelf,
+            DependencyCategory::RuntimeBuiltin,
+            DependencyCategory::UnknownExternalLike,
+        ] {
+            assert!(
+                !not_declared.is_declared_manifest_dependency(),
+                "{not_declared:?} must NOT count as a declared manifest dependency"
+            );
+        }
+    }
 }

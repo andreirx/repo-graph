@@ -103,11 +103,17 @@ pub(crate) fn classify_ecosystem_presence(
     // ≥1 parsed manifest, none failed → real attribution from the ecosystem's own compose.
     match compose {
         Ok(result) => {
+            // A declared dependency is any manifest-declared category — declared+used, type-only, or
+            // declared-but-unobserved (`DependencyCategory::is_declared_manifest_dependency`). Using
+            // that single predicate (instead of summing named counts) is what fixes review-1 finding
+            // 2: the pre-fix sum omitted the type-only bucket that increment 1 split out of
+            // declared-but-unobserved, understating an "also present" ecosystem's declared count.
             let declared_dependencies: usize = result
                 .summaries
                 .iter()
-                .map(|s| s.declared_and_used_count() + s.declared_but_unobserved_count())
-                .sum();
+                .flat_map(|s| s.entries.iter())
+                .filter(|e| e.category.is_declared_manifest_dependency())
+                .count();
             EcosystemPresenceState::Attributed {
                 declared_dependencies,
                 manifests: parsed,
@@ -291,6 +297,50 @@ mod tests {
                 assert_eq!(manifests, 1);
             }
             other => panic!("expected Attributed, got a different state: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ecosystem_presence_declared_count_includes_type_only_imports() {
+        // review-1 finding 2: a declared package whose only use is a type-only import
+        // (`DependencyCategory::TypeOnlyImport`) is still a declared manifest dependency and must be
+        // counted in the "also present" ecosystem's declared total — one used + one type-only + one
+        // unobserved = 3 declared, not the pre-fix 2.
+        let entry = |package: &str, category: DependencyCategory| DependencyEntry {
+            package: package.to_string(),
+            category,
+            import_count: 0,
+            import_sites: 0,
+            dependency_class: None,
+            confidence: 1.0,
+            raw_specifiers: vec![],
+        };
+        let compose = result_of(vec![ModuleDependencySummary {
+            module: "web".into(),
+            manifest_context: ManifestContext::Parsed {
+                path: "web/package.json".into(),
+            },
+            manifest_scope_available: true,
+            entries: vec![
+                entry("react", DependencyCategory::DeclaredAndUsed),
+                entry("@types/node", DependencyCategory::TypeOnlyImport),
+                entry("eslint", DependencyCategory::DeclaredButUnobserved),
+            ],
+            rejected_non_specifier: 0,
+            declared_manifest_paths: vec![],
+        }]);
+        let state = classify_ecosystem_presence(
+            "npm",
+            200,
+            &ProvenanceRead::Tracked(vec![prov_rec("web/package.json", "web", "npm")]),
+            Ok(&compose),
+        );
+        match state {
+            EcosystemPresenceState::Attributed {
+                declared_dependencies,
+                ..
+            } => assert_eq!(declared_dependencies, 3),
+            other => panic!("expected Attributed, got: {other:?}"),
         }
     }
 

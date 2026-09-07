@@ -287,7 +287,13 @@ pub(super) fn dependencies(
         .filter(|e| {
             matches!(
                 e.category,
-                DependencyCategory::DeclaredAndUsed | DependencyCategory::DeclaredButUnobserved
+                DependencyCategory::DeclaredAndUsed
+                    // DEPS-CLASSIFIER-1B §2.2 item 3: a type-only import is still a DECLARED-manifest
+                    // dependency (the `extracted` fact this class claims); including it keeps a
+                    // package `find` returned as DeclaredButUnobserved before this slice from
+                    // silently disappearing once reclassified type-only.
+                    | DependencyCategory::TypeOnlyImport
+                    | DependencyCategory::DeclaredButUnobserved
             )
         })
         .map(|e| e.package)

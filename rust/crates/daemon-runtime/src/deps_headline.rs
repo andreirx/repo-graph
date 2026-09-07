@@ -660,6 +660,10 @@ fn module_json(s: &ModuleDependencySummary, resolution: &ResolutionState) -> ser
         "manifest_path": manifest_path,
         "manifest_scope_available": s.manifest_scope_available,
         "declared_and_used": s.declared_and_used_count(),
+        // DEPS-CLASSIFIER-1B §2.2 item 3: declared packages whose only evidence is a type-only
+        // import. Additive wire field; an older consumer that never reads it is unaffected, and the
+        // per-entry `category: "type_only_import"` carries the same fact per-row.
+        "type_only_import": s.type_only_import_count(),
         "declared_but_unobserved": s.declared_but_unobserved_count(),
         "observed_but_undeclared": s.observed_but_undeclared_count(),
         "first_party_self": s.first_party_self_count(),
@@ -684,6 +688,7 @@ fn module_json(s: &ModuleDependencySummary, resolution: &ResolutionState) -> ser
 fn format_category(cat: DependencyCategory) -> &'static str {
     match cat {
         DependencyCategory::DeclaredAndUsed => "declared_and_used",
+        DependencyCategory::TypeOnlyImport => "type_only_import",
         DependencyCategory::DeclaredButUnobserved => "declared_but_unobserved",
         DependencyCategory::ObservedButUndeclared => "observed_but_undeclared",
         DependencyCategory::FirstPartySelf => "first_party_self",

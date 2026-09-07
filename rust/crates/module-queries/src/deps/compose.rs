@@ -106,8 +106,54 @@ pub fn compose_dependency_summaries(
     // `file.toString` (a method chain — no such import) is rejected.
     let file_specifiers = build_file_specifier_sets(&import_bindings);
 
+    // §2.2 item 3: per-module set of package heads imported ONLY type-only (`import type … from
+    // "pkg"`). Reduced with the SAME ecosystem normalizer as the observed set, so the head matches a
+    // declared name; only the TS extractor sets `is_type_only`, so this is empty for non-npm views.
+    // A package that is ALSO value-imported/called is observed → reconcile never consults this set
+    // for it (it takes the observed branch). Relative/local type-only specifiers reduce to a
+    // non-`Package` kind and are dropped.
+    let mut module_type_only_heads: HashMap<String, HashSet<String>> = HashMap::new();
+    for b in &import_bindings {
+        if !b.is_type_only {
+            continue;
+        }
+        let Some(&module_uid) = file_to_module_uid.get(b.file_uid.as_str()) else {
+            continue;
+        };
+        let Some(&module) = uid_to_module.get(module_uid) else {
+            continue;
+        };
+        if let super::classify::ObservedKind::Package { package } =
+            super::classify::classify_observed(
+                &b.specifier,
+                &input.ecosystem,
+                &input.runtime_builtins,
+            )
+        {
+            module_type_only_heads
+                .entry(module.canonical_root_path.clone())
+                .or_default()
+                .insert(package);
+        }
+    }
+
     // 4. Load package dependencies from file_signals.
     let package_deps = storage.get_package_dependencies_for_snapshot(input.snapshot_uid)?;
+
+    // Ecosystem declared-module key prefix (DEPS-ATTRIB-2): npm→`npm:`, cargo→`cargo:`,
+    // python→`pyproject:`, java→`gradle:`; `None` for `none-detected`/unknown (every module
+    // included, no prefix gate). Computed HERE (before the grouping loops) because
+    // `insert_module_key_preferring_ecosystem` needs it at each `module_keys` write — R7: two root
+    // manifests (django's npm `package.json` and pyproject, both canonical path `.`) collide on the
+    // canonical-path key, and last-writer-wins let the non-ecosystem key mask the one this view
+    // wants, dropping the row at the prefix gate (`--ecosystem npm` on django rendered nothing).
+    let ecosystem_prefix: Option<&str> = match input.ecosystem.as_str() {
+        "cargo" => Some("cargo:"),
+        "npm" => Some("npm:"),
+        "python" => Some("pyproject:"),
+        "java" => Some("gradle:"),
+        _ => None,
+    };
 
     // 5. Group data by module canonical_root_path.
     // Key: canonical_root_path (user-facing identity)
@@ -137,7 +183,13 @@ pub fn compose_dependency_summaries(
             if let Some(&module) = uid_to_module.get(module_uid) {
                 let canonical_path = &module.canonical_root_path;
                 // Track module_key for ecosystem filtering (contains "npm:"/"cargo:"/… prefix).
-                module_keys.insert(canonical_path.clone(), module.module_key.clone());
+                // R7: prefer the ecosystem-matching key when two root manifests collide on `.`.
+                insert_module_key_preferring_ecosystem(
+                    &mut module_keys,
+                    canonical_path,
+                    &module.module_key,
+                    ecosystem_prefix,
+                );
 
                 // Resolve the specifier:
                 // 1. Try to resolve via import binding (e.g., "useState" → "react")
@@ -214,7 +266,12 @@ pub fn compose_dependency_summaries(
                 // Mark that this module has manifest context.
                 // Note: dep.file_path is the source file; manifest path is derived below.
                 module_has_manifest.insert(canonical_path.clone(), true);
-                module_keys.insert(canonical_path.clone(), module.module_key.clone());
+                insert_module_key_preferring_ecosystem(
+                    &mut module_keys,
+                    canonical_path,
+                    &module.module_key,
+                    ecosystem_prefix,
+                );
             }
         }
     }
@@ -229,15 +286,6 @@ pub fn compose_dependency_summaries(
     let all_module_paths: HashSet<&str> =
         reconcilable_module_paths(&module_imports, &module_declared, &module_rejected);
 
-    // Ecosystem declared-module key prefix (DEPS-ATTRIB-2): npm→`npm:`, cargo→`cargo:`,
-    // python→`pyproject:`, java→`gradle:`; `None` for `none-detected`/unknown (every module included).
-    let ecosystem_prefix: Option<&str> = match input.ecosystem.as_str() {
-        "cargo" => Some("cargo:"),
-        "npm" => Some("npm:"),
-        "python" => Some("pyproject:"),
-        "java" => Some("gradle:"),
-        _ => None,
-    };
     // Whether ANY declared module of this ecosystem exists in the snapshot. When one does (django,
     // FRAKTAG, repo-graph — a root/workspace manifest was discovered as an ecosystem module), the
     // strict prefix gate is kept EXACTLY as before (byte-parity for repos that already worked). The
@@ -305,6 +353,10 @@ pub fn compose_dependency_summaries(
             ecosystem: input.ecosystem.clone(),
             pre_rejected_non_specifier: module_rejected.get(canonical_path).copied().unwrap_or(0),
             own_manifest_names: own_manifest_names.clone(),
+            type_only_package_heads: module_type_only_heads
+                .get(canonical_path)
+                .cloned()
+                .unwrap_or_default(),
         };
 
         let mut summary = reconcile_module_dependencies(reconcile_input);
@@ -323,6 +375,44 @@ pub fn compose_dependency_summaries(
         summaries,
         total_external_imports,
     })
+}
+
+/// Insert a `canonical_path → module_key` mapping, biased to the ecosystem-matching key when two
+/// declared modules collide on the same canonical path (R7). `module_keys` is keyed by canonical
+/// path alone, so two ROOT manifests of different ecosystems — django's npm `package.json` and its
+/// pyproject, both at canonical path `.` — write the same key. Plain last-writer-wins let the
+/// non-ecosystem key mask the one the current view needs, so `--ecosystem npm` on django found
+/// `pyproject:…` at `.` at the prefix gate and dropped the row (its 6 devDeps never rendered).
+///
+/// Bias rule (compose runs for ONE `input.ecosystem`): an ecosystem-matching key already present is
+/// NEVER overwritten by a non-matching one; a non-matching key present IS replaced by a matching
+/// one. With `ecosystem_prefix == None` (none-detected/unknown — no prefix gate) there is nothing to
+/// bias toward, so this degenerates to the prior plain `HashMap::insert`: LAST writer wins,
+/// byte-identical to the code it replaced (review-0 item 1: the earlier first-writer variant was a
+/// silent semantic change from `.insert`, not a parity preservation).
+fn insert_module_key_preferring_ecosystem(
+    module_keys: &mut HashMap<String, String>,
+    canonical_path: &str,
+    module_key: &str,
+    ecosystem_prefix: Option<&str>,
+) {
+    // No prefix gate → no ecosystem to prefer; preserve the replaced `.insert` last-writer semantics.
+    let Some(prefix) = ecosystem_prefix else {
+        module_keys.insert(canonical_path.to_string(), module_key.to_string());
+        return;
+    };
+    match module_keys.get(canonical_path) {
+        None => {
+            module_keys.insert(canonical_path.to_string(), module_key.to_string());
+        }
+        Some(existing) => {
+            let existing_matches = existing.starts_with(prefix);
+            let new_matches = module_key.starts_with(prefix);
+            if new_matches && !existing_matches {
+                module_keys.insert(canonical_path.to_string(), module_key.to_string());
+            }
+        }
+    }
 }
 
 /// The set of module canonical paths that need a reconciliation summary: every module with an
@@ -709,6 +799,43 @@ mod tests {
             "rejected-only module dropped from reconciliation: {set:?}"
         );
         assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn two_root_manifests_collision_keeps_the_ecosystem_key() {
+        // R7 (item 4): django declares TWO root modules at canonical path `.` — an npm
+        // `package.json` (module_key `npm:django:.`) and a pyproject (`pyproject:django:.`). In the
+        // `--ecosystem npm` view the `.` row must key on the npm module so it survives the prefix
+        // gate; plain last-writer-wins dropped it whenever pyproject was written last.
+        let npm_prefix = Some("npm:");
+
+        // pyproject seen first, then npm → npm must win (overwrite the non-matching key).
+        let mut keys: HashMap<String, String> = HashMap::new();
+        insert_module_key_preferring_ecosystem(&mut keys, ".", "pyproject:django:.", npm_prefix);
+        insert_module_key_preferring_ecosystem(&mut keys, ".", "npm:django:.", npm_prefix);
+        assert_eq!(
+            keys["."], "npm:django:.",
+            "npm key must win when it arrives later"
+        );
+
+        // npm seen first, then pyproject → npm must STAY (never overwritten by a non-matching key).
+        let mut keys2: HashMap<String, String> = HashMap::new();
+        insert_module_key_preferring_ecosystem(&mut keys2, ".", "npm:django:.", npm_prefix);
+        insert_module_key_preferring_ecosystem(&mut keys2, ".", "pyproject:django:.", npm_prefix);
+        assert_eq!(
+            keys2["."], "npm:django:.",
+            "npm key must stand when it arrived first"
+        );
+
+        // No ecosystem prefix (none-detected) → LAST writer wins, byte-parity with the plain
+        // `HashMap::insert` this replaced (review-0 item 1).
+        let mut keys3: HashMap<String, String> = HashMap::new();
+        insert_module_key_preferring_ecosystem(&mut keys3, ".", "a:.", None);
+        insert_module_key_preferring_ecosystem(&mut keys3, ".", "b:.", None);
+        assert_eq!(
+            keys3["."], "b:.",
+            "no prefix gate → last writer wins, like `.insert`"
+        );
     }
 
     #[test]

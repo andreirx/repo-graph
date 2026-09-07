@@ -52,6 +52,11 @@ pub struct DepModule {
     pub manifest_scope_available: bool,
     #[serde(default)]
     pub declared_and_used: u64,
+    /// DEPS-CLASSIFIER-1B §2.2 item 3: declared packages whose only evidence of use is a type-only
+    /// import (`import type … from "pkg"`). Rendered as a `type-only N` clause + examples. Additive;
+    /// an older daemon omits it (0 → no clause, byte-identical).
+    #[serde(default)]
+    pub type_only_import: u64,
     #[serde(default)]
     pub declared_but_unobserved: u64,
     #[serde(default)]
@@ -488,9 +493,18 @@ impl DepsListResponse {
             } else {
                 String::new()
             };
+            // DEPS-CLASSIFIER-1B §2.2 item 3: a `type-only N` clause when a declared package is
+            // imported only type-only (compile-time reference, not a runtime dep). Omitted when 0
+            // (byte-parity with pre-slice rows).
+            let type_only_suffix = if m.type_only_import > 0 {
+                format!(" · type-only {}", m.type_only_import)
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
-                "  used {} · {} {}{} · undeclared {}{} · builtins {}{}\n",
+                "  used {}{} · {} {}{} · undeclared {}{} · builtins {}{}\n",
                 m.declared_and_used,
+                type_only_suffix,
                 unused_label,
                 m.declared_but_unobserved,
                 unused_suffix,
@@ -512,7 +526,11 @@ impl DepsListResponse {
             let rolled = &self.results[MAX_ROWS..];
             let rolled_deps: u64 = rolled
                 .iter()
-                .map(|m| m.declared_and_used + m.declared_but_unobserved)
+                // DEPS-CLASSIFIER-1B §2.2 item 3: a type-only-imported package is still a DECLARED
+                // dependency (reconcile's declared-not-value-observed branch), so it counts toward
+                // "declared deps". Omitting it understated the rollup total by the type-only count
+                // once this slice split that bucket out of declared_but_unobserved.
+                .map(|m| m.declared_and_used + m.type_only_import + m.declared_but_unobserved)
                 .sum();
             out.push_str(&format!(
                 "(+{} more module{}: {} declared dep{} — `--json` for all)\n",
@@ -547,7 +565,10 @@ fn module_label(m: &DepModule) -> &str {
 /// contributing manifest renders exactly as before (byte-parity).
 fn manifest_label(m: &DepModule, ecosystem: &str) -> String {
     if m.declared_manifest_paths.len() > 1 {
-        let declared_total = m.declared_and_used + m.declared_but_unobserved;
+        // DEPS-CLASSIFIER-1B §2.2 item 3: type-only-imported packages are declared dependencies too;
+        // include them so "N declared across M manifests" stays the TRUE declared count (before this
+        // slice the two-way split made used+unobserved == declared; the new bucket must be re-added).
+        let declared_total = m.declared_and_used + m.type_only_import + m.declared_but_unobserved;
         let cited = m
             .manifest_path
             .as_deref()
@@ -617,6 +638,11 @@ fn examples_line(m: &DepModule, basis: &DeclaredUnobservedBasis) -> Option<Strin
     let used = pick_used("declared_and_used");
     if !used.is_empty() {
         parts.push(format!("used: {}", used.join(", ")));
+    }
+    // §2.2 item 3: type-only imports get their own labelled example group.
+    let type_only = pick_names("type_only_import");
+    if !type_only.is_empty() {
+        parts.push(format!("type-only import: {}", type_only.join(", ")));
     }
     for (label, cat) in [
         (unobserved_label, "declared_but_unobserved"),

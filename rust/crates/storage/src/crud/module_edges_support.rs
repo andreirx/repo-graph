@@ -366,6 +366,7 @@ impl StorageConnection {
                             identifier: b.identifier,
                             specifier: b.specifier,
                             is_relative: b.is_relative,
+                            is_type_only: b.is_type_only,
                         });
                     }
                 }
@@ -533,12 +534,27 @@ struct PackageDependencySetJson {
 }
 
 /// JSON structure for import_bindings_json column.
+///
+/// The persisted array is the camelCase serialization of
+/// `repo_graph_classification::types::ImportBinding` (`#[serde(rename_all = "camelCase")]`), so the
+/// JSON keys are `isRelative` / `isTypeOnly`. DEPS-CLASSIFIER-1B §2.2 item 3: `is_type_only` reads
+/// `isTypeOnly` explicitly so the type-only disposition SURVIVES the read (it was silently dropped
+/// before — the struct only projected identifier/specifier/is_relative).
+///
+/// NOTE (surfaced, out-of-scope): `is_relative` here has NO rename, so it never matches the
+/// persisted `isRelative` key and always decodes to its `false` default — a pre-existing casing
+/// defect that makes `get_external_import_bindings_for_snapshot`'s relative-skip inert. Left
+/// unchanged deliberately: fixing it would alter the reconcile input set (a deps-output /
+/// STOP-trigger surface) and belongs in its own slice. The type-only path below reduces via the
+/// ecosystem normalizer, which drops relative specifiers regardless of this flag.
 #[derive(Debug, serde::Deserialize)]
 struct ImportBindingJson {
     identifier: String,
     specifier: String,
     #[serde(default)]
     is_relative: bool,
+    #[serde(default, rename = "isTypeOnly")]
+    is_type_only: bool,
 }
 
 /// An import binding for identifier → specifier resolution.
@@ -555,6 +571,11 @@ pub struct ImportBindingFact {
     pub specifier: String,
     /// Whether this is a relative import (./foo, ../bar).
     pub is_relative: bool,
+    /// DEPS-CLASSIFIER-1B §2.2 item 3: whether the enclosing statement was `import type …` (or
+    /// `export type … from`). The deps assembly reduces a type-only-ONLY package to the
+    /// `type_only_import` category — usage that is a compile-time type reference, not a runtime
+    /// dependency. Reads the persisted `isTypeOnly` JSON key (survives the storage read).
+    pub is_type_only: bool,
 }
 
 /// A file ownership fact for rollup computation.
@@ -647,6 +668,48 @@ mod tests {
                 ],
             )
             .expect("insert module candidate");
+    }
+
+    // ── Import bindings tests ──────────────────────────────────────
+
+    /// DEPS-CLASSIFIER-1B §2.2 item 3: the persisted `import_bindings_json` is the camelCase
+    /// serialization of `ImportBinding` (`isRelative`, `isTypeOnly`); the read must preserve
+    /// `is_type_only`. Before this slice `ImportBindingJson` projected only identifier/specifier/
+    /// is_relative, so the flag was silently dropped. Round-trip the exact on-disk shape.
+    #[test]
+    fn get_external_import_bindings_preserves_is_type_only() {
+        let conn = fresh_storage();
+        let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+        let file_uid = format!("{repo_uid}:src/Button.stories.ts");
+        // The exact serialized shape produced by `serde_json::to_string(&Vec<ImportBinding>)`
+        // (camelCase keys). One value import, one `import type` — both bare packages.
+        let json = r#"[
+            {"identifier":"React","specifier":"react","isRelative":false,"location":null,"isTypeOnly":false},
+            {"identifier":"Meta","specifier":"@storybook/react","isRelative":false,"location":null,"isTypeOnly":true}
+        ]"#;
+        conn.connection()
+            .execute(
+                "INSERT INTO file_signals (snapshot_uid, file_uid, import_bindings_json) VALUES (?, ?, ?)",
+                rusqlite::params![snapshot_uid, file_uid, json],
+            )
+            .expect("insert file_signals");
+
+        let bindings = conn
+            .get_external_import_bindings_for_snapshot(&snapshot_uid)
+            .expect("query bindings");
+        let react = bindings
+            .iter()
+            .find(|b| b.identifier == "React")
+            .expect("react binding");
+        assert!(!react.is_type_only, "value import is not type-only");
+        let meta = bindings
+            .iter()
+            .find(|b| b.identifier == "Meta")
+            .expect("Meta binding");
+        assert!(
+            meta.is_type_only,
+            "the `import type` binding's is_type_only survives the storage read"
+        );
     }
 
     // ── Resolved imports tests ─────────────────────────────────────

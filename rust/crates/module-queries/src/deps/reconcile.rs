@@ -42,6 +42,12 @@ pub struct ReconcileInput {
     /// (under ecosystem-aware normalization) is a first-party self-reference, not an undeclared
     /// external. Empty (no parsed manifests) → nothing reclassified (byte-identical pre-slice output).
     pub own_manifest_names: HashSet<String>,
+    /// DEPS-CLASSIFIER-1B §2.2 item 3: normalized package heads this module imports ONLY type-only
+    /// (`import type … from "pkg"`). Computed by `compose` from `is_type_only` bindings. A DECLARED
+    /// package in this set, with no value import/call observed, reconciles as `TypeOnlyImport`
+    /// instead of `DeclaredButUnobserved`. Empty for non-npm ecosystems (only the TS extractor sets
+    /// `is_type_only`) and for snapshots with no type-only imports (byte-parity).
+    pub type_only_package_heads: HashSet<String>,
 }
 
 /// Reconcile declared and observed dependencies for a module.
@@ -168,9 +174,17 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
 
         for declared in &input.declared_dependencies {
             if !observed_set.contains(declared.as_str()) {
+                // §2.2 item 3: a declared package with no value use, but imported type-only, is
+                // `TypeOnlyImport` — not `DeclaredButUnobserved`. `type_only_package_heads` holds
+                // already-normalized heads, so the declared name is compared directly.
+                let category = if input.type_only_package_heads.contains(declared.as_str()) {
+                    DependencyCategory::TypeOnlyImport
+                } else {
+                    DependencyCategory::DeclaredButUnobserved
+                };
                 entries.push(DependencyEntry {
                     package: declared.clone(),
-                    category: DependencyCategory::DeclaredButUnobserved,
+                    category,
                     import_count: 0,
                     import_sites: 0,
                     dependency_class: None, // TODO: extract from manifest
@@ -231,11 +245,12 @@ impl ObservedPackage {
 fn category_order(cat: DependencyCategory) -> u8 {
     match cat {
         DependencyCategory::DeclaredAndUsed => 0,
-        DependencyCategory::DeclaredButUnobserved => 1,
-        DependencyCategory::ObservedButUndeclared => 2,
-        DependencyCategory::FirstPartySelf => 3,
-        DependencyCategory::RuntimeBuiltin => 4,
-        DependencyCategory::UnknownExternalLike => 5,
+        DependencyCategory::TypeOnlyImport => 1,
+        DependencyCategory::DeclaredButUnobserved => 2,
+        DependencyCategory::ObservedButUndeclared => 3,
+        DependencyCategory::FirstPartySelf => 4,
+        DependencyCategory::RuntimeBuiltin => 5,
+        DependencyCategory::UnknownExternalLike => 6,
     }
 }
 
@@ -305,6 +320,7 @@ mod tests {
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -371,6 +387,7 @@ mod tests {
             ecosystem: "python".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
         let summary = reconcile_module_dependencies(input);
         let asgiref = summary
@@ -389,6 +406,70 @@ mod tests {
     }
 
     #[test]
+    fn declared_type_only_import_is_type_only_not_unobserved() {
+        // DEPS-CLASSIFIER-1B §2.2 item 3: `@storybook/react` is declared and imported ONLY
+        // type-only (no value import/call observed). `type_only_package_heads` carries its
+        // normalized head, so it reconciles as TypeOnlyImport, NOT DeclaredButUnobserved. `moment`
+        // is declared with no import of any kind → stays DeclaredButUnobserved.
+        let mut type_only = HashSet::new();
+        type_only.insert("@storybook/react".to_string());
+        let input = ReconcileInput {
+            module: ".".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "package.json".to_string(),
+            },
+            declared_dependencies: vec!["@storybook/react".to_string(), "moment".to_string()],
+            manifest_scope_available: true,
+            observed_external_imports: obs(&[]), // no value use
+            runtime_builtins: npm_builtins(),
+            ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
+            type_only_package_heads: type_only,
+        };
+        let summary = reconcile_module_dependencies(input);
+        assert_eq!(summary.type_only_import_count(), 1);
+        assert_eq!(summary.declared_but_unobserved_count(), 1);
+        let sb = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "@storybook/react")
+            .unwrap();
+        assert_eq!(sb.category, DependencyCategory::TypeOnlyImport);
+        let moment = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "moment")
+            .unwrap();
+        assert_eq!(moment.category, DependencyCategory::DeclaredButUnobserved);
+    }
+
+    #[test]
+    fn value_use_beats_type_only() {
+        // A package both value-imported AND in the type-only set is DeclaredAndUsed (value use wins):
+        // it takes the observed branch and never consults the type-only set.
+        let mut type_only = HashSet::new();
+        type_only.insert("react".to_string());
+        let input = ReconcileInput {
+            module: ".".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "package.json".to_string(),
+            },
+            declared_dependencies: vec!["react".to_string()],
+            manifest_scope_available: true,
+            observed_external_imports: obs(&["react"]),
+            runtime_builtins: npm_builtins(),
+            ecosystem: "npm".to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
+            type_only_package_heads: type_only,
+        };
+        let summary = reconcile_module_dependencies(input);
+        assert_eq!(summary.declared_and_used_count(), 1);
+        assert_eq!(summary.type_only_import_count(), 0);
+    }
+
+    #[test]
     fn declared_but_unobserved() {
         let input = ReconcileInput {
             module: "frontend".to_string(),
@@ -402,6 +483,7 @@ mod tests {
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -431,6 +513,7 @@ mod tests {
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -464,6 +547,7 @@ mod tests {
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -494,6 +578,7 @@ mod tests {
             ecosystem: "python".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: own,
+            type_only_package_heads: HashSet::new(),
         };
         let summary = reconcile_module_dependencies(input);
         // `django` is self, not undeclared.
@@ -528,6 +613,7 @@ mod tests {
             ecosystem: "cargo".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: own,
+            type_only_package_heads: HashSet::new(),
         };
         let summary = reconcile_module_dependencies(input);
         assert_eq!(summary.declared_and_used_count(), 1);
@@ -555,6 +641,7 @@ mod tests {
             ecosystem: "python".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
         let summary = reconcile_module_dependencies(input);
         assert_eq!(summary.first_party_self_count(), 0);
@@ -581,6 +668,7 @@ mod tests {
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -610,6 +698,7 @@ mod tests {
             ecosystem: "npm".to_string(), // doesn't matter
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -641,6 +730,7 @@ mod tests {
             ecosystem: "cargo".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);
@@ -675,6 +765,7 @@ mod tests {
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
             own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
         };
 
         let summary = reconcile_module_dependencies(input);

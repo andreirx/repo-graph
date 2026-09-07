@@ -106,6 +106,7 @@ mod tests {
             identifier: identifier.to_string(),
             specifier: specifier.to_string(),
             is_relative: false,
+            is_type_only: false,
         }
     }
 
