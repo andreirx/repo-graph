@@ -638,6 +638,11 @@ fn module_json(s: &ModuleDependencySummary, resolution: &ResolutionState) -> ser
                 "package": e.package,
                 "category": format_category(e.category),
                 "import_count": e.import_count,
+                // DEPS-CLASSIFIER-1 §2.3: the import-site / call-site split behind the per-package
+                // `used (N import sites, M call sites)` basis. Additive fields; call_sites is derived
+                // (import_count - import_sites) so the two always reconcile to import_count.
+                "import_sites": e.import_sites,
+                "call_sites": e.import_count.saturating_sub(e.import_sites),
                 "confidence": confidence,
             });
             if cap_this {
@@ -823,6 +828,7 @@ mod tests {
                 package: p.to_string(),
                 category: DependencyCategory::DeclaredButUnobserved,
                 import_count: 0,
+                import_sites: 0,
                 dependency_class: None,
                 confidence: 1.0,
                 raw_specifiers: vec![],

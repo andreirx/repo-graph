@@ -239,6 +239,7 @@ mod tests {
                 package: p.to_string(),
                 category: DependencyCategory::DeclaredButUnobserved,
                 import_count: 0,
+                import_sites: 0,
                 dependency_class: None,
                 confidence: 1.0,
                 raw_specifiers: vec![],

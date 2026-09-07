@@ -28,6 +28,20 @@ pub enum DependencyCategory {
     UnknownExternalLike,
 }
 
+/// One observed external reference fed to reconciliation (DEPS-CLASSIFIER-1 §2.3).
+///
+/// Carries the raw specifier AND whether it came from an IMPORTS edge (an "import site") or a
+/// CALL edge (a "call site"), so the per-package basis can report the two counts separately.
+/// A plain specifier string lost that distinction; a bool alongside it recovers it without a
+/// parallel array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedImportRef {
+    /// The raw observed specifier (already identifier→specifier resolved by `compose`).
+    pub specifier: String,
+    /// `true` = an IMPORTS-edge site; `false` = a CALL-edge site.
+    pub is_import_edge: bool,
+}
+
 /// A single package usage in a dependency summary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackageUsage {
@@ -140,8 +154,14 @@ pub struct DependencyEntry {
     pub package: String,
     /// Dependency category.
     pub category: DependencyCategory,
-    /// Number of import statements referencing this package.
+    /// Number of external references (import sites + call sites) attributed to this package.
     pub import_count: usize,
+    /// DEPS-CLASSIFIER-1 §2.3: how many of `import_count` are IMPORTS-edge sites (`from x import y`,
+    /// `use x::y`) — the rest (`import_count - import_sites`) are CALL sites. Lets the per-package
+    /// basis read `used (N import sites, M call sites)`. `#[serde(default)]`: additive over the
+    /// stored/wire shape — an old payload without this field reads 0 (renders as call-sites-only).
+    #[serde(default)]
+    pub import_sites: usize,
     /// Dependency class from manifest (prod, dev, peer, optional).
     pub dependency_class: Option<String>,
     /// Confidence score for classification.

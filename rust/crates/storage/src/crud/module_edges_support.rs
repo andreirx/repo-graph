@@ -287,9 +287,15 @@ impl StorageConnection {
         snapshot_uid: &str,
     ) -> Result<Vec<ExternalImportFact>, StorageError> {
         let conn = self.connection();
+        // DEPS-CLASSIFIER-1 §2.2: read the DOTTED specifier from `metadata_json.specifier` when the
+        // edge carries one, else the raw `target_key`. This corrects ONLY Python IMPORTS edges
+        // (whose target_key is the resolver's slash form); Rust (target_key == metadata specifier),
+        // Java (no `specifier` key), TS and CALL edges (no `specifier` key) all fall back to
+        // target_key unchanged. §2.3: `ue.type` distinguishes import sites from call sites.
         let mut stmt = conn.prepare(
             "SELECT n.file_uid AS source_file_uid,
-			        ue.target_key AS specifier
+			        COALESCE(json_extract(ue.metadata_json, '$.specifier'), ue.target_key) AS specifier,
+			        ue.type AS edge_type
 			 FROM unresolved_edges ue
 			 JOIN nodes n ON ue.source_node_uid = n.node_uid
 			 WHERE ue.snapshot_uid = ?
@@ -299,9 +305,11 @@ impl StorageConnection {
         )?;
 
         let rows = stmt.query_map([snapshot_uid], |row| {
+            let edge_type: String = row.get("edge_type")?;
             Ok(ExternalImportFact {
                 source_file_uid: row.get("source_file_uid")?,
                 specifier: row.get("specifier")?,
+                is_import_edge: edge_type == "IMPORTS",
             })
         })?;
 
@@ -475,7 +483,17 @@ pub struct ExternalImportFact {
     /// The file UID of the source file containing the import.
     pub source_file_uid: String,
     /// The import specifier (e.g., "react/jsx-runtime", "tokio::spawn").
+    ///
+    /// DEPS-CLASSIFIER-1 §2.2: for a Python IMPORTS edge this is the DOTTED specifier read from
+    /// `metadata_json.specifier` (`asgiref.sync`), not the slash-form `target_key` the extractor
+    /// writes for the resolver (`asgiref/sync`) — so query-time Python head reduction reaches it.
+    /// Byte-stable for Rust (target_key == metadata specifier), Java (no `specifier` key → NULL →
+    /// falls back to target_key), TS and CALL edges (same fallback).
     pub specifier: String,
+    /// DEPS-CLASSIFIER-1 §2.3: whether this evidence is an IMPORTS edge (`type = 'IMPORTS'`) — an
+    /// "import site" — versus a CALL edge (a "call site"). Lets the per-package basis report
+    /// `used (N import sites, M call sites)` instead of one conflated count.
+    pub is_import_edge: bool,
 }
 
 /// An external import with file path and location evidence.

@@ -28,6 +28,13 @@ pub struct DepEntry {
     pub category: String,
     #[serde(default)]
     pub import_count: u64,
+    /// DEPS-CLASSIFIER-1 §2.3: import-site / call-site split behind the per-package
+    /// `used (N import sites, M call sites)` basis. Additive; an older daemon omits them (both
+    /// default 0 → the basis reads `used (0 import sites, 0 call sites)`, never a fabricated count).
+    #[serde(default)]
+    pub import_sites: u64,
+    #[serde(default)]
+    pub call_sites: u64,
 }
 
 /// One manifest's reconciliation summary.
@@ -583,7 +590,18 @@ fn manifest_label(m: &DepModule, ecosystem: &str) -> String {
 /// HONESTY-GATE-1 §2.1: the declared-but-unobserved examples are labelled "no static import" unless
 /// the ecosystem's absence basis is established — the word "unused" never appears without the basis.
 fn examples_line(m: &DepModule, basis: &DeclaredUnobservedBasis) -> Option<String> {
-    let pick = |cat: &str| -> Vec<&str> {
+    // DEPS-CLASSIFIER-1 §2.3: each `used` example carries its COMPUTED basis — the import-site /
+    // call-site split (`asgiref (29 import sites, 136 call sites)`) — so the reader sees the evidence
+    // that a declared package is used, not just its name. Other categories keep the name-only form.
+    let pick_used = |cat: &str| -> Vec<String> {
+        m.entries
+            .iter()
+            .filter(|e| e.category == cat)
+            .map(|e| format!("{} ({})", e.package, used_basis(e)))
+            .take(3)
+            .collect()
+    };
+    let pick_names = |cat: &str| -> Vec<&str> {
         m.entries
             .iter()
             .filter(|e| e.category == cat)
@@ -596,12 +614,15 @@ fn examples_line(m: &DepModule, basis: &DeclaredUnobservedBasis) -> Option<Strin
         DeclaredUnobservedBasis::NotEstablished { .. } => "no static import",
     };
     let mut parts: Vec<String> = Vec::new();
+    let used = pick_used("declared_and_used");
+    if !used.is_empty() {
+        parts.push(format!("used: {}", used.join(", ")));
+    }
     for (label, cat) in [
-        ("used", "declared_and_used"),
         (unobserved_label, "declared_but_unobserved"),
         ("undeclared", "observed_but_undeclared"),
     ] {
-        let names = pick(cat);
+        let names = pick_names(cat);
         if !names.is_empty() {
             parts.push(format!("{}: {}", label, names.join(", ")));
         }
@@ -611,6 +632,19 @@ fn examples_line(m: &DepModule, basis: &DeclaredUnobservedBasis) -> Option<Strin
     } else {
         Some(format!("e.g. {}", parts.join("  ")))
     }
+}
+
+/// The per-package computed basis for a `declared_and_used` row (DEPS-CLASSIFIER-1 §2.3):
+/// `N import sites, M call sites`, pluralized. `import_sites`/`call_sites` are additive daemon
+/// fields; a pre-slice daemon omits them (both 0) — the basis then honestly reads `0 import sites,
+/// 0 call sites` rather than inventing a figure.
+fn used_basis(e: &DepEntry) -> String {
+    let site = |n: u64, noun: &str| format!("{} {}{}", n, noun, if n == 1 { "" } else { "s" });
+    format!(
+        "{}, {}",
+        site(e.import_sites, "import site"),
+        site(e.call_sites, "call site")
+    )
 }
 
 #[cfg(test)]
@@ -1150,41 +1184,52 @@ mod tests {
     }
 
     #[test]
-    fn no_static_import_found_replaces_unused_when_basis_not_established() {
-        // HONESTY-GATE-1 §2.1 (the invariant): django/zvec shape — the basis is NOT established
-        // (default), so a declared-but-unobserved package renders "no static import found", NEVER the
-        // word "unused"/"declared-unused", and the ecosystem caveat states what was not checked.
+    fn asgiref_reads_used_with_computed_basis_tzdata_stays_unobserved() {
+        // DEPS-CLASSIFIER-1 §2.3 (replaces the false fixture that canonized `no static import:
+        // asgiref`). django's TRUE row: `asgiref` IS imported — 29 import sites + 136 call sites —
+        // so it reads `used (…)` with its computed basis and is NEVER in the "no static import"
+        // column; `tzdata` is genuinely unused, so it alone carries the "no static import" basis and
+        // the ≠-unused caveat. The false half (asgiref) is gone; the true half (tzdata) survives.
         let r = resp(serde_json::json!({
             "ecosystem": "python",
             "declared_unobserved_basis": "no_static_import_found",
             "declared_unobserved_caveat": "a declared package with no resolved static import may still be used at runtime — dynamic imports … are not resolved to a declared package; import coverage from root config files … is not established",
-            "total_external_imports": 50,
+            "total_external_imports": 165,
             "count": 1,
             "results": [{
                 "module": ".",
                 "manifest_path": "pyproject.toml",
                 "manifest_scope_available": true,
                 "declared_and_used": 1,
-                "declared_but_unobserved": 2,
+                "declared_but_unobserved": 1,
                 "entries": [
-                    {"package": "asgiref", "category": "declared_but_unobserved", "import_count": 0},
-                    {"package": "tzdata", "category": "declared_but_unobserved", "import_count": 0}
+                    {"package": "asgiref", "category": "declared_and_used", "import_count": 165, "import_sites": 29, "call_sites": 136},
+                    {"package": "tzdata", "category": "declared_but_unobserved", "import_count": 0, "import_sites": 0, "call_sites": 0}
                 ]
             }]
         }));
         let out = r.render_human();
+        // asgiref reads `used` with its computed import-site / call-site basis.
         assert!(
-            out.contains("no static import found 2"),
-            "column not relabelled: {out}"
+            out.contains("used: asgiref (29 import sites, 136 call sites)"),
+            "asgiref must render its computed used-basis: {out}"
+        );
+        // The false negative is GONE: asgiref never appears under "no static import".
+        assert!(
+            !out.contains("no static import: asgiref")
+                && !out.contains("no static import: asgiref, tzdata"),
+            "asgiref must NOT be reported as no-static-import: {out}"
+        );
+        // tzdata is genuinely unobserved → the "no static import" column + example still apply to it.
+        assert!(
+            out.contains("no static import found 1"),
+            "tzdata's genuine absence must still render: {out}"
         );
         assert!(
-            !out.contains("declared-unused") && !out.contains("· unused"),
-            "the word 'unused' must never render without an established basis: {out}"
+            out.contains("no static import: tzdata"),
+            "tzdata example must carry the no-static-import basis: {out}"
         );
-        assert!(
-            out.contains("no static import: asgiref, tzdata"),
-            "examples not relabelled: {out}"
-        );
+        // The ≠-unused caveat still fires (a real declared-but-unobserved row exists).
         assert!(
             out.contains("ⓘ \"no static import found\" ≠ unused:"),
             "caveat line missing: {out}"

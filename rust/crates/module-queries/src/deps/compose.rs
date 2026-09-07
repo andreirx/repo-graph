@@ -14,7 +14,7 @@ use super::reconcile::{reconcile_module_dependencies, ReconcileInput};
 use super::resolve::{
     build_file_specifier_sets, build_identifier_resolution_map, is_bound, resolve_import_specifier,
 };
-use super::types::{ManifestContext, ModuleDependencySummary, ProvenanceRead};
+use super::types::{ManifestContext, ModuleDependencySummary, ObservedImportRef, ProvenanceRead};
 use crate::ModuleQueryError;
 
 /// Input for composing dependency summaries across modules.
@@ -111,7 +111,7 @@ pub fn compose_dependency_summaries(
 
     // 5. Group data by module canonical_root_path.
     // Key: canonical_root_path (user-facing identity)
-    let mut module_imports: HashMap<String, Vec<String>> = HashMap::new();
+    let mut module_imports: HashMap<String, Vec<ObservedImportRef>> = HashMap::new();
     let mut module_declared: HashMap<String, HashSet<String>> = HashMap::new();
     // Tracks whether module has manifest context (deps were loaded).
     let mut module_has_manifest: HashMap<String, bool> = HashMap::new();
@@ -164,7 +164,12 @@ pub fn compose_dependency_summaries(
                     Admission::Import => module_imports
                         .entry(canonical_path.clone())
                         .or_default()
-                        .push(resolved_specifier),
+                        .push(ObservedImportRef {
+                            specifier: resolved_specifier,
+                            // §2.3: carry whether this evidence is an import site or a call site so
+                            // reconcile can split the per-package `used (N import, M call)` basis.
+                            is_import_edge: import.is_import_edge,
+                        }),
                     Admission::Rejected => {
                         *module_rejected.entry(canonical_path.clone()).or_default() += 1
                     }
@@ -325,8 +330,8 @@ pub fn compose_dependency_summaries(
 /// A rejected-only module MUST be reconciled so its dropped-fragment count reaches a summary and is
 /// accounted in `total_rejected` — otherwise those fragments leak into the unattributed headline.
 /// Borrows the keys of all three maps (no allocation of the key strings).
-fn reconcilable_module_paths<'a>(
-    imports: &'a HashMap<String, Vec<String>>,
+fn reconcilable_module_paths<'a, V>(
+    imports: &'a HashMap<String, V>,
     declared: &'a HashMap<String, HashSet<String>>,
     rejected: &'a HashMap<String, usize>,
 ) -> HashSet<&'a str> {

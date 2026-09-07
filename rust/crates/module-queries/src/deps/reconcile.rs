@@ -7,7 +7,10 @@
 use std::collections::{HashMap, HashSet};
 
 use super::classify::{classify_observed, ObservedKind};
-use super::types::{DependencyCategory, DependencyEntry, ManifestContext, ModuleDependencySummary};
+use super::types::{
+    DependencyCategory, DependencyEntry, ManifestContext, ModuleDependencySummary,
+    ObservedImportRef,
+};
 
 /// Input data for dependency reconciliation.
 #[derive(Debug, Clone)]
@@ -23,9 +26,9 @@ pub struct ReconcileInput {
     /// Whether manifest dependency context is available.
     /// `false` for Python/Java until compose.rs attaches their contexts.
     pub manifest_scope_available: bool,
-    /// Observed import specifiers classified as external.
-    /// Each entry is a raw specifier (e.g., "react/jsx-runtime", "lodash/get").
-    pub observed_external_imports: Vec<String>,
+    /// Observed external references classified as external — each a raw specifier plus whether it
+    /// is an IMPORTS-edge site or a CALL-edge site (DEPS-CLASSIFIER-1 §2.3).
+    pub observed_external_imports: Vec<ObservedImportRef>,
     /// Runtime builtin module specifiers (e.g., "fs", "path", "node:fs").
     pub runtime_builtins: HashSet<String>,
     /// Ecosystem for normalization rules: "npm" or "cargo".
@@ -79,33 +82,18 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
     let mut observed_builtins: HashMap<String, ObservedPackage> = HashMap::new();
     let mut rejected_non_specifier: usize = input.pre_rejected_non_specifier;
 
-    for raw in &input.observed_external_imports {
+    for observed in &input.observed_external_imports {
+        let raw = &observed.specifier;
         match classify_observed(raw, &input.ecosystem, &input.runtime_builtins) {
             ObservedKind::Local => {}
             ObservedKind::NonSpecifier => rejected_non_specifier += 1,
             ObservedKind::Builtin { name } => {
-                let entry = observed_builtins
-                    .entry(name)
-                    .or_insert_with(|| ObservedPackage {
-                        import_count: 0,
-                        raw_specifiers: Vec::new(),
-                    });
-                entry.import_count += 1;
-                if !entry.raw_specifiers.contains(raw) {
-                    entry.raw_specifiers.push(raw.clone());
-                }
+                let entry = observed_builtins.entry(name).or_default();
+                entry.record(raw, observed.is_import_edge);
             }
             ObservedKind::Package { package } => {
-                let entry = observed_packages
-                    .entry(package)
-                    .or_insert_with(|| ObservedPackage {
-                        import_count: 0,
-                        raw_specifiers: Vec::new(),
-                    });
-                entry.import_count += 1;
-                if !entry.raw_specifiers.contains(raw) {
-                    entry.raw_specifiers.push(raw.clone());
-                }
+                let entry = observed_packages.entry(package).or_default();
+                entry.record(raw, observed.is_import_edge);
             }
         }
     }
@@ -116,6 +104,7 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
             package: name.clone(),
             category: DependencyCategory::RuntimeBuiltin,
             import_count: observed.import_count,
+            import_sites: observed.import_sites,
             dependency_class: None,
             confidence: 1.0,
             raw_specifiers: observed.raw_specifiers.clone(),
@@ -129,6 +118,7 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
                 package: package.clone(),
                 category: DependencyCategory::DeclaredAndUsed,
                 import_count: observed.import_count,
+                import_sites: observed.import_sites,
                 dependency_class: None, // TODO: extract from manifest
                 confidence: 1.0,
                 raw_specifiers: observed.raw_specifiers.clone(),
@@ -142,6 +132,7 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
                 package: package.clone(),
                 category: DependencyCategory::FirstPartySelf,
                 import_count: observed.import_count,
+                import_sites: observed.import_sites,
                 dependency_class: None,
                 confidence: 1.0,
                 raw_specifiers: observed.raw_specifiers.clone(),
@@ -152,6 +143,7 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
                 package: package.clone(),
                 category: DependencyCategory::ObservedButUndeclared,
                 import_count: observed.import_count,
+                import_sites: observed.import_sites,
                 dependency_class: None,
                 confidence: 0.8, // Slightly lower confidence for undeclared
                 raw_specifiers: observed.raw_specifiers.clone(),
@@ -162,6 +154,7 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
                 package: package.clone(),
                 category: DependencyCategory::UnknownExternalLike,
                 import_count: observed.import_count,
+                import_sites: observed.import_sites,
                 dependency_class: None,
                 confidence: 0.5,
                 raw_specifiers: observed.raw_specifiers.clone(),
@@ -179,6 +172,7 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
                     package: declared.clone(),
                     category: DependencyCategory::DeclaredButUnobserved,
                     import_count: 0,
+                    import_sites: 0,
                     dependency_class: None, // TODO: extract from manifest
                     confidence: 1.0,
                     raw_specifiers: Vec::new(),
@@ -211,9 +205,26 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
 }
 
 /// Intermediate struct for counting observed imports.
+#[derive(Default)]
 struct ObservedPackage {
     import_count: usize,
+    /// DEPS-CLASSIFIER-1 §2.3: the IMPORTS-edge subset of `import_count` (the rest are call sites).
+    import_sites: usize,
     raw_specifiers: Vec<String>,
+}
+
+impl ObservedPackage {
+    /// Record one observed reference: bump the total, the import-site subcount when it is an
+    /// IMPORTS edge, and remember the distinct raw specifier.
+    fn record(&mut self, raw: &str, is_import_edge: bool) {
+        self.import_count += 1;
+        if is_import_edge {
+            self.import_sites += 1;
+        }
+        if !self.raw_specifiers.iter().any(|s| s == raw) {
+            self.raw_specifiers.push(raw.to_string());
+        }
+    }
 }
 
 /// Ordering for dependency categories in output.
@@ -237,24 +248,10 @@ fn category_order(cat: DependencyCategory) -> u8 {
 ///   matching two genuinely-distinct packages).
 fn normalize_self_name(name: &str, ecosystem: &str) -> String {
     match ecosystem {
-        "python" => {
-            // PEP 503: lowercase, then collapse any run of `-`, `_`, `.` into a single `-`.
-            let lowered = name.to_ascii_lowercase();
-            let mut out = String::with_capacity(lowered.len());
-            let mut prev_sep = false;
-            for ch in lowered.chars() {
-                if matches!(ch, '-' | '_' | '.') {
-                    if !prev_sep {
-                        out.push('-');
-                        prev_sep = true;
-                    }
-                } else {
-                    out.push(ch);
-                    prev_sep = false;
-                }
-            }
-            out
-        }
+        // DEPS-CLASSIFIER-1 §2.1: the single shared PEP 503 folding (lowercase + collapse `-_.`
+        // runs), the same function the index-time classifier uses for the Python head match — one
+        // source of truth, mirroring the cargo arm's delegation below.
+        "python" => repo_graph_classification::pep503_normalize(name),
         // IMPORT-RESOLUTION-RUST-1 §2.3: the single shared `_`→`-` canonicalisation.
         "cargo" => repo_graph_classification::canonicalize_cargo_package_name(name),
         _ => name.to_string(),
@@ -264,6 +261,19 @@ fn normalize_self_name(name: &str, ecosystem: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build observed refs from bare specifiers, all marked as IMPORTS-edge sites. The import/call
+    /// split is exercised by `import_sites_and_call_sites_split`; the category tests below only care
+    /// about totals, so `import_count` is unaffected by the flag.
+    fn obs(specs: &[&str]) -> Vec<ObservedImportRef> {
+        specs
+            .iter()
+            .map(|s| ObservedImportRef {
+                specifier: s.to_string(),
+                is_import_edge: true,
+            })
+            .collect()
+    }
 
     fn npm_builtins() -> HashSet<String> {
         [
@@ -290,11 +300,7 @@ mod tests {
             },
             declared_dependencies: vec!["react".to_string(), "lodash".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec![
-                "react".to_string(),
-                "react/jsx-runtime".to_string(),
-                "lodash/get".to_string(),
-            ],
+            observed_external_imports: obs(&["react", "react/jsx-runtime", "lodash/get"]),
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
@@ -324,6 +330,65 @@ mod tests {
     }
 
     #[test]
+    fn import_sites_and_call_sites_split() {
+        // DEPS-CLASSIFIER-1 §2.3: asgiref's shape — declared `["asgiref"]`, imported at IMPORTS-edge
+        // sites (`from asgiref.sync import …`) AND used at CALL-edge sites (`sync_to_async(...)`).
+        // The DeclaredAndUsed entry must split them: import_sites counts only IMPORTS edges,
+        // call_sites = import_count - import_sites. This is the `used (N import sites, M call sites)`
+        // basis the row renders instead of the false `no static import: asgiref`.
+        let input = ReconcileInput {
+            module: ".".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "pyproject.toml".to_string(),
+            },
+            declared_dependencies: vec!["asgiref".to_string()],
+            manifest_scope_available: true,
+            observed_external_imports: vec![
+                // two IMPORTS-edge sites (asgiref.sync, asgiref.local)
+                ObservedImportRef {
+                    specifier: "asgiref.sync".to_string(),
+                    is_import_edge: true,
+                },
+                ObservedImportRef {
+                    specifier: "asgiref.local".to_string(),
+                    is_import_edge: true,
+                },
+                // three CALL-edge sites (sync_to_async resolved to asgiref.sync by compose)
+                ObservedImportRef {
+                    specifier: "asgiref.sync".to_string(),
+                    is_import_edge: false,
+                },
+                ObservedImportRef {
+                    specifier: "asgiref.sync".to_string(),
+                    is_import_edge: false,
+                },
+                ObservedImportRef {
+                    specifier: "asgiref.local".to_string(),
+                    is_import_edge: false,
+                },
+            ],
+            runtime_builtins: HashSet::new(),
+            ecosystem: "python".to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
+        };
+        let summary = reconcile_module_dependencies(input);
+        let asgiref = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "asgiref")
+            .unwrap();
+        assert_eq!(asgiref.category, DependencyCategory::DeclaredAndUsed);
+        assert_eq!(asgiref.import_count, 5, "total = imports + calls");
+        assert_eq!(asgiref.import_sites, 2, "only the IMPORTS-edge sites");
+        assert_eq!(
+            asgiref.import_count - asgiref.import_sites,
+            3,
+            "call sites = total - import sites"
+        );
+    }
+
+    #[test]
     fn declared_but_unobserved() {
         let input = ReconcileInput {
             module: "frontend".to_string(),
@@ -332,7 +397,7 @@ mod tests {
             },
             declared_dependencies: vec!["react".to_string(), "moment".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec!["react".to_string()],
+            observed_external_imports: obs(&["react"]),
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
@@ -361,10 +426,7 @@ mod tests {
             },
             declared_dependencies: vec!["react".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec![
-                "react".to_string(),
-                "debug".to_string(), // Not declared
-            ],
+            observed_external_imports: obs(&["react", "debug"]), // debug not declared
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
@@ -397,7 +459,7 @@ mod tests {
             },
             declared_dependencies: vec![], // parsed manifest, zero declared deps
             manifest_scope_available: true,
-            observed_external_imports: vec!["leftpad".to_string()],
+            observed_external_imports: obs(&["leftpad"]),
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
@@ -427,7 +489,7 @@ mod tests {
             },
             declared_dependencies: vec!["asgiref".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec!["django".to_string(), "asgiref".to_string()],
+            observed_external_imports: obs(&["django", "asgiref"]),
             runtime_builtins: HashSet::new(),
             ecosystem: "python".to_string(),
             pre_rejected_non_specifier: 0,
@@ -461,7 +523,7 @@ mod tests {
             },
             declared_dependencies: vec!["widgets".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec!["widgets::thing".to_string()],
+            observed_external_imports: obs(&["widgets::thing"]),
             runtime_builtins: HashSet::new(),
             ecosystem: "cargo".to_string(),
             pre_rejected_non_specifier: 0,
@@ -488,7 +550,7 @@ mod tests {
             },
             declared_dependencies: vec![],
             manifest_scope_available: true,
-            observed_external_imports: vec!["django".to_string()],
+            observed_external_imports: obs(&["django"]),
             runtime_builtins: HashSet::new(),
             ecosystem: "python".to_string(),
             pre_rejected_non_specifier: 0,
@@ -514,7 +576,7 @@ mod tests {
             },
             declared_dependencies: vec![],
             manifest_scope_available: true,
-            observed_external_imports: vec!["fs".to_string(), "node:path".to_string()],
+            observed_external_imports: obs(&["fs", "node:path"]),
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,
@@ -543,7 +605,7 @@ mod tests {
             manifest_context: ManifestContext::Absent,
             declared_dependencies: vec![],
             manifest_scope_available: false, // Python, no manifest context
-            observed_external_imports: vec!["requests".to_string()],
+            observed_external_imports: obs(&["requests"]),
             runtime_builtins: HashSet::new(),
             ecosystem: "npm".to_string(), // doesn't matter
             pre_rejected_non_specifier: 0,
@@ -569,12 +631,12 @@ mod tests {
             },
             declared_dependencies: vec!["tokio".to_string(), "serde".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec![
-                "tokio::spawn".to_string(),
-                "tokio::sync::Mutex".to_string(),
-                "serde::Deserialize".to_string(),
-                "std::collections::HashMap".to_string(),
-            ],
+            observed_external_imports: obs(&[
+                "tokio::spawn",
+                "tokio::sync::Mutex",
+                "serde::Deserialize",
+                "std::collections::HashMap",
+            ]),
             runtime_builtins: HashSet::new(),
             ecosystem: "cargo".to_string(),
             pre_rejected_non_specifier: 0,
@@ -608,12 +670,7 @@ mod tests {
             },
             declared_dependencies: vec!["react".to_string()],
             manifest_scope_available: true,
-            observed_external_imports: vec![
-                "react".to_string(),
-                "./utils".to_string(),        // local
-                "../shared".to_string(),      // local
-                "/absolute/path".to_string(), // local
-            ],
+            observed_external_imports: obs(&["react", "./utils", "../shared", "/absolute/path"]),
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
             pre_rejected_non_specifier: 0,

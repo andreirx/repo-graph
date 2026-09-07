@@ -110,9 +110,16 @@ pub fn classify_unresolved_edge(
         {
             return external(UnresolvedEdgeBasisCode::SpecifierMatchesRuntimeModule);
         }
-        // Rule 5b: declared package dependency.
+        // Rule 5b: declared package dependency. DEPS-CLASSIFIER-1 §2.1: a CALL through an import
+        // binding is "used" when the binding's specifier reduces to a DECLARED package head — the
+        // SAME reduction the IMPORTS path uses (`resolve_declared_dependency`), not a raw exact
+        // match. Exact-match here is what left `sync_to_async` (binding specifier `asgiref.sync`,
+        // declared `asgiref`) UNKNOWN, so asgiref's call sites never attributed. Reduction is a
+        // superset of exact match (`lodash` → `lodash`), so bare-specifier verdicts are byte-stable;
+        // only dotted/scoped/subpath call bindings that a declared head owns newly attribute.
         if !binding.is_relative
-            && has_package_dependency(&file_signals.package_dependencies, &binding.specifier)
+            && resolve_declared_dependency(&binding.specifier, &file_signals.package_dependencies)
+                .is_some()
         {
             return external(external_basis_for(category));
         }
@@ -475,6 +482,16 @@ pub(crate) fn resolve_declared_dependency(
     if hyphenated != base && has_package_dependency(declared, &hyphenated) {
         return Some(hyphenated);
     }
+    // npm subpath reduction (DEPS-CLASSIFIER-1 §2.1): `storybook/test` → `storybook`,
+    // `@scope/pkg/sub` → `@scope/pkg`. Fires only for slash-bearing specifiers, which Rust (`::`)
+    // and Java (`.`) never produce — so this is inert for those ecosystems. npm names are literal
+    // (`has_package_dependency` exact), never PEP 503 / cargo-hyphen folded.
+    if specifier.contains('/') {
+        let head = crate::dep_reduce::npm_package_head(specifier);
+        if head != specifier && has_package_dependency(declared, &head) {
+            return Some(head);
+        }
+    }
     // Java package-segment match. A dotted Maven group owns a Java import package
     // when the import EQUALS the group or extends it on a `.` boundary — e.g.
     // `org.springframework.boot.autoconfigure.SpringBootApplication` matches group
@@ -496,9 +513,26 @@ pub(crate) fn resolve_declared_dependency(
                 best = Some(dep);
             }
         }
-        return best.cloned();
+        if let Some(group) = best {
+            return Some(group.clone());
+        }
+        // No declared Java group matched. Fall through to the Python head reduction below:
+        // a dotted specifier with NO matching Maven group is either an unmatched Java import
+        // (Python head is its first segment, e.g. `com` — which no dotted Maven group equals
+        // under PEP 503, so this stays None and Java behaviour is byte-stable) OR a Python
+        // dotted submodule whose declared head is single-token (`asgiref.sync` → `asgiref`).
     }
-    None
+    // Python head reduction + PEP 503 equivalence (DEPS-CLASSIFIER-1 §2.1). The import head and the
+    // declared distribution name are the SAME package under Python's own case/`-_.` folding, so
+    // `django_extensions` matches declared `Django-Extensions`. PEP 503 is applied ONLY on this
+    // Python path — npm/cargo/Java matched above with their own (literal / hyphen / segment) rules.
+    let py_head = crate::dep_reduce::python_import_head(specifier);
+    let py_norm = crate::dep_reduce::pep503_normalize(py_head);
+    declared
+        .names
+        .iter()
+        .find(|dep| crate::dep_reduce::pep503_normalize(dep) == py_norm)
+        .cloned()
 }
 
 /// Resolve the DECLARED dependency an external-import unresolved reference maps to, in the
@@ -1082,6 +1116,127 @@ mod tests {
                 &d,
             ),
             None
+        );
+    }
+
+    // ── DEPS-CLASSIFIER-1 §2.1: Python head + npm subpath reduction ──
+    //
+    // FAILING-FIRST (spec §4). On pre-slice code `resolve_declared_dependency` has NO Python head
+    // and NO npm subpath reduction, so every one of these returns `None` and the classifier verdict
+    // is `Unknown` — the root cause of the false `no static import: asgiref`.
+
+    #[test]
+    fn python_dotted_submodule_resolves_to_declared_head() {
+        // `from asgiref.sync import …` → binding specifier `asgiref.sync`, declared `["asgiref"]`.
+        let d = deps(&["asgiref", "django"]);
+        assert_eq!(
+            resolve_declared_dependency("asgiref.sync", &d),
+            Some("asgiref".to_string()),
+            "a Python dotted submodule must reduce to its declared top-level package"
+        );
+        assert_eq!(
+            resolve_declared_dependency("asgiref.local", &d),
+            Some("asgiref".to_string())
+        );
+        // A dotted head that is NOT declared stays unresolved.
+        assert_eq!(resolve_declared_dependency("requests.adapters", &d), None);
+    }
+
+    #[test]
+    fn python_head_uses_pep503_equivalence() {
+        // PEP 503: distribution name `Django-Extensions` and import head `django_extensions` are the
+        // SAME package (case-insensitive; `-`/`_`/`.` runs equivalent).
+        let d = deps(&["Django-Extensions"]);
+        assert_eq!(
+            resolve_declared_dependency("django_extensions", &d),
+            Some("Django-Extensions".to_string())
+        );
+        assert_eq!(
+            resolve_declared_dependency("django_extensions.management", &d),
+            Some("Django-Extensions".to_string())
+        );
+        // The inverse spelling also matches.
+        let d2 = deps(&["django_extensions"]);
+        assert_eq!(
+            resolve_declared_dependency("Django-Extensions", &d2),
+            Some("django_extensions".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_subpath_resolves_to_declared_package() {
+        // `import { … } from 'storybook/test'` with declared `["storybook"]`.
+        let d = deps(&["storybook", "react"]);
+        assert_eq!(
+            resolve_declared_dependency("storybook/test", &d),
+            Some("storybook".to_string())
+        );
+        assert_eq!(
+            resolve_declared_dependency("react/jsx-runtime", &d),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_scoped_subpath_resolves_to_scope_and_name() {
+        let d = deps(&["@scope/pkg", "@tanstack/react-query"]);
+        assert_eq!(
+            resolve_declared_dependency("@scope/pkg/sub", &d),
+            Some("@scope/pkg".to_string())
+        );
+        assert_eq!(
+            resolve_declared_dependency("@tanstack/react-query/devtools", &d),
+            Some("@tanstack/react-query".to_string())
+        );
+        // A scoped subpath whose scope+name is not declared stays unresolved.
+        assert_eq!(resolve_declared_dependency("@other/thing/sub", &d), None);
+    }
+
+    #[test]
+    fn asgiref_call_site_classifies_external_via_reduced_binding_specifier() {
+        // DEPS-CLASSIFIER-1 §2.1 (CALL path): `sync_to_async(...)` is a CALL whose binding specifier
+        // is the dotted `asgiref.sync`; declared `["asgiref"]`. Rule 5b must reduce the binding
+        // specifier to its declared head — so the call attributes to asgiref (a "call site"), not
+        // Unknown. Pre-fix (raw exact match) this stayed Unknown and asgiref reported 0 call sites.
+        let mut fs = empty_file();
+        fs.import_bindings = vec![binding("sync_to_async", "asgiref.sync")];
+        fs.package_dependencies = deps(&["asgiref"]);
+        let v = classify_unresolved_edge(
+            &edge("sync_to_async"),
+            UnresolvedEdgeCategory::CallsFunctionAmbiguousOrMissing,
+            &empty_snapshot(),
+            &fs,
+        );
+        assert_eq!(
+            v.classification,
+            UnresolvedEdgeClassification::ExternalLibraryCandidate
+        );
+        assert_eq!(
+            v.basis_code,
+            UnresolvedEdgeBasisCode::CalleeMatchesExternalImport
+        );
+    }
+
+    #[test]
+    fn asgiref_import_edge_classifies_external_via_metadata_specifier() {
+        // The exact spec §4 failing case: target_key is the SLASH form the Python extractor writes,
+        // metadata carries the DOTTED specifier; declared `["asgiref"]` → ExternalLibraryCandidate.
+        let e = edge_with_meta("asgiref/sync", r#"{"specifier":"asgiref.sync"}"#);
+        let mut fs = empty_file();
+        fs.package_dependencies = deps(&["asgiref"]);
+        let v = classify_unresolved_edge(
+            &e,
+            UnresolvedEdgeCategory::ImportsFileNotFound,
+            &empty_snapshot(),
+            &fs,
+        );
+        assert_eq!(
+            v.classification,
+            UnresolvedEdgeClassification::ExternalLibraryCandidate
+        );
+        assert_eq!(
+            v.basis_code,
+            UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency
         );
     }
 

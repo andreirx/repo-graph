@@ -33,28 +33,10 @@
 /// assert_eq!(normalize_npm_specifier("lodash/get"), "lodash");
 /// ```
 pub fn normalize_npm_specifier(specifier: &str) -> String {
-    if specifier.starts_with('@') {
-        // Scoped package: @scope/name or @scope/name/subpath
-        // Find the second slash (after @scope/name)
-        let mut slash_count = 0;
-        let mut boundary = specifier.len();
-        for (i, c) in specifier.char_indices() {
-            if c == '/' {
-                slash_count += 1;
-                if slash_count == 2 {
-                    boundary = i;
-                    break;
-                }
-            }
-        }
-        specifier[..boundary].to_string()
-    } else {
-        // Unscoped package: name or name/subpath
-        match specifier.find('/') {
-            Some(idx) => specifier[..idx].to_string(),
-            None => specifier.to_string(),
-        }
-    }
+    // DEPS-CLASSIFIER-1 §2.1: one source of truth. The subpath/scope reduction lives in
+    // `classification::dep_reduce` so the INDEX-time classifier and this query-time normalizer
+    // share it and can never diverge (the divergence was the root cause). Delegation, not a copy.
+    repo_graph_classification::npm_package_head(specifier)
 }
 
 /// Normalize a Rust/Cargo use path to its crate name.
@@ -100,8 +82,11 @@ pub fn normalize_cargo_specifier(specifier: &str) -> String {
 /// normalizers (published on the crate's public API with doctests), the python/java normalizers
 /// added by DEPS-LIST-REWRITE-1 have no external consumer, so they stay crate-private.
 pub(crate) fn normalize_python_specifier(specifier: &str) -> String {
-    let head = specifier.split('.').next().unwrap_or(specifier);
-    head.to_ascii_lowercase()
+    // DEPS-CLASSIFIER-1 §2.1: the head reduction is shared with the index-time classifier via
+    // `classification::dep_reduce::python_import_head`; the lowercasing is this normalizer's own
+    // query-time convention (pyproject names are read lower-cased), composed on top. Output is
+    // byte-identical to the prior inline `split('.').next().to_ascii_lowercase()`.
+    repo_graph_classification::python_import_head(specifier).to_ascii_lowercase()
 }
 
 /// Normalize a Java import specifier (a fully-qualified name) to its package path.
