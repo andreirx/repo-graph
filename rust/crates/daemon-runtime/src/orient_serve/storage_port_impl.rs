@@ -15,7 +15,7 @@ use repo_graph_agent::{
     AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry,
     AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary,
     AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-    AgentSymbolEntry, AgentTrustSummary, ManifestRoot,
+    AgentSymbolEntry, AgentSymbolResolution, AgentTrustSummary, ManifestRoot,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -231,6 +231,23 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             }
         }
         self.inner.resolve_symbol_name(snapshot_uid, name)
+    }
+
+    // SYMBOL-IDENTITY-1 §2.1 (ruling EXPLAIN-RESOLVER-ROUTING = B): explain's SHARED symbol
+    // resolver is NOT LiveGraph-served — a plain delegation to SQLite (like
+    // `count_symbol_definitions_by_name` above). The LiveGraph focus resolver
+    // (`resolve_symbol_name`) matches on `name` ONLY; routing explain's suffix-aware resolution
+    // through it would silently drop the qualified-suffix step on resident-LiveGraph repos, and the
+    // focus-resolution parity cert (short names + stable keys only) could not see the divergence —
+    // a Layer-0 false not-found. So the suffix ladder always runs against SQLite `nodes` here; the
+    // rest of explain's SYMBOL pipeline stays decorator-served. `resolve_symbol_name` stays the
+    // LiveGraph-served, name-only resolver for `orient` + the cert (unchanged above).
+    fn resolve_symbol(
+        &self,
+        snapshot_uid: &str,
+        query: &str,
+    ) -> Result<AgentSymbolResolution, AgentStorageError> {
+        self.inner.resolve_symbol(snapshot_uid, query)
     }
 
     fn get_symbol_context(

@@ -30,7 +30,7 @@ use repo_graph_agent::{
     AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
     AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
     AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentTrustSummary, EnrichmentState,
+    AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::{assemble_trust_report_cancellable, TrustReportOutcome};
 use repo_graph_trust::types::{
@@ -96,6 +96,19 @@ impl StorageConnection {
             line_count: line_count.and_then(|n| u64::try_from(n).ok()),
             is_test: is_test_int != 0,
         })
+    }
+
+    /// SYMBOL-IDENTITY-1 §2.1: map a shared-resolver `ResolvedSymbol` into the agent focus DTO.
+    /// `kind` is always `Symbol` (the resolver only returns SYMBOL nodes); the line degrades to
+    /// `None` when NULL/non-positive (the DB's "no span" 0-sentinel is never a real 1-based anchor —
+    /// same rule as `resolve_symbol_name`).
+    fn resolved_symbol_to_focus(sym: crate::queries::ResolvedSymbol) -> AgentFocusCandidate {
+        AgentFocusCandidate {
+            stable_key: sym.stable_key,
+            kind: AgentFocusKind::Symbol,
+            file: sym.file,
+            line: sym.line.filter(|v| *v > 0).map(|v| v as u64),
+        }
     }
 }
 
@@ -1026,6 +1039,54 @@ impl AgentStorageRead for StorageConnection {
             .filter(|(_, fd)| !has_def || !*fd)
             .map(|(c, _)| c)
             .collect())
+    }
+
+    fn resolve_symbol(
+        &self,
+        snapshot_uid: &str,
+        query: &str,
+    ) -> Result<AgentSymbolResolution, AgentStorageError> {
+        // SYMBOL-IDENTITY-1 §2.1 (ruling B): the real SQLite adapter routes explain through the
+        // SHARED resolver `queries::resolve_symbol` (the same one `callers`/`callees` use) — exact
+        // stable_key → qualified_name → name, THEN the qualified-suffix step, with the
+        // CPP-DECLARATORS-1 definition-over-declaration filter throughout. Fully-qualified to call
+        // the inherent `StorageConnection::resolve_symbol`, NOT this trait method (they share a
+        // name).
+        match StorageConnection::resolve_symbol(self, snapshot_uid, query) {
+            Ok(sym) => Ok(AgentSymbolResolution::Resolved(
+                Self::resolved_symbol_to_focus(sym),
+            )),
+            Err(crate::queries::SymbolResolveError::NotFound) => {
+                Ok(AgentSymbolResolution::NotFound)
+            }
+            Err(crate::queries::SymbolResolveError::Ambiguous(keys)) => {
+                // The shared resolver returns only stable_keys on ambiguity. Enrich each (in the
+                // resolver's deterministic order) with its file+line via the stable_key lookup, so
+                // the ambiguous LISTING carries the same `path:line` anchor the resolved path does.
+                let mut candidates = Vec::with_capacity(keys.len());
+                for key in keys {
+                    match self
+                        .query_symbol_by_field(snapshot_uid, "stable_key", &key)
+                        .map_err(map_err("resolve_symbol"))?
+                    {
+                        Some(sym) => candidates.push(Self::resolved_symbol_to_focus(sym)),
+                        // The key came straight from the resolver over the same snapshot; a missing
+                        // row would be a store inconsistency. Keep the key so the candidate is still
+                        // listed (honest), with no anchor.
+                        None => candidates.push(AgentFocusCandidate {
+                            stable_key: key,
+                            kind: AgentFocusKind::Symbol,
+                            file: None,
+                            line: None,
+                        }),
+                    }
+                }
+                Ok(AgentSymbolResolution::Ambiguous(candidates))
+            }
+            Err(crate::queries::SymbolResolveError::Storage(e)) => {
+                Err(map_err("resolve_symbol")(e))
+            }
+        }
     }
 
     fn count_symbol_definitions_by_name(

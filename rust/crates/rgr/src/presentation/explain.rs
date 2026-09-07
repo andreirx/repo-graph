@@ -535,6 +535,37 @@ mod tests {
     }
 
     #[test]
+    fn no_high_confidence_beside_no_match() {
+        // SYMBOL-IDENTITY-1 §2.4 / STANDING HONESTY RULE 3: a miss is never rendered
+        // "Confidence: high". The agent use case now derives `low` for a no_match (was a static
+        // `High` literal, root-caused in 2026-09-06 audit §H-A); this fixture pins the rendered
+        // contract — the `no_match` line and the confidence line, with `high` absent.
+        let mut r = minimal_response();
+        r.confidence = "low".to_string(); // what `build_no_match` now emits
+        r.focus = ExplainFocus {
+            input: Some("DBImpl::Recover".to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_path: None,
+            reason: Some("no_match".to_string()),
+            candidates: vec![],
+        };
+        let out = r.render_human(false);
+        assert!(
+            out.contains("unresolved: no_match"),
+            "the miss is rendered as no_match: {out}"
+        );
+        assert!(
+            !out.contains("Confidence: high"),
+            "a miss must NOT print `Confidence: high`: {out}"
+        );
+        assert!(
+            out.contains("Confidence: low"),
+            "the honest floor `low` is rendered beside the miss: {out}"
+        );
+    }
+
+    #[test]
     fn render_shows_ambiguous_with_candidates() {
         let mut r = minimal_response();
         r.focus = ExplainFocus {

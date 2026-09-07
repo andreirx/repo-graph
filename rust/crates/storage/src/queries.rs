@@ -643,13 +643,14 @@ impl std::fmt::Display for ResourceResolveError {
 impl StorageConnection {
     /// Resolve a symbol query to a single `ResolvedSymbol`.
     ///
-    /// Resolution order (all exact match, no LIKE):
-    ///   1. `stable_key` — direct identity match
+    /// Resolution order:
+    ///   1. `stable_key` — direct identity match (exact)
     ///   2. `qualified_name` — exact match
     ///   3. `name` — exact match
+    ///   4. `qualified_name` SUFFIX — ends with `<sep><query>`, sep ∈ {`::`, `.`} (SYMBOL-IDENTITY-1)
     ///
     /// Returns `NotFound` if zero matches.
-    /// Returns `Ambiguous` if > 1 match at steps 2 or 3.
+    /// Returns `Ambiguous` if > 1 match at steps 2, 3, or 4.
     pub fn resolve_symbol(
         &self,
         snapshot_uid: &str,
@@ -676,6 +677,23 @@ impl StorageConnection {
             .query_symbols_by_field(snapshot_uid, "name", query)
             .map_err(SymbolResolveError::Storage)?;
         if let Some(r) = Self::pick_definition(by_name) {
+            return r;
+        }
+
+        // Step 4 (SYMBOL-IDENTITY-1 §2.2): qualified-name SUFFIX. `find` prints a
+        // language-qualified name (C++ `leveldb::DBImpl::Recover`, Java
+        // `org…owner.OwnerController.processCreationForm`, Python/Rust container-relative
+        // `BaseHandler.get_response`); steps 2-3 match only the WHOLE qualified_name or the bare
+        // short name, so a printed name that is a SUFFIX of a longer stored qualified_name never
+        // resolves (the `explain`/`callers` hand-off gap). Accept `qualified_name` ending with
+        // `<sep><query>` for sep ∈ {`::`, `.`}; exactly one hit resolves, >1 → `Ambiguous` (the
+        // candidates, each carrying its file in the stable key — honest), 0 → `NotFound`. Runs
+        // ONLY after the exact tiers miss, so a bare `Recover` (resolved-or-ambiguated by short
+        // name at step 3) never reaches here and a bare short name is never suffix-widened.
+        let by_suffix = self
+            .query_symbols_by_qualified_suffix(snapshot_uid, query)
+            .map_err(SymbolResolveError::Storage)?;
+        if let Some(r) = Self::pick_definition(by_suffix) {
             return r;
         }
 
@@ -3017,7 +3035,10 @@ impl StorageConnection {
 
     // ── Internal helpers ─────────────────────────────────────
 
-    fn query_symbol_by_field(
+    /// `pub(crate)`: the `agent_impl` adapter enriches the shared resolver's ambiguous stable_keys
+    /// with their file+line for the honest listing (SYMBOL-IDENTITY-1 §2.1). `field` is always a
+    /// compile-time literal from this crate — no SQL injection surface.
+    pub(crate) fn query_symbol_by_field(
         &self,
         snapshot_uid: &str,
         field: &str,
@@ -3079,6 +3100,56 @@ impl StorageConnection {
         );
         let mut stmt = self.connection().prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params![snapshot_uid, value], |row| {
+            let metadata_json: Option<String> = row.get(8)?;
+            Ok((
+                ResolvedSymbol {
+                    stable_key: row.get(0)?,
+                    name: row.get(1)?,
+                    qualified_name: row.get(2)?,
+                    kind: row.get(3)?,
+                    subtype: row.get(4)?,
+                    file: row.get(5)?,
+                    line: row.get(6)?,
+                    column: row.get(7)?,
+                },
+                repo_graph_indexer::resolver::metadata_forward_decl(metadata_json.as_deref()),
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
+    /// SYMBOL-IDENTITY-1 §2.2: SYMBOL rows whose `qualified_name` ends with `<sep><query>` for
+    /// `<sep>` ∈ {`::`, `.`}, each paired with its `forward_decl` flag (so `resolve_symbol`'s
+    /// step 4 runs the SAME decl/def filter as steps 2-3). LIKE metacharacters (`%`, `_`, `\`) in
+    /// the query are escaped to literals via `ESCAPE '\'`, so a symbol name containing them
+    /// matches literally rather than as a wildcard. The leading-`%` patterns force a full scan of
+    /// the snapshot's `nodes` (no index on a suffix); measured on a django-size store (78k
+    /// symbols) — see the SYMBOL-IDENTITY-1 build report. Ordered by `stable_key` for a
+    /// deterministic ambiguity listing.
+    fn query_symbols_by_qualified_suffix(
+        &self,
+        snapshot_uid: &str,
+        query: &str,
+    ) -> Result<Vec<(ResolvedSymbol, bool)>, StorageError> {
+        // Escape the LIKE wildcards so the query text is matched literally. Backslash first (the
+        // escape char itself), then `%` and `_`.
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pat_colon = format!("%::{}", escaped);
+        let pat_dot = format!("%.{}", escaped);
+        let sql = "SELECT n.stable_key, n.name, n.qualified_name, n.kind, n.subtype, \
+			        f.path, n.line_start, n.col_start, n.metadata_json \
+			 FROM nodes n \
+			 LEFT JOIN files f ON n.file_uid = f.file_uid \
+			 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' \
+			   AND (n.qualified_name LIKE ? ESCAPE '\\' \
+			        OR n.qualified_name LIKE ? ESCAPE '\\') \
+			 ORDER BY n.stable_key ASC";
+        let mut stmt = self.connection().prepare(sql)?;
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid, pat_colon, pat_dot], |row| {
             let metadata_json: Option<String> = row.get(8)?;
             Ok((
                 ResolvedSymbol {
@@ -3962,6 +4033,169 @@ mod tests {
         );
         let result = storage.resolve_symbol(&snap, "Opaque").unwrap();
         assert_eq!(result.stable_key, "r1:x.h#Opaque:SYMBOL:CLASS");
+    }
+
+    // ── SYMBOL-IDENTITY-1 §2.2: qualified-name SUFFIX resolution ──
+
+    #[test]
+    fn resolve_symbol_accepts_qualified_suffix() {
+        // The suffix `find` prints resolves in the shared resolver, across the three separators.
+        let (storage, snap) = setup_db_with_snapshot();
+        // C++ `::` — stored `leveldb::DBImpl::Recover`, query the printed `DBImpl::Recover`.
+        insert_typed_node(
+            &storage,
+            &snap,
+            "cpp",
+            "r1:db/db_impl.cc#DBImpl::Recover:SYMBOL:METHOD",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            "METHOD",
+            None,
+        );
+        // Java `.` — stored FQN, query the printed `OwnerController.processCreationForm`.
+        insert_typed_node(
+            &storage,
+            &snap,
+            "java",
+            "r1:owner/OwnerController.java#…processCreationForm:SYMBOL:METHOD",
+            "processCreationForm",
+            "org.springframework.samples.petclinic.owner.OwnerController.processCreationForm",
+            "METHOD",
+            None,
+        );
+        // Python/Rust container-relative `.` — stored `foo.Bar.baz`, query `Bar.baz`.
+        insert_typed_node(
+            &storage,
+            &snap,
+            "py",
+            "r1:foo.py#Bar.baz:SYMBOL:METHOD",
+            "baz",
+            "foo.Bar.baz",
+            "METHOD",
+            None,
+        );
+
+        assert_eq!(
+            storage
+                .resolve_symbol(&snap, "DBImpl::Recover")
+                .unwrap()
+                .stable_key,
+            "r1:db/db_impl.cc#DBImpl::Recover:SYMBOL:METHOD",
+        );
+        assert_eq!(
+            storage
+                .resolve_symbol(&snap, "OwnerController.processCreationForm")
+                .unwrap()
+                .stable_key,
+            "r1:owner/OwnerController.java#…processCreationForm:SYMBOL:METHOD",
+        );
+        assert_eq!(
+            storage.resolve_symbol(&snap, "Bar.baz").unwrap().stable_key,
+            "r1:foo.py#Bar.baz:SYMBOL:METHOD",
+        );
+    }
+
+    #[test]
+    fn resolve_symbol_suffix_ambiguous_lists_candidates() {
+        // Two DEFINITIONS sharing the queried suffix but in different containers stay ambiguous,
+        // listing BOTH candidate stable keys (file is carried in the key — honest).
+        let (storage, snap) = setup_db_with_snapshot();
+        insert_typed_node(
+            &storage,
+            &snap,
+            "s1",
+            "r1:a.cc#X::foo::bar:SYMBOL:METHOD",
+            "bar",
+            "X::foo::bar",
+            "METHOD",
+            None,
+        );
+        insert_typed_node(
+            &storage,
+            &snap,
+            "s2",
+            "r1:b.cc#Y::foo::bar:SYMBOL:METHOD",
+            "bar",
+            "Y::foo::bar",
+            "METHOD",
+            None,
+        );
+        match storage.resolve_symbol(&snap, "foo::bar") {
+            Err(SymbolResolveError::Ambiguous(keys)) => {
+                assert_eq!(keys.len(), 2, "both suffix candidates listed: {keys:?}");
+                assert!(keys.iter().any(|k| k.contains("a.cc")));
+                assert!(keys.iter().any(|k| k.contains("b.cc")));
+            }
+            other => panic!("suffix-ambiguous must list candidates: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_symbol_suffix_prefers_definition_over_declaration() {
+        // A suffix that matches one definition + one forward declaration resolves to the
+        // DEFINITION (the decl/def filter is inherited at step 4, not just steps 2-3).
+        let (storage, snap) = setup_db_with_snapshot();
+        insert_typed_node(
+            &storage,
+            &snap,
+            "def",
+            "r1:db/db_impl.cc#DBImpl::NewDB:SYMBOL:METHOD",
+            "NewDB",
+            "leveldb::DBImpl::NewDB",
+            "METHOD",
+            None,
+        );
+        insert_typed_node(
+            &storage,
+            &snap,
+            "decl",
+            "r1:db/db_impl.h#DBImpl::NewDB:SYMBOL:METHOD",
+            "NewDB",
+            "leveldb::DBImpl::NewDB",
+            "METHOD",
+            Some(r#"{"forward_decl":true}"#),
+        );
+        assert_eq!(
+            storage
+                .resolve_symbol(&snap, "DBImpl::NewDB")
+                .unwrap()
+                .stable_key,
+            "r1:db/db_impl.cc#DBImpl::NewDB:SYMBOL:METHOD",
+        );
+    }
+
+    #[test]
+    fn resolve_symbol_bare_short_name_not_suffix_widened() {
+        // A bare short name is resolved-or-ambiguated at the exact-NAME tier and never reaches the
+        // suffix widening: a lone exact-name match wins even though it is also a suffix of others.
+        let (storage, snap) = setup_db_with_snapshot();
+        // Exact short-name match on `Recover`.
+        insert_typed_node(
+            &storage,
+            &snap,
+            "exact",
+            "r1:util.cc#Recover:SYMBOL:FUNCTION",
+            "Recover",
+            "Recover",
+            "FUNCTION",
+            None,
+        );
+        // A different symbol whose qualified_name ends with `::Recover` — must NOT make the bare
+        // query ambiguous, because step 3 (exact name) resolves first.
+        insert_typed_node(
+            &storage,
+            &snap,
+            "suffixed",
+            "r1:db.cc#DBImpl::Recover:SYMBOL:METHOD",
+            "Recover2",
+            "leveldb::DBImpl::Recover",
+            "METHOD",
+            None,
+        );
+        assert_eq!(
+            storage.resolve_symbol(&snap, "Recover").unwrap().stable_key,
+            "r1:util.cc#Recover:SYMBOL:FUNCTION",
+        );
     }
 
     // ── FILE name must NOT resolve through step 3 ───────────────

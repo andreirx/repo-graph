@@ -3,6 +3,11 @@
 //!
 //! A spy over the real SQLite storage. `panicking()` PANICS on the six decorator-served (b) methods — the
 //! no-eager-`nodes`-read proof: on green they are served from the LiveGraph, so the panics never fire.
+//! SYMBOL-IDENTITY-1 (ruling B): explain's SHARED symbol resolver `resolve_symbol` is the ONE
+//! exception — it is SQLite-served (delegated, never panics), because the suffix-aware ladder cannot
+//! be answered by the name-only LiveGraph resolver. `resolve_symbol_name` stays a panicking (b)
+//! method (still LiveGraph-served for orient + the cert); the panicking SYMBOL proofs resolve by
+//! stable key and never reach either resolver.
 //! `recording()` delegates the served methods but RECORDS the four FILE/PATH summary/listing `nodes` reads
 //! plus the two cycle finders (EC-M2): on the pre-M-2 `new()` decorator the summary flags fire (the
 //! honest-bound proof); on the M-2-enabled `with_leaf_serves` decorator the summary + cycle flags must
@@ -17,7 +22,8 @@ use repo_graph_agent::{
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
     AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
     AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
+    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentSymbolResolution, AgentTrustSummary,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -103,6 +109,18 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
             panic!("resolve_symbol_name must be served from the LiveGraph on green")
         }
         self.inner.resolve_symbol_name(s, n)
+    }
+    // SYMBOL-IDENTITY-1 §2.1 (ruling EXPLAIN-RESOLVER-ROUTING = B): explain's SHARED symbol
+    // resolution step is now SQLite-served (NOT one of the six LiveGraph-served (b) methods), so
+    // it DELEGATES here and never panics — the decorator forwards `resolve_symbol` straight to this
+    // inner port. This is the ONE explain resolution-step expectation change ruling B calls for; the
+    // REST of the explain SYMBOL pipeline (callers/callees/context) stays decorator/LiveGraph-served
+    // and still panics above. The `panicking()` SYMBOL proofs resolve their targets by STABLE KEY
+    // (`resolve_stable_key_focus`, still LiveGraph-served), so they never reach this method — the
+    // nodes-free-on-green claim for the key/name focus path is unchanged; only a qualified-suffix
+    // resolution (this slice's new capability) reads SQLite here, by design.
+    fn resolve_symbol(&self, s: &str, q: &str) -> Result<AgentSymbolResolution, AgentStorageError> {
+        self.inner.resolve_symbol(s, q)
     }
     fn get_symbol_context(
         &self,

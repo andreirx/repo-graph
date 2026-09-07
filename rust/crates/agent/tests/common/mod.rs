@@ -26,7 +26,7 @@ use repo_graph_agent::{
     AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
     AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
     AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentTrustSummary, EnrichmentState,
+    AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -108,6 +108,11 @@ pub struct FakeAgentStorage {
     /// `count_symbol_definitions_by_name`. Unseeded ⇒ `None` ⇒ completeness unproven ⇒ the
     /// type-vs-constructor collapse stays ambiguous (mirrors a real adapter that hid definitions).
     pub symbol_definition_counts: HashMap<(String, String), u64>,
+    /// SYMBOL-IDENTITY-1 §2.1: seed the SHARED resolver (`resolve_symbol`) directly, per
+    /// (snapshot, query). When a query is seeded here it is returned VERBATIM (proving `explain`
+    /// routes through `resolve_symbol`, not `resolve_symbol_name`); an unseeded query falls back to
+    /// the name-only default over `symbol_name_results`, so every existing fake user is unaffected.
+    pub symbol_resolutions: HashMap<(String, String), AgentSymbolResolution>,
     pub symbol_callers: HashMap<(String, String), Vec<AgentCallerRow>>,
     pub symbol_callees: HashMap<(String, String), Vec<AgentCalleeRow>>,
     pub cycles_involving_module: HashMap<(String, String), Vec<AgentCycle>>,
@@ -468,6 +473,27 @@ impl AgentStorageRead for FakeAgentStorage {
             .get(&key)
             .cloned()
             .unwrap_or_default())
+    }
+
+    fn resolve_symbol(
+        &self,
+        snapshot_uid: &str,
+        query: &str,
+    ) -> Result<AgentSymbolResolution, AgentStorageError> {
+        self.fail_if_forced("resolve_symbol")?;
+        let key = (snapshot_uid.to_string(), query.to_string());
+        // A query seeded in `symbol_resolutions` returns VERBATIM (the shared-resolver seam);
+        // otherwise fall back to the name-only default over `symbol_name_results` so every existing
+        // fake user is byte-identical to before this method existed.
+        if let Some(resolution) = self.symbol_resolutions.get(&key) {
+            return Ok(resolution.clone());
+        }
+        let mut candidates = self.resolve_symbol_name(snapshot_uid, query)?;
+        Ok(match candidates.len() {
+            0 => AgentSymbolResolution::NotFound,
+            1 => AgentSymbolResolution::Resolved(candidates.pop().unwrap()),
+            _ => AgentSymbolResolution::Ambiguous(candidates),
+        })
     }
 
     fn count_symbol_definitions_by_name(

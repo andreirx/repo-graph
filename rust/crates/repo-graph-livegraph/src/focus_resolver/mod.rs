@@ -256,8 +256,17 @@ impl LiveGraph {
     /// `resolve_symbol_name(name)` — mirrors SQLite `resolve_symbol_name`. Resident `AstAdopted`
     /// nodes whose `name == name`, sorted by canonical key ascending, first 5 (the SQLite
     /// `ORDER BY stable_key ASC LIMIT 5`). All `kind = Symbol`; `file =` each key's path segment.
-    /// SQLite matches on `name` ONLY and surfaces same-name ambiguity as up-to-5 candidates — this
-    /// reproduces that exactly (no `qualified_name` disambiguation on either side).
+    /// Both sides match on `name` ONLY and surface same-name ambiguity as up-to-5 candidates — this
+    /// reproduces that exactly (no `qualified_name` disambiguation on either side), and the
+    /// LiveGraph↔SQLite focus-resolution parity cert pins that equivalence.
+    ///
+    /// SCOPE (SYMBOL-IDENTITY-1, ruling EXPLAIN-RESOLVER-ROUTING = B, 2026-09-07): this name-only
+    /// resolver is `orient`'s resolver and the parity-cert contract — it is NO LONGER `explain`'s
+    /// resolver. `explain` now routes through the suffix-aware shared resolver
+    /// (`AgentStorageRead::resolve_symbol` → SQLite `queries::resolve_symbol`), which the daemon
+    /// decorator serves from SQLite, NOT this LiveGraph resolver. So the "name-only, no
+    /// qualified_name disambiguation" statement above is the truthful contract for `orient` + the
+    /// cert; it does not describe how `explain` resolves a `find`-printed qualified name.
     pub fn resolve_symbol_name(&self, name: &str) -> AnswerEnvelope<Vec<FocusCandidate>> {
         let mut keys: Vec<&str> = self
             .resident_nodes()

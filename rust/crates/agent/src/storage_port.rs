@@ -497,6 +497,25 @@ pub struct AgentFocusCandidate {
     pub line: Option<u64>,
 }
 
+/// SYMBOL-IDENTITY-1 §2.1: outcome of the SHARED symbol resolver [`resolve_symbol`]
+/// (`AgentStorageRead::resolve_symbol`). It mirrors `storage::queries::resolve_symbol`
+/// (`Ok` / `NotFound` / `Ambiguous`) across the port boundary as a raw DTO, so `explain`
+/// resolves a target through the SAME exact-then-suffix ladder `callers`/`callees` use —
+/// every row `find` prints resolves by its printed qualified name.
+///
+/// `Ambiguous` carries the full candidate list (each with its file+line) so the render lists
+/// the matches honestly — a miss is `NotFound`, ambiguity is `Ambiguous`, never one masquerading
+/// as the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSymbolResolution {
+    /// Exactly one symbol resolved (a definition preferred over a declaration).
+    Resolved(AgentFocusCandidate),
+    /// More than one symbol matched at the tier that fired; every candidate is listed.
+    Ambiguous(Vec<AgentFocusCandidate>),
+    /// Zero matches.
+    NotFound,
+}
+
 /// Result of resolving a path-based focus string against the
 /// snapshot's file and module graph.
 ///
@@ -834,6 +853,38 @@ pub trait AgentStorageRead {
         snapshot_uid: &str,
         name: &str,
     ) -> Result<Vec<AgentFocusCandidate>, AgentStorageError>;
+
+    /// SYMBOL-IDENTITY-1 §2.1 (ruling EXPLAIN-RESOLVER-ROUTING = B, 2026-09-07): the SHARED symbol
+    /// resolver `explain` routes through — the SAME exact `stable_key` → `qualified_name` → `name`
+    /// ladder plus the qualified-SUFFIX step (`qualified_name` ending `<sep><query>`, sep ∈ {`::`,
+    /// `.`}) that `callers`/`callees` use (`storage::queries::resolve_symbol`), with the
+    /// CPP-DECLARATORS-1 definition-over-declaration filter. So every row `find` prints resolves by
+    /// its printed qualified name, ambiguity is LISTED, and a miss is `NotFound` (never rendered as
+    /// high-confidence "not found").
+    ///
+    /// DELEGATION, not LiveGraph service: unlike [`resolve_symbol_name`](Self::resolve_symbol_name)
+    /// — which stays name-only and IS LiveGraph-served for `orient` + the focus-resolution parity
+    /// cert — this method is served from SQLite through the daemon decorator (precedent:
+    /// [`count_symbol_definitions_by_name`](Self::count_symbol_definitions_by_name)). Routing it
+    /// through the name-only LiveGraph resolver would silently drop the suffix step on resident-
+    /// LiveGraph repos (a Layer-0 false not-found the parity cert's short-name/key corpus cannot
+    /// see).
+    ///
+    /// DEFAULT: name-only, via `resolve_symbol_name` (adapters — chiefly the in-memory test doubles
+    /// — that carry no shared ladder resolve exactly as before this slice). The real SQLite adapter
+    /// OVERRIDES with the exact-then-suffix ladder; the daemon decorator OVERRIDES to delegate here.
+    fn resolve_symbol(
+        &self,
+        snapshot_uid: &str,
+        query: &str,
+    ) -> Result<AgentSymbolResolution, AgentStorageError> {
+        let mut candidates = self.resolve_symbol_name(snapshot_uid, query)?;
+        Ok(match candidates.len() {
+            0 => AgentSymbolResolution::NotFound,
+            1 => AgentSymbolResolution::Resolved(candidates.pop().unwrap()),
+            _ => AgentSymbolResolution::Ambiguous(candidates),
+        })
+    }
 
     /// CPP-DECLARATORS-1 §2.3 (review-3 #4): total count of DEFINITION SYMBOL nodes
     /// (`metadata_json.forward_decl` absent/0) whose `name` matches exactly — UNCAPPED, unlike

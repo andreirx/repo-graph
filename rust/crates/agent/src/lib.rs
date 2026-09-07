@@ -165,6 +165,6 @@ pub use storage_port::{
     AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
     AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
     AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-    AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
-    EnrichmentState,
+    AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentSymbolResolution,
+    AgentTrustSummary, EnrichmentState,
 };

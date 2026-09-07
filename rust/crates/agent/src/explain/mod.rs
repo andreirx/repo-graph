@@ -32,7 +32,7 @@ use crate::ordering;
 use crate::ranking;
 use crate::storage_port::{
     AgentCancelCheck, AgentFocusCandidate, AgentReliabilityLevel, AgentSnapshot, AgentStorageRead,
-    AgentSymbolContext,
+    AgentSymbolContext, AgentSymbolResolution,
 };
 
 /// Items cap per budget tier (medium minimum, large optional).
@@ -184,12 +184,19 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
             )
         }
         None => {
-            // ── 5. Try symbol name resolution. ──────────────
-            let symbol_candidates = storage.resolve_symbol_name(snapshot_uid, target)?;
-            match symbol_candidates.len() {
-                0 => Ok(build_no_match(&repo.name, &snapshot, target, budget)),
-                1 => {
-                    let candidate = &symbol_candidates[0];
+            // ── 5. Symbol resolution through the SHARED resolver (SYMBOL-IDENTITY-1 §2.1,
+            //    ruling EXPLAIN-RESOLVER-ROUTING = B). The SAME exact-then-suffix ladder
+            //    `callers`/`callees` use (`storage.resolve_symbol`): exact stable_key →
+            //    qualified_name → name, THEN the qualified-SUFFIX step, definition preferred over
+            //    declaration. So a `find`-printed qualified name (`DBImpl::Recover`,
+            //    `OwnerController.processCreationForm`) resolves in `explain` too. Ambiguity is
+            //    LISTED with candidates (never "not found"); a miss is `NotFound` and NOT rendered
+            //    as high confidence.
+            match storage.resolve_symbol(snapshot_uid, target)? {
+                AgentSymbolResolution::NotFound => {
+                    Ok(build_no_match(&repo.name, &snapshot, target, budget))
+                }
+                AgentSymbolResolution::Resolved(candidate) => {
                     let context =
                         storage.get_symbol_context(snapshot_uid, &candidate.stable_key)?;
                     match context {
@@ -207,7 +214,7 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                         None => Ok(build_no_match(&repo.name, &snapshot, target, budget)),
                     }
                 }
-                _ => {
+                AgentSymbolResolution::Ambiguous(symbol_candidates) => {
                     // CPP-DECLARATORS-1 §2.3 (AMENDED 2026-09-07): when the surviving
                     // candidates are exactly ONE type (class/struct/enum/interface) plus
                     // constructor(s) of that type, a bare-name query resolves to the TYPE — a
@@ -281,7 +288,11 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                         display_name: None, // Populated by daemon handler
                         snapshot: snapshot.snapshot_uid.clone(),
                         focus: Focus::ambiguous(target, focus_candidates),
-                        confidence: Confidence::High,
+                        // SYMBOL-IDENTITY-1 §2.4: an UNRESOLVED outcome (here, ambiguity — the
+                        // target did not resolve to a single symbol) must not claim `high`
+                        // confidence in a resolution it did not make. `low` is the honest floor:
+                        // the candidate list is a fact, but "which one you meant" is unresolved.
+                        confidence: Confidence::Low,
                         documentation: None,
                         signals: Vec::new(),
                         signals_truncated: None,
@@ -326,12 +337,14 @@ fn is_type_subtype(subtype: &str) -> bool {
 /// classify safely → stay ambiguous).
 ///
 /// review-3 #4 — the collapse is now proof-only, never inference:
-///   1. Completeness. `candidates` came through the `LIMIT 5` window of `resolve_symbol_name`;
-///      an unseen 6th exact-name definition could make a truncated `{type + constructors}` set
-///      look unambiguous. We require the UNCAPPED definition count for `name`
-///      (`count_symbol_definitions_by_name`) to equal the number of candidates classified — so a
-///      truncated window can NEVER satisfy the rule. Unknown count (adapter without the method)
-///      ⇒ stay ambiguous.
+///   1. Completeness. `candidates` is the `Ambiguous` set from the shared resolver
+///      (`storage.resolve_symbol`, SYMBOL-IDENTITY-1 §2.1) — for the real SQLite adapter that set
+///      is the UNCAPPED name-tier definitions; for a name-only test double it is the `LIMIT 5`
+///      window of `resolve_symbol_name`. Either way a truncated window could hide a 6th exact-name
+///      definition that makes a `{type + constructors}` set look unambiguous, so we require the
+///      UNCAPPED definition count for `name` (`count_symbol_definitions_by_name`) to equal the
+///      number of candidates classified — a truncated window can NEVER satisfy the rule. Unknown
+///      count (adapter without the method) ⇒ stay ambiguous.
 ///   2. Membership. Every constructor must carry a qualified name whose container equals the
 ///      type's qualified name. A constructor (or the type) with NO qualified name is not proof of
 ///      membership — it is an inference — so it now stays ambiguous instead of being accepted.
@@ -429,7 +442,11 @@ fn build_no_match(
         display_name: None, // Populated by daemon handler
         snapshot: snapshot.snapshot_uid.clone(),
         focus: Focus::no_match(target),
-        confidence: Confidence::High,
+        // SYMBOL-IDENTITY-1 §2.4 / STANDING HONESTY RULE 3: a MISS is never "Confidence: high".
+        // Nothing resolved, so there is nothing to be confident about — `low` is the honest floor
+        // (the previous static `High` was the "Confidence: high" printed beside `unresolved:
+        // no_match` the root-cause audit §H-A flagged; nothing ever computed it).
+        confidence: Confidence::Low,
         documentation: None,
         signals: Vec::new(),
         signals_truncated: None,

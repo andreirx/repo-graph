@@ -363,3 +363,118 @@ fn explain_collapse_bails_without_qualified_name_proof() {
         "no constructor cursor surfaced without qualified-name proof"
     );
 }
+
+// ── SYMBOL-IDENTITY-1 §2.1 / §2.4 ─────────────────────────────────────────
+
+#[test]
+fn explain_no_match_is_not_high_confidence() {
+    // SYMBOL-IDENTITY-1 §2.4 / STANDING HONESTY RULE 3: a MISS must never render "Confidence: high".
+    // The root-cause audit §H-A flagged `explain DBImpl::Recover` printing "Confidence: high" beside
+    // "unresolved: no_match" — a static literal nothing computed. It is now `Low`.
+    let mut fake = FakeAgentStorage::new();
+    fake.seed_minimal_repo("r1", "my-repo", "snap1");
+
+    let result = run_explain(&fake, "r1", "nonexistent", Budget::Medium, TEST_NOW).unwrap();
+
+    assert!(!result.focus.resolved, "the target does not resolve");
+    assert_ne!(
+        result.confidence,
+        repo_graph_agent::Confidence::High,
+        "a no_match must not claim high confidence"
+    );
+    assert_eq!(
+        result.confidence,
+        repo_graph_agent::Confidence::Low,
+        "a miss states the honest floor `low`"
+    );
+}
+
+#[test]
+fn explain_ambiguous_symbol_is_not_high_confidence() {
+    // SYMBOL-IDENTITY-1 §2.4: the ambiguous arm must not claim high confidence either — the
+    // candidate list is a fact, but "which one you meant" is unresolved.
+    let mut fake = FakeAgentStorage::new();
+    fake.seed_minimal_repo("r1", "my-repo", "snap1");
+    // Two same-name candidates → ambiguous. Seeded via the name results (the default shared
+    // resolver maps len>1 → Ambiguous).
+    fake.symbol_name_results.insert(
+        ("snap1".into(), "dispatch".into()),
+        vec![
+            AgentFocusCandidate {
+                stable_key: "r1:a.rs#A::dispatch:SYMBOL:METHOD".into(),
+                kind: AgentFocusKind::Symbol,
+                file: Some("a.rs".into()),
+                line: Some(3),
+            },
+            AgentFocusCandidate {
+                stable_key: "r1:b.rs#B::dispatch:SYMBOL:METHOD".into(),
+                kind: AgentFocusKind::Symbol,
+                file: Some("b.rs".into()),
+                line: Some(7),
+            },
+        ],
+    );
+
+    let result = run_explain(&fake, "r1", "dispatch", Budget::Medium, TEST_NOW).unwrap();
+
+    assert!(
+        !result.focus.resolved,
+        "two candidates → ambiguous, not resolved"
+    );
+    assert!(
+        !result.focus.candidates.is_empty(),
+        "ambiguity is LISTED with candidates, never rendered as not-found"
+    );
+    assert_ne!(
+        result.confidence,
+        repo_graph_agent::Confidence::High,
+        "an ambiguous outcome must not claim high confidence"
+    );
+}
+
+#[test]
+fn explain_resolves_qualified_suffix_through_shared_resolver() {
+    // SYMBOL-IDENTITY-1 §2.1 (ruling B): explain routes through `storage.resolve_symbol` (the shared
+    // resolver), NOT `resolve_symbol_name`. Proof: the qualified suffix `DBImpl::Recover` is seeded
+    // ONLY in the shared-resolver map, and `resolve_symbol_name` is force-failed. Explain still
+    // resolves the symbol → it must have consulted `resolve_symbol`, and a `find`-printed qualified
+    // name now resolves in `explain`.
+    let mut fake = FakeAgentStorage::new();
+    fake.seed_minimal_repo("r1", "my-repo", "snap1");
+    let sk = "r1:db/db_impl.cc#DBImpl::Recover:SYMBOL:METHOD";
+    fake.symbol_resolutions.insert(
+        ("snap1".into(), "DBImpl::Recover".into()),
+        repo_graph_agent::AgentSymbolResolution::Resolved(AgentFocusCandidate {
+            stable_key: sk.into(),
+            kind: AgentFocusKind::Symbol,
+            file: Some("db/db_impl.cc".into()),
+            line: Some(292),
+        }),
+    );
+    fake.symbol_contexts.insert(
+        ("snap1".into(), sk.into()),
+        AgentSymbolContext {
+            file_path: Some("db/db_impl.cc".into()),
+            module_path: Some("db".into()),
+            module_stable_key: Some("r1:db:MODULE".into()),
+            name: "Recover".into(),
+            qualified_name: Some("leveldb::DBImpl::Recover".into()),
+            subtype: Some("METHOD".into()),
+            line_start: Some(292),
+        },
+    );
+    // Force the OLD resolver to fail: if explain still resolves, it did NOT use resolve_symbol_name.
+    *fake.force_error_on.borrow_mut() = Some("resolve_symbol_name");
+
+    let result = run_explain(&fake, "r1", "DBImpl::Recover", Budget::Medium, TEST_NOW).unwrap();
+
+    assert!(
+        result.focus.resolved,
+        "the qualified suffix resolves through the shared resolver (not resolve_symbol_name)"
+    );
+    let codes: Vec<_> = result.signals.iter().map(|s| s.code()).collect();
+    assert!(
+        codes.contains(&SignalCode::ExplainIdentity),
+        "the resolved symbol emits EXPLAIN_IDENTITY: {codes:?}"
+    );
+}

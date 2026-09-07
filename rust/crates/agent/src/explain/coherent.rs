@@ -47,8 +47,9 @@
 //! - **EXPLAIN_MEASUREMENTS — dormant** (never emitted today; defensive `{sqlite}`).
 //!
 //! The ZERO-SIGNAL ambiguous / no-match terminals take the resolution-only root (D-EXPLAIN-ZEROSIGNAL =
-//! orient D-ORIENT-4): operational-identity-only provenance, the static `High` confidence preserved, NEVER
-//! a structural Exact. explain POPULATES the shared `trust_briefing` field `Some(..)` when degraded — it
+//! orient D-ORIENT-4): operational-identity-only provenance, the use case's confidence preserved verbatim
+//! (`Low` for a miss/ambiguity since SYMBOL-IDENTITY-1 §2.4 — no longer a static `High`), NEVER a
+//! structural Exact. explain POPULATES the shared `trust_briefing` field `Some(..)` when degraded — it
 //! is the SECOND populator after orient (unlike check, which always leaves it `None`).
 
 use repo_graph_coherence::{
@@ -289,7 +290,9 @@ fn lg_first_leaf(
 ///
 /// ZERO-SIGNAL (ambiguous / no-match): the empty-signal builders emit no leaves, so the root takes the
 /// explicit resolution-only posture (D-EXPLAIN-ZEROSIGNAL) — NEVER the empty fold's lattice-TOP — and the
-/// confidence is the legacy STATIC `High` preserved verbatim.
+/// bare result's `confidence` is preserved verbatim (NOT recomputed here). SYMBOL-IDENTITY-1 §2.4: that
+/// value is now `Low` for a miss/ambiguity (the use case sets it), so a miss is no longer rendered
+/// "Confidence: high"; this layer just threads whatever the use case decided.
 pub fn explain_to_coherent(
     result: OrientResult,
     lg: &ExplainLgDecisions,
@@ -319,8 +322,9 @@ pub fn explain_to_coherent(
 
     // ── ZERO-SIGNAL carve-out (ambiguous / no-match). ────────────
     // The empty-signal builders emit no leaves; the structural MEET has no inputs. Serve the explicit
-    // resolution-only posture (operational-identity-only provenance; static `High` preserved), NEVER the
-    // empty fold's lattice-TOP. D-EXPLAIN-ZEROSIGNAL (= orient D-ORIENT-4). `trust_briefing` still follows
+    // resolution-only posture (operational-identity-only provenance; the use case's confidence preserved —
+    // `Low` for a miss/ambiguity since SYMBOL-IDENTITY-1 §2.4), NEVER the empty fold's lattice-TOP.
+    // D-EXPLAIN-ZEROSIGNAL (= orient D-ORIENT-4). `trust_briefing` still follows
     // the focus-INDEPENDENT snapshot-degradation gate, so a degraded-snapshot ambiguous/no-match MAY carry
     // it (the daemon decides; here we just thread it through).
     if signals.is_empty() {
@@ -331,7 +335,7 @@ pub fn explain_to_coherent(
             display_name,
             snapshot,
             focus,
-            confidence, // the legacy STATIC High, preserved verbatim (NOT recomputed)
+            confidence, // the use case's confidence, preserved verbatim (NOT recomputed); Low on a miss/ambiguity (§2.4)
             documentation,
             signals: Vec::new(),
             signals_truncated,
