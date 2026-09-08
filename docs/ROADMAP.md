@@ -642,6 +642,10 @@ filed as SEED-DOCUMENT-1, and the acceptance was RESTATED to the measured outwar
 operator ruling; never a score re-weighting). SEED-CHUNK-2 proofs preserved; controls not hurt. Gate
 note: two wall-clock lock-hold storage tests flaked under the loaded suite and passed alone
 (LOCK-TEST-FLAKE-1 filed). AUDIT5-MINORS-1 launched next.
+BUILDER SWITCH (human directive 2026-09-08): from EXIT-CODES-1 the builder is Codex `gpt-5.6-sol`;
+the reviewer moves to `claude-opus-4-8` so the gate stays two-vendor (operator consequence, stated to the
+human). AUDIT5-MINORS-1 (in flight) finishes on claude-opus-4-8 / gpt-5.6-terra. Ship lines keep
+recording both models for comparison.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
