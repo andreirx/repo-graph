@@ -312,22 +312,29 @@ fn inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated
 }
 
 #[test]
-fn inventory_upgrades_license_from_content_marker_not_name() {
-    // DOCS-LIST-2 §2: a doc under the architecture catch-all whose CONTENT carries a license marker
-    // is re-kinded `license` (named, not folded into `architecture`) — a CONTENT basis, needing the
-    // hashing pass (`compute_hashes = true`). A LICENSE-named file with no marker content is NOT
-    // upgraded (classify from structural evidence, never the name).
+fn inventory_license_is_name_only_content_body_is_not_upgraded() {
+    // AUDIT5-MINORS-1 F1 (operator ruling, iteration 3): `license` is NAME ONLY. The former CONTENT
+    // basis is removed — a headingless doc that embeds an MIT/BSD/Apache body clause plus other
+    // prose is NOT a license (the reviewer's required negative case). Only a dedicated
+    // LICENSE*/COPYING*/NOTICE* FILENAME is `license`.
     let dir = tempdir().unwrap();
+    // The reviewer's precise regression case (cycle-4/5): a NON-license filename whose body embeds a
+    // full MIT license clause PLUS other prose is NOT a license. The NAME (`terms.txt`) is not a
+    // license filename, and content is not consulted for the `license` kind at all → it stays the
+    // neutral docs-tree `doc` kind (cycle-5 ruling: docs-tree prose is `doc`, not `architecture`).
     create_file(
         dir.path(),
         "docs/legal/terms.txt",
-        "MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy",
+        "# Contribution Terms\n\nBy contributing you agree to the following.\n\nThe MIT License applies:\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction.\n\nQuestions? Email legal@example.com — this document also covers our code of conduct and review process.\n",
     );
+    // A dedicated LICENSE-named file → license by NAME, regardless of its (here trivial) content.
     create_file(
         dir.path(),
-        "docs/NOTLICENSE.txt",
-        "# Just a guide, no license text here.\n",
+        "docs/legal/LICENSE.txt",
+        "Apache License\nVersion 2.0",
     );
+    // A non-license-named guide under docs/ → neutral `doc` (no license name prefix, no architecture).
+    create_file(dir.path(), "docs/NOTLICENSE.txt", "# Just a guide.\n");
 
     let result = discover_doc_inventory(dir.path(), true).unwrap();
     let find = |p: &str| {
@@ -339,13 +346,18 @@ fn inventory_upgrades_license_from_content_marker_not_name() {
     };
     assert_eq!(
         find("docs/legal/terms.txt").kind,
+        "doc",
+        "MIT clause + other prose but non-license NAME → NOT license (NAME ONLY, content path removed)"
+    );
+    assert_eq!(
+        find("docs/legal/LICENSE.txt").kind,
         "license",
-        "marker → license"
+        "LICENSE-named file → license by name"
     );
     assert_eq!(
         find("docs/NOTLICENSE.txt").kind,
-        "architecture",
-        "no marker content → NOT license by name"
+        "doc",
+        "non-license name, no matching prefix → NOT license (neutral doc)"
     );
     assert_eq!(
         result.unreadable_count, 0,
@@ -359,9 +371,9 @@ fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_n
     // Three repos with the SAME `docs/releases/1.4.x.txt` path differ only by the subtree's manifest
     // evidence:
     //   (A) index.txt whose CONTENT carries a `.. toctree::` directive → release-notes (grouped);
-    //   (B) index.txt present but its CONTENT is just a heading (NO toctree) → stays `architecture`
+    //   (B) index.txt present but its CONTENT is just a heading (NO toctree) → stays neutral `doc`
     //       (review-2 item 1: a file merely NAMED index.* is not structural evidence);
-    //   (C) no index.* at all → stays `architecture`.
+    //   (C) no index.* at all → stays neutral `doc`.
     // `compute_hashes == false` throughout, proving the BOUNDED on-demand manifest read (the orient
     // path) confirms without reading the whole tree — the file's NAME is never the basis.
     let find = |r: &DocInventoryResult, p: &str| {
@@ -391,8 +403,8 @@ fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_n
     let unconfirmed = discover_doc_inventory(with_toctree.path(), false).unwrap();
     let note = find(&unconfirmed, "docs/releases/1.4.x.txt");
     assert_eq!(
-        note.kind, "architecture",
-        "no loaded content (compute_hashes=false) → no basis → old kind"
+        note.kind, "doc",
+        "no loaded content (compute_hashes=false) → no basis → old (now neutral doc) kind"
     );
     let confirmed = discover_doc_inventory(with_toctree.path(), true).unwrap();
     let note = find(&confirmed, "docs/releases/1.4.x.txt");
@@ -412,7 +424,7 @@ fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_n
     );
 
     // (B) review-2 item 1 negative: an index.* WITHOUT a toctree directive is not a manifest — the
-    // release-named dir + a file named index.txt is still just NAMES. The doc keeps `architecture`.
+    // release-named dir + a file named index.txt is still just NAMES. The doc keeps neutral `doc`.
     let non_manifest_index = tempdir().unwrap();
     create_file(
         non_manifest_index.path(),
@@ -427,8 +439,8 @@ fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_n
     let unconfirmed_by_content = discover_doc_inventory(non_manifest_index.path(), false).unwrap();
     let not_a_note = find(&unconfirmed_by_content, "docs/releases/1.4.x.txt");
     assert_eq!(
-        not_a_note.kind, "architecture",
-        "index.* without a toctree directive → NOT release-notes (name is not evidence)"
+        not_a_note.kind, "doc",
+        "index.* without a toctree directive → NOT release-notes (name is not evidence); neutral doc"
     );
     assert_eq!(
         not_a_note.release_family, None,
@@ -445,8 +457,8 @@ fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_n
     let unconfirmed = discover_doc_inventory(no_index.path(), false).unwrap();
     let bare = find(&unconfirmed, "docs/releases/1.4.x.txt");
     assert_eq!(
-        bare.kind, "architecture",
-        "no manifest index → release-named dir alone is NOT release-notes"
+        bare.kind, "doc",
+        "no manifest index → release-named dir alone is NOT release-notes; neutral doc"
     );
     assert_eq!(
         bare.release_family, None,
@@ -456,11 +468,13 @@ fn inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_n
 
 #[test]
 #[cfg(unix)]
-fn inventory_unreadable_non_sidecar_doc_is_counted_never_silently_no_license() {
-    // DOCS-LIST-2 review-0 F4: a NON-sidecar doc whose content read FAILS (permission denied — a
-    // genuine failure, NOT `NotFound`) leaves the CONTENT-based `license` classification UNVERIFIABLE.
-    // It must be ADMITTED (kept at its location kind) but COUNTED as unreadable — never silently
-    // treated as "no license marker" (honesty rule #1). Only `compute_hashes` reads its content.
+fn inventory_unreadable_license_named_doc_is_license_by_name_and_still_counted() {
+    // AUDIT5-MINORS-1 F1 (supersedes DOCS-LIST-2 review-0 F4's content-only stance for dedicated
+    // license FILENAMES): `license` now has a NAME basis (`LICENSE*`/`COPYING*`/`NOTICE*`) in
+    // addition to the content basis. A file literally named `LICENSE.txt` IS a license document —
+    // the name is the deterministic structural evidence — so it classifies `license` even when its
+    // content read FAILS (no content basis needed). The read failure is STILL surfaced through the
+    // unreadable count (honesty rule #1), never silently swallowed.
     use std::os::unix::fs::PermissionsExt;
 
     let dir = tempdir().unwrap();
@@ -483,15 +497,14 @@ fn inventory_unreadable_non_sidecar_doc_is_counted_never_silently_no_license() {
         .iter()
         .find(|e| e.path == "docs/legal/LICENSE.txt")
         .expect("unreadable doc still admitted to inventory");
-    // Admitted at its location kind (architecture), NOT silently classified license OR "definitely
-    // not a license" — the read failure is surfaced through the count instead.
+    // NAME basis: a `LICENSE*`-named file is `license` even unreadable (F1).
     assert_eq!(
-        blocked_entry.kind, "architecture",
-        "unreadable → kept at location kind, not a fabricated license claim"
+        blocked_entry.kind, "license",
+        "LICENSE-named file is license by name, no content read required (F1)"
     );
     assert_eq!(
         result.unreadable_count, 1,
-        "the unreadable non-sidecar doc is counted UNKNOWN, never a silent no-marker"
+        "the unreadable non-sidecar doc is STILL counted UNKNOWN (read failure surfaced)"
     );
 }
 

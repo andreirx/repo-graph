@@ -5,41 +5,31 @@
 
 use crate::types::DocKind;
 
-/// DOCS-LIST-2 §2 — does `content` carry a license marker (SPDX identifier or a license-header
-/// phrase)? CONTENT basis — never the `LICENSE` filename (honesty: classify from structural
-/// evidence, not a name). Checks the head of the file only (license text leads the document), so a
-/// large doc that merely mentions "license" deep in prose does not trip it.
+/// AUDIT5-MINORS-1 F1 (operator ruling 2026-09-08, iteration 3): is this doc a LICENSE DOCUMENT?
+/// The basis is **NAME ONLY** — the filename starts with `LICENSE`/`COPYING`/`NOTICE` (any
+/// extension: `LICENSE`, `LICENSE.md`, `LICENSE-MIT`, `COPYING.LESSER`, `NOTICE.txt`). The name is
+/// the sole deterministic structural evidence for a stand-alone license file.
 ///
-/// `pub(crate)` (DOC_FACTS_PUBLIC_API review-0): consumed only by [`crate::discover_doc_inventory`]
-/// inside this crate — never a public cross-crate API.
-pub(crate) fn has_license_marker(content: &str) -> bool {
-    // Bound the scan to the document head — license identifiers/headers lead the file.
-    let head_len = content
-        .char_indices()
-        .nth(2000)
-        .map(|(i, _)| i)
-        .unwrap_or(content.len());
-    let head = content[..head_len].to_lowercase();
-    // SPDX identifier — the machine-readable license marker.
-    if head.contains("spdx-license-identifier") {
-        return true;
-    }
-    // Canonical license-header phrases (structural, present at the head of license texts).
-    const LICENSE_MARKERS: &[&str] = &[
-        "permission is hereby granted, free of charge", // MIT
-        "apache license",
-        "gnu general public license",
-        "gnu lesser general public license",
-        "mozilla public license",
-        "bsd 3-clause",
-        "bsd 2-clause",
-        "redistribution and use in source and binary forms", // BSD
-        "the mit license",
-        "boost software license",
-        "isc license",
-        "creative commons",
-    ];
-    LICENSE_MARKERS.iter().any(|m| head.contains(m))
+/// Why NAME ONLY (no content path): "marker-and-nothing-else" is not a decidable content rule — a
+/// headingless prose document that embeds one license clause plus other prose is not a license, so
+/// no whole-document body/heading heuristic can separate the two without false positives (the
+/// reviewer's §D13 case). The header marker is therefore ignored for kind everywhere: hadoop's
+/// ASF-headed `CONTRIBUTING.md` is NOT license; only a dedicated LICENSE*/COPYING*/NOTICE* file is.
+///
+/// No content is read: the name is available from the path regardless of whether `discover_doc_inventory`
+/// loaded content, so a `LICENSE`-named file is `license` even when unreadable (still surfaced in the
+/// unreadable count — honesty rule #1). This is distinct from the doc-KIND honesty rule for
+/// extensions: a file named `LICENSE` IS a license, whereas a `foo.md` is not architecture merely
+/// because of its extension.
+pub(crate) fn is_license_document(relative_path: &str) -> bool {
+    let file_name = relative_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(relative_path)
+        .to_lowercase();
+    file_name.starts_with("license")
+        || file_name.starts_with("copying")
+        || file_name.starts_with("notice")
 }
 
 /// Classify a document by its relative path.
@@ -65,17 +55,23 @@ pub fn classify_doc_kind(relative_path: &str) -> DocKind {
     // subtree's manifest index must be PRESENT for structural confirmation, review-1 item 1), which a
     // single path cannot see. It is assigned in `crate::discover_doc_inventory` via `crate::release_notes`.
 
-    // Architecture docs
-    if file_name == "architecture.md"
-        || file_name == "contributing.md"
-        || file_name == "changelog.md"
-        || lower.contains("docs/")
-        || lower.contains("design/")
+    // Architecture docs — by EXPLICIT NAME. AUDIT5-MINORS-1 F1 (cycle-5 operator ruling,
+    // 2026-09-08): the architecture NAME set is exactly `ARCHITECTURE*` / `DESIGN*` / `OVERVIEW*`
+    // (a prefix, any extension). `CONTRIBUTING`/`CHANGELOG` are deliberately NOT here — a
+    // contributing guide or a changelog is not an architecture document, so they fall through to the
+    // neutral `Doc` kind below. Keeping this set tiny is the whole point of F1: `architecture` names
+    // a real design document, never the default catch-all (the old rule folded every docs-tree
+    // prose file into `architecture` — repo-graph read 577/591).
+    if file_name.starts_with("architecture")
+        || file_name.starts_with("design")
+        || file_name.starts_with("overview")
     {
         return DocKind::Architecture;
     }
 
-    // Config files.
+    // Config files (extension) — AUDIT5-MINORS-1 F1: this PRECEDES the `docs/`/`design/` directory
+    // rule so a `docker-compose.yaml` (or any `.yaml`/`.yml`) UNDER `docs/` is `config`, not
+    // `architecture` (extension beats directory — the audit's §D13 defect).
     //
     // `.env*` is NOT special-cased here: it falls through to the `DocKind::Config`
     // default below ON PURPOSE. `classify_doc_kind` feeds the semantic-fact EXTRACTOR
@@ -95,10 +91,43 @@ pub fn classify_doc_kind(relative_path: &str) -> DocKind {
         return DocKind::Config;
     }
 
-    // Prose documentation: Markdown plus reStructuredText / plain-text (the
-    // extensions admitted inside docs trees).
-    if file_name.ends_with(".md") || file_name.ends_with(".rst") || file_name.ends_with(".txt") {
+    // Architecture docs — by an explicitly ARCHITECTURAL DIRECTORY, matched on PATH COMPONENTS
+    // (not raw substrings). AUDIT5-MINORS-1 F1 (cycle-5 operator ruling, 2026-09-08; corrected in
+    // iteration 6 per review-5): the prior rule matched ALL of `docs/`, so every docs-tree prose
+    // file read `architecture` and the movement never happened (repo-graph stayed at 591). It was
+    // narrowed to an explicitly architectural directory, but with `lower.contains(...)` — which
+    // matched unrelated names as *substrings*: `src/redesign/guide.md` matched `"design/"`,
+    // `src/mydocs/architecture/guide.md` matched `"docs/architecture"`. Both would wrongly become
+    // `architecture`. The fix splits the path into slash-delimited components and requires
+    // WHOLE-COMPONENT matches:
+    //   - a component exactly `design` (a `design/` tree anywhere), OR
+    //   - a `docs` component IMMEDIATELY followed by a component beginning `architecture` or
+    //     `design` (a `docs/architecture*` or `docs/design*` subtree — this preserves the required
+    //     `docs/design-system/…` positive while rejecting `src/mydocs/architecture/…`).
+    // The architecture NAME rule above already handles `docs/architecture.md` / `docs/design.md`
+    // (the filename cases), so this rule is purely the directory signal. Every OTHER file under
+    // `docs/` (and `agent_docs/`) falls through to the neutral `Doc` kind below — a small,
+    // explicitly-named `architecture` set and a large `doc` set. Runs AFTER the config extension
+    // rule (extension beats directory — the §D13 fix).
+    let components: Vec<&str> = lower.split('/').collect();
+    let in_architecture_dir = components.iter().enumerate().any(|(i, comp)| {
+        *comp == "design"
+            || (*comp == "docs"
+                && components.get(i + 1).is_some_and(|next| {
+                    next.starts_with("architecture") || next.starts_with("design")
+                }))
+    });
+    if in_architecture_dir {
         return DocKind::Architecture;
+    }
+
+    // Prose documentation OUTSIDE an architecture/design tree — Markdown / reStructuredText /
+    // plain-text. AUDIT5-MINORS-1 F1: a NEUTRAL `Doc` kind, NOT the `architecture` default bucket
+    // (which the audit found inflated `architecture` to a catch-all — repo-graph "architecture
+    // 577"). Every `.md`/`.rst`/`.txt` with no explicit-name or directory architecture signal
+    // lands here honestly.
+    if file_name.ends_with(".md") || file_name.ends_with(".rst") || file_name.ends_with(".txt") {
+        return DocKind::Doc;
     }
 
     // Default for unknown
@@ -288,14 +317,127 @@ mod tests {
 
     #[test]
     fn classify_architecture() {
-        assert_eq!(classify_doc_kind("ARCHITECTURE.md"), DocKind::Architecture);
-        assert_eq!(classify_doc_kind("docs/design.md"), DocKind::Architecture);
+        // AUDIT5-MINORS-1 F1 (cycle-5 operator ruling): architecture is by explicit NAME
+        // (ARCHITECTURE*/DESIGN*/OVERVIEW*) or an explicitly architectural DIRECTORY
+        // (design/, docs/architecture*, docs/design*) ONLY — the exact acceptance cases:
+        assert_eq!(classify_doc_kind("ARCHITECTURE.md"), DocKind::Architecture); // name
+        assert_eq!(
+            classify_doc_kind("docs/architecture/overview.md"),
+            DocKind::Architecture
+        ); // docs/architecture dir (and OVERVIEW name)
+        assert_eq!(classify_doc_kind("design/foo.md"), DocKind::Architecture); // design/ dir
+        assert_eq!(classify_doc_kind("docs/design.md"), DocKind::Architecture); // DESIGN name
+        assert_eq!(classify_doc_kind("OVERVIEW.rst"), DocKind::Architecture); // OVERVIEW name
+        assert_eq!(
+            classify_doc_kind("docs/design-system/tokens.md"),
+            DocKind::Architecture
+        ); // docs/design* subtree (the `docs/design` prefix, not `design/`)
+    }
+
+    #[test]
+    fn plain_docs_tree_prose_is_doc_not_architecture() {
+        // AUDIT5-MINORS-1 F1 (cycle-5 operator ruling): a docs-tree prose file with NO explicit
+        // architecture name and NOT under an architecture directory is the neutral `Doc` kind, not
+        // the `architecture` catch-all (the old `docs/`-location rule read repo-graph at 577/591).
+        assert_eq!(classify_doc_kind("docs/slices/x.md"), DocKind::Doc); // operator acceptance case
+        assert_eq!(classify_doc_kind("docs/guide.md"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("agent_docs/validation.md"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("docs/faq/admin.txt"), DocKind::Doc);
+    }
+
+    #[test]
+    fn architecture_dir_rule_matches_path_components_not_substrings() {
+        // AUDIT5-MINORS-1 F1 (iteration-6 correction, review-5): the directory rule matches whole
+        // PATH COMPONENTS, not raw substrings. The prior `lower.contains(...)` form mis-fired on
+        // unrelated names. Negative — these must stay neutral `Doc`:
+        assert_eq!(classify_doc_kind("src/redesign/guide.md"), DocKind::Doc); // "redesign" ⊃ "design/"
+        assert_eq!(
+            classify_doc_kind("src/mydocs/architecture/guide.md"),
+            DocKind::Doc
+        ); // "mydocs/architecture" ⊃ "docs/architecture" but "mydocs" ≠ "docs" component
+        assert_eq!(classify_doc_kind("src/mydocs/x.md"), DocKind::Doc); // "mydocs" ≠ "docs" component
+        assert_eq!(classify_doc_kind("src/undesigned/x.md"), DocKind::Doc); // "undesigned" ≠ "design"
+                                                                            // Positive — the whole-component matches that MUST be preserved:
+        assert_eq!(classify_doc_kind("design/foo.md"), DocKind::Architecture); // exact `design` component
+        assert_eq!(
+            classify_doc_kind("docs/design-system/tokens.md"),
+            DocKind::Architecture
+        ); // `docs` then component beginning `design`
+        assert_eq!(
+            classify_doc_kind("docs/architecture-notes/adr-1.md"),
+            DocKind::Architecture
+        ); // `docs` then component beginning `architecture`
+        assert_eq!(
+            classify_doc_kind("libs/gui/design/theme.md"),
+            DocKind::Architecture
+        ); // exact `design` component nested deeper
     }
 
     #[test]
     fn classify_config() {
         assert_eq!(classify_doc_kind("docker-compose.yml"), DocKind::Config);
         assert_eq!(classify_doc_kind("config.yaml"), DocKind::Config);
+    }
+
+    #[test]
+    fn config_extension_beats_docs_directory() {
+        // AUDIT5-MINORS-1 F1: a `.yaml`/docker-compose UNDER `docs/` is Config, not Architecture —
+        // extension beats directory (the §D13 defect: docs/monitoring/docker-compose.yaml was
+        // mislabeled "architecture" because the `docs/` path rule ran first).
+        assert_eq!(
+            classify_doc_kind("docs/monitoring/docker-compose.yaml"),
+            DocKind::Config
+        );
+        assert_eq!(
+            classify_doc_kind("docs/deploy/compose.prod.yml"),
+            DocKind::Config
+        );
+    }
+
+    #[test]
+    fn plain_prose_outside_docs_tree_is_neutral_doc_not_architecture() {
+        // AUDIT5-MINORS-1 F1: the generic `.md`/`.rst`/`.txt` fallthrough is the NEUTRAL `Doc`
+        // kind, NOT the `architecture` catch-all that inflated the count. "architecture" is now
+        // only by explicit ARCHITECTURE*/DESIGN*/OVERVIEW* name or an architecture directory.
+        // AMENDED (cycle-5 ruling): CHANGELOG is NOT an architecture name — it is neutral `Doc`.
+        assert_eq!(classify_doc_kind("CHANGELOG.md"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("CONTRIBUTING.md"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("NOTES.md"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("src/core/api_MAP.md"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("guide.rst"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("changes.txt"), DocKind::Doc);
+        // A docs/-tree prose file is now neutral `Doc` (only an architecture NAME/DIR is architecture).
+        assert_eq!(classify_doc_kind("docs/guide.md"), DocKind::Doc);
+    }
+
+    #[test]
+    fn is_license_document_by_name_only() {
+        // AUDIT5-MINORS-1 F1 (operator ruling, iteration 3): NAME ONLY. The `license` kind is
+        // assigned ONLY to files named LICENSE*/COPYING*/NOTICE* (any extension). The header marker
+        // is ignored for kind everywhere else.
+        //
+        // Positive — dedicated license FILES (name is the sole basis, any extension, any dir):
+        assert!(is_license_document("LICENSE"));
+        assert!(is_license_document("LICENSE.txt"));
+        assert!(is_license_document("LICENSE.md"));
+        assert!(is_license_document("LICENSE-MIT"));
+        assert!(is_license_document("path/to/COPYING"));
+        assert!(is_license_document("COPYING.LESSER"));
+        assert!(is_license_document("NOTICE.txt"));
+        // Negative — the reviewer's required case: a HEADINGLESS document that embeds an MIT/BSD/
+        // Apache body clause PLUS other prose is NOT a license (the name does not match). No
+        // content rule can decide "marker-and-nothing-else", so content is not consulted at all.
+        assert!(!is_license_document("legal/terms.txt")); // MIT-body content would have fired the
+                                                          // old content path; NAME ONLY rejects it.
+        assert!(!is_license_document("docs/BUILDING.txt")); // ASF-headed plain-text authored doc.
+                                                            // Negative — an ASF-headed authored doc (§D13 false-positive class): not license by name.
+        assert!(!is_license_document("CONTRIBUTING.md"));
+        assert!(!is_license_document("README.md"));
+        assert!(!is_license_document("guide.md"));
+        // Negative — the match is a NAME PREFIX: `licensing-guide.md` shares the prefix "licens"
+        // but diverges at 'i' vs 'e', so `starts_with("license")` is false. A prose doc ABOUT
+        // licensing is not a license file.
+        assert!(!is_license_document("licensing-guide.md"));
     }
 
     #[test]
@@ -315,40 +457,22 @@ mod tests {
     }
 
     #[test]
-    fn classify_release_dir_stays_architecture_without_the_doc_set() {
+    fn classify_release_dir_is_neutral_doc_without_the_doc_set() {
         // review-1 item 1: path-only classification NEVER emits release-notes (it cannot see the
-        // subtree's manifest index). A doc under docs/releases/ is the docs/ architecture default
-        // here; the release-notes upgrade happens in `discover_doc_inventory` (see lib_tests).
-        assert_eq!(
-            classify_doc_kind("docs/releases/1.4.x.txt"),
-            DocKind::Architecture
-        );
+        // subtree's manifest index). AMENDED (cycle-5 ruling): a doc under `docs/releases/` is now
+        // the neutral `Doc` default (not `architecture`) — `docs/releases` is not an architecture
+        // directory; the release-notes upgrade happens in `discover_doc_inventory` (see lib_tests),
+        // whose upgrade arm accepts `Doc` as well as `Architecture`/`Config`.
+        assert_eq!(classify_doc_kind("docs/releases/1.4.x.txt"), DocKind::Doc);
         assert_eq!(classify_doc_kind("docs/design.md"), DocKind::Architecture);
     }
 
     #[test]
-    fn license_marker_from_content_not_name() {
-        assert!(has_license_marker(
-            "MIT License\n\nPermission is hereby granted, free of charge, to any person"
-        ));
-        assert!(has_license_marker("SPDX-License-Identifier: Apache-2.0\n"));
-        assert!(has_license_marker(
-            "Redistribution and use in source and binary forms, with or without modification"
-        ));
-        // A prose doc that merely mentions the word license is NOT a license doc.
-        assert!(!has_license_marker(
-            "# Guide\n\nSee the license file for terms. This section covers configuration."
-        ));
-    }
-
-    #[test]
     fn classify_txt_and_rst_as_docs() {
-        // SELF-POLLUTION-1 §3: .txt/.rst are prose docs, not the Config fallthrough.
-        assert_eq!(
-            classify_doc_kind("docs/ref/fields.txt"),
-            DocKind::Architecture
-        );
-        assert_eq!(classify_doc_kind("docs/index.rst"), DocKind::Architecture);
+        // SELF-POLLUTION-1 §3: .txt/.rst are prose docs, not the Config fallthrough. AMENDED
+        // (cycle-5 ruling): a docs-tree prose file with no architecture NAME/DIR is neutral `Doc`.
+        assert_eq!(classify_doc_kind("docs/ref/fields.txt"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("docs/index.rst"), DocKind::Doc);
     }
 
     #[test]

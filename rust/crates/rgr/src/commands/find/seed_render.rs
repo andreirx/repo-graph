@@ -64,7 +64,20 @@ pub(super) fn render_seed_tier(
     repo_uid: Option<&str>,
     out: &mut String,
 ) {
-    out.push_str("Semantic seeds (embedding similarity — ranked guesses, not facts):\n");
+    // AUDIT5-MINORS-1 F3: hoist the provenance triple `{source}, model {model}` into this heading
+    // (stated ONCE), so the per-row template omits it unless a row's model differs from the
+    // heading's ("a foreign-daemon row keeps its own label"). Computed from `candidates` (absent in
+    // `--exact` / unavailable-tier states → `None` → no suffix, byte-identical to before).
+    let heading_prov = result
+        .get("candidates")
+        .and_then(|v| v.as_array())
+        .map(|cands| crate::presentation::seed::heading_provenance(cands))
+        .unwrap_or(None);
+    out.push_str(&format!(
+        "Semantic seeds (embedding similarity — ranked guesses, not facts{}):\n",
+        crate::presentation::seed::provenance_heading_suffix(&heading_prov)
+    ));
+    let heading_prov_ref = heading_prov.as_ref().map(|(s, m)| (s.as_str(), m.as_str()));
 
     // `seeds_available` is our OWN DTO field, ALWAYS serialized (bool). A missing /
     // mistyped value is MALFORMED — surfaced, NEVER defaulted to `false` (which would
@@ -143,7 +156,11 @@ pub(super) fn render_seed_tier(
             Some(score) if score < SEED_SIMILARITY_FLOOR => {
                 best_below = Some(best_below.map_or(score, |b| b.max(score)));
             }
-            _ => match crate::presentation::seed::render_seed_chunk_candidate(c, repo_uid) {
+            _ => match crate::presentation::seed::render_seed_chunk_candidate(
+                c,
+                repo_uid,
+                heading_prov_ref,
+            ) {
                 // Partition by the candidate's OWN `is_test` DTO field. A missing / non-bool
                 // value is UNKNOWN classification (old daemon / malformed) — routed to its
                 // own bucket, NEVER counted as production; the shared renderer already

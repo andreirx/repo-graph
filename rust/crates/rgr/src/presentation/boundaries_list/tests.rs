@@ -450,23 +450,72 @@ fn list_render_shows_filter() {
     assert!(output.contains("Filtered by: kind=http_client"));
 }
 
-/// ANCHORS-EVERYWHERE-1 (§4): the `boundaries list` GROUPED view (file × direction ×N) never
-/// renders a line — a group spans many rows/lines and has no single line. Even when every entry
-/// carries a `line`, the human output contains no `file:line` anchor (the line rides only in the
-/// JSON for machine consumers; the anchor lands on `surfaces list` rows / `boundaries show`).
+/// AUDIT5-MINORS-1 F2 (supersedes the ANCHORS-EVERYWHERE-1 grouped-line exclusion): the grouped
+/// `boundaries list` view carries the SET of each group's start-lines as `@ l1,l2,… (+K more)` —
+/// a set, never one picked `file:line` anchor. This replaces the prior test that PINNED the defect
+/// (the grouped view rendering NO line at all despite the DTO carrying one).
 #[test]
-fn grouped_headline_never_carries_a_line() {
+fn grouped_rows_carry_the_set_of_lines() {
     let mut resp = sample_list_response();
-    for e in &mut resp.results {
-        e.line = Some(123);
-    }
+    // Two distinct (file×direction) groups, each with one hit → each shows `@ <line>`.
+    resp.results[0].line = Some(112);
+    resp.results[1].line = Some(140);
     let out = resp.render_human();
     assert!(
-        !out.contains(":123"),
-        "grouped boundaries headline must not render a line:\n{out}"
+        out.contains("@ 112"),
+        "group carries its start-line set:\n{out}"
     );
     assert!(
-        !out.contains("client.ts:") && !out.contains("pool.ts:"),
-        "no `file:line` anchor on a grouped row:\n{out}"
+        out.contains("@ 140"),
+        "group carries its start-line set:\n{out}"
+    );
+    // It is a SET after `×N`, never a `file:line` anchor picked from one hit.
+    assert!(
+        !out.contains("client.ts:112") && !out.contains("pool.ts:140"),
+        "a set (`@ N`), never a `file:line` anchor:\n{out}"
+    );
+}
+
+/// AUDIT5-MINORS-1 F2: distinct lines within ONE group collapse to the group's line SET (`@` a
+/// comma list), capped at 5 shown with a truthful `(+K more)` tail — the audit's `ximagepool.c ×13
+/// @ 112,140,163,… (+8 more)` shape. A `None`/`0` line is an honest absence (never `@ 0`).
+#[test]
+fn grouped_line_set_is_capped_with_remainder() {
+    let mut resp = sample_empty_response();
+    let hit = |uid: &str, line: Option<u64>| BoundaryListEntry {
+        boundary_channel_uid: uid.to_string(),
+        channel_kind: "http".to_string(),
+        boundary_scope: "unknown".to_string(),
+        direction: "provider".to_string(),
+        protocol_family: Some("http".to_string()),
+        service_name: None,
+        file_path: Some("src/ximagepool.c".to_string()),
+        line,
+        symbol_key: None,
+        confidence: 0.9,
+        basis: None,
+        surface_uid: None,
+        surface_display_name: None,
+        test_composition: "production".to_string(),
+        test_composition_unknown_reason: None,
+    };
+    // 7 distinct lines + one None + one 0 → 7 in the set, 5 shown, "(+2 more)"; None/0 never shown.
+    resp.results = vec![
+        hit("a", Some(112)),
+        hit("b", Some(140)),
+        hit("c", Some(163)),
+        hit("d", Some(200)),
+        hit("e", Some(233)),
+        hit("f", Some(300)),
+        hit("g", Some(412)),
+        hit("h", None),
+        hit("i", Some(0)),
+    ];
+    resp.count = 9;
+    let out = resp.render_human();
+    assert!(out.contains("@ 112,140,163,200,233 (+2 more)"), "{out}");
+    assert!(
+        !out.contains("@ 0") && !out.contains(",0"),
+        "no fabricated 0 line:\n{out}"
     );
 }

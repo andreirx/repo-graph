@@ -67,9 +67,12 @@ fn seeds_above_floor_render_and_sub_floor_are_dropped_without_abstain() {
         None,
         &mut out,
     );
+    // AUDIT5-MINORS-1 F3: the score is on the ROW; the provenance (source embedding, model) is
+    // hoisted into the heading, so the row no longer repeats ", embedding, model …".
+    assert!(out.contains("score 0.72"), "above-floor rendered: {out}");
     assert!(
-        out.contains("score 0.72, embedding"),
-        "above-floor rendered: {out}"
+        out.contains("Semantic seeds (embedding similarity — ranked guesses, not facts; source embedding, model"),
+        "provenance hoisted into the heading (F3): {out}"
     );
     assert!(
         !out.contains("no candidates above the minimum similarity"),
@@ -237,9 +240,17 @@ fn well_formed_candidate_renders_with_validated_label() {
         "candidates": [well_formed_candidate(json!("embedding"))],
     });
     render_seed_tier(&result, FactTierOutcome::EstablishedMiss, None, &mut out);
+    // AUDIT5-MINORS-1 F3: the model is stated ONCE in the heading, not repeated per row.
     assert!(
-        out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
-        "candidate label: {out}"
+        out.contains(
+            "Semantic seeds (embedding similarity — ranked guesses, not facts; source embedding, model nomic-embed-text-v1.5):"
+        ),
+        "provenance (source + model) hoisted into the heading: {out}"
+    );
+    assert!(out.contains("score 0.71"), "row carries the score: {out}");
+    assert!(
+        !out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
+        "per-row model string is dropped (matches the heading): {out}"
     );
     assert!(out.contains(", module backend/auth"), "module hint: {out}");
 }

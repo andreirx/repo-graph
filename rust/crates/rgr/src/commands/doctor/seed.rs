@@ -129,6 +129,22 @@ pub(super) fn semantic_seeding_from_facts(response: &serde_json::Value) -> Probe
     }
 }
 
+/// AUDIT5-MINORS-1 F5: does the semantic-seeding store warrant a `[note]` tone (a healthy-but-
+/// degraded advisory, mirroring `apply_degraded_enrichment_tone`)? True when the seed store is NOT
+/// in a healthy serving state — i.e. its `state` is anything other than `present`/`building`
+/// (`unavailable`, `absent`, `degraded`, a missing/malformed block, or an unknown state). Seeding is
+/// optional so this never fails doctor (the `passed` bit stays true); it only refines the HUMAN
+/// marker from a misleading `[ok]` to `[note]` beside an unavailable/absent/degraded store, and
+/// feeds the `N ok · M note` count line. The `seed` block and `state` are our own daemon DTO; a
+/// missing block reads as `unavailable` (→ note), never a silent healthy default (VISION unknown≠ok).
+pub(super) fn seed_probe_is_note(response: &serde_json::Value) -> bool {
+    let state = response
+        .get("seed")
+        .and_then(|seed| seed.get("state"))
+        .and_then(|v| v.as_str());
+    !matches!(state, Some("present") | Some("building"))
+}
+
 /// Print the human-mode "Semantic seeding" section (spec §9). A probe not listed in a
 /// section filter is silently dropped from human output, so the seed probe is named
 /// here explicitly. Empty ⇒ nothing printed.
@@ -144,5 +160,27 @@ pub(super) fn print_seed_section(output: &DoctorOutput) {
             print_probe_labeled(probe, "vector store");
         }
         println!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn seed_probe_is_note_only_for_degraded_states() {
+        // AUDIT5-MINORS-1 F5: unavailable/absent/degraded (+ missing/unknown) → note; present/
+        // building → not a note.
+        assert!(seed_probe_is_note(
+            &json!({"seed": {"state": "unavailable"}})
+        ));
+        assert!(seed_probe_is_note(&json!({"seed": {"state": "absent"}})));
+        assert!(seed_probe_is_note(&json!({"seed": {"state": "degraded"}})));
+        // Missing seed block reads unavailable → note (unknown ≠ healthy).
+        assert!(seed_probe_is_note(&json!({})));
+        // Healthy serving states → not a note.
+        assert!(!seed_probe_is_note(&json!({"seed": {"state": "present"}})));
+        assert!(!seed_probe_is_note(&json!({"seed": {"state": "building"}})));
     }
 }

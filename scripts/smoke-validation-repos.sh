@@ -297,6 +297,20 @@ if [[ -n "$SMOKE_ONLY" ]]; then
     ALL_CATEGORIES=("${only_cats[@]}")
 fi
 
+# AUDIT5-MINORS-1 F6: the CANDIDATE universe for the accounting invariant — the repos that were
+# candidates to run, captured AFTER the SMOKE_ONLY subset filter but BEFORE the SMOKE_SKIP drop.
+# Every candidate must end up in exactly one of passed / failed / skipped. (Under a full batch this
+# equals internal ∪ legacy; under SMOKE_ONLY it is the selected subset — the correct universe in
+# both modes, unlike the raw internal ∪ legacy which would false-alarm under SMOKE_ONLY.)
+CANDIDATE_NAMES=("${ALL_NAMES[@]}")
+
+# Skip bookkeeping (AUDIT5-MINORS-1 F6): initialized HERE, before the SMOKE_SKIP filter, so a
+# repo dropped by the filter is RECORDED as skipped (with reason `env`) — not silently vanished
+# from every result array (the §D-meta defect: linux listed in legacy_repos but in none of
+# passed/failed/skipped). Path-missing skips (in the run loop below) append reason `path-missing`.
+SKIPPED_REPOS=()
+SKIP_REASONS=()
+
 # Optional complement: SMOKE_SKIP="n1 n2 ..." drops those repos from the batch.
 if [[ -n "$SMOKE_SKIP" ]]; then
     keep_names=(); keep_paths=(); keep_cats=()
@@ -305,6 +319,10 @@ if [[ -n "$SMOKE_SKIP" ]]; then
             keep_names+=("${ALL_NAMES[$idx]}")
             keep_paths+=("${ALL_PATHS[$idx]}")
             keep_cats+=("${ALL_CATEGORIES[$idx]}")
+        else
+            # AUDIT5-MINORS-1 F6: an env-skipped repo lands in `skipped` with reason `env`.
+            SKIPPED_REPOS+=("${ALL_NAMES[$idx]}")
+            SKIP_REASONS+=("env")
         fi
     done
     ALL_NAMES=("${keep_names[@]}")
@@ -348,7 +366,8 @@ export RMAP_SOCKET_PATH="$SOCKET_PATH"
 
 FAILED_REPOS=()
 PASSED_REPOS=()
-SKIPPED_REPOS=()
+# SKIPPED_REPOS / SKIP_REASONS were initialized above the SMOKE_SKIP filter (F6) so env-skips are
+# already recorded; the run loop below appends path-missing skips.
 
 # Timing log accumulator
 TIMING_FILE=$(mktemp)
@@ -368,6 +387,7 @@ for i in "${!ALL_NAMES[@]}"; do
     if [[ ! -d "$REPO_PATH" ]]; then
         echo "SKIP: repo path does not exist"
         SKIPPED_REPOS+=("$REPO_NAME")
+        SKIP_REASONS+=("path-missing")
         echo ""
         continue
     fi
@@ -540,6 +560,19 @@ if [[ "$ADHOC" == "false" ]]; then
         SKIPPED_JSON="[\"$(echo "${SKIPPED_REPOS[*]}" | sed 's/ /","/g')\"]"
     fi
 
+    # AUDIT5-MINORS-1 F6: an ADDITIVE per-skip reason map (name → env|path-missing), index-aligned
+    # with SKIPPED_REPOS. Additive key — pre-existing consumers ignore it; the shape version is
+    # unchanged because no existing field moved.
+    SKIP_REASONS_JSON="{}"
+    if [[ ${#SKIPPED_REPOS[@]} -gt 0 ]]; then
+        SKIP_REASONS_JSON="{"
+        for sidx in "${!SKIPPED_REPOS[@]}"; do
+            [[ $sidx -gt 0 ]] && SKIP_REASONS_JSON+=","
+            SKIP_REASONS_JSON+="\"${SKIPPED_REPOS[$sidx]}\":\"${SKIP_REASONS[$sidx]}\""
+        done
+        SKIP_REASONS_JSON+="}"
+    fi
+
     # 00-meta.json — batch summary
     cat > "$RUN_DIR/00-meta.json" << EOF
 {
@@ -559,6 +592,7 @@ if [[ "$ADHOC" == "false" ]]; then
   "passed": $PASSED_JSON,
   "failed": $FAILED_JSON,
   "skipped": $SKIPPED_JSON,
+  "skip_reasons": $SKIP_REASONS_JSON,
   "per_repo_meta": "See <repo>-meta.json for per-repo category, exit codes, timing; <repo>-<cmd>.txt for output"
 }
 EOF
@@ -579,14 +613,35 @@ echo "Passed: ${#PASSED_REPOS[@]} (${PASSED_REPOS[*]:-none})"
 echo "Failed: ${#FAILED_REPOS[@]} (${FAILED_REPOS[*]:-none})"
 echo "Skipped: ${#SKIPPED_REPOS[@]} (${SKIPPED_REPOS[*]:-none})"
 echo ""
+
+# AUDIT5-MINORS-1 F6: accounting invariant — every CANDIDATE repo must land in exactly one of
+# passed / failed / skipped. A repo that vanished from all three (the meta defect this fixes) trips
+# this check. Sorted-unique set comparison. A mismatch is a HARD FAILURE (not advisory): the
+# invariant is the whole point of the fix, so a violation FAILS the run (exit 1) and RETAINS the
+# state root for diagnosis, exactly as a repo failure would.
+ACCOUNTING_OK=true
+# `${arr[@]+"${arr[@]}"}` expands to NOTHING when the array is empty — required under `set -u` on
+# bash 3.2 (macOS), where a bare `"${empty[@]}"` raises "unbound variable" and aborts the summary.
+CANDIDATES_SORTED="$(printf '%s\n' ${CANDIDATE_NAMES[@]+"${CANDIDATE_NAMES[@]}"} | sort -u)"
+ACCOUNTED_SORTED="$(printf '%s\n' ${PASSED_REPOS[@]+"${PASSED_REPOS[@]}"} ${FAILED_REPOS[@]+"${FAILED_REPOS[@]}"} ${SKIPPED_REPOS[@]+"${SKIPPED_REPOS[@]}"} | sort -u)"
+if [[ "$CANDIDATES_SORTED" != "$ACCOUNTED_SORTED" ]]; then
+    ACCOUNTING_OK=false
+    echo "ERROR: repo accounting mismatch (F6 invariant) — candidates != passed∪failed∪skipped:"
+    echo "  only in candidates: $(comm -23 <(echo "$CANDIDATES_SORTED") <(echo "$ACCOUNTED_SORTED") | tr '\n' ' ')"
+    echo "  only in accounted:  $(comm -13 <(echo "$CANDIDATES_SORTED") <(echo "$ACCOUNTED_SORTED") | tr '\n' ' ')"
+else
+    echo "Accounting: OK (all candidate repos are passed/failed/skipped)"
+fi
+echo ""
 echo "State root: $STATE_ROOT"
 
 if [[ "$ADHOC" == "false" ]]; then
     echo "Run log: $RUN_DIR"
 fi
 
-# Cleanup or retain
-if [[ ${#FAILED_REPOS[@]} -eq 0 && "$RETAIN" == "false" ]]; then
+# Cleanup or retain. AUDIT5-MINORS-1 F6: an accounting mismatch retains the state root too (a
+# diagnosable fault, same as a repo failure).
+if [[ ${#FAILED_REPOS[@]} -eq 0 && "$ACCOUNTING_OK" == "true" && "$RETAIN" == "false" ]]; then
     rm -rf "$STATE_ROOT"
     echo "Disposal: deleted (all passed, default lifecycle)"
 elif [[ "$RETAIN" == "true" ]]; then
@@ -595,6 +650,7 @@ else
     echo "Disposal: RETAINED (failures detected)"
 fi
 
-if [[ ${#FAILED_REPOS[@]} -gt 0 ]]; then
+# AUDIT5-MINORS-1 F6: fail the run on a repo failure OR an accounting-invariant violation.
+if [[ ${#FAILED_REPOS[@]} -gt 0 || "$ACCOUNTING_OK" != "true" ]]; then
     exit 1
 fi

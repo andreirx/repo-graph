@@ -36,7 +36,8 @@ mod seed;
 mod summary;
 
 use summary::{
-    apply_degraded_enrichment_tone, cwd_check_verdict, status_line, ProbeTone, SnapshotVerdict,
+    apply_degraded_enrichment_tone, apply_seed_probe_tone, cwd_check_verdict, status_line,
+    ProbeTone, SnapshotVerdict,
 };
 
 /// Doctor output for JSON mode.
@@ -151,8 +152,11 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     // Add storage summary probe (PERF-OBS-1) + the witness-ledger operational probe when the
     // daemon attached one (RECON-M-R3a; absent on zero-SCIP repos — R-0 data-driven absence).
     // Uses DaemonClient which handles transport fallback (socket → stdio)
-    // so this works in both normal and sandboxed environments
-    probes.extend(storage_summary_probes());
+    // so this works in both normal and sandboxed environments. AUDIT5-MINORS-1 F5: `seed_note`
+    // rides alongside (like enrichment's degraded flag) — it cannot travel on a flat `ProbeResult`,
+    // so it is the second tuple element rather than a per-probe field (~32 sites).
+    let (storage_probes, seed_note) = storage_summary_probes();
+    probes.extend(storage_probes);
 
     // daemon_info-derived probes: authority policy (STATE-ROOT-SEPARATION-1) plus
     // daemon memory + total storage (DOCTOR-RESOURCE-REPORT), from one round-trip. The
@@ -179,6 +183,8 @@ fn execute_doctor() -> (DoctorOutput, bool) {
 
     let mut probe_outputs: Vec<ProbeOutput> = probes.into_iter().map(ProbeOutput::from).collect();
     apply_degraded_enrichment_tone(&mut probe_outputs, enrichment_degraded);
+    // AUDIT5-MINORS-1 F5: an unavailable/absent/degraded seed store renders `[note]`, not `[ok]`.
+    apply_seed_probe_tone(&mut probe_outputs, seed_note);
 
     let output = DoctorOutput {
         platform,
@@ -202,28 +208,41 @@ fn execute_doctor() -> (DoctorOutput, bool) {
 /// Always returns at least the `storage` probe (failures visible in diagnostics, never
 /// silent); the `witness_ledger` probe rides only when the daemon attached the block.
 /// (Renamed from `storage_summary_probe` with the plural contract — local, recorded.)
-fn storage_summary_probes() -> Vec<ProbeResult> {
+///
+/// Returns `(probes, seed_note)`. AUDIT5-MINORS-1 F5: `seed_note` is a HUMAN display-tone signal
+/// (the seed probe stays health-`passed` — seeding is optional — yet must render `[note]`, not
+/// `[ok]`, a distinction the boolean `ProbeResult.passed` deliberately does not encode). It rides
+/// as the second tuple element rather than a per-`ProbeResult` field to avoid touching ~32 sites.
+/// `false` on every early-return path (no seed block was read); true only when the success path
+/// found an unavailable/absent/degraded seed store.
+fn storage_summary_probes() -> (Vec<ProbeResult>, bool) {
     let cwd = match std::env::current_dir() {
         Ok(p) => p,
         Err(e) => {
-            return vec![ProbeResult {
-                name: "storage".to_string(),
-                passed: false,
-                message: "failed to get cwd".to_string(),
-                details: Some(format!("{}", e)),
-            }];
+            return (
+                vec![ProbeResult {
+                    name: "storage".to_string(),
+                    passed: false,
+                    message: "failed to get cwd".to_string(),
+                    details: Some(format!("{}", e)),
+                }],
+                false,
+            );
         }
     };
 
     let mut client = match DaemonClient::new() {
         Ok(c) => c,
         Err(e) => {
-            return vec![ProbeResult {
-                name: "storage".to_string(),
-                passed: false,
-                message: "daemon unavailable".to_string(),
-                details: Some(format!("{}", e)),
-            }];
+            return (
+                vec![ProbeResult {
+                    name: "storage".to_string(),
+                    passed: false,
+                    message: "daemon unavailable".to_string(),
+                    details: Some(format!("{}", e)),
+                }],
+                false,
+            );
         }
     };
 
@@ -239,27 +258,35 @@ fn storage_summary_probes() -> Vec<ProbeResult> {
             let msg = format!("{}", e);
             if msg.contains("not indexed") {
                 // Not an error — just no repo in cwd
-                return vec![ProbeResult {
-                    name: "storage".to_string(),
-                    passed: true,
-                    message: "no repo indexed in cwd".to_string(),
-                    details: None,
-                }];
+                return (
+                    vec![ProbeResult {
+                        name: "storage".to_string(),
+                        passed: true,
+                        message: "no repo indexed in cwd".to_string(),
+                        details: None,
+                    }],
+                    false,
+                );
             }
             // Other errors are degraded diagnostics
-            return vec![ProbeResult {
-                name: "storage".to_string(),
-                passed: false,
-                message: "query failed".to_string(),
-                details: Some(msg),
-            }];
+            return (
+                vec![ProbeResult {
+                    name: "storage".to_string(),
+                    passed: false,
+                    message: "query failed".to_string(),
+                    details: Some(msg),
+                }],
+                false,
+            );
         }
     };
 
     let mut probes = vec![storage_probe::storage_probe_from_facts(&response)];
     probes.extend(storage_probe::witness_probe_from_facts(&response));
     probes.push(seed::semantic_seeding_from_facts(&response));
-    probes
+    // AUDIT5-MINORS-1 F5: derive the seed `[note]` signal from the SAME response.
+    let seed_note = seed::seed_probe_is_note(&response);
+    (probes, seed_note)
 }
 
 /// Format size in human-readable form.
@@ -447,7 +474,17 @@ fn print_human_output(output: &DoctorOutput) {
     }
 
     // Summary. §1: doctor reports DAEMON/INSTALL health — it must NOT imply snapshot quality.
-    println!("{}", status_line(&output.summary, &output.snapshot_verdict));
+    // AUDIT5-MINORS-1 F5: count the healthy-but-degraded probes (tone `[note]`) so the count line
+    // reads "N ok · M note" instead of a flat "N/N checks" beside a degraded store.
+    let notes = output
+        .probes
+        .iter()
+        .filter(|p| p.tone == ProbeTone::Note)
+        .count();
+    println!(
+        "{}",
+        status_line(&output.summary, &output.snapshot_verdict, notes)
+    );
 }
 
 fn print_probe(probe: &ProbeOutput) {

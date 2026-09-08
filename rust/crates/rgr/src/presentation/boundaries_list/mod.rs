@@ -51,10 +51,10 @@ pub struct BoundaryListEntry {
     #[serde(default, rename = "sourceFile")]
     pub file_path: Option<String>,
     /// ANCHORS-EVERYWHERE-1 (Tier 1): the surface's start line, carried from the four-struct
-    /// thread for machine consumers of the boundaries-list JSON. Deliberately NOT rendered in
-    /// the HUMAN grouped view — a `file × direction (×N)` group spans many rows/lines and has
-    /// no single line, so a headline never picks one (the anchor lands on the individual
-    /// `surfaces list` rows and on `boundaries show` instead).
+    /// thread for machine consumers of the boundaries-list JSON. AUDIT5-MINORS-1 F2: the grouped
+    /// human view now renders the SET of these lines per `file × direction` group (`@ 112,140,…
+    /// (+K more)`) — a set, never one picked line (a group spans many hits, so no single line is
+    /// the anchor). See [`group`]'s `summarize_lines`.
     #[serde(default, rename = "lineStart")]
     pub line: Option<u64>,
     #[serde(default, rename = "symbolStableKey")]

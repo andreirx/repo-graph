@@ -20,6 +20,12 @@ use super::{BoundaryListEntry, RowComposition};
 /// Max methods/routes listed per group before summarizing the tail as `+K more`.
 const MAX_ROUTES_PER_GROUP: usize = 6;
 
+/// AUDIT5-MINORS-1 F2: max distinct start-lines shown per group before the tail is summarized as
+/// `(+K more)`. A `file × direction` group legitimately spans many hits; the human render shows the
+/// SET of their lines (never one picked line — consistent with ANCHORS-EVERYWHERE-1's grouped rule),
+/// capped so a 772-row repo stays legible.
+const MAX_LINES_PER_GROUP: usize = 5;
+
 /// A borrowed grouped row: its `(file, direction)` key and accumulated columns. Named so
 /// the production/test-only partition (§2.2) reads cleanly and clippy's type-complexity
 /// lint stays quiet.
@@ -158,6 +164,12 @@ fn render_group_section(
         }
         cols.push(key.file.clone());
         out.push_str(&format!("  {}  ×{}", cols.join("  "), agg.n));
+        // AUDIT5-MINORS-1 F2: the group's start-line SET (`@ 112,140,… (+K more)`), the anchor
+        // that migration_024 stores per hit but the grouped human view never rendered.
+        let lines = summarize_lines(&agg.lines);
+        if !lines.is_empty() {
+            out.push_str(&format!("  {}", lines));
+        }
         // §2.4: the methods/routes summary (from `surface_display_name`), the signal that
         // lived only in `surfaces list` before.
         let routes = summarize_routes(&agg.routes);
@@ -196,6 +208,11 @@ fn render_demoted_rows(groups: &[(&GroupKey, &GroupAgg)]) -> String {
             key.file.clone(),
         ];
         out.push_str(&format!("  {}  ×{}", cols.join("  "), agg.n));
+        // AUDIT5-MINORS-1 F2: the demoted (test-only) groups carry their start-line SET too.
+        let lines = summarize_lines(&agg.lines);
+        if !lines.is_empty() {
+            out.push_str(&format!("  {}", lines));
+        }
         let routes = summarize_routes(&agg.routes);
         if !routes.is_empty() {
             out.push_str(&format!("  {}", routes));
@@ -223,6 +240,11 @@ struct GroupAgg {
     families: BTreeSet<String>,
     /// The methods/routes (`surface_display_name`) seen in this group.
     routes: BTreeSet<String>,
+    /// AUDIT5-MINORS-1 F2: the SET of distinct start-lines of this group's hits (storage carries a
+    /// line per hit — migration_024). A group spans many rows and has no single line, so the render
+    /// shows the SET (`@ 112,140,… (+K more)`), never one picked line. `None`/`0` lines are honest
+    /// absences and are NOT added (never a fabricated `@ 0`).
+    lines: BTreeSet<u64>,
     /// Rows in this group positively classified test-only (§2.2).
     test_only_n: usize,
     /// Rows positively classified production.
@@ -251,6 +273,13 @@ impl GroupAgg {
         if let Some(name) = &e.surface_display_name {
             if !name.trim().is_empty() {
                 self.routes.insert(name.clone());
+            }
+        }
+        // AUDIT5-MINORS-1 F2: accumulate the hit's start-line into the group's line SET. A `None`
+        // (unknown) or `0` line is an honest absence — never a fabricated anchor.
+        if let Some(line) = e.line {
+            if line > 0 {
+                self.lines.insert(line);
             }
         }
     }
@@ -297,6 +326,26 @@ fn summarize_routes(routes: &BTreeSet<String>) -> String {
         .join(", ");
     if routes.len() > MAX_ROUTES_PER_GROUP {
         s.push_str(&format!(", +{} more", routes.len() - MAX_ROUTES_PER_GROUP));
+    }
+    s
+}
+
+/// AUDIT5-MINORS-1 F2: summarize a group's start-line SET as `@ l1,l2,… (+K more)`, up to
+/// [`MAX_LINES_PER_GROUP`] shown (ascending — `BTreeSet` order), then `(+K more)`. Empty ⇒ `""`
+/// (a group with no stored line renders no `@` clause — an honest absence, never `@ 0`). A SET,
+/// never one picked line, consistent with ANCHORS-EVERYWHERE-1's grouped rule.
+fn summarize_lines(lines: &BTreeSet<u64>) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let shown: Vec<String> = lines
+        .iter()
+        .take(MAX_LINES_PER_GROUP)
+        .map(|l| l.to_string())
+        .collect();
+    let mut s = format!("@ {}", shown.join(","));
+    if lines.len() > MAX_LINES_PER_GROUP {
+        s.push_str(&format!(" (+{} more)", lines.len() - MAX_LINES_PER_GROUP));
     }
     s
 }

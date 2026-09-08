@@ -183,6 +183,15 @@ fn project_surface_to_input(
         .and_then(|v| v.as_str())
         .map(str::to_string);
     let (method, route) = split_method_route(s.display_name.as_deref(), meta_method.as_deref());
+    // AUDIT5-MINORS-1 F7 (root cause §H6): the detector already stores the surface's start line in
+    // `metadata_json.lineStart` (e.g. `express_detector`), but this family hard-coded `line: None`.
+    // Read it now. Absent OR `0` → `None` (an honest absence — never a fabricated line, STANDING
+    // HONESTY RULE 3).
+    let line = meta
+        .as_ref()
+        .and_then(|m| m.get("lineStart"))
+        .and_then(|v| v.as_u64())
+        .filter(|&l| l > 0);
     let source_file = s
         .entrypoint_path
         .clone()
@@ -196,10 +205,10 @@ fn project_surface_to_input(
         http_method: method,
         route,
         source_file,
-        // ANCHORS-EVERYWHERE-1: the legacy project_surfaces family carries no line_start in
-        // scope for this slice → None (honest absence, back-filled from the boundary family
-        // on a dedup merge; never fabricated).
-        line: None,
+        // AUDIT5-MINORS-1 F7: the project_surfaces family now carries its `metadata_json.lineStart`
+        // (read above; absent/0 → None). Express provider rows (`server.ts:45 [provider]`) get their
+        // anchor; a surface with no stored line stays an honest absence.
+        line,
         is_test,
         framework,
         route_unknown_reason: None,
@@ -522,6 +531,43 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(uin.is_test, None, "no files row ⇒ None, not false");
+    }
+
+    #[test]
+    fn project_surface_carries_line_start_from_metadata() {
+        // AUDIT5-MINORS-1 F7 (§H6): a project_surfaces provider row reads its start line from
+        // `metadata_json.lineStart` (0/47 → 47/47 on FRAKTAG). Absent OR 0 → None (never fabricated).
+        let is_test = BTreeMap::new();
+
+        // With lineStart → Some(line).
+        let mut with_line = project_surface(
+            "http_provider",
+            "GET /api/knowledge-bases",
+            "packages/api/src/server.ts",
+        );
+        with_line.metadata_json =
+            Some(r#"{"httpMethod":"GET","framework":"express","lineStart":45}"#.to_string());
+        let input = project_surface_to_input(&with_line, &is_test)
+            .expect("valid metadata")
+            .expect("http kind");
+        assert_eq!(input.line, Some(45), "reads metadata lineStart");
+
+        // Absent lineStart (the base helper's metadata has none) → None.
+        let absent = project_surface("http_provider", "GET /api/x", "src/api.ts");
+        let ai = project_surface_to_input(&absent, &is_test)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ai.line, None, "absent lineStart ⇒ None, never fabricated");
+
+        // lineStart == 0 → None (honest absence, never `server.ts:0`).
+        let mut zero = project_surface("http_provider", "GET /api/y", "src/y.ts");
+        zero.metadata_json =
+            Some(r#"{"httpMethod":"GET","framework":"express","lineStart":0}"#.to_string());
+        let zi = project_surface_to_input(&zero, &is_test).unwrap().unwrap();
+        assert_eq!(
+            zi.line, None,
+            "0 lineStart ⇒ None (STANDING HONESTY RULE 3)"
+        );
     }
 
     // ── review-3 item 1: a legacy project-family pair feeds the modules note ──

@@ -212,19 +212,6 @@ pub(super) enum FactTierOutcome {
     MissNotEstablished,
 }
 
-/// ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): the ONE pattern-header line (with its
-/// trailing newline) that replaces every in-root row's per-row `→ rmap explain …` cursor
-/// line. It states the composition pattern once — the reader reassembles the runnable short
-/// cursor from each row's own visible `path` / `qualified_name` / `[KIND]`, and the daemon's
-/// syntax-gated `explain` reattach alias (keyed on `:SYMBOL`) resolves it. This is how the
-/// LITERAL ≤15%-of-bytes-on-cursor-lines target is met BY DESIGN. The SINGLE source of both
-/// the printed text and (via `len()`) the amortization gate — so the two never drift. The
-/// repo uid rides the alias, not this line, so no uid is restated per output.
-fn pattern_header_line() -> &'static str {
-    "→ explain any row below: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>' \
-     (compose it from the row's path, name, and [KIND])\n"
-}
-
 /// ECONOMY-2 (§2.1): the cursor-diet eligibility of a `find` response — either an EXACT
 /// count of the CURSOR-COMPOSABLE rows (fact symbol rows + seed rows whose own path +
 /// qualified_name reassemble the runnable short cursor, so the pattern header can cover them
@@ -376,7 +363,7 @@ fn render_find_human(result: &serde_json::Value, exact: bool) -> String {
         DietEligibility::Malformed => false,
     });
     if diet_uid.is_some() {
-        out.push_str(pattern_header_line());
+        out.push_str(crate::presentation::seed::pattern_header_line());
     }
     out.push('\n');
 

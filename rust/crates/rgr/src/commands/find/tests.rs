@@ -54,10 +54,17 @@ fn facts_render_above_seeds_with_class_and_command_labels() {
         out.contains("provider GET /api/offers  — src/offer.ts"),
         "route hit: {out}"
     );
-    // Seed candidate still rendered below, with its validated label.
+    // Seed candidate still rendered below. AUDIT5-MINORS-1 F3: its provenance (source embedding,
+    // model) is hoisted into the seed heading (stated once), not repeated on the row.
     assert!(
-        out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
-        "seed candidate below: {out}"
+        out.contains(
+            "Semantic seeds (embedding similarity — ranked guesses, not facts; source embedding, model nomic-embed-text-v1.5):"
+        ),
+        "seed provenance hoisted into the heading: {out}"
+    );
+    assert!(
+        !out.contains("score 0.71, embedding, model nomic-embed-text-v1.5"),
+        "per-row model string dropped (matches heading): {out}"
     );
 }
 

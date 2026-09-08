@@ -68,6 +68,49 @@ pub(crate) fn composable_cursor_kind(
     Some(kind.to_string())
 }
 
+/// ECONOMY-2 (§2.1, ruling economy_2_cursor_metric): the ONE pattern-header line (with its
+/// trailing newline) that replaces every in-root row's per-row `→ rmap explain …` cursor line. It
+/// states the composition pattern once — the reader reassembles the runnable short cursor from each
+/// row's own visible `path` / `qualified_name` / `[KIND]`, and the daemon's syntax-gated `explain`
+/// reattach alias (keyed on `:SYMBOL`) resolves it.
+///
+/// AUDIT5-MINORS-1 F3: moved here from `find` so BOTH `find`'s seed tier AND the `callers`/`callees`/
+/// `path` not-found fallback ([`render_symbol_not_found_semantic`]) print the IDENTICAL header from
+/// ONE source (STANDING HONESTY RULE 2 — never a per-command copy). The repo uid rides the alias,
+/// not this line, so no uid is restated per output.
+pub(crate) fn pattern_header_line() -> &'static str {
+    "→ explain any row below: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>' \
+     (compose it from the row's path, name, and [KIND])\n"
+}
+
+/// AUDIT5-MINORS-1 F3: the `(source, model_id)` HEADING provenance for a seed candidate block — the
+/// provenance triple `{source}, model {model}` hoisted OUT of the per-row template and stated ONCE
+/// in the block heading. Returns the FIRST candidate's `(source, model_id)` (both present as
+/// strings); `None` when no candidate carries both (then rows keep their own per-row label). A row
+/// whose `(source, model)` differs from this heading value restates it (the honesty rule "a
+/// foreign-daemon row keeps its own label" survives — see [`render_seed_chunk_candidate`]).
+pub(crate) fn heading_provenance(candidates: &[Value]) -> Option<(String, String)> {
+    for c in candidates {
+        if let (Some(s), Some(m)) = (
+            c.get("source").and_then(|v| v.as_str()),
+            c.get("model_id").and_then(|v| v.as_str()),
+        ) {
+            return Some((s.to_string(), m.to_string()));
+        }
+    }
+    None
+}
+
+/// AUDIT5-MINORS-1 F3: the heading suffix stating the hoisted provenance once — `; source
+/// {source}, model {model}` — or `""` when there is no common provenance to hoist. Shared by
+/// `find`'s seed tier and the not-found fallback so both headings read identically.
+pub(crate) fn provenance_heading_suffix(prov: &Option<(String, String)>) -> String {
+    match prov {
+        Some((source, model)) => format!("; source {source}, model {model}"),
+        None => String::new(),
+    }
+}
+
 /// Render the semantic `hint` + `semantic_candidates` (if any) carried on a
 /// `symbol not found` error's `data`. Returns `None` when `data` carries no seed
 /// semantic keys at all (a plain not-found from a daemon without the tier) so the
@@ -91,19 +134,54 @@ pub fn render_symbol_not_found_semantic(data: Option<&Value>) -> Option<String> 
         out.push_str(&format!("hint: {hint}\n"));
     }
     if let Some(cands) = candidates {
-        out.push_str("Semantic candidates (Layer-3 embedding hints, not resolved facts):\n");
+        // AUDIT5-MINORS-1 F3: hoist the provenance triple `{source}, model {model}` into the
+        // heading (stated ONCE), so the per-row template omits it unless a row's model differs.
+        let heading_prov = heading_provenance(cands);
+        out.push_str(&format!(
+            "Semantic candidates (Layer-3 embedding hints, not resolved facts{}):\n",
+            provenance_heading_suffix(&heading_prov)
+        ));
+        // AUDIT5-MINORS-1 F3 (cursor diet — the 47%-of-bytes-on-full-cursors defect): the
+        // not-found error has NO once-per-output uid header to anchor the composability strip to,
+        // so derive the repo uid from the FIRST candidate's `<uid>:…` stable_key prefix. When any
+        // candidate is cursor-composable (its own path+qualified_name reassemble the short cursor),
+        // print the SAME one pattern header `find` prints and pass `Some(uid)` so composable rows
+        // drop their full `(cd … && rmap explain …)` line and show `[KIND]` instead. If NOTHING
+        // composes (a foreign uid), keep `None` → full self-contained cursors (byte-identical to
+        // before) and no header — matching `find`'s discipline (STANDING HONESTY RULE: never a
+        // header the rows below cannot honour).
+        let uid = cands.iter().find_map(|c| {
+            c.get("stable_key")
+                .and_then(|v| v.as_str())
+                .and_then(|k| k.split_once(':'))
+                .map(|(u, _)| u.to_string())
+        });
+        let any_composable = uid.as_deref().is_some_and(|u| {
+            cands.iter().any(|c| {
+                match (
+                    c.get("stable_key").and_then(|v| v.as_str()),
+                    c.get("path").and_then(|v| v.as_str()),
+                    c.get("qualified_name").and_then(|v| v.as_str()),
+                ) {
+                    (Some(k), Some(p), Some(q)) => {
+                        composable_cursor_kind(Some(u), k, p, q).is_some()
+                    }
+                    _ => false,
+                }
+            })
+        });
+        let diet_uid = if any_composable { uid.as_deref() } else { None };
+        if diet_uid.is_some() {
+            out.push_str(pattern_header_line());
+        }
         // CURSOR-ROUNDTRIP-1 (§2.2): render through the CURRENT SEED-CHUNK-1 renderer
         // (`path`/`line`/`qualified_name`/`is_test`) — the SAME one `find` uses. A
         // candidate that fails validation is COUNTED (not rendered as a placeholder) and
         // stated ONCE below (STANDING HONESTY RULE 1).
+        let heading_prov_ref = heading_prov.as_ref().map(|(s, m)| (s.as_str(), m.as_str()));
         let mut unreadable: Vec<String> = Vec::new();
         for c in cands {
-            // Group B has NO once-per-output repo-uid header (it renders inside a
-            // `symbol not found` error, not `find`'s framed output), so it passes
-            // `None`: every seed cursor stays in its full, self-contained `cd … &&`
-            // form here — byte-identical to before ECONOMY-2. Only `find`'s seed tier,
-            // which prints the uid header once, passes `Some(uid)` to shorten rows.
-            match render_seed_chunk_candidate(c, None) {
+            match render_seed_chunk_candidate(c, diet_uid, heading_prov_ref) {
                 Ok(row) => out.push_str(&row),
                 Err(reason) => unreadable.push(reason),
             }
@@ -152,6 +230,7 @@ pub(crate) fn render_semantic_header(summary: &str, reasons: &[String]) -> Strin
 pub(crate) fn render_seed_chunk_candidate(
     c: &Value,
     repo_uid: Option<&str>,
+    heading_provenance: Option<(&str, &str)>,
 ) -> Result<String, String> {
     let path = c.get("path").and_then(|v| v.as_str());
     let key = c.get("stable_key").and_then(|v| v.as_str());
@@ -223,8 +302,18 @@ pub(crate) fn render_seed_chunk_candidate(
         Some(Value::Bool(false)) => "",
         _ => "  [is_field unknown]",
     };
+    // AUDIT5-MINORS-1 F3: the provenance triple `{source}, model {model}` is HOISTED into the
+    // block heading and OMITTED from the row when this row matches the heading's provenance — the
+    // 17.7%-of-bytes-on-a-repeated-model-string defect. A row whose `(source, model)` DIFFERS from
+    // the heading (a foreign/old-daemon candidate) RESTATES it, so "a foreign-daemon row keeps its
+    // own label" survives. `None` heading (no common provenance) keeps every row's own label —
+    // byte-identical to before this slice.
+    let provenance = match heading_provenance {
+        Some((h_source, h_model)) if h_source == source && h_model == model => String::new(),
+        _ => format!(", {source}, model {model}"),
+    };
     let mut row = format!(
-        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){decl_label}{test_label}{field_label}{kind_label}\n"
+        "  {anchor}{symbol}  (score {score:.2}{provenance}{module}){decl_label}{test_label}{field_label}{kind_label}\n"
     );
     // Composable ⇒ the pattern header covers this row; emit NO per-row cursor line. Otherwise
     // render the explicit follow-up (the short in-root cursor, or the full self-contained
@@ -452,18 +541,37 @@ mod tests {
         let out = render_symbol_not_found_semantic(Some(&data)).expect("renders");
         assert!(out.contains("hint: no such symbol"));
         assert!(out.contains("src/a.ts:12  svc"));
-        assert!(out.contains("embedding"));
         assert!(out.contains("module backend/services"));
-        // review-3: the `#`-bearing symbol key is single-quoted in the full-form fallback
-        // (Group B, repo_uid=None) so the copy-paste command runs — an unquoted `#` would
-        // start a shell comment and truncate the key.
-        assert!(out.contains("(cd /repo && rmap explain 'glamCRM:src/a.ts#svc:SYMBOL:FUNCTION')"));
+        // AUDIT5-MINORS-1 F3: the provenance triple is HOISTED into the heading (stated once), not
+        // repeated per row.
         assert!(
-            !out.contains("rmap explain glamCRM:src/a.ts#svc:SYMBOL:FUNCTION)"),
-            "must NOT print the unquoted `#`-bearing key: {out}"
+            out.contains(
+                "Semantic candidates (Layer-3 embedding hints, not resolved facts; source embedding, model m):"
+            ),
+            "provenance hoisted into the heading: {out}"
         );
-        // The bug this slice fixes: a well-formed current-DTO candidate must NOT render as
-        // a malformed placeholder (the pre-slice `file`-shaped renderer printed exactly that).
+        assert!(
+            !out.contains("(score 0.71, embedding, model m"),
+            "the per-row model string is dropped (matches the heading): {out}"
+        );
+        // AUDIT5-MINORS-1 F3: an in-root COMPOSABLE candidate now drops its full `(cd … && rmap
+        // explain …)` cursor line — the ONE pattern header covers it and the row shows `[KIND]`.
+        assert!(
+            out.contains(
+                "→ explain any row below: rmap explain '<path>#<qualified_name>:SYMBOL:<KIND>'"
+            ),
+            "the not-found fallback prints the pattern header (F3): {out}"
+        );
+        assert!(
+            out.contains("[FUNCTION]"),
+            "composable row shows [KIND]: {out}"
+        );
+        assert!(
+            !out.contains("(cd /repo && rmap explain"),
+            "composable row drops its full cursor line (F3): {out}"
+        );
+        // The bug CURSOR-ROUNDTRIP-1 fixed: a well-formed current-DTO candidate must NOT render as
+        // a malformed placeholder.
         assert!(
             !out.contains("malformed"),
             "no placeholder for a valid candidate: {out}"
@@ -471,6 +579,52 @@ mod tests {
         assert!(
             !out.contains("unreadable"),
             "nothing unreadable here: {out}"
+        );
+    }
+
+    #[test]
+    fn foreign_model_row_restates_its_own_model_label_when_it_differs_from_heading() {
+        // AUDIT5-MINORS-1 F3 (honesty survival — the reviewer's required regression): the
+        // provenance triple is hoisted into the heading from the FIRST candidate. A LATER
+        // candidate whose model DIFFERS (a foreign/old-daemon row mixed into the set) must
+        // RESTATE its own `, {source}, model {model}` label — the hoist must NEVER silently
+        // repaint it with the heading's model ("a foreign-daemon row keeps its own label").
+        let data = json!({
+            "semantic_candidates": [
+                {
+                    "stable_key": "r:src/a.ts#a:SYMBOL:FUNCTION",
+                    "path": "src/a.ts", "line": 1, "qualified_name": "a", "is_test": false,
+                    "is_decl": false, "is_field": false,
+                    "score": 0.71, "source": "embedding", "model_id": "house-model",
+                    "module": {"owning": "db"},
+                    "next": {"cmd": "explain", "args": ["r:src/a.ts#a:SYMBOL:FUNCTION"], "cwd": "/repo"}
+                },
+                {
+                    "stable_key": "r:src/b.ts#b:SYMBOL:FUNCTION",
+                    "path": "src/b.ts", "line": 2, "qualified_name": "b", "is_test": false,
+                    "is_decl": false, "is_field": false,
+                    "score": 0.66, "source": "embedding", "model_id": "foreign-model",
+                    "module": {"owning": "db"},
+                    "next": {"cmd": "explain", "args": ["r:src/b.ts#b:SYMBOL:FUNCTION"], "cwd": "/repo"}
+                }
+            ],
+            "hint": "h"
+        });
+        let out = render_symbol_not_found_semantic(Some(&data)).expect("renders");
+        // The heading hoists the FIRST candidate's provenance (stated once).
+        assert!(
+            out.contains("source embedding, model house-model):"),
+            "heading states the first candidate's model once: {out}"
+        );
+        // The heading-matching first row OMITS the per-row model label.
+        assert!(
+            !out.contains(", embedding, model house-model"),
+            "the heading-matching row drops its per-row model string: {out}"
+        );
+        // The DIFFERENT-model row RESTATES its own source/model label — the honesty rule survives.
+        assert!(
+            out.contains(", embedding, model foreign-model"),
+            "a foreign-model row keeps its own source/model label (F3 honesty): {out}"
         );
     }
 

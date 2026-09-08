@@ -139,11 +139,34 @@ pub(super) fn apply_degraded_enrichment_tone(
     }
 }
 
+/// AUDIT5-MINORS-1 F5: a semantic-seeding store that is unavailable/absent/degraded is
+/// healthy-but-degraded — it stays `passed` (seeding is optional) yet must render `[note]`, not a
+/// misleading `[ok]`. Mirrors [`apply_degraded_enrichment_tone`]: applied over the built
+/// `ProbeOutput` list so the wiring is unit-tested without a daemon round-trip. The `passed` bit is
+/// untouched (doctor still passes); only the display marker moves.
+pub(super) fn apply_seed_probe_tone(probes: &mut [ProbeOutput], seed_note: bool) {
+    if seed_note {
+        if let Some(p) = probes.iter_mut().find(|p| p.name == "semantic_seeding") {
+            p.tone = ProbeTone::Note;
+        }
+    }
+}
+
 /// §1: the doctor summary line. Frames the verdict as DAEMON/INSTALL health ("daemon healthy (N/N
 /// checks)") and NAMES the cwd repo's separate `check` verdict (snapshot quality) in its own clause when
 /// resolvable — omitted honestly otherwise. Pure, so the exact contract wording is unit-tested without a
 /// daemon round-trip.
-pub(super) fn status_line(summary: &Summary, verdict: &Option<SnapshotVerdict>) -> String {
+/// AUDIT5-MINORS-1 F5: `notes` is the count of healthy-but-degraded probes (tone `[note]`, e.g. an
+/// unavailable seed store or a 0-promotion enrichment pass). When there are any, the HEALTHY count
+/// reads `N ok · M note` instead of the flat `N/N checks` — so "28/28 checks" no longer reads green
+/// beside an unavailable store. `notes` is a strict subset of the `passed` count (a note never
+/// fails), so the ok count is `passed - notes`. The `--json` contract is unaffected (this is a human
+/// summary line; `notes` is derived from the human-only tone, not a serialized field).
+pub(super) fn status_line(
+    summary: &Summary,
+    verdict: &Option<SnapshotVerdict>,
+    notes: usize,
+) -> String {
     let verdict_clause = match verdict {
         Some(v) => {
             let check = match &v.check {
@@ -155,10 +178,18 @@ pub(super) fn status_line(summary: &Summary, verdict: &Option<SnapshotVerdict>) 
         None => String::new(),
     };
     if summary.healthy {
-        format!(
-            "Status: daemon healthy ({}/{} checks){}",
-            summary.passed, summary.total, verdict_clause
-        )
+        let count = if notes > 0 {
+            let ok = summary.passed.saturating_sub(notes);
+            format!(
+                "{} ok · {} note{}",
+                ok,
+                notes,
+                if notes == 1 { "" } else { "s" }
+            )
+        } else {
+            format!("{}/{} checks", summary.passed, summary.total)
+        };
+        format!("Status: daemon healthy ({}){}", count, verdict_clause)
     } else {
         format!(
             "Status: daemon UNHEALTHY ({}/{} checks failed){}",
@@ -191,6 +222,7 @@ mod tests {
                 repo: "glamCRM".to_string(),
                 check: SnapshotCheck::Verdict("FAIL"),
             }),
+            0,
         );
         assert_eq!(
             line,
@@ -198,6 +230,20 @@ mod tests {
         );
         // The old conflating "healthy (N/N checks passed)" framing is gone.
         assert!(!line.contains("checks passed"), "{line}");
+    }
+
+    // AUDIT5-MINORS-1 F5: with a healthy-but-degraded probe (note), the HEALTHY count reads
+    // "N ok · M note" — "28/28 checks" no longer reads green beside an unavailable seed store.
+    #[test]
+    fn status_line_healthy_with_notes_reads_ok_dot_note() {
+        let line = status_line(&summary(28, 0), &None, 1);
+        assert_eq!(line, "Status: daemon healthy (27 ok · 1 note)");
+        // Multiple notes pluralize.
+        let line2 = status_line(&summary(28, 0), &None, 2);
+        assert_eq!(line2, "Status: daemon healthy (26 ok · 2 notes)");
+        // Zero notes keeps the flat count (byte-identical to pre-slice).
+        let line3 = status_line(&summary(28, 0), &None, 0);
+        assert_eq!(line3, "Status: daemon healthy (28/28 checks)");
     }
 
     // §1: an UNHEALTHY daemon still names the snapshot verdict separately (the two axes are independent).
@@ -209,6 +255,7 @@ mod tests {
                 repo: "amodx".to_string(),
                 check: SnapshotCheck::Verdict("PASS"),
             }),
+            0,
         );
         assert_eq!(
             line,
@@ -219,7 +266,7 @@ mod tests {
     // §1: unresolvable/not-indexed cwd → the clause is OMITTED honestly, never a fabricated verdict.
     #[test]
     fn status_line_omits_verdict_when_cwd_unresolvable() {
-        let line = status_line(&summary(28, 0), &None);
+        let line = status_line(&summary(28, 0), &None, 0);
         assert_eq!(line, "Status: daemon healthy (28/28 checks)");
         assert!(!line.contains("snapshot verdicts"), "{line}");
     }
@@ -236,6 +283,7 @@ mod tests {
                     "daemon unavailable: connection refused".to_string(),
                 ),
             }),
+            0,
         );
         assert_eq!(
             line,
@@ -276,6 +324,38 @@ mod tests {
         let mut probes: Vec<ProbeOutput> =
             vec![ProbeResult::pass("enrichment", "resolved 81/100, promoted 40").into()];
         apply_degraded_enrichment_tone(&mut probes, false);
+        assert_eq!(probes[0].tone, ProbeTone::Ok);
+    }
+
+    // AUDIT5-MINORS-1 F5: the seed-note flag flips ONLY the semantic_seeding probe to [note], and
+    // only when set — the probe stays health-passed (its `passed` bit is untouched; the marker moves).
+    #[test]
+    fn seed_note_flag_marks_only_seed_probe_note() {
+        let mut probes: Vec<ProbeOutput> = vec![
+            ProbeResult::pass("semantic_seeding", "unavailable (vector store not built)").into(),
+            ProbeResult::pass("storage", "db: 1 GB").into(),
+        ];
+        apply_seed_probe_tone(&mut probes, true);
+        let seed = probes
+            .iter()
+            .find(|p| p.name == "semantic_seeding")
+            .unwrap();
+        assert_eq!(
+            seed.tone,
+            ProbeTone::Note,
+            "unavailable seed store → [note]"
+        );
+        assert!(seed.passed, "still health-passed (seeding is optional)");
+        assert_eq!(
+            probes.iter().find(|p| p.name == "storage").unwrap().tone,
+            ProbeTone::Ok,
+            "other probes are untouched"
+        );
+
+        // Not a note (present store) → seed stays [ok].
+        let mut probes: Vec<ProbeOutput> =
+            vec![ProbeResult::pass("semantic_seeding", "present (256-dim, model m)").into()];
+        apply_seed_probe_tone(&mut probes, false);
         assert_eq!(probes[0].tone, ProbeTone::Ok);
     }
 }

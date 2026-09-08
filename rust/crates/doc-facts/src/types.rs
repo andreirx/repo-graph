@@ -40,10 +40,22 @@ pub enum DocKind {
     /// Assigned in [`crate::discover_doc_inventory`] (needs the whole doc set), not from a single path.
     /// Grouped one line per family on the human render.
     ReleaseNotes,
-    /// DOCS-LIST-2 §2: a license document. Deterministic basis: CONTENT — the file carries an
-    /// SPDX identifier or a license-header marker (see [`crate::classification::has_license_marker`]),
-    /// never its `LICENSE` filename. Named on the human render, not folded into `architecture`.
+    /// A license document. AUDIT5-MINORS-1 F1 (operator ruling, iteration 3): deterministic basis
+    /// is **NAME ONLY** — a dedicated license FILENAME (`LICENSE*`/`COPYING*`/`NOTICE*`, any
+    /// extension). An authored doc that merely carries an ASF/apache HEADER is NOT `license` (the
+    /// former content path was removed — "marker-and-nothing-else" is not a decidable content rule).
+    /// See [`crate::classification::is_license_document`]. Named on the human render, not folded
+    /// into `architecture`.
     License,
+    /// AUDIT5-MINORS-1 F1: the neutral catch-all for prose docs (`.md`/`.rst`/`.txt`) that are
+    /// NOT explicitly architecture. AMENDED (cycle-5 operator ruling, 2026-09-08): `architecture`
+    /// is now assigned ONLY by an explicit NAME (`ARCHITECTURE*`/`DESIGN*`/`OVERVIEW*`) or an
+    /// explicitly architectural DIRECTORY (`design/`, `docs/architecture*`, `docs/design*`); every
+    /// other file under `docs/`/`agent_docs/` lands here. The prior behaviour folded every docs-tree
+    /// file into `architecture` — the default bucket that inflated the count (repo-graph
+    /// "architecture 577/591"). This is an ADDITIVE, neutral kind: `architecture` now means
+    /// "explicitly named or located as architecture", nothing more.
+    Doc,
 }
 
 impl DocKind {
@@ -56,6 +68,7 @@ impl DocKind {
             DocKind::Map => "map",
             DocKind::ReleaseNotes => "release-notes",
             DocKind::License => "license",
+            DocKind::Doc => "doc",
         }
     }
 }
@@ -264,6 +277,7 @@ mod tests {
         assert_eq!(DocKind::Map.as_str(), "map");
         assert_eq!(DocKind::ReleaseNotes.as_str(), "release-notes");
         assert_eq!(DocKind::License.as_str(), "license");
+        assert_eq!(DocKind::Doc.as_str(), "doc");
     }
 
     #[test]

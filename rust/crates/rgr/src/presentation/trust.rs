@@ -3,15 +3,16 @@
 //! # CLI-OUT-2B → TRUST-LIVEGRAPH-IMPL
 //!
 //! The daemon now returns the ratified HYBRID `CoherenceEnvelope<CoherentTrustReport>` (the wrapper is the
-//! top level). The `--json` path prints it verbatim; this human path projects it. The render is the honest
-//! two-half model (`docs/slices/trust-livegraph-1.md` §3e / W2):
-//!   - a NEW **Current-State Posture** section (Half A, `source = livegraph`) — residency / per-partition
-//!     freshness / language / producer / migrated-answer capability, GENUINELY served from the LiveGraph;
+//! top level). The `--json` path prints it verbatim; this human path projects it:
+//!   - AUDIT5-MINORS-1 F4: the Half-A "Current-State Posture (livegraph)" section was DROPPED from the
+//!     HUMAN render (a cold LiveGraph made it a constant, information-free line); the leaf and D-T6's MEET
+//!     survive UNCHANGED on `--json` for machine consumers;
 //!   - the existing v1 sections (Half B, `source = sqlite`) with their bullet text BYTE-IDENTICAL to the
 //!     pre-wrapper report, each heading carrying a `(source, snapshot-scoped extraction, freshness)` label so
 //!     a reader never mistakes the OUTGOING-extractor snapshot diagnostics for the current-state LiveGraph
 //!     resolution (F5);
-//!   - an overall **Posture** line carrying the root MEET (current-state-vs-snapshot freshness).
+//!   - an overall **Posture** line carrying the SNAPSHOT posture (Fresh/Stale — what the extracted facts
+//!     describe), from the always-computable `reliability` leaf (F4). The root MEET stays on `--json`.
 //!
 //! The renderer reuses the trust crate's coherent DTOs (`repo_graph_trust::CoherentTrustReport`) for
 //! deserialization so the CLI view cannot silently drift from the daemon's wire shape.
@@ -21,13 +22,7 @@
 //! ```text
 //! Trust Report: billing-service
 //! Snapshot: snap_01kr...
-//! Posture: Exact (Fresh)
-//!
-//! Current-State Posture  (livegraph, current-state, Fresh)
-//!   - Resident: yes (1 partition)
-//!   - app: Fresh, TypeScript, producer scip-typescript@0.4.0
-//!   - Producer available: yes
-//!   - Migrated-answer capability: yes
+//! Posture: Exact (Fresh)     <- F4: the SNAPSHOT posture (not the LiveGraph-dominated root MEET)
 //!
 //! Resolution  (sqlite, snapshot-scoped extraction, Fresh)
 //!   - your code's calls 78% resolved (1234 of 1582 in-scope or unclassified)
@@ -51,7 +46,7 @@ use repo_graph_agent::dto::ceiling_fact::CeilingReport;
 use repo_graph_agent::reliability::{self, CallReliabilityView, ExternalTarget};
 use repo_graph_coherence::{AnswerClass, CoherenceEnvelope, FreshnessState, Provenance, Source};
 use repo_graph_trust::types::{ReliabilityAxisScore, ReliabilityLevel};
-use repo_graph_trust::{CoherentTrustReport, LiveGraphPosture};
+use repo_graph_trust::CoherentTrustReport;
 
 use crate::presentation::{bullet, heading, kv_line};
 
@@ -105,14 +100,6 @@ fn labelled_heading<T>(title: &str, leaf: &CoherenceEnvelope<T>, scope: &str) ->
     ))
 }
 
-fn yes_no(b: bool) -> &'static str {
-    if b {
-        "yes"
-    } else {
-        "no"
-    }
-}
-
 // ── Top-level render ─────────────────────────────────────────────────────────────────────────────
 
 /// Render trust's coherence-wrapped daemon response (TRUST-LIVEGRAPH-IMPL).
@@ -124,21 +111,28 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
     let repo_display = v.display_name.as_deref().unwrap_or(&v.snapshot_uid);
     out.push_str(&kv_line("Trust Report", repo_display));
     out.push_str(&kv_line("Snapshot", &truncate_uid(&v.snapshot_uid)));
-    // The overall MEET posture (root): the hybrid's honest current-state-vs-snapshot freshness. A Fresh
-    // LiveGraph posture over a Stale snapshot reads Stale; a cold LiveGraph reads Unavailable (D-T6).
+    // AUDIT5-MINORS-1 F4: the headline is the SNAPSHOT posture (Fresh/Stale — what the extracted
+    // facts below describe), not the root MEET. The MEET was dominated by a LiveGraph half that is
+    // resident only after a hidden `rmap dev livegraph-refresh` (D-T6), so it read a constant
+    // `Unavailable (Unavailable)` on 28/28 repos — a line carrying no information. The MEET is
+    // UNCHANGED on the `--json` surface (`env.trust`/`env.freshness`); only the human headline moves
+    // to the snapshot posture (the `reliability` leaf carries the always-computable snapshot posture
+    // — `snapshot_posture(stale)`; the blob-derived `resolution` leaf can read `Unavailable` when the
+    // diagnostics blob is absent, so it is not the source here).
     out.push_str(&kv_line(
         "Posture",
         &format!(
             "{} ({})",
-            class_label(env.trust.class),
-            freshness_label(env.freshness)
+            class_label(v.reliability.trust.class),
+            freshness_label(v.reliability.freshness)
         ),
     ));
     out.push('\n');
 
-    // ── Half A — Current-State Posture (livegraph) ──
-    out.push_str(&render_posture(&v.current_state_posture));
-    out.push('\n');
+    // AUDIT5-MINORS-1 F4: the "Current-State Posture (livegraph)" section is DROPPED from the human
+    // render — a cold LiveGraph (the norm without the hidden dev refresh) made it a constant
+    // "Resident: no" carrying nothing about the repo. The current_state_posture leaf (with D-T6's
+    // MEET) is UNCHANGED on the `--json` surface for machine consumers.
 
     // ── Half B — residual extraction diagnostics (sqlite, snapshot-scoped) ──
     out.push_str(&render_resolution(v));
@@ -218,65 +212,9 @@ pub fn render_trust_envelope(env: &TrustEnvelope) -> String {
     out.trim_end().to_string()
 }
 
-// ── Half A — Current-State Posture (livegraph) ──────────────────────────────────────────────────
-
-fn render_posture(leaf: &CoherenceEnvelope<LiveGraphPosture>) -> String {
-    let p = &leaf.value;
-    let mut out = labelled_heading("Current-State Posture", leaf, "current-state");
-
-    if !p.resident {
-        // M-R3A-TRUST-POSTURE (ratified 2026-07-19): the legacy `resident` field is the SERVE
-        // fact; the amendment fields carry the two distinguished facts. A resident-but-withheld
-        // state must NEVER read as "not loaded" (the review-0 contradiction — a false state
-        // claim beside a W-BOTH witnesses block).
-        if p.livegraph_resident == Some(true) && p.coherent_serve_eligible == Some(false) {
-            out.push_str(&bullet(
-                "Resident: yes (compiler analysis is loaded) — current-state detail withheld: \
-                 not verified coherent with this report's snapshot for this request",
-            ));
-            return out;
-        }
-        out.push_str(&bullet(
-            "Resident: no (LiveGraph not loaded for this repo — current-state posture unavailable)",
-        ));
-        return out;
-    }
-
-    let n = p.partitions.len();
-    out.push_str(&bullet(&format!(
-        "Resident: yes ({} partition{})",
-        n,
-        if n == 1 { "" } else { "s" }
-    )));
-    for part in &p.partitions {
-        let lang = if part.typescript_primary {
-            "TypeScript"
-        } else {
-            "non-TypeScript"
-        };
-        let producer = if part.producer_fingerprint.is_empty() {
-            "(no producer)".to_string()
-        } else {
-            part.producer_fingerprint.clone()
-        };
-        out.push_str(&bullet(&format!(
-            "{}: {}, {}, producer {}",
-            part.partition_id,
-            freshness_label(part.freshness),
-            lang,
-            producer
-        )));
-    }
-    out.push_str(&bullet(&format!(
-        "Producer available: {}",
-        yes_no(p.producer_available)
-    )));
-    out.push_str(&bullet(&format!(
-        "Migrated-answer capability: {}",
-        yes_no(p.migrated_answer_capability)
-    )));
-    out
-}
+// AUDIT5-MINORS-1 F4: the Half-A "Current-State Posture (livegraph)" render was removed — a cold
+// LiveGraph made it a constant, information-free "Resident: no" line on the human surface. The
+// `current_state_posture` leaf (and D-T6's MEET) survive UNCHANGED on `--json`.
 
 // ── Half B — residual diagnostics sections (bullet text byte-identical to the v1 report) ────────
 

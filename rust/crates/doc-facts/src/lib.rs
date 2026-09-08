@@ -218,7 +218,8 @@ pub fn discover_doc_inventory(
     // and carries a Sphinx `toctree` directive — the manifest relationship that makes it a real
     // documentation section. The file's NAME (directory named `releases`, file named `index.*`) is not
     // evidence (review-2 item 1); the toctree directive is. A release-named directory whose index lacks
-    // a toctree — or that has no index — keeps `architecture` (no deterministic basis → old kind).
+    // a toctree — or that has no index — keeps its prior kind (the neutral `doc` for docs-tree prose,
+    // after the cycle-5 F1 narrowing; no deterministic basis → old kind).
     //
     // The candidate index's CONTENT is consulted here only when the `compute_hashes` pass already
     // loaded it (the `docs list` path) — the SAME no-read discipline the `license` kind uses below
@@ -242,29 +243,34 @@ pub fn discover_doc_inventory(
         }
     }
     for doc in &mut doc_files {
-        if matches!(doc.kind, DocKind::Architecture | DocKind::Config)
-            && release_notes::release_subtree_of(&doc.relative_path, &confirmed_release_subtrees)
-                .is_some()
+        if matches!(
+            doc.kind,
+            DocKind::Architecture | DocKind::Config | DocKind::Doc
+        ) && release_notes::release_subtree_of(&doc.relative_path, &confirmed_release_subtrees)
+            .is_some()
         {
             doc.kind = DocKind::ReleaseNotes;
         }
     }
 
-    // DOCS-LIST-2 §2: the `license` kind is a CONTENT basis (SPDX / license-header marker), so it
-    // is decided HERE where content is in hand (the `compute_hashes` pass above already read it),
-    // never from the `LICENSE` filename. Precedence: it upgrades only the catch-all kinds
-    // (`architecture` / `config`) — a `readme`, `map`, or `release-notes` classification (each a
-    // stronger, location/structure-stable signal) is left intact (a release note already moved off
-    // `architecture` above, so it is never re-labeled `license`). When content is absent
-    // (compute_hashes == false) there is no basis, so the kind is unchanged — "no basis keeps the old
-    // kind" (STANDING HONESTY RULE). This never re-reads: it consults `doc.content` already loaded.
+    // AUDIT5-MINORS-1 F1 (operator ruling, iteration 3): the `license` kind has a **NAME-ONLY**
+    // basis — a dedicated license FILENAME (`LICENSE*`/`COPYING*`/`NOTICE*`, any extension). The
+    // former content path (a license-header/body marker) is GONE: "marker-and-nothing-else" is not
+    // a decidable content rule, so an authored doc that merely carries an ASF/apache HEADER
+    // (CONTRIBUTING.md, CHANGELOG.md, docs prose) is NEVER relabeled `license` (the §D13 defect).
+    // Because the name is available regardless of `compute_hashes`, this no longer needs content and
+    // fires even when the file was unreadable (still surfaced in the unreadable count — honesty
+    // rule #1). Precedence: it upgrades only the catch-all kinds (`architecture` / `config`) plus
+    // the neutral `Doc` fallthrough (a bare `LICENSE.md` classifies `Doc` first, then upgrades
+    // here) — a `readme`, `map`, or `release-notes` classification (each a stronger,
+    // location/structure-stable signal) is left intact.
     for doc in &mut doc_files {
-        if matches!(doc.kind, DocKind::Architecture | DocKind::Config) {
-            if let Some(content) = &doc.content {
-                if classification::has_license_marker(content) {
-                    doc.kind = DocKind::License;
-                }
-            }
+        if matches!(
+            doc.kind,
+            DocKind::Architecture | DocKind::Config | DocKind::Doc
+        ) && classification::is_license_document(&doc.relative_path)
+        {
+            doc.kind = DocKind::License;
         }
     }
 

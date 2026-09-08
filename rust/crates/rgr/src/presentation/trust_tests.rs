@@ -3,7 +3,9 @@
 //! Split out of `trust.rs` (via `#[path]`) to respect the >500-line structural guardrail. Builds the wrapper
 //! through the REAL `repo_graph_trust::trust_to_coherent` so the render is exercised against the true wire
 //! shape. Pins the byte-identical Half-B bullets (W2/P1), the dead_code absence (D-TRUST-5), the per-section
-//! source/freshness labels, the NEW Current-State Posture section, and the cold-LiveGraph degradation (D-T6).
+//! source/freshness labels, and — AUDIT5-MINORS-1 F4 — the DROPPED LiveGraph posture section plus the
+//! snapshot-posture headline (the human render no longer surfaces the LiveGraph-dominated root MEET; D-T6's
+//! MEET stays on `--json`).
 
 use super::*;
 use repo_graph_coherence::{FreshnessState, QueryCompleteness, TrustPosture};
@@ -439,56 +441,69 @@ fn render_carries_per_section_source_labels() {
     assert!(out.contains("Reliability  (sqlite, snapshot-scoped extraction, Fresh)"));
 }
 
+/// AUDIT5-MINORS-1 F4: the human render DROPS the LiveGraph "Current-State Posture" section
+/// entirely — none of its constant lines appear (they carried no information about the repo without
+/// the hidden dev refresh). The leaf survives on `--json`, which this human render does not touch.
 #[test]
-fn render_shows_current_state_posture_section() {
+fn render_drops_the_livegraph_posture_section() {
     let out = render_trust_envelope(&warm_envelope());
-    assert!(out.contains("Current-State Posture  (livegraph, current-state, Fresh)"));
-    assert!(out.contains("Resident: yes (1 partition)"));
-    assert!(out.contains("app: Fresh, TypeScript, producer scip-typescript@0.4.0"));
-    assert!(out.contains("Producer available: yes"));
-    assert!(out.contains("Migrated-answer capability: yes"));
+    assert!(
+        !out.contains("Current-State Posture"),
+        "the livegraph posture section is dropped from the human render:\n{out}"
+    );
+    assert!(
+        !out.contains("Resident:"),
+        "no residency line in human render:\n{out}"
+    );
+    assert!(
+        !out.contains("Migrated-answer capability"),
+        "no livegraph capability line in human render:\n{out}"
+    );
+    // Even a WARM (resident) leaf renders no posture lines — the section is unconditionally gone.
+    assert!(!out.contains("producer scip-typescript@0.4.0"), "{out}");
 }
 
 #[test]
-fn render_shows_overall_posture_line() {
+fn render_headline_is_the_snapshot_posture() {
     let out = render_trust_envelope(&warm_envelope());
-    // A Fresh LiveGraph posture + Fresh snapshot -> Exact (Fresh) overall.
+    // F4: the headline is the SNAPSHOT posture (Fresh snapshot -> Exact (Fresh)), from the
+    // always-computable reliability leaf — never the LiveGraph-dominated root MEET.
     assert!(out.contains("Posture: Exact (Fresh)"));
 }
 
 #[test]
-fn cold_livegraph_posture_renders_unavailable_and_degrades_overall() {
+fn cold_livegraph_headline_is_snapshot_posture_not_constant_unavailable() {
+    // AUDIT5-MINORS-1 F4 (supersedes the D-T6 human-render behaviour): a cold LiveGraph over a
+    // Fresh snapshot no longer degrades the HUMAN headline to the information-free
+    // "Unavailable (Unavailable)" — the headline reads the SNAPSHOT posture (Fresh -> Exact
+    // (Fresh)). The MEET is unchanged on `--json`.
     let env = trust_to_coherent(report(), LiveGraphPosture::unavailable_leaf(), false);
     let out = render_trust_envelope(&env);
-    assert!(out.contains("Current-State Posture  (livegraph, current-state, Unavailable)"));
-    assert!(out.contains("Resident: no"));
-    // The overall posture is degraded by the cold LiveGraph even over a Fresh snapshot (D-T6).
-    assert!(out.contains("Posture: Unavailable (Unavailable)"));
+    assert!(
+        out.contains("Posture: Exact (Fresh)"),
+        "headline is the snapshot posture, not the cold-LiveGraph MEET:\n{out}"
+    );
+    assert!(
+        !out.contains("Posture: Unavailable (Unavailable)"),
+        "the constant, information-free MEET headline is gone:\n{out}"
+    );
+    // The LiveGraph posture section is absent regardless of the (cold) leaf.
+    assert!(!out.contains("Current-State Posture"), "{out}");
+    assert!(!out.contains("Resident: no"), "{out}");
     // Half B is still rendered (the v1 report is available).
     assert!(out.contains("Reliability  (sqlite, snapshot-scoped extraction, Fresh)"));
 }
 
-/// M-R3A-TRUST-POSTURE (ratified 2026-07-19): the resident-but-cert-gated leaf renders BOTH
-/// facts — "Resident: yes" (the residency fact, agreeing with any W-BOTH witness row beside it)
-/// + the withheld-detail clause (the eligibility fact) — and NEVER the false "not loaded" line.
 #[test]
-fn resident_withheld_posture_renders_loaded_with_detail_withheld_never_not_loaded() {
-    let env = trust_to_coherent(report(), LiveGraphPosture::resident_withheld_leaf(), false);
+fn stale_snapshot_headline_reads_stale() {
+    // F4: the headline tracks the snapshot posture — a stale snapshot reads Stale (Stale), so the
+    // headline is genuinely informative (not a constant).
+    let env = trust_to_coherent(report(), LiveGraphPosture::unavailable_leaf(), true);
     let out = render_trust_envelope(&env);
     assert!(
-        out.contains("Resident: yes (compiler analysis is loaded)"),
-        "the residency fact renders true:\n{out}"
+        out.contains("Posture: Stale (Stale)"),
+        "stale snapshot -> Stale headline:\n{out}"
     );
-    assert!(
-        out.contains("current-state detail withheld"),
-        "the eligibility fact renders as withholding:\n{out}"
-    );
-    assert!(
-        !out.contains("not loaded"),
-        "a resident graph must never read as not loaded:\n{out}"
-    );
-    // The epoch invariant is untouched: the leaf still degrades the overall posture.
-    assert!(out.contains("Posture: Unavailable (Unavailable)"));
 }
 
 #[test]
