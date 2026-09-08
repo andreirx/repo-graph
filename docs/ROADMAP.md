@@ -684,7 +684,12 @@ discrimination, django boundaries zero-state (what cycles should print), map --d
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
 
-Open follow-ups awaiting ratification/scheduling: SEED-DOCUMENT-1 (ROOT-CAUSED 2026-09-08 by
+Open follow-ups awaiting ratification/scheduling: LOCK-TEST-FLAKE-1 (three wall-clock lock-hold
+tests fail under a loaded parallel suite and pass alone — `foreground_open::tests::lock_held_beyond_
+patience_is_locked_after_retries_and_bounded` (DEPS-1B gate), `connection::tests::writer_past_busy_
+timeout_yields_honest_error_not_a_hang` + `writer_held_past_production_5s_bound_yields_honest_busy`
+(SEED-CHUNK-3 gate, storage suite 165 s): the holder thread is not guaranteed to hold across the timeout
+under scheduler pressure; make the hold deterministic (barrier/handshake), not wall-clock), SEED-DOCUMENT-1 (ROOT-CAUSED 2026-09-08 by
 SEED-CHUNK-3's measurement: a method chunk's document = qualified name + doc + first 60 body lines, so
 FRAKTAG's createSession/logTurn score 0.27/0.15 on "where are conversations persisted to disk" — below
 the frozen 0.30 floor — while the owning class ranks 2nd; the fix is document COMPOSITION (enclosing
