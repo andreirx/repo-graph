@@ -663,6 +663,20 @@ an accounting invariant that FAILS the run. F7 Express provider rows carry `meta
 (0/absent → None). MODULES-METHOD-1's recommendations byte-identical. Process: a provider timeout at
 cycle 1 left an orphaned release build in the tree (killed; lesson recorded). EXIT-CODES-1 launched next —
 FIRST slice on the Codex gpt-5.6-sol builder with claude-opus-4-8 reviewing.
+SHIPPED: EXIT-CODES-1 (2026-09-08, 365d695; builder Codex gpt-5.6-sol — FIRST Codex-built slice —
+reviewer claude-opus-4-8; 3 cycles + operator close-out): `docs/contracts/exit-codes.md` (NORMATIVE) —
+two families: non-verdict commands 0 / 1 usage / 2 runtime / 3 still running / 4 refused-by-policy;
+verdict commands (doctor, gate, check, modules violations, hook) keep their established 0/1/2 with the
+per-command meanings AND the runtime-error ambiguity stated, JSON `status` as the discriminator (the
+Codex builder's cycle-1 finding: the spec's single table would have stamped a false name on four verdict
+paths — amended, spec §6); every exit site references a constant named by MEANING from one table, enforced
+by an enumeration test; `rmap dead` exits 4 with its unchanged refusal on stdout and additive `--json
+{status: refused, code: 4}`; `gate.rs`'s "3: gate fail" doc lie corrected; malformed-response paths in
+gate/check/violations exit runtime 2 instead of a false success; the django `orient --full` exit 2 was a
+transient daemon Busy (correct). Codex-builder observations: a correct spec-contradiction finding at
+cycle 1 with a clean tree; a 62-file diff by cycle 3 but 90 minutes without progress writes before a
+timeout; its sandbox cannot bind Unix sockets (socket proofs are operator-run — practice recorded).
+THE v0.17.0-AUDIT QUEUE IS COMPLETE — next: release v0.18.0 + audit round six.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
