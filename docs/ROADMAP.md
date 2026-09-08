@@ -743,6 +743,37 @@ discrimination, django boundaries zero-state (what cycles should print), map --d
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
 
+AUDIT ROUND SIX (2026-09-08, rmap v0.18.0; artifact https://claude.ai/code/artifact/f982a58c-9e11-40ee-bdc2-3c459fdfafdf;
+`docs/audits/2026-09-08-per-command-usefulness-v0.18.0.md`; root causes `docs/audits/2026-09-08-root-causes-v0.18.0.md`).
+Smoke 24/5/1 (linux env-skipped; all 5 failures batch-load Busy, retested 0); 45 supplementals; matrix + judge +
+codex gpt-5.6-terra adjudication. HIT B−→B · EVIDENCE B→B+ · HONESTY C+→B− · ECONOMY B− flat. 14/15 v0.17.0 defects
+FIXED or partial-by-design (D8 carried by design). The command-summary fabrication class is DEAD at the named sites
+(modules/cycles/surfaces/deps/stats/dead); it RELOCATED (plural): (1) SYMBOL LAYER — CPP-DECLARATORS-1 5c3ec2d is a
+REGRESSION: the enclosing-class call preference ignores the receiver → receiver-bearing CALLS self-loops 0→155
+leveldb / 497 OpenXcom / 836 vcmi / 1098 poco / 2522 duckdb / 321 gstreamer (codegraph 0); each shields a symbol
+from `dead` and inflates trust's calls-resolved %; the ship line's "ambiguous→1" WAS the loop; net-negative for
+relationship discovery (adjudicator). (2) RELIABILITY LAYER — trust zero-connectivity = REGRESSION 28126a2
+ORIENT-BUG-1: exact join on the crate ROOT dir node while edges attach to the leaf `src` node → structurally zero
+on Cargo/Gradle/Maven/TS (repo-graph 48/61, kafka 65/65, hadoop 8/9, FRAKTAG 3/4) → false alias-resolution downgrade.
+New dominant class: COHERENCE UNDER COMPOSITION (trust vs modules; callers vs surfaces; table vs edge list; scores vs
+order; exclusion predicates applied by three surfaces, skipped by a fourth).
+QUEUE (root-cause-cut, adjudicator's order, AWAITS HUMAN ORDERING): Q1 CALL-BINDING-RECEIVER-1 (RC-1; invariant:
+an INDIRECT receiver never binds to the enclosing class without receiver-type evidence — `this`/explicit self may)
+→ Q2 TRUST-MODULE-EDGES-1 (RC-5; one module-edge computation; Import-graph stays LOW while unresolved>0 — the false
+REASON goes) → Q3 CPP-INCLUDE-ROOTS-1 (RC-10; any `include`/`inc` segment is a root: poco +9,893 resolved,
+Net→Foundation 616; inc 2 = unique multi-segment suffix for gstreamer +9,775) → Q4 EXPLAIN-CYCLES-HONEST-1 (RC-4;
+~15 lines, reuse cycles' render_unordered) → Q5 DEPS-ECOSYSTEM-PARTITION-1 (RC-6 observed side never partitioned +
+RC-7 reader note unfiltered / 13 manifests parsed) → Q6 EXPLAIN-TYPE-SECTIONS-1 (RC-3; members + referenced-by are
+render-only in every language; C++ IMPLEMENTS anchored on the FILE at extractor.rs:1288; macro clauses dropped)
+→ Q7 COMPLEXITY-SCOPE-1 (RC-9; is_generated dead-false everywhere; filter in the aggregator, never the storage read
+— the LiveGraph cert; vscode weights table = honest residual) → Q8 DOCS-DISCOVERY-1 (RC-8; one stem list; .adoc;
+src/site/**; hadoop 23→~545) → Q9 PYTHON-SELF-BINDING-1 (RC-2; selfCall + superclass BFS; ~+3,600 django edges).
+Carried: CLAIM-INVARIANT-1 (D-N9), D-N10 identifier spaces, D-N7 seed order, retention line always renders standing
+(DR-2B DORMANT on the audit root AND production — 1 snapshot, "cleanup: none yet"), Busy path leak / 2 generic
+(DAEMON-RESIDUALS-3), surfaces/orient --full budgets. Could not ground-truth: find --text; C++ IMPLEMENTS from a
+class focus (2→852 provisional); FK prune cost. Operator field checks: doctor `[note]` renders on production
+("26 ok · 1 note").
+
 Open follow-ups awaiting ratification/scheduling: LOCK-TEST-FLAKE-1 (three wall-clock lock-hold
 tests fail under a loaded parallel suite and pass alone — `foreground_open::tests::lock_held_beyond_
 patience_is_locked_after_retries_and_bounded` (DEPS-1B gate), `connection::tests::writer_past_busy_
