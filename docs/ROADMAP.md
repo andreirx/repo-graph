@@ -646,6 +646,23 @@ BUILDER SWITCH (human directive 2026-09-08): from EXIT-CODES-1 the builder is Co
 the reviewer moves to `claude-opus-4-8` so the gate stays two-vendor (operator consequence, stated to the
 human). AUDIT5-MINORS-1 (in flight) finishes on claude-opus-4-8 / gpt-5.6-terra. Ship lines keep
 recording both models for comparison.
+SHIPPED: AUDIT5-MINORS-1 (2026-09-08, 75fe165; 7 cycles; builder claude-opus-4-8, reviewer
+gpt-5.6-terra): the closed list of seven one-file causes. F1 docs kinds — config extension beats any path
+rule; a neutral additive `doc` kind for docs-tree prose; `architecture` ONLY by explicit name
+(ARCHITECTURE*/DESIGN*/OVERVIEW*) or an architectural directory (`design/`, `docs/architecture*`,
+`docs/design*`) — the spec's own "577 → fewer while all of docs/ stays architecture" contradiction was
+found by the reviewer and amended; `license` by file name only ("marker-and-nothing-else" is not a
+decidable content rule). Movement: repo-graph By kind `architecture 590 → 28 · doc 563`; vscode
+`architecture 22 → 1`, `docker-compose.yaml → config`; hadoop's ASF-headed `CONTRIBUTING.md → doc`, no
+`license` kind. F2 boundaries grouped rows carry their sorted line SET (`×13 @ 112,140,… (+8 more)`).
+F3 the callers not-found fallback prints ONE shared cursor header (131 B = 11.8%) with composable rows
+(per-row cursor share 47% → 0%) and the model string once. F4 the constant LiveGraph posture lines are
+gone from human `trust` (JSON MEET unchanged — G2 closed as ruled). F5 doctor's seed probe renders
+`[note]` on unavailable/absent/degraded (`27 ok · 1 note`). F6 `SMOKE_SKIP` repos land in `skipped` with
+an accounting invariant that FAILS the run. F7 Express provider rows carry `metadata_json.lineStart`
+(0/absent → None). MODULES-METHOD-1's recommendations byte-identical. Process: a provider timeout at
+cycle 1 left an orphaned release build in the tree (killed; lesson recorded). EXIT-CODES-1 launched next —
+FIRST slice on the Codex gpt-5.6-sol builder with claude-opus-4-8 reviewing.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
