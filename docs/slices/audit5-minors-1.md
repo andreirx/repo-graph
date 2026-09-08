@@ -21,8 +21,9 @@ Outward surface named per item. Six independent causes; none is a regression.
 
 - **F1** Config rule (extension) precedes the `docs/` path rule; `.md` fallthrough becomes a
   neutral kind (`doc`), not `architecture` — "architecture" only by explicit name/dir; License
-  only when the document IS a license (`LICENSE*`/`COPYING*`/`NOTICE*` names or marker-and-
-  nothing-else), otherwise the header is ignored for kind. Movement: vscode/hadoop/repo-graph
+  ONLY when the file is NAMED `LICENSE*`/`COPYING*`/`NOTICE*` (AMENDED 2026-09-08: the content basis
+  "marker-and-nothing-else" is not decidable — a headingless prose document with one license clause is
+  not a license — so the header marker is ignored for kind everywhere else). Movement: vscode/hadoop/repo-graph
   "By kind" blocks before/after; the repo-graph count of `architecture` drops from 577 to the
   explicitly named set.
 - **F2** Grouped rows carry the SET of lines: `ximagepool.c ×13 @ 112,140,163,… (+8 more)`,
