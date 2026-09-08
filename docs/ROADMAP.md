@@ -677,6 +677,14 @@ transient daemon Busy (correct). Codex-builder observations: a correct spec-cont
 cycle 1 with a clean tree; a 62-file diff by cycle 3 but 90 minutes without progress writes before a
 timeout; its sandbox cannot bind Unix sockets (socket proofs are operator-run — practice recorded).
 THE v0.17.0-AUDIT QUEUE IS COMPLETE — next: release v0.18.0 + audit round six.
+RELEASED v0.18.0 (2026-09-08, d7522f9; tag pushed; `dev-install-local` → daemon restarted under launchd
+on 0.18.0, doctor healthy, 4.76 GB across 17 repos; `rust/target` cleaned 73 → 2 GB, debug cache
+warming). Fourteen slices since v0.17.0: IMPORT-RESOLUTION-RUST-1, IMPORT-RESOLUTION-JAVA-1,
+DAEMON-RESIDUALS-2 (increment 1, 2B observability, 2C `repo rebuild`), CPP-DECLARATORS-1,
+SYMBOL-IDENTITY-1, DEPS-CLASSIFIER-1 (+1B), HEADLINE-TRUTH-1, MODULES-METHOD-1, SEED-CHUNK-3,
+AUDIT5-MINORS-1, EXIT-CODES-1. Retained state roots relocated to `~/repo-graph-retained/` (out of the
+/private/tmp purge). NEXT: audit round six — smoke (SMOKE_SKIP=linux, --retain audit-v0.18.0) +
+`scripts/audit18-supplemental.sh` (agent-manager) + three-perspective gate + artifact.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
