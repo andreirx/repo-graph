@@ -626,6 +626,22 @@ Eight corpus repos render pairwise-distinct pairs. Process: cycle 4 timed out wi
 (resumed on the diff); the gate script's /private/tmp copy had been purged by macOS and a commit chained
 after `echo` slipped past it — caught, reverted, script now tracked in agent-manager. SEED-CHUNK-3
 launched next.
+SHIPPED: SEED-CHUNK-3 (2026-09-08, 6e5a567; 7 cycles; builder claude-opus-4-8, reviewer gpt-5.6-terra):
+a one-line field never outranks the code that does the work — stored `is_field` (migration 036,
+nullable, pre-036 rows refused as StaleClassification and self-healed), a partition-first field tier
+in rank (declarations excluded — a first-cut defect the builder found by MEASURING leveldb), `[field]`
+rendering with a named unknown state, TS property doc comments kept (JSDoc + contiguous LEADING `//`
+runs only — the reviewer caught that a previous member's trailing comment would have been attributed to
+the next), and vector reuse keyed on a document-identity digest (migration 037 — the reviewer caught
+that a doc change with an unchanged file hash re-stamped the old vector). MEASURED on FRAKTAG "where
+are conversations persisted to disk": 7/10 → 0/10 one-line property rows in the top 10;
+`ConversationManager` (the owning class) at rank 2; the write-path methods rose (createSession 26 → 13,
+ContentStore 81 → 45, TreeStore 85 → 48, logTurn 150 → 83) but their scores (0.27 / 0.20 / 0.20 / 0.15)
+sit below the frozen 0.30 floor — no tier can seat them; the remaining cause is DOCUMENT COMPOSITION,
+filed as SEED-DOCUMENT-1, and the acceptance was RESTATED to the measured outward outcome (spec §2.6,
+operator ruling; never a score re-weighting). SEED-CHUNK-2 proofs preserved; controls not hurt. Gate
+note: two wall-clock lock-hold storage tests flaked under the loaded suite and passed alone
+(LOCK-TEST-FLAKE-1 filed). AUDIT5-MINORS-1 launched next.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
