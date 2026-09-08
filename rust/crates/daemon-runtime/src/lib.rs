@@ -99,6 +99,7 @@ pub(crate) mod module_degradation;
 pub mod module_summary_cert;
 // DAEMON-CRASH-RECOVERY-1 (F8): op-lifecycle lines in the daemon LOG (index/refresh/enrich/retention/
 // reconcile), so a crashed op's forensics survive in the ONE surface a dead daemon leaves behind.
+mod modules_method; // MODULES-METHOD-1: per-repo method description + orientation-doc recommendation (crate-private; 2 callers: dispatch + orient_additive_fields)
 pub mod oplog;
 mod orient_additive_fields; // ORIENT-SEGMENT-2: daemon-injected additive orient fields orchestrator (crate-private)
 pub mod orient_coherence;

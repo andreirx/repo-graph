@@ -653,6 +653,31 @@ impl OrientResponse {
         let effective_names: Vec<&str> = rows.iter().map(|r| r.effective_name()).collect();
 
         let mut out = heading("Modules (declared/inferred, by size)");
+
+        // MODULES-METHOD-1 §2.1 + §2.2 + §2.3: method line + recommendation.
+        // Uses the shared JSON→line helpers from modules_list (the SAME rendering
+        // logic — one derivation, two surfaces).
+        let method_line = super::modules_list::render_method_line_from_json(&self.modules_method);
+        let recommendation_line =
+            super::modules_list::render_recommendation_from_json(&self.orientation_docs);
+        let is_all_inferred = self
+            .modules_method
+            .as_ref()
+            .and_then(|m| m.get("all_inferred"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Method line always appears first (indented for orient's section style).
+        if let Some(ref line) = method_line {
+            out.push_str(&format!("  {line}\n"));
+        }
+        // §2.3: all-inferred → recommendation BEFORE rows.
+        if is_all_inferred {
+            if let Some(ref rec) = recommendation_line {
+                out.push_str(&format!("  {rec}\n"));
+            }
+        }
+
         let mut malformed_modules = 0usize;
         for (i, m) in modules.iter().enumerate() {
             // review-5 #1: same rule as group rows — no fabricated 0-file modules.
@@ -685,6 +710,12 @@ impl OrientResponse {
                     "+{} more — rmap modules list",
                     total - shown
                 )));
+            }
+        }
+        // §2.3: non-all-inferred → recommendation AFTER the rows.
+        if !is_all_inferred {
+            if let Some(ref rec) = recommendation_line {
+                out.push_str(&format!("  {rec}\n"));
             }
         }
         out

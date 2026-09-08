@@ -169,6 +169,19 @@ pub struct ModulesListResponse {
     /// (older daemon / read failure) → no footer.
     #[serde(default)]
     pub root_level_file_count: Option<u64>,
+    /// MODULES-METHOD-1 §2.1: per-repo method description — which indexer families
+    /// produced the modules on THIS repo. Structured as `{families: [{family, count,
+    /// label}], all_inferred: bool}`. The presenter renders the method line BEFORE the
+    /// module rows. `None` = older daemon (UNKNOWN) → method line omitted. Additive;
+    /// existing consumers unaffected.
+    #[serde(default)]
+    pub modules_method: Option<serde_json::Value>,
+    /// MODULES-METHOD-1 §2.2: orientation-doc recommendation — the repo's own top docs
+    /// from `docs list` facts. Structured as `{paths: [String], recommendation: String}`.
+    /// The presenter renders the recommendation line after the method line. `None` = older
+    /// daemon → recommendation omitted. Additive.
+    #[serde(default)]
+    pub orientation_docs: Option<serde_json::Value>,
 }
 
 impl ModulesListResponse {
@@ -201,6 +214,38 @@ impl ModulesListResponse {
         let count = self.results.len();
         out.push_str(&format_count(count, "module", "modules"));
         out.push('\n');
+
+        // ── MODULES-METHOD-1 §2.1 + §2.2 + §2.3: method line + recommendation ──
+        //
+        // §2.3 ordering:
+        //   all-inferred → "boundaries are a guess" caveat + recommendation FIRST
+        //   all-declared / mixed → method line, then rows, then recommendation AFTER
+        //
+        // Unavailable method → "method not recorded on this index" (review-0 item 3).
+        // Unavailable orientation docs → the unavailable reason is stated, never silently dropped.
+        let method_line = render_method_line_from_json(&self.modules_method);
+        let recommendation_line = render_recommendation_from_json(&self.orientation_docs);
+        let is_all_inferred = self
+            .modules_method
+            .as_ref()
+            .and_then(|m| m.get("all_inferred"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Method line always appears first (when available)
+        if let Some(ref line) = method_line {
+            out.push_str(line);
+            out.push('\n');
+        }
+
+        // §2.3: all-inferred → recommendation BEFORE rows (it's more useful when
+        // boundaries are a guess — the repo's own docs are the primary source).
+        if is_all_inferred {
+            if let Some(ref rec) = recommendation_line {
+                out.push_str(rec);
+                out.push('\n');
+            }
+        }
 
         if self.results.is_empty() {
             out.push_str("\nNo modules detected.\n");
@@ -391,6 +436,16 @@ impl ModulesListResponse {
             None => self.render_edges_unavailable(&mut out),
         }
 
+        // §2.3: non-all-inferred → recommendation AFTER the rows (declared boundaries
+        // are trustworthy, so the recommendation is secondary context, not primary).
+        if !is_all_inferred {
+            if let Some(ref rec) = recommendation_line {
+                out.push('\n');
+                out.push_str(rec);
+                out.push('\n');
+            }
+        }
+
         out
     }
 
@@ -538,6 +593,129 @@ impl ModulesListResponse {
             ));
         }
     }
+}
+
+// ── MODULES-METHOD-1: JSON → rendered line helpers ─────────────────────────────
+// These consume the additive JSON blocks the daemon produces and render the human
+// lines. They live outside the impl because the orient presenter reuses them.
+
+/// Render the method line from the daemon's `modules_method` JSON block.
+///
+/// Returns `None` when the block is absent (older daemon → method line omitted).
+///
+/// The block carries one of THREE mutually-exclusive shapes, rendered DISTINCTLY
+/// (review-3 #2 — an unreadable stored fact must not read the same as an absent one):
+/// - `{unavailable: reason}` — the evidence READ FAILED (IO boundary). Renders
+///   "Modules: method unavailable — <reason>" (the reason is shown, never dropped).
+/// - `{not_recorded: reason}` — the read SUCCEEDED but stored facts do not name the
+///   method (no candidates, or a declared module with no manifest evidence; §2.3).
+///   Renders the canonical "Modules: method not recorded on this index".
+/// - `{families, all_inferred, diagnostics}` — the named method. §2.3: all-inferred
+///   appends "boundaries are a guess from directory names".
+///
+/// An empty/malformed families array renders the not-recorded sentence defensively
+/// (the daemon should never emit it — `compute_method` maps empty → `not_recorded`).
+pub(crate) fn render_method_line_from_json(block: &Option<serde_json::Value>) -> Option<String> {
+    let method = block.as_ref()?;
+
+    // Unavailable block (evidence read FAILED) → honest degradation WITH the reason,
+    // rendered distinctly from the not-recorded (absent-fact) sentence below.
+    if let Some(reason) = method.get("unavailable").and_then(|v| v.as_str()) {
+        return Some(format!("Modules: method unavailable — {reason}"));
+    }
+    // Not-recorded block (read OK, stored facts don't name the method) → §2.3 sentence.
+    if method.get("not_recorded").is_some() {
+        return Some("Modules: method not recorded on this index".to_string());
+    }
+
+    let families = method.get("families")?.as_array()?;
+    if families.is_empty() {
+        return Some("Modules: method not recorded on this index".to_string());
+    }
+
+    let parts: Vec<&str> = families
+        .iter()
+        .filter_map(|f| f.get("label").and_then(|l| l.as_str()))
+        .collect();
+    if parts.is_empty() {
+        return Some("Modules: method not recorded on this index".to_string());
+    }
+
+    // `all_inferred` is a bool WE serialized on the additive block; a missing/malformed
+    // value defaults to the conservative non-all-inferred ordering (recommendation after
+    // rows). This is a total read of our own structured field, not a swallowed fallible
+    // storage read — the standing honesty rule governs the latter.
+    let is_all_inferred = method
+        .get("all_inferred")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let line = format!("Modules: {}", parts.join(" · "));
+
+    // Collect the diagnostic notices ALWAYS (review-2 #4). The spec §2.1 example shows
+    // "Maven manifests present but not parsed on this build" on an all-inferred repo, so
+    // diagnostics are NOT gated on all_inferred. A FAILED diagnostic read (the `_degraded`
+    // keys) renders its reason — never dropped (standing honesty rule #1); the prior code
+    // dropped `maven_manifests_present_degraded` entirely.
+    let mut notices: Vec<String> = Vec::new();
+    if let Some(diag) = method.get("diagnostics") {
+        if let Some(n) = diag
+            .get("gradle_projectdir_unhandled")
+            .and_then(|v| v.as_u64())
+        {
+            if n > 0 {
+                notices.push(format!(
+                    "{n} projectDir relocation{} in an unsupported form",
+                    if n == 1 { "" } else { "s" }
+                ));
+            }
+        }
+        if let Some(reason) = diag
+            .get("gradle_projectdir_unhandled_degraded")
+            .and_then(|v| v.as_str())
+        {
+            notices.push(format!("Gradle projectDir diagnostic unreadable: {reason}"));
+        }
+        if let Some(n) = diag.get("maven_manifests_present").and_then(|v| v.as_u64()) {
+            if n > 0 {
+                notices.push("Maven manifests present but not parsed on this build".to_string());
+            }
+        }
+        if let Some(reason) = diag
+            .get("maven_manifests_present_degraded")
+            .and_then(|v| v.as_str())
+        {
+            notices.push(format!("Maven manifest presence unreadable: {reason}"));
+        }
+    }
+    // §2.3: all-inferred appends the "guess" caveat LAST, after any diagnostics.
+    if is_all_inferred {
+        notices.push("boundaries are a guess from directory names".to_string());
+    }
+
+    if notices.is_empty() {
+        Some(line)
+    } else {
+        Some(format!("{line} ({})", notices.join("; ")))
+    }
+}
+
+/// Render the recommendation line from the daemon's `orientation_docs` JSON block.
+///
+/// Returns `None` when the block is absent (older daemon → recommendation omitted).
+/// An `unavailable` block renders the failure reason honestly.
+pub(crate) fn render_recommendation_from_json(block: &Option<serde_json::Value>) -> Option<String> {
+    let orient = block.as_ref()?;
+
+    // Unavailable block (failed read) → honest degradation
+    if let Some(reason) = orient.get("unavailable").and_then(|v| v.as_str()) {
+        return Some(format!("Orientation docs unavailable: {reason}"));
+    }
+
+    orient
+        .get("recommendation")
+        .and_then(|r| r.as_str())
+        .map(|s| s.to_string())
 }
 
 // review-0 item 2: the test body lives in a sibling file (via `#[path]`, the

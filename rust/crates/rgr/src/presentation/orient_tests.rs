@@ -39,6 +39,8 @@ fn minimal_response() -> OrientResponse {
         directory_group_fallback: None,
         http_surfaces: None,
         top_module_edges: None,
+        modules_method: None,
+        orientation_docs: None,
     }
 }
 
@@ -909,6 +911,47 @@ fn budget_trades_depth_small_subset_of_full() {
     // FULL is complete → no "--full" pointer; SMALL has it.
     assert!(small.contains("[--full for the complete breakdown"));
     assert!(!full.contains("[--full for the complete breakdown"));
+}
+
+/// review-3 #2: orient's module section (the SAME shared `render_method_line_from_json`
+/// as `modules list`) renders an `unavailable` method block DISTINCTLY, with the reason —
+/// not conflated with the not-recorded sentence. Tested on the orient surface too.
+#[test]
+fn orient_method_unavailable_renders_distinct_reason() {
+    let mut r = nginx_like();
+    r.modules_method = Some(serde_json::json!({
+        "unavailable": "module evidence read failed for uid:x: disk error"
+    }));
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains(
+            "Modules: method unavailable — module evidence read failed for uid:x: disk error"
+        ),
+        "orient must render the unavailable reason distinctly:\n{out}"
+    );
+    assert!(
+        !out.contains("Modules: method not recorded on this index"),
+        "orient unavailable must NOT collapse into the not-recorded sentence:\n{out}"
+    );
+}
+
+/// review-3 #1/#2: orient renders a `not_recorded` method block as the canonical §2.3
+/// sentence, distinct from the unavailable (read-failure) rendering.
+#[test]
+fn orient_method_not_recorded_renders_canonical_sentence() {
+    let mut r = nginx_like();
+    r.modules_method = Some(serde_json::json!({
+        "not_recorded": "2 declared modules with no manifest evidence (source_type)"
+    }));
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains("Modules: method not recorded on this index"),
+        "orient not_recorded must render the canonical §2.3 sentence:\n{out}"
+    );
+    assert!(
+        !out.contains("method unavailable"),
+        "orient not_recorded must NOT read as the unavailable state:\n{out}"
+    );
 }
 
 #[test]

@@ -9441,6 +9441,79 @@ impl ServiceDispatcher {
                 }
             };
 
+        // MODULES-METHOD-1 §2.1: the per-repo method description + orientation-doc
+        // recommendation, computed from the SAME `facts.context.modules` the rows above
+        // used (frozen invariant: no new discovery) and the doc inventory.
+        //
+        // review-2 #1: family derivation (via evidence `source_type`) is delegated to
+        // `build_modules_method_json`, the SINGLE owner shared with orient — a FAILED
+        // evidence read degrades the whole block to `{unavailable}` (no `.ok()` swallow).
+        // Diagnostics carry the Gradle projectDir + Maven presence facts. Both are
+        // Result so a failed read renders a named degradation (review-2 #4): the Gradle
+        // reason reuses the `(count, degraded)` pair already computed above for the
+        // separate wire field.
+        let method_diagnostics = crate::modules_method::MethodDiagnostics {
+            gradle_projectdir_unhandled: match &gradle_projectdir_unhandled_degraded {
+                Some(reason) => Err(reason.clone()),
+                None => Ok(gradle_projectdir_unhandled),
+            },
+            maven_manifests_present: crate::orient_additive_fields::read_maven_manifests_present(
+                &storage,
+                &snapshot.snapshot_uid,
+            ),
+        };
+        let method_modules: Vec<(&str, &str)> = facts
+            .context
+            .modules
+            .iter()
+            .map(|m| (m.module_candidate_uid.as_str(), m.module_kind.as_str()))
+            .collect();
+        let modules_method_json = crate::orient_additive_fields::build_modules_method_json(
+            &storage,
+            &method_modules,
+            &method_diagnostics,
+        );
+
+        // MODULES-METHOD-1 §2.2: orientation docs from the doc inventory.
+        // STANDING HONESTY RULE #1: a FAILED read is unknown-with-reason, never
+        // `unwrap_or_default()` which would present a failure as "no docs" (review-0 item 1).
+        //
+        // review-1 fix #1: apply vendored-path check to match `docs list`'s classified
+        // facts. `get_doc_inventory` skips the vendored overlay that `docs list` applies.
+        let orientation_docs_result =
+            match repo_graph_agent::AgentStorageRead::get_doc_inventory(&storage, &repo_uid) {
+                Ok(doc_inventory) => {
+                    let orientation_inputs: Vec<crate::modules_method::OrientationDocInput> =
+                        doc_inventory
+                            .iter()
+                            .map(|d| {
+                                // review-1 fix #1: demote vendored paths to kind "vendored"
+                                let kind =
+                                    if crate::handlers::quality::support::is_vendored_path(&d.path)
+                                    {
+                                        "vendored"
+                                    } else {
+                                        d.kind.as_str()
+                                    };
+                                crate::modules_method::OrientationDocInput {
+                                    path: d.path.as_str(),
+                                    kind,
+                                    generated: d.generated,
+                                }
+                            })
+                            .collect();
+                    let paths = crate::modules_method::select_orientation_docs(&orientation_inputs);
+                    crate::modules_method::OrientationDocsResult::Ok {
+                        paths: paths.into_iter().map(|s| s.to_string()).collect(),
+                    }
+                }
+                Err(e) => crate::modules_method::OrientationDocsResult::Unavailable {
+                    reason: e.to_string(),
+                },
+            };
+        let orientation_docs_json =
+            crate::modules_method::orientation_docs_to_json(&orientation_docs_result);
+
         // Build response
         let mut response = serde_json::json!({
             "command": "modules list",
@@ -9469,6 +9542,13 @@ impl ServiceDispatcher {
             // HEADLINE-TRUTH-1 (§2.1, review-4 #1): PROVEN root-level count the footer
             // reconciles `Σ owned − grouped` against before naming root-level files.
             "root_level_file_count": root_level_file_count,
+            // MODULES-METHOD-1 §2.1: per-repo method description (family → count + label).
+            // Always emitted when `facts` loaded. The presenter renders the method line
+            // before the module rows; JSON consumers get structured per-family data.
+            "modules_method": modules_method_json,
+            // MODULES-METHOD-1 §2.2: orientation-doc recommendation (paths + rendered line).
+            // Always emitted. The presenter renders the recommendation after the method line.
+            "orientation_docs": orientation_docs_json,
         });
         if let (serde_json::Value::Object(ref mut map), Some(reason)) =
             (&mut response, &http_boundary_link_degraded)
@@ -9514,7 +9594,10 @@ impl ServiceDispatcher {
 ///   - blob not valid JSON, or the value not a non-negative integer → `Err` (rendered as a
 ///     labelled UNKNOWN, never silently dropped to a false "clean" — honesty rule #1);
 ///   - key present and a `u64` → `Ok(Some(n))`.
-fn parse_gradle_projectdir_unhandled(blob: Option<&str>) -> Result<Option<u64>, String> {
+///
+/// `pub(crate)`: also reused by `orient_additive_fields::read_gradle_projectdir_unhandled`
+/// (review-2 #4) so orient and modules-list parse the SAME diagnostic identically.
+pub(crate) fn parse_gradle_projectdir_unhandled(blob: Option<&str>) -> Result<Option<u64>, String> {
     let Some(s) = blob else { return Ok(None) };
     let value: serde_json::Value = serde_json::from_str(s)
         .map_err(|e| format!("extraction diagnostics not valid JSON ({e})"))?;

@@ -83,6 +83,8 @@ fn sample_list_response() -> ModulesListResponse {
         gradle_projectdir_unhandled_degraded: None,
         directory_group_file_count: None,
         root_level_file_count: None,
+        modules_method: None,
+        orientation_docs: None,
     }
 }
 
@@ -101,6 +103,8 @@ fn sample_empty_list_response() -> ModulesListResponse {
         gradle_projectdir_unhandled_degraded: None,
         directory_group_file_count: None,
         root_level_file_count: None,
+        modules_method: None,
+        orientation_docs: None,
     }
 }
 
@@ -131,6 +135,8 @@ fn two_crate_fixture_response() -> ModulesListResponse {
         gradle_projectdir_unhandled_degraded: None,
         directory_group_file_count: None,
         root_level_file_count: None,
+        modules_method: None,
+        orientation_docs: None,
     }
 }
 
@@ -1018,6 +1024,8 @@ fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
         gradle_projectdir_unhandled_degraded: None,
         directory_group_file_count: None,
         root_level_file_count: None,
+        modules_method: None,
+        orientation_docs: None,
     }
 }
 
@@ -1120,4 +1128,298 @@ fn shared_derivation_matches_orient() {
     let output = resp.render_human();
     assert!(output.contains("Django [pyproject.toml]"), "{output}");
     assert!(output.contains("Django [package.json]"), "{output}");
+}
+
+// ── MODULES-METHOD-1: method line + orientation-doc rendering tests ────────────
+
+/// When `modules_method` is present with one family, the method line renders
+/// before the module rows.
+#[test]
+fn method_line_renders_single_family() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "families": [{"family": "Cargo.toml", "count": 59, "label": "59 declared in Cargo.toml (workspace members)"}],
+        "all_inferred": false,
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("Modules: 59 declared in Cargo.toml (workspace members)"),
+        "method line must appear:\n{out}"
+    );
+}
+
+/// When `modules_method` is absent (older daemon), no method line appears.
+#[test]
+fn method_line_absent_on_older_daemon() {
+    let resp = sample_list_response();
+    assert!(resp.modules_method.is_none());
+    let out = resp.render_human();
+    // The generic "Modules" header IS present, but no "Modules:" method line.
+    assert!(
+        !out.contains("Modules: "),
+        "no method line when field absent:\n{out}"
+    );
+}
+
+/// Mixed-repo method line joins families with " · ".
+#[test]
+fn method_line_renders_mixed_families() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "families": [
+            {"family": "Cargo.toml", "count": 2, "label": "2 declared in Cargo.toml (workspace members)"},
+            {"family": "package.json", "count": 1, "label": "1 npm workspace from package.json"},
+        ],
+        "all_inferred": false,
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("Modules: 2 declared in Cargo.toml (workspace members) · 1 npm workspace from package.json"),
+        "mixed method line must join with ' · ':\n{out}"
+    );
+}
+
+/// Orientation docs recommendation renders when present.
+#[test]
+fn orientation_recommendation_renders() {
+    let mut resp = sample_list_response();
+    resp.orientation_docs = Some(serde_json::json!({
+        "paths": ["README.md", "docs/ARCHITECTURE.md"],
+        "recommendation": "For module boundaries as the authors describe them, read: README.md, docs/ARCHITECTURE.md — or the tree.",
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("For module boundaries as the authors describe them, read: README.md, docs/ARCHITECTURE.md"),
+        "recommendation line must appear:\n{out}"
+    );
+}
+
+/// No-docs recommendation renders.
+#[test]
+fn orientation_no_docs_recommendation_renders() {
+    let mut resp = sample_list_response();
+    resp.orientation_docs = Some(serde_json::json!({
+        "paths": [],
+        "recommendation": "No README or architecture doc found — the tree is the best orientation.",
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("No README or architecture doc found"),
+        "no-docs recommendation must appear:\n{out}"
+    );
+}
+
+/// When `orientation_docs` is absent (older daemon), no recommendation line.
+#[test]
+fn orientation_absent_on_older_daemon() {
+    let resp = sample_list_response();
+    assert!(resp.orientation_docs.is_none());
+    let out = resp.render_human();
+    assert!(
+        !out.contains("tree is the best orientation"),
+        "no recommendation when field absent:\n{out}"
+    );
+    assert!(
+        !out.contains("read:"),
+        "no recommendation when field absent:\n{out}"
+    );
+}
+
+/// The inequality property: two different fixtures produce different method +
+/// recommendation lines (map-not-territory rule — a line that reads the same
+/// on every repo is a defect).
+#[test]
+fn inequality_across_fixtures() {
+    let mut resp_cargo = sample_list_response();
+    resp_cargo.modules_method = Some(serde_json::json!({
+        "families": [{"family": "Cargo.toml", "count": 59, "label": "59 declared in Cargo.toml (workspace members)"}],
+        "all_inferred": false,
+    }));
+    resp_cargo.orientation_docs = Some(serde_json::json!({
+        "paths": ["README.md"],
+        "recommendation": "For module boundaries as the authors describe them, read: README.md — or the tree.",
+    }));
+
+    let mut resp_npm = sample_list_response();
+    resp_npm.modules_method = Some(serde_json::json!({
+        "families": [{"family": "package.json", "count": 5, "label": "5 npm workspaces from package.json"}],
+        "all_inferred": false,
+    }));
+    resp_npm.orientation_docs = Some(serde_json::json!({
+        "paths": ["README.md", "docs/ARCHITECTURE.md"],
+        "recommendation": "For module boundaries as the authors describe them, read: README.md, docs/ARCHITECTURE.md — or the tree.",
+    }));
+
+    let out_cargo = resp_cargo.render_human();
+    let out_npm = resp_npm.render_human();
+    assert_ne!(
+        out_cargo, out_npm,
+        "different repos must produce different output"
+    );
+}
+
+// ── review-1 fix #5: presenter-level tests for §2.3 ordering + unavailable fields ──
+
+/// §2.3: when ALL modules are inferred, the recommendation renders BEFORE the module
+/// rows (it's more useful when boundaries are a guess — the repo's own docs are the
+/// primary source). The method line (with "boundaries are a guess") comes first, then
+/// the recommendation, then the rows.
+#[test]
+fn all_inferred_renders_recommendation_before_rows() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "families": [{"family": "inferred", "count": 2, "label": "2 inferred from top-level directories"}],
+        "all_inferred": true,
+    }));
+    resp.orientation_docs = Some(serde_json::json!({
+        "paths": ["README.md"],
+        "recommendation": "For module boundaries as the authors describe them, read: README.md — or the tree.",
+    }));
+    let out = resp.render_human();
+    // Method line present with the guess caveat
+    assert!(
+        out.contains("boundaries are a guess from directory names"),
+        "all-inferred must carry the guess caveat:\n{out}"
+    );
+    // Recommendation renders BEFORE the module rows (before the first module entry)
+    let rec_pos = out
+        .find("For module boundaries")
+        .expect("recommendation must appear");
+    let first_row_pos = out.find("src").expect("first module row must appear");
+    assert!(
+        rec_pos < first_row_pos,
+        "§2.3: recommendation must come BEFORE module rows on all-inferred:\n{out}"
+    );
+}
+
+/// §2.3: when modules are declared (or mixed), the recommendation renders AFTER the
+/// module rows (declared boundaries are trustworthy, so the recommendation is secondary).
+#[test]
+fn declared_renders_recommendation_after_rows() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "families": [{"family": "Cargo.toml", "count": 2, "label": "2 declared in Cargo.toml (workspace members)"}],
+        "all_inferred": false,
+    }));
+    resp.orientation_docs = Some(serde_json::json!({
+        "paths": ["README.md"],
+        "recommendation": "For module boundaries as the authors describe them, read: README.md — or the tree.",
+    }));
+    let out = resp.render_human();
+    // Recommendation renders AFTER the module rows
+    let rec_pos = out
+        .find("For module boundaries")
+        .expect("recommendation must appear");
+    let last_row_pos = out.rfind("lib").expect("last module row must appear");
+    assert!(
+        rec_pos > last_row_pos,
+        "§2.3: recommendation must come AFTER module rows on declared:\n{out}"
+    );
+}
+
+/// review-3 #2: an `unavailable` `modules_method` block (the evidence READ FAILED)
+/// renders DISTINCTLY from the not-recorded (absent-fact) sentence, and carries the
+/// reason — an unreadable stored fact must not read the same as an absent one.
+#[test]
+fn unavailable_method_renders_distinct_reason() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "unavailable": "duplicate ownership on 3 file(s)"
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("Modules: method unavailable — duplicate ownership on 3 file(s)"),
+        "unavailable method must render the reason distinctly:\n{out}"
+    );
+    assert!(
+        !out.contains("Modules: method not recorded on this index"),
+        "unavailable must NOT collapse into the not-recorded sentence:\n{out}"
+    );
+}
+
+/// review-3 #1/#2: a `not_recorded` `modules_method` block (read OK, stored facts do
+/// not name the method — e.g. a declared module with no manifest evidence) renders the
+/// canonical §2.3 sentence, DISTINCT from the unavailable (read-failure) rendering.
+#[test]
+fn not_recorded_method_renders_canonical_sentence() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "not_recorded": "1 declared module with no manifest evidence (source_type)"
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("Modules: method not recorded on this index"),
+        "not_recorded must render the canonical §2.3 sentence:\n{out}"
+    );
+    assert!(
+        !out.contains("method unavailable"),
+        "not_recorded must NOT read as the unavailable (read-failure) state:\n{out}"
+    );
+}
+
+/// Unavailable `orientation_docs` (failed read) renders the failure reason.
+#[test]
+fn unavailable_orientation_docs_renders_reason() {
+    let mut resp = sample_list_response();
+    resp.orientation_docs = Some(serde_json::json!({
+        "unavailable": "doc inventory read failed: disk full"
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("Orientation docs unavailable: doc inventory read failed: disk full"),
+        "unavailable docs must render reason:\n{out}"
+    );
+}
+
+/// review-2 #4: a FAILED Maven diagnostic read is RENDERED on the human method line
+/// (its reason), never silently dropped (the prior renderer dropped it — the reviewer's
+/// finding). Standing honesty rule #1: a fallible rendered read is never a silent clean.
+#[test]
+fn method_line_renders_maven_diagnostics_degradation() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "families": [{"family": "settings.gradle", "count": 67, "label": "67 Gradle projects from settings.gradle"}],
+        "all_inferred": false,
+        "diagnostics": {
+            "maven_manifests_present_degraded": "extraction blob not valid JSON"
+        },
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("67 Gradle projects from settings.gradle"),
+        "method line renders:\n{out}"
+    );
+    assert!(
+        out.contains("Maven manifest presence unreadable: extraction blob not valid JSON"),
+        "the Maven degraded reason must be rendered, not dropped:\n{out}"
+    );
+}
+
+/// review-2 #4: a FAILED Gradle projectDir diagnostic read is also rendered on the
+/// human method line (symmetric with Maven), and diagnostics render even on an
+/// all-inferred repo (spec §2.1 example) alongside the guess caveat.
+#[test]
+fn method_line_renders_gradle_degradation_and_all_inferred_caveat() {
+    let mut resp = sample_list_response();
+    resp.modules_method = Some(serde_json::json!({
+        "families": [{"family": "inferred", "count": 9, "label": "9 inferred from top-level directories"}],
+        "all_inferred": true,
+        "diagnostics": {
+            "maven_manifests_present": 8,
+            "gradle_projectdir_unhandled_degraded": "extraction diagnostics unreadable"
+        },
+    }));
+    let out = resp.render_human();
+    assert!(
+        out.contains("Maven manifests present but not parsed on this build"),
+        "maven-present diagnostic renders on an all-inferred repo (§2.1 example):\n{out}"
+    );
+    assert!(
+        out.contains("Gradle projectDir diagnostic unreadable: extraction diagnostics unreadable"),
+        "gradle degraded reason renders:\n{out}"
+    );
+    assert!(
+        out.contains("boundaries are a guess from directory names"),
+        "the all-inferred guess caveat renders alongside diagnostics:\n{out}"
+    );
 }

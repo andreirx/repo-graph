@@ -69,10 +69,26 @@ pub(crate) fn doc_inventory(
     }
 
     // 3. Live filesystem discovery (doc-facts crate); map to agent DTOs.
-    let result = match repo_graph_doc_facts::discover_doc_inventory(&resolved, false) {
-        Ok(r) => r,
-        Err(_) => return Ok(Vec::new()),
-    };
+    //
+    // review-1 fix #1 (completion): `compute_hashes = true` to match the same
+    // content-based classification pipeline that `docs list` uses. Without content
+    // reads, kinds like `license` and `release-notes` — which are content-evidence-
+    // based refinements of the `architecture` catch-all — never fire: a `LICENSE.txt`
+    // under `docs/` stays `architecture` (name-based `docs/` match) and passes
+    // `is_orientation_doc`, producing a false orientation recommendation.
+    //
+    // The cost is reading doc-file contents (bounded: discovery caps candidates).
+    // The content hashes themselves are discarded (the DTO only carries path/kind/
+    // generated), so the only effect is correct classification.
+    // review-2 #3: a discovery FAILURE (an I/O error walking a directory that DOES
+    // exist — permissions, a mid-walk failure) is PROPAGATED, never collapsed to an
+    // empty inventory. Collapsing it made the orientation surface render "No README or
+    // architecture doc found" (a false Layer-0 absence claim) after an unreadable tree;
+    // the caller now renders a named `unavailable` state instead (standing honesty
+    // rule #1). Genuine absence — no repo row, NULL root_path, or a root_path that is
+    // not a directory — still returns `Ok(empty)` above (those are real, not failures).
+    let result = repo_graph_doc_facts::discover_doc_inventory(&resolved, true)
+        .map_err(map_err("get_doc_inventory"))?;
 
     Ok(result
         .entries

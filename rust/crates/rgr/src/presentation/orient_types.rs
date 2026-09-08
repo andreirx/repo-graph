@@ -111,6 +111,16 @@ pub struct OrientResponse {
     // `pub(crate)`: see `directory_group_fallback` — crate-internal `orient_seg2` type.
     #[serde(default)]
     pub(crate) top_module_edges: Option<super::orient_seg2::TopModuleEdges>,
+    /// MODULES-METHOD-1 §2.1: per-repo method description — which indexer families
+    /// produced the modules on THIS repo. Structured JSON block. `None` = older daemon
+    /// (UNKNOWN) → method line omitted from orient's module section. Additive.
+    #[serde(default)]
+    pub modules_method: Option<serde_json::Value>,
+    /// MODULES-METHOD-1 §2.2: orientation-doc recommendation — the repo's own top
+    /// docs from `docs list` facts. Structured JSON block. `None` = older daemon →
+    /// recommendation omitted. Additive.
+    #[serde(default)]
+    pub orientation_docs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

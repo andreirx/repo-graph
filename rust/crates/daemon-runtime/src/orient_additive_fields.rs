@@ -105,6 +105,212 @@ pub(crate) fn inject<D: Serialize>(
     // them, e.g. leveldb's gold standard); a FAILED read is unknown-with-reason
     // (rendered at the detail tiers), NEVER a silent zero (standing honesty rule #1).
     inject_top_module_edges(output, storage, repo_uid, snapshot_uid);
+
+    // MODULES-METHOD-1 §2.1 + §2.2: the per-repo method description and orientation-doc
+    // recommendation. Computed from the SAME `load_module_graph_facts` (frozen: no new
+    // discovery) and the doc inventory. Always injected (the fields are ADDITIVE; the
+    // presenter skips rendering when absent — an older daemon's orient is byte-identical).
+    inject_modules_method(output, storage, repo_uid, snapshot_uid);
+}
+
+/// MODULES-METHOD-1: compute + inject the `modules_method` and `orientation_docs`
+/// blocks into the orient envelope. Storage reads stay here; the pure computation
+/// lives in `crate::modules_method`.
+fn inject_modules_method(
+    output: &mut Value,
+    storage: &StorageConnection,
+    repo_uid: &str,
+    snapshot_uid: &str,
+) {
+    // §2.1: method line from module_graph_facts (the SAME load `top_module_edges` above
+    // may already have done — but orient calls are rare and the read is cheap; sharing
+    // the load result would couple the two injectors, which is worse than a second read).
+    match repo_graph_module_queries::load_module_graph_facts(storage, snapshot_uid) {
+        Ok(facts) => {
+            // review-2 #4: orient carries the SAME diagnostics as `modules list` — both
+            // the Maven presence AND the Gradle projectDir count — so orient's method
+            // line is not diagnostic-blind. Both are Result: a FAILED read renders a
+            // named degradation, never a silent absence (standing honesty rule #1).
+            let diagnostics = crate::modules_method::MethodDiagnostics {
+                gradle_projectdir_unhandled: read_gradle_projectdir_unhandled(
+                    storage,
+                    snapshot_uid,
+                ),
+                maven_manifests_present: read_maven_manifests_present(storage, snapshot_uid),
+            };
+            // review-2 #1: `build_modules_method_json` propagates a FAILED evidence read
+            // as `{unavailable}` — a named method is NEVER derived from evidence that
+            // could not be read (no `.ok()`/`.and_then` swallowing).
+            let modules: Vec<(&str, &str)> = facts
+                .context
+                .modules
+                .iter()
+                .map(|m| (m.module_candidate_uid.as_str(), m.module_kind.as_str()))
+                .collect();
+            let block = build_modules_method_json(storage, &modules, &diagnostics);
+            inject_value_field(output, "modules_method", &block, repo_uid);
+        }
+        Err(e) => {
+            // A failed read is unknown-with-reason, NEVER a silent absence.
+            let block = serde_json::json!({ "unavailable": e.to_string() });
+            inject_value_field(output, "modules_method", &block, repo_uid);
+        }
+    }
+
+    // §2.2: orientation docs from the doc inventory.
+    // STANDING HONESTY RULE #1: a FAILED read is unknown-with-reason, never
+    // `unwrap_or_default()` which would turn a failure into "no docs found" (false).
+    //
+    // review-1 fix #1: apply the vendored-path check to match `docs list`'s classified
+    // facts. `get_doc_inventory` uses `discover_doc_inventory(..., false)` and does NOT
+    // apply the vendored overlay, so vendored docs would be classified by their content
+    // kind (readme, license) rather than demoted to "vendored". The is_vendored_path
+    // check ensures vendored docs are excluded from orientation recommendations.
+    let orientation_result =
+        match repo_graph_agent::AgentStorageRead::get_doc_inventory(storage, repo_uid) {
+            Ok(doc_inventory) => {
+                let orientation_inputs: Vec<crate::modules_method::OrientationDocInput> =
+                    doc_inventory
+                        .iter()
+                        .map(|d| {
+                            // review-1 fix #1: demote vendored paths to kind "vendored"
+                            // so is_orientation_doc filters them out, matching docs list.
+                            let kind =
+                                if crate::handlers::quality::support::is_vendored_path(&d.path) {
+                                    "vendored"
+                                } else {
+                                    d.kind.as_str()
+                                };
+                            crate::modules_method::OrientationDocInput {
+                                path: d.path.as_str(),
+                                kind,
+                                generated: d.generated,
+                            }
+                        })
+                        .collect();
+                let paths = crate::modules_method::select_orientation_docs(&orientation_inputs);
+                crate::modules_method::OrientationDocsResult::Ok {
+                    paths: paths.into_iter().map(|s| s.to_string()).collect(),
+                }
+            }
+            Err(e) => crate::modules_method::OrientationDocsResult::Unavailable {
+                reason: e.to_string(),
+            },
+        };
+    let block = crate::modules_method::orientation_docs_to_json(&orientation_result);
+    inject_value_field(output, "orientation_docs", &block, repo_uid);
+}
+
+/// MODULES-METHOD-1 (review-2 #1): build the `modules_method` JSON block for either
+/// surface (`modules list` / `orient`) from the modules `(candidate_uid, module_kind)`
+/// pairs + the already-read diagnostics.
+///
+/// The single owner of the evidence→family derivation, shared by the two callers
+/// (dispatch's `handle_modules_list` and this module's `inject_modules_method`) so the
+/// honesty contract is enforced in ONE place: a FAILED `module_candidate_evidence`
+/// read degrades the WHOLE block to `{unavailable}` — a named method is NEVER derived
+/// from evidence that could not be read (standing honesty rule #1). The old code
+/// `.ok().and_then(..)` per module, silently conflating a read failure with genuinely
+/// absent evidence and then rendering a family from it (review-2 #1).
+///
+/// Abstraction record (crate-private fn):
+///   - what: the evidence-read + method-family derivation for the modules surface.
+///   - concrete current users: `dispatch::handle_modules_list`, `inject_modules_method`.
+///   - axis of variation: the evidence read succeeds / fails per module.
+///   - rejected simpler: inlining in each caller (that IS what review-2 #1 flagged —
+///     two copies of the `.ok()` swallow that diverged from the honest contract).
+pub(crate) fn build_modules_method_json(
+    storage: &StorageConnection,
+    modules: &[(&str, &str)],
+    diagnostics: &crate::modules_method::MethodDiagnostics,
+) -> Value {
+    let uids: Vec<&str> = modules.iter().map(|(uid, _)| *uid).collect();
+    match load_module_source_types(storage, &uids) {
+        Ok(source_types) => {
+            let inputs: Vec<crate::modules_method::ModuleMethodInput> = modules
+                .iter()
+                .zip(source_types.iter())
+                .map(|((_, kind), st)| crate::modules_method::ModuleMethodInput {
+                    module_kind: kind,
+                    source_type: st.as_deref(),
+                })
+                .collect();
+            let entries = crate::modules_method::compute_method(&inputs);
+            crate::modules_method::method_to_json(&entries, diagnostics)
+        }
+        Err(reason) => serde_json::json!({ "unavailable": reason }),
+    }
+}
+
+/// Load each module's manifest `source_type` from `module_candidate_evidence`,
+/// PROPAGATING read failures (review-2 #1 — never `.ok()`). One FAILED read aborts the
+/// whole load with the reason, so `build_modules_method_json` degrades the block rather
+/// than fabricating a family from unread evidence.
+///
+/// Deterministic multi-row rule (review-2 #1): the evidence query has no `ORDER BY`, so
+/// `.next()` had no defined contract. When a module has multiple evidence rows we take
+/// the lexicographically smallest `source_type` — a total, stable choice independent of
+/// row order. `None` = the read succeeded with ZERO rows (genuinely absent evidence — a
+/// legacy MODULE-node fallback), which is honest, distinct from a failed read.
+fn load_module_source_types(
+    storage: &StorageConnection,
+    module_uids: &[&str],
+) -> Result<Vec<Option<String>>, String> {
+    let mut out = Vec::with_capacity(module_uids.len());
+    for uid in module_uids {
+        match storage.get_module_candidate_evidence(uid) {
+            Ok(evs) => out.push(evs.into_iter().map(|e| e.source_type).min()),
+            Err(e) => return Err(format!("module evidence read failed for {uid}: {e}")),
+        }
+    }
+    Ok(out)
+}
+
+/// Read the Gradle `projectDir`-relocation count from the extraction diagnostics blob
+/// (review-2 #4). Mirrors `read_maven_manifests_present`; reuses the SAME parser
+/// `handle_modules_list` uses (`dispatch::parse_gradle_projectdir_unhandled`) so orient
+/// and modules-list cannot disagree. `Ok(Some(n))` = n relocations; `Ok(None)` = none;
+/// `Err(reason)` = the blob was unreadable/malformed — rendered as a named degradation,
+/// never a silent zero.
+pub(crate) fn read_gradle_projectdir_unhandled(
+    storage: &StorageConnection,
+    snapshot_uid: &str,
+) -> Result<Option<u64>, String> {
+    use repo_graph_trust::storage_port::TrustStorageRead;
+    match TrustStorageRead::get_snapshot_extraction_diagnostics(storage, snapshot_uid) {
+        Ok(blob) => crate::dispatch::parse_gradle_projectdir_unhandled(blob.as_deref()),
+        Err(e) => Err(format!("extraction diagnostics unreadable ({e})")),
+    }
+}
+
+/// Read Maven manifest presence count from the extraction diagnostics blob.
+///
+/// review-1 fix #2: returns `Result<Option<u64>, String>` — distinguishes:
+/// - `Ok(Some(n))` where `n > 0`: Maven manifests present but not parsed
+/// - `Ok(None)`: key absent or zero (not applicable)
+/// - `Err(reason)`: the blob could not be read or parsed — carries the reason
+///   honestly, never collapsed to `None` via `.ok()`/`.flatten()` (standing
+///   honesty rule #1).
+pub(crate) fn read_maven_manifests_present(
+    storage: &StorageConnection,
+    snapshot_uid: &str,
+) -> Result<Option<u64>, String> {
+    use repo_graph_trust::storage_port::TrustStorageRead;
+    let blob = match TrustStorageRead::get_snapshot_extraction_diagnostics(storage, snapshot_uid) {
+        Ok(Some(b)) => b,
+        Ok(None) => return Ok(None), // No diagnostics blob → not applicable
+        Err(e) => return Err(format!("extraction diagnostics read failed: {e}")),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&blob)
+        .map_err(|e| format!("extraction diagnostics blob not valid JSON: {e}"))?;
+    let maven = parsed
+        .get("deps_manifests_present")
+        .and_then(|v| v.get("maven"))
+        .and_then(|v| v.as_u64());
+    match maven {
+        Some(n) if n > 0 => Ok(Some(n)),
+        _ => Ok(None),
+    }
 }
 
 /// MODULE-EDGES-1 §2.3: compute + inject the `top_module_edges` headline block.
