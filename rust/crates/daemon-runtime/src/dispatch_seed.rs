@@ -27,8 +27,9 @@ use crate::state::DaemonState;
 
 use super::ServiceDispatcher;
 
-/// SEED-CHUNK-2 §2.4 self-heal seam: when a serve produced the StaleClassification degrade
-/// (a pre-034 store, refused rather than served), kick the idempotent background re-seed so
+/// SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3 self-heal seam: when a serve produced the
+/// StaleClassification degrade (a store missing per-chunk test/decl (pre-034) OR field-tier
+/// (pre-036) classification, refused rather than served), kick the idempotent background re-seed so
 /// the upgrade fixes itself. A no-op for every other degrade reason and when the working-tree
 /// root is unavailable (the pass needs it to embed; its absence is already an honest render).
 /// Shared by all three seed serve paths (`handle_find`, `symbol_not_found_with_semantic`,
@@ -138,7 +139,8 @@ pub(super) fn apply_semantic_fallback(
             ));
         }
         crate::seed::SemanticResult::Unavailable(reason) => {
-            // SEED-CHUNK-2 §2.4: a pre-034 store self-heals — schedule the background
+            // SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3: a stale-classification store (pre-034
+            // test/decl OR pre-036 field-tier) self-heals — schedule the background
             // re-seed before rendering the "re-embedding (pending)" reason.
             self_heal_if_stale(state, Some(&reason), db_path, repo_uid, repo_root);
             result.limits.push(Limit::from_code_with_reasons(
@@ -196,7 +198,8 @@ impl ServiceDispatcher {
             query,
             SEMANTIC_FALLBACK_CAP,
         );
-        // SEED-CHUNK-2 §2.4: a pre-034 store found here self-heals via a scheduled re-seed.
+        // SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3: a stale-classification store (pre-034 OR
+        // pre-036) found here self-heals via a scheduled re-seed.
         self_heal_if_stale(
             &self.state,
             degrade_reason(&result),
@@ -402,7 +405,8 @@ impl ServiceDispatcher {
                 FIND_CANDIDATE_CAP,
             ))
         };
-        // SEED-CHUNK-2 §2.4: if the affirmative `find` hit a pre-034 store, kick the
+        // SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3: if the affirmative `find` hit a
+        // stale-classification store (pre-034 OR pre-036), kick the
         // idempotent background self-heal re-seed (no-op for any other degrade reason).
         if let Some(result) = &seed {
             self_heal_if_stale(

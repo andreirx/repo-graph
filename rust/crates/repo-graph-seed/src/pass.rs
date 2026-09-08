@@ -60,8 +60,8 @@ pub struct BuildReport {
     /// Chunks admitted and stored (passed the source/snapshot-race check).
     pub admitted: usize,
     /// Of `admitted`, chunks whose vector was **copied forward** from the prior
-    /// snapshot because their `(stable_key, content_hash)` was unchanged (spec §5) —
-    /// these made NO embed call this pass.
+    /// snapshot because their `(stable_key, content_hash, document_hash)` was unchanged
+    /// (spec §5; the `document_hash` was added in review-3) — these made NO embed call this pass.
     pub reused: usize,
     /// Chunks omitted because their file drifted from the snapshot pin, could not be
     /// read, or had no span (spec §2.1/§3.5 — omit, never store under a wrong pin).
@@ -100,8 +100,13 @@ fn span_source(lines: &[&str], line_start: Option<i64>, line_end: Option<i64>) -
 /// - `cancel()` is checked at each batch boundary; a `true` aborts without publishing.
 /// - `prior` is the previous snapshot's vectors (already filtered by the daemon to
 ///   the CURRENT model — a model change hands `&[]`, forcing a full re-embed). Any
-///   admitted chunk whose `(stable_key, content_hash)` matches a prior entry copies
-///   that vector forward (no embed); only changed/new chunks are embedded.
+///   admitted chunk whose `(stable_key, content_hash, document_hash)` matches a prior
+///   entry copies that vector forward (no embed); only changed/new chunks are embedded.
+///   The `document_hash` is in the key (review-3) because the embedded document carries the
+///   EXTRACTOR-DERIVED `doc_comment`, which can change without the file bytes changing (SC3
+///   property doc extraction) — so the file hash alone is NOT the embedding-input identity, and
+///   reusing on it would re-stamp a stale vector as current. A prior entry with a NULL
+///   `document_hash` (a pre-migration-037 parent) is EXCLUDED from reuse and re-embedded.
 #[allow(clippy::too_many_arguments)]
 pub fn build_store<R, C>(
     entries: Vec<SeedCorpusEntry>,
@@ -137,11 +142,22 @@ where
     // from the decl tier (never forced `(decl)`) and reported.
     let mut forward_decl_unreadable = 0usize;
 
-    // Prior index: (stable_key, content_hash) → &vector (dim-matched only).
-    let prior_by_key: HashMap<(&str, &str), &Vec<f32>> = prior
+    // Prior index: (stable_key, content_hash, document_hash) → &vector (dim-matched only).
+    // A prior entry with a NULL `document_hash` (a pre-migration-037 parent) has an UNKNOWN
+    // embedding-input identity, so it is dropped here (never keyed) — it cannot match any current
+    // chunk and is therefore re-embedded, the one-time self-heal (review-3, STANDING HONESTY RULE 1:
+    // never reuse a vector whose document we cannot prove is the current one).
+    let prior_by_key: HashMap<(&str, &str, &str), &Vec<f32>> = prior
         .iter()
         .filter(|e| e.vector.len() == dim)
-        .map(|e| ((e.stable_key.as_str(), e.content_hash.as_str()), &e.vector))
+        .filter_map(|e| {
+            e.document_hash.as_deref().map(|dh| {
+                (
+                    (e.stable_key.as_str(), e.content_hash.as_str(), dh),
+                    &e.vector,
+                )
+            })
+        })
         .collect();
 
     enum Slot {
@@ -212,6 +228,33 @@ where
             };
             let is_decl =
                 classify::is_declaration(&chunk.path, chunk.subtype.as_deref(), &span, force_decl);
+            // SEED-CHUNK-3 (spec §2.1): the FIELD tier. All inputs are in hand here (the
+            // slice reads the file + slices the span already, spec §2.3 "stored, not
+            // recomputed"): the stored subtype, the span's physical line count, and whether
+            // a doc comment is present. Compute the derived flag ONCE at pass time — the
+            // rank/serve path reads only the stored boolean (the `is_decl` precedent), never
+            // re-deriving the rule. A one-line chunk WITH a doc is NOT field-tiered by span.
+            let has_doc = chunk.doc_comment.as_deref().is_some_and(|d| !d.is_empty());
+            // `is_decl` EXCLUDES the span rule: a bodyless one-line callable declaration is
+            // owned by the SEED-CHUNK-2 decl tier (FROZEN INVARIANT: consume, do not
+            // re-derive) — never field-tiered and never mislabeled `[field]`.
+            let is_field = classify::is_field_tier(
+                chunk.subtype.as_deref(),
+                span.lines().count(),
+                has_doc,
+                is_decl,
+            );
+            // Assemble the chunk's embedding document ONCE, up front (review-3): its digest is the
+            // copy-forward reuse key, and if not reused it is the very text handed to the embedder.
+            // Building it for every chunk (not only the non-reused ones as before) is cheap string
+            // work — negligible beside an embed call — and is what makes the reuse identity the
+            // ACTUAL embedding input rather than the file hash.
+            let doc = build_chunk_document(
+                chunk.qualified_name.as_deref(),
+                chunk.doc_comment.as_deref(),
+                &span,
+            );
+            let document_hash = content_hash(&doc);
             let vector_row = SeedVectorEntry {
                 node_uid: chunk.node_uid.clone(),
                 stable_key: chunk.stable_key.clone(),
@@ -221,10 +264,16 @@ where
                 qualified_name: chunk.qualified_name.clone(),
                 is_test,
                 is_decl,
+                is_field,
                 content_hash: chunk.content_hash.clone(),
+                document_hash: Some(document_hash.clone()),
                 vector: Vec::new(), // filled below
             };
-            match prior_by_key.get(&(chunk.stable_key.as_str(), chunk.content_hash.as_str())) {
+            match prior_by_key.get(&(
+                chunk.stable_key.as_str(),
+                chunk.content_hash.as_str(),
+                document_hash.as_str(),
+            )) {
                 Some(v) => {
                     let mut row = vector_row;
                     row.vector = (*v).clone();
@@ -233,11 +282,6 @@ where
                     reused += 1;
                 }
                 None => {
-                    let doc = build_chunk_document(
-                        chunk.qualified_name.as_deref(),
-                        chunk.doc_comment.as_deref(),
-                        &span,
-                    );
                     admitted.push(vector_row);
                     slots.push(Slot::Pending);
                     docs.push(doc);

@@ -54,8 +54,9 @@ pub struct SeedCoordinator {
     run_slot: Mutex<()>,
     running: Mutex<BTreeMap<PathBuf, CancelFlag>>,
     last_report: Mutex<Option<SeedReport>>,
-    /// SEED-CHUNK-2 §2.4 self-heal latch: db_paths with a background re-seed already
-    /// scheduled/in-flight because a serve found a pre-034 (StaleClassification) store.
+    /// SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3 self-heal latch: db_paths with a background
+    /// re-seed already scheduled/in-flight because a serve found a StaleClassification store
+    /// (missing per-chunk test/decl (pre-034) OR field-tier (pre-036) classification).
     /// The latch makes the trigger IDEMPOTENT — repeated stale reads spawn at most ONE
     /// self-heal pass per db, so they neither livelock (each bump cancelling the last) nor
     /// pile up threads. Cleared when the pass terminates (a later read that still finds the
@@ -293,8 +294,9 @@ pub fn spawn_auto_seed(
     });
 }
 
-/// SEED-CHUNK-2 §2.4 self-heal: a serve found a pre-034 (StaleClassification) store for
-/// `db_path` — vectors that predate per-chunk test/decl classification and are therefore
+/// SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3 self-heal: a serve found a StaleClassification
+/// store for `db_path` — vectors that predate a per-chunk classification the ranker needs
+/// (test/decl (pre-034) OR field-tier (pre-036)) and are therefore
 /// REFUSED at read. Schedule a background re-seed so the upgrade never leaves the repo
 /// serving refused vectors ("an upgrade never leaves a repo silently seedless").
 ///

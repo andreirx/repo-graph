@@ -521,3 +521,79 @@ fn raw_string_body_brace_is_not_a_decl_body() {
         false
     ));
 }
+
+// ── SEED-CHUNK-3: the FIELD tier (spec §2.1, DoD §4) ────────────────────────
+
+#[test]
+fn property_subtype_is_field_tier_regardless_of_span_or_doc() {
+    // A PROPERTY/FIELD data member is ALWAYS field-tier — it carries no implementation, so
+    // decl-demotion (qualified-name-keyed) can never reach it. Multi-line and documented
+    // still field: the subtype is the signal.
+    // is_decl is irrelevant to the subtype rule (a data member is a field regardless).
+    assert!(is_field_tier(Some("PROPERTY"), 1, false, false));
+    assert!(
+        is_field_tier(Some("PROPERTY"), 5, true, false),
+        "a documented multi-line property is still field-tier (subtype rule)"
+    );
+    assert!(
+        is_field_tier(Some("FIELD"), 1, false, false),
+        "the ratified §2 wording is PROPERTY/FIELD — both match"
+    );
+}
+
+#[test]
+fn undocumented_one_liner_is_field_tier_by_span() {
+    // A one-line NON-DECLARATION chunk with NO doc comment is field-tier by the span rule —
+    // its embedded document is ~90% its own name (the D11 name-domination geometry).
+    assert!(is_field_tier(Some("CONSTANT"), 1, false, false));
+    assert!(is_field_tier(None, 1, false, false));
+    assert!(
+        is_field_tier(Some("FUNCTION"), 0, false, false),
+        "an empty/0-line span is also captured (≤ 1 line)"
+    );
+}
+
+#[test]
+fn one_line_declaration_is_not_field_tiered_it_belongs_to_the_decl_tier() {
+    // FROZEN INVARIANT (SEED-CHUNK-2 decl tier: consume, do not re-derive). A one-line
+    // bodyless callable declaration (e.g. `Status Recover(...);` in a header) is a
+    // DECLARATION, not a data field. The span rule must EXCLUDE it so the decl tier owns it,
+    // it is labeled `(decl)` not `[field]`, and two sibling decls are handled uniformly
+    // regardless of whether one signature happens to wrap past one line. The measured leveldb
+    // regression this pins: `DBImpl::Recover` decl (db_impl.h:113, one line) was field-tiered
+    // while `DBImpl::RecoverLogFile` decl (db_impl.h:126, multi-line) was not.
+    assert!(
+        !is_field_tier(Some("METHOD"), 1, false, true),
+        "a one-line METHOD declaration is decl-tiered, never field-tiered"
+    );
+    assert!(
+        !is_field_tier(Some("FUNCTION"), 1, false, true),
+        "a one-line FUNCTION prototype is decl-tiered, never field-tiered"
+    );
+    // The SAME symbol as an IMPLEMENTATION (is_decl=false) that happens to be one line with
+    // no doc IS field-tiered by span — the exclusion is exactly the decl case.
+    assert!(is_field_tier(Some("METHOD"), 1, false, false));
+}
+
+#[test]
+fn documented_one_line_constant_is_not_field_tiered_by_span_alone() {
+    // DoD §4 (the rule stated): the span rule is "≤ 1 line AND no doc comment AND not a
+    // declaration". A one-line CONSTANT WITH a doc comment is NOT field-tiered — the doc is
+    // the authored counter-signal, and a CONSTANT is not a PROPERTY/FIELD data member.
+    assert!(
+        !is_field_tier(Some("CONSTANT"), 1, true, false),
+        "a documented one-line constant is NOT field-tiered by span (doc present)"
+    );
+    assert!(
+        !is_field_tier(None, 1, true, false),
+        "any documented one-liner escapes the span rule"
+    );
+}
+
+#[test]
+fn multi_line_body_bearing_chunk_is_not_field_tier() {
+    // A multi-line function/method (the code that does the work) is never field-tier,
+    // documented or not.
+    assert!(!is_field_tier(Some("METHOD"), 60, false, false));
+    assert!(!is_field_tier(Some("FUNCTION"), 2, false, false));
+}

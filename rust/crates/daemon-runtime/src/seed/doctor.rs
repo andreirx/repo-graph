@@ -97,8 +97,9 @@ where
     };
     let stored = match storage.read_seed_vectors(&snapshot_uid) {
         Ok(s) => s,
-        // SEED-CHUNK-2 §2.4: a pre-034 store reads as the self-healing "re-embedding
-        // (pending)" state (the serve paths schedule the re-seed), distinct from terminal
+        // SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3: a store missing a needed per-chunk
+        // classification (pre-034 test/decl OR pre-036 field-tier) reads as the self-healing
+        // "re-embedding (pending)" state (the serve paths schedule the re-seed), distinct from terminal
         // corruption. `doctor` reports this state honestly; it does not itself trigger the
         // heavy re-seed (a diagnostics read stays read-only) — the serve paths do.
         Err(SeedCorpusError::StaleClassification(_)) => {
@@ -186,7 +187,9 @@ mod tests {
                 qualified_name: Some("q".to_string()),
                 is_test: false,
                 is_decl: false,
+                is_field: false,
                 content_hash: "h".to_string(),
+                document_hash: None,
                 vector: vec![1.0; dim as usize],
             }],
         }

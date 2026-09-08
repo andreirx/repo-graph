@@ -411,6 +411,101 @@ fn extract_doc_comment(node: &tree_sitter::Node, source: &[u8]) -> Option<String
     find_preceding(node, source).or_else(|| node.parent().and_then(|p| find_preceding(&p, source)))
 }
 
+/// Doc-comment extraction for TS PROPERTIES (class fields AND interface members).
+///
+/// SEED-CHUNK-3 (spec §2.2; operator ruling 2026-09-08 item 1): a data member's authored
+/// counter-signal to name-domination on a one-line seed chunk is *often a leading `//` line
+/// comment*, not only a `/** */` JSDoc — a field is conventionally documented with a `//` line
+/// on its own directly above it (`// last write time` on the line, then `updatedAt: string;`
+/// below). The example is deliberately *leading*: a trailing comment on the same line as the
+/// field (`updatedAt: string; // last write time`) is NOT documentation here — guard 2 below
+/// rejects it, and the regression tests assert that rejection. The shared `extract_doc_comment`
+/// (JSDoc-only, used by every TS symbol) discards the leading-`//` signal.
+///
+/// This variant is deliberately property-scoped rather than a widening of the shared helper:
+/// two concrete current callers (`extract_property`, `extract_interface_property`); axis of
+/// variation = the property counter-signal set (JSDoc + contiguous leading `//` run); the
+/// rejected simpler alternative — widening `extract_doc_comment` — would change document
+/// composition for every method/class/function chunk in the corpus, an unratified change
+/// outside this slice that would perturb the very FRAKTAG measurement §2.5 requires. A
+/// `/**` block immediately preceding still wins (identical to the JSDoc path); an
+/// undocumented property still yields `None` (no fabricated doc).
+fn extract_property_doc_comment(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
+    fn find_preceding(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
+        // Walk preceding siblings, nearest first. The nearest comment decides the doc kind:
+        // a JSDoc block wins outright; otherwise collect a contiguous run of `//` line
+        // comments (source order restored below). Stop at the first non-comment sibling.
+        //
+        // A comment only counts as *leading documentation* for the member when SOURCE
+        // POSITIONS say so (operator ruling 2026-09-08, review-2 item 1). Two guards:
+        //   1. CONTIGUITY — the comment must end on the line directly above the element it
+        //      documents (the member, or the next-nearer comment in the run). A blank line
+        //      between them (`// orphan` \n <blank> \n `title: string;`) breaks attribution:
+        //      that comment is not the field's doc.
+        //   2. LEADING, NOT TRAILING — the comment must sit on its own line. A previous
+        //      member's *trailing* comment (`id: string; // Tree ID`) is exposed by
+        //      tree-sitter as the preceding sibling of the NEXT member (`title`); it shares
+        //      its start row with that member's code sibling. Attributing it to `title`
+        //      would fabricate ownership of a neighbor's comment. Detect and stop the run.
+        let mut line_comments: Vec<String> = Vec::new();
+        // Row directly below which a qualifying comment must end. Seeded to the member's own
+        // start row; each accepted comment moves it up to that comment's start row.
+        let mut next_start_row = node.start_position().row;
+        let mut prev = node.prev_sibling();
+        while let Some(p) = prev {
+            if p.kind() != "comment" {
+                break;
+            }
+            // Guard 1 (contiguity): reject a blank-line gap between this comment and the
+            // element below it. `end_position().row` is the comment's last line.
+            if p.end_position().row + 1 != next_start_row {
+                break;
+            }
+            // Guard 2 (leading, not trailing): if this comment's own preceding sibling is a
+            // non-comment node that ENDS on the comment's start row, the comment trails that
+            // node's code — it belongs to that member, not to `node`. Stop the run.
+            if let Some(pp) = p.prev_sibling() {
+                if pp.kind() != "comment" && pp.end_position().row == p.start_position().row {
+                    break;
+                }
+            }
+            // `source` enters `extract` as `&str` (guaranteed valid UTF-8) and is passed down
+            // as its bytes, so every comment node's byte range lies on a UTF-8 boundary and
+            // `utf8_text` cannot return `Err` here. An `Err` would mean tree-sitter produced a
+            // node range off a char boundary — an unrecoverable invariant violation, not a
+            // real input condition. Fail loud rather than substitute `""` (which the sibling
+            // dispatch below would treat as a non-comment stop-boundary, silently classifying
+            // an unreadable comment as an ABSENT doc). STANDING HONESTY RULE 1: no silent
+            // default (`unwrap_or`/`.ok()`/`.flatten()`) on a classification-relevant read.
+            let text = p
+                .utf8_text(source)
+                .expect("comment node range must lie on a UTF-8 boundary of valid-UTF-8 source");
+            if text.starts_with("/**") {
+                if line_comments.is_empty() {
+                    return Some(text.to_string());
+                }
+                // A JSDoc separated from the field by `//` lines: the `//` run is the doc.
+                break;
+            }
+            if text.starts_with("//") {
+                line_comments.push(text.to_string());
+                next_start_row = p.start_position().row;
+                prev = p.prev_sibling();
+                continue;
+            }
+            // A non-JSDoc block comment `/* ... */`: not a doc signal here — stop.
+            break;
+        }
+        if line_comments.is_empty() {
+            None
+        } else {
+            line_comments.reverse();
+            Some(line_comments.join("\n"))
+        }
+    }
+    find_preceding(node, source).or_else(|| node.parent().and_then(|p| find_preceding(&p, source)))
+}
+
 /// Build a SYMBOL node with the standard stable_key format.
 /// Uses ctx.make_stable_key() for duplicate disambiguation.
 fn make_symbol_node(
@@ -804,7 +899,10 @@ fn extract_property(
         location: Some(location_from_node(node)),
         signature: None,
         visibility: Some(get_method_visibility(node, source)),
-        doc_comment: None,
+        // SEED-CHUNK-3 (spec §2.2): keep the class field's doc — JSDoc OR a leading `//` line
+        // comment (operator ruling 2026-09-08 item 1) — the authored counter-signal to
+        // name-domination on a one-line chunk (D11). A field with no preceding comment → None.
+        doc_comment: extract_property_doc_comment(node, source),
         metadata_json: None,
     });
 }
@@ -1026,7 +1124,10 @@ fn extract_interface_property(
         location: Some(location_from_node(node)),
         signature: None,
         visibility: Some(Visibility::Public),
-        doc_comment: None,
+        // SEED-CHUNK-3 (spec §2.2): keep the interface member's doc — JSDoc OR a leading `//`
+        // line comment (operator ruling 2026-09-08 item 1) — the authored counter-signal to
+        // name-domination on a one-line chunk (D11). A member with no comment → None.
+        doc_comment: extract_property_doc_comment(node, source),
         metadata_json: None,
     });
 }
@@ -3158,6 +3259,291 @@ mod tests {
         let prop = result.nodes.iter().find(|n| n.name == "repo").unwrap();
         assert_eq!(prop.subtype, Some(NodeSubtype::Property));
         assert_eq!(prop.visibility, Some(Visibility::Private));
+    }
+
+    #[test]
+    fn property_keeps_its_jsdoc_doc_comment() {
+        // SEED-CHUNK-3 §2.2: a TS property (class field AND interface member) must KEEP its
+        // JSDoc instead of hard-coding doc_comment: None — the authored counter-signal to
+        // name-domination on a one-line seed chunk (D11). A property with no JSDoc stays None.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let src = "\
+interface Session {
+  /** The last write time. */
+  updatedAt: string;
+  id: string;
+}
+class Store {
+  /** The active session. */
+  session: string;
+}
+";
+        let result = extract_ok(&ext, src, "src/session.ts");
+
+        let iface_prop = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "updatedAt" && n.subtype == Some(NodeSubtype::Property))
+            .expect("interface property extracted");
+        assert!(
+            iface_prop
+                .doc_comment
+                .as_deref()
+                .is_some_and(|d| d.contains("The last write time")),
+            "interface property keeps its JSDoc: {:?}",
+            iface_prop.doc_comment
+        );
+
+        let undoc_prop = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "id" && n.subtype == Some(NodeSubtype::Property))
+            .expect("undocumented interface property extracted");
+        assert_eq!(
+            undoc_prop.doc_comment, None,
+            "an undocumented property still yields None (no fabricated doc)"
+        );
+
+        let class_field = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "session" && n.subtype == Some(NodeSubtype::Property))
+            .expect("class field extracted");
+        assert!(
+            class_field
+                .doc_comment
+                .as_deref()
+                .is_some_and(|d| d.contains("The active session")),
+            "class field keeps its JSDoc: {:?}",
+            class_field.doc_comment
+        );
+    }
+
+    #[test]
+    fn property_keeps_leading_line_comment() {
+        // SEED-CHUNK-3 §2.2 + operator ruling 2026-09-08 item 1: a property's counter-signal
+        // is OFTEN a leading `//` line comment, not only a `/** */` JSDoc. The extractor must
+        // keep it for BOTH interface members AND class fields (a contiguous multi-line `//`
+        // run is joined). A field with no comment still yields None.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let src = "\
+interface Session {
+  // The last write timestamp.
+  updatedAt: string;
+  bare: string;
+}
+class Store {
+  // The active session id.
+  // Persisted on every turn.
+  sessionId: string;
+}
+";
+        let result = extract_ok(&ext, src, "src/session.ts");
+
+        let iface_prop = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "updatedAt" && n.subtype == Some(NodeSubtype::Property))
+            .expect("interface property extracted");
+        assert!(
+            iface_prop
+                .doc_comment
+                .as_deref()
+                .is_some_and(|d| d.contains("The last write timestamp")),
+            "interface member keeps its leading `//` line comment: {:?}",
+            iface_prop.doc_comment
+        );
+
+        let bare = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "bare" && n.subtype == Some(NodeSubtype::Property))
+            .expect("undocumented interface property extracted");
+        assert_eq!(
+            bare.doc_comment, None,
+            "a property with no leading comment still yields None (no fabricated doc)"
+        );
+
+        let class_field = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "sessionId" && n.subtype == Some(NodeSubtype::Property))
+            .expect("class field extracted");
+        let field_doc = class_field
+            .doc_comment
+            .as_deref()
+            .expect("class field keeps its leading `//` line comment");
+        assert!(
+            field_doc.contains("The active session id")
+                && field_doc.contains("Persisted on every turn"),
+            "class field keeps a contiguous multi-line `//` run: {:?}",
+            class_field.doc_comment
+        );
+    }
+
+    #[test]
+    fn property_leading_line_comment_run_kept_not_confused_by_trailing() {
+        // SEED-CHUNK-3 §2.2 + operator ruling 2026-09-08 (review-2 item 1), scenario "leading
+        // run kept": a genuine contiguous leading `//` run above a member IS its doc — even
+        // when the PREVIOUS member carries a trailing comment on its own line. The trailing
+        // comment must NOT leak into the run; the leading run must survive. Interface member
+        // AND class field.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let src = "\
+interface Session {
+  id: string; // Tree ID
+  // The display title.
+  title: string;
+}
+class Store {
+  sessionId: string; // primary key
+  // The active session name.
+  name: string;
+}
+";
+        let result = extract_ok(&ext, src, "src/session.ts");
+
+        let iface_prop = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "title" && n.subtype == Some(NodeSubtype::Property))
+            .expect("interface property extracted");
+        let iface_doc = iface_prop
+            .doc_comment
+            .as_deref()
+            .expect("interface member keeps its leading `//` line comment");
+        assert!(
+            iface_doc.contains("The display title") && !iface_doc.contains("Tree ID"),
+            "interface member keeps its OWN leading `//`, not the prior member's trailing one: {:?}",
+            iface_prop.doc_comment
+        );
+
+        let class_field = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "name" && n.subtype == Some(NodeSubtype::Property))
+            .expect("class field extracted");
+        let field_doc = class_field
+            .doc_comment
+            .as_deref()
+            .expect("class field keeps its leading `//` line comment");
+        assert!(
+            field_doc.contains("The active session name") && !field_doc.contains("primary key"),
+            "class field keeps its OWN leading `//`, not the prior field's trailing one: {:?}",
+            class_field.doc_comment
+        );
+    }
+
+    #[test]
+    fn property_trailing_comment_of_previous_member_not_attributed() {
+        // SEED-CHUNK-3 operator ruling 2026-09-08 (review-2 item 1), scenario "trailing
+        // comment not attributed": `id: string; // Tree ID` is `id`'s trailing comment.
+        // tree-sitter exposes it as the preceding sibling of the NEXT member; it must NOT
+        // become that member's doc. The documented member here (`id`/`sessionId`) also stays
+        // None — this extractor captures LEADING comments only, never a member's own trailing
+        // one. Interface member AND class field.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let src = "\
+interface Session {
+  id: string; // Tree ID
+  title: string;
+}
+class Store {
+  sessionId: string; // primary key
+  name: string;
+}
+";
+        let result = extract_ok(&ext, src, "src/session.ts");
+
+        let iface_next = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "title" && n.subtype == Some(NodeSubtype::Property))
+            .expect("interface property extracted");
+        assert_eq!(
+            iface_next.doc_comment, None,
+            "the prior member's trailing `//` must not become the next member's doc: {:?}",
+            iface_next.doc_comment
+        );
+        let iface_trailed = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "id" && n.subtype == Some(NodeSubtype::Property))
+            .expect("interface property extracted");
+        assert_eq!(
+            iface_trailed.doc_comment, None,
+            "a member's own trailing `//` is not captured as leading doc: {:?}",
+            iface_trailed.doc_comment
+        );
+
+        let class_next = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "name" && n.subtype == Some(NodeSubtype::Property))
+            .expect("class field extracted");
+        assert_eq!(
+            class_next.doc_comment, None,
+            "the prior field's trailing `//` must not become the next field's doc: {:?}",
+            class_next.doc_comment
+        );
+        let class_trailed = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "sessionId" && n.subtype == Some(NodeSubtype::Property))
+            .expect("class field extracted");
+        assert_eq!(
+            class_trailed.doc_comment, None,
+            "a field's own trailing `//` is not captured as leading doc: {:?}",
+            class_trailed.doc_comment
+        );
+    }
+
+    #[test]
+    fn property_blank_line_separated_comment_not_attributed() {
+        // SEED-CHUNK-3 operator ruling 2026-09-08 (review-2 item 1), scenario "blank-line-
+        // separated not attributed": a comment with a blank line between it and the member is
+        // not that member's documentation (contiguity guard). Interface member AND class field.
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let src = "\
+interface Session {
+  // orphan note
+
+  title: string;
+}
+class Store {
+  // orphan note
+
+  name: string;
+}
+";
+        let result = extract_ok(&ext, src, "src/session.ts");
+
+        let iface_prop = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "title" && n.subtype == Some(NodeSubtype::Property))
+            .expect("interface property extracted");
+        assert_eq!(
+            iface_prop.doc_comment, None,
+            "a blank-line-separated comment is not the interface member's doc: {:?}",
+            iface_prop.doc_comment
+        );
+
+        let class_field = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "name" && n.subtype == Some(NodeSubtype::Property))
+            .expect("class field extracted");
+        assert_eq!(
+            class_field.doc_comment, None,
+            "a blank-line-separated comment is not the class field's doc: {:?}",
+            class_field.doc_comment
+        );
     }
 
     #[test]

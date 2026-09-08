@@ -48,11 +48,15 @@ pub enum DegradeReason {
     /// hard-fail) — they were built by a different embedding regime; rebuild on next
     /// index.
     PinsMismatch,
-    /// SEED-CHUNK-2 (§2.4): the stored vectors predate per-chunk test/decl
-    /// classification (migration 034). Refused rather than served as stale per-file
-    /// fact — and the daemon SCHEDULES a background re-seed (self-heal), so this is a
+    /// SEED-CHUNK-2 (§2.4) + SEED-CHUNK-3 (§2.3): the stored vectors predate a per-chunk
+    /// classification the ranker needs — either per-chunk test/decl (migration 034) OR the
+    /// field tier (migration 036, `is_field`). A row missing EITHER is refused as
+    /// `StaleClassification` rather than served as stale per-file fact — and the daemon
+    /// SCHEDULES a background re-seed (self-heal, one re-seed backfills both), so this is a
     /// transient UPGRADE state that fixes itself, DISTINCT from
-    /// [`StoreUnreadable`](Self::StoreUnreadable) (terminal corruption).
+    /// [`StoreUnreadable`](Self::StoreUnreadable) (terminal corruption). The name stays
+    /// `SeedsReembedding` — the meaning ("re-embedding for per-chunk facts") is unchanged;
+    /// only the set of facts it self-heals grew by one column.
     SeedsReembedding,
     /// SEED-CHUNK-2 (review-2 item 2): the stored vectors predate per-chunk
     /// classification (as [`SeedsReembedding`](Self::SeedsReembedding)) BUT seeding is
@@ -64,8 +68,9 @@ pub enum DegradeReason {
     SeedsStaleSeedingDisabled,
 }
 
-/// The degrade reason for a pre-034 (StaleClassification) store, chosen by whether
-/// seeding is enabled. PURE so both branches are unit-tested without mutating the global
+/// The degrade reason for a `StaleClassification` store (pre-034 test/decl OR pre-036
+/// field-tier), chosen by whether seeding is enabled. PURE so both branches are
+/// unit-tested without mutating the global
 /// `seed_enabled()` override (which would race parallel unit tests) — the same test-seam
 /// convention as [`degrade_for_resolve_error`] / [`serve_identity`] in this file.
 ///
@@ -126,6 +131,10 @@ pub struct SemanticCandidate {
     /// SEED-CHUNK-2 (spec §2.2): `true` ⇒ a declaration without a body — ranked below
     /// its own implementation and labeled `(decl)` in rendering.
     pub is_decl: bool,
+    /// SEED-CHUNK-3 (spec §2.1): `true` ⇒ a FIELD-tier chunk (a PROPERTY/FIELD data
+    /// member, or an undocumented one-liner) — ranked below every body-bearing chunk of
+    /// its partition and labeled `[field]` in rendering.
+    pub is_field: bool,
     /// Owning-module hint — a GENUINE module or explicit unavailable-with-reason.
     pub module: ModuleHint,
     pub score: f64,
@@ -233,7 +242,9 @@ where
     // (no vectors yet / pre-migration snapshot); a read error is present-but-unusable.
     let stored = match storage.read_seed_vectors(snapshot_uid) {
         Ok(s) => s,
-        // SEED-CHUNK-2 §2.4: a pre-034 store is refused as StaleClassification. When
+        // SEED-CHUNK-2 §2.4 + SEED-CHUNK-3 §2.3: a store missing a needed per-chunk
+        // classification (pre-034 test/decl OR pre-036 field-tier) is refused as
+        // StaleClassification. When
         // seeding is ENABLED it maps to the self-healing "re-embedding (pending)" state
         // (the daemon caller schedules the re-seed); when seeding is DISABLED nothing will
         // re-embed, so it maps to the distinct truthful "stale + disabled" state (review-2
@@ -335,6 +346,7 @@ where
             qualified_name: r.qualified_name,
             is_test: r.is_test,
             is_decl: r.is_decl,
+            is_field: r.is_field,
             score: r.score as f64,
             model_id: MODEL_ID.to_string(),
         })
@@ -573,7 +585,9 @@ mod tests {
                     qualified_name: Some("q".to_string()),
                     is_test: false,
                     is_decl: false,
+                    is_field: false,
                     content_hash: "h".to_string(),
+                    document_hash: None,
                     vector: vec![0.0; MODEL_DIM],
                 }],
             })

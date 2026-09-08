@@ -119,13 +119,15 @@ pub mod migration_032;
 pub mod migration_033;
 pub mod migration_034;
 pub mod migration_035;
+pub mod migration_036;
+pub mod migration_037;
 
-/// Apply all 35 storage migrations to the given connection.
+/// Apply all 37 storage migrations to the given connection.
 ///
 /// Sets connection-level pragmas, runs migration 001
 /// unconditionally (idempotent via `CREATE TABLE IF NOT EXISTS`),
 /// then reads `MAX(version)` from `schema_migrations` and
-/// version-gates the application of migrations 002 through 035.
+/// version-gates the application of migrations 002 through 037.
 ///
 /// Mirrors the TypeScript `SqliteConnectionProvider.initialize()`
 /// method at `connection-provider.ts:53`.
@@ -274,6 +276,12 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
     if max_version < 35 {
         migration_035::run(conn)?;
     }
+    if max_version < 36 {
+        migration_036::run(conn)?;
+    }
+    if max_version < 37 {
+        migration_037::run(conn)?;
+    }
 
     Ok(())
 }
@@ -392,17 +400,17 @@ mod tests {
     // ── Category 1: Schema creation parity ────────────────────
 
     #[test]
-    fn run_migrations_applies_all_thirty_five_migrations() {
+    fn run_migrations_applies_all_thirty_seven_migrations() {
         let mut conn = fresh_conn();
         run_migrations(&mut conn).expect("run all migrations");
 
-        // schema_migrations table exists and contains rows 1..=35
+        // schema_migrations table exists and contains rows 1..=37
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 35, "expected 35 migration rows after full run");
+        assert_eq!(count, 37, "expected 37 migration rows after full run");
     }
 
     #[test]
@@ -498,7 +506,7 @@ mod tests {
     // ── Category 2: Migration version progression parity ─────
 
     #[test]
-    fn schema_migrations_records_versions_one_through_thirty_five_in_order() {
+    fn schema_migrations_records_versions_one_through_thirty_seven_in_order() {
         let mut conn = fresh_conn();
         run_migrations(&mut conn).expect("run all migrations");
 
@@ -551,6 +559,8 @@ mod tests {
             (33, "033-seed-vectors"),
             (34, "034-seed-chunk-decl"),
             (35, "035-fk-child-indexes"),
+            (36, "036-seed-chunk-field"),
+            (37, "037-seed-chunk-document-hash"),
         ];
 
         assert_eq!(rows.len(), expected.len());
@@ -566,14 +576,14 @@ mod tests {
         run_migrations(&mut conn).expect("first run");
         run_migrations(&mut conn).expect("second run must not error");
 
-        // Still exactly 35 rows.
+        // Still exactly 37 rows.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
         assert_eq!(
-            count, 35,
+            count, 37,
             "re-run must not duplicate schema_migrations rows"
         );
 

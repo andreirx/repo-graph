@@ -121,7 +121,9 @@ fn publish_is_skipped_after_forget_removes_the_registry_entry() {
         qualified_name: Some("f".to_string()),
         is_test: false,
         is_decl: false,
+        is_field: false,
         content_hash: "h1".to_string(),
+        document_hash: Some("dh1".to_string()),
         // The publish stamps the row's `dim` = `MODEL_DIM`, and the homogeneity-
         // validating read now rejects a vector whose length ≠ `dim` — so this test
         // vector must be `MODEL_DIM`-long to be a well-formed row (the race, not a

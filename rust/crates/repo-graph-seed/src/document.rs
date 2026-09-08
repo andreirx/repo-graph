@@ -22,6 +22,20 @@ pub const MAX_DOC_CHARS: usize = 6000;
 /// with neither a qualified name nor a doc comment still contributes its span
 /// source (never an empty document — the caller only calls this for nodes WITH a
 /// span, spec §2.1).
+///
+/// # Name domination on one-line chunks (SEED-CHUNK-3, spec §2.2)
+///
+/// For a ONE-LINE chunk with no doc comment, this document is essentially just its
+/// qualified name twice: the `qualified_name` header line plus a span line that is the
+/// declaration itself (e.g. `ConversationSession.updatedAt` + `updatedAt: string;` — the
+/// name is ≈ 90% of the ~40 characters embedded). The static mean-pooled code model then
+/// lets the parent-type words ("conversation", "session") dominate the vector, so such a
+/// chunk out-scores a 60-line method whose text is code with no lexical "persist"/"disk".
+/// This builder does NOT try to fix that geometry (it would distort every document); the
+/// compensation lives DOWNSTREAM — the FIELD tier in [`crate::rank`] sinks these one-line
+/// data declarations below every body-bearing chunk of their partition, and (§2.2) the TS
+/// extractor now KEEPS a property's JSDoc so a genuinely-documented field carries an
+/// authored counter-signal in this document rather than being pure name.
 pub fn build_chunk_document(
     qualified_name: Option<&str>,
     doc_comment: Option<&str>,

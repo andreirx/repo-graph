@@ -153,6 +153,11 @@ pub struct FindCandidate {
     /// its own implementation and labeled `(decl)`. Always present so the decl/impl
     /// kind is honest in the JSON, not just the human render.
     pub is_decl: bool,
+    /// SEED-CHUNK-3 (spec §2.1/§2.4): `true` ⇒ a FIELD-tier chunk (a PROPERTY/FIELD data
+    /// member, or an undocumented one-liner), ranked below every body-bearing chunk of
+    /// its partition and labeled `[field]`. Always present so the tier is honest in the
+    /// JSON, not just the human render.
+    pub is_field: bool,
     pub score: f64,
     /// Always "embedding" (I2).
     pub source: String,
@@ -261,6 +266,7 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
                         "qualified_name": c.qualified_name,
                         "is_test": c.is_test,
                         "is_decl": c.is_decl,
+                        "is_field": c.is_field,
                         "score": c.score,
                         "source": "embedding",
                         "model_id": c.model_id,
@@ -416,6 +422,7 @@ pub(crate) fn build_find_response(
                         qualified_name: c.qualified_name,
                         is_test: c.is_test,
                         is_decl: c.is_decl,
+                        is_field: c.is_field,
                         score: c.score,
                         source: "embedding".to_string(),
                         model_id: c.model_id,

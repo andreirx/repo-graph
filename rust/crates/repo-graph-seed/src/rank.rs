@@ -40,6 +40,10 @@ pub struct RankedCandidate {
     /// `(decl)` downstream), ranked below any body-bearing chunk of the same
     /// qualified name.
     pub is_decl: bool,
+    /// SEED-CHUNK-3 (spec §2.1): `true` ⇒ a FIELD-tier chunk (a PROPERTY/FIELD data
+    /// member, or an undocumented one-liner), ranked below every body-bearing chunk of
+    /// its PARTITION and labeled `[field]` downstream.
+    pub is_field: bool,
     pub score: f32,
     /// Within [`NEAR_TIE_EPSILON`] of the next-lower candidate in the returned
     /// order — advisory only (spec §7.3).
@@ -133,14 +137,21 @@ pub fn rank(query_vec: &[f32], entries: &[&SeedVectorEntry], top_n: usize) -> Ve
         s
     };
 
-    // Production (is_test=false) sorts before test (is_test=true); within a block,
-    // descending EFFECTIVE score, then impl-before-decl (so a decl sits just under its
-    // impl), then path, then node_uid — a deterministic total order.
+    // Production (is_test=false) sorts before test (is_test=true) — the moat, applied
+    // FIRST. WITHIN a partition, SEED-CHUNK-3 (spec §2.1) applies the FIELD tier NEXT:
+    // a field-tier chunk (a PROPERTY/FIELD data member, or an undocumented one-liner)
+    // ranks below EVERY body-bearing chunk of its partition, regardless of raw cosine —
+    // "a one-line field never outranks the code that does the work." This is a stronger,
+    // partition-keyed demotion than decl-below-impl (which is qualified-name-keyed and so
+    // can never reach a property, whose document has no implementation counterpart). Then
+    // the SEED-CHUNK-2 ordering: descending EFFECTIVE score, impl-before-decl (a decl sits
+    // just under its own impl), path, node_uid — a deterministic total order.
     scored.sort_by(|a, b| {
         let ea = effective(a.0, a.1);
         let eb = effective(b.0, b.1);
         a.1.is_test
             .cmp(&b.1.is_test)
+            .then_with(|| a.1.is_field.cmp(&b.1.is_field))
             .then_with(|| eb.total_cmp(&ea))
             .then_with(|| a.1.is_decl.cmp(&b.1.is_decl))
             .then_with(|| a.1.path.cmp(&b.1.path))
@@ -159,16 +170,19 @@ pub fn rank(query_vec: &[f32], entries: &[&SeedVectorEntry], top_n: usize) -> Ve
             qualified_name: e.qualified_name.clone(),
             is_test: e.is_test,
             is_decl: e.is_decl,
+            is_field: e.is_field,
             score,
             near_tie: false,
         })
         .collect();
 
-    // Near-tie flag between adjacent rows ONLY within the same is_test block (a
-    // production→test boundary is not a tie even if scores are close — the blocks
-    // carry different certainty).
+    // Near-tie flag between adjacent rows ONLY within the same (is_test, is_field) tier
+    // block — a partition boundary OR a field-tier boundary is never a tie even when the
+    // scores are close, because the blocks carry different certainty (production vs test,
+    // body-bearing vs field).
     for i in 0..out.len().saturating_sub(1) {
         if out[i].is_test == out[i + 1].is_test
+            && out[i].is_field == out[i + 1].is_field
             && (out[i].score - out[i + 1].score).abs() <= NEAR_TIE_EPSILON
         {
             out[i].near_tie = true;
@@ -191,7 +205,9 @@ mod tests {
             qualified_name: Some(node.to_string()),
             is_test,
             is_decl: false,
+            is_field: false,
             content_hash: "h".to_string(),
+            document_hash: None,
             vector: v,
         }
     }
@@ -207,7 +223,28 @@ mod tests {
             qualified_name: Some(qname.to_string()),
             is_test: false,
             is_decl,
+            is_field: false,
             content_hash: "h".to_string(),
+            document_hash: None,
+            vector: v,
+        }
+    }
+
+    /// A field-tier entry (SEED-CHUNK-3): explicit qualified_name, `is_field = true`,
+    /// production partition, not a decl — the shape of a one-line PROPERTY chunk.
+    fn field(node: &str, path: &str, qname: &str, v: Vec<f32>) -> SeedVectorEntry {
+        SeedVectorEntry {
+            node_uid: node.to_string(),
+            stable_key: format!("k:{node}"),
+            file_uid: format!("fu:{path}"),
+            path: path.to_string(),
+            line: Some(1),
+            qualified_name: Some(qname.to_string()),
+            is_test: false,
+            is_decl: false,
+            is_field: true,
+            content_hash: "h".to_string(),
+            document_hash: None,
             vector: v,
         }
     }
@@ -285,7 +322,9 @@ mod tests {
             qualified_name: Some("N.F".to_string()),
             is_test: false,
             is_decl: true,
+            is_field: false,
             content_hash: "h".to_string(),
+            document_hash: None,
             vector: vec![0.40, 0.0],
         };
         let test_impl = SeedVectorEntry {
@@ -297,7 +336,9 @@ mod tests {
             qualified_name: Some("N.F".to_string()),
             is_test: true,
             is_decl: false,
+            is_field: false,
             content_hash: "h".to_string(),
+            document_hash: None,
             vector: vec![0.90, 0.0],
         };
         let refs = vec![&prod_decl, &test_impl];
@@ -340,7 +381,9 @@ mod tests {
             qualified_name: Some("N.F".to_string()),
             is_test: true,
             is_decl: false,
+            is_field: false,
             content_hash: "h".to_string(),
+            document_hash: None,
             vector: vec![0.90, 0.0],
         };
         let refs = vec![&unrelated, &prod_decl, &test_impl];
@@ -443,5 +486,112 @@ mod tests {
         // First 8 are production (all production ranked above test), then 2 test.
         assert_eq!(ranked.iter().filter(|c| !c.is_test).count(), 8);
         assert_eq!(ranked.iter().filter(|c| c.is_test).count(), 2);
+    }
+
+    #[test]
+    fn field_ranks_below_body_bearing_even_when_it_scores_higher() {
+        // SEED-CHUNK-3 (spec §2.1, DoD §4): the D11 case. A one-line PROPERTY chunk
+        // (cosine 0.47) must sink BELOW a body-bearing METHOD (cosine 0.39) in the SAME
+        // production partition — "a one-line field never outranks the code that does the
+        // work." Unlike decl-demotion, the property has a DIFFERENT qualified name than the
+        // method (a property has no impl counterpart), so only the partition-keyed field
+        // tier can demote it. Cosine against [1,0] is the first component.
+        let prop = field(
+            "prop",
+            "ChatDialog.tsx",
+            "ConversationSession.updatedAt",
+            vec![0.47, 0.0],
+        );
+        let method = named(
+            "m",
+            "ConversationManager.ts",
+            "ConversationManager.createSession",
+            false,
+            vec![0.39, 0.0],
+        );
+        let refs = vec![&prop, &method];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(
+            ranked[0].node_uid, "m",
+            "the body-bearing method outranks the higher-scoring one-line property"
+        );
+        assert!(!ranked[0].is_field);
+        assert_eq!(
+            ranked[1].node_uid, "prop",
+            "the property is demoted to the field tier, still present"
+        );
+        assert!(ranked[1].is_field, "and labeled a field");
+    }
+
+    #[test]
+    fn field_below_every_body_bearing_chunk_of_its_partition_not_just_the_best() {
+        // The field tier is keyed on the PARTITION, not the qualified name: a field ranks
+        // below EVERY body-bearing chunk of its partition, even a lower-scoring one of an
+        // unrelated name. Two production methods (0.60, 0.10) and a production property
+        // (0.95) → both methods rank above the property despite its far-higher cosine.
+        let prop = field("prop", "a.ts", "N.field", vec![0.95, 0.0]);
+        let hi = named("hi", "b.ts", "N.hi", false, vec![0.60, 0.0]);
+        let lo = named("lo", "c.ts", "N.lo", false, vec![0.10, 0.0]);
+        let refs = vec![&prop, &hi, &lo];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(
+            ranked
+                .iter()
+                .map(|c| c.node_uid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["hi", "lo", "prop"]
+        );
+        assert!(ranked[2].is_field);
+    }
+
+    #[test]
+    fn a_test_partition_field_stays_within_the_test_partition() {
+        // DoD §4: a PROPERTY in the TEST partition still sorts WITHIN the test partition —
+        // the moat (production above test) is applied BEFORE the field tier. Set-up: a
+        // production property (0.99), a production method (0.20), a test method (0.90), a
+        // test property (0.95). Order must be: production block (method above its field:
+        // body-bearing above field), THEN test block (test method above test field). The
+        // test property must NOT jump into production despite its high cosine.
+        let prod_field = field("pf", "a.ts", "N.pf", vec![0.99, 0.0]);
+        let prod_method = named("pm", "a.ts", "N.pm", false, vec![0.20, 0.0]);
+        let test_method = SeedVectorEntry {
+            is_test: true,
+            ..named("tm", "a_test.ts", "N.tm", false, vec![0.90, 0.0])
+        };
+        let test_field = SeedVectorEntry {
+            is_test: true,
+            ..field("tf", "a_test.ts", "N.tf", vec![0.95, 0.0])
+        };
+        let refs = vec![&prod_field, &prod_method, &test_method, &test_field];
+        let ranked = rank(&[1.0, 0.0], &refs, 10);
+        assert_eq!(
+            ranked.iter().map(|c| c.node_uid.as_str()).collect::<Vec<_>>(),
+            vec!["pm", "pf", "tm", "tf"],
+            "production block (body-bearing then field) precedes the test block (body-bearing then field)"
+        );
+        assert!(!ranked[0].is_test && !ranked[1].is_test);
+        assert!(ranked[2].is_test && ranked[3].is_test);
+        assert!(
+            ranked[3].is_field,
+            "the test-partition field stays in the test partition, last"
+        );
+    }
+
+    #[test]
+    fn field_boundary_is_not_a_near_tie() {
+        // A field-tier boundary carries different certainty than the body-bearing block, so
+        // two rows straddling it are NOT flagged near-tie even at identical scores. A
+        // production method (1.0) and a production field (1.0): same score, but the field
+        // boundary means the method row is not a near-tie with the field below it.
+        let method = named("m", "a.ts", "N.m", false, vec![1.0, 0.0]);
+        let prop = field("prop", "b.ts", "N.f", vec![1.0, 0.0]);
+        let refs = vec![&method, &prop];
+        let ranked = rank(&[1.0, 0.0], &refs, 5);
+        assert_eq!(ranked[0].node_uid, "m");
+        assert!(
+            !ranked[0].near_tie,
+            "the field boundary is not a tie even at equal scores"
+        );
     }
 }

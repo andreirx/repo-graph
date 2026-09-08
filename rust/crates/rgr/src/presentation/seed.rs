@@ -211,8 +211,20 @@ pub(crate) fn render_seed_chunk_candidate(
         Some(Value::Bool(false)) => "",
         _ => "  [is_decl unknown]",
     };
+    // SEED-CHUNK-3 (spec §2.4): a FIELD-tier chunk (a PROPERTY/FIELD data member, or an
+    // undocumented one-liner) is labeled `[field]` so the reader sees WHY a high-similarity
+    // property sits low in the ranked list. `is_field` is always serialized (bool) by the
+    // current DTO, so a MISSING/non-bool value is an UNKNOWN classification (old / foreign
+    // daemon) — rendered EXPLICITLY as `[is_field unknown]`, symmetric with `[is_decl
+    // unknown]` (unknown never masquerades as the unlabeled body-bearing default; VISION
+    // unknown≠zero, STANDING HONESTY RULE 1).
+    let field_label = match c.get("is_field") {
+        Some(Value::Bool(true)) => "  [field]",
+        Some(Value::Bool(false)) => "",
+        _ => "  [is_field unknown]",
+    };
     let mut row = format!(
-        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){decl_label}{test_label}{kind_label}\n"
+        "  {anchor}{symbol}  (score {score:.2}, {source}, model {model}{module}){decl_label}{test_label}{field_label}{kind_label}\n"
     );
     // Composable ⇒ the pattern header covers this row; emit NO per-row cursor line. Otherwise
     // render the explicit follow-up (the short in-root cursor, or the full self-contained
@@ -516,7 +528,7 @@ mod tests {
                 "semantic_candidates": [{
                     "stable_key": "r:src/a.rs#s:SYMBOL:FUNCTION",
                     "path": "src/a.rs", "line": 9, "qualified_name": "s", "is_test": false,
-                    "is_decl": is_decl,
+                    "is_decl": is_decl, "is_field": false,
                     "score": 0.7, "source": "embedding", "model_id": "m",
                     "module": {"owning": "db"},
                     "next": {"cmd": "explain", "args": ["r:src/a.rs#s:SYMBOL:FUNCTION"], "cwd": "/repo"}
@@ -536,6 +548,48 @@ mod tests {
             "is_decl=false is unlabeled impl: {imp}"
         );
         assert!(!imp.contains("[is_decl unknown]"), "not unknown: {imp}");
+    }
+
+    #[test]
+    fn is_field_true_labeled_field_false_unlabeled_missing_unknown() {
+        // SEED-CHUNK-3 §2.4: a FIELD-tier chunk (a one-line property) is labeled `[field]`;
+        // a body-bearing chunk (is_field=false) is unlabeled; a MISSING is_field renders the
+        // explicit `[is_field unknown]` marker (unknown never masquerades as body-bearing).
+        let base = |is_field: Option<bool>| {
+            let mut cand = json!({
+                "stable_key": "r:src/a.ts#s:SYMBOL:PROPERTY",
+                "path": "src/a.ts", "line": 9, "qualified_name": "ConversationSession.updatedAt",
+                "is_test": false, "is_decl": false,
+                "score": 0.7, "source": "embedding", "model_id": "m",
+                "module": {"owning": "engine"},
+                "next": {"cmd": "explain", "args": ["r:src/a.ts#s:SYMBOL:PROPERTY"], "cwd": "/repo"}
+            });
+            if let Some(f) = is_field {
+                cand["is_field"] = json!(f);
+            }
+            json!({ "semantic_candidates": [cand], "hint": "h" })
+        };
+        let field = render_symbol_not_found_semantic(Some(&base(Some(true)))).expect("renders");
+        assert!(
+            field.contains("[field]"),
+            "is_field=true labeled [field]: {field}"
+        );
+        assert!(!field.contains("unknown"), "not unknown: {field}");
+        let body = render_symbol_not_found_semantic(Some(&base(Some(false)))).expect("renders");
+        assert!(
+            !body.contains("[field]"),
+            "is_field=false is unlabeled: {body}"
+        );
+        assert!(!body.contains("[is_field unknown]"), "not unknown: {body}");
+        let missing = render_symbol_not_found_semantic(Some(&base(None))).expect("renders");
+        assert!(
+            missing.contains("[is_field unknown]"),
+            "missing is_field renders explicit unknown marker: {missing}"
+        );
+        assert!(
+            !missing.contains("[field]"),
+            "no fabricated [field] over unknown: {missing}"
+        );
     }
 
     #[test]

@@ -71,8 +71,9 @@ pub struct SeedCorpusEntry {
     pub line_end: Option<i64>,
     /// The owning file's `is_test` classification at this snapshot (the partition input).
     pub is_test: bool,
-    /// The owning file's `file_versions.content_hash` pin (the copy-forward key +
-    /// the source/snapshot-race admission check).
+    /// The owning file's `file_versions.content_hash` pin (the source/snapshot-race
+    /// admission check + ONE part of the copy-forward key — the reuse identity is
+    /// `(stable_key, content_hash, document_hash)`, review-3; see [`SeedVectorEntry::document_hash`]).
     pub content_hash: String,
     /// CPP-DECLARATORS-1 (§2.3): the 3-state classification of the node's stored
     /// `metadata_json.forward_decl`. A genuine [`ForwardDecl`](SeedForwardDecl::ForwardDecl)
@@ -136,7 +137,29 @@ pub struct SeedVectorEntry {
     /// (prototype / trait-method decl / interface member / `declare`). A decl ranks
     /// below any body-bearing chunk of the same qualified name and renders `(decl)`.
     pub is_decl: bool,
+    /// SEED-CHUNK-3 (spec §2.1): the chunk is in the FIELD tier — a data member
+    /// (subtype PROPERTY/FIELD, any language) or an undocumented one-line chunk whose
+    /// embedded document is ~90% its own qualified name. A field-tier chunk ranks BELOW
+    /// every body-bearing chunk of its PARTITION (keyed on the partition only, never on
+    /// the qualified name — a property has no impl counterpart for decl-demotion to pair
+    /// with) and renders `[field]`. Properties stay IN the corpus; the tier applies
+    /// within the ranked list, not at admission.
+    pub is_field: bool,
     pub content_hash: String,
+    /// SEED-CHUNK-3 (review-3): the copy-forward REUSE discriminator — the 16-hex digest
+    /// ([`crate::hash::content_hash`]) of the ASSEMBLED chunk document
+    /// ([`crate::document::build_chunk_document`]), i.e. the exact bytes fed to the embedder.
+    ///
+    /// `content_hash` (the FILE hash) is NOT a sufficient reuse key: the document also carries
+    /// the EXTRACTOR-DERIVED `doc_comment`, which SC3 made variable INDEPENDENTLY of the file
+    /// bytes (a property whose leading `//` run was previously discarded now becomes its doc on
+    /// re-index, with the file byte-identical). Keying reuse on `(stable_key, content_hash,
+    /// document_hash)` invalidates a copy-forward whenever the embedded document changes — from
+    /// file bytes OR extractor logic — so a stale vector is never re-stamped as current
+    /// (STANDING HONESTY RULE 1). `None` on a row that predates migration 037 (a legacy parent):
+    /// its document identity is unknown, so it is EXCLUDED from copy-forward and re-embedded (the
+    /// one-time self-heal transition), never reused blind.
+    pub document_hash: Option<String>,
     /// The `dim`-length L2-normalized vector.
     pub vector: Vec<f32>,
 }

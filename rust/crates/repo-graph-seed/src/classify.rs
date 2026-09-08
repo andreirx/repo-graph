@@ -755,6 +755,50 @@ pub fn is_declaration(
     has_paren && !has_body
 }
 
+/// SEED-CHUNK-3 (spec §2.1): is this chunk in the FIELD tier — a one-line data
+/// declaration that must never outrank a body-bearing chunk of its partition?
+///
+/// True when EITHER:
+/// - the subtype is PROPERTY/FIELD (a data member, any language) — these carry no
+///   implementation, so SEED-CHUNK-2's decl-demotion (which pairs a decl with a
+///   same-name impl) can never reach them; the field tier is the mechanism that does;
+/// - OR the span is ≤ 1 physical line AND the chunk has no doc comment — an
+///   undocumented one-liner whose embedded document is ~90% its own qualified name
+///   (the D11 name-domination geometry).
+///
+/// A one-line chunk WITH a doc comment is NOT field-tiered by the span rule: the doc is
+/// the authored counter-signal the extractor now preserves (§2.2), so a documented
+/// one-line constant sits in the ordinary tier. A CONSTANT/VARIABLE/TYPE_ALIAS is never
+/// field-tiered by SUBTYPE — only PROPERTY/FIELD are data members in this sense.
+///
+/// `is_decl` EXCLUDES the span rule (NOT the subtype rule): a DECLARATION — a bodyless
+/// callable signature or a C++ forward-decl (SEED-CHUNK-2 / CPP-DECLARATORS-1) — is already
+/// owned by the SEED-CHUNK-2 decl tier, which the FROZEN INVARIANT says to CONSUME, not
+/// re-derive. A one-line method declaration (`Status Recover(...);` in a header) is a
+/// declaration, not a data field; without this exclusion the span rule would field-tier it
+/// and (a) mislabel a method `[field]`, (b) override its decl-below-impl placement, and
+/// (c) treat two sibling decls differently by the incidental fact that one signature wraps
+/// past one line. The subtype rule is NOT excluded: a PROPERTY/FIELD is a data member and
+/// stays field-tiered even in an interface (a TS interface property is `is_decl == false`
+/// anyway — `is_declaration` returns false for non-callables — so this is defensive, not
+/// load-bearing, for today's extractors).
+///
+/// The subtype match is on the stored uppercase `nodes.subtype` string. `"FIELD"` is
+/// matched alongside `"PROPERTY"` to transcribe the ratified §2 wording ("PROPERTY/FIELD,
+/// any language") verbatim; only `"PROPERTY"` is emitted by any current extractor (TS
+/// class field + interface property, Java field — all `NodeSubtype::Property`).
+pub fn is_field_tier(
+    subtype: Option<&str>,
+    span_line_count: usize,
+    has_doc: bool,
+    is_decl: bool,
+) -> bool {
+    if matches!(subtype, Some("PROPERTY" | "FIELD")) {
+        return true;
+    }
+    !is_decl && span_line_count <= 1 && !has_doc
+}
+
 #[cfg(test)]
 #[path = "classify_tests.rs"]
 mod tests;

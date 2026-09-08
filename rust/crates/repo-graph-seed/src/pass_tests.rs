@@ -2,9 +2,17 @@
 //! a fake `Embedder` + in-memory file reader — no model, no daemon, no DB.
 
 use super::*;
+use crate::document::build_chunk_document;
 use crate::hash::content_hash;
 use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedForwardDecl, SeedVectorEntry};
 use std::collections::HashMap;
+
+/// The copy-forward reuse digest for a chunk (review-3): the hash of the ASSEMBLED document
+/// `build_chunk_document(qname, doc, span)` — the exact bytes the embedder saw. A test helper so a
+/// prior entry can carry the EXACT digest `build_store` computes for the matching current chunk.
+fn doc_hash(qname: Option<&str>, doc: Option<&str>, span: &str) -> String {
+    content_hash(&build_chunk_document(qname, doc, span))
+}
 
 /// A fake embedder: returns a fixed 2-dim vector per input and records the docs it
 /// was asked to embed (so tests can assert copy-forward skipped the reused ones).
@@ -185,7 +193,9 @@ fn copy_forward_reuses_unchanged_chunk_and_skips_the_embed() {
     ];
     let mut files = HashMap::new();
     files.insert("x.rs".to_string(), content.to_string());
-    // Prior snapshot embedded chunk "a" (same stable_key + content_hash).
+    // Prior snapshot embedded chunk "a" (same stable_key + content_hash + document_hash).
+    // The document is unchanged (qname "a", doc None, span "fn a() {}"), so the digest matches and
+    // the vector copies forward (review-3: reuse now also requires the document digest to match).
     let prior = vec![SeedVectorEntry {
         node_uid: "a_prev".to_string(),
         stable_key: "k:a".to_string(),
@@ -195,7 +205,9 @@ fn copy_forward_reuses_unchanged_chunk_and_skips_the_embed() {
         qualified_name: Some("a".to_string()),
         is_test: false,
         is_decl: false,
+        is_field: false,
         content_hash: h.clone(),
+        document_hash: Some(doc_hash(Some("a"), None, "fn a() {}")),
         vector: vec![0.6, 0.8], // already normalized
     }];
     let emb = FakeEmbedder::new();
@@ -469,6 +481,201 @@ fn unreadable_forward_decl_is_excluded_from_decl_tier_and_counted() {
             assert_eq!(
                 report.forward_decl_unreadable, 1,
                 "the corrupt carrier is counted exactly once (honest degradation report)"
+            );
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
+}
+
+#[test]
+fn field_tier_is_set_from_subtype_and_span() {
+    // SEED-CHUNK-3 §2.1: build_store computes is_field per chunk from the stored subtype,
+    // the span line count, and doc presence.
+    //  - a PROPERTY (any span) is field-tier;
+    //  - an undocumented one-line CONSTANT is field-tier (span rule);
+    //  - a one-line CONSTANT WITH a doc comment is NOT (doc counter-signal);
+    //  - a multi-line body-bearing FUNCTION is NOT.
+    let content = "\
+prop_line;
+const K = 1;
+const D = 2;
+fn sig() -> u32;
+fn work() -> u32 {
+    1
+}
+";
+    let h = content_hash(content);
+    let prop = SeedCorpusEntry {
+        subtype: Some("PROPERTY".to_string()),
+        ..chunk("prop", "src/x.rs", &h, Some(1), Some(1), false)
+    };
+    let bare_const = SeedCorpusEntry {
+        subtype: Some("CONSTANT".to_string()),
+        ..chunk("bare_const", "src/x.rs", &h, Some(2), Some(2), false)
+    };
+    let doc_const = SeedCorpusEntry {
+        subtype: Some("CONSTANT".to_string()),
+        doc_comment: Some("The documented one.".to_string()),
+        ..chunk("doc_const", "src/x.rs", &h, Some(3), Some(3), false)
+    };
+    // A ONE-LINE bodyless FUNCTION declaration (is_decl=true). It is ≤1 line with no doc, so
+    // the span rule WOULD field-tier it — but the decl exclusion keeps it in the SEED-CHUNK-2
+    // decl tier (FROZEN INVARIANT). This is the leveldb `DBImpl::Recover` decl case, pinned.
+    let one_line_decl = SeedCorpusEntry {
+        subtype: Some("FUNCTION".to_string()),
+        ..chunk("one_line_decl", "src/x.rs", &h, Some(4), Some(4), false)
+    };
+    let work = chunk("work", "src/x.rs", &h, Some(5), Some(7), false); // FUNCTION, 3 lines
+    let mut files = HashMap::new();
+    files.insert("src/x.rs".to_string(), content.to_string());
+    let emb = FakeEmbedder::new();
+    match build_store(
+        vec![prop, bare_const, doc_const, one_line_decl, work],
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &[],
+    ) {
+        BuildOutcome::Built { entries, .. } => {
+            let get = |k: &str| entries.iter().find(|e| e.stable_key == k).unwrap();
+            assert!(get("k:prop").is_field, "a PROPERTY is field-tier");
+            assert!(
+                get("k:bare_const").is_field,
+                "an undocumented one-line constant is field-tier (span rule)"
+            );
+            assert!(
+                !get("k:doc_const").is_field,
+                "a documented one-line constant is NOT field-tier (doc counter-signal)"
+            );
+            assert!(
+                get("k:one_line_decl").is_decl,
+                "a bodyless one-line signature is a declaration"
+            );
+            assert!(
+                !get("k:one_line_decl").is_field,
+                "a one-line DECLARATION is decl-tiered, NOT field-tiered (decl exclusion)"
+            );
+            assert!(
+                !get("k:work").is_field,
+                "a multi-line body-bearing function is NOT field-tier"
+            );
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
+}
+
+#[test]
+fn copy_forward_reembeds_when_doc_comment_changed_though_file_hash_unchanged() {
+    // review-3 (the core regression): the SC3 scenario. The FILE bytes are byte-identical (same
+    // content_hash), but a re-index with the SC3 extractor now populates the chunk's `doc_comment`
+    // (a property's leading `//` run that was previously discarded). The embedded DOCUMENT therefore
+    // changed even though the file hash did not. Copy-forward MUST NOT reuse the prior (docless)
+    // vector — it must re-embed, and the NEW document (carrying the authored doc) must reach the
+    // embedder. If reuse keyed on the file hash alone, the stale vector would be re-stamped as
+    // current — presenting an embedding of a document that no longer matches the chunk (RULE 1).
+    let content = "fn a() {}\n";
+    let h = content_hash(content);
+    // Current corpus chunk: SAME stable_key + content_hash, but now WITH a doc comment.
+    let current = SeedCorpusEntry {
+        doc_comment: Some("Tree ID".to_string()),
+        ..chunk("a", "x.rs", &h, Some(1), Some(1), false)
+    };
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    // Prior snapshot's vector for the SAME (stable_key, content_hash) but the OLD document
+    // (doc=None) — its digest is the docless one, so it must NOT match the current chunk.
+    let prior = vec![SeedVectorEntry {
+        node_uid: "a_prev".to_string(),
+        stable_key: "k:a".to_string(),
+        file_uid: "fu:x.rs".to_string(),
+        path: "x.rs".to_string(),
+        line: Some(1),
+        qualified_name: Some("a".to_string()),
+        is_test: false,
+        is_decl: false,
+        is_field: false,
+        content_hash: h.clone(),
+        document_hash: Some(doc_hash(Some("a"), None, "fn a() {}")),
+        vector: vec![0.6, 0.8],
+    }];
+    let emb = FakeEmbedder::new();
+    match build_store(
+        vec![current],
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &prior,
+    ) {
+        BuildOutcome::Built { entries, report } => {
+            assert_eq!(
+                report.reused, 0,
+                "a changed document must NOT copy forward the stale (docless) vector"
+            );
+            let seen = emb.seen.borrow();
+            assert_eq!(seen.len(), 1, "the chunk is re-embedded, not reused");
+            assert!(
+                seen[0].contains("Tree ID"),
+                "the NEW document (with the authored doc comment) reaches the embedder: {:?}",
+                seen[0]
+            );
+            // The stored entry carries the CURRENT document's digest, not the prior one.
+            let a = entries.iter().find(|e| e.stable_key == "k:a").unwrap();
+            assert_eq!(
+                a.document_hash,
+                Some(doc_hash(Some("a"), Some("Tree ID"), "fn a() {}")),
+                "the re-embedded row stores the current document digest"
+            );
+        }
+        other => panic!("expected Built, got {other:?}"),
+    }
+}
+
+#[test]
+fn copy_forward_reembeds_a_legacy_null_document_hash_parent() {
+    // review-3 self-heal: a PRE-migration-037 parent has a NULL document_hash (its embedding-input
+    // identity is unknown). Even with a matching (stable_key, content_hash), it is EXCLUDED from the
+    // reuse map and re-embedded — never reused blind. This is the one-time transition after the
+    // upgrade; the re-seed writes the digest, and every subsequent refresh reuses correctly.
+    let content = "fn a() {}\n";
+    let h = content_hash(content);
+    let entries = vec![chunk("a", "x.rs", &h, Some(1), Some(1), false)];
+    let mut files = HashMap::new();
+    files.insert("x.rs".to_string(), content.to_string());
+    let prior = vec![SeedVectorEntry {
+        node_uid: "a_prev".to_string(),
+        stable_key: "k:a".to_string(),
+        file_uid: "fu:x.rs".to_string(),
+        path: "x.rs".to_string(),
+        line: Some(1),
+        qualified_name: Some("a".to_string()),
+        is_test: false,
+        is_decl: false,
+        is_field: false,
+        content_hash: h.clone(),
+        document_hash: None, // legacy parent: unknown document identity
+        vector: vec![0.6, 0.8],
+    }];
+    let emb = FakeEmbedder::new();
+    match build_store(
+        entries,
+        &emb,
+        reader(files),
+        || false,
+        BuildConfig::default(),
+        &prior,
+    ) {
+        BuildOutcome::Built { entries, report } => {
+            assert_eq!(
+                report.reused, 0,
+                "a NULL-digest legacy parent is never reused blind — it re-embeds"
+            );
+            assert_eq!(emb.seen.borrow().len(), 1, "the chunk is re-embedded");
+            let a = entries.iter().find(|e| e.stable_key == "k:a").unwrap();
+            assert!(
+                a.document_hash.is_some(),
+                "the re-seeded row now carries a document digest (clears the legacy NULL)"
             );
         }
         other => panic!("expected Built, got {other:?}"),
