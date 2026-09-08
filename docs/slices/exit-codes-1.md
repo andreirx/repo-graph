@@ -39,6 +39,25 @@ a non-error path (`django-meta.json`); the builder root-causes it first (§2.1).
    site in rgr and asserts it uses a named constant; the smoke harness's per-repo meta
    records the code and the summary lists any command exiting 2 for later triage.
 
+## 6. Amendment after cycle 1 (2026-09-08; the Codex builder's finding, reviewer-verified)
+
+§2.2's single five-meaning table contradicts §3: four existing VERDICT commands already use 1/2 as
+documented verdicts, not errors — `doctor` 1 = unhealthy (`doctor/mod.rs:136`), `modules violations`
+1 = violations found (`violations.rs:93-96`), `hook` 1 = warning / 2 = error (`hook/mod.rs:31-33`),
+`gate` fail 1 / incomplete 2 / pass 0 (`gate/compute.rs:623-644`) — and stamping `EXIT_USAGE_ERROR` on
+them would be a false name. RULING (mapped outward: an agent reading `$?` must never confuse "the tool
+broke" with "the tool answered no"): the contract has TWO FAMILIES, both documented in
+`docs/contracts/exit-codes.md`. (a) Non-verdict commands: 0 success (incl. vacuous/empty) · 1 usage
+error · 2 runtime error · 3 still running · 4 refused by policy. (b) Verdict commands (`doctor`, `gate`,
+`check`, `modules violations`, `hook`): 0 = the positive verdict, 1/2 = the documented negative verdicts
+listed per command in the contract (unchanged — §3 froze them); a RUNTIME error inside a verdict command
+also exits 2 today — the contract states that ambiguity honestly per command rather than hiding it, and
+`--json` carries `status` so automation can disambiguate. Constants are named by MEANING at each site
+(`EXIT_UNHEALTHY`, `EXIT_GATE_FAIL`, `EXIT_GATE_INCOMPLETE`, `EXIT_VIOLATIONS_FOUND`, `EXIT_REFUSED_BY_
+POLICY`, …) from ONE table, and the enumeration test asserts every exit site references a named constant
+— never a bare integer, never a name that lies. `gate.rs:36-40`'s "3: gate fail" doc is corrected to the
+producer's truth (1 fail / 2 incomplete). `dead` → 4 with its verdict on stdout, as §2.
+
 ## 3. Stop conditions
 
 Frozen: wire protocol (the JSON `status` field is additive), the meaning of 0/1/2/3 for every
