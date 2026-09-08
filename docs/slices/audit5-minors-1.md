@@ -19,8 +19,13 @@ Outward surface named per item. Six independent causes; none is a regression.
 
 ## 2. Contract
 
-- **F1** Config rule (extension) precedes the `docs/` path rule; `.md` fallthrough becomes a
-  neutral kind (`doc`), not `architecture` — "architecture" only by explicit name/dir; License
+- **F1** Config rule (extension) precedes any path rule; `.md` fallthrough becomes a neutral kind
+  (`doc`), not `architecture`. AMENDED 2026-09-08 (cycle-5 finding — the old text let ALL of `docs/`
+  stay `architecture`, so repo-graph read 591, not fewer): "architecture" is assigned ONLY by explicit
+  NAME (`ARCHITECTURE*`, `DESIGN*`, `OVERVIEW*`) or by an explicitly architectural DIRECTORY
+  (`design/`, `docs/architecture*/`, `docs/design*/`); every other file under `docs/` is `doc`. The
+  movement is the rendered outcome — repo-graph's "By kind" shows a small, explicitly-named
+  `architecture` set and a large `doc` set — not a memorized count; License
   ONLY when the file is NAMED `LICENSE*`/`COPYING*`/`NOTICE*` (AMENDED 2026-09-08: the content basis
   "marker-and-nothing-else" is not decidable — a headingless prose document with one license clause is
   not a license — so the header marker is ignored for kind everywhere else). Movement: vscode/hadoop/repo-graph
