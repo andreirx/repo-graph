@@ -79,7 +79,7 @@ impl HumanReadable for HookResult<PromptSubmitOutput> {
 pub fn run_hook_prompt_submit(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_prompt_submit_usage();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     let ctx = match HookContext::from_args(args) {
@@ -87,13 +87,13 @@ pub fn run_hook_prompt_submit(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("error: {}", e);
             print_prompt_submit_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     let (result, status) = execute_prompt_submit(&ctx);
     output_result(&result, ctx.json_output);
-    ExitCode::from(status.exit_code())
+    status.exit_code()
 }
 
 fn execute_prompt_submit(ctx: &HookContext) -> (HookResult<PromptSubmitOutput>, HookStatus) {

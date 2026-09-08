@@ -73,13 +73,13 @@ pub fn run_orient(args: &[String]) -> ExitCode {
             // `--help` fell through to the unknown-flag branch and errored with exit 1.
             "--help" | "-h" => {
                 print_orient_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             "--budget" => {
                 if budget_raw.is_some() {
                     eprintln!("error: --budget specified more than once");
                     print_orient_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 let value = match args.get(i) {
@@ -87,13 +87,13 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                     None => {
                         eprintln!("error: --budget requires a value");
                         print_orient_usage();
-                        return ExitCode::from(1);
+                        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                     }
                 };
                 if value.starts_with("--") {
                     eprintln!("error: --budget requires a value, got flag: {}", value);
                     print_orient_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 budget_raw = Some(value.clone());
             }
@@ -101,7 +101,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                 if focus_raw.is_some() {
                     eprintln!("error: --focus specified more than once");
                     print_orient_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 let value = match args.get(i) {
@@ -109,26 +109,26 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                     None => {
                         eprintln!("error: --focus requires a value");
                         print_orient_usage();
-                        return ExitCode::from(1);
+                        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                     }
                 };
                 if value.starts_with("--") {
                     eprintln!("error: --focus requires a value, got flag: {}", value);
                     print_orient_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 focus_raw = Some(value.clone());
             }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
                 print_orient_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             other => {
                 // No positional args in REG-1 contract
                 eprintln!("error: unexpected argument: {}", other);
                 print_orient_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
         i += 1;
@@ -144,7 +144,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
     if full && budget_raw.is_some() {
         eprintln!("error: --full cannot be combined with --budget");
         print_orient_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
     let budget = if full {
         "full"
@@ -160,7 +160,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                     other
                 );
                 print_orient_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     };
@@ -170,7 +170,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -178,7 +178,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -187,7 +187,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -209,11 +209,11 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -228,11 +228,11 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                         // (`small|medium|large|full`) selected above.
                         let depth = OrientDepth::from_budget(budget);
                         println!("{}", render_orient_envelope(&envelope, depth));
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse orient response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -244,11 +244,11 @@ pub fn run_orient(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -284,17 +284,17 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
             // documenting `--full` as the no-op it is here.
             "--help" | "-h" => {
                 print_check_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
                 print_check_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             other => {
                 eprintln!("error: unexpected argument: {}", other);
                 print_check_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -304,7 +304,7 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -312,7 +312,7 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -321,7 +321,7 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -339,18 +339,29 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
             // return exit 2 for EVERY check, INCLUDING a PASS). Computed ONCE here, before the mode branch,
             // so the human and `--json` paths share the identical exit code; the value mapping is preserved
             // verbatim: CHECK_PASS=0 / CHECK_FAIL=1 / CHECK_INCOMPLETE=2 / not-found=2.
-            let exit_code = check_exit_code(&result);
+            let exit_code = match check_exit_code(&result) {
+                Some(crate::daemon_command::EXIT_CHECK_PASS) => {
+                    ExitCode::from(crate::daemon_command::EXIT_CHECK_PASS)
+                }
+                Some(crate::daemon_command::EXIT_CHECK_FAIL) => {
+                    ExitCode::from(crate::daemon_command::EXIT_CHECK_FAIL)
+                }
+                Some(crate::daemon_command::EXIT_CHECK_INCOMPLETE) => {
+                    ExitCode::from(crate::daemon_command::EXIT_CHECK_INCOMPLETE)
+                }
+                Some(_) | None => ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR),
+            };
 
             if json_mode {
                 // Machine mode: print full wrapped envelope verbatim
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::from(exit_code)
+                        exit_code
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -360,11 +371,11 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<CoherenceEnvelope<CheckResponse>>(result) {
                     Ok(envelope) => {
                         println!("{}", render_check_envelope(&envelope));
-                        ExitCode::from(exit_code)
+                        exit_code
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse check response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -376,11 +387,11 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -417,13 +428,13 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
             // exits 0. Placed BEFORE the `_` positional arm so `-h` is treated as help, not as the target.
             "--help" | "-h" => {
                 print_explain_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             "--budget" => {
                 if budget_raw.is_some() {
                     eprintln!("error: --budget specified more than once");
                     print_explain_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 let value = match args.get(i) {
@@ -431,26 +442,26 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                     None => {
                         eprintln!("error: --budget requires a value");
                         print_explain_usage();
-                        return ExitCode::from(1);
+                        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                     }
                 };
                 if value.starts_with("--") {
                     eprintln!("error: --budget requires a value, got flag: {}", value);
                     print_explain_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 budget_raw = Some(value.clone());
             }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
                 print_explain_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => {
                 if target.is_some() {
                     eprintln!("error: unexpected argument: {}", arg);
                     print_explain_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 target = Some(arg.clone());
             }
@@ -463,7 +474,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
         None => {
             eprintln!("error: missing target argument");
             print_explain_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -473,7 +484,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
     if full && budget_raw.is_some() {
         eprintln!("error: --full cannot be combined with --budget");
         print_explain_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
     let budget = if full {
         "full"
@@ -488,7 +499,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                     other
                 );
                 print_explain_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     };
@@ -498,7 +509,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -506,7 +517,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -515,7 +526,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -534,11 +545,11 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -564,11 +575,11 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                         // miss items past the display cap.
                         println!("{}", envelope.value.render_human(full));
                         print!("{}", reference_section);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse explain response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -580,11 +591,11 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

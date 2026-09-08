@@ -29,41 +29,41 @@ pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
             "--forbids" => {
                 if forbids.is_some() {
                     eprintln!("error: --forbids specified more than once");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 if i >= args.len() || args[i].starts_with('-') {
                     eprintln!("error: --forbids requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 let v = args[i].trim().to_string();
                 if v.is_empty() {
                     eprintln!("error: --forbids requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 forbids = Some(v);
             }
             "--reason" => {
                 if reason.is_some() {
                     eprintln!("error: --reason specified more than once");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 if i >= args.len() || args[i].starts_with('-') {
                     eprintln!("error: --reason requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 let v = args[i].trim().to_string();
                 if v.is_empty() {
                     eprintln!("error: --reason requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 reason = Some(v);
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("usage: rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -72,14 +72,14 @@ pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
 
     if positional.len() != 3 {
         eprintln!("usage: rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let forbids = match forbids {
         Some(f) => f,
         None => {
             eprintln!("error: --forbids is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -91,7 +91,7 @@ pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -129,11 +129,11 @@ pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
                 "inserted": result.inserted,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

@@ -33,41 +33,41 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
             "--forbids" => {
                 if forbids.is_some() {
                     eprintln!("error: --forbids specified more than once");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 if i >= args.len() || args[i].starts_with('-') {
                     eprintln!("error: --forbids requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 let v = args[i].trim().to_string();
                 if v.is_empty() {
                     eprintln!("error: --forbids requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 forbids = Some(v);
             }
             "--reason" => {
                 if reason.is_some() {
                     eprintln!("error: --reason specified more than once");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 i += 1;
                 if i >= args.len() || args[i].starts_with('-') {
                     eprintln!("error: --reason requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 let v = args[i].trim().to_string();
                 if v.is_empty() {
                     eprintln!("error: --reason requires a non-empty value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 reason = Some(v);
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("{}", SUPERSEDE_BOUNDARY_USAGE);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -76,14 +76,14 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
 
     if positional.len() != 2 {
         eprintln!("{}", SUPERSEDE_BOUNDARY_USAGE);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let forbids = match forbids {
         Some(f) => f,
         None => {
             eprintln!("error: --forbids is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -92,14 +92,14 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
 
     if old_uid.trim().is_empty() {
         eprintln!("error: old_declaration_uid must be non-empty");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let mut storage = match open_storage(db_path) {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -108,17 +108,17 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
         Ok(Some(row)) => row,
         Ok(None) => {
             eprintln!("error: declaration {} does not exist", old_uid);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
     if !old_row.is_active {
         eprintln!("error: declaration {} is already inactive", old_uid);
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
 
     if old_row.kind != "boundary" {
@@ -126,7 +126,7 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
             "error: declaration {} is kind '{}', expected 'boundary'",
             old_uid, old_row.kind
         );
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
 
     // Extract module_path from target_stable_key: {repo}:{path}:MODULE
@@ -137,7 +137,7 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
                 "error: cannot parse module path from target_stable_key: {}",
                 old_row.target_stable_key
             );
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -174,11 +174,11 @@ pub(super) fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
                 "superseded": true,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

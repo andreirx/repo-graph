@@ -114,27 +114,25 @@ pub fn render_check_envelope(env: &CoherenceEnvelope<CheckResponse>) -> String {
 /// Reading the now-dead top-level path would resolve to `null` and silently return exit 2 for EVERY check,
 /// INCLUDING a PASS (a green repo would report failure) — the anti-silent-break hazard the spec flags as
 /// load-bearing (§3e CRITICAL / §5 CW5). The value mapping is preserved verbatim from the pre-wrapper
-/// behaviour: `CHECK_PASS` → 0, `CHECK_FAIL` → 1, `CHECK_INCOMPLETE` → 2, and verdict-not-found → 2 (the
-/// `.unwrap_or(2)` fallback — INCOMPLETE and "no verdict signal" both map to 2).
+/// behaviour: `CHECK_PASS` → 0, `CHECK_FAIL` → 1, `CHECK_INCOMPLETE` → 2. A missing verdict is
+/// represented as `None`; the CLI maps that runtime failure to process code 2 without falsely
+/// naming it `CHECK_INCOMPLETE`.
 ///
 /// This projection is co-located with [`render_check_envelope`] (the OTHER wire→CLI read) on purpose:
 /// §3e requires the exit-code extraction and the human-render deserialization to move in lockstep with the
 /// daemon's wrapper, so they live and are tested together and cannot silently drift. `run_check_cmd`
 /// computes this ONCE, before the human/`--json` mode branch, so both modes share the identical exit code.
-pub fn check_exit_code(result: &serde_json::Value) -> u8 {
-    result["value"]["signals"]
-        .as_array()
-        .and_then(|signals| {
-            signals.iter().find_map(|leaf| {
-                leaf["value"]["code"].as_str().and_then(|code| match code {
-                    "CHECK_PASS" => Some(0),
-                    "CHECK_FAIL" => Some(1),
-                    "CHECK_INCOMPLETE" => Some(2),
-                    _ => None,
-                })
+pub fn check_exit_code(result: &serde_json::Value) -> Option<u8> {
+    result["value"]["signals"].as_array().and_then(|signals| {
+        signals.iter().find_map(|leaf| {
+            leaf["value"]["code"].as_str().and_then(|code| match code {
+                "CHECK_PASS" => Some(crate::daemon_command::EXIT_CHECK_PASS),
+                "CHECK_FAIL" => Some(crate::daemon_command::EXIT_CHECK_FAIL),
+                "CHECK_INCOMPLETE" => Some(crate::daemon_command::EXIT_CHECK_INCOMPLETE),
+                _ => None,
             })
         })
-        .unwrap_or(2)
+    })
 }
 
 impl CheckResponse {
@@ -496,17 +494,20 @@ mod tests {
 
     #[test]
     fn exit_code_pass_is_zero() {
-        assert_eq!(check_exit_code(&wrapped_verdict("CHECK_PASS")), 0);
+        assert_eq!(check_exit_code(&wrapped_verdict("CHECK_PASS")), Some(0));
     }
 
     #[test]
     fn exit_code_fail_is_one() {
-        assert_eq!(check_exit_code(&wrapped_verdict("CHECK_FAIL")), 1);
+        assert_eq!(check_exit_code(&wrapped_verdict("CHECK_FAIL")), Some(1));
     }
 
     #[test]
     fn exit_code_incomplete_is_two() {
-        assert_eq!(check_exit_code(&wrapped_verdict("CHECK_INCOMPLETE")), 2);
+        assert_eq!(
+            check_exit_code(&wrapped_verdict("CHECK_INCOMPLETE")),
+            Some(2)
+        );
     }
 
     #[test]
@@ -519,32 +520,32 @@ mod tests {
                 { "value": { "code": "CHECK_FAIL" } }
             ] }
         });
-        assert_eq!(check_exit_code(&result), 1);
+        assert_eq!(check_exit_code(&result), Some(1));
     }
 
     #[test]
-    fn exit_code_missing_verdict_signal_is_two() {
-        // No verdict leaf at all (only SNAPSHOT_INFO) → the `.unwrap_or(2)` fallback. INCOMPLETE and
-        // "no verdict found" both map to 2 (the pre-wrapper semantics, preserved).
+    fn exit_code_missing_verdict_signal_is_absent() {
+        // No verdict leaf at all (only SNAPSHOT_INFO) is distinct from an INCOMPLETE verdict.
+        // The CLI still returns the frozen numeric code 2, but names this branch as a runtime error.
         let result = serde_json::json!({
             "value": { "signals": [ { "value": { "code": "SNAPSHOT_INFO" } } ] }
         });
-        assert_eq!(check_exit_code(&result), 2);
+        assert_eq!(check_exit_code(&result), None);
     }
 
     #[test]
     fn exit_code_ignores_dead_top_level_signals_path() {
         // ANTI-SILENT-BREAK REGRESSION (§3e CRITICAL): a PASS verdict placed at the PRE-WRAPPER top-level
-        // `signals` path (no `value.signals`) must NOT be read — it resolves to the fallback 2, proving the
+        // `signals` path (no `value.signals`) must NOT be read — it resolves to absence, proving the
         // extractor does not silently honour the dead path. If `check_exit_code` ever regressed to reading
         // `result["signals"]`, this PASS would wrongly yield 0 and a green repo could report 2 in reverse;
-        // pinning 2 here locks the extractor onto the wrapped path.
+        // pinning `None` here locks the extractor onto the wrapped path.
         let result = serde_json::json!({
             "signals": [ { "value": { "code": "CHECK_PASS" } } ]
         });
         assert_eq!(
             check_exit_code(&result),
-            2,
+            None,
             "the dead top-level signals path must not be honoured"
         );
     }

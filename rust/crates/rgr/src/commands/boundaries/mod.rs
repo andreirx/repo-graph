@@ -39,7 +39,7 @@ use summary::run_boundaries_summary;
 pub fn run_boundaries(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -50,7 +50,7 @@ pub fn run_boundaries(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown boundaries subcommand: {}", other);
             print_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

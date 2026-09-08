@@ -30,7 +30,7 @@ pub fn run_repo(args: &[String]) -> ExitCode {
         eprintln!(
             "  rebuild <repo> [--yes]     Discard the store and reindex from scratch (destructive)"
         );
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -41,7 +41,7 @@ pub fn run_repo(args: &[String]) -> ExitCode {
         "rebuild" => run_repo_rebuild(&args[1..]),
         other => {
             eprintln!("error: unknown repo subcommand: {}", other);
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -54,7 +54,7 @@ fn run_repo_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -65,20 +65,20 @@ fn run_repo_list(args: &[String]) -> ExitCode {
                     "{}",
                     serde_json::to_string_pretty(&result["repos"]).unwrap_or_default()
                 );
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
 
             let repos = match result["repos"].as_array() {
                 Some(r) => r,
                 None => {
                     eprintln!("no repos registered");
-                    return ExitCode::SUCCESS;
+                    return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
                 }
             };
 
             if repos.is_empty() {
                 eprintln!("no repos registered");
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
 
             // Print header
@@ -96,15 +96,15 @@ fn run_repo_list(args: &[String]) -> ExitCode {
                 println!("{:<20} {:<50} {}", alias, path, last_indexed);
             }
 
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -126,7 +126,7 @@ fn run_repo_info(args: &[String]) -> ExitCode {
     if repo_ref == "." {
         if let Err(e) = std::env::current_dir() {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     }
 
@@ -134,7 +134,7 @@ fn run_repo_info(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -148,7 +148,7 @@ fn run_repo_info(args: &[String]) -> ExitCode {
                     "{}",
                     serde_json::to_string_pretty(&result).unwrap_or_default()
                 );
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
 
             // Human mode: show user-facing information only
@@ -171,7 +171,7 @@ fn run_repo_info(args: &[String]) -> ExitCode {
                 print_repo_storage(storage);
             }
 
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
@@ -180,11 +180,11 @@ fn run_repo_info(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: daemon returned {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -289,7 +289,7 @@ fn format_bytes(bytes: u64) -> String {
 fn run_repo_alias(args: &[String]) -> ExitCode {
     if args.len() != 2 {
         eprintln!("usage: rmap repo alias <repo_path> <alias>");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let repo_path = &args[0];
@@ -300,7 +300,7 @@ fn run_repo_alias(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot resolve path '{}': {}", repo_path, e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -308,7 +308,7 @@ fn run_repo_alias(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -322,15 +322,15 @@ fn run_repo_alias(args: &[String]) -> ExitCode {
             let path = result["canonical_path"].as_str().unwrap_or("?");
             let set_alias = result["alias"].as_str().unwrap_or("?");
             eprintln!("Alias set: {} -> {}", set_alias, path);
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -394,7 +394,7 @@ fn print_remove_usage() {
 fn run_repo_remove(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         print_remove_usage();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
     // review-1 #1: parse strictly BEFORE any destructive action. An unrecognized flag or an extra
     // positional is a hard error — never a silent fall-through to the destructive default (e.g. a
@@ -404,7 +404,7 @@ fn run_repo_remove(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {msg}");
             print_remove_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let repo_ref = parsed.repo_ref;
@@ -414,7 +414,7 @@ fn run_repo_remove(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -429,11 +429,11 @@ fn run_repo_remove(args: &[String]) -> ExitCode {
             // A refusal (in-flight write) comes back as a StateUnavailable error — surface it plainly.
             eprintln!("error: cannot forget repo: {}", message);
             let _ = code;
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -480,10 +480,10 @@ fn render_forget_result(result: &serde_json::Value) -> ExitCode {
     }
 
     if ok {
-        ExitCode::SUCCESS
+        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
     } else {
         eprintln!("error: one or more artifacts could not be removed (see FAILED lines above)");
-        ExitCode::from(1)
+        ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
     }
 }
 
@@ -629,14 +629,14 @@ fn parse_rebuild_response(result: &serde_json::Value) -> Result<RebuildReport<'_
 fn run_repo_rebuild(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         print_rebuild_usage();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
     let parsed = match parse_rebuild_args(args) {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("error: {msg}");
             print_rebuild_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -651,7 +651,7 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
                 "hint: pass --yes to '{}' to confirm the destructive rebuild",
                 parsed.repo_ref
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         eprintln!("{}", rebuild_confirmation_text(&parsed.repo_ref));
         eprint!("Type 'yes' to proceed: ");
@@ -659,7 +659,7 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
         let mut line = String::new();
         if std::io::stdin().read_line(&mut line).is_err() || line.trim() != "yes" {
             eprintln!("aborted: nothing was discarded");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     }
 
@@ -674,7 +674,7 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -711,7 +711,7 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
                 Ok(r) => r,
                 Err(msg) => {
                     eprintln!("error: {msg}");
-                    return ExitCode::from(2);
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
                 }
             };
             if parsed.json {
@@ -720,11 +720,11 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(s) => {
                         println!("{s}");
-                        return ExitCode::SUCCESS;
+                        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
                     }
                     Err(e) => {
                         eprintln!("error: could not serialize the rebuild response: {e}");
-                        return ExitCode::from(2);
+                        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
                     }
                 }
             }
@@ -746,7 +746,7 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
             if let Some(secs) = report.duration_secs {
                 eprintln!("  duration: {secs}s");
             }
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(DaemonClientError::Timeout { timeout_secs }) => {
             // A long rebuild that outlived the client read timeout is STILL RUNNING on the daemon —
@@ -762,11 +762,11 @@ fn run_repo_rebuild(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: daemon returned {code}: {message}");
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

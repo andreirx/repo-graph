@@ -43,7 +43,7 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             print_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -56,7 +56,7 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
                 Ok(p) => p.to_string_lossy().to_string(),
                 Err(e) => {
                     eprintln!("error: cannot resolve current directory: {}", e);
-                    return ExitCode::from(2);
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
                 }
             };
             params.insert("repo".to_string(), serde_json::json!(cwd));
@@ -92,7 +92,7 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -113,11 +113,11 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         // Detached completion (INDEX-DISCONNECT-1 semantics): a client read-timeout does NOT abort
@@ -127,7 +127,7 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
                 "note: enrich is still running on the daemon (client read timed out after {timeout_secs}s);"
             );
             eprintln!("      it continues detached — check `rmap doctor` for the result.");
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
@@ -136,11 +136,11 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

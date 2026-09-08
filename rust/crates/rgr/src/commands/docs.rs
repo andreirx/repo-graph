@@ -41,7 +41,7 @@ use crate::presentation::docs::{DocsExtractResponse, DocsListResponse};
 pub fn run_docs(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_docs_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -50,7 +50,7 @@ pub fn run_docs(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown docs subcommand: {}", other);
             print_docs_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -120,7 +120,7 @@ fn run_docs_list(args: &[String]) -> ExitCode {
     if !remaining.is_empty() {
         eprintln!("usage: rmap docs list [--json] [--include-generated] [--full]");
         eprintln!("       (run from within a repo directory)");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Get cwd for repo resolution
@@ -128,7 +128,7 @@ fn run_docs_list(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -136,7 +136,7 @@ fn run_docs_list(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -145,7 +145,7 @@ fn run_docs_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -169,27 +169,27 @@ fn run_docs_list(args: &[String]) -> ExitCode {
                         match serde_json::to_string_pretty(&out_value) {
                             Ok(json) => {
                                 println!("{}", json);
-                                ExitCode::SUCCESS
+                                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                             }
                             Err(e) => {
                                 eprintln!("error: failed to serialize result: {}", e);
-                                ExitCode::from(2)
+                                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                             }
                         }
                     } else {
                         print!("{}", response.render_human(include_generated, full));
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                 }
                 Err(e) => {
                     eprintln!("error: failed to parse response: {}", e);
-                    ExitCode::from(2)
+                    ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -203,7 +203,7 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
     if !remaining.is_empty() {
         eprintln!("usage: rmap docs extract [--json]");
         eprintln!("       (run from within a repo directory)");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Get cwd for repo resolution
@@ -211,7 +211,7 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -219,7 +219,7 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -228,7 +228,7 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -241,11 +241,11 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -253,18 +253,18 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<DocsExtractResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

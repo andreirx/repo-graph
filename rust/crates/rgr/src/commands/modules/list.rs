@@ -54,7 +54,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
                 eprintln!("usage: rmap modules list [--json] [--full]");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => {
                 if unexpected.is_none() {
@@ -69,7 +69,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
         eprintln!("usage: rmap modules list [--json] [--full]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Get cwd for repo resolution
@@ -77,7 +77,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -85,7 +85,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -94,7 +94,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -110,11 +110,11 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -123,18 +123,18 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<ModulesListResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human_budgeted(full));
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse modules list response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

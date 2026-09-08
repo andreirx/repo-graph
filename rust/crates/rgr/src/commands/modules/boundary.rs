@@ -30,7 +30,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
             eprintln!(
 				"usage: rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]"
 			);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -38,7 +38,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
         eprintln!(
 			"usage: rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]"
 		);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let forbids = match forbids {
@@ -48,7 +48,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
             eprintln!(
 				"usage: rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]"
 			);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -60,7 +60,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -73,11 +73,11 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
                 "error: {}",
                 no_ready_snapshot_hint(&storage, db_path, repo_uid)
             );
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -86,7 +86,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to load module context: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -96,7 +96,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
         None => {
             eprintln!("error: source module not found: {}", source_arg);
             eprintln!("hint: use canonical path (e.g., 'packages/app') or module key");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -106,7 +106,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
         None => {
             eprintln!("error: target module not found: {}", forbids);
             eprintln!("hint: use canonical path (e.g., 'packages/core') or module key");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -116,7 +116,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
             "error: source and target must be different modules (both resolve to '{}')",
             source_path
         );
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Build discovered_module boundary declaration
@@ -157,7 +157,7 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: failed to insert declaration: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -172,11 +172,11 @@ pub(super) fn run_modules_boundary(args: &[String]) -> ExitCode {
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {
             println!("{}", json);
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

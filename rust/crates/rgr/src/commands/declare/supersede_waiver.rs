@@ -35,32 +35,32 @@ pub(super) fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
         match args[i].as_str() {
             "--reason" => match parse_flag_value("--reason", &reason, args, &mut i) {
                 Some(v) => reason = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--expires-at" => match parse_flag_value("--expires-at", &expires_at, args, &mut i) {
                 Some(v) => expires_at = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--created-by" => match parse_flag_value("--created-by", &created_by, args, &mut i) {
                 Some(v) => created_by = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--rationale-category" => {
                 match parse_flag_value("--rationale-category", &rationale_category, args, &mut i) {
                     Some(v) => rationale_category = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--policy-basis" => {
                 match parse_flag_value("--policy-basis", &policy_basis, args, &mut i) {
                     Some(v) => policy_basis = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("{}", SUPERSEDE_WAIVER_USAGE);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -69,14 +69,14 @@ pub(super) fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
 
     if positional.len() != 2 {
         eprintln!("{}", SUPERSEDE_WAIVER_USAGE);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let reason = match reason {
         Some(v) => v,
         None => {
             eprintln!("error: --reason is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -85,14 +85,14 @@ pub(super) fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
 
     if old_uid.trim().is_empty() {
         eprintln!("error: old_declaration_uid must be non-empty");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let mut storage = match open_storage(db_path) {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -101,24 +101,24 @@ pub(super) fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
         Ok(Some(row)) => row,
         Ok(None) => {
             eprintln!("error: declaration {} does not exist", old_uid);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
     if !old_row.is_active {
         eprintln!("error: declaration {} is already inactive", old_uid);
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
     if old_row.kind != "waiver" {
         eprintln!(
             "error: declaration {} is kind '{}', expected 'waiver'",
             old_uid, old_row.kind
         );
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
 
     // Parse old value_json to extract identity fields.
@@ -126,28 +126,28 @@ pub(super) fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: old waiver has malformed value_json: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
     let req_id = match old_value["req_id"].as_str() {
         Some(s) => s.to_string(),
         None => {
             eprintln!("error: old waiver missing req_id in value_json");
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
     let requirement_version = match old_value["requirement_version"].as_i64() {
         Some(v) => v,
         None => {
             eprintln!("error: old waiver missing requirement_version in value_json");
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
     let obligation_id = match old_value["obligation_id"].as_str() {
         Some(s) => s.to_string(),
         None => {
             eprintln!("error: old waiver missing obligation_id in value_json");
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -204,11 +204,11 @@ pub(super) fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
                 "superseded": true,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

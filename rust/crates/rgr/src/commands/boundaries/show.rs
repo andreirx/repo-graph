@@ -19,7 +19,7 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             eprintln!("usage: rmap boundaries show <surface_uid> [--json]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -28,7 +28,7 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -36,7 +36,7 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -45,7 +45,7 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -62,11 +62,11 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -75,11 +75,11 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<BoundariesShowResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse boundaries show response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -89,10 +89,10 @@ pub(super) fn run_boundaries_show(args: &[String]) -> ExitCode {
             let err_str = e.to_string();
             if err_str.contains("not found") {
                 eprintln!("error: {}", err_str);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

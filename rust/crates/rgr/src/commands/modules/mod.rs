@@ -62,7 +62,7 @@ pub fn run_modules(args: &[String]) -> ExitCode {
         eprintln!("  rmap modules violations                        (REG-1: from cwd)");
         eprintln!("  rmap modules unowned                           (REG-1: from cwd)");
         eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -83,7 +83,7 @@ pub fn run_modules(args: &[String]) -> ExitCode {
             eprintln!("  rmap modules violations                        (REG-1: from cwd)");
             eprintln!("  rmap modules unowned                           (REG-1: from cwd)");
             eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

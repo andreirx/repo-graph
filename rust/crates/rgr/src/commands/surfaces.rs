@@ -40,7 +40,7 @@ pub fn run_surfaces(args: &[String]) -> ExitCode {
         eprintln!("  rmap surfaces show <surface_ref> [--json]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -51,7 +51,7 @@ pub fn run_surfaces(args: &[String]) -> ExitCode {
             eprintln!("usage:");
             eprintln!("  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>] [--json]");
             eprintln!("  rmap surfaces show <surface_ref> [--json]");
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -65,7 +65,7 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             eprintln!("usage: rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>] [--json]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -74,7 +74,7 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -82,7 +82,7 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -91,7 +91,7 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -117,11 +117,11 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -130,18 +130,18 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<SurfacesListResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse surfaces list response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -155,7 +155,7 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             eprintln!("usage: rmap surfaces show <surface_ref> [--json]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -164,7 +164,7 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -172,7 +172,7 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -181,7 +181,7 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -198,11 +198,11 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -211,11 +211,11 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<SurfacesShowResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse surfaces show response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -225,10 +225,10 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
             let err_str = e.to_string();
             if err_str.contains("not found") {
                 eprintln!("error: {}", err_str);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

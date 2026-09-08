@@ -27,7 +27,7 @@ pub fn run_inferences(args: &[String]) -> ExitCode {
         print_list_usage();
         eprintln!();
         eprintln!("Run from within a repo directory.");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -35,7 +35,7 @@ pub fn run_inferences(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown inferences subcommand: {}", other);
             print_list_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -57,7 +57,7 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
             "--kind" => {
                 if i + 1 >= args.len() {
                     eprintln!("error: --kind requires a value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 kind_filter = Some(args[i + 1].clone());
                 i += 2;
@@ -65,25 +65,25 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
             "--limit" => {
                 if i + 1 >= args.len() {
                     eprintln!("error: --limit requires a value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 match args[i + 1].parse::<u64>() {
                     Ok(n) => limit = Some(n),
                     Err(_) => {
                         eprintln!("error: --limit must be a non-negative integer");
-                        return ExitCode::from(1);
+                        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                     }
                 }
                 i += 2;
             }
             "--help" | "-h" => {
                 print_list_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             other => {
                 eprintln!("error: unknown option: {}", other);
                 print_list_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -93,7 +93,7 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -101,7 +101,7 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -110,7 +110,7 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -129,16 +129,16 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
                 print!("{}", inferences_render::render(&result, limit.is_some()));
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
         }
         // Preserve the original error surface (behaviour-preserving): the daemon's
@@ -146,7 +146,7 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
         // SURFACE change to the success payload, not the error contract.
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

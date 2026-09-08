@@ -49,7 +49,7 @@ pub fn run_declare(args: &[String]) -> ExitCode {
         eprintln!(
             "subcommands: boundary, requirement, waiver, quality-policy, deactivate, supersede"
         );
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -64,7 +64,7 @@ pub fn run_declare(args: &[String]) -> ExitCode {
             eprintln!(
                 "subcommands: boundary, requirement, waiver, quality-policy, deactivate, supersede"
             );
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -74,7 +74,7 @@ fn run_declare_supersede(args: &[String]) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage: rmap declare supersede <kind> ...");
         eprintln!("kinds: boundary, requirement, waiver");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -84,7 +84,7 @@ fn run_declare_supersede(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown supersede kind: {}", other);
             eprintln!("kinds: boundary, requirement, waiver");
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

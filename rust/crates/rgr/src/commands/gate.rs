@@ -35,9 +35,8 @@ fn print_usage() {
 ///
 /// Exit codes:
 /// - 0: gate pass
-/// - 1: usage error
-/// - 2: runtime error (daemon unavailable, repo not indexed)
-/// - 3: gate fail (strict mode or violations present)
+/// - 1: gate fail (or usage error before evaluation)
+/// - 2: gate incomplete (or runtime error before a verdict)
 pub fn run_gate(args: &[String]) -> ExitCode {
     // Parse optional mode flags
     let mut strict = false;
@@ -52,19 +51,19 @@ pub fn run_gate(args: &[String]) -> ExitCode {
             flag if flag.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", flag);
                 print_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => {
                 eprintln!("error: unexpected argument: {}", arg);
                 print_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
 
     if strict && advisory {
         eprintln!("error: --strict and --advisory are mutually exclusive");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Resolve repo from cwd
@@ -72,7 +71,7 @@ pub fn run_gate(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -80,7 +79,7 @@ pub fn run_gate(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -89,7 +88,7 @@ pub fn run_gate(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -111,22 +110,34 @@ pub fn run_gate(args: &[String]) -> ExitCode {
     match client.request("gate", Some(params)) {
         Ok(result) => {
             // Determine exit code from gate outcome
-            let exit_code = result
+            let exit_code = match result
                 .get("gate")
                 .and_then(|g| g.get("exit_code"))
                 .and_then(|c| c.as_u64())
-                .unwrap_or(0) as u8;
+            {
+                Some(0) => ExitCode::from(crate::daemon_command::EXIT_GATE_PASS),
+                Some(1) => ExitCode::from(crate::daemon_command::EXIT_GATE_FAIL),
+                Some(2) => ExitCode::from(crate::daemon_command::EXIT_GATE_INCOMPLETE),
+                Some(code) => {
+                    eprintln!("error: gate response has unsupported exit code: {code}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
+                None => {
+                    eprintln!("error: gate response is missing numeric gate.exit_code");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
+            };
 
             if json_mode {
                 // Machine mode: raw JSON output
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::from(exit_code)
+                        exit_code
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -136,18 +147,18 @@ pub fn run_gate(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<GateResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::from(exit_code)
+                        exit_code
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse gate response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

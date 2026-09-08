@@ -49,42 +49,42 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
         match args[i].as_str() {
             "--version" => match parse_flag_value("--version", &version, args, &mut i) {
                 Some(v) => version = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--measurement" => {
                 match parse_flag_value("--measurement", &measurement, args, &mut i) {
                     Some(v) => measurement = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--policy-kind" => {
                 match parse_flag_value("--policy-kind", &policy_kind, args, &mut i) {
                     Some(v) => policy_kind = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--threshold" => match parse_flag_value("--threshold", &threshold, args, &mut i) {
                 Some(v) => threshold = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--severity" => match parse_flag_value("--severity", &severity, args, &mut i) {
                 Some(v) => severity = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--scope-clause" => match parse_repeatable_flag_value("--scope-clause", args, &mut i) {
                 Some(v) => scope_clauses_raw.push(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--description" => {
                 match parse_flag_value("--description", &description, args, &mut i) {
                     Some(v) => description = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("{}", DECLARE_QUALITY_POLICY_USAGE);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -94,7 +94,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
     // Validate positional args: db_path, repo_uid, policy_id.
     if positional.len() != 3 {
         eprintln!("{}", DECLARE_QUALITY_POLICY_USAGE);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let db_path = Path::new(positional[0].as_str());
@@ -103,7 +103,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
 
     if policy_id.trim().is_empty() {
         eprintln!("error: policy_id must be non-empty");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Version defaults to 1.
@@ -112,7 +112,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
             Ok(n) => n,
             Err(_) => {
                 eprintln!("error: --version must be an integer, got: {}", v);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         },
         None => 1,
@@ -127,7 +127,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "supported kinds: {}",
                 SupportedMeasurementKind::supported_kinds_display()
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     if let Err(e) = parse_measurement_kind(&measurement_str) {
@@ -136,7 +136,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
             "supported kinds: {}",
             SupportedMeasurementKind::supported_kinds_display()
         );
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Validate and parse policy kind.
@@ -144,7 +144,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
         Some(v) => v,
         None => {
             eprintln!("error: --policy-kind is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let policy_kind_enum = match QualityPolicyKind::parse(&policy_kind_str) {
@@ -154,7 +154,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "error: invalid --policy-kind: '{}'; valid values: absolute_max, absolute_min, no_new, no_worsened",
                 policy_kind_str
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -163,7 +163,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
         Some(v) => v,
         None => {
             eprintln!("error: --threshold is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let threshold_num: f64 = match threshold_str.parse() {
@@ -173,7 +173,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "error: --threshold must be a number, got: {}",
                 threshold_str
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -186,7 +186,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "error: invalid --severity: '{}'; valid values: fail, advisory",
                 other
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -199,7 +199,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "error: invalid --scope-clause format: '{}'; expected <type>:<selector>",
                 clause_str
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         let clause_type = parts[0].trim();
         let selector = parts[1].trim();
@@ -208,7 +208,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "error: --scope-clause selector is empty in '{}'",
                 clause_str
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         let clause_kind = match ScopeClauseKind::parse(clause_type) {
             Some(k) => k,
@@ -217,7 +217,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                     "error: invalid scope clause type: '{}'; valid types: module, file, symbol_kind",
                     clause_type
                 );
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         };
         scope_clauses.push(ScopeClause::new(clause_kind, selector));
@@ -241,7 +241,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
         for e in errors {
             eprintln!("error: {}", e);
         }
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Open storage.
@@ -249,7 +249,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -261,7 +261,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
         Ok(j) => j,
         Err(e) => {
             eprintln!("error: failed to serialize payload: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -290,11 +290,11 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 "inserted": result.inserted,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

@@ -45,21 +45,21 @@ pub fn run_uninstall(args: &[String]) -> ExitCode {
             }
             "--help" | "-h" => {
                 print_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             other => {
                 eprintln!("unknown option: {}", other);
                 print_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
 
     match execute_uninstall(dry_run, force, remove_data) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => ExitCode::from(crate::daemon_command::EXIT_SUCCESS),
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

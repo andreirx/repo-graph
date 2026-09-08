@@ -88,7 +88,7 @@ fn create_daemon_client(_command: &str) -> Result<DaemonClient, ExitCode> {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return Err(ExitCode::from(2));
+            return Err(ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR));
         }
     };
 
@@ -138,11 +138,11 @@ fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
                     eprint!("{}", rendered);
                 }
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         e => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -205,7 +205,7 @@ pub fn run_dev(args: &[String]) -> ExitCode {
             eprintln!("  livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
             eprintln!("  livegraph-refresh --repo <repo> [--partition <id>] [--source-root <repo-relative-root>]... [--all-discovered] [--include-fixtures]");
             eprintln!("  cycle-completeness-audit --repo <repo> [--include-fixtures]   (read-only; load first via livegraph-refresh --all-discovered)");
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -248,7 +248,7 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
             }
             other => {
                 eprintln!("error: unknown arg: {}", other);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -259,7 +259,7 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
                 "usage: rmap dev livegraph-refresh --repo <repo> [--partition <id>] \
                  [--source-root <repo-relative-root>]..."
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let mut client = match create_daemon_client("dev") {
@@ -283,11 +283,11 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => handle_daemon_error(e),
@@ -316,7 +316,7 @@ fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
             }
             other => {
                 eprintln!("error: unknown arg: {}", other);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -326,7 +326,7 @@ fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
             eprintln!(
                 "usage: rmap dev cycle-completeness-audit --repo <repo> [--include-fixtures]"
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let mut client = match create_daemon_client("dev") {
@@ -341,11 +341,11 @@ fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => handle_daemon_error(e),
@@ -381,7 +381,7 @@ fn run_dev_livegraph_preload(args: &[String]) -> ExitCode {
             }
             other => {
                 eprintln!("error: unknown arg: {}", other);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -389,7 +389,7 @@ fn run_dev_livegraph_preload(args: &[String]) -> ExitCode {
         (Some(r), Some(p), Some(s), Some(sr)) => (r, p, s, sr),
         _ => {
             eprintln!("usage: rmap dev livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let mut client = match create_daemon_client("dev") {
@@ -406,11 +406,11 @@ fn run_dev_livegraph_preload(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => handle_daemon_error(e),
@@ -441,14 +441,14 @@ pub fn run_callers(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("error: {}", e);
             eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     // REG-1: one positional arg (symbol), repo from cwd
     if positional.len() != 1 {
         eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--json]");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let symbol = &positional[0];
@@ -457,7 +457,7 @@ pub fn run_callers(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -480,11 +480,11 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -518,11 +518,11 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                     Ok(response) => {
                         print!("{}", response.render_human());
                         print!("{}", reference_section);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse callers response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -562,14 +562,14 @@ pub fn run_callees(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("error: {}", e);
             eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     // REG-1: one positional arg (symbol), repo from cwd
     if positional.len() != 1 {
         eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--json]");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let symbol = &positional[0];
@@ -578,7 +578,7 @@ pub fn run_callees(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -601,11 +601,11 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -637,11 +637,11 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                     Ok(response) => {
                         print!("{}", response.render_human());
                         print!("{}", reference_section);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse callees response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -678,7 +678,7 @@ pub fn run_path(args: &[String]) -> ExitCode {
     // REG-1: two positional args (from, to), repo from cwd
     if positional.len() != 2 {
         eprintln!("usage: rmap path <from> <to> [--engine auto|sqlite|livegraph|compare] [--json]");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let from_query = positional[0];
@@ -688,7 +688,7 @@ pub fn run_path(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -711,11 +711,11 @@ pub fn run_path(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -741,11 +741,11 @@ pub fn run_path(args: &[String]) -> ExitCode {
                     Ok(response) => {
                         // Pass query terms so not-found header preserves user intent
                         print!("{}", response.render_human_with_query(from_query, to_query));
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse path response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -778,7 +778,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {flag}");
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             other => positional.push(other.to_string()),
         }
@@ -788,7 +788,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -801,7 +801,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             if positional.len() != 1 {
                 eprintln!("error: imports requires exactly one <file>");
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             serde_json::json!({ "repo": repo_path, "engine": engine, "file": positional[0] })
         }
@@ -809,7 +809,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             if positional.len() > 1 {
                 eprintln!("error: at most one <file> (omit for a repo-wide view)");
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             let mut p = serde_json::json!({ "repo": repo_path, "engine": "livegraph" });
             if let Some(file) = positional.first() {
@@ -823,7 +823,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             if positional.len() > 1 {
                 eprintln!("error: at most one <file> (omit for the repo-wide readiness aggregate)");
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             let mut p = serde_json::json!({ "repo": repo_path, "engine": "compare" });
             if let Some(file) = positional.first() {
@@ -833,7 +833,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
         }
         other => {
             eprintln!("error: unknown --engine '{other}' (supported: sqlite, livegraph, compare)");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -849,11 +849,11 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else if engine == "livegraph" {
@@ -861,11 +861,11 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<LivegraphImportsResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse imports response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else if engine == "compare" && positional.is_empty() {
@@ -874,11 +874,11 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<ImportsReadinessReport>(result) {
                     Ok(report) => {
                         print!("{}", report.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse imports response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else if engine == "compare" {
@@ -887,11 +887,11 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<ImportsCompareResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse imports response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -908,11 +908,11 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                 match serde_json::from_value::<ImportsResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse imports response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -968,12 +968,12 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {flag}");
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             other => {
                 eprintln!("error: unexpected argument: {other}");
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -989,34 +989,34 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
         ("livegraph", "module-import") => CyclesRoute::LivegraphModule,
         ("livegraph", _) => {
             eprintln!("error: --engine livegraph requires --kind file-import or module-import");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         ("sqlite", "file-import") => {
             eprintln!("error: SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         ("compare", "module-import") => CyclesRoute::CompareModule,
         ("compare", "file-import") => {
             eprintln!("error: --engine compare --kind file-import is not supported (FILE-import has no SQLite peer graph); use --kind module-import");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         ("compare", _) => {
             eprintln!("error: --engine compare requires --kind module-import");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         (_, "file-import") => {
             eprintln!("error: --kind file-import requires --engine livegraph");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         (e, "") => {
             eprintln!(
                 "error: unknown --engine '{e}' (supported: auto, sqlite, livegraph, compare)"
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
         (_, k) => {
             eprintln!("error: unknown --kind '{k}' (supported: file-import, module-import)");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -1024,7 +1024,7 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -1057,11 +1057,11 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -1180,11 +1180,11 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                         if let Some(summary) = compare_summary {
                             println!("{summary}");
                         }
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse cycles response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
@@ -1215,12 +1215,12 @@ pub fn run_stats(args: &[String]) -> ExitCode {
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             other => {
                 eprintln!("error: unexpected argument: {}", other);
                 eprintln!("{usage}");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -1231,14 +1231,14 @@ pub fn run_stats(args: &[String]) -> ExitCode {
             "error: unknown --engine '{engine}' (supported: auto, sqlite, livegraph, compare)"
         );
         eprintln!("{usage}");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -1259,11 +1259,11 @@ pub fn run_stats(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -1317,11 +1317,11 @@ pub fn run_stats(args: &[String]) -> ExitCode {
                         if let Some(summary) = compare_summary {
                             println!("{summary}");
                         }
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to parse stats response: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }

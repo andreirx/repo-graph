@@ -26,7 +26,7 @@ use crate::daemon_client::DaemonClient;
 pub fn run_contracts(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_contracts_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -37,7 +37,7 @@ pub fn run_contracts(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown contracts subcommand: {}", other);
             print_contracts_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -64,13 +64,13 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         if args[i] == "--kind" {
             if i + 1 >= args.len() {
                 eprintln!("--kind requires a value");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             kind_filter = Some(args[i + 1].clone());
             i += 2;
         } else {
             eprintln!("unknown option: {}", args[i]);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     }
 
@@ -79,7 +79,7 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -87,7 +87,7 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -96,7 +96,7 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -110,16 +110,16 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -129,7 +129,7 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
 fn run_contracts_show(args: &[String]) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage: rmap contracts show <file_path>");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let file_path = &args[0];
@@ -139,7 +139,7 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -147,7 +147,7 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -156,7 +156,7 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -170,16 +170,16 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -196,7 +196,7 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
             "--kind" => {
                 if i + 1 >= args.len() {
                     eprintln!("--kind requires a value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 kind_filter = Some(args[i + 1].clone());
                 i += 2;
@@ -204,14 +204,14 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
             "--file" => {
                 if i + 1 >= args.len() {
                     eprintln!("--file requires a value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 file_filter = Some(args[i + 1].clone());
                 i += 2;
             }
             other => {
                 eprintln!("unknown option: {}", other);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -221,7 +221,7 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -229,7 +229,7 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -238,7 +238,7 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -255,16 +255,16 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -281,7 +281,7 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
             "--element" => {
                 if i + 1 >= args.len() {
                     eprintln!("--element requires a value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 element_filter = Some(args[i + 1].clone());
                 i += 2;
@@ -289,20 +289,20 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
             "--min-confidence" => {
                 if i + 1 >= args.len() {
                     eprintln!("--min-confidence requires a value");
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 match args[i + 1].parse::<f64>() {
                     Ok(v) if (0.0..=1.0).contains(&v) => min_confidence = Some(v),
                     _ => {
                         eprintln!("--min-confidence must be a number between 0.0 and 1.0");
-                        return ExitCode::from(1);
+                        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                     }
                 }
                 i += 2;
             }
             other => {
                 eprintln!("unknown option: {}", other);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -312,7 +312,7 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -320,7 +320,7 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -329,7 +329,7 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -346,16 +346,16 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

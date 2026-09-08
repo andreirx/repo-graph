@@ -20,13 +20,13 @@ use std::process::ExitCode;
 pub fn run_integrate(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
         "--help" | "-h" => {
             print_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         "claude-code" => run_claude_code(&args[1..]),
         "codex" => run_codex(&args[1..]),
@@ -34,7 +34,7 @@ pub fn run_integrate(args: &[String]) -> ExitCode {
             eprintln!("error: unknown host: {}", other);
             eprintln!();
             print_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -43,13 +43,13 @@ pub fn run_integrate(args: &[String]) -> ExitCode {
 fn run_claude_code(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_claude_code_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
         "--help" | "-h" => {
             print_claude_code_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         "install" => run_claude_code_install(&args[1..]),
         "remove" => run_claude_code_remove(&args[1..]),
@@ -58,7 +58,7 @@ fn run_claude_code(args: &[String]) -> ExitCode {
             eprintln!("error: unknown action: {}", other);
             eprintln!();
             print_claude_code_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -69,12 +69,12 @@ fn run_claude_code_install(args: &[String]) -> ExitCode {
         Ok(opts) => claude_code::execute_install(&opts),
         Err(e) if e == "help" => {
             claude_code::print_install_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             claude_code::print_install_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -85,12 +85,12 @@ fn run_claude_code_remove(args: &[String]) -> ExitCode {
         Ok(opts) => claude_code::execute_remove(&opts),
         Err(e) if e == "help" => {
             claude_code::print_remove_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             claude_code::print_remove_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -101,12 +101,12 @@ fn run_claude_code_status(args: &[String]) -> ExitCode {
         Ok(opts) => claude_code::execute_status(&opts),
         Err(e) if e == "help" => {
             claude_code::print_status_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             claude_code::print_status_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -115,13 +115,13 @@ fn run_claude_code_status(args: &[String]) -> ExitCode {
 fn run_codex(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_codex_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
         "--help" | "-h" => {
             print_codex_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         "install" => run_codex_install(&args[1..]),
         "remove" => run_codex_remove(&args[1..]),
@@ -130,7 +130,7 @@ fn run_codex(args: &[String]) -> ExitCode {
             eprintln!("error: unknown action: {}", other);
             eprintln!();
             print_codex_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -141,12 +141,12 @@ fn run_codex_install(args: &[String]) -> ExitCode {
         Ok(opts) => codex::execute_install(&opts),
         Err(e) if e == "help" => {
             codex::print_install_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             codex::print_install_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -157,12 +157,12 @@ fn run_codex_remove(args: &[String]) -> ExitCode {
         Ok(opts) => codex::execute_remove(&opts),
         Err(e) if e == "help" => {
             codex::print_remove_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             codex::print_remove_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -173,12 +173,12 @@ fn run_codex_status(args: &[String]) -> ExitCode {
         Ok(opts) => codex::execute_status(&opts),
         Err(e) if e == "help" => {
             codex::print_status_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
             codex::print_status_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

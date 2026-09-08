@@ -49,7 +49,7 @@ pub(super) enum SnapshotCheck {
 ///   to name). An honest omission, never a fabricated verdict.
 /// - `Some(SnapshotCheck::Verdict(_))` — the cwd resolved and `check` returned a verdict, derived from
 ///   the SAME [`check_exit_code`](crate::presentation::check::check_exit_code) mapping `rmap check`
-///   uses (0→PASS, 1→FAIL, 2/other→INCOMPLETE), so the two cannot disagree on one snapshot.
+///   uses (0→PASS, 1→FAIL, 2→INCOMPLETE), so the two cannot disagree on one snapshot.
 /// - `Some(SnapshotCheck::Unavailable(reason))` — the cwd resolved to a repo but the verdict READ
 ///   FAILED for a reason OTHER than not-indexed (daemon unreachable / malformed reply). review-1 #2:
 ///   this renders an explicit "unavailable (reason)" clause rather than being silently suppressed with
@@ -91,9 +91,17 @@ pub(super) fn cwd_check_verdict() -> Option<SnapshotVerdict> {
         }
     };
     let word = match crate::presentation::check::check_exit_code(&result) {
-        0 => "PASS",
-        1 => "FAIL",
-        _ => "INCOMPLETE",
+        Some(crate::daemon_command::EXIT_CHECK_PASS) => "PASS",
+        Some(crate::daemon_command::EXIT_CHECK_FAIL) => "FAIL",
+        Some(crate::daemon_command::EXIT_CHECK_INCOMPLETE) => "INCOMPLETE",
+        Some(_) | None => {
+            return Some(SnapshotVerdict {
+                repo,
+                check: SnapshotCheck::Unavailable(
+                    "check response missing a recognized verdict signal".to_string(),
+                ),
+            })
+        }
     };
     Some(SnapshotVerdict {
         repo,

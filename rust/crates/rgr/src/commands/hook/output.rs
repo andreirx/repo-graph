@@ -5,6 +5,7 @@
 //! - Human-readable: formatted text for terminal display (default)
 
 use serde::Serialize;
+use std::process::ExitCode;
 
 /// Output a hook result in the appropriate format.
 pub fn output_result<T: Serialize + HumanReadable>(result: &T, json: bool) {
@@ -75,11 +76,11 @@ pub enum HookStatus {
 }
 
 impl HookStatus {
-    pub fn exit_code(self) -> u8 {
+    pub fn exit_code(self) -> ExitCode {
         match self {
-            HookStatus::Ok => 0,
-            HookStatus::Warning => 1,
-            HookStatus::Error => 2,
+            HookStatus::Ok => ExitCode::from(crate::daemon_command::EXIT_HOOK_OK),
+            HookStatus::Warning => ExitCode::from(crate::daemon_command::EXIT_HOOK_WARNING),
+            HookStatus::Error => ExitCode::from(crate::daemon_command::EXIT_HOOK_ERROR),
         }
     }
 }

@@ -143,14 +143,14 @@ impl HumanReadable for HookResult<StatusOutput> {
 pub fn run_hook_status(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_status_usage();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     let json_output = args.iter().any(|a| a == "--json");
 
     let (result, status) = execute_status();
     output_result(&result, json_output);
-    ExitCode::from(status.exit_code())
+    status.exit_code()
 }
 
 fn execute_status() -> (HookResult<StatusOutput>, HookStatus) {

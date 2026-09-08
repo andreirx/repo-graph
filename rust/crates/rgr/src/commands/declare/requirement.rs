@@ -37,38 +37,38 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
         match args[i].as_str() {
             "--version" => match parse_flag_value("--version", &version, args, &mut i) {
                 Some(v) => version = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--obligation-id" => {
                 match parse_flag_value("--obligation-id", &obligation_id, args, &mut i) {
                     Some(v) => obligation_id = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--method" => match parse_flag_value("--method", &method, args, &mut i) {
                 Some(v) => method = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--obligation" => match parse_flag_value("--obligation", &obligation, args, &mut i) {
                 Some(v) => obligation = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--target" => match parse_flag_value("--target", &target, args, &mut i) {
                 Some(v) => target = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--threshold" => match parse_flag_value("--threshold", &threshold, args, &mut i) {
                 Some(v) => threshold = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--operator" => match parse_flag_value("--operator", &operator, args, &mut i) {
                 Some(v) => operator = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("{}", DECLARE_REQUIREMENT_USAGE);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -78,7 +78,7 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
     // Validate positional args: db_path, repo_uid, req_id.
     if positional.len() != 3 {
         eprintln!("{}", DECLARE_REQUIREMENT_USAGE);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Validate required flags.
@@ -86,35 +86,35 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
         Some(v) => v,
         None => {
             eprintln!("error: --version is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let version_num: i64 = match version_str.parse() {
         Ok(v) => v,
         Err(_) => {
             eprintln!("error: --version must be an integer, got: {}", version_str);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let obligation_id = match obligation_id {
         Some(v) => v,
         None => {
             eprintln!("error: --obligation-id is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let method = match method {
         Some(v) => v,
         None => {
             eprintln!("error: --method is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let obligation = match obligation {
         Some(v) => v,
         None => {
             eprintln!("error: --obligation is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -124,7 +124,7 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
             Ok(v) => Some(v),
             Err(_) => {
                 eprintln!("error: --threshold must be a number, got: {}", t);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         },
         None => None,
@@ -136,7 +136,7 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
                 "error: --operator must be one of {:?}, got: {}",
                 VALID_OPERATORS, op
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     }
 
@@ -148,7 +148,7 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -201,11 +201,11 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
                 "inserted": result.inserted,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

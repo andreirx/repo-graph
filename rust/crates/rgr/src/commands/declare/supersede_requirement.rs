@@ -37,33 +37,33 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
             "--obligation-id" => {
                 match parse_flag_value("--obligation-id", &obligation_id, args, &mut i) {
                     Some(v) => obligation_id = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--method" => match parse_flag_value("--method", &method, args, &mut i) {
                 Some(v) => method = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--obligation" => match parse_flag_value("--obligation", &obligation, args, &mut i) {
                 Some(v) => obligation = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--target" => match parse_flag_value("--target", &target, args, &mut i) {
                 Some(v) => target = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--threshold" => match parse_flag_value("--threshold", &threshold, args, &mut i) {
                 Some(v) => threshold = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--operator" => match parse_flag_value("--operator", &operator, args, &mut i) {
                 Some(v) => operator = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("{}", SUPERSEDE_REQUIREMENT_USAGE);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -72,7 +72,7 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
 
     if positional.len() != 2 {
         eprintln!("{}", SUPERSEDE_REQUIREMENT_USAGE);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Validate required flags.
@@ -80,21 +80,21 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
         Some(v) => v,
         None => {
             eprintln!("error: --obligation-id is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let method = match method {
         Some(v) => v,
         None => {
             eprintln!("error: --method is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let obligation = match obligation {
         Some(v) => v,
         None => {
             eprintln!("error: --obligation is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -104,7 +104,7 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
             Ok(v) => Some(v),
             Err(_) => {
                 eprintln!("error: --threshold must be a number, got: {}", t);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         },
         None => None,
@@ -115,7 +115,7 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
                 "error: --operator must be one of {:?}, got: {}",
                 VALID_OPERATORS, op
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     }
 
@@ -124,14 +124,14 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
 
     if old_uid.trim().is_empty() {
         eprintln!("error: old_declaration_uid must be non-empty");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let mut storage = match open_storage(db_path) {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -140,24 +140,24 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
         Ok(Some(row)) => row,
         Ok(None) => {
             eprintln!("error: declaration {} does not exist", old_uid);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
     if !old_row.is_active {
         eprintln!("error: declaration {} is already inactive", old_uid);
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
     if old_row.kind != "requirement" {
         eprintln!(
             "error: declaration {} is kind '{}', expected 'requirement'",
             old_uid, old_row.kind
         );
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
 
     // Parse old value_json to extract req_id and version.
@@ -165,21 +165,21 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: old requirement has malformed value_json: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
     let req_id = match old_value["req_id"].as_str() {
         Some(s) => s.to_string(),
         None => {
             eprintln!("error: old requirement missing req_id in value_json");
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
     let version = match old_value["version"].as_i64() {
         Some(v) => v,
         None => {
             eprintln!("error: old requirement missing version in value_json");
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -232,11 +232,11 @@ pub(super) fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
                 "superseded": true,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

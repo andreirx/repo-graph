@@ -57,7 +57,7 @@ use stop::run_hook_stop;
 pub fn run_hook(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_hook_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -69,12 +69,12 @@ pub fn run_hook(args: &[String]) -> ExitCode {
         "status" => run_hook_status(&args[1..]),
         "--help" | "-h" => {
             print_hook_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         other => {
             eprintln!("unknown hook subcommand: {}", other);
             print_hook_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

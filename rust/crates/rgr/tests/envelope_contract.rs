@@ -113,6 +113,7 @@ fn dead_envelope_contract() {
     let db_str = db_path.to_str().unwrap();
 
     let output = Command::new(binary_path())
+        .env("RMAP_STATE_ROOT", db_dir.path())
         .env("RMAP_SOCKET_PATH", isolated_socket_path(db_dir.path()))
         .args(["dead", db_str, "r1", "SYMBOL"])
         .output()
@@ -120,14 +121,15 @@ fn dead_envelope_contract() {
 
     assert_eq!(
         output.status.code(),
-        Some(2),
-        "dead command should exit 2 (disabled), got: {:?}",
+        Some(4),
+        "dead command should exit 4 (refused by policy), got: {:?}",
         output.status.code()
     );
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("rmap dead` is disabled"),
-        "stderr should explain disabled state"
+        stdout.contains("rmap dead` is disabled"),
+        "stdout should carry the disabled verdict"
     );
+    assert!(output.stderr.is_empty(), "a refusal is not an error");
 }

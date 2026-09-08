@@ -53,7 +53,7 @@ pub fn run_map(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             eprintln!("usage: rmap map [path] [--dry-run [--full | --limit <n>]] [--json]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -62,7 +62,7 @@ pub fn run_map(args: &[String]) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             print_daemon_error(&e, "map");
-            return ExitCode::from(e.exit_code());
+            return e.exit_code();
         }
     };
 
@@ -70,7 +70,7 @@ pub fn run_map(args: &[String]) -> ExitCode {
         Ok(f) => f,
         Err(e) => {
             eprintln!("error: failed to parse map facts from daemon: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -90,17 +90,17 @@ pub fn run_map(args: &[String]) -> ExitCode {
             crate::presentation::map::render_dry_run(&facts, &rendered, opts.dry_run_cap)
         );
         eprint!("{}", render_summary(&facts, &rendered));
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     match write_maps(&facts.repo_root, &rendered) {
         Ok(()) => {
             print!("{}", render_summary(&facts, &rendered));
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: failed to write MAP.md files: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -156,11 +156,11 @@ fn output_json(facts: &MapFacts, rendered: &[RenderedMapFile]) -> ExitCode {
     match serde_json::to_string_pretty(&env) {
         Ok(json) => {
             println!("{}", json);
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: failed to serialize result: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

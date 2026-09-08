@@ -30,42 +30,84 @@ use std::process::Command;
 
 #[test]
 fn dead_command_is_disabled() {
-    // The dead command should exit 2 regardless of arguments.
+    let isolation = tempfile::tempdir().unwrap();
+
+    // A deliberate policy refusal is a completed verdict, not a runtime error.
     let output = Command::new(binary_path())
+        .env("RMAP_STATE_ROOT", isolation.path())
+        .env("RMAP_SOCKET_PATH", isolation.path().join("daemon.sock"))
         .args(["dead", "/any.db", "any"])
         .output()
         .unwrap();
 
     assert_eq!(
         output.status.code(),
-        Some(2),
-        "dead command should exit 2 (disabled), got: {:?}",
+        Some(4),
+        "dead command should exit 4 (refused by policy), got: {:?}",
         output.status.code()
     );
 
-    // Stdout should be empty (no JSON output).
+    // The refusal is a verdict on stdout, not an error on stderr.
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        output.stdout.is_empty(),
-        "dead command should produce no stdout"
+        stdout.contains("`rmap dead` is disabled"),
+        "expected disabled verdict on stdout, got: {stdout}"
     );
+    assert!(
+        !stdout.contains("error:"),
+        "refusal verdict must not carry an error prefix: {stdout}"
+    );
+    assert!(
+        stdout.contains("false-positive"),
+        "expected false-positive explanation in stdout, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("\n  rmap callers  - trace who calls a symbol"),
+        "expected unchanged, indented alternatives in stdout, got: {stdout}"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "refusal verdict must not write stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
-    // Stderr should contain the disabled message.
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("`rmap dead` is disabled"),
-        "expected disabled message in stderr, got: {}",
-        stderr
-    );
-    assert!(
-        stderr.contains("false-positive"),
-        "expected false-positive explanation in stderr, got: {}",
-        stderr
-    );
-    assert!(
-        stderr.contains("callers"),
-        "expected alternative commands in stderr, got: {}",
-        stderr
-    );
+#[test]
+fn dead_json_reports_refusal_status_and_code() {
+    let isolation = tempfile::tempdir().unwrap();
+    let output = Command::new(binary_path())
+        .env("RMAP_STATE_ROOT", isolation.path())
+        .env("RMAP_SOCKET_PATH", isolation.path().join("daemon.sock"))
+        .args(["dead", "--json"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(4));
+    assert!(output.stderr.is_empty());
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["status"], "refused");
+    assert_eq!(payload["code"], 4);
+    assert!(payload["verdict"]
+        .as_str()
+        .unwrap()
+        .contains("signal quality produces high false-positive rates"));
+}
+
+#[test]
+fn dead_help_names_its_exit_codes() {
+    let isolation = tempfile::tempdir().unwrap();
+    let output = Command::new(binary_path())
+        .env("RMAP_STATE_ROOT", isolation.path())
+        .env("RMAP_SOCKET_PATH", isolation.path().join("daemon.sock"))
+        .arg("dead")
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("2  runtime error"));
+    assert!(stdout.contains("4  refused by policy"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════

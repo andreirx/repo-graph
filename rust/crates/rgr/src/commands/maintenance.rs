@@ -112,7 +112,7 @@ struct RetentionStats {
 pub fn run_maintenance(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -120,12 +120,12 @@ pub fn run_maintenance(args: &[String]) -> ExitCode {
         "gc" => run_gc(&args[1..]),
         "--help" | "-h" => {
             print_usage();
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         other => {
             eprintln!("unknown subcommand: {}", other);
             print_usage();
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -146,12 +146,12 @@ fn run_gc(args: &[String]) -> ExitCode {
             "--json" => json_output = true,
             "--help" | "-h" => {
                 print_gc_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             other => {
                 eprintln!("unknown option: {}", other);
                 print_gc_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -160,7 +160,7 @@ fn run_gc(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to connect to daemon: {}", e);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -177,14 +177,14 @@ fn run_gc(args: &[String]) -> ExitCode {
             }
             // Non-zero exit if a real removal failed (dry-run never fails).
             if result["ok"].as_bool().unwrap_or(true) {
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             } else {
-                ExitCode::from(1)
+                ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -293,12 +293,12 @@ fn run_prune(args: &[String]) -> ExitCode {
             }
             "--help" | "-h" => {
                 print_prune_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             other if other.starts_with('-') => {
                 eprintln!("unknown option: {}", other);
                 print_prune_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => {
                 // Ignore positional args for now (future: specific path)
@@ -311,7 +311,7 @@ fn run_prune(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to connect to daemon: {}", e);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -327,11 +327,11 @@ fn run_prune(args: &[String]) -> ExitCode {
             } else {
                 print_prune_human(&output);
             }
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

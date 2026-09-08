@@ -13,11 +13,9 @@
 //!
 //! # Exit Code Policy
 //!
-//! | Code | Meaning |
-//! |------|---------|
-//! | 0    | Success |
-//! | 1    | Usage error (bad args, unknown flag) |
-//! | 2    | Runtime error (daemon unavailable, repo not found, timeout) |
+//! `docs/contracts/exit-codes.md` is the normative outward contract. The
+//! constants below are its single code table: general command outcomes and
+//! meaning-specific aliases for verdict commands intentionally share values.
 //!
 //! # Design Constraints
 //!
@@ -50,6 +48,43 @@ pub const EXIT_RUNTIME_ERROR: u8 = 2;
 /// "still running in the background" apart from "the operation failed". No exit code >= 3 existed
 /// before this slice.
 pub const EXIT_STILL_RUNNING: u8 = 3;
+
+/// The command understood the request and deliberately declined under a stated policy.
+pub const EXIT_REFUSED_BY_POLICY: u8 = 4;
+
+// Verdict-command aliases. These preserve the existing command-specific meanings
+// of 0/1/2 without stamping a usage/runtime name onto an evaluated verdict.
+
+/// `check` completed with a passing verdict.
+pub const EXIT_CHECK_PASS: u8 = 0;
+/// `check` completed with a failing verdict.
+pub const EXIT_CHECK_FAIL: u8 = 1;
+/// `check` could not reach a complete verdict.
+pub const EXIT_CHECK_INCOMPLETE: u8 = 2;
+
+/// `gate` completed with a passing verdict, including an unarmed/vacuous pass.
+pub const EXIT_GATE_PASS: u8 = 0;
+/// `gate` completed with a failing verdict.
+pub const EXIT_GATE_FAIL: u8 = 1;
+/// `gate` could not reach a complete verdict.
+pub const EXIT_GATE_INCOMPLETE: u8 = 2;
+
+/// A host hook completed without a warning or fatal error.
+pub const EXIT_HOOK_OK: u8 = 0;
+/// A host hook completed with a non-fatal warning.
+pub const EXIT_HOOK_WARNING: u8 = 1;
+/// A host hook completed with a fatal error.
+pub const EXIT_HOOK_ERROR: u8 = 2;
+
+/// `doctor` found all required health checks healthy.
+pub const EXIT_HEALTHY: u8 = 0;
+/// `doctor` completed and found an unhealthy condition.
+pub const EXIT_UNHEALTHY: u8 = 1;
+
+/// `modules violations` completed and found no violations.
+pub const EXIT_NO_VIOLATIONS: u8 = 0;
+/// `modules violations` completed and found one or more violations.
+pub const EXIT_VIOLATIONS_FOUND: u8 = 1;
 
 // ── Repo resolution ──────────────────────────────────────────────────────────
 
@@ -136,8 +171,8 @@ impl DaemonError {
     }
 
     /// Get the exit code for this error.
-    pub fn exit_code(&self) -> u8 {
-        EXIT_RUNTIME_ERROR
+    pub fn exit_code(&self) -> ExitCode {
+        ExitCode::from(EXIT_RUNTIME_ERROR)
     }
 }
 
@@ -283,13 +318,13 @@ pub fn print_daemon_error(err: &DaemonError, command_name: &str) {
 ///
 /// # Returns
 ///
-/// * `ExitCode::SUCCESS` on success
+/// * `ExitCode::from(crate::daemon_command::EXIT_SUCCESS)` on success
 /// * `ExitCode::from(EXIT_RUNTIME_ERROR)` on serialization failure
 pub fn output_json(result: &serde_json::Value) -> ExitCode {
     match serde_json::to_string_pretty(result) {
         Ok(json) => {
             println!("{}", json);
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: failed to serialize result: {}", e);
@@ -312,7 +347,7 @@ pub fn output_json(result: &serde_json::Value) -> ExitCode {
 ///
 /// # Returns
 ///
-/// * `ExitCode::SUCCESS` on success
+/// * `ExitCode::from(crate::daemon_command::EXIT_SUCCESS)` on success
 /// * `ExitCode::from(EXIT_RUNTIME_ERROR)` on parse/serialize failure
 ///
 /// # Design Note
@@ -331,7 +366,7 @@ where
         match serde_json::from_value::<T>(result) {
             Ok(response) => {
                 print!("{}", render(response));
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to parse response: {}", e);
@@ -361,7 +396,7 @@ pub fn output_result_with_exit_code<T, F, E>(
 where
     T: serde::de::DeserializeOwned,
     F: FnOnce(&T) -> String,
-    E: FnOnce(&serde_json::Value) -> u8,
+    E: FnOnce(&serde_json::Value) -> ExitCode,
 {
     let exit_code = extract_exit_code(&result);
 
@@ -369,7 +404,7 @@ where
         match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::from(exit_code)
+                exit_code
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
@@ -380,7 +415,7 @@ where
         match serde_json::from_value::<T>(result) {
             Ok(response) => {
                 print!("{}", render(&response));
-                ExitCode::from(exit_code)
+                exit_code
             }
             Err(e) => {
                 eprintln!("error: failed to parse response: {}", e);
@@ -430,7 +465,7 @@ where
         Ok(result) => output_result(result, json_mode, render),
         Err(err) => {
             print_daemon_error(&err, command_name);
-            ExitCode::from(err.exit_code())
+            err.exit_code()
         }
     }
 }
@@ -576,7 +611,12 @@ mod tests {
         ];
 
         for err in errors {
-            assert_eq!(err.exit_code(), EXIT_RUNTIME_ERROR, "error: {:?}", err);
+            assert_eq!(
+                err.exit_code(),
+                ExitCode::from(EXIT_RUNTIME_ERROR),
+                "error: {:?}",
+                err
+            );
         }
     }
 

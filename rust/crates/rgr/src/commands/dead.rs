@@ -45,9 +45,18 @@ struct DeadNodeOutput {
     trust: repo_graph_trust::DeadResultTrust,
 }
 
-pub fn run_dead(_args: &[String]) -> ExitCode {
+pub fn run_dead(args: &[String]) -> ExitCode {
     // ══════════════════════════════════════════════════════════════════
-    // DELIBERATELY DISABLED — 2026-04-27 (disable decision + exit code 2 FROZEN).
+
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        print_dead_help();
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
+    }
+    // DELIBERATELY DISABLED — 2026-04-27. EXIT-CODES-1 superseded only the
+    // original exit-2 transport: the unchanged policy refusal now exits 4.
     //
     // The `dead` command refuses because current signal quality produces
     // 85-95% false-positive rates on real codebases; a misleading "dead"
@@ -67,35 +76,72 @@ pub fn run_dead(_args: &[String]) -> ExitCode {
     // stronger evidence-backed `dead` is future work (see docs/TECH-DEBT.md).
     // ══════════════════════════════════════════════════════════════════
 
-    eprintln!("error: `rmap dead` is disabled");
-    eprintln!();
-    eprintln!("Dead-code detection is not available in rmap because current");
-    eprintln!("signal quality produces high false-positive rates (85-95% on");
-    eprintln!("real codebases). Using this output would mislead agents into");
-    eprintln!("investigating or deleting live code.");
-    eprintln!();
-
     // Derive the "Root causes" from the reader's snapshot; fall back to a
     // labelled generic list (with the reason) when it cannot be derived.
-    match fetch_dead_causes() {
-        Ok(facts) => eprint!("{}", dead_render::render_derived(&facts)),
-        Err(reason) => eprint!("{}", dead_render::render_generic(&reason)),
+    let causes = match fetch_dead_causes() {
+        Ok(facts) => dead_render::render_derived(&facts),
+        Err(reason) => dead_render::render_generic(&reason),
+    };
+    let verdict = render_refusal(&causes);
+
+    if args.iter().any(|arg| arg == "--json") {
+        let payload = serde_json::json!({
+            "status": "refused",
+            "code": crate::daemon_command::EXIT_REFUSED_BY_POLICY,
+            "verdict": verdict,
+        });
+        match serde_json::to_string_pretty(&payload) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("error: failed to serialize refusal verdict: {error}");
+                return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+            }
+        }
+    } else {
+        print!("{verdict}");
     }
 
-    eprintln!();
-    eprintln!("Alternative discovery commands that work:");
-    eprintln!("  rmap callers  - trace who calls a symbol");
-    eprintln!("  rmap callees  - trace what a symbol calls");
-    eprintln!("  rmap imports  - trace file imports");
-    eprintln!("  rmap orient   - repo overview with trust signals");
-    eprintln!("  rmap trust    - detailed reliability report");
-    eprintln!();
-    eprintln!("Dead-code surface will be reintroduced when framework-liveness,");
-    eprintln!("entrypoint, and coverage evidence are wired into deadness scoring");
-    eprintln!("(such evidence may already exist in the snapshot but is not yet");
-    eprintln!("consumed by any deadness verdict).");
+    ExitCode::from(crate::daemon_command::EXIT_REFUSED_BY_POLICY)
+}
 
-    ExitCode::from(2)
+fn print_dead_help() {
+    println!("usage: rmap dead [--json]");
+    println!();
+    println!("This command is disabled by policy because its current signal is unsafe.");
+    println!("Running it returns the refusal verdict on stdout.");
+    println!();
+    println!("Exit codes:");
+    println!("  0  help displayed");
+    println!("  2  runtime error while producing the verdict");
+    println!("  4  refused by policy");
+    println!("See docs/contracts/exit-codes.md for the complete contract.");
+}
+
+/// Compose the one refusal verdict for both human stdout and the JSON `verdict` field.
+/// Keeping one byte source prevents the machine surface from dropping the quantified
+/// reason, alternatives, or re-enable condition carried by the human verdict.
+fn render_refusal(causes: &str) -> String {
+    format!(
+        concat!(
+            "`rmap dead` is disabled\n\n",
+            "Dead-code detection is not available in rmap because current\n",
+            "signal quality produces high false-positive rates (85-95% on\n",
+            "real codebases). Using this output would mislead agents into\n",
+            "investigating or deleting live code.\n\n",
+            "{causes}\n",
+            "Alternative discovery commands that work:\n",
+            "  rmap callers  - trace who calls a symbol\n",
+            "  rmap callees  - trace what a symbol calls\n",
+            "  rmap imports  - trace file imports\n",
+            "  rmap orient   - repo overview with trust signals\n",
+            "  rmap trust    - detailed reliability report\n\n",
+            "Dead-code surface will be reintroduced when framework-liveness,\n",
+            "entrypoint, and coverage evidence are wired into deadness scoring\n",
+            "(such evidence may already exist in the snapshot but is not yet\n",
+            "consumed by any deadness verdict).\n",
+        ),
+        causes = causes,
+    )
 }
 
 /// Resolve the cwd's repo and ask the daemon for the derived cause facts.

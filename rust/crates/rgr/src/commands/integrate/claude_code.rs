@@ -121,7 +121,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
 
     let Some(config_path) = config_path else {
         eprintln!("error: could not determine Claude Code config path");
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     };
 
     if opts.dry_run {
@@ -134,7 +134,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("error: failed to read {}: {}", config_path.display(), e);
-                return ExitCode::from(2);
+                return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
             }
         }
     } else {
@@ -146,7 +146,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -159,7 +159,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
                 backup_file.display(),
                 e
             );
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
         println!("  Backup: {}", backup_file.display());
         Some(backup_file)
@@ -176,7 +176,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
                     parent.display(),
                     e
                 );
-                return ExitCode::from(2);
+                return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
             }
         }
     }
@@ -186,14 +186,14 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to generate config: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
     // Write the new config
     if let Err(e) = std::fs::write(&config_path, &new_content) {
         eprintln!("error: failed to write {}: {}", config_path.display(), e);
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
 
     // Record in manifest
@@ -229,7 +229,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
         println!("  Note: existing repo-graph hooks were updated");
     }
 
-    ExitCode::SUCCESS
+    ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
 }
 
 /// Execute install in dry-run mode.
@@ -244,7 +244,7 @@ fn execute_install_dry_run(config_path: &Path, scope: &str, opts: &InstallOption
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -275,7 +275,7 @@ fn execute_install_dry_run(config_path: &Path, scope: &str, opts: &InstallOption
     println!();
     println!("No changes made (dry run).");
 
-    ExitCode::SUCCESS
+    ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
 }
 
 /// Execute the remove command.
@@ -284,13 +284,13 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
 
     let Some(config_path) = config_path else {
         eprintln!("error: could not determine Claude Code config path");
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     };
 
     if !config_path.exists() {
         println!("Claude Code config not found: {}", config_path.display());
         println!("No repo-graph hooks to remove.");
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     // Read existing content
@@ -298,7 +298,7 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to read {}: {}", config_path.display(), e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -307,13 +307,13 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     if !plan.existing_hooks_found {
         println!("No repo-graph hooks found in {}", config_path.display());
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     // Apply the removal
@@ -321,14 +321,14 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to generate config: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
     // Write the new config
     if let Err(e) = std::fs::write(&config_path, &new_content) {
         eprintln!("error: failed to write {}: {}", config_path.display(), e);
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     }
 
     // Remove from manifest
@@ -347,7 +347,7 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
             .count()
     );
 
-    ExitCode::SUCCESS
+    ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
 }
 
 /// Execute the status command.
@@ -370,7 +370,7 @@ pub fn execute_status(opts: &StatusOptions) -> ExitCode {
         } else {
             eprintln!("error: could not determine Claude Code config path");
         }
-        return ExitCode::from(2);
+        return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
     };
 
     let existing_content = if config_path.exists() {
@@ -391,7 +391,7 @@ pub fn execute_status(opts: &StatusOptions) -> ExitCode {
         print_status_human(&config_path, scope, &analysis, manifest_record.as_ref());
     }
 
-    ExitCode::SUCCESS
+    ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
 }
 
 /// Build JSON status output.

@@ -122,7 +122,7 @@ pub fn run_hook_session_start(args: &[String]) -> ExitCode {
     // Check for help
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_session_start_usage();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     // Parse context
@@ -131,7 +131,7 @@ pub fn run_hook_session_start(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("error: {}", e);
             print_session_start_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -141,7 +141,7 @@ pub fn run_hook_session_start(args: &[String]) -> ExitCode {
     // Output result
     output_result(&result, ctx.json_output);
 
-    ExitCode::from(status.exit_code())
+    status.exit_code()
 }
 
 fn execute_session_start(ctx: &HookContext) -> (HookResult<SessionStartOutput>, HookStatus) {

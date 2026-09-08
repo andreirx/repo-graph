@@ -160,7 +160,13 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
     match client.request("modules_violations", Some(params)) {
         Ok(result) => {
             // Extract violation count for exit code
-            let violation_count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let violation_count = match result.get("count").and_then(|v| v.as_u64()) {
+                Some(count) => count,
+                None => {
+                    eprintln!("error: modules violations response is missing numeric count");
+                    return ExitCode::from(EXIT_RUNTIME_ERROR);
+                }
+            };
 
             if json_mode {
                 // Machine mode: print full envelope
@@ -169,9 +175,9 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
                         println!("{}", json);
                         // Exit code: 0 if no violations, 1 if violations
                         if violation_count > 0 {
-                            ExitCode::from(1)
+                            ExitCode::from(crate::daemon_command::EXIT_VIOLATIONS_FOUND)
                         } else {
-                            ExitCode::SUCCESS
+                            ExitCode::from(crate::daemon_command::EXIT_NO_VIOLATIONS)
                         }
                     }
                     Err(e) => {
@@ -187,9 +193,9 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
                         print!("{}", response.render_human());
                         // Exit code: 0 if no violations, 1 if violations
                         if violation_count > 0 {
-                            ExitCode::from(1)
+                            ExitCode::from(crate::daemon_command::EXIT_VIOLATIONS_FOUND)
                         } else {
-                            ExitCode::SUCCESS
+                            ExitCode::from(crate::daemon_command::EXIT_NO_VIOLATIONS)
                         }
                     }
                     Err(e) => {

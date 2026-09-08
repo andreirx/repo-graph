@@ -68,18 +68,18 @@ pub fn run_find(args: &[String]) -> ExitCode {
             "-F" | "--fixed" => fixed = true,
             "--help" | "-h" => {
                 print_find_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unknown flag: {}", flag);
                 print_find_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => {
                 if query.is_some() {
                     eprintln!("error: unexpected argument: {}", arg);
                     print_find_usage();
-                    return ExitCode::from(1);
+                    return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                 }
                 query = Some(arg.clone());
             }
@@ -92,7 +92,7 @@ pub fn run_find(args: &[String]) -> ExitCode {
         None => {
             eprintln!("error: missing query argument");
             print_find_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -102,12 +102,12 @@ pub fn run_find(args: &[String]) -> ExitCode {
     if fixed && !text {
         eprintln!("error: -F/--fixed only applies with --text");
         print_find_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
     if text && exact {
         eprintln!("error: --exact (facts-only) and --text (live scan) are mutually exclusive");
         print_find_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Resolve repo from cwd (same convention as orient/explain).
@@ -115,14 +115,14 @@ pub fn run_find(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
     let repo_path = match cwd.canonicalize() {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -130,7 +130,7 @@ pub fn run_find(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -149,11 +149,11 @@ pub fn run_find(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else if text {
@@ -162,10 +162,10 @@ pub fn run_find(args: &[String]) -> ExitCode {
                 // report): a valid response is SUCCESS whether or not it matched — `find`
                 // is a discovery verb, not a match/no-match gate.
                 print!("{}", text_render::render_text_scan(&result));
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             } else {
                 print!("{}", render_find_human(&result, exact));
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
@@ -175,11 +175,11 @@ pub fn run_find(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

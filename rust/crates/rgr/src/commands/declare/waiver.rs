@@ -39,43 +39,43 @@ pub(super) fn run_declare_waiver(args: &[String]) -> ExitCode {
                 match parse_flag_value("--requirement-version", &requirement_version, args, &mut i)
                 {
                     Some(v) => requirement_version = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--obligation-id" => {
                 match parse_flag_value("--obligation-id", &obligation_id, args, &mut i) {
                     Some(v) => obligation_id = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--reason" => match parse_flag_value("--reason", &reason, args, &mut i) {
                 Some(v) => reason = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--expires-at" => match parse_flag_value("--expires-at", &expires_at, args, &mut i) {
                 Some(v) => expires_at = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--created-by" => match parse_flag_value("--created-by", &created_by, args, &mut i) {
                 Some(v) => created_by = Some(v),
-                None => return ExitCode::from(1),
+                None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
             },
             "--rationale-category" => {
                 match parse_flag_value("--rationale-category", &rationale_category, args, &mut i) {
                     Some(v) => rationale_category = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             "--policy-basis" => {
                 match parse_flag_value("--policy-basis", &policy_basis, args, &mut i) {
                     Some(v) => policy_basis = Some(v),
-                    None => return ExitCode::from(1),
+                    None => return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR),
                 }
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
                 eprintln!("{}", DECLARE_WAIVER_USAGE);
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
         }
@@ -84,7 +84,7 @@ pub(super) fn run_declare_waiver(args: &[String]) -> ExitCode {
 
     if positional.len() != 3 {
         eprintln!("{}", DECLARE_WAIVER_USAGE);
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Validate required flags.
@@ -92,7 +92,7 @@ pub(super) fn run_declare_waiver(args: &[String]) -> ExitCode {
         Some(v) => v,
         None => {
             eprintln!("error: --requirement-version is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let version_num: i64 = match version_str.parse() {
@@ -102,21 +102,21 @@ pub(super) fn run_declare_waiver(args: &[String]) -> ExitCode {
                 "error: --requirement-version must be an integer, got: {}",
                 version_str
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let obligation_id = match obligation_id {
         Some(v) => v,
         None => {
             eprintln!("error: --obligation-id is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
     let reason = match reason {
         Some(v) => v,
         None => {
             eprintln!("error: --reason is required");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -128,7 +128,7 @@ pub(super) fn run_declare_waiver(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -181,11 +181,11 @@ pub(super) fn run_declare_waiver(args: &[String]) -> ExitCode {
                 "inserted": result.inserted,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

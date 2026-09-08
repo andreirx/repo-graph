@@ -112,7 +112,7 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("{}", msg);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -123,7 +123,7 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -136,11 +136,11 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
                 "error: {}",
                 no_ready_snapshot_hint(&storage, db_path, repo_uid)
             );
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -151,7 +151,7 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
         Ok(m) => m,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -196,7 +196,7 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -219,11 +219,11 @@ pub fn run_metrics(args: &[String]) -> ExitCode {
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {
             println!("{}", json);
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

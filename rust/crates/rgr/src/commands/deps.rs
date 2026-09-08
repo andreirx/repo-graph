@@ -38,7 +38,7 @@ pub fn run_deps(args: &[String]) -> ExitCode {
         eprintln!("  rmap deps drift [--ecosystem npm|cargo]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[0].as_str() {
@@ -48,7 +48,7 @@ pub fn run_deps(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown deps subcommand: {}", other);
             eprintln!("subcommands: list, why, drift");
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }
@@ -64,7 +64,7 @@ fn run_deps_list(args: &[String]) -> ExitCode {
             eprintln!(
                 "usage: rmap deps list [module] [--ecosystem npm|cargo|python|java] [--json]"
             );
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -73,7 +73,7 @@ fn run_deps_list(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -81,7 +81,7 @@ fn run_deps_list(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -90,7 +90,7 @@ fn run_deps_list(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -112,7 +112,7 @@ fn run_deps_list(args: &[String]) -> ExitCode {
                     if let Some(serde_json::Value::String(filter)) = result.get("module_filter") {
                         eprintln!("error: no dependencies found for module '{}'", filter);
                         eprintln!("hint: use canonical path (e.g., 'packages/app') or check rmap modules list");
-                        return ExitCode::from(1);
+                        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
                     }
                 }
             }
@@ -122,11 +122,11 @@ fn run_deps_list(args: &[String]) -> ExitCode {
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to serialize result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             } else {
@@ -135,18 +135,18 @@ fn run_deps_list(args: &[String]) -> ExitCode {
                 ) {
                     Ok(parsed) => {
                         print!("{}", parsed.render_human());
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
                         eprintln!("error: failed to render result: {}", e);
-                        ExitCode::from(2)
+                        ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                     }
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -160,7 +160,7 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             eprintln!("usage: rmap deps why <package> [--ecosystem npm|cargo]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -168,7 +168,7 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         Some(p) => p,
         None => {
             eprintln!("usage: rmap deps why <package> [--ecosystem npm|cargo]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -177,7 +177,7 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -185,7 +185,7 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -194,7 +194,7 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -211,11 +211,11 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
-                ExitCode::SUCCESS
+                ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
             }
             Err(e) => {
                 eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
+                ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
         Err(e) => {
@@ -224,10 +224,10 @@ fn run_deps_why(args: &[String]) -> ExitCode {
             if err_str.contains("not found") {
                 eprintln!("error: {}", err_str);
                 eprintln!("hint: check package name or try rmap deps list to see all packages");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -241,7 +241,7 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
         Err(msg) => {
             eprintln!("error: {}", msg);
             eprintln!("usage: rmap deps drift [--ecosystem npm|cargo]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -250,7 +250,7 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot determine current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -258,7 +258,7 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -267,7 +267,7 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -286,20 +286,20 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
                     println!("{}", json);
                     // Exit with 1 if there are drift anomalies (matches gate behavior)
                     if drift_count > 0 {
-                        ExitCode::from(1)
+                        ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
                     } else {
-                        ExitCode::SUCCESS
+                        ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                 }
                 Err(e) => {
                     eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
+                    ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
                 }
             }
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

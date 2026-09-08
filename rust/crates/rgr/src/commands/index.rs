@@ -181,14 +181,14 @@ pub fn run_index(args: &[String]) -> ExitCode {
         if args[i] == "--include-root" {
             if i + 1 >= args.len() {
                 eprintln!("error: --include-root requires a path argument");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             include_roots.push(args[i + 1].clone());
             i += 2;
         } else if args[i] == "--alias" {
             if i + 1 >= args.len() {
                 eprintln!("error: --alias requires a name argument");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             alias = Some(args[i + 1].clone());
             i += 2;
@@ -197,14 +197,14 @@ pub fn run_index(args: &[String]) -> ExitCode {
             i += 1;
         } else if args[i].starts_with("--") {
             eprintln!("error: unknown option: {}", args[i]);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         } else if repo_path_arg.is_none() {
             repo_path_arg = Some(args[i].clone());
             i += 1;
         } else {
             eprintln!("error: unexpected argument: {}", args[i]);
             eprintln!("usage: rmap index [repo_path] [--alias <name>] [--include-root <path>]... [--progress]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     }
 
@@ -217,7 +217,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
             "error: repo path does not exist or is not a directory: {}",
             repo_path.display()
         );
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     // Canonicalize repo path for daemon
@@ -225,7 +225,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: failed to canonicalize repo path: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -247,7 +247,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -309,7 +309,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
                 print_mapping_summary_from_daemon(mappings);
             }
 
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         // DAEMON-VISIBILITY-1 (contract C): a read timeout on a long index is NOT a failure. Probe
         // the daemon; if the index is still running, say so truthfully with a DISTINCT exit status.
@@ -318,11 +318,11 @@ pub fn run_index(args: &[String]) -> ExitCode {
         }
         Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }
@@ -391,7 +391,7 @@ pub(crate) fn report_long_op_timeout(
             );
         }
     }
-    ExitCode::from(status.exit_code())
+    status.exit_code()
 }
 
 /// The three honest outcomes of a long-op read timeout (contract C). Only [`Unreachable`] is a
@@ -407,13 +407,13 @@ enum LongOpStatus {
 }
 
 impl LongOpStatus {
-    fn exit_code(self) -> u8 {
+    fn exit_code(self) -> ExitCode {
         match self {
             // Both "still running" and "just completed" are NON-failures (the op was not lost).
             LongOpStatus::StillRunning | LongOpStatus::ReachableNoOp => {
-                crate::daemon_command::EXIT_STILL_RUNNING
+                ExitCode::from(crate::daemon_command::EXIT_STILL_RUNNING)
             }
-            LongOpStatus::Unreachable => crate::daemon_command::EXIT_RUNTIME_ERROR,
+            LongOpStatus::Unreachable => ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR),
         }
     }
 }
@@ -1011,7 +1011,7 @@ mod tests {
         });
         let status = classify_long_op_timeout(Some(&with_op), repo);
         assert_eq!(status, LongOpStatus::StillRunning);
-        assert_eq!(status.exit_code(), EXIT_STILL_RUNNING);
+        assert_eq!(status.exit_code(), ExitCode::from(EXIT_STILL_RUNNING));
 
         // Reachable, but the op is for a DIFFERENT repo → not this repo's op (just-completed case).
         let other = serde_json::json!({
@@ -1023,14 +1023,14 @@ mod tests {
         );
         assert_eq!(
             classify_long_op_timeout(Some(&other), repo).exit_code(),
-            EXIT_STILL_RUNNING,
+            ExitCode::from(EXIT_STILL_RUNNING),
             "just-completed is still NOT a failure"
         );
 
         // Daemon unreachable after the timeout → genuine failure.
         let unreachable = classify_long_op_timeout(None, repo);
         assert_eq!(unreachable, LongOpStatus::Unreachable);
-        assert_eq!(unreachable.exit_code(), EXIT_RUNTIME_ERROR);
+        assert_eq!(unreachable.exit_code(), ExitCode::from(EXIT_RUNTIME_ERROR));
 
         // The "still running" status is DISTINCT from the failure status.
         assert_ne!(EXIT_STILL_RUNNING, EXIT_RUNTIME_ERROR);
@@ -1363,7 +1363,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         if args[i] == "--include-root" {
             if i + 1 >= args.len() {
                 eprintln!("error: --include-root requires a path argument");
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             include_roots.push(args[i + 1].clone());
             i += 2;
@@ -1372,11 +1372,11 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             i += 1;
         } else if args[i].starts_with("--") {
             eprintln!("error: unknown option: {}", args[i]);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         } else {
             eprintln!("error: unexpected argument: {}", args[i]);
             eprintln!("usage: rmap refresh [--include-root <path>]... [--progress]");
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     }
 
@@ -1385,7 +1385,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: cannot get current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -1393,7 +1393,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
             eprintln!("error: cannot canonicalize current directory: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -1411,7 +1411,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -1475,7 +1475,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
                 print_mapping_summary_from_daemon(mappings);
             }
 
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         // DAEMON-VISIBILITY-1 (contract C): a read timeout on a long refresh is NOT a failure.
         Err(DaemonClientError::Timeout { timeout_secs }) => {
@@ -1488,11 +1488,11 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             } else {
                 eprintln!("error: daemon returned {}: {}", code, message);
             }
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

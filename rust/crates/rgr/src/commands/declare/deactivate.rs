@@ -19,7 +19,7 @@ use crate::cli::open_storage;
 pub(super) fn run_declare_deactivate(args: &[String]) -> ExitCode {
     if args.len() != 2 {
         eprintln!("usage: rmap declare deactivate <db_path> <declaration_uid>");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let db_path = Path::new(&args[0]);
@@ -27,14 +27,14 @@ pub(super) fn run_declare_deactivate(args: &[String]) -> ExitCode {
 
     if declaration_uid.trim().is_empty() {
         eprintln!("error: declaration_uid must be non-empty");
-        return ExitCode::from(1);
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
     let storage = match open_storage(db_path) {
         Ok(s) => s,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+            return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
         }
     };
 
@@ -45,11 +45,11 @@ pub(super) fn run_declare_deactivate(args: &[String]) -> ExitCode {
                 "deactivated": rows > 0,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
-            ExitCode::from(0)
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(2)
+            ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
         }
     }
 }

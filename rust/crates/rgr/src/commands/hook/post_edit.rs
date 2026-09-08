@@ -83,7 +83,7 @@ impl HumanReadable for HookResult<PostEditOutput> {
 pub fn run_hook_post_edit(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_post_edit_usage();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
     }
 
     let ctx = match HookContext::from_args(args) {
@@ -91,13 +91,13 @@ pub fn run_hook_post_edit(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("error: {}", e);
             print_post_edit_usage();
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     let (result, status) = execute_post_edit(&ctx);
     output_result(&result, ctx.json_output);
-    ExitCode::from(status.exit_code())
+    status.exit_code()
 }
 
 fn execute_post_edit(ctx: &HookContext) -> (HookResult<PostEditOutput>, HookStatus) {

@@ -66,17 +66,17 @@ fn main() -> ExitCode {
 
     if args.len() < 2 {
         print_usage();
-        return ExitCode::from(1);
+        return ExitCode::from(repo_graph_rgr::daemon_command::EXIT_USAGE_ERROR);
     }
 
     match args[1].as_str() {
         "--version" | "-V" => {
             println!("rmap {}", VERSION);
-            return ExitCode::SUCCESS;
+            return ExitCode::from(repo_graph_rgr::daemon_command::EXIT_SUCCESS);
         }
         "--help" | "-h" => {
             print_usage();
-            return ExitCode::SUCCESS;
+            return ExitCode::from(repo_graph_rgr::daemon_command::EXIT_SUCCESS);
         }
         _ => {}
     }
@@ -132,17 +132,17 @@ fn main() -> ExitCode {
             eprintln!("         The rmapd binary is the dedicated daemon executable.");
             eprintln!();
             match repo_graph_daemon_runtime::run_daemon() {
-                Ok(()) => ExitCode::SUCCESS,
+                Ok(()) => ExitCode::from(repo_graph_rgr::daemon_command::EXIT_SUCCESS),
                 Err(e) => {
                     eprintln!("daemon error: {}", e);
-                    ExitCode::from(2)
+                    ExitCode::from(repo_graph_rgr::daemon_command::EXIT_RUNTIME_ERROR)
                 }
             }
         }
         other => {
             eprintln!("unknown command: {}", other);
             print_usage();
-            ExitCode::from(1)
+            ExitCode::from(repo_graph_rgr::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

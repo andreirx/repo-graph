@@ -118,12 +118,12 @@ pub fn run_perf(args: &[String]) -> ExitCode {
             }
             "--help" | "-h" => {
                 print_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             other if other.starts_with('-') => {
                 eprintln!("unknown option: {}", other);
                 print_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => {
                 // Ignore positional args for now
@@ -136,7 +136,7 @@ pub fn run_perf(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to connect to daemon: {}", e);
-            return ExitCode::from(1);
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
@@ -150,11 +150,11 @@ pub fn run_perf(args: &[String]) -> ExitCode {
                     serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
                 );
             }
-            ExitCode::SUCCESS
+            ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            ExitCode::from(1)
+            ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR)
         }
     }
 }

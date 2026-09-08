@@ -51,6 +51,13 @@ Repo-graph is not a documentation authoring system. It is the deterministic disc
 
 The Rust CLI (`rmap`) is the primary binary.
 
+Process status is part of the agent protocol: 0 is success (including empty or
+vacuous results), 1 is usage error, 2 is runtime error, 3 means an asynchronous
+operation is still running, and 4 is a deliberate policy refusal. Verdict
+commands retain their documented command-specific meanings for 1 and 2; the
+normative table and exceptions are in
+[`docs/contracts/exit-codes.md`](docs/contracts/exit-codes.md).
+
 ### CLI contract
 
 The daemon owns repo state. Normal usage requires no paths or identifiers:

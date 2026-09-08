@@ -109,12 +109,12 @@ pub fn run_doctor(args: &[String]) -> ExitCode {
             }
             "--help" | "-h" => {
                 print_usage();
-                return ExitCode::SUCCESS;
+                return ExitCode::from(crate::daemon_command::EXIT_SUCCESS);
             }
             other => {
                 eprintln!("unknown option: {}", other);
                 print_usage();
-                return ExitCode::from(1);
+                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
         }
     }
@@ -131,9 +131,9 @@ pub fn run_doctor(args: &[String]) -> ExitCode {
     }
 
     if healthy {
-        ExitCode::SUCCESS
+        ExitCode::from(crate::daemon_command::EXIT_HEALTHY)
     } else {
-        ExitCode::from(1)
+        ExitCode::from(crate::daemon_command::EXIT_UNHEALTHY)
     }
 }
 
