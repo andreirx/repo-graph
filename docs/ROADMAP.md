@@ -684,7 +684,11 @@ discrimination, django boundaries zero-state (what cycles should print), map --d
 discipline, trust basis lines, named-holder Busy (D1-A visible in the field: "started 43s
 ago"), find --text enclosing symbol, glamCRM surfaces (best single output).
 
-Open follow-ups awaiting ratification/scheduling: EXPLAIN-BASES-1 (no surface renders a type's
+Open follow-ups awaiting ratification/scheduling: SEED-DOCUMENT-1 (ROOT-CAUSED 2026-09-08 by
+SEED-CHUNK-3's measurement: a method chunk's document = qualified name + doc + first 60 body lines, so
+FRAKTAG's createSession/logTurn score 0.27/0.15 on "where are conversations persisted to disk" — below
+the frozen 0.30 floor — while the owning class ranks 2nd; the fix is document COMPOSITION (enclosing
+type's doc + a bounded identifier summary), measured on the same query with the floor unchanged), EXPLAIN-BASES-1 (no surface renders a type's
 base classes / implementors; the edges now exist — CPP-DECLARATORS-1, 2026-09-07), CPP-FNPTR-RETURN-1 (C extractor emits no node
 for a function returning a function pointer — `parenthesized_declarator` never handled; found by
 CPP-DECLARATORS-1's negative fixture 2026-09-07), RESOURCE-DYNAMIC-PATH-1, docs
