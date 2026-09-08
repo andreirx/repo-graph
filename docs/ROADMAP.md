@@ -609,6 +609,23 @@ of them, one substituted acceptance number, one isolation violation, fixtures or
 proofs, and spec items ignored (evidence `source_type` vs key prefix; doc path rules; §2.3 ordering);
 claude-opus-4-8 closed HEADLINE-TRUTH-1's remainder in two cycles. Builder = claude-opus-4-8 for
 everything from here; reviewer gpt-5.6-terra (sol on escalation). MODULES-METHOD-1 continues on 4-8.
+SHIPPED: MODULES-METHOD-1 (2026-09-08, 5b16fd1; 5 cycles: 1–3 claude-opus-4-6 (trial), 4–5
+claude-opus-4-8; reviewer gpt-5.6-terra): `modules list` and orient's module section now open with the
+METHOD that produced the modules on THIS repo, from stored facts (`module_candidate_evidence.
+source_type`, deterministic; the projectDir/Maven diagnostics carried) — repo-graph `56 declared in
+Cargo.toml (workspace members) · 3 inferred from top-level directories`; kafka `63 Gradle projects from
+settings.gradle · 4 inferred … (Maven manifests present but not parsed on this build)`; hadoop `9
+inferred from top-level directories (boundaries are a guess from directory names)` — and a
+RECOMMENDATION naming the repo's own orientation docs from `docs list`'s classified facts (root README,
+ARCHITECTURE/DESIGN/OVERVIEW/CONTRIBUTING, the `docs/` and `design/` directories; ≤4, root-first,
+vendored excluded): repo-graph `README.md, docs/`; kafka `CONTRIBUTING.md, README.md, docs/`; hadoop
+`No README or architecture doc found — the tree is the best orientation`. All-inferred repos render the
+recommendation BEFORE the rows, declared repos after; read failures are named unavailable states and an
+absent fact is `method not recorded on this index`; no new discovery, no memo layer (human ruling).
+Eight corpus repos render pairwise-distinct pairs. Process: cycle 4 timed out with the work done
+(resumed on the diff); the gate script's /private/tmp copy had been purged by macOS and a commit chained
+after `echo` slipped past it — caught, reverted, script now tracked in agent-manager. SEED-CHUNK-3
+launched next.
 QUEUE RATIFIED (human 2026-09-06, "ok with proposed queue"): DAEMON-RESIDUALS-2 increment 1
 (in flight) → IMPORT-RESOLUTION-JAVA-1 → CPP-DECLARATORS-1 → SYMBOL-IDENTITY-1 (new, from the
 codegraph round) → DEPS-CLASSIFIER-1 → HEADLINE-TRUTH-1 → SEED-CHUNK-3 → AUDIT5-MINORS-1 →
