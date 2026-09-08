@@ -54,6 +54,25 @@ Design gap since SEED-CHUNK-1's per-symbol chunks; not a regression.
    byte-stable; ≥ 3 further concept queries across FRAKTAG / repo-graph / leveldb before/after
    with the verdict per query (helped / neutral / hurt) — a tier that hurts any of them STOPS.
 
+6. **Acceptance restated after measurement (operator ruling `SC3-FIELD-DOD` = C, 2026-09-08).** The
+   field tier was built and MEASURED: FRAKTAG's persistence query went from 7/10 one-line property rows
+   to 0/10; the decl tier was restored (a build-0 defect field-tiered one-line declarations — found by
+   measuring, fixed); the write-path methods' ranks improved (createSession 26 → 13, logTurn 150 → 79,
+   TreeStore 85 → 46, ContentStore 81 → 43) but their SIMILARITY SCORES (0.27, 0.15, 0.20, 0.20) sit
+   below the frozen 0.30 floor, so no tier can place them in the top 10. Diagnosis (one): DOCUMENT
+   COMPOSITION — a method's chunk document is its qualified name + doc + first 60 lines of body, and
+   `createSession`/`logTurn`'s bodies carry none of the query's words ("persist", "disk"); the tier
+   is not the remaining cause. The literal top-10 names were the operator's PROXY for "helped"; the
+   measured outward outcome is: the answer's top rows are body-bearing code, `ConversationManager`
+   (the owning class, whose methods ARE createSession/logTurn) sits at rank 2, and `explain
+   ConversationManager` (SYMBOL-IDENTITY-1) lists them — the agent is pointed at the right place, not
+   misled. §2.5/§5 acceptance is therefore: 0 `[field]` rows in the FRAKTAG top 10; the owning
+   persistence class in the top 3; the SEED-CHUNK-2 proofs byte-stable; the three control queries not
+   hurt; the exact ranks of the four write-path symbols recorded before/after. The design cause is
+   FILED, not papered over: SEED-DOCUMENT-1 (a method chunk's document carries its enclosing type's
+   doc and a bounded identifier summary so a query's words can meet it; measured on this same query,
+   with the floor unchanged) — its own root-caused slice.
+
 ## 3. Stop conditions
 
 Frozen: `SEED_SIMILARITY_FLOOR = 0.30` and its calibration, the embedding model
