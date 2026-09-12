@@ -774,6 +774,17 @@ Carried: CLAIM-INVARIANT-1 (D-N9), D-N10 identifier spaces, D-N7 seed order, ret
 class focus (2→852 provisional); FK prune cost. Operator field checks: doctor `[note]` renders on production
 ("26 ok · 1 note").
 
+REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
+requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
+verification criterion and a v0.18.0 evidence reading; independently reviewed (Codex gpt-5.6-terra, REFINE, findings applied;
+`docs/requirements/reviews/`). HUMAN APPROVAL PENDING; open decisions named in the catalog README (RG-REQ-011-L11 latency bound;
+RG-REQ-008-L01 docs scope unfreeze; RG-REQ-006-L11 suffix fallback; RG-REQ-009-L01 repo-declared exclusion; RG-REQ-010-L10/L11).
+The round-six queue Q1–Q9 is GROUNDED on the catalog: each slice packet (`docs/slices/call-binding-receiver-1.md`,
+`trust-module-edges-1.md`, `cpp-include-roots-1.md`, `explain-cycles-honest-1.md`, `deps-ecosystem-partition-1.md`,
+`explain-type-sections-1.md` inc 1, `complexity-scope-1.md`, `docs-discovery-1.md` (awaits RG-REQ-008-L01), `python-self-binding-1.md`)
+allocates Implements / Changes (pre-authorised headline movements) / Preserves and carries a Regression watch — preserved L →
+what would regress → the proving test. No relay launches until the human approves the catalog revision and orders the queue.
+
 Open follow-ups awaiting ratification/scheduling: LOCK-TEST-FLAKE-1 (three wall-clock lock-hold
 tests fail under a loaded parallel suite and pass alone — `foreground_open::tests::lock_held_beyond_
 patience_is_locked_after_retries_and_bounded` (DEPS-1B gate), `connection::tests::writer_past_busy_

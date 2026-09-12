@@ -1,0 +1,54 @@
+VERDICT: REFINE — the catalog tracks the main product obligations, but cannot be a baseline until it separates Q2’s scope, ratifies proposed scope changes, and stops counting compound unmet Ls as MET.
+
+Verification spot-check: OBSERVED via deterministic `rg`, 30 cited test names exist under `rust/crates`, including `index_rust_crate_extracts_symbols` (repo-index/tests/integration.rs:488), `ambiguous_name_stays_unresolved` (indexer/src/resolver.rs:2188), `concurrent_no_head_of_line_blocking` (daemon-transport/tests/concurrency.rs:119), `rendered_numbers_are_budget_invariant_length_is_monotonic` (rgr/src/presentation/orient_density_tests.rs:367), and `exit_code_values_preserve_both_contract_families` (rgr/tests/exit_code_contract.rs:18). This is a name/existence check only, not execution.
+
+RG-REQ-004-L01 — infeasible — It maps Q2 to “trust, modules, cycles and stats” sharing one edge computation (rg-req-004:47-53), but RC-5 says the Q2 fix deliberately leaves stats’ fourth population unresolved (root-causes:50-52). Split the trust↔modules obligation from stats/identifier reconciliation.
+
+RG-REQ-005-L01 — incorrect — Its fixture says `b_` has type `B*` but expects `B::run` to call `A::run` (rg-req-005:51). The intended RC-1 fixture is an indirect receiver typed as `A*`; as written it cannot verify the claimed target (root-causes:14-15).
+
+RG-REQ-005-L02 — inconsistent — “receiver/enclosing-type evidence” may permit enclosing-type selection for an indirect receiver (rg-req-005:57), contradicting L01’s indirect-receiver rule. Limit enclosing-type preference to receiverless/explicit-`this` calls.
+
+RG-REQ-006-L03 — incorrect — It makes the unique multi-segment suffix fallback mandatory in the same L as include/inc roots (rg-req-006:63-69), although the audit calls that fallback a separately decidable second increment (root-causes:83-85). It needs a separate L or explicit ratification.
+
+RG-REQ-008-L01 — incorrect — The exact discovery scope is an audit proposal, not a ratified contract: DOCS-LIST-2 freezes discovery (docs/slices/docs-list-2.md:35-40), while RC-8 proposes the stem/extensions/src-site rule (root-causes:141-143). Keep it explicitly PROPOSED until human ratification.
+
+RG-REQ-009-L01 — incorrect — “repository-declared exclusion” is an unratified new input/policy shape (rg-req-009:50). RC-9 says the proposed fix is marker-based and that the unmarked vscode file remains ranked; adding another exclusion basis is a separate decision (root-causes:62-64).
+
+RG-REQ-010-L10 — incorrect — It is explicitly “not in the ratified order” (rg-req-010:117-123) and ROADMAP lists SEED-DOCUMENT-1 among follow-ups awaiting ratification (docs/ROADMAP.md:777-786). Mark it proposed, not a baseline obligation.
+
+RG-REQ-001-L03 — overclaimed-evidence — The requirement expressly treats a wrong binding that removes an unresolved row as failure, while its evidence begins “OBSERVED MET” and immediately records RC-1 doing exactly that (rg-req-001:62-68; root-causes:10-16). Overall reading is PARTIALLY MET/NOT MET, not MET.
+
+RG-REQ-002-L04 — overclaimed-evidence — Its required automated anti-swallow enforcement does not exist, and the evidence says review caught repeated violations (rg-req-002:72-78). Overall reading is NOT MET.
+
+RG-REQ-008-L02 — overclaimed-evidence — The L includes README-stem classification and renderer coverage, both absent, but the leading MET label is used by README accounting (rg-req-008:54-60; requirements/README.md:30,39). Overall reading is PARTIALLY MET.
+
+RG-REQ-011-L02 — overclaimed-evidence — “Every background operation registers” is false for Seed and generic Busy messages occurred; raw store paths also leak (rg-req-011:56-62; root-causes:145-147). Overall reading is PARTIALLY MET.
+
+RG-REQ-011-L10 — overclaimed-evidence — The always-rendered retention standing is part of the L but is explicitly NOT MET (rg-req-011:120-126). Overall reading is PARTIALLY MET.
+
+RG-REQ-011-L11 — unverifiable — “Within a ratified bound” has neither a bound nor a measurement basis such as sample count, percentile, hardware, cache state, and corpus revision (rg-req-011:128-134). It is correctly marked UNKNOWN, but is not an acceptance requirement yet.
+
+RG-REQ-012-L06 — overclaimed-evidence — Same-facts human/JSON parity is required but explicitly unprobed (rg-req-012-cli-protocol-surface.md:84-94). Overall reading is UNKNOWN/PARTIALLY MET, not MET by first-label accounting.
+
+RG-REQ-013-L06 — overclaimed-evidence — The required armed-positive corpus path is absent and expressly UNKNOWN (rg-req-013:82-88), while README’s first-label rule can count it as met (requirements/README.md:30,39).
+
+RG-REQ-012-L09 — missing — No H owns behavioural contracts for `contracts`, `map`, `perf`, or `enrich`; `imports` has extraction obligations in RG-REQ-006 but no direct CLI outcome. The CLI contract enumerates `imports`, `contracts`, index/refresh, and policy surfaces (docs/cli/rmap-contracts.md:16-40, 151-165, 845-879).
+
+MISSING obligations to add:
+- New H: contract/schema and generated-code-mapping discovery — `contracts list/show/elements/usages` must present schema facts, mapping basis/confidence, coverage, and honest zero/degradation states. Source: docs/cli/rmap-contracts.md:845-1075; VISION Layer 3 includes generated-code mapping (docs/VISION.md:116-122).
+- RG-REQ-006: `rmap imports [file]` must have a direct output/zero-state/JSON parity obligation, not only resolver internals. Source: docs/cli/rmap-contracts.md:151-160.
+- RG-REQ-010: conditional cross-module concern hints, labeled Layer 3 and below deterministic facts, once a rendering surface is specified. Source: docs/VISION.md:172-188.
+- New H or explicit RG-REQ-012 expansion: `map`, `enrich`, and `perf` need user-outcome requirements; generic protocol rules do not specify what successful, degraded, or bounded operation means.
+
+Five most consequential findings for Q1/Q2 builders:
+1. Q1: Correct L01’s fixture type before writing a regression test; otherwise it proves the wrong binding.
+2. Q1: Make the L02 rule explicit: indirect receiver → receiver-type evidence only; enclosing-type preference is receiverless/explicit-`this` only.
+3. Q1: Preserve unresolved rows and report the expected resolution-rate decrease; do not hide self-loops in rendering (RG-REQ-001-L03, RG-REQ-009-L03).
+4. Q2: Do not claim RG-REQ-004-L01 complete. Implement trust↔modules shared derivation, but leave stats/grpc identity reconciliation as a separate obligation.
+5. Q2: Preserve the unresolved-import LOW verdict; only remove the false `alias_resolution_suspicion` reason (root-causes:50-52).
+
+Decisions needing the human:
+- RG-REQ-011-L11 latency: Problem: no warm-`orient` benchmark definition can support a numeric claim. Options: (A) ratify a named-machine, fixed-corpus, repeated-sample percentile bound after measuring it — reward: defensible “milliseconds”; risk: runner-specific maintenance. (B) publish measurements only — reward: no false limit; risk: VISION commitment remains unverified. (C) self-calibrate per machine — reward: portability; risk: no comparable release claim.
+- RG-REQ-008-L01 discovery scope: Problem: it overrides a frozen discovery contract. Options: (A) ratify the exact stem/extensions/src-site rule — reward: fixes documented misses; risk: broader fixture/prose intake. (B) keep it proposed pending a bounded corpus probe — reward: preserves the freeze; risk: known misses remain. (C) retain old scope — reward: stability; risk: contradicts documentation-as-evidence intent.
+- RG-REQ-006-L03 suffix fallback: Problem: it is a separately decidable increment, currently merged into Q3. Options: roots only — lower blast radius, leaves gstreamer gap; roots plus unique suffix — higher recovery, larger reindex/edge movement.
+- RG-REQ-009-L01 repository-declared generated exclusion and RG-REQ-010-L10 SEED-DOCUMENT-1: either ratify their new policy/data behaviour or move them from baseline obligations to proposed backlog.
