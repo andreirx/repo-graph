@@ -775,8 +775,24 @@ TD-019 in agent-manager) → implementation cycle 0 (claude-opus-4-8): fix corre
 proofs CONTRADICTED the predicted movement → builder STOPPED per §4 → HUMAN DECISION D-TME-MOVEMENT-1 = A (accept the fix,
 correct the prediction, root-cause the heuristic separately) → RC-11 filed (docs/audits/2026-09-08-root-causes-v0.18.0.md):
 `detect_alias_resolution_suspicion` (≥3 zero-connectivity candidates) cannot distinguish unresolved imports from genuine
-isolation → FOLLOW-UP ALIAS-SUSPICION-1 (awaits human ordering). PREP-3 (movement correction → INPUT-3) and the implementation
-resume follow.
+isolation → FOLLOW-UP ALIAS-SUSPICION-1 (awaits human ordering) → PREP-3 → INPUT-3 (movement corrected; Terra F-TME-001 then
+accepted 26/26) → implementation re-admitted (TD-021: no supersession path; local record retired) → reviewer decision-required
+D-TME-VALIDATION-STALE-1 (TME-C08B/C14B grep tokens never matched the product output; operator = A; TD-022) → PREP-4 → INPUT-4 →
+re-admitted → reviewer decision-required D-TME-TEST-NAME-1 (the rewritten render test kept a name asserting the opposite of its
+body because C03 bound the old name; operator = A, renamed suspicious_modules_basis_in_reader_frame_no_internal_wording; TD-023)
+→ PREP-5 → INPUT-5 (Terra 26/26, no findings) → re-admitted; two cycles lost to the runtime's strict parse of a sentence-prefixed
+final message → agent-manager ef3e1c9 under the human ruling "agent-to-agent results are not schema-policed" (first balanced
+JSON object extracted before the unchanged strict parse; TD-020 mitigated) → cycle 3 ACCEPTED: Terra implementation review 0
+findings; verification published (docs/assurance/TRUST-MODULE-EDGES-1/). SHIPPED df08725 (2026-09-13; builder claude-opus-4-8,
+reviewer codex gpt-5.6-terra): compute_module_stats fans come from the resolved file→file IMPORTS aggregated through
+module_file_ownership — the SAME edge set `modules deps` renders (RC-5 MODULE-root join removed; identity + file_count
+unchanged); suspicious-module basis stated in the reader's frame; seam test on two fixtures; fan parity 0 mismatches on five
+isolated store copies (repo-graph 53/61 connected, kafka 60/65, hadoop 6/9, FRAKTAG 0/4 = true zero, vcmi 13/16); repo-graph
+"Suspicious Modules" 48 → the 6 genuinely isolated candidates (rust umbrella, detectors, git, a test fixture, scripts, tools);
+kafka 5 non-code dirs. Operator gates ALL-GATES-GREEN; product-sense pass on a copy of the retained v0.18.0 root. TALLY: 4
+admissions, 5 baselines, 5 decisions (1 human, 4 operator), 14 document cycles, 7 implementation cycles; the fix never failed a
+check — every block was a correct finding against the manager's packet/oracles or the runtime's strictness (TD-020–023 in
+agent-manager). Import-graph stays LOW with "alias resolution suspected" on repo-graph/kafka/FRAKTAG until ALIAS-SUSPICION-1.
 Carried: CLAIM-INVARIANT-1 (D-N9), D-N10 identifier spaces, D-N7 seed order, retention line always renders standing
 (DR-2B DORMANT on the audit root AND production — 1 snapshot, "cleanup: none yet"), Busy path leak / 2 generic
 (DAEMON-RESIDUALS-3), surfaces/orient --full budgets. Could not ground-truth: find --text; C++ IMPLEMENTS from a
