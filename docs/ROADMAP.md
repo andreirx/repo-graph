@@ -768,6 +768,15 @@ render-only in every language; C++ IMPLEMENTS anchored on the FILE at extractor.
 → Q7 COMPLEXITY-SCOPE-1 (RC-9; is_generated dead-false everywhere; filter in the aggregator, never the storage read
 — the LiveGraph cert; vscode weights table = honest residual) → Q8 DOCS-DISCOVERY-1 (RC-8; one stem list; .adoc;
 src/site/**; hadoop 23→~545) → Q9 PYTHON-SELF-BINDING-1 (RC-2; selfCall + superclass BFS; ~+3,600 django edges).
+FIRST ASSURED SLICE (2026-09-13, manager paradigm): TRUST-MODULE-EDGES-1 run under agent-manager stages 1–3 — v1 bootstrap
+baseline RG-BOOTSTRAP-INPUT-1 (Terra REFINE/REFINE/ACCEPT) → document item (stage-3 allocation + v2 baseline; Terra accepted
+26/26 at cycle 5; operator decisions D-TME-CHANGE-CLASSIFICATION-1, D-TME-EXTERNAL-ROOT-1) → INPUT-2 (P-ID prose declarations;
+TD-019 in agent-manager) → implementation cycle 0 (claude-opus-4-8): fix correct and all preservation proofs green; outward
+proofs CONTRADICTED the predicted movement → builder STOPPED per §4 → HUMAN DECISION D-TME-MOVEMENT-1 = A (accept the fix,
+correct the prediction, root-cause the heuristic separately) → RC-11 filed (docs/audits/2026-09-08-root-causes-v0.18.0.md):
+`detect_alias_resolution_suspicion` (≥3 zero-connectivity candidates) cannot distinguish unresolved imports from genuine
+isolation → FOLLOW-UP ALIAS-SUSPICION-1 (awaits human ordering). PREP-3 (movement correction → INPUT-3) and the implementation
+resume follow.
 Carried: CLAIM-INVARIANT-1 (D-N9), D-N10 identifier spaces, D-N7 seed order, retention line always renders standing
 (DR-2B DORMANT on the audit root AND production — 1 snapshot, "cleanup: none yet"), Busy path leak / 2 generic
 (DAEMON-RESIDUALS-3), surfaces/orient --full budgets. Could not ground-truth: find --text; C++ IMPLEMENTS from a
