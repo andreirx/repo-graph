@@ -2,6 +2,8 @@
 
 Manager reading at the human's request: "look at the repo-graph current structure and architecture and using rmap check any bloated modules — a command router may be bloated, but any leaf module that is overly complex needs a good explanation." Evidence: `rmap refresh` of repo-graph on the production daemon (snapshot 2026-09-13T06:12Z; 1,000 source files, 17,626 symbols), then `rmap orient --full`, `stats`, `cycles`, `modules list`, `hotspots --exclude-tests`, `trust`; cross-checked with `cargo metadata` (crate graph) and `wc -l` net of inline `#[cfg(test)]` blocks. Evidence labels: EXECUTED (rmap/cargo/wc) unless stated.
 
+> Note 2026-09-13: the requirement RG-REQ-016 drafted from this reading was RETIRED the same day by the human (agents already over-preserve structure; refactoring is decided case by case). The reading stands as evidence; its refactor candidates are not obligations.
+
 ## 1. Shape of the workspace
 
 54 workspace crates (58 Cargo.toml members incl. tools/probes); `rmap stats`: 71 package groups, 170 directory groups, 17,626 symbols. Source: 669 `.rs` files under `crates/*/src` (tests excluded).
