@@ -1,0 +1,48 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TRUST-MODULE-EDGES-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-2.json",
+    "sha256": "sha256:67c86e509adb9f55023805b9923ee61523124897c8cc47709186bd6565d7fbe0"
+  },
+  "review": {
+    "path": "docs/assurance/TRUST-MODULE-EDGES-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:f4765428d17f6fe967acce7d73cbba408bb91851a1e57df33eb5dce7f2c97d3b"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-CHANGE-CLASSIFICATION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-CHANGE-CLASSIFICATION-1.md",
+        "sha256": "sha256:118439f42bfd13429e3397e44f05943a7f505abc55410823814ed7f891a6a5a8"
+      }
+    },
+    {
+      "id": "D-TME-EXTERNAL-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-EXTERNAL-ROOT-1.md",
+        "sha256": "sha256:bb1ec681650b9582f57f3415d66e32387f9022b685331995520f74eb4a873189"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-13T15:16:36.369Z",
+  "rationale": "Operator approves the re-baselined TRUST-MODULE-EDGES-1 allocation (INPUT-2: P-TME-01..03 prose declarations added for stage-3 admission; content otherwise identical to the accepted INPUT-1); Codex gpt-5.6-terra structured review accepted 26/26; under the human's 2026-09-13 instruction."
+}

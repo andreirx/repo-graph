@@ -3,7 +3,7 @@
   "formatVersion": 1,
   "kind": "implementation-allocation",
   "workItemId": "TRUST-MODULE-EDGES-1",
-  "baselinePath": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-1.json",
+  "baselinePath": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-2.json",
   "parentRequirementIds": [
     "RG-REQ-001",
     "RG-REQ-002",
@@ -255,6 +255,14 @@ Status: SPECIFIED (2026-09-12) · Track: audit round six, Q2 (CRITICAL; REGRESSI
 | RG-REQ-003-L03 | file universe untouched | `header_renders_indexed_source_tracked_only_split` |
 | RG-REQ-012-L01 | exit codes | `exit_code_contract.rs` |
 | RG-REQ-011-L06 | isolation | throwaway roots; registry sha256 unchanged |
+
+The named preservation obligations bound by the allocation metadata block:
+
+| Preservation obligation | What must remain true | Proof (check) |
+|---|---|---|
+| P-TME-01 | D-T6 JSON semantics: the trust root posture is the MEET over the weakest leaf and stays byte-unchanged in `trust --json` — this slice moves only the downgrade REASON lines, never the root posture computation. | TME-C10 |
+| P-TME-02 | `dead`'s overlay is unchanged: its `unresolved_import_pressure` input and the overlay level (LOW) do not move, because this slice touches only resolved-IMPORTS fan aggregation, not unresolved-import pressure. | TME-C12 |
+| P-TME-03 | `orient`/`assess`/`stats` reliability axes inherit ONLY the section-0 reason-wording change; `stats`' module rows (the directory-node population, RG-REQ-004-L11, out of scope) stay byte-identical. | TME-C13, TME-C13B |
 
 ## 4. Stop conditions
 
