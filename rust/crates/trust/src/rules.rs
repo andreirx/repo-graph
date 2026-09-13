@@ -859,18 +859,39 @@ mod tests {
 
     #[test]
     fn count_suspicious_modules_matches_all_criteria() {
+        // TRUST-MODULE-EDGES-1 (RG-REQ-009-L04): with fan_in/fan_out now sourced from
+        // the real module-dependency edge set, a module that HAS a rendered edge — in
+        // EITHER direction — is never flagged as zero-connectivity. Only a module with
+        // no incoming AND no outgoing cross-module import (and ≥2 files, not the repo
+        // root) is suspicious.
         let modules = vec![
+            // Genuinely disconnected: no edges either way → the one suspicious row.
             ModuleForSuspicionCheck {
                 qualified_name: "src/api".into(),
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 5,
             },
+            // Fully connected → not suspicious.
             ModuleForSuspicionCheck {
                 qualified_name: "src/core".into(),
                 fan_in: 3,
                 fan_out: 2,
                 file_count: 10,
+            },
+            // A single OUTGOING edge is still a rendered edge → not suspicious.
+            ModuleForSuspicionCheck {
+                qualified_name: "src/outbound-only".into(),
+                fan_in: 0,
+                fan_out: 1,
+                file_count: 4,
+            },
+            // A single INCOMING edge is still a rendered edge → not suspicious.
+            ModuleForSuspicionCheck {
+                qualified_name: "src/inbound-only".into(),
+                fan_in: 1,
+                fan_out: 0,
+                file_count: 4,
             },
             ModuleForSuspicionCheck {
                 qualified_name: ".".into(), // repo root — excluded

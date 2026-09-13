@@ -756,49 +756,77 @@ impl TrustStorageRead for StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<TrustModuleStats>, StorageError> {
-        // ORIENT-BUG-1: Rewritten to use module_candidates as source of truth.
+        // TRUST-MODULE-EDGES-1 (RG-REQ-009-L02 / RG-REQ-004-L01): fan_in/fan_out are
+        // computed over the SAME derived module-dependency edge set that `modules list`
+        // and `modules deps` render — resolved file→file IMPORTS aggregated through
+        // `module_file_ownership` to the owning module candidate on BOTH endpoints, with
+        // intra-module imports excluded. This mirrors
+        // `classification::module_edges::derive_module_dependency_edges` in SQL:
+        //   fan_out(M) = COUNT(DISTINCT target module candidate) over cross-module imports whose
+        //               source file is owned by M;
+        //   fan_in(M)  = COUNT(DISTINCT source module candidate) over cross-module imports whose
+        //               target file is owned by M.
         //
-        // Previous implementation started from MODULE nodes in `nodes` table,
-        // which are directory-based and don't align with module_candidates.
-        // This caused trust to report different module counts than orient.
+        // The prior implementation (ORIENT-BUG-1, 28126a2) took the fans from IMPORTS
+        // edges between per-DIRECTORY MODULE nodes joined by `qualified_name =
+        // canonical_root_path` — the crate ROOT node, which owns no files, while the
+        // edges attach to the leaf directory node — so the join missed and every fan
+        // COALESCE'd to 0 on Cargo/Gradle/Maven/TS layouts (RC-5). A prefix-LIKE bridge
+        // is rejected: it would double-count nested candidates.
         //
-        // New implementation:
-        // 1. Start from module_candidates (semantic module model)
-        // 2. Get file counts from module_file_ownership table
-        // 3. LEFT JOIN to MODULE nodes for fan_in/fan_out metrics
-        // 4. Modules without matching MODULE nodes get 0 fan_in/fan_out
+        // Identity is UNCHANGED (MODULES-IDENTITY-2): the stable_key is still synthesized
+        // as `repo_uid:canonical_root_path:MODULE` and `file_count` is still the ownership
+        // count. Only the SOURCE of the fan counts changes.
         //
-        // The stable_key is synthesized from repo_uid and canonical_root_path
-        // to match the format used by MODULE nodes (repo_uid:path:MODULE).
+        // `file_owner` restricts ownership rows to owners that are real module candidates
+        // for this snapshot, matching the pure derivation's `module_lookup` (an edge whose
+        // endpoint module is not a candidate is dropped there); `module_pairs` are the
+        // cross-module directed (source_module, target_module) pairs, one row per resolved
+        // file→file import that crosses a module boundary.
         let mut stmt = self.connection().prepare(
-            "SELECT \
+            "WITH file_owner AS ( \
+               SELECT o.file_uid AS file_uid, o.module_candidate_uid AS module_uid \
+               FROM module_file_ownership o \
+               JOIN module_candidates mc2 \
+                 ON mc2.module_candidate_uid = o.module_candidate_uid \
+                AND mc2.snapshot_uid = ?1 \
+               WHERE o.snapshot_uid = ?1 \
+             ), \
+             resolved_imports AS ( \
+               SELECT src.file_uid AS src_file, tgt.file_uid AS tgt_file \
+               FROM edges e \
+               JOIN nodes src ON e.source_node_uid = src.node_uid \
+               JOIN nodes tgt ON e.target_node_uid = tgt.node_uid \
+               WHERE e.snapshot_uid = ?1 \
+                 AND e.type = 'IMPORTS' \
+                 AND e.resolution = 'static' \
+                 AND src.file_uid IS NOT NULL \
+                 AND tgt.file_uid IS NOT NULL \
+             ), \
+             module_pairs AS ( \
+               SELECT so.module_uid AS src_mod, tg.module_uid AS tgt_mod \
+               FROM resolved_imports ri \
+               JOIN file_owner so ON so.file_uid = ri.src_file \
+               JOIN file_owner tg ON tg.file_uid = ri.tgt_file \
+               WHERE so.module_uid != tg.module_uid \
+             ) \
+             SELECT \
                mc.repo_uid || ':' || mc.canonical_root_path || ':MODULE' AS stable_key, \
                mc.canonical_root_path AS path, \
                COALESCE(fan_in.cnt, 0) AS fan_in, \
                COALESCE(fan_out.cnt, 0) AS fan_out, \
                COALESCE(files.cnt, 0) AS file_count \
              FROM module_candidates mc \
-             LEFT JOIN nodes m ON m.snapshot_uid = mc.snapshot_uid \
-               AND m.kind = 'MODULE' \
-               AND m.qualified_name = mc.canonical_root_path \
              LEFT JOIN ( \
-               SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt \
-               FROM edges \
-               WHERE snapshot_uid = ?1 AND type = 'IMPORTS' \
-                 AND source_node_uid IN ( \
-                   SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE' \
-                 ) \
-               GROUP BY target_node_uid \
-             ) fan_in ON fan_in.nid = m.node_uid \
+               SELECT tgt_mod AS mid, COUNT(DISTINCT src_mod) AS cnt \
+               FROM module_pairs \
+               GROUP BY tgt_mod \
+             ) fan_in ON fan_in.mid = mc.module_candidate_uid \
              LEFT JOIN ( \
-               SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt \
-               FROM edges \
-               WHERE snapshot_uid = ?1 AND type = 'IMPORTS' \
-                 AND target_node_uid IN ( \
-                   SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE' \
-                 ) \
-               GROUP BY source_node_uid \
-             ) fan_out ON fan_out.nid = m.node_uid \
+               SELECT src_mod AS mid, COUNT(DISTINCT tgt_mod) AS cnt \
+               FROM module_pairs \
+               GROUP BY src_mod \
+             ) fan_out ON fan_out.mid = mc.module_candidate_uid \
              LEFT JOIN ( \
                SELECT module_candidate_uid, COUNT(*) AS cnt \
                FROM module_file_ownership \
@@ -1582,9 +1610,11 @@ mod tests {
         let mut storage = setup();
         let snap_uid = setup_with_snapshot(&storage);
 
-        // ORIENT-BUG-1: The query now starts from module_candidates, not nodes.
-        // We need: module_candidates + module_file_ownership for file count,
-        // and MODULE nodes + IMPORTS edges for fan_in/fan_out.
+        // TRUST-MODULE-EDGES-1: fan_in/fan_out now derive from the SAME edge set
+        // `modules deps` renders — resolved file→file IMPORTS aggregated through
+        // module_file_ownership to the owning module candidate on both endpoints —
+        // NOT from IMPORTS between MODULE nodes. So the fixture is now file nodes +
+        // file→file IMPORTS + ownership.
 
         // 1. Insert module_candidates (source of truth for module list)
         storage
@@ -1599,7 +1629,19 @@ mod tests {
             ))
             .unwrap();
 
-        // 2. Insert module_file_ownership (determines file_count)
+        // 2. Insert files (FK target for nodes.file_uid).
+        storage
+            .connection()
+            .execute_batch(
+                "INSERT INTO files (file_uid, repo_uid, path, is_test, is_generated, is_excluded) VALUES \
+                 ('r1:src/core/index.ts', 'r1', 'src/core/index.ts', 0, 0, 0), \
+                 ('r1:src/api/handler.ts', 'r1', 'src/api/handler.ts', 0, 0, 0), \
+                 ('r1:src/util/helpers.ts', 'r1', 'src/util/helpers.ts', 0, 0, 0)",
+            )
+            .unwrap();
+
+        // 3. Insert module_file_ownership (determines file_count AND the module a file
+        //    belongs to for fan aggregation).
         storage
             .connection()
             .execute_batch(&format!(
@@ -1611,20 +1653,19 @@ mod tests {
             ))
             .unwrap();
 
-        // 3. Insert MODULE nodes (for fan_in/fan_out via IMPORTS edges)
-        // qualified_name must match canonical_root_path for the JOIN to work.
+        // 4. Insert FILE nodes (each carries file_uid — the endpoints of IMPORTS edges).
         storage
             .insert_nodes(&[
                 crate::types::GraphNode {
-                    node_uid: "m_core".into(),
+                    node_uid: "f_core".into(),
                     snapshot_uid: snap_uid.clone(),
                     repo_uid: "r1".into(),
-                    stable_key: "r1:src/core:MODULE".into(),
-                    kind: "MODULE".into(),
+                    stable_key: "r1:src/core/index.ts:FILE".into(),
+                    kind: "FILE".into(),
                     subtype: None,
-                    name: "core".into(),
-                    qualified_name: Some("src/core".into()),
-                    file_uid: None,
+                    name: "index.ts".into(),
+                    qualified_name: Some("src/core/index.ts".into()),
+                    file_uid: Some("r1:src/core/index.ts".into()),
                     parent_node_uid: None,
                     location: None,
                     signature: None,
@@ -1633,15 +1674,15 @@ mod tests {
                     metadata_json: None,
                 },
                 crate::types::GraphNode {
-                    node_uid: "m_api".into(),
+                    node_uid: "f_api".into(),
                     snapshot_uid: snap_uid.clone(),
                     repo_uid: "r1".into(),
-                    stable_key: "r1:src/api:MODULE".into(),
-                    kind: "MODULE".into(),
+                    stable_key: "r1:src/api/handler.ts:FILE".into(),
+                    kind: "FILE".into(),
                     subtype: None,
-                    name: "api".into(),
-                    qualified_name: Some("src/api".into()),
-                    file_uid: None,
+                    name: "handler.ts".into(),
+                    qualified_name: Some("src/api/handler.ts".into()),
+                    file_uid: Some("r1:src/api/handler.ts".into()),
                     parent_node_uid: None,
                     location: None,
                     signature: None,
@@ -1650,15 +1691,15 @@ mod tests {
                     metadata_json: None,
                 },
                 crate::types::GraphNode {
-                    node_uid: "m_util".into(),
+                    node_uid: "f_util".into(),
                     snapshot_uid: snap_uid.clone(),
                     repo_uid: "r1".into(),
-                    stable_key: "r1:src/util:MODULE".into(),
-                    kind: "MODULE".into(),
+                    stable_key: "r1:src/util/helpers.ts:FILE".into(),
+                    kind: "FILE".into(),
                     subtype: None,
-                    name: "util".into(),
-                    qualified_name: Some("src/util".into()),
-                    file_uid: None,
+                    name: "helpers.ts".into(),
+                    qualified_name: Some("src/util/helpers.ts".into()),
+                    file_uid: Some("r1:src/util/helpers.ts".into()),
                     parent_node_uid: None,
                     location: None,
                     signature: None,
@@ -1669,17 +1710,18 @@ mod tests {
             ])
             .unwrap();
 
-        // 4. Insert IMPORTS edges (determines fan_in/fan_out)
-        // m_core → m_api: fan_out for m_core, fan_in for m_api
-        // m_api → m_util: fan_out for m_api, fan_in for m_util
+        // 5. Insert resolved file→file IMPORTS edges (determine fan_in/fan_out through
+        //    ownership).
+        //    core/index.ts → api/handler.ts: fan_out for mc_core, fan_in for mc_api
+        //    api/handler.ts → util/helpers.ts: fan_out for mc_api, fan_in for mc_util
         storage
             .insert_edges(&[
                 crate::types::GraphEdge {
                     edge_uid: "e_imp1".into(),
                     snapshot_uid: snap_uid.clone(),
                     repo_uid: "r1".into(),
-                    source_node_uid: "m_core".into(),
-                    target_node_uid: "m_api".into(),
+                    source_node_uid: "f_core".into(),
+                    target_node_uid: "f_api".into(),
                     edge_type: "IMPORTS".into(),
                     resolution: "static".into(),
                     extractor: "ts-base:1".into(),
@@ -1690,8 +1732,8 @@ mod tests {
                     edge_uid: "e_imp2".into(),
                     snapshot_uid: snap_uid.clone(),
                     repo_uid: "r1".into(),
-                    source_node_uid: "m_api".into(),
-                    target_node_uid: "m_util".into(),
+                    source_node_uid: "f_api".into(),
+                    target_node_uid: "f_util".into(),
                     edge_type: "IMPORTS".into(),
                     resolution: "static".into(),
                     extractor: "ts-base:1".into(),

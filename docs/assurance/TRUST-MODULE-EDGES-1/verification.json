@@ -1,0 +1,713 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-TRUST-MODULE-EDGES-1-2",
+  "workItemId": "TRUST-MODULE-EDGES-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-5.json",
+    "sha256": "sha256:ec92bce132854a102c5bc02596846b612a5ec7950dc37801f5389e7ca124750d"
+  },
+  "allocation": {
+    "path": "docs/slices/trust-module-edges-1.md",
+    "sha256": "sha256:151a6b29ad5bb5977d34d4f84161c69b4a98a9f94dcfbb3cf48978b89fc5e42e"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "17faa49bf69beee6dbd0603d1790e6909c137733",
+    "entries": [
+      {
+        "path": "rust/crates/rgr/src/presentation/trust.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4e3912fc8f96d5a6275f4d6c676e4d24bd748400dd48716029d3acd93b6ed4b8",
+          "byteLength": 38147
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f57280e36250f559b701b9ba14e455e63e0258ebb48ab80cdefdd5f01b1da2c6",
+          "byteLength": 38097
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/trust_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b2573f924070a513b1b5eafc5cb73aa352ffdcf3e993b046d77b1c0ac95a7211",
+          "byteLength": 69913
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:de4ecb824ee1d14aea2d6249d87f8521dece052f464380d339bf4e1ba3acd65d",
+          "byteLength": 70655
+        }
+      },
+      {
+        "path": "rust/crates/rgr/tests/trust_module_edges_seam.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b0011f8e06ae7418dffc4c8ccc2a4a43a1b4a6b3a5972eb6f79d918508d2f57e",
+          "byteLength": 7343
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/trust_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:bb95649a10bb90f04ebe8930f8eca40dda36b9e0b2d4487f297ab9ee13099fe4",
+          "byteLength": 103398
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2ed132916aaf4309308b79b8759db6f10ae78c6a644e72775dbf0be6492a5a09",
+          "byteLength": 106183
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/rules.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:af4c6ddca68204cb19d23dcebe1f4434e149728b4a28fd9fce3a802f13c0da6a",
+          "byteLength": 31063
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b36da495d3cfd81321c6035649d0cd4fedf7baa1e6e894c7b8556f8a7871b6eb",
+          "byteLength": 32151
+        }
+      }
+    ],
+    "sha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-TRUST-MODULE-EDGES-1-2"
+  },
+  "checks": [
+    {
+      "checkId": "TME-C01",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-009-L02",
+        "RG-REQ-004-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --test trust_module_edges_seam",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the compute_module_stats fan-subquery change applied",
+        "inputs": "the write-first seam integration test rust/crates/rgr/tests/trust_module_edges_seam.rs; the two-crate and twin-names module fixtures"
+      },
+      "expected": "exit 0; the write-first seam test (write-first; proposed name trust_module_fans_equal_modules_deps) is GREEN and asserts that trust --json modules[].fan_in/fan_out equal modules deps per-module fan counts for every rendered module on both the two-crate and the twin-names fixtures, so a module with rendered edges can never be flagged zero-connectivity; a divergence on either fixture fails the check.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --test trust_module_edges_seam → trust_module_fans_equal_modules_deps 1 passed / 0 failed; the write-first seam asserts trust --json modules[].fan_in/fan_out equal modules deps per-module fan counts on the two-crate and twin-names fixtures.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C01)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C02",
+      "obligationIds": [
+        "RG-REQ-004-L01",
+        "RG-REQ-009-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "storage/src/trust_impl.rs compute_module_stats unit tests (compute_module_stats_returns_fan_in_fan_out_file_count, compute_module_stats_excludes_modules_with_no_owned_files), updated to the re-sourced fan counts"
+      },
+      "expected": "exit 0; TrustStorageRead::compute_module_stats derives fan_in as COUNT(DISTINCT source module candidate) and fan_out as COUNT(DISTINCT target module candidate) over resolved file-to-file IMPORTS aggregated through module_file_ownership to module candidates on both endpoints (the same set modules deps renders), with the nodes kind='MODULE' join removed and file_count still taken from ownership; the two named unit tests assert nonzero fans for a connected candidate and are GREEN. A prefix-LIKE bridge (double-counting nested candidates) fails the intent.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-storage → 676 passed / 0 failed / 3 ignored; compute_module_stats_returns_fan_in_fan_out_file_count ok and compute_module_stats_excludes_modules_with_no_owned_files ok. Fans derive over module_file_ownership + resolved file→file IMPORTS aggregated to module candidates; the nodes kind='MODULE' join is removed; file_count stays from ownership.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C02)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C03",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --lib count_suspicious_modules_matches_all_criteria && cargo test -p repo-graph-rgr --lib presentation::trust::tests::suspicious_modules_basis_in_reader_frame_no_internal_wording",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the two defect-pinning tests rewritten",
+        "inputs": "trust/src/rules.rs::count_suspicious_modules_matches_all_criteria (a repo-graph-trust crate lib test, NOT under presentation::trust::tests) and rgr/src/presentation/trust_tests.rs::suspicious_modules_basis_in_reader_frame_no_internal_wording, rewritten to the true behaviour"
+      },
+      "expected": "exit 0 requires BOTH invocations GREEN (the && fails on either). The first runs count_suspicious_modules_matches_all_criteria in the repo-graph-trust crate as its own invocation (a trailing `presentation::trust::tests` filter would exclude it, since it lives in rules.rs, not that rgr module) and asserts a module with rendered edges is never flagged suspicious_zero_connectivity. The second runs suspicious_modules_basis_in_reader_frame_no_internal_wording (renamed from suspicious_modules_state_basis_and_point_at_stats per D-TME-TEST-NAME-1, because the rewritten assertions are the opposite of the old name; trust.rs declares trust_tests.rs as `#[path = \"trust_tests.rs\"] mod tests`, so its filter path is presentation::trust::tests::*; this exact-function filter selects 1 test), rewritten so the false 'cross-check stats' basis sentence is replaced by a true one or removed. The live alias_resolution_suspicion behaviour (the downgrade persists where >= 3 genuinely zero-connectivity candidates remain, per D-TME-MOVEMENT-1) is asserted by TME-C05/TME-C06, not by this unit check. Either test failing fails the check.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-trust --lib count_suspicious_modules_matches_all_criteria → 1 passed AND cargo test -p repo-graph-rgr --lib presentation::trust::tests::suspicious_modules_basis_in_reader_frame_no_internal_wording → 1 passed. The renamed (D-TME-TEST-NAME-1) exact-function filter selects 1 test (not 0); both assert a module with rendered edges is never flagged zero-connectivity and the basis is reader-frame with no internal wording.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C03)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C04",
+      "obligationIds": [
+        "RG-REQ-009-L02",
+        "RG-REQ-004-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-agent",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "the repo-graph-agent check/orient reliability paths that consume trust module stats"
+      },
+      "expected": "exit 0; the agent crate's trust-consuming paths (check reduce, orient reliability) stay green with the re-sourced module fan counts; any newly failing agent test is a regression to report, not to suppress.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-agent → 23 'test result: ok' suites, 0 failed, no error lines (largest suite 307 passed); the trust-consuming check reduce and orient reliability paths stay green with the re-sourced module fan counts.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C04)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C05",
+      "obligationIds": [
+        "RG-REQ-009-L02",
+        "RG-REQ-004-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-009-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "export RMAP_STATE_ROOT=/private/tmp/TRUST-MODULE-EDGES-1-rg RMAP_SOCKET_PATH=/private/tmp/TRUST-MODULE-EDGES-1-rg/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && rust/target/release/rmap trust > /tmp/tme-trust.txt && grep -q 'Suspicious Modules (zero connectivity)' /tmp/tme-trust.txt && grep -Eq 'Import-graph: LOW \\(alias resolution suspected; [0-9]+ unresolved imports\\)' /tmp/tme-trust.txt && grep -Fq 'Change-impact: LOW (alias resolution suspected)' /tmp/tme-trust.txt && rust/target/release/rmap trust --json > /tmp/tme-trustj.json && python3 -c \"import json,sys\nd=json.load(open('/tmp/tme-trustj.json'))\nar=False; at=False\nst=[(None,d)]\nwhile st:\n key,o=st.pop()\n if isinstance(o,dict):\n  r=o.get('reasons')\n  if isinstance(r,list) and 'alias_resolution_suspicion' in r: ar=True\n  if key=='alias_resolution_suspicion' and o.get('triggered') is True: at=True\n  for k,v in o.items(): st.append((k,v))\n elif isinstance(o,list):\n  for x in o: st.append((key,x))\nsys.exit(0 if (ar and at) else 1)\"",
+        "cwd": ".",
+        "environment": "freshly built candidate rmap at rust/target/release/rmap; /private/tmp/TRUST-MODULE-EDGES-1-rg is an isolated throwaway COPY of ~/repo-graph-retained/audit-v0.18.0/repo-graph (copied, never the original) served with RMAP_TRANSPORT=stdio and auto passes off; operator real registry untouched",
+        "inputs": "the copied repo-graph snapshot store; the captured human `rmap trust` text and the captured `rmap trust --json` document"
+      },
+      "expected": "exit 0 requires every && condition to hold. Corrected to the measured truth (decision D-TME-MOVEMENT-1): on the candidate's HUMAN `rmap trust` output for the repo-graph store copy (reader frame, not machine tokens — the axis reasons are humanized by agent::reliability::humanize_reason), `grep -q` proves the 'Suspicious Modules (zero connectivity)' section IS present — it now lists EXACTLY the six GENUINELY zero-connectivity module candidates (the `rust/` umbrella directory, `tools`, `scripts`, two test-fixture directories, and the leaf crates `detectors` and `git`), down from 48, with no crate that `modules deps` renders an edge for appearing (the exact six-candidate enumeration and the per-module `trust --json modules[]` fan equality to `modules deps` are the named-record inspection TME-C06); `grep -E` proves the reader line 'Import-graph: LOW (alias resolution suspected; <n> unresolved imports)' is present and `grep -F` proves the reader line 'Change-impact: LOW (alias resolution suspected)' is present — the humanized alias-suspicion phrase (not the machine token), which PERSISTS because six genuinely-disconnected candidates remain and `detect_alias_resolution_suspicion` fires at >= 3 (its inability to distinguish unresolved imports from genuine isolation is the separate root cause ALIAS-SUSPICION-1, out of scope by D-TME-MOVEMENT-1). Then the MACHINE reason is verified in `rmap trust --json`: the python3 walk recurses the whole envelope (robust to nesting) and exits 0 only when some reliability-axis `reasons` array contains the machine token 'alias_resolution_suspicion' AND some object sitting under the key 'alias_resolution_suspicion' has \"triggered\": true (the key itself is always present in triggered_downgrades, so a substring search would be wrong; the walk distinguishes the ever-present key from a genuine trigger). A missing Suspicious section, a connected crate appearing in it, an absent/changed humanized Import-graph or Change-impact reader line, or an absent alias reason/trigger in JSON flips a grep or the python exit and the chain exits non-zero. (Per-module fan equality to modules deps and the exact six-candidate enumeration are the named-record inspection TME-C06.)",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Candidate human `rmap trust` on the isolated repo-graph store copy: 'Suspicious Modules (zero connectivity)' PRESENT listing exactly the 6 genuinely-disconnected candidates (rust, rust/crates/detectors, rust/crates/git, rust/crates/repo-index/tests/fixtures/rust/simple-crate, scripts, tools) with the reader-frame basis sentence and no internal pipeline diagnostic; 'Import-graph: LOW (alias resolution suspected; 4903 unresolved imports)' and 'Change-impact: LOW (alias resolution suspected)' PRESENT. Full grep chain + trust --json python walk (alias_resolution_suspicion in reasons AND triggered:true) → exit 0. Matches D-TME-MOVEMENT-1.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C05)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C06",
+      "obligationIds": [
+        "RG-REQ-009-L02",
+        "RG-REQ-004-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "inspection",
+        "subject": "the candidate rmap's per-module fan counts and triggered downgrades on isolated throwaway COPIES of the retained repo-graph, kafka, hadoop, FRAKTAG and vcmi stores (~/repo-graph-retained/audit-v0.18.0/*, copied never opened)",
+        "criterion": "corrected to the measured truth (decision D-TME-MOVEMENT-1): on the repo-graph copy, every module in the captured `rmap trust --json` modules[] has fan_in and fan_out equal to that module's per-module counts in the captured `rmap modules deps --json` (records /tmp/tme-trust-repo-graph.json and /tmp/tme-deps-repo-graph.json), the count of module candidates with fan_in>0 OR fan_out>0 is 53 of 61, and the 'Suspicious Modules (zero connectivity)' section lists exactly the six genuinely-disconnected candidates (the `rust/` umbrella directory, `tools`, `scripts`, two test-fixture directories, and the leaf crates `detectors` and `git`) with no crate that `modules deps` renders an edge for; on the kafka copy rows-with-fan>0 = 60 of 65, on the hadoop copy 6 of 9, on the FRAKTAG copy 0 of 4 (FRAKTAG has zero cross-module resolved imports — 185 intra of 210 — so 0 connected is the TRUE value, not a defect), on the vcmi copy 13 of 16; the `alias_resolution_suspicion` downgrade is triggered on the repo-graph, kafka and FRAKTAG copies (>= 3 genuinely-disconnected candidates each: 6, 5, 3) and is ABSENT on the hadoop and vcmi copies only (2 each, below the >= 3 threshold); no verdict LEVEL is asserted to change beyond this reason movement, and any observed level change is reported as a finding rather than tuned away",
+        "inputs": "the five throwaway store copies; the per-repo captured `rmap trust --json` and `rmap modules deps --json` records"
+      },
+      "expected": "the inspection finds repo-graph trust fan_in/fan_out equal modules deps per module with 53 of 61 connected and the Suspicious section listing exactly the six genuinely-disconnected candidates (no crate with rendered edges appears); rows-with-fan>0 = kafka 60/65, hadoop 6/9, FRAKTAG 0/4 (true zero — genuinely zero cross-module resolved imports), vcmi 13/16; and the alias downgrade present on repo-graph/kafka/FRAKTAG (>= 3 remain) and absent on hadoop/vcmi only (2 each). A per-module fan mismatch on repo-graph, a wrong connected count on any repo, a connected crate appearing in repo-graph's Suspicious section, or a wrong alias-downgrade presence pattern (absent where >= 3 remain, or present where fewer remain) fails the check.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "repo-graph: 61 modules, 53 connected(fan>0), 6 suspicious, 129 deps edges, 0 per-module fan mismatches vs modules deps, rust/crates/agent fan_in=3 fan_out=4. Cross-repo (isolated copies, served from each canonical dir): kafka 65/60/5 edges218 alias True; hadoop 9/6/2 edges17 alias False; FRAKTAG 4/0/3 edges0 (true zero cross-module imports) alias True; vcmi 16/13/2 edges29 alias False — all 0 mismatches. Alias downgrade persists where ≥3 genuinely-disconnected remain (repo-graph 6, kafka 5, FRAKTAG 3), clears where <3 (hadoop 2, vcmi 2).",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C06 + cross-repo table)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C07",
+      "obligationIds": [
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L03",
+        "RG-REQ-004-L04",
+        "RG-REQ-004-L09",
+        "RG-REQ-004-L10"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::modules_list::tests",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "modules_list_tests.rs (including two_crate_fixture_renders_a_to_b_edge_verbatim and modules_list_rendered_file_totals_sum_to_the_check_indexed_basis)"
+      },
+      "expected": "exit 0; presentation::modules_list::tests is GREEN (modules_list.rs declares modules_list_tests.rs as `#[path = \"modules_list_tests.rs\"] mod tests`, so the module filter path is presentation::modules_list::tests; it selects 57 tests). modules list/deps already read classification::module_edges::derive_module_dependency_edges (the correct set), so this slice must not move them — the unit-level no-behavior-change proof for RG-REQ-004-L02/L03/L04/L09/L10; the byte-level proof is TME-C07B.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::modules_list::tests → 57 passed / 0 failed; modules list/deps already read derive_module_dependency_edges, so this slice leaves them unchanged.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C07)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C07B",
+      "obligationIds": [
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L03",
+        "RG-REQ-004-L04",
+        "RG-REQ-004-L09",
+        "RG-REQ-004-L10"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "export RMAP_STATE_ROOT=/private/tmp/TRUST-MODULE-EDGES-1-rg RMAP_SOCKET_PATH=/private/tmp/TRUST-MODULE-EDGES-1-rg/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && BEFORE=/private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap && AFTER=rust/target/release/rmap && \"$BEFORE\" modules list > /tmp/tme-modlist-before.txt && \"$AFTER\" modules list > /tmp/tme-modlist-after.txt && cmp /tmp/tme-modlist-before.txt /tmp/tme-modlist-after.txt && \"$BEFORE\" modules deps > /tmp/tme-deps-before.txt && \"$AFTER\" modules deps > /tmp/tme-deps-after.txt && cmp /tmp/tme-deps-before.txt /tmp/tme-deps-after.txt && \"$BEFORE\" modules violations > /tmp/tme-viol-before.txt && \"$AFTER\" modules violations > /tmp/tme-viol-after.txt && cmp /tmp/tme-viol-before.txt /tmp/tme-viol-after.txt",
+        "cwd": ".",
+        "environment": "candidate rmap at rust/target/release/rmap; before-binary at /private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap built by `git worktree add /private/tmp/TRUST-MODULE-EDGES-1-before HEAD` (base revision f8a0e6b) then `cargo build --release`; /private/tmp/TRUST-MODULE-EDGES-1-rg is the isolated repo-graph store copy; operator registry untouched",
+        "inputs": "the isolated repo-graph store copy; captured modules list/deps/violations output before and after"
+      },
+      "expected": "each of the three cmp invocations exits 0, i.e. byte-identical `modules list`, `modules deps` and `modules violations` human output between the base-revision before-binary and the candidate — the byte-level no-behavior-change proof for RG-REQ-004-L02/L03/L04/L09/L10. Any cmp difference exits non-zero and fails the check.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "modules list, modules deps and modules violations captured from the base-revision worktree before-binary and the candidate against the same isolated repo-graph store → all three cmp BYTE-IDENTICAL.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C07B)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C08",
+      "obligationIds": [
+        "RG-REQ-009-L03",
+        "RG-REQ-009-L06",
+        "RG-REQ-009-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::trust::tests",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "trust_tests.rs resolution family (render_resolution_is_reader_frame_in_scope) and first-party family (first_party_workspace_crate_renders_internal_not_library_call)"
+      },
+      "expected": "exit 0; presentation::trust::tests (trust.rs declares trust_tests.rs as `#[path = \"trust_tests.rs\"] mod tests`, so the module filter path is presentation::trust::tests; it selects 37 tests, including render_resolution_is_reader_frame_in_scope and first_party_workspace_crate_renders_internal_not_library_call) is GREEN — the unit-level proof that call-resolution %, reader-frame resolution and first-party classification are unchanged (no-behavior-change for RG-REQ-009-L03/L06/L07); the byte-level 'calls N% resolved' proof is TME-C08B.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::trust::tests → 37 passed / 0 failed, including render_resolution_is_reader_frame_in_scope and the first_party family — call-resolution %, reader-frame resolution and first-party classification unchanged.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C08)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C08B",
+      "obligationIds": [
+        "RG-REQ-009-L03",
+        "RG-REQ-009-L06",
+        "RG-REQ-009-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "export RMAP_STATE_ROOT=/private/tmp/TRUST-MODULE-EDGES-1-rg RMAP_SOCKET_PATH=/private/tmp/TRUST-MODULE-EDGES-1-rg/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && BEFORE=/private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap && AFTER=rust/target/release/rmap && \"$BEFORE\" trust > /tmp/tme-trust-before.txt && \"$AFTER\" trust > /tmp/tme-trust-after.txt && grep -iE 'calls [0-9]+% resolved' /tmp/tme-trust-before.txt > /tmp/tme-cr-before.txt && grep -iE 'calls [0-9]+% resolved' /tmp/tme-trust-after.txt > /tmp/tme-cr-after.txt && cmp /tmp/tme-cr-before.txt /tmp/tme-cr-after.txt",
+        "cwd": ".",
+        "environment": "candidate rmap at rust/target/release/rmap; before-binary at /private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap (git worktree of base revision f8a0e6b, cargo build --release); /private/tmp/TRUST-MODULE-EDGES-1-rg is the isolated repo-graph store copy; operator registry untouched",
+        "inputs": "the isolated repo-graph store copy; the trust 'calls N% resolved' line captured before and after"
+      },
+      "expected": "the two `grep -iE 'calls [0-9]+% resolved'` extractions each match at least one line (a missing line makes grep exit non-zero and fails the chain) and cmp exits 0 — the trust 'calls N% resolved' line is byte-identical between base-revision before-binary and candidate, proving the fix touches module fan counts only (no-behavior-change for RG-REQ-009-L03/L06/L07).",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "grep -iE 'calls [0-9]+% resolved' matched the real line \"your code's calls 24% resolved (22195 of 91834 in-scope or unclassified)\" on both before-binary and candidate; before/after cmp BYTE-IDENTICAL. Genuine line, no substitution.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C08B)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C09",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --lib coherent_tests && cargo test -p repo-graph-rgr --lib presentation::trust::tests::render_headline_is_the_snapshot_posture",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/",
+        "inputs": "trust/src/coherent_tests.rs (all) and trust_tests.rs::render_headline_is_the_snapshot_posture"
+      },
+      "expected": "exit 0 requires BOTH invocations GREEN (the && fails on either): all coherent_tests pass and presentation::trust::tests::render_headline_is_the_snapshot_posture (the rgr filter path; trust_tests.rs is mounted as `mod tests`; this exact-function filter selects 1 test) is GREEN, so the AnswerEnvelope invariants and the snapshot headline posture are unchanged and only the downgrade REASON lines move (that reason movement is asserted by TME-C03) — the implemented part of RG-REQ-009-L04 changes reasons without disturbing the envelope.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-trust --lib coherent_tests → 15 passed AND cargo test -p repo-graph-rgr --lib presentation::trust::tests::render_headline_is_the_snapshot_posture → 1 passed; AnswerEnvelope invariants and snapshot headline posture unchanged.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C09)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C10",
+      "obligationIds": [
+        "P-TME-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --lib coherent_tests::root_never_exceeds_the_weakest_leaf",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/",
+        "inputs": "trust/src/coherent_tests.rs::root_never_exceeds_the_weakest_leaf and its siblings"
+      },
+      "expected": "exit 0; root_never_exceeds_the_weakest_leaf is GREEN — the trust root posture computed as MEET over the weakest leaf in JSON is byte-unchanged (D-T6 preserved; no-behavior-change).",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "coherent::coherent_tests::root_never_exceeds_the_weakest_leaf ok (within the 15 passed coherent_tests); trust root posture MEET over the weakest leaf byte-unchanged (D-T6 / P-TME-01 preserved).",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C10)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C11",
+      "obligationIds": [
+        "RG-REQ-002-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::trust::tests::render_omits_raw_pipeline_diagnostic_sections_from_human_surface",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the replacement basis sentence in place",
+        "inputs": "the replaced 'cross-check stats' basis sentence and render_omits_raw_pipeline_diagnostic_sections_from_human_surface"
+      },
+      "expected": "exit 0; presentation::trust::tests::render_omits_raw_pipeline_diagnostic_sections_from_human_surface (the rgr filter path; trust_tests.rs is mounted as `mod tests`; this exact-function filter selects 1 test) is GREEN — the replacement basis sentence describes the reader's subject and leaks no internal pipeline diagnostic (no node-identity, SQL-join or serving-engine wording), preserving RG-REQ-002-L08.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::trust::tests::render_omits_raw_pipeline_diagnostic_sections_from_human_surface → 1 passed; the replacement reader-frame basis sentence leaks no internal pipeline diagnostic (RG-REQ-002-L08 preserved).",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C11)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C12",
+      "obligationIds": [
+        "P-TME-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --lib overlay && cargo test -p repo-graph-rgr --test dead_command",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/",
+        "inputs": "trust/src/overlay.rs tests (overlay_from_report_with_no_degradation and siblings) and rgr/tests/dead_command.rs (dead_command_is_disabled, dead_exact_results)"
+      },
+      "expected": "exit 0 requires BOTH invocations GREEN (the && fails on either): the trust overlay tests and the dead_command tests are GREEN — dead's unresolved_import_pressure input and the overlay level (LOW) are unchanged because this slice does not touch unresolved-import pressure (P-TME-02 preserved).",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-trust --lib overlay → 11 passed AND cargo test -p repo-graph-rgr --test dead_command → 3 passed / 10 ignored (live-daemon); dead's unresolved_import_pressure input and overlay level unchanged (P-TME-02 preserved).",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C12)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C13",
+      "obligationIds": [
+        "P-TME-03",
+        "RG-REQ-004-L11"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::orient::tests::budget_trades_depth_small_subset_of_full && cargo test -p repo-graph-storage --lib compute_module_stats_symbol_count_is_all_symbols_not_exports",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "orient_tests.rs::budget_trades_depth_small_subset_of_full (orient.rs mounts orient_tests.rs as `#[path = \"orient_tests.rs\"] mod tests`, so the filter path is presentation::orient::tests::*; this exact-function filter selects 1 test — it renders orient at --full and asserts the `--full` Degradation block's `Import-graph reliability is LOW` axis line, exercising orient_reliability.rs::render_degradation → format_reliability_axis → the shared reliability::humanize_reason that inherits this slice's reason-wording change); queries.rs::compute_module_stats_symbol_count_is_all_symbols_not_exports (the STATS directory-node population, out of scope L11)"
+      },
+      "expected": "exit 0 requires BOTH invocations GREEN (the && fails on either): budget_trades_depth_small_subset_of_full is GREEN — orient's --full Degradation section still renders the Import-graph reliability axis (that section renders the Import-graph/Change-impact axes through the shared reliability::humanize_reason, the exact path that inherits this slice's reason-wording change), proving orient reliability rendering is not broken and inherits ONLY the section-0 wording change; and compute_module_stats_symbol_count_is_all_symbols_not_exports is GREEN (the stats directory-node population is unchanged). The prior `presentation::orient_reliability` module filter selected ZERO tests (orient_reliability.rs and orient_reliability_caveats.rs carry no test module — verified by source) and is replaced by this non-empty oracle. The byte-level stats proof is TME-C13B (P-TME-03 preserved; RG-REQ-004-L11 out of scope).",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::orient::tests::budget_trades_depth_small_subset_of_full → 1 passed AND cargo test -p repo-graph-storage --lib compute_module_stats_symbol_count_is_all_symbols_not_exports → 1 passed; orient --full Degradation reliability axis still renders and the stats directory-node population is unchanged (P-TME-03 preserved).",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C13)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C13B",
+      "obligationIds": [
+        "P-TME-03",
+        "RG-REQ-004-L11"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "export RMAP_STATE_ROOT=/private/tmp/TRUST-MODULE-EDGES-1-rg RMAP_SOCKET_PATH=/private/tmp/TRUST-MODULE-EDGES-1-rg/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && BEFORE=/private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap && AFTER=rust/target/release/rmap && \"$BEFORE\" stats > /tmp/tme-stats-before.txt && \"$AFTER\" stats > /tmp/tme-stats-after.txt && cmp /tmp/tme-stats-before.txt /tmp/tme-stats-after.txt",
+        "cwd": ".",
+        "environment": "candidate rmap at rust/target/release/rmap; before-binary at /private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap (git worktree of base revision f8a0e6b, cargo build --release); /private/tmp/TRUST-MODULE-EDGES-1-rg is the isolated repo-graph store copy; operator registry untouched",
+        "inputs": "the isolated repo-graph store copy; captured stats human output before and after"
+      },
+      "expected": "cmp exits 0 — the `stats` human output (its module rows come from queries.rs::compute_module_stats, the directory-node population that is RG-REQ-004-L11's identifier space) is byte-identical between base-revision before-binary and candidate, proving the grpc/stats identifier space is untouched (RG-REQ-004-L11 out of scope; P-TME-03 preserved). Any difference fails the check.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "stats human output captured from before-binary and candidate against the isolated repo-graph store → cmp BYTE-IDENTICAL; the grpc/stats identifier space (RG-REQ-004-L11, out of scope) is untouched.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C13B)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C14",
+      "obligationIds": [
+        "RG-REQ-003-L03",
+        "RG-REQ-002-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::orient::tests::header_renders_indexed_source_tracked_only_split",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "orient_tests.rs::header_renders_indexed_source_tracked_only_split"
+      },
+      "expected": "exit 0; presentation::orient::tests::header_renders_indexed_source_tracked_only_split (orient.rs declares orient_tests.rs as `#[path = \"orient_tests.rs\"] mod tests` — distinct from the sibling orient_density_tests.rs mounted as `mod density_tests` — so the filter path is presentation::orient::tests::*; this exact-function filter selects 1 test) is GREEN — the unit-level proof that the orient header still names its indexed/source/tracked-only inclusion universe (no-behavior-change for RG-REQ-003-L03 and RG-REQ-002-L03); the byte-level file/symbol-total proof is TME-C14B.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::orient::tests::header_renders_indexed_source_tracked_only_split → 1 passed; the orient header still names its indexed/source/tracked-only universe.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C14)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C14B",
+      "obligationIds": [
+        "RG-REQ-003-L03",
+        "RG-REQ-002-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "export RMAP_STATE_ROOT=/private/tmp/TRUST-MODULE-EDGES-1-rg RMAP_SOCKET_PATH=/private/tmp/TRUST-MODULE-EDGES-1-rg/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && BEFORE=/private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap && AFTER=rust/target/release/rmap && \"$BEFORE\" orient > /tmp/tme-orient-before.txt && \"$AFTER\" orient > /tmp/tme-orient-after.txt && grep -i 'files indexed' /tmp/tme-orient-before.txt > /tmp/tme-oh-before.txt && grep -i 'files indexed' /tmp/tme-orient-after.txt > /tmp/tme-oh-after.txt && cmp /tmp/tme-oh-before.txt /tmp/tme-oh-after.txt && \"$BEFORE\" stats --json > /tmp/tme-statsj-before.json && \"$AFTER\" stats --json > /tmp/tme-statsj-after.json && grep -Eo '\\\"indexed_file_count\\\"[[:space:]]*:[[:space:]]*[0-9]+' /tmp/tme-statsj-before.json > /tmp/tme-tf-before.txt && grep -Eo '\\\"indexed_file_count\\\"[[:space:]]*:[[:space:]]*[0-9]+' /tmp/tme-statsj-after.json > /tmp/tme-tf-after.txt && cmp /tmp/tme-tf-before.txt /tmp/tme-tf-after.txt",
+        "cwd": ".",
+        "environment": "candidate rmap at rust/target/release/rmap; before-binary at /private/tmp/TRUST-MODULE-EDGES-1-before/rust/target/release/rmap (git worktree of base revision f8a0e6b, cargo build --release); /private/tmp/TRUST-MODULE-EDGES-1-rg is the isolated repo-graph store copy; operator registry untouched",
+        "inputs": "the isolated repo-graph store copy; the orient 'files indexed' header line and the stats --json indexed_file_count field captured before and after"
+      },
+      "expected": "both cmp invocations exit 0 (each grep must first match — a missing line/field makes grep exit non-zero and fails the chain): the orient 'files indexed' header line and the stats --json indexed_file_count count are byte-identical between base-revision before-binary and candidate, proving the fix changes no file total (no-behavior-change for RG-REQ-003-L03 and RG-REQ-002-L03). The indexed_file_count extraction uses an extended-regex whitespace-tolerant pattern ('\"indexed_file_count\"[[:space:]]*:[[:space:]]*[0-9]+') because graph.rs serializes stats --json with serde_json::to_string_pretty (a space follows the colon: \"indexed_file_count\": <n>), so a compact-form grep would never match the emitted field. Note the full orient body is NOT compared because its reliability caveat wording is an intended section-0 change.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "orient 'files indexed' header (\"repo-graph · 1073 files indexed (1000 source; 73 config/contract/unreadable, tracked only), 17626 symbols …\") before/after cmp BYTE-IDENTICAL; stats --json indexed_file_count (whitespace-tolerant regex) = \"indexed_file_count\": 1073 before/after cmp BYTE-IDENTICAL. No file total changed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C14B)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C15",
+      "obligationIds": [
+        "RG-REQ-012-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --test exit_code_contract",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/",
+        "inputs": "rgr/tests/exit_code_contract.rs"
+      },
+      "expected": "exit 0; exit_code_contract passes — the process exit codes of trust, modules and stats are unchanged (no-behavior-change for RG-REQ-012-L01).",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --test exit_code_contract → 2 passed / 0 failed; process exit codes of trust/modules/stats unchanged (RG-REQ-012-L01 preserved).",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C15)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C16",
+      "obligationIds": [
+        "RG-REQ-001-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --lib count_unresolved_by_classification_groups_correctly",
+        "cwd": "rust",
+        "environment": "cargo workspace under rust/ with the change applied",
+        "inputs": "storage/src/trust_impl.rs::count_unresolved_by_classification_groups_correctly"
+      },
+      "expected": "exit 0; count_unresolved_by_classification_groups_correctly is GREEN — the unit-level proof that unresolved-edge classification grouping is unchanged (no-behavior-change for RG-REQ-001-L03); the stored-row preservation proof is TME-C16B.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-storage --lib count_unresolved_by_classification_groups_correctly → 1 passed; unresolved-edge classification grouping unchanged.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — cargo gates, C16)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C16B",
+      "obligationIds": [
+        "RG-REQ-001-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "inspection",
+        "subject": "the unresolved_edges rows and their per-classification counts in the isolated repo-graph store copy, read once under the base-revision before-binary and once under the candidate binary (compute_module_stats reads resolved IMPORTS only and never reads or writes unresolved_edges)",
+        "criterion": "the total unresolved_edges row count and the per-classification group counts are identical between the before-binary readout and the candidate-binary readout (records /tmp/tme-unresolved-before.txt and /tmp/tme-unresolved-after.txt); any changed total or per-classification count fails the check",
+        "inputs": "the isolated repo-graph store copy; the two unresolved-edge count readouts (before-binary vs candidate)"
+      },
+      "expected": "the inspection finds the unresolved_edges row count and every per-classification count identical before and after — every unresolved reference is preserved and classified exactly as before, since this slice's SQL touches only resolved IMPORTS fan aggregation (no-behavior-change for RG-REQ-001-L03). A differing total or class count fails the check.",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "The copied repo-graph db sha256 a29a1bb79e17022360c78392c0aef495ddfe4b2b26a7df1da9c89358c1635d08 is UNCHANGED after all candidate reads (compute_module_stats reads resolved IMPORTS only, no write). unresolved_edges classification counts: external_library_candidate 17654 / internal_candidate 3967 / unknown 68949 / total 90570. Because the db is byte-identical the readout is binary-independent → RG-REQ-001-L03 preserved.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C16B)"
+        ]
+      }
+    },
+    {
+      "checkId": "TME-C17",
+      "obligationIds": [
+        "RG-REQ-011-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "inspection",
+        "subject": "every built-rmap invocation in the outward proofs and the operator's real state root before and after the run",
+        "criterion": "every built-rmap proof ran under RMAP_STATE_ROOT and RMAP_SOCKET_PATH pointing at throwaway copies with RMAP_AUTO_ENRICH=off and RMAP_AUTO_RETENTION=off; the operator real registry sha256 is byte-identical before and after the whole run; every throwaway root created was deleted",
+        "inputs": "the operator registry file digest captured before and after; the list of throwaway state roots created and removed"
+      },
+      "expected": "the inspection finds every proof ran isolated, the operator real registry sha256 is byte-identical before and after, and no throwaway root was left behind (no-behavior-change for RG-REQ-011-L06).",
+      "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Operator real registry sha256 BEFORE = AFTER = 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c → UNCHANGED. Every rmap invocation ran under RMAP_STATE_ROOT/RMAP_SOCKET_PATH throwaway copies with RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off. All throwaway roots (rg + 4 cross-repo), the before-worktree and the helper script were deleted (`ls /private/tmp/TRUST-MODULE-EDGES-1-*` → no matches; git worktree pruned); the pre-existing m-r2-baseline-worktree, not created by this run, was left untouched.",
+        "supportingEvidence": [
+          ".agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 — outward proofs, C17)"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/storage/src/trust_impl.rs",
+      "obligationIds": [
+        "RG-REQ-009-L02",
+        "RG-REQ-004-L01"
+      ],
+      "summary": "Rewrites TrustStorageRead::compute_module_stats so fan_in/fan_out are computed over the same derived module-dependency edge set modules list/deps render — resolved (static) file→file IMPORTS aggregated through module_file_ownership to the owning module candidate on both endpoints, intra-module pairs excluded (fan_out = COUNT DISTINCT target candidate, fan_in = COUNT DISTINCT source candidate) — dropping the nodes kind='MODULE' join that keyed on the file-less crate-root node (RC-5). Stable-key synthesis and file_count-from-ownership are unchanged; its two named unit tests are rewritten to the file-node/ownership fixture."
+    },
+    {
+      "path": "rust/crates/trust/src/rules.rs",
+      "obligationIds": [
+        "RG-REQ-009-L02",
+        "RG-REQ-002-L02",
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Rewrites the count_suspicious_modules_matches_all_criteria unit test (test-module only) to the true re-sourced behaviour, adding outbound-only and inbound-only fixtures that prove a module carrying any rendered edge in either direction is never flagged zero-connectivity; only a module with no incoming and no outgoing cross-module import (≥2 files, not the repo root) is suspicious."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust.rs",
+      "obligationIds": [
+        "RG-REQ-002-L08",
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Replaces the CONTRADICTION-SWEEP-1 'directory node / fan_in = fan_out = 0 / cross-check stats' basis sentence in render_suspicious_modules — which narrated internal pipeline machinery — with a reader-frame sentence ('no resolved import connects this module to another module in this snapshot … open the module to confirm'), now literally true because the fans read the same edge set modules deps renders."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust_tests.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-009-L02",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "Rewrites the suspicious-modules render test to assert the reader-frame basis is present and the internal-diagnostic wording (fan_in=fan_out=0, directory node, stats pointer) is absent, and renames it from suspicious_modules_state_basis_and_point_at_stats to suspicious_modules_basis_in_reader_frame_no_internal_wording (D-TME-TEST-NAME-1) so the identity matches the rewritten body; the retained-name comment is deleted."
+    },
+    {
+      "path": "rust/crates/rgr/tests/trust_module_edges_seam.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-004-L01",
+        "RG-REQ-009-L02"
+      ],
+      "summary": "New write-first cross-surface seam integration test (trust_module_fans_equal_modules_deps) that makes trust↔modules disagreement unrepresentable: it asserts trust --json modules[].fan_in/fan_out equal modules deps per-module fan counts for every rendered module on the two-crate and twin-names fixtures, so a module with rendered edges can never be listed zero-connectivity."
+    }
+  ],
+  "completedAt": "2026-09-13T20:49:10.380Z",
+  "limitations": [
+    "Honest movement, pre-authorised by D-TME-MOVEMENT-1: the alias_resolution_suspicion downgrade does NOT disappear — it persists wherever ≥3 genuinely zero-connectivity module candidates remain (repo-graph 6, kafka 5, FRAKTAG 3) and clears only where fewer remain (hadoop 2, vcmi 2). The ≥3 threshold in detect_alias_resolution_suspicion cannot distinguish unresolved imports from genuine isolation; recalibrating it is the separate follow-up ALIAS-SUSPICION-1 (out of scope for this slice).",
+    "Verdict LEVEL is unchanged on all five proof repos (Import-graph/Change-impact stay LOW while unresolved imports > 0); only the fan counts, the suspicious-module set, and the reader-frame basis sentence moved.",
+    "Outward proofs were run against isolated COPIES of the retained audit-v0.18.0 stores (the method the checks prescribe), with a base-revision git-worktree before-binary; no operator state was touched (C17)."
+  ],
+  "report": "Cycle 3 of the INPUT-5 admission. The tree was confirmed to be exactly candidate-0.patch + the seam test + the D-TME-TEST-NAME-1 rename: the three non-renamed files (trust.rs, trust_impl.rs, rules.rs) reverse cleanly against candidate-0.patch (byte-identical to the preserved candidate), trust_tests.rs carries the candidate rewrite plus the rename (new name at line 84; old name and retained-name comment absent), and the seam test is byte-identical to the preserved candidate-0-trust_module_edges_seam.rs; git status --porcelain shows exactly the five candidatePaths and git diff --check is clean. SLICE_DOC sha256 is 151a6b29… (matches the INPUT-5 manifest allocation digest). All 22 checks (TME-C01..C17 with the B-suffix variants) were re-executed fresh this cycle and every one PASSED: cargo gates C01–C16 green (C02 storage 676 passed; C03 both the trust rules test and the renamed rgr filter selecting 1 test; C04 agent 0 failures; C07 modules_list 57; C08 trust::tests 37; C09/C10 coherent 15; C11; C12 overlay 11 + dead_command 3; C13; C14; C15 exit_code_contract 2; C16), fmt --check clean; outward proofs on isolated store copies with a base-revision worktree before-binary — C05 human trust shows the 6 genuinely-disconnected candidates with a reader-frame basis and the persisting alias reader lines, C06 has 0 per-module fan mismatches on repo-graph (53/61 connected, 6 suspicious, 129 edges) and on kafka/hadoop/FRAKTAG/vcmi with the alias-downgrade persist/clear pattern of D-TME-MOVEMENT-1, and the preservation proofs C07B/C08B/C13B/C14B/C16B are byte-identical (or db-unchanged) before/after; C17 confirms the operator registry sha256 is unchanged and all throwaway roots were deleted. Full narrative and command-by-command evidence are in .agent-manager/slices/TRUST-MODULE-EDGES-1/build-progress.md (Cycle 3 section). No commit, no install, no stash; no edits outside the five candidatePaths."
+}

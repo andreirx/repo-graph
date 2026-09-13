@@ -1,0 +1,831 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-TRUST-MODULE-EDGES-1-2",
+  "workItemId": "TRUST-MODULE-EDGES-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-5.json",
+    "sha256": "sha256:ec92bce132854a102c5bc02596846b612a5ec7950dc37801f5389e7ca124750d"
+  },
+  "allocation": {
+    "path": "docs/slices/trust-module-edges-1.md",
+    "sha256": "sha256:151a6b29ad5bb5977d34d4f84161c69b4a98a9f94dcfbb3cf48978b89fc5e42e"
+  },
+  "subject": {
+    "candidateSha256": "sha256:181f9af600057ffe09dfe536c0989938fded916b25e998a6ffa2596926a8ef67",
+    "verification": {
+      "path": "docs/assurance/TRUST-MODULE-EDGES-1/verification.json",
+      "sha256": "sha256:2aedf8c75c81ea78010ae4da28af11dc85af238f74749da9df985397fa82f875"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-TRUST-MODULE-EDGES-1-2"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-5.json",
+      "sha256": "sha256:ec92bce132854a102c5bc02596846b612a5ec7950dc37801f5389e7ca124750d"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:fbb99b8cb7349562236bf289e33f9850a8412e1272746ba53d8dc7c9f6894f75",
+        "byteLength": 26976
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-5.json",
+        "sha256": "sha256:ec92bce132854a102c5bc02596846b612a5ec7950dc37801f5389e7ca124750d",
+        "byteLength": 7531
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+        "sha256": "sha256:01cefeaec408d9ee6c4146da15e27791b37088e8190d9c1c6338dbb6fb3ccb99",
+        "byteLength": 14193
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:d33e566fd2b3fcf0fe4484ddf370a904b8f6b82f07eb2e08bf0d5f9f5ea4c9c9",
+        "byteLength": 13956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-003-orientation-surfaces.md",
+        "sha256": "sha256:bf4630448569e9de5b84fa874b44f0476a4656dcbd0e3627e8f2809d33b6bbcb",
+        "byteLength": 13084
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+        "sha256": "sha256:8c3b7d778c9f90116a7929a41c72388f87239a9af310dccc65779a66e1f044de",
+        "byteLength": 15922
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-009-quality-signals-trust-reliability.md",
+        "sha256": "sha256:f19ce69780e0052a7b9880d555da8556e15dffde3030ded5e33bf456a6d4b8d2",
+        "byteLength": 15591
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0a17f977374c92cbaf71c98b4f9b713aae56844d9602bb5ec938b16d2ee83868",
+        "byteLength": 15067
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+        "sha256": "sha256:60598f5c99e45318b24b424c6e5619e4c5d1c21e95530db239dcf6036122eefe",
+        "byteLength": 13094
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/architecture/artifact-contract-model.md",
+        "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332",
+        "byteLength": 13896
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cycle-honesty-1.md",
+        "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe",
+        "byteLength": 6001
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-rust-1.md",
+        "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731",
+        "byteLength": 9053
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/trust-model-rebase-1.md",
+        "sha256": "sha256:de1abefc05f2a6a0c9b59b2be83cb86956375def8217f080568055b8521b9305",
+        "byteLength": 12615
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/dead-causes-1.md",
+        "sha256": "sha256:653fa5e9bc26f3c6e8b4d50e40cf1fe88c9dee05c1532fea86af964aac033d1f",
+        "byteLength": 4288
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/contracts/exit-codes.md",
+        "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429",
+        "byteLength": 3756
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/economy-2.md",
+        "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4",
+        "byteLength": 4956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cursor-roundtrip-1.md",
+        "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be",
+        "byteLength": 2882
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/anchors-everywhere-1.md",
+        "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60",
+        "byteLength": 4803
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553",
+        "byteLength": 2844
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:8b6891834cf3e2bf01539215df1bd5173c9ee66271b64e028de2828094681a72",
+        "byteLength": 7479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-CHANGE-CLASSIFICATION-1.md",
+        "sha256": "sha256:118439f42bfd13429e3397e44f05943a7f505abc55410823814ed7f891a6a5a8",
+        "byteLength": 1113
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-EXTERNAL-ROOT-1.md",
+        "sha256": "sha256:bb1ec681650b9582f57f3415d66e32387f9022b685331995520f74eb4a873189",
+        "byteLength": 1070
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-MOVEMENT-1.md",
+        "sha256": "sha256:d7a87be64e26b2c3c2071b35e41151c574eb1f0b719f35e031f4bd20aaddd96b",
+        "byteLength": 2159
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-VALIDATION-STALE-1.md",
+        "sha256": "sha256:135d5031d50b240d5d6e9cc9ce0859598265c240e775848bdb31b0fa453de133",
+        "byteLength": 2038
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370",
+        "byteLength": 1774
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/trust-module-edges-1.md",
+        "sha256": "sha256:151a6b29ad5bb5977d34d4f84161c69b4a98a9f94dcfbb3cf48978b89fc5e42e",
+        "byteLength": 46375
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/TRUST-MODULE-EDGES-1-INPUT-5/requirements-review.json",
+        "sha256": "sha256:f1b30ae4e5c210c33ee4b0fd46f8632a3eef2f68b45b637c7bb12acb6c98d5c9",
+        "byteLength": 50355
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/TRUST-MODULE-EDGES-1-INPUT-5/baseline-approval.json",
+        "sha256": "sha256:f278b12d9f063aa164fbe0a87b37b8fdb189b7f20c647aa81d845d19d2b9bb10",
+        "byteLength": 2835
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:89587bc371260ae1e38f45ca3a5b0d942a62e477e6ae190ff93e01ae2379d393",
+        "byteLength": 5731
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/TRUST-MODULE-EDGES-1/selection.md",
+        "sha256": "sha256:ab7e3e5531789f5b1a4183ff0ec428381c624742c22035310966da86d4c36225",
+        "byteLength": 11133
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-2",
+        "sha256": "sha256:20d059c3f096619fc2517af0c009f2e715ab29544683c45f244ed08cff1bb537",
+        "byteLength": 17157
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-2",
+        "sha256": "sha256:b4cf8b5ea1ca376ed84728f346635d14c5150a3f14f1f75791cdc3ac37cd4749",
+        "byteLength": 31038
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-2",
+        "sha256": "sha256:33ec4f5c6ab7ae99b7f54b4bb501ea0c1d50e9530e73bcc92a21f3cd022fba21",
+        "byteLength": 2021
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-2",
+        "sha256": "sha256:2aedf8c75c81ea78010ae4da28af11dc85af238f74749da9df985397fa82f875",
+        "byteLength": 56731
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-2",
+        "sha256": "sha256:d715cda187fac66d3305c7be094859cd7358d3038b9c893ea75c056f5ce1fec2",
+        "byteLength": 30047
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:fc5cfb9958038ebc82e21f6fc5b5086b1d4bcd03e5849252c1f7b9ffddc1a28a",
+        "byteLength": 29586
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:fbb99b8cb7349562236bf289e33f9850a8412e1272746ba53d8dc7c9f6894f75",
+        "byteLength": 26976
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:701623471fd49e29fa51b6404411b63ea3c55f74f2a14e87c7c25bdeb4381554",
+        "byteLength": 587926
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-002-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-003-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-TME-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-TME-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-TME-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "TME-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "Independent execution: cargo test -p repo-graph-rgr --test trust_module_edges_seam; 1 passed, 0 failed.",
+          "supportingEvidence": [
+            "reviewer execution in rust/"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "TME-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED complete storage suite relied upon; reviewer inspected the new SQL against get_resolved_imports_for_snapshot and module-edge derivation."
+      }
+    },
+    {
+      "checkId": "TME-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "Independent executions of count_suspicious_modules_matches_all_criteria and suspicious_modules_basis_in_reader_frame_no_internal_wording each passed.",
+          "supportingEvidence": [
+            "reviewer executions in rust/"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "TME-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED agent-crate suite relied upon; changed trust storage contract and downstream presentation path were inspected."
+      }
+    },
+    {
+      "checkId": "TME-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated retained-store proof relied upon; reviewer inspected the corrected oracle and implementation."
+      }
+    },
+    {
+      "checkId": "TME-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED five-store comparison relied upon; reviewer independently reproduced the fixture seam and inspected both derivations."
+      }
+    },
+    {
+      "checkId": "TME-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED modules presentation suite relied upon; the changed query does not alter the modules query path."
+      }
+    },
+    {
+      "checkId": "TME-C07B",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated before/after byte comparisons relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED trust presentation suite relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C08B",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED corrected-oracle before/after comparison relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED envelope and headline tests relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED root-posture invariant relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED render test relied upon; reviewer inspected the reader-frame replacement text."
+      }
+    },
+    {
+      "checkId": "TME-C12",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED overlay and dead-command suites relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C13",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED orient and storage preservation tests relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C13B",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED stats byte comparison relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C14",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED orient-header test relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C14B",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED corrected-oracle file-universe comparison relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C15",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED exit-code contract suite relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C16",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED unresolved-edge classification test relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C16B",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated store hash and unresolved-count comparison relied upon."
+      }
+    },
+    {
+      "checkId": "TME-C17",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED registry-digest and cleanup evidence relied upon."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/storage/src/trust_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/trust/src/rules.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/tests/trust_module_edges_seam.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-13T20:51:20.596Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate."
+}

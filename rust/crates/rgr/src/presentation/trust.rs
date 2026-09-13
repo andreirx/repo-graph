@@ -635,17 +635,16 @@ fn render_suspicious_modules(v: &CoherentTrustReport) -> String {
         &v.modules,
         "snapshot-scoped extraction",
     );
-    // CONTRADICTION-SWEEP-1 §3: state the basis inline so this never reads as a
-    // contradiction of `stats`. "Zero connectivity" here = zero RESOLVED
-    // module-to-module import edges attributed to THIS module's directory node
-    // (fan_in = fan_out = 0). A finer-grained CHILD module (e.g. a subdirectory)
-    // can still carry connectivity that `stats` reports against its own node — so
-    // the two surfaces are consistent at different granularity, not in conflict.
-    // Computation is UNCHANGED (this slice aligns wording, not math).
+    // TRUST-MODULE-EDGES-1 (RG-REQ-009-L02 / RG-REQ-002-L08): the fan counts now come
+    // from the same module-dependency edge set `modules list`/`modules deps` render, so
+    // this list means exactly what it says — no resolved import connects the module to
+    // any other module in this snapshot. The basis is stated in the reader's frame (their
+    // code), not our pipeline: the old sentence narrated internal machinery ("directory
+    // node", "fan_in = fan_out = 0", "cross-check `stats`") which RG-REQ-002-L08 forbids.
     out.push_str(
-        "  basis: no resolved module-to-module import edges attach to this module's \
-         directory node (fan_in = fan_out = 0); a finer-grained child module may still \
-         be connected — cross-check per-module fan_in/fan_out in `stats`.\n",
+        "  basis: no resolved import connects this module to another module in this \
+         snapshot (no incoming and no outgoing cross-module imports); open the module \
+         to confirm whether that is expected.\n",
     );
     for m in suspicious.iter().take(10) {
         out.push_str(&bullet(&m.qualified_name));

@@ -81,10 +81,14 @@ fn report() -> TrustReport {
 }
 
 #[test]
-fn suspicious_modules_state_basis_and_point_at_stats() {
-    // CONTRADICTION-SWEEP-1 §3: the zero-connectivity suspicion must state its
-    // basis inline and reconcile with `stats` (different granularity, not a
-    // contradiction). Computation is untouched — this asserts RENDERING only.
+fn suspicious_modules_basis_in_reader_frame_no_internal_wording() {
+    // TRUST-MODULE-EDGES-1 (RG-REQ-009-L02 / RG-REQ-009-L04 / RG-REQ-002-L08): the
+    // zero-connectivity fans now come from the SAME edge set `modules list`/`modules
+    // deps` render, so a flagged module genuinely has no cross-module import in either
+    // direction. The rendered basis is stated in the reader's frame — it must NOT narrate
+    // internal pipeline machinery: the old "directory node", "fan_in = fan_out = 0" and
+    // "cross-check `stats`" wording is gone (it named the wrong identity and leaked our
+    // pipeline).
     let mut r = report();
     r.modules = vec![ModuleTrustRow {
         module_stable_key: "repo:include:MODULE".into(),
@@ -102,14 +106,23 @@ fn suspicious_modules_state_basis_and_point_at_stats() {
     );
     // The flagged module is named.
     assert!(out.contains("include"), "module named:\n{out}");
-    // The basis is stated inline and reconciles with stats.
+    // The basis is stated in the reader's frame (their code), not our pipeline.
     assert!(
-        out.contains("fan_in = fan_out = 0"),
-        "states the basis inline:\n{out}"
+        out.contains("no resolved import connects this module to another module"),
+        "states the reader-frame basis:\n{out}"
+    );
+    // The old internal-diagnostic wording is gone (RG-REQ-002-L08 reader frame).
+    assert!(
+        !out.contains("fan_in = fan_out = 0"),
+        "internal fan wording must not leak to the reader:\n{out}"
     );
     assert!(
-        out.contains("`stats`"),
-        "points at stats for finer-grained connectivity:\n{out}"
+        !out.contains("directory node"),
+        "internal 'directory node' wording must not leak to the reader:\n{out}"
+    );
+    assert!(
+        !out.contains("`stats`"),
+        "the false cross-check-stats pointer must be gone:\n{out}"
     );
 }
 
