@@ -1,0 +1,69 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TRUST-MODULE-EDGES-1-BASELINE-APPROVAL-5",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-5.json",
+    "sha256": "sha256:ec92bce132854a102c5bc02596846b612a5ec7950dc37801f5389e7ca124750d"
+  },
+  "review": {
+    "path": "docs/assurance/TRUST-MODULE-EDGES-1-INPUT-5/requirements-review.json",
+    "sha256": "sha256:f1b30ae4e5c210c33ee4b0fd46f8632a3eef2f68b45b637c7bb12acb6c98d5c9"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-CHANGE-CLASSIFICATION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-CHANGE-CLASSIFICATION-1.md",
+        "sha256": "sha256:118439f42bfd13429e3397e44f05943a7f505abc55410823814ed7f891a6a5a8"
+      }
+    },
+    {
+      "id": "D-TME-EXTERNAL-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-EXTERNAL-ROOT-1.md",
+        "sha256": "sha256:bb1ec681650b9582f57f3415d66e32387f9022b685331995520f74eb4a873189"
+      }
+    },
+    {
+      "id": "D-TME-MOVEMENT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-MOVEMENT-1.md",
+        "sha256": "sha256:d7a87be64e26b2c3c2071b35e41151c574eb1f0b719f35e031f4bd20aaddd96b"
+      }
+    },
+    {
+      "id": "D-TME-VALIDATION-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-VALIDATION-STALE-1.md",
+        "sha256": "sha256:135d5031d50b240d5d6e9cc9ce0859598265c240e775848bdb31b0fa453de133"
+      }
+    },
+    {
+      "id": "D-TME-TEST-NAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-13T20:01:46.291Z",
+  "rationale": "Operator approves the TRUST-MODULE-EDGES-1 allocation INPUT-5: the render test rewritten by the slice is renamed suspicious_modules_basis_in_reader_frame_no_internal_wording (its old name asserted the opposite of its body) and TME-C03's exact filter and section 2 item 2 name the new identity (D-TME-TEST-NAME-1 = A, operator decision, human may override). Content otherwise identical to the approved INPUT-4. Codex gpt-5.6-terra structured review accepted 26/26 with no findings at PREP-5 cycle 1. Under the human's 2026-09-13 instruction."
+}

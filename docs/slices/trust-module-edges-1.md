@@ -3,7 +3,7 @@
   "formatVersion": 1,
   "kind": "implementation-allocation",
   "workItemId": "TRUST-MODULE-EDGES-1",
-  "baselinePath": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-4.json",
+  "baselinePath": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-5.json",
   "parentRequirementIds": [
     "RG-REQ-001",
     "RG-REQ-002",
@@ -77,8 +77,8 @@
       "checkId": "TME-C03",
       "obligationIds": ["RG-REQ-009-L04", "RG-REQ-009-L02"],
       "owner": "builder",
-      "method": { "kind": "command", "command": "cargo test -p repo-graph-trust --lib count_suspicious_modules_matches_all_criteria && cargo test -p repo-graph-rgr --lib presentation::trust::tests::suspicious_modules_state_basis_and_point_at_stats", "cwd": "rust", "environment": "cargo workspace under rust/ with the two defect-pinning tests rewritten", "inputs": "trust/src/rules.rs::count_suspicious_modules_matches_all_criteria (a repo-graph-trust crate lib test, NOT under presentation::trust::tests) and rgr/src/presentation/trust_tests.rs::suspicious_modules_state_basis_and_point_at_stats, rewritten to the true behaviour" },
-      "expected": "exit 0 requires BOTH invocations GREEN (the && fails on either). The first runs count_suspicious_modules_matches_all_criteria in the repo-graph-trust crate as its own invocation (a trailing `presentation::trust::tests` filter would exclude it, since it lives in rules.rs, not that rgr module) and asserts a module with rendered edges is never flagged suspicious_zero_connectivity. The second runs suspicious_modules_state_basis_and_point_at_stats (trust.rs declares trust_tests.rs as `#[path = \"trust_tests.rs\"] mod tests`, so its filter path is presentation::trust::tests::*; this exact-function filter selects 1 test), rewritten so the false 'cross-check stats' basis sentence is replaced by a true one or removed. The live alias_resolution_suspicion behaviour (the downgrade persists where >= 3 genuinely zero-connectivity candidates remain, per D-TME-MOVEMENT-1) is asserted by TME-C05/TME-C06, not by this unit check. Either test failing fails the check."
+      "method": { "kind": "command", "command": "cargo test -p repo-graph-trust --lib count_suspicious_modules_matches_all_criteria && cargo test -p repo-graph-rgr --lib presentation::trust::tests::suspicious_modules_basis_in_reader_frame_no_internal_wording", "cwd": "rust", "environment": "cargo workspace under rust/ with the two defect-pinning tests rewritten", "inputs": "trust/src/rules.rs::count_suspicious_modules_matches_all_criteria (a repo-graph-trust crate lib test, NOT under presentation::trust::tests) and rgr/src/presentation/trust_tests.rs::suspicious_modules_basis_in_reader_frame_no_internal_wording, rewritten to the true behaviour" },
+      "expected": "exit 0 requires BOTH invocations GREEN (the && fails on either). The first runs count_suspicious_modules_matches_all_criteria in the repo-graph-trust crate as its own invocation (a trailing `presentation::trust::tests` filter would exclude it, since it lives in rules.rs, not that rgr module) and asserts a module with rendered edges is never flagged suspicious_zero_connectivity. The second runs suspicious_modules_basis_in_reader_frame_no_internal_wording (renamed from suspicious_modules_state_basis_and_point_at_stats per D-TME-TEST-NAME-1, because the rewritten assertions are the opposite of the old name; trust.rs declares trust_tests.rs as `#[path = \"trust_tests.rs\"] mod tests`, so its filter path is presentation::trust::tests::*; this exact-function filter selects 1 test), rewritten so the false 'cross-check stats' basis sentence is replaced by a true one or removed. The live alias_resolution_suspicion behaviour (the downgrade persists where >= 3 genuinely zero-connectivity candidates remain, per D-TME-MOVEMENT-1) is asserted by TME-C05/TME-C06, not by this unit check. Either test failing fails the check."
     },
     {
       "checkId": "TME-C04",
@@ -237,7 +237,7 @@ Status: SPECIFIED (2026-09-12) · Track: audit round six, Q2 (CRITICAL; REGRESSI
 ## 2. Contract
 
 1. **One edge computation.** `compute_module_stats` computes fan_in = COUNT(DISTINCT source module candidate) and fan_out = COUNT(DISTINCT target module candidate) over resolved file→file IMPORTS edges whose endpoints are attributed through `module_file_ownership` to different module candidates — the same set `derive_module_dependency_edges` renders — and drops the `nodes kind='MODULE'` join. A prefix-`LIKE` bridge is REJECTED (double-counts nested candidates; wrong population). `file_count` stays from ownership.
-2. **The seam.** A test asserts, on the two-crate fixture and on the twin-names fixture, that `trust --json modules[].fan_in/fan_out` equal `modules deps`' per-module counts; `rules.rs::count_suspicious_modules_matches_all_criteria` and `trust_tests.rs::suspicious_modules_state_basis_and_point_at_stats` are rewritten to the true behaviour (a module with rendered edges is never suspicious); the "cross-check stats" basis sentence is replaced by a true one or removed.
+2. **The seam.** A test asserts, on the two-crate fixture and on the twin-names fixture, that `trust --json modules[].fan_in/fan_out` equal `modules deps`' per-module counts; `rules.rs::count_suspicious_modules_matches_all_criteria` and `trust_tests.rs::suspicious_modules_basis_in_reader_frame_no_internal_wording` are rewritten to the true behaviour (a module with rendered edges is never suspicious); the "cross-check stats" basis sentence is replaced by a true one or removed.
 3. **Honest verdict movement.** The packet pre-states: Import-graph stays LOW wherever `unresolved_imports_count > 0`; the `alias_resolution_suspicion` reason persists where >= 3 genuinely zero-connectivity candidates remain (repo-graph 6, kafka 5, FRAKTAG 3) and clears where fewer remain (hadoop 2, vcmi 2) — D-TME-MOVEMENT-1. A repo with zero unresolved imports may go HIGH — say so if observed, never claim it otherwise.
 4. **Outward proof on repo-graph (isolated copy of the retained store or an isolated index; `RMAP_TRANSPORT=stdio`):** `trust`'s "Suspicious Modules (zero connectivity)" section lists exactly the 6 genuinely-disconnected candidates named in §0 — no crate that `modules deps` renders an edge for appears (down from 48); `trust --json modules[]` fans match `modules deps` per module (`rust/crates/agent` connected: fan_out ≥ 1, fan_in ≥ 2 from daemon-runtime/storage); the Import-graph and Change-impact lines read exactly as §0 Changes (the `alias_resolution_suspicion` downgrade persists because 6 ≥ 3); the store assertion rows-with-fan>0 = 53 of 61. Cross-repo, on copies of kafka, hadoop, FRAKTAG, vcmi: rows-with-fan>0 = kafka 60/65, hadoop 6/9, FRAKTAG 0/4 (genuinely zero cross-module resolved imports — 0 is the true value), vcmi 13/16; the alias downgrade persists on kafka and FRAKTAG (≥ 3 genuinely-disconnected) and clears on hadoop and vcmi (2 each, below the ≥ 3 threshold).
 
@@ -282,7 +282,7 @@ Frozen: module identity computation (MODULES-IDENTITY-2), `module-graph-contract
 
 CORPUS PATHS: repo-graph is THIS repo; kafka, hadoop at ../legacy-codebases/<name>; FRAKTAG at ../FRAKTAG; retained stores under ~/repo-graph-retained/audit-v0.18.0 (copies only).
 
-## Allocation amendment for INPUT-4 (2026-09-13)
+## Allocation amendments for INPUT-4 and INPUT-5 (2026-09-13)
 
 Text-only corrections to validation oracles; no change to the allocation sets, the checks' intent, or the ratified behaviour:
 
@@ -290,3 +290,5 @@ Text-only corrections to validation oracles; no change to the allocation sets, t
 2. TME-C08B grep token `calls resolved` -> `calls [0-9]+% resolved` (and the prose naming that line reads "calls N% resolved") — the trust line reads "your code's calls N% resolved (…)" (D-TME-VALIDATION-STALE-1).
 3. TME-C14B token `total_files` -> `indexed_file_count` — the field that exists in `stats --json` (D-TME-VALIDATION-STALE-1).
 4. The >= 3 alias heuristic remains out of scope: follow-up ALIAS-SUSPICION-1 (RC-11).
+
+INPUT-5 (D-TME-TEST-NAME-1): the render test rewritten by this slice is renamed `suspicious_modules_state_basis_and_point_at_stats` -> `suspicious_modules_basis_in_reader_frame_no_internal_wording`; TME-C03's exact filter and §2 item 2 name the new identity. Text-only; no behaviour change.
