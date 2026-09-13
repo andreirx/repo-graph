@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TRUST-MODULE-EDGES-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TRUST-MODULE-EDGES-1-INPUT-3.json",
+    "sha256": "sha256:36a84dbc008c66c1db29810b4c1c8300bccd0e36555d4bce46b58ea35f033ff0"
+  },
+  "review": {
+    "path": "docs/assurance/TRUST-MODULE-EDGES-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:0d9d860e84480143b1ad08ab5dca1d12ddb87aeb7e7eccb63d107aa0753aa823"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-CHANGE-CLASSIFICATION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-CHANGE-CLASSIFICATION-1.md",
+        "sha256": "sha256:118439f42bfd13429e3397e44f05943a7f505abc55410823814ed7f891a6a5a8"
+      }
+    },
+    {
+      "id": "D-TME-EXTERNAL-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-EXTERNAL-ROOT-1.md",
+        "sha256": "sha256:bb1ec681650b9582f57f3415d66e32387f9022b685331995520f74eb4a873189"
+      }
+    },
+    {
+      "id": "D-TME-MOVEMENT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-MOVEMENT-1.md",
+        "sha256": "sha256:d7a87be64e26b2c3c2071b35e41151c574eb1f0b719f35e031f4bd20aaddd96b"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-13T18:17:43.856Z",
+  "rationale": "Operator approves the corrected TRUST-MODULE-EDGES-1 allocation (INPUT-3: section 0/2.4/6 and TME-C05/C06 restated to the measured movement ratified by the human as D-TME-MOVEMENT-1 = A; content otherwise identical to the approved INPUT-2); Codex gpt-5.6-terra structured review accepted 26/26 at PREP-3 cycle 3 after a cycle-2 consistency finding (F-TME-001: TME-C03 expected prose + section 2 item 3 still cross-reference the superseded 'no alias reason' wording). Known and carried, not hidden: that prose cross-reference remains stale in this approved revision; TME-C03's binding oracle is two cargo tests unaffected by it and the live alias-reason assertions are TME-C05/C06; the wording is corrected in the closeout amendment after implementation acceptance so the bound allocation digest is not disturbed mid-implementation. Under the human's 2026-09-13 instruction."
+}
