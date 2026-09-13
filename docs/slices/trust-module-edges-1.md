@@ -10,7 +10,7 @@ Status: SPECIFIED (2026-09-12) · Track: audit round six, Q2 (CRITICAL; REGRESSI
 
 **Explicitly NOT in scope (separate obligation RG-REQ-004-L11):** `stats`' module rows (`queries.rs::compute_module_stats`, the directory-node population) and the grpc table/edge-list identifier space. Module IDENTITY does not change (MODULES-IDENTITY-2 §3); only the source of the fan counts.
 
-**Preserves (§3):** RG-REQ-004-L02/L03/L04/L09 (modules list/deps unchanged), RG-REQ-009-L03/L06/L07 (the other trust computations), RG-REQ-002-L08 (reader-frame labels), RG-REQ-003-L03 (file universe), D-T6 JSON semantics, the envelope invariants, `dead`'s overlay, exit codes.
+**Preserves (§3):** RG-REQ-004-L02/L03/L04/L09/L10 (modules list/deps unchanged), RG-REQ-009-L03/L06/L07 (the other trust computations), RG-REQ-002-L08 (reader-frame labels), RG-REQ-003-L03 (file universe), RG-REQ-001-L03 (unresolved rows untouched), RG-REQ-012-L01 (exit codes), RG-REQ-011-L06 (isolation), D-T6 JSON semantics, the envelope invariants of RG-REQ-009-L04 other than the downgrade-reason lines this slice changes, `dead`'s overlay. RG-REQ-009-L04 is IMPLEMENTED (its reason lines move), not preserved.
 
 ## 1. Problem (ROOT-CAUSED — RC-5, measured on the retained stores)
 

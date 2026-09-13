@@ -7,7 +7,9 @@
     { "kind": "document-section", "path": "docs/VISION.md", "fragment": "the-core" },
     { "kind": "document-section", "path": "docs/VISION.md", "fragment": "operational-architecture" },
     { "kind": "document-section", "path": "docs/VISION.md", "fragment": "honesty-rules" },
-    { "kind": "document-section", "path": "docs/contracts/exit-codes.md", "fragment": "non-verdict-commands" }
+    { "kind": "document-section", "path": "docs/contracts/exit-codes.md", "fragment": "non-verdict-commands" },
+    { "kind": "document-section", "path": "docs/cli/rmap-contracts.md", "fragment": "command-specific-contracts" },
+    { "kind": "document-section", "path": "docs/cli/rmap-contracts.md", "fragment": "output-format" }
   ],
   "lowLevelRequirements": [
     { "id": "RG-REQ-015-L01", "parentId": "RG-REQ-015" },
@@ -121,7 +123,7 @@ Enrichment shall run after every completed index/refresh when the language's res
 
 **Verification criterion:** `daemon-runtime/tests/enrich_lifecycle.rs` (auto trigger, supersede, absent toolchain skip, opt-out, yield, explicit index preempts, cwd-resolved manual enrich, mixed context, python-dominant skip naming); `enrich_in_flight_coherence.rs`; `doctor/daemon_info.rs::enrichment_probe_*` (12 tests incl. the promotion funnel and the toolchain skip).
 
-**Evidence (v0.18.0):** OBSERVED MET (ENRICH-LIFECYCLE-1, ENRICH-ROOT-1, ENRICH-YIELD-1/2/3, ORIENT-SMALL-ENRICH-1). Doc drift: `docs/cli/rmap-contracts.md` still shows the positional `enrich <db_path> <repo_uid>` form.
+**Evidence (v0.18.0):** PARTIALLY MET — the lifecycle, skips, opt-out, yielding and the funnel's presence in `doctor` hold (ENRICH-LIFECYCLE-1, ENRICH-ROOT-1, ENRICH-YIELD-1/2/3, ORIENT-SMALL-ENRICH-1); the funnel's READER-FRAME vocabulary is not shipped (FUNNEL-VOCAB-1 is an open tail), so the "in the reader's language" clause is NOT MET. Doc drift: `docs/cli/rmap-contracts.md` still shows the positional `enrich <db_path> <repo_uid>` form.
 
 ### RG-REQ-015-L11 — `perf` is the deliberate heavy probe, kept off the readiness path
 

@@ -125,9 +125,9 @@ Enrichment and retention shall run after an index/refresh by default, register i
 
 **Evidence (v0.18.0):** PARTIALLY MET — the toggles and skips hold; the always-rendered retention standing is NOT MET (DAEMON-RESIDUALS-2B's fields were DORMANT on both the audit root and production — the deep-vertical rule). Preservation: a chained pass must not hold the store across resolver work (ENRICH-GUARD-1 filed).
 
-### RG-REQ-011-L11 — Warm answers have a measured latency floor
+### RG-REQ-011-L11 — PROPOSED: warm answers have a measured latency floor
 
-A warm `orient` (daemon resident, snapshot loaded) on a repository of the smoke corpus shall complete within a ratified bound, measured per release on the smoke corpus and published with the audit; a cold first answer may exceed it and shall say so. The bound is TO BE RATIFIED by the human — data points: django `stats` 760,594 ms → 2,981 ms after RMAPD-PERF-1; 9.8 s cold first `orient` on a 100k-node snapshot; the 300 s client read window is a symptom threshold, not a target.
+STATUS: PROPOSED — no bound is ratified and no benchmark gate exists; this L becomes an obligation only when the human ratifies a bound with its measurement basis (machine, corpus, sample count, percentile, cache state). A warm `orient` (daemon resident, snapshot loaded) on a repository of the smoke corpus shall complete within a ratified bound, measured per release on the smoke corpus and published with the audit; a cold first answer may exceed it and shall say so. The bound is TO BE RATIFIED by the human — data points: django `stats` 760,594 ms → 2,981 ms after RMAPD-PERF-1; 9.8 s cold first `orient` on a 100k-node snapshot; the 300 s client read window is a symptom threshold, not a target.
 
 **Verification criterion:** NO EXISTING VERIFICATION — no benchmark gate asserts a latency floor (the only gate is `retention_prune_benchmark_gate`). A per-release latency table is the smallest acceptable proof.
 

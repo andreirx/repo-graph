@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-1.json",
+    "sha256": "sha256:0028a7bbd5861f72f968d06f01f371e8c1d3d1a145372193d3237ab4aef51091"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-1/requirements-review.json",
+    "sha256": "sha256:eeeefef130b3725fc79294b9729e820b64bc5a8c298083ca5d122096aa6c3912"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-13T13:42:05.000Z",
+  "rationale": "Operator approves this exact reviewed baseline as the input for ONE requirements-grounded slice (TRUST-MODULE-EDGES-1) under the human's 2026-09-13 instruction to run one of the proposed fix slices under the new agent-manager setup; three independent review passes (REFINE, REFINE, ACCEPT) are recorded; the catalog's PROPOSED Ls remain open decisions not needed by this slice."
+}

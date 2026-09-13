@@ -37,7 +37,7 @@ Sources: [VISION — Value Frontier](../VISION.md#value-frontier) item 1 (module
 
 ## High-level requirement
 
-An agent asking `rmap modules list|deps|files` and `rmap cycles` shall receive the repository's modules with the method that produced them (declared per manifest family, or inferred from directories and said so), the files each owns with a reconciled total, the module dependency edges derived only from resolved file-to-file imports with every unresolved import counted, and the strongly connected components as sets with their size and runtime classification — with one module identity and one edge computation behind `modules`, `cycles`, `stats` and `trust`.
+An agent asking `rmap modules list|deps|files` and `rmap cycles` shall receive the repository's modules with the method that produced them (declared per manifest family, or inferred from directories and said so), the files each owns with a reconciled total, the module dependency edges derived only from resolved file-to-file imports with every unresolved import counted, and the strongly connected components as sets with their size and runtime classification — with one edge computation behind `modules` and `trust` (L01) and one identifier space across `modules list`, its edge list, `cycles` and `stats` (L11, a separate obligation).
 
 **Scope:** Layer 1–2 module model and its surfaces. Import resolution itself is RG-REQ-006; the trust consumer is RG-REQ-009-L02.
 

@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-3",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-1.json",
+    "sha256": "sha256:0028a7bbd5861f72f968d06f01f371e8c1d3d1a145372193d3237ab4aef51091"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-1"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-3"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-13T13:42:05.000Z",
+  "report": "VERDICT: ACCEPT\n1. RESOLVED \u2014 docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:11-12; docs/requirements/baselines/RG-BOOTSTRAP-INPUT-1.json:83-86\n2. RESOLVED \u2014 docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:126\n3. RESOLVED \u2014 docs/requirements/rg-req-004-module-model-and-cycles.md:40,48-54,128-134\n4. RESOLVED \u2014 docs/requirements/README.md:57\n5. RESOLVED \u2014 docs/slices/trust-module-edges-1.md:7,13\n6. RESOLVED \u2014 docs/requirements/rg-req-011-daemon-and-store-lifecycle.md:128-134\nDIGEST CHECK: MATCH \u2014 15/15 requirement-file SHA-256 digests match the manifest.\nALLOCATION: CONSISTENT \u2014 Implements and Preserves classifications align with their stated L obligations.\nREMAINING HUMAN DECISIONS: RG-REQ-011-L11, RG-REQ-008-L01, RG-REQ-006-L11, RG-REQ-010-L10, RG-REQ-010-L11\n\n[Manual-bootstrap note by the recorder: this is the third pass. Pass 1 (2026-09-12, REFINE) is docs/requirements/reviews/2026-09-12-requirements-review-0-terra.txt; pass 2 (2026-09-13, REFINE) is docs/requirements/reviews/2026-09-13-requirements-review-1-terra.txt; every finding of both passes is applied in the bytes this manifest binds. All three passes were separate standalone `codex exec --sandbox read-only` invocations of gpt-5.6-terra; the author of the requirement files was the in-place manager session (claude-fable-5-1), a different provider. Stage 1 validates this record's structure, not its semantics.]\n"
+}

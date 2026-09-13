@@ -1,0 +1,10 @@
+VERDICT: ACCEPT
+1. RESOLVED — docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:11-12; docs/requirements/baselines/RG-BOOTSTRAP-INPUT-1.json:83-86
+2. RESOLVED — docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:126
+3. RESOLVED — docs/requirements/rg-req-004-module-model-and-cycles.md:40,48-54,128-134
+4. RESOLVED — docs/requirements/README.md:57
+5. RESOLVED — docs/slices/trust-module-edges-1.md:7,13
+6. RESOLVED — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md:128-134
+DIGEST CHECK: MATCH — 15/15 requirement-file SHA-256 digests match the manifest.
+ALLOCATION: CONSISTENT — Implements and Preserves classifications align with their stated L obligations.
+REMAINING HUMAN DECISIONS: RG-REQ-011-L11, RG-REQ-008-L01, RG-REQ-006-L11, RG-REQ-010-L10, RG-REQ-010-L11

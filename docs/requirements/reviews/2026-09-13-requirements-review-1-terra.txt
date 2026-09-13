@@ -1,0 +1,34 @@
+VERDICT: REFINE
+FIRST-REVIEW FINDINGS
+RG-REQ-004-L01 — RESOLVED — docs/requirements/rg-req-004-module-model-and-cycles.md:48-54,128-134 — stats/grpc identity is separated into L11.
+RG-REQ-005-L01 — RESOLVED — docs/requirements/rg-req-005-symbol-relationship-discovery.md:47-53 — fixture receiver is `A*`, the other class.
+RG-REQ-005-L02 — RESOLVED — docs/requirements/rg-req-005-symbol-relationship-discovery.md:55-61 — enclosing-type preference is receiverless/explicit-this only.
+RG-REQ-006-L03 — RESOLVED — docs/requirements/rg-req-006-import-resolution-and-dependencies.md:65-71,129-135 — roots and suffix fallback are separate.
+RG-REQ-008-L01 — RESOLVED — docs/requirements/rg-req-008-documentation-inventory.md:46-52 — explicitly PROPOSED.
+RG-REQ-009-L01 — RESOLVED — docs/requirements/rg-req-009-quality-signals-trust-reliability.md:48-54 — repository-declared exclusion is explicitly outside the L.
+RG-REQ-010-L10 — RESOLVED — docs/requirements/rg-req-010-semantic-seeding.md:118-124 — explicitly PROPOSED.
+RG-REQ-001-L03 — RESOLVED — docs/requirements/rg-req-001-deterministic-extraction-and-identity.md:62-68 — PARTIALLY MET, with wrong binding identified as violation.
+RG-REQ-002-L04 — RESOLVED — docs/requirements/rg-req-002-honesty-about-certainty.md:72-78 — NOT MET pending automated enforcement.
+RG-REQ-008-L02 — RESOLVED — docs/requirements/rg-req-008-documentation-inventory.md:54-60 — PARTIALLY MET.
+RG-REQ-011-L02 — RESOLVED — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md:56-62 — PARTIALLY MET.
+RG-REQ-011-L10 — RESOLVED — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md:120-126 — PARTIALLY MET.
+RG-REQ-011-L11 — NOT RESOLVED — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md:128-134 — no ratified bound or benchmark gate exists.
+RG-REQ-012-L06 — RESOLVED — docs/requirements/rg-req-012-cli-protocol-surface.md:88-94 — UNKNOWN.
+RG-REQ-013-L06 — RESOLVED — docs/requirements/rg-req-013-governance-and-enforcement.md:82-88 — UNKNOWN.
+imports CLI outcome — RESOLVED — docs/requirements/rg-req-006-import-resolution-and-dependencies.md:137-143.
+contracts/map/enrich/perf coverage — RESOLVED — docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:46-132.
+cross-module concern hints — RESOLVED — docs/requirements/rg-req-010-semantic-seeding.md:126-132.
+RG-REQ-015-L01 — verification — `rg` found 11 cited test names under rust/crates; name existence only, no execution.
+RG-REQ-015-L08 — traceability — its stated CLI contract source is absent from metadata and the baseline dependency list: docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:6-11,34,102-106; docs/requirements/baselines/RG-BOOTSTRAP-INPUT-1.json:71-233.
+RG-REQ-015-L10 — consistency — reader-frame funnel behaviour is claimed MET, but its preservation list says the funnel vocabulary is unshipped: docs/requirements/rg-req-015-indexing-maps-contracts-enrichment.md:118-124,140.
+NEW INCONSISTENCY
+RG-REQ-004 high-level still requires one identity/edge computation behind stats, while L01 excludes stats and L11 makes it separate: docs/requirements/rg-req-004-module-model-and-cycles.md:40,48-54,128-134.
+README still routes the removed repository-declared exclusion as an RG-REQ-009-L01 human decision although L01 excludes it: docs/requirements/README.md:57; docs/requirements/rg-req-009-quality-signals-trust-reliability.md:50.
+TRUST-MODULE-EDGES-1 ALLOCATION: INCONSISTENT — implemented Ls match their current text, but §0 says its Preserves set is §3 while omitting §3’s RG-REQ-004-L10 and RG-REQ-011-L06; RG-REQ-009-L04 is simultaneously Implements and preserved: docs/slices/trust-module-edges-1.md:7-13,28-39.
+DECISIONS STILL NEEDING THE HUMAN
+RG-REQ-006-L11
+RG-REQ-008-L01
+RG-REQ-009-L01
+RG-REQ-010-L10
+RG-REQ-010-L11
+RG-REQ-011-L11
