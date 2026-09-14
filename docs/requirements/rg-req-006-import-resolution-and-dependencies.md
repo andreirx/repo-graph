@@ -126,13 +126,15 @@ Attributed ecosystems render; a secondary material one is named with its manifes
 
 **Evidence (v0.18.0):** OBSERVED MET for Maven and provenance; FAILS on gstreamer (L09) and leaks on django (L08).
 
-### RG-REQ-006-L11 — PROPOSED: a unique multi-segment path-suffix fallback for includes no root resolves
+### RG-REQ-006-L11 — A unique multi-segment path-suffix fallback for includes no root resolves
+
+STATUS: RATIFIED 2026-09-14 (human, option A): adopted for specifiers of two or more path segments, unique match only; a non-unique match stays unresolved; single-segment names never guess. Its own slice, separate from CPP-INCLUDE-ROOTS-1.
 
 Where no include root resolves a ≥2-segment specifier, a UNIQUE path-suffix match over the indexed file list shall resolve it (the `build_java_suffix_index` shape); a non-unique match stays unresolved; single-segment specifiers are never suffix-matched. STATUS: PROPOSED — a separately decidable increment (Q3 increment 2) awaiting human ratification; not a baseline obligation until ratified.
 
 **Verification criterion:** a resolver test that a unique 2-segment suffix resolves and a duplicated one stays unresolved; `no_suffix_guessing` stays green for single segments; field: gstreamer unresolved 22,392 → ~12,600 with cross-module edges; vcmi +300; duckdb +1,618; nothing that resolves today changes.
 
-**Evidence (v0.18.0):** NOT MET / PROPOSED — RC-10's measured second cause (meson subprojects, headers never under `include/`).
+**Evidence (v0.18.0):** NOT MET — RC-10's measured second cause (meson subprojects, headers never under `include/`).
 
 ### RG-REQ-006-L12 — `rmap imports <file>` shows the file's imports as resolved rows and classified unresolved rows
 

@@ -43,9 +43,9 @@ An agent asking `rmap docs list` shall receive the repository's documentation as
 
 ## Low-level requirements
 
-### RG-REQ-008-L01 — PROPOSED: discovery scope is one stem list × one extension list × one doc-tree rule
+### RG-REQ-008-L01 — Discovery scope is one stem list × one extension list × one doc-tree rule
 
-STATUS: PROPOSED scope rule — it unfreezes DOCS-LIST-2 §3's discovery freeze on the strength of the round-six root cause (RC-8), not a ratified specification; human ratification of this L is the decision. A file is a document if its stem is in `{readme, contributing, changelog, architecture, design, overview, install, building, authors, news}` (with or without a documentation extension), or its extension is in `{.md, .markdown, .txt, .rst, .adoc}` inside a doc tree, where a doc tree is an ancestor component `docs`/`doc`/`design` or the `src/site/**` convention (component `site` whose parent is `src`); matching is on whole path components.
+STATUS: RATIFIED 2026-09-14 (human, option A: the rule as proposed replaces DOCS-LIST-2 §3's discovery freeze; authored from the round-six root cause RC-8). Queue Q8 DOCS-DISCOVERY-1 is unblocked. A file is a document if its stem is in `{readme, contributing, changelog, architecture, design, overview, install, building, authors, news}` (with or without a documentation extension), or its extension is in `{.md, .markdown, .txt, .rst, .adoc}` inside a doc tree, where a doc tree is an ancestor component `docs`/`doc`/`design` or the `src/site/**` convention (component `site` whose parent is `src`); matching is on whole path components.
 
 **Verification criterion:** `doc-facts/src/discovery.rs` tests (existing: `discovers_readme_at_root`, `discovers_docs_directory_markdown`, `admits_txt_and_rst_under_docs_tree`, `skips_node_modules`; to add: stem rule, `.adoc`, `src/site`); field: hadoop 23 → ~545, django 670 → ~674, buildroot 4 → ~77; django/kafka/grpc-java/langchain4j/vscode/storybook/gstreamer/repo-graph byte-stable.
 

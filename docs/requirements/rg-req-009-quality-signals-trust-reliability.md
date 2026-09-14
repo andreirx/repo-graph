@@ -53,6 +53,8 @@ An agent asking `rmap orient`, `trust`, `reliability`, `hotspots`, `churn`, `ris
 
 **Evidence (v0.18.0):** NOT MET — RC-9 (never worked; `files.is_generated` hard-coded false; only filter is `complexity >= 20`). Queue Q7 COMPLEXITY-SCOPE-1. A populated `is_generated` also narrows the seed corpus — a stated behaviour change requiring reindex.
 
+Refinement ratified 2026-09-14 (human, option A): generated/vendored/test are decided by rmap's own path and content heuristics. Reading a repository's own exclusion declarations (`.gitattributes linguist-generated`, ignore files, manifest excludes) is a possible future increment and, if taken, lives in one dedicated ecosystem-declarations module so the per-ecosystem parsers stay organized; it is not part of this L.
+
 ### RG-REQ-009-L02 — Trust's module connectivity reads the edge set `modules list` renders
 
 `trust`'s per-module fan-in/fan-out, its "Suspicious Modules (zero connectivity)" list and the `alias_resolution_suspicion` downgrade shall be computed from the same module-dependency edge set `modules list` and `modules deps` render (resolved file→file imports aggregated through module ownership to the module candidate on both endpoints). A module with rendered edges shall never be listed as zero-connectivity.

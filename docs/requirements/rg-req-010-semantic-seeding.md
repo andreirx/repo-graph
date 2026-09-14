@@ -115,15 +115,17 @@ A reader shall never see a higher score below a lower one without a rendered tie
 
 **Evidence (v0.18.0):** NOT MET — D-N7 (carried minor): the inversion exists and the label is not always present.
 
-### RG-REQ-010-L10 — PROPOSED: a method chunk's document carries enough beyond its name for a task query to meet it
+### RG-REQ-010-L10 — A method chunk's document carries enough beyond its name for a task query to meet it
 
-STATUS: PROPOSED — SEED-DOCUMENT-1 is filed and awaits human ratification; not a baseline obligation until ratified. The embedded document of a method chunk shall carry, besides its qualified name, doc comment and leading body lines, its enclosing type's doc and a bounded identifier summary, so that a natural-language task query can reach the method that does the work; measured on the FRAKTAG persistence query with the floor and model unchanged and the SEED-CHUNK-2 control proofs byte-stable.
+STATUS: RATIFIED 2026-09-14 (human, option A); SEED-DOCUMENT-1 is scheduled after the round-six queue (a re-embedding of every repo is the stated cost). The embedded document of a method chunk shall carry, besides its qualified name, doc comment and leading body lines, its enclosing type's doc and a bounded identifier summary, so that a natural-language task query can reach the method that does the work; measured on the FRAKTAG persistence query with the floor and model unchanged and the SEED-CHUNK-2 control proofs byte-stable.
 
 **Verification criterion:** `repo-graph-seed/src/document.rs` composition tests (pin the current form; to be extended); the recorded rank/score table (createSession 0.27, logTurn 0.15, TreeStore 0.20, ContentStore 0.20 vs floor 0.30) as the before; the same query as the after.
 
-**Evidence (v0.18.0):** NOT MET — filed as SEED-DOCUMENT-1 (its own root-caused slice; not in the ratified order).
+**Evidence (v0.18.0):** NOT MET — SEED-DOCUMENT-1 (its own root-caused slice; ratified position: after the round-six queue).
 
 ### RG-REQ-010-L11 — PROPOSED: cross-module concern hints, labeled Layer 3, beneath the deterministic facts
+
+STATUS: PROPOSED, decision pending — the human asked (2026-09-14) why it matters and whether other means find the same thing; the manager's answer is in the ROADMAP decisions block of that date.
 
 Cohesive embedding clusters spanning deployable modules shall be surfaced on the module/boundary discovery surfaces as labeled seam/concern candidates (score, provenance, member modules), beneath the deterministic facts and never in the map. STATUS: PROPOSED — VISION ratifies the use (iii) but its rendering surface is not yet specified; no obligation until the surface is ratified.
 

@@ -793,6 +793,23 @@ kafka 5 non-code dirs. Operator gates ALL-GATES-GREEN; product-sense pass on a c
 admissions, 5 baselines, 5 decisions (1 human, 4 operator), 14 document cycles, 7 implementation cycles; the fix never failed a
 check — every block was a correct finding against the manager's packet/oracles or the runtime's strictness (TD-020–023 in
 agent-manager). Import-graph stays LOW with "alias resolution suspected" on repo-graph/kafka/FRAKTAG until ALIAS-SUSPICION-1.
+HUMAN DECISIONS 2026-09-14 (answers to the manager's nine self-contained questions): (1) agent-manager ef3e1c9 (provider-result
+framing tolerated) RATIFIED as made. (2) queue order = adjudicator's: Q1 CALL-BINDING-RECEIVER-1 → Q3 CPP-INCLUDE-ROOTS-1 → Q4
+EXPLAIN-CYCLES-HONEST-1 → Q5 DEPS-ECOSYSTEM-PARTITION-1 → Q6 EXPLAIN-TYPE-SECTIONS-1 → Q7 COMPLEXITY-SCOPE-1 → Q8 DOCS-DISCOVERY-1 →
+Q9 PYTHON-SELF-BINDING-1 → ALIAS-SUSPICION-1 → SEED-DOCUMENT-1. (3) RG-REQ-006-L11 RATIFIED: unique ≥2-segment suffix fallback for
+includes. (4) RG-REQ-008-L01 RATIFIED as proposed; Q8 unblocked. (5) RG-REQ-009-L01: rmap's own heuristics now (option A); reading
+repo-declared exclusions is a possible future increment in one dedicated ecosystem-declarations module ("why have we been avoiding
+it?" — answered in the session: a standing bias against per-ecosystem parser surface, not a measured cost; the deps classifier
+already holds per-ecosystem manifest parsers, so a single organized home is the right shape if/when it is taken). (6) RG-REQ-010-L10
+RATIFIED; SEED-DOCUMENT-1 after the round-six queue. (7) RG-REQ-010-L11 (Layer-3 concern hints) PENDING — human asked why it
+matters / whether other means find it; manager's answer: deterministic surfaces show STRUCTURE (directories, imports, cycles),
+`find` shows what you already know to ask for; a concern spanning modules (glamCRM: exchange rates across 4 modules) is the one
+thing neither shows unprompted — it is an orientation/seam-discovery aid for a newcomer, not a defect fix, and no user has asked for
+it; recommendation: ratify only with a concrete surface + the glamCRM clusters as acceptance corpus (option C), or decline.
+(8) RG-REQ-011-L11 (latency floor) WITHDRAWN — the VISION's speed promise is algorithms, data structures, wiring and organization,
+not a benchmark on a particular machine. (9) Assurance corrections: option B — a recorded, operator-approved, closeout-reviewed
+"oracle correction" for text-only changes to a check or its prose, no re-baseline/re-admission, every correction logged
+(agent-manager ROADMAP/TD-022).
 Carried: CLAIM-INVARIANT-1 (D-N9), D-N10 identifier spaces, D-N7 seed order, retention line always renders standing
 (DR-2B DORMANT on the audit root AND production — 1 snapshot, "cleanup: none yet"), Busy path leak / 2 generic
 (DAEMON-RESIDUALS-3), surfaces/orient --full budgets. Could not ground-truth: find --text; C++ IMPLEMENTS from a
