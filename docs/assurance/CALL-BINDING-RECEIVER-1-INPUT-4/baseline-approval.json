@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CALL-BINDING-RECEIVER-1-BASELINE-APPROVAL-4",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-4.json",
+    "sha256": "sha256:4a55fe2b33dd56c31baa733747c6c10e8694983cd8ac44c2ae256bda5d0e9e41"
+  },
+  "review": {
+    "path": "docs/assurance/CALL-BINDING-RECEIVER-1-INPUT-4/requirements-review.json",
+    "sha256": "sha256:13db67d483d498b230a503d51e9931f64203b926fad73df5114550d67f6684cc"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-VALIDATION-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-VALIDATION-STALE-1.md",
+        "sha256": "sha256:135d5031d50b240d5d6e9cc9ce0859598265c240e775848bdb31b0fa453de133"
+      }
+    },
+    {
+      "id": "D-TME-TEST-NAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370"
+      }
+    },
+    {
+      "id": "D-CBR-XFILE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CBR-XFILE-1.md",
+        "sha256": "sha256:0922afaf63b1fc85ade5a0504b862512350aa114b2e6d469ed6b8ff56d1e9b45"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-14T10:44:33.523Z",
+  "rationale": "Operator approves CALL-BINDING-RECEIVER-1 INPUT-4: oracle correction OC-3 (text-only; CBR-C17 strips both walk-derived lines — the ring and its '(+ N more members)' overflow — before the text comparison; the cycles --json member-set comparison remains the proof). Content otherwise identical to the approved INPUT-3. Codex gpt-5.6-terra structured review accepted 32/32 at PREP-4 cycle 2 (cycle 1 raised a provenance 'conflict' between an abbreviated and a full rendering of the same digest; packets now quote full digests). Under the human's 2026-09-13 instruction and 2026-09-14 decisions."
+}
