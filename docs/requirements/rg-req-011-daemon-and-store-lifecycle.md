@@ -129,9 +129,9 @@ Enrichment and retention shall run after an index/refresh by default, register i
 
 STATUS: WITHDRAWN 2026-09-14 (human, option C — no floor): "the vision promise is not about a benchmark on a particular hardware piece — it is about having good algorithms and data structures and good wiring between the modules — optimal solutions to known problems — good organization and not leaking stuff." The ID stays reserved; no numeric bound will be authored. Previously: no bound was ratified and no benchmark gate existed; this L becomes an obligation only when the human ratifies a bound with its measurement basis (machine, corpus, sample count, percentile, cache state). A warm `orient` (daemon resident, snapshot loaded) on a repository of the smoke corpus shall complete within a ratified bound, measured per release on the smoke corpus and published with the audit; a cold first answer may exceed it and shall say so. The bound is TO BE RATIFIED by the human — data points: django `stats` 760,594 ms → 2,981 ms after RMAPD-PERF-1; 9.8 s cold first `orient` on a 100k-node snapshot; the 300 s client read window is a symptom threshold, not a target.
 
-**Verification criterion:** NO EXISTING VERIFICATION — no benchmark gate asserts a latency floor (the only gate is `retention_prune_benchmark_gate`). A per-release latency table is the smallest acceptable proof.
+**Verification criterion:** none — withdrawn 2026-09-14. (Historical, not normative: no benchmark gate ever asserted a latency floor; the only gate is `retention_prune_benchmark_gate`.)
 
-**Evidence (v0.18.0):** UNKNOWN — the economic claim of VISION commitment 3 has measurements but no asserted floor. Unresolved upstream decision: the numeric bound.
+**Evidence (v0.18.0):** WITHDRAWN — historical: measurements existed and no floor was asserted; by the human's decision no numeric bound will be authored. The text above the criterion is retained for the record and is not normative.
 
 ## Preservation obligations named by the ratifying specifications
 

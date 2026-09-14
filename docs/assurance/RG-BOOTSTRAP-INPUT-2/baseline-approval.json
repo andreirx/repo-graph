@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-2.json",
+    "sha256": "sha256:6550f195ecd5085fb336975a5f7a70c3ca4b3130771f134d72cde44a0ce0c6a2"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-2/requirements-review.json",
+    "sha256": "sha256:3fdd39e007d50492c3d5f7e172df27e93c8abee045a243d05d9b48bdfeeb4103"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-14T07:29:29.000Z",
+  "rationale": "Operator approves the second bootstrap admission baseline RG-BOOTSTRAP-INPUT-2: INPUT-1 with refreshed digests after the human's 2026-09-14 decisions (RG-REQ-006-L11, 008-L01, 010-L10, 010-L11 ratified; 009-L01 refined; 011-L11 withdrawn) and the reviewer's five text corrections; codex gpt-5.6-terra standalone review passes REFINE then ACCEPT (15/15 requirement and 33/33 dependency digests verified by execution; 152/152 L headings). No L remains PROPOSED. Authored by hand because the relay's approval verb serves v2 manifests only, exactly as RG-BOOTSTRAP-BASELINE-APPROVAL-1 was. Under the human's 2026-09-13 instruction and 2026-09-14 decisions."
+}

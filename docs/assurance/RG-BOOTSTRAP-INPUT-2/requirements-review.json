@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-2-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-2.json",
+    "sha256": "sha256:6550f195ecd5085fb336975a5f7a70c3ca4b3130771f134d72cde44a0ce0c6a2"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-2"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-2-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-14T07:29:06.000Z",
+  "report": "PASS 2 (ACCEPT):\nVERDICT: ACCEPT\n\nFINDINGS: []\n\nDIGEST CHECK: MATCH — 15/15 requirement-file digests and 33/33 dependency digests (EXECUTED: `shasum -a 256`).\n\nGRAMMAR CHECK: PASS — 152/152 L headings match the required form; metadata blocks untouched (EXECUTED/OBSERVED).\n\nDECISION MAPPING:\n- README.md:39–59 → RG-REQ-006-L11, 008-L01, 009-L01, 010-L10/L11, 011-L11 queue/status ledger.\n- rg-req-006-import-resolution-and-dependencies.md:129 → RG-REQ-006-L11 ratification.\n- rg-req-008-documentation-inventory.md:46 → RG-REQ-008-L01 ratification.\n- rg-req-009-quality-signals-trust-reliability.md:56 → RG-REQ-009-L01 refinement.\n- rg-req-010-semantic-seeding.md:118–134 → RG-REQ-010-L10/L11 ratifications.\n- rg-req-011-daemon-and-store-lifecycle.md:128–134 → RG-REQ-011-L11 withdrawal.\n\nREMAINING HUMAN DECISIONS: None; no requirement L remains PROPOSED.\n\nPASS 1 (REFINE, five findings, all applied):\nVERDICT: REFINE\n\nFINDINGS:\n1. `docs/requirements/rg-req-006-import-resolution-and-dependencies.md:133` — remove the superseded embedded `STATUS: PROPOSED … awaiting human ratification` text. It contradicts the ratified status at line 131.\n2. `docs/requirements/rg-req-010-semantic-seeding.md:130,134` — remove the superseded `STATUS: PROPOSED` wording and change evidence from `NOT MET / PROPOSED` to `NOT MET`. L11 is ratified but unscheduled.\n3. `docs/requirements/rg-req-011-daemon-and-store-lifecycle.md:132-134` — mark the former normative text and verification criterion as historical, or replace the criterion with “none — withdrawn.” A current “smallest acceptable proof” conflicts with withdrawal/no benchmark floor.\n4. `docs/requirements/README.md:52` — the ratified-order line omits the separately ratified RG-REQ-006-L11 slice and CONCERN-HINTS-1. Name/position them, or explicitly mark them ratified-but-unscheduled; the latter matches the Roadmap’s CONCERN-HINTS-1 status.\n5. `docs/requirements/README.md:59` — update the “Decisions for the human” list to record the 2026-09-14 closed outcomes, including L011 withdrawal.\n\nDIGEST CHECK: MATCH — 15/15 requirement-file digests and 33/33 dependency digests. `baselineId` is `RG-BOOTSTRAP-INPUT-2`; INPUT-2 differs from INPUT-1 only by that ID and the five refreshed requirement digests. EXECUTED with `shasum -a 256` and `git diff --no-index`.\n\nGRAMMAR CHECK: MATCH — OBSERVED all L headings retain the required identifier/delimiter form; the metadata blocks are outside all requirement-file diff hunks and remain untouched.\n\nDECISION MAPPING:\n- `README.md:42` → RG-REQ-006-L11 ratification.\n- `README.md:47` → RG-REQ-008-L01 ratification.\n- `README.md:52` → ratified queue/order record, including RG-REQ-010-L10 scheduling.\n- `rg-req-006-import-resolution-and-dependencies.md:129-137` → RG-REQ-006-L11, option A.\n- `rg-req-008-documentation-inventory.md:46-50` → RG-REQ-008-L01 ratification.\n- `rg-req-009-quality-signals-trust-reliability.md:55` → RG-REQ-009-L01 refinement.\n- `rg-req-010-semantic-seeding.md:118-124` → RG-REQ-010-L10 ratification.\n- `rg-req-010-semantic-seeding.md:126-134` → RG-REQ-010-L11 ratification. The displayed physical Git hunk coalesces these two adjacent logical decisions; no semantic overreach beyond the Roadmap’s recorded intended shape was observed.\n- `rg-req-011-daemon-and-store-lifecycle.md:128-134` → RG-REQ-011-L11 withdrawal, option C.\n\nREMAINING HUMAN DECISIONS: None intended. However, RG-REQ-006-L11 (`:133`) and RG-REQ-010-L11 (`:130,134`) still contain stale `PROPOSED` text and therefore falsely appear pending until corrected.\n\n[Manual-bootstrap note by the recorder: RG-BOOTSTRAP-INPUT-2 revises the admission baseline after the human's 2026-09-14 decisions changed five requirement files (006-L11, 008-L01, 010-L10, 010-L11 ratified; 009-L01 refined; 011-L11 withdrawn). Both passes were standalone codex exec runs in a read-only sandbox over a self-contained prompt carrying the complete diff f8a0e6b..working-tree of docs/requirements; prompts and outputs are retained in the manager session scratchpad and quoted here verbatim. The manager applied pass 1's findings and refreshed the digests before pass 2.]"
+}
