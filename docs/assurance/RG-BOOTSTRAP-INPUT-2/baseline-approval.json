@@ -24,6 +24,6 @@
     "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
   },
   "resolvedDecisions": [],
-  "decidedAt": "2026-09-14T07:29:29.000Z",
+  "decidedAt": "2026-09-14T07:30:50.000Z",
   "rationale": "Operator approves the second bootstrap admission baseline RG-BOOTSTRAP-INPUT-2: INPUT-1 with refreshed digests after the human's 2026-09-14 decisions (RG-REQ-006-L11, 008-L01, 010-L10, 010-L11 ratified; 009-L01 refined; 011-L11 withdrawn) and the reviewer's five text corrections; codex gpt-5.6-terra standalone review passes REFINE then ACCEPT (15/15 requirement and 33/33 dependency digests verified by execution; 152/152 L headings). No L remains PROPOSED. Authored by hand because the relay's approval verb serves v2 manifests only, exactly as RG-BOOTSTRAP-BASELINE-APPROVAL-1 was. Under the human's 2026-09-13 instruction and 2026-09-14 decisions."
 }
