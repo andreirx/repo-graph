@@ -123,13 +123,13 @@ STATUS: RATIFIED 2026-09-14 (human, option A); SEED-DOCUMENT-1 is scheduled afte
 
 **Evidence (v0.18.0):** NOT MET — SEED-DOCUMENT-1 (its own root-caused slice; ratified position: after the round-six queue).
 
-### RG-REQ-010-L11 — PROPOSED: cross-module concern hints, labeled Layer 3, beneath the deterministic facts
+### RG-REQ-010-L11 — Cross-module concern hints, labeled Layer 3, beneath the deterministic facts
 
-STATUS: PROPOSED, decision pending — the human asked (2026-09-14) why it matters and whether other means find the same thing; the manager's answer is in the ROADMAP decisions block of that date.
+STATUS: RATIFIED 2026-09-14 (human) after the manager's answer (deterministic surfaces show structure; `find` shows what you already know to ask; a concern spread across modules is the one thing neither shows unprompted). Intended shape and acceptance corpus: ROADMAP entry CONCERN-HINTS-1. Not a baseline obligation for any current slice until that slice is packeted.
 
 Cohesive embedding clusters spanning deployable modules shall be surfaced on the module/boundary discovery surfaces as labeled seam/concern candidates (score, provenance, member modules), beneath the deterministic facts and never in the map. STATUS: PROPOSED — VISION ratifies the use (iii) but its rendering surface is not yet specified; no obligation until the surface is ratified.
 
-**Verification criterion:** to be defined with the surface (the glamCRM sales-targets/tenant-brand/exchange-rate/auth clusters of the spike addendum are the acceptance corpus).
+**Verification criterion:** the glamCRM sales-targets / tenant-brand / exchange-rate / auth clusters of the spike addendum are the acceptance corpus: each must appear as a labeled candidate with its member modules; no candidate may be counted in any deterministic total or change any existing line; the section renders only when at least one cluster spans ≥2 deployable modules (details: ROADMAP CONCERN-HINTS-1).
 
 **Evidence (v0.18.0):** NOT MET / PROPOSED — no surface exists.
 

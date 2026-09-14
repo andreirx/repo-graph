@@ -1242,3 +1242,28 @@ signing/notarization (MAC-2) · updater/repair channel (UPDATE-1).
 - Rust state-boundaries blocked on Rust `ResolvedCallsite` emission
 - Quality discovery surface depends on comparability (toolchain provenance;
   `docs/architecture/versioning-model.txt`)
+
+## CONCERN-HINTS-1 — cross-module concern candidates (RG-REQ-010-L11, ratified 2026-09-14; unscheduled, after the round-six queue and SEED-DOCUMENT-1)
+
+What the user gets: on the module/boundary surfaces (`modules list`, `orient`'s boundary section), a section BENEATH the
+deterministic facts — "Concern candidates (Layer 3, embedding-derived; not counted above)" — listing concerns that cut across
+deployable modules, each with a label, a score, the member modules, and provenance (the member symbols). It answers "what does
+this repo actually deal with, and which concerns leak across module boundaries?" — the one question neither the structural
+surfaces nor a `find` query (which needs you to know the name) answers unprompted. Acceptance corpus: glamCRM's sales-targets,
+tenant-brand, exchange-rate and auth clusters from the seed-chunk spike addendum (docs/audits/2026-09-03-seed-chunk-spike-1.md).
+
+How, in outline (a hint, not a spec — the slice packet root-causes and sizes it):
+1. Reuse what exists: the per-symbol seed vectors already persisted for `find` (model2vec potion-code, per-chunk) — no new
+   embedding pass; read them for one snapshot.
+2. Cluster within the snapshot: cosine neighborhoods over the chunk vectors (a fixed similarity threshold and a minimum cluster
+   size; agglomerative or a simple threshold graph + connected components — whichever the spike's numbers support), computed at
+   query time from the store or once per snapshot and persisted as a small table keyed by snapshot — decide by measured cost.
+3. Keep only clusters whose members are owned by ≥2 deployable module candidates (the same `module_file_ownership` the trust
+   fans now use); everything intra-module is structure, not a cross-cutting concern.
+4. Label each cluster from its members' names and doc comments (top terms after splitting identifiers; no LLM), score it by
+   mean intra-cluster similarity × module spread, and carry provenance = member chunk ids so `explain` can be pointed at them.
+5. Render beneath the facts, never merged into totals; `--json` carries it under its own key (`concernCandidates`) with the
+   method named; the section is absent when nothing spans ≥2 modules (a line that reads the same on every repo answers nothing).
+6. Regression watch: RG-REQ-002 honesty (labeled as derived, never as fact), RG-REQ-004 module model unchanged, RG-REQ-011
+   latency (the clustering must not put a warm `orient` over its current cost — measure, and persist per snapshot if it does).
+
