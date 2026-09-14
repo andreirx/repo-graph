@@ -1,0 +1,48 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CALL-BINDING-RECEIVER-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-1.json",
+    "sha256": "sha256:81fa78d43ffaf574fadc54326b9167ae3d34dfbeb779d2152893b1d4e2fc442d"
+  },
+  "review": {
+    "path": "docs/assurance/CALL-BINDING-RECEIVER-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:149ac47f96eace4504b4a53ba34dd9cc18f12a6cf033e42ab116cb2111fa89df"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-VALIDATION-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-VALIDATION-STALE-1.md",
+        "sha256": "sha256:135d5031d50b240d5d6e9cc9ce0859598265c240e775848bdb31b0fa453de133"
+      }
+    },
+    {
+      "id": "D-TME-TEST-NAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-14T08:06:49.071Z",
+  "rationale": "Operator approves the CALL-BINDING-RECEIVER-1 allocation (Q1 of the queue the human ratified 2026-09-14): 19 checks whose literals were read from the product's real output before binding, movements reported not predicted, new test identities named up front, the existing unresolved category reused; Codex gpt-5.6-terra structured review accepted 32/32 with no findings at PREP cycle 3 (cycles 1-2 raised two manager authoring defects — a $PWD evaluated after cd, and an optional category outside the candidate paths — both applied). Under the human's 2026-09-13 instruction and 2026-09-14 ordering."
+}
