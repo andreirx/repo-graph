@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CALL-BINDING-RECEIVER-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-3.json",
+    "sha256": "sha256:f9919d68996bc34ab9850a130c41c36470729e0df752081563fdd1bb915b1dc5"
+  },
+  "review": {
+    "path": "docs/assurance/CALL-BINDING-RECEIVER-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:895a97486446fa518ddb0119e79c3ecf87ae18ab88cdae1c2bdb5607ec60d34c"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-VALIDATION-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-VALIDATION-STALE-1.md",
+        "sha256": "sha256:135d5031d50b240d5d6e9cc9ce0859598265c240e775848bdb31b0fa453de133"
+      }
+    },
+    {
+      "id": "D-TME-TEST-NAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370"
+      }
+    },
+    {
+      "id": "D-CBR-XFILE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CBR-XFILE-1.md",
+        "sha256": "sha256:0922afaf63b1fc85ade5a0504b862512350aa114b2e6d469ed6b8ff56d1e9b45"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-14T09:49:32.324Z",
+  "rationale": "Operator approves CALL-BINDING-RECEIVER-1 INPUT-3: oracle correction OC-2 under decision D-CBR-XFILE-1 (per-file receiver typing ships now; cross-file typing = CALL-BINDING-RECEIVER-2; CBR-C12 asserts the reachable outcome over the callees list only; CBR-C17 compares cycle member sets from cycles --json — the walk nondeterminism is CYCLES-WALK-DETERMINISM-1) and the PREP-3 cycle-1 findings F-PREP3-1/2/3 applied. Codex gpt-5.6-terra structured review accepted 32/32 at PREP-3 cycle 2. Under the human's 2026-09-13 instruction and 2026-09-14 decisions; the human may override D-CBR-XFILE-1."
+}
