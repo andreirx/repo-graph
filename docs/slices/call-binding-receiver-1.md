@@ -3,7 +3,7 @@
   "formatVersion": 1,
   "kind": "implementation-allocation",
   "workItemId": "CALL-BINDING-RECEIVER-1",
-  "baselinePath": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-1.json",
+  "baselinePath": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-2.json",
   "parentRequirementIds": [
     "RG-REQ-001",
     "RG-REQ-002",
@@ -113,7 +113,8 @@
         "RG-REQ-006-L02",
         "RG-REQ-006-L04",
         "RG-REQ-001-L03",
-        "RG-REQ-007-L03"
+        "RG-REQ-007-L03",
+        "P-CBR-02"
       ],
       "owner": "builder",
       "method": {
@@ -129,7 +130,8 @@
       "checkId": "CBR-C04",
       "obligationIds": [
         "RG-REQ-005-L02",
-        "RG-REQ-001-L03"
+        "RG-REQ-001-L03",
+        "P-CBR-02"
       ],
       "owner": "builder",
       "method": {
@@ -145,7 +147,8 @@
       "checkId": "CBR-C05",
       "obligationIds": [
         "RG-REQ-005-L01",
-        "RG-REQ-001-L02"
+        "RG-REQ-001-L02",
+        "P-CBR-01"
       ],
       "owner": "builder",
       "method": {
@@ -183,7 +186,9 @@
         "RG-REQ-005-L09",
         "RG-REQ-004-L07",
         "RG-REQ-012-L02",
-        "RG-REQ-013-L07"
+        "RG-REQ-013-L07",
+        "P-CBR-03",
+        "P-CBR-04"
       ],
       "owner": "builder",
       "method": {
@@ -193,7 +198,7 @@
         "environment": "candidate tree",
         "inputs": "the crates whose behaviour section 3 preserves: classification (categories, parity), agent (attribution mapping every_basis_code_maps_to_its_expected_reader_class; explain_symbol), storage (resolve_symbol), graph-algorithms (self_loop_not_counted_as_cycle_by_size), rgr (dead_command_is_disabled; exit_code_contract), daemon-runtime (callgraph_cert)"
       },
-      "expected": "exit 0: every named suite green. This slice adds NO UnresolvedEdgeCategory variant (it reuses calls_obj_method_needs_type_info for the honest remainder); every_basis_code_maps_to_its_expected_reader_class therefore proves the reader mapping is untouched."
+      "expected": "exit 0: every named suite green, which is the no-behavior-change oracle for the obligations this check alone carries — RG-REQ-004-L07: cycle semantics unchanged, a size-1 self-loop is never a cycle (scc.rs self_loop_not_counted_as_cycle_by_size); RG-REQ-005-L06: a miss never renders Confidence: high (explain_symbol tests unchanged); RG-REQ-012-L02 and RG-REQ-013-L07 (P-CBR-03): the exit-code contract and `dead`'s policy refusal (verdict on stdout, exit 4) are unchanged (exit_code_contract, dead_command_is_disabled); RG-REQ-005-L05: symbol lookup by key/qualified name/suffix unchanged (storage resolve_symbol); RG-REQ-001-L03 / RG-REQ-005-L09: classification categories and the reader mapping unchanged — this slice adds NO UnresolvedEdgeCategory variant (it reuses calls_obj_method_needs_type_info for the unresolved rows), so every_basis_code_maps_to_its_expected_reader_class proves the mapping untouched; P-CBR-04: the LiveGraph callgraph certificate's meaning is preserved (callgraph_cert tests green; the builder states in build-progress.md whether the cert compares edge SETS across engines). A red anywhere is a STOP, not a fix-forward."
     },
     {
       "checkId": "CBR-C08",
@@ -264,7 +269,7 @@
         "environment": "the candidate rmap on the CBR-C10 isolated leveldb index",
         "inputs": "the captured callers --json document (keys: target, callers[], count, backend_used, fallback_reason)"
       },
-      "expected": "exit 0: the callers of leveldb::DBImpl::Recover are exactly {leveldb::DB::Open} (leveldb's source has ONE call site, db_impl.cc:1511 `impl->Recover(&edit, &save_manifest)`); the self-row leveldb::DBImpl::Recover is gone; the row anchors db/db_impl.cc:1503 — the caller NODE's line, which is what the renderer prints today (the call-site anchoring half of RG-REQ-005-L08 is OUT OF SCOPE here: follow-up CALLERS-ANCHOR-1); the stable_key is format v2 and repo-relative."
+      "expected": "exit 0: the callers of leveldb::DBImpl::Recover are exactly {leveldb::DB::Open} (leveldb's source has ONE call site, db_impl.cc:1511 `impl->Recover(&edit, &save_manifest)`); the self-row leveldb::DBImpl::Recover is gone; the row anchors db/db_impl.cc:1503 — the caller NODE's line, which is what the renderer prints today (the call-site anchoring half of RG-REQ-005-L08 is OUT OF SCOPE here: follow-up CALLERS-ANCHOR-1); the stable_key is format v2 and repo-relative (no-behavior-change for RG-REQ-001-L04 and RG-REQ-001-L05: the identity format and the hand-back of a printed identity are unchanged)."
     },
     {
       "checkId": "CBR-C12",
@@ -339,7 +344,9 @@
         "RG-REQ-001-L02",
         "RG-REQ-006-L04",
         "RG-REQ-007-L03",
-        "RG-REQ-001-L03"
+        "RG-REQ-001-L03",
+        "P-CBR-01",
+        "P-CBR-02"
       ],
       "owner": "builder",
       "method": {
@@ -349,7 +356,7 @@
         "environment": "fresh isolated indexes of nginx (C) and codegraph (TypeScript + Rust; the audit's control repo) with the before-binary and the candidate, in throwaway roots, stdio, auto passes off",
         "inputs": "../legacy-codebases/nginx; ../legacy-codebases/codegraph"
       },
-      "expected": "exit 0: for BOTH corpora the edge counts by type and resolution, the unresolved counts by category, the node count and the is_test partition are byte-identical before/after — C emits no receiver (the C extractor is untouched) and the receiver-type stage is gated on metadata only the C++ extractor emits, so TypeScript and Rust cannot move. A differing line is a STOP (RG-REQ-001-L02)."
+      "expected": "exit 0: for BOTH corpora the edge counts by type and resolution, the unresolved counts by category, the node count and the is_test partition are byte-identical before/after — C emits no receiver (the C extractor is untouched) and the receiver-type stage is gated on metadata only the C++ extractor emits, so TypeScript and Rust cannot move. A differing line is a STOP (no-behavior-change for RG-REQ-001-L02, RG-REQ-006-L04, RG-REQ-007-L03: structural edges, TS/Python resolution and the test partition are byte-identical)."
     },
     {
       "checkId": "CBR-C17",
@@ -378,7 +385,7 @@
         "criterion": "every rmap invocation in CBR-C08..C17 ran under an RMAP_STATE_ROOT/RMAP_SOCKET_PATH inside /private/tmp/CALL-BINDING-RECEIVER-1-* with RMAP_TRANSPORT=stdio and RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the operator's real registry '$HOME/Library/Application Support/repo-graph/registry.json' has the SAME sha256 before the first proof and after the last (shasum -a 256, both values quoted in build-progress.md); at hand-off `ls -d /private/tmp/CALL-BINDING-RECEIVER-1-*` lists nothing, `git worktree list` shows only the main tree, and no rmapd from /private/tmp/CALL-BINDING-RECEIVER-1-before or rust/target survives (pgrep -fl rmapd)",
         "inputs": "build-progress.md; the two registry digests; the final ls/worktree/pgrep outputs"
       },
-      "expected": "the inspection finds every proof isolated, the real registry digest identical before/after, and no throwaway root, worktree or daemon left behind (no-behaviour-change for RG-REQ-011-L06)."
+      "expected": "the inspection finds every proof isolated, the real registry digest identical before/after, and no throwaway root, worktree or daemon left behind (no-behavior-change for RG-REQ-011-L06)."
     },
     {
       "checkId": "CBR-C19",
@@ -471,3 +478,7 @@ OPERATOR-RUN after acceptance: the receiver-bearing self-loop count on OpenXcom/
 Every check CBR-C01..C19 passes AS WRITTEN — a check whose command cannot execute or match as written is reported `execution-failed` with the evidence attached, never `passed` on a substitute (decision D-TME-VALIDATION-STALE-1); every preserved row in §3 has its proof EXECUTED and green; the two pre-authorised movements are reported with before/after numbers and attribution; no non-C/C++ fact moved; gates green. Reviewer checks the §3 table row by row — a positive verdict without it is incomplete.
 
 CORPUS PATHS: leveldb at ../legacy-codebases/leveldb; FRAKTAG at ../FRAKTAG; kafka at ../legacy-codebases/kafka; nginx/sqlite at ../legacy-codebases/<name>; repo-graph is THIS repo.
+
+## Oracle corrections (ratified procedure, docs/MANAGER.md § Oracle corrections)
+
+- OC-1 (2026-09-14): stage-3 admission refused INPUT-1 — preserved obligations RG-REQ-001-L02/L04/L05 and RG-REQ-011-L06 "lack an explicit no-behavior-change oracle"; the runtime's parser (run by the manager before re-review) additionally requires each P-CBR-0n to be listed in a check's obligationIds — added to CBR-C05/C16 (P-CBR-01), C03/C04/C16 (P-CBR-02), C07 (P-CBR-03, P-CBR-04); reviewer finding F-CBR-OC1 (PREP-2 cycle 2): CBR-C07's `expected` matched the marker only through the substring `remain` in "honest remainder" — rewritten to state each preserved behaviour explicitly (the runtime requires a check's `expected` to say no-behavior-change / remain / preserve for every preserved L; document review does not run that parser — agent-manager TD-019). Text-only: CBR-C11, CBR-C16 and CBR-C18 `expected` gained the marker (C18: British "behaviour" → "behavior"). No allocation set, check id, requirement text or candidate path changed. Recorded in docs/assurance/CALL-BINDING-RECEIVER-1/oracle-corrections.md; carried as INPUT-2 because the runtime still binds the allocation digest.

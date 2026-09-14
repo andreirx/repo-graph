@@ -1,0 +1,7 @@
+# Oracle corrections — CALL-BINDING-RECEIVER-1
+
+| id | date | check(s) | old → new | evidence | approver | slice sha256 before → after |
+|---|---|---|---|---|---|---|
+| OC-1 | 2026-09-14 | CBR-C11, CBR-C16, CBR-C18 (`expected` only) | C11: + "(no-behavior-change for RG-REQ-001-L04 and RG-REQ-001-L05 …)"; P-CBR-01..04 added to the obligationIds of the checks that prove them (C05/C16; C03/C04/C16; C07; C07); C07 `expected` rewritten to state each preserved behaviour explicitly (reviewer F-CBR-OC1: the earlier text matched the marker only via "remainder"); C16: "(RG-REQ-001-L02)" → "(no-behavior-change for RG-REQ-001-L02, RG-REQ-006-L04, RG-REQ-007-L03 …)"; C18: "no-behaviour-change" → "no-behavior-change" | stage-3 admission refusal 2026-09-14 08:07Z: `preserved obligation 'RG-REQ-001-L02' lacks an explicit no-behavior-change oracle` (+ 001-L04, 001-L05, 011-L06); runtime rule src/core/assurance.ts:1862 | operator in-place-manager (human authorization docs/assurance/RG-BOOTSTRAP/human-authorization.md; procedure ratified 2026-09-14) | 49c8d846ecb42e51 → 5948e338a30bf63d |
+
+Text-only per the definition in docs/MANAGER.md: no allocation set, check-id set, requirement text or candidate path changed. Because the runtime still binds the allocation digest, this correction is ALSO carried as baseline INPUT-2 (document review + approval); once the runtime accepts corrections chained through this file, that step disappears.
