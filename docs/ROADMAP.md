@@ -840,7 +840,40 @@ into one; `cargo fmt --check` belongs in the whitespace oracle. FOLLOW-UPS: CALL
 typing; interface-declaration-vs-definition pool policy under unique-name binding), CYCLES-WALK-DETERMINISM-1, CALLERS-ANCHOR-1
 (callers/callees rows anchor the caller node's line, not the call site — RG-REQ-005-L08's other half), CPP-LAMBDA-CALLS-1
 (calls inside C++ lambda bodies are never extracted — pre-existing, walk skipped lambda_expression before this slice).
-NEXT: Q3 CPP-INCLUDE-ROOTS-1.
+NEXT: Q3 CPP-INCLUDE-ROOTS-1 (shipped below).
+
+Q3 CPP-INCLUDE-ROOTS-1 SHIPPED (2026-09-18; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+C/C++ `#include` resolution derives its conventional roots from the indexed file list — every directory named `include` or
+`inc` at any depth (`derive_include_roots`, sorted/deduplicated, subsuming the former repo-root literals) — pooled after the
+same-directory hit and `--include-root`; several hits stay Ambiguous and are now COUNTED in the modules-list headline
+(`MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` gains `imports_ambiguous_match`; RG-REQ-006-L03 "unresolved and counted");
+no suffix guessing, case-sensitive lower-case roots. CODE UNDER ANALYSIS (poco): `Net/src/AbstractHTTPRequestHandler.cpp:20`
+`#include "Poco/Exception.h"` was `imports_file_not_found` and now resolves to `Foundation/include/Poco/Exception.h` (402
+files resolve that header; 0 before); `Data/src/RowFormatter.cpp` → `Foundation/include/Poco/Exception.h` and
+`Util/src/SystemConfiguration.cpp` → `Foundation/include/Poco/DateTimeFormat.h` are among the newly resolved cross-module
+includes; `NetSSL_OpenSSL/src/SecureServerSocket.cpp:15` `#include "Poco/Net/SecureServerSocket.h"` is COUNTED AMBIGUOUS
+because the header exists under both `NetSSL_OpenSSL/include/` and `NetSSL_Win/include/` (never bound);
+`Foundation/src/AsyncNotificationCenter.cpp:24` `#include <vector>` stays unresolved (a true system header). RESULT on a fresh
+poco index: FILE→FILE resolved IMPORTS 1,687 → 11,580, `imports_file_not_found` 13,703 → 3,442 (all system headers),
+`imports_ambiguous_match` 0 → 368, include sites conserved (15,390 == 15,390), never-flip proved as a resolved-pair-set
+inclusion, MODULE→MODULE edges 15 → 492; `modules list` renders 79 module pairs led by `Net → Foundation (616 file-level
+imports)` instead of "No cross-module dependencies detected."; `unresolved_import_count` 3,810 == the store's four-category
+count; a real cycle renders (`Foundation/include/Poco` ↔ `Foundation/include/Poco/Dynamic`); index 31 s, store +0.4%.
+Manager-executed corpora (candidate fresh indexes vs the retained v0.18.0 stores, FILE→FILE resolved / not_found): OpenXcom
+3,920 → 4,073 / 945 → 792 (+153, RC-10's measured number exactly); duckdb 20,031 → 22,305 / 8,692 → 6,418 (RC-10 estimated
++2,277); gstreamer 7,706 → 7,722 (+16 — its headers sit under meson subprojects/gst-libs, never `include/`: RG-REQ-006-L11,
+CPP-INCLUDE-SUFFIX-1); vcmi, swupdate, sqlite byte-identical (only a root-level `include/`, or none); leveldb/nginx/codegraph
+byte-identical (CIR-C13); registry digest unchanged; no stray daemon. GATES: ALL-GATES-GREEN (tracked scripts/repo-graph-gates.sh; fmt-check was inside the builder oracle CIR-C16, so the committed bytes are the accepted bytes). TALLY: 2 admissions, 2 baselines
+(INPUT-1, INPUT-2), 1 bootstrap re-baseline (RG-BOOTSTRAP-INPUT-3: the ratified queue order recorded as authority —
+D-CIR-AUTH-01), 3 oracle corrections (OC-1, OC-1a, OC-2), 5 document cycles (PREP 1, PREP-2 2, PREP-3 2), 2 implementation
+cycles (cycle 1: 15/16 with the builder's correct D-CIR-C10-ORACLE stop on two manager oracle defects; cycle 2: 16/16 accepted);
+reviewer findings F-CIR-01..05 + F-CIR-001 (all real: `;`-chained captures, an unparsed trust JSON, a misnamed classification
+test, an unpinned citation, a false "zero include dirs" claim about leveldb, an unanchored sed); 3 manager interpretations
+(shape only). LESSONS: a grep that prints nothing is a failed verification (RC-10's witness file never included the header);
+never edit a pinned input before applying a pending interpretation. FOLLOW-UPS: CPP-INCLUDE-SUFFIX-1 (RG-REQ-006-L11;
+gstreamer/vcmi/duckdb remainder); INCLUDE-NEAREST-ROOT-1 (candidate, needs a requirement refinement: whether an includer's own
+module root should win an ambiguity such as `NetSSL_OpenSSL/src/SecureServerSocket.cpp:15` between `NetSSL_OpenSSL/include/`
+and `NetSSL_Win/include/` — today counted, never bound). NEXT: Q4 EXPLAIN-CYCLES-HONEST-1.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a

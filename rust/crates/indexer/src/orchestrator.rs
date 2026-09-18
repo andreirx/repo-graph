@@ -864,10 +864,14 @@ fn run_pipeline<S: IndexerStoragePort>(
     let file_resolution_map = build_file_resolution_map(all_file_paths, repo_uid);
     let per_file_include_map = build_per_file_include_resolution(all_file_paths, repo_uid);
 
-    // v1.1: Build include resolver with configured + conventional roots.
+    // CPP-INCLUDE-ROOTS-1: pass only the configured (`--include-root`) roots;
+    // the conventional roots are DERIVED from the indexed file list inside
+    // `build_include_resolution_map` (every `include`/`inc` directory at any
+    // depth), which subsumes the former repo-root-anchored literals
+    // `include`/`inc`/`src/include`.
     let include_config = IncludeResolverConfig {
         configured_roots: c_include_roots.to_vec(),
-        conventional_roots: vec!["include", "inc", "src/include"],
+        derived_roots: Vec::new(),
     };
     let include_resolution_map =
         build_include_resolution_map(all_file_paths, repo_uid, &include_config);

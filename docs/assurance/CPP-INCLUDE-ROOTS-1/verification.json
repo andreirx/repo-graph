@@ -1,0 +1,612 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-CPP-INCLUDE-ROOTS-1-0",
+  "workItemId": "CPP-INCLUDE-ROOTS-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/CPP-INCLUDE-ROOTS-1-INPUT-2.json",
+    "sha256": "sha256:3906c781cd09c08f020a4ac33051b092c126e37d106840fbd5522b4009c36b10"
+  },
+  "allocation": {
+    "path": "docs/slices/cpp-include-roots-1.md",
+    "sha256": "sha256:48f7625c9e17443b1a3ea41c8ae7e86db8921fa41a7df35d4a5abb1d1ad0399e"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "810a8bbd701f0e025c07fb1b4cc20120f150c39c",
+    "entries": [
+      {
+        "path": "rust/crates/classification/src/types.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:3ec1130053191cc3e05b5dd57030264148e2fe3f2af69fa413ffab014189a1a8",
+          "byteLength": 50718
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:27cc8c801171e09b5b340f60c3cc4d003d72c3a29ffbafbac0a77e545e104ded",
+          "byteLength": 51413
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/include_resolver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2f4d5cbfbca7a21e8f0fa2721655a17ff7d6624d8d65b3690e774d52060546bb",
+          "byteLength": 24957
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:75d851902307ab6f2d2cf78f990a8e4b7d64403b9e916f8739fc9c25f0983333",
+          "byteLength": 36631
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:94278a324ed49d37d530188035d0f983a440ec22f61f874ce5c4cc6534c9cdf7",
+          "byteLength": 173092
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:258531d5f6f6ab526aeb8fd7ff3c965d30aa173ed4e6cd7bce2133767bb624af",
+          "byteLength": 173326
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/cpp_include_roots.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fb22c16f0da38232224fe5c002330f18903e516a6c041704789476c352f35021",
+          "byteLength": 7356
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/trust_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2ed132916aaf4309308b79b8759db6f10ae78c6a644e72775dbf0be6492a5a09",
+          "byteLength": 106183
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ff3f9798ba42ff27687cd5aff67a66b9327d86ef5399512486c60f3def3a9e97",
+          "byteLength": 106263
+        }
+      }
+    ],
+    "sha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-CPP-INCLUDE-ROOTS-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "CIR-C01",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer --lib derived_root 2>&1 | tee /tmp/cir-c01.txt | grep -E 'test result: ok\\. (9|[1-9][0-9]+) passed; 0 failed' && for t in derived_root_resolves_header_under_nested_include_dir derived_root_resolves_header_under_nested_inc_dir derived_root_ambiguous_when_two_derived_roots_hold_the_header derived_root_pooled_with_configured_root_is_ambiguous derived_root_same_directory_hit_still_wins derived_root_ignores_a_file_named_include derived_root_is_case_sensitive derived_root_angle_bracket_resolves derived_roots_are_deterministic_regardless_of_file_order; do grep -qE \"^test .*$t .* ok$\" /tmp/cir-c01.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the derived_root* unit tests in rust/crates/indexer/src/include_resolver.rs (section 2.3's evidence taxonomy, one test per row) plus any further regression test the family gains"
+      },
+      "expected": "exit 0: at least nine derived_root* tests pass with 0 failed AND each of the nine NAMED tests is listed as ok — the count is a lower bound so a regression test added under review does not turn a green family red; a missing named test or any failure fails the check.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-indexer --lib derived_root → 9 passed; 0 failed; all 9 named derived_root* tests present; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c01.txt",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 413 filtered out"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C02",
+      "obligationIds": [
+        "RG-REQ-006-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer --lib include_resolver:: 2>&1 | tee /tmp/cir-c02.txt | grep -E 'test result: ok\\. ([3-9][0-9]|[1-9][0-9]{2,}) passed; 0 failed' && for t in same_directory_resolves same_directory_wins_over_include_root include_root_resolves inc_root_resolves src_include_root_resolves header_to_header_same_dir header_to_header_via_include_root subpath_include_resolves subpath_does_not_match_basename configured_root_resolves ambiguous_when_multiple_roots_have_same_header angle_bracket_resolves_via_conventional_root angle_bracket_skips_same_dir angle_bracket_unresolved_when_no_local_match angle_bracket_resolves_if_local_header_exists angle_bracket_ambiguous_when_multiple_matches quoted_still_checks_same_dir_first no_sibling_directory_magic no_suffix_guessing configured_and_conventional_both_matching_is_ambiguous; do grep -qE \"^test .*$t .* ok$\" /tmp/cir-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && ! grep -q 'configured_root_wins_over_conventional' /tmp/cir-c02.txt && ! grep -q 'fn configured_root_wins_over_conventional' crates/indexer/src/include_resolver.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the whole include_resolver test module (24 tests at the base revision; 9 new + 1 renamed expected): the 19 named pre-existing tests keep their names and assertions and construct their resolver through the derived-roots path; the test formerly named configured_root_wins_over_conventional (it asserts AMBIGUOUS, not a win) is renamed configured_and_conventional_both_matching_is_ambiguous with its body unchanged (section 2.4; decision D-TME-TEST-NAME-1's rule)"
+      },
+      "expected": "exit 0: at least 30 include_resolver tests pass with 0 failed; each of the 19 named pre-existing tests and the renamed test is listed as ok; the old misnomer is absent from both the run and the source. The pre-existing tests' behaviour is preserved (same-directory precedence, root-level include/inc/src/include still resolve, configured+conventional overlap is ambiguous, no sibling-directory magic, no suffix guessing).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-indexer --lib include_resolver:: → 33 passed; 0 failed; all 20 named pre-existing/renamed tests present; the old misnomer 'configured_root_wins_over_conventional' absent from both the run and crates/indexer/src/include_resolver.rs; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c02.txt",
+          "test result: ok. 33 passed; 0 failed; 389 filtered out",
+          "renamed to configured_and_conventional_both_matching_is_ambiguous (body unchanged)"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C03",
+      "obligationIds": [
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L04",
+        "RG-REQ-005-L01",
+        "RG-REQ-005-L02",
+        "RG-REQ-005-L07",
+        "RG-REQ-005-L09",
+        "P-CIR-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer --lib 2>&1 | tee /tmp/cir-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cir-c03.txt && for t in rust_crate_import java_suffix aliased_named_import_uses_imported_name_for_lookup receiver_binding_ categorize_calls forward_decl_classification_reads_the_stamped_key ambiguous_name_stays_unresolved; do grep -qE \"^test .*$t.* ok$\" /tmp/cir-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && git -C .. diff --quiet -- rust/crates/indexer/src/resolver.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the whole indexer lib suite; the named families of the OTHER resolver stages (Rust crate, Java suffix, TS aliased import, C++ receiver binding, unresolved-call categorisation, forward-decl classification, unique-name ambiguity); git diff of rust/crates/indexer/src/resolver.rs"
+      },
+      "expected": "exit 0: the whole indexer lib suite is green, every named family is listed as ok, and rust/crates/indexer/src/resolver.rs is byte-identical to the base revision — no-behavior-change for the Rust/Java/TS import stages and for C++ call binding (RG-REQ-006-L01/L02/L04, RG-REQ-005-L01/L02/L07/L09; P-CIR-02).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-indexer --lib → 422 passed; 0 failed; no FAILED/panicked; named families present (rust_crate_import, java_suffix, aliased_named_import_uses_imported_name_for_lookup, receiver_binding_, categorize_calls, forward_decl_classification_reads_the_stamped_key, ambiguous_name_stays_unresolved); git diff --quiet on rust/crates/indexer/src/resolver.rs (byte-identical to base); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c03.txt",
+          "test result: ok. 422 passed; 0 failed",
+          "resolver.rs untouched — the C++ call-binding stage is not modified"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C04",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer --test parity 2>&1 | tee /tmp/cir-c04.txt | grep -E 'test result: ok\\.' && grep -E '^test parity_against_shared_indexer_fixture_corpus .* ok$' /tmp/cir-c04.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the shared indexer fixture corpus parity test (per-file extraction fixtures; no include/inc directory exists in the corpus, so include resolution cannot move it)"
+      },
+      "expected": "exit 0: parity_against_shared_indexer_fixture_corpus is listed as ok — extraction output remains identical (the slice changes resolution, not extraction).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-indexer --test parity → parity_against_shared_indexer_fixture_corpus ok (1 passed; 0 failed); extraction output unchanged; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c04.txt",
+          "test parity_against_shared_indexer_fixture_corpus ... ok"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C05",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02",
+        "RG-REQ-002-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-repo-index --test cpp_include_roots 2>&1 | tee /tmp/cir-c05.txt | grep -E 'test result: ok\\. ([2-9]|[1-9][0-9]+) passed; 0 failed' && for t in indexed_cpp_include_resolves_through_nested_include_root indexed_cpp_include_ambiguous_across_two_include_roots_is_counted_not_bound; do grep -qE \"^test .*$t .* ok$\" /tmp/cir-c05.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the NEW source→store test file rust/crates/repo-index/tests/cpp_include_roots.rs: it writes its own fixture into a temp dir — (a) Foundation/include/Poco/Exception.h and Net/src/a.cpp containing #include \"Poco/Exception.h\" → after index_path the store holds ONE resolved IMPORTS edge from the Net/src/a.cpp FILE node to the Foundation/include/Poco/Exception.h FILE node and no unresolved imports_* row for it; (b) the same header duplicated under Util/include/Poco/ and included from Net/src/b.cpp → NO IMPORTS edge and exactly one unresolved_edges row with category imports_ambiguous_match for that include"
+      },
+      "expected": "exit 0: both named end-to-end tests pass — a nested include root resolves through extractor→indexer→storage, and a header present under two derived roots is counted as imports_ambiguous_match and never bound (no guessing between candidates).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-repo-index --test cpp_include_roots → 2 passed; 0 failed; both named end-to-end tests present (indexed_cpp_include_resolves_through_nested_include_root; indexed_cpp_include_ambiguous_across_two_include_roots_is_counted_not_bound); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c05.txt",
+          "test result: ok. 2 passed; 0 failed",
+          "source→store: a nested include root resolves; a header under two roots is imports_ambiguous_match and never bound"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C06",
+      "obligationIds": [
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L09",
+        "RG-REQ-002-L06",
+        "P-CIR-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-classification 2>&1 | tee /tmp/cir-c06a.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cir-c06a.txt && grep -qE '^test .*is_imports_category_accepts_all_four_import_categories_and_rejects_others .* ok$' /tmp/cir-c06a.txt && ! grep -q 'is_imports_category_only_matches_imports_file_not_found' crates/classification/src/types.rs && cargo test -p repo-graph-storage modules_list_unresolved_import_count 2>&1 | tee /tmp/cir-c06b.txt | grep -E 'test result: ok\\. 1 passed; 0 failed' && grep -qE '^test .*modules_list_unresolved_import_count_includes_all_import_categories .* ok$' /tmp/cir-c06b.txt && ! grep -q 'includes_all_three_import_categories' crates/storage/src/trust_impl.rs && cargo test -p repo-graph-rgr modules_list 2>&1 | tee /tmp/cir-c06c.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cir-c06c.txt && for t in two_crate_fixture_renders_a_to_b_edge_verbatim list_render_empty_edges_is_zero_state list_render_absent_edges_field_is_unavailable_with_reason; do grep -qE \"^test .*$t .* ok$\" /tmp/cir-c06c.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the classification crate suite (MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES now holds the four import categories; the test formerly named is_imports_category_only_matches_imports_file_not_found — its body never asserted an 'only' — is expanded to assert all four import categories and renamed is_imports_category_accepts_all_four_import_categories_and_rejects_others); the storage regression test renamed from modules_list_unresolved_import_count_includes_all_three_import_categories to modules_list_unresolved_import_count_includes_all_import_categories, now asserting that imports_ambiguous_match IS counted (section 2.5); the rgr modules-list render tests"
+      },
+      "expected": "exit 0: the headline unresolved-import count includes the ambiguous-match category (both renamed tests pass; both old names are gone from their sources); the module-edge derivation and zero-state render tests remain green — no-behavior-change for RG-REQ-004-L02 (edges derive only from resolved cross-module file→file imports) and RG-REQ-004-L09 (the zero-state sentence and its denominators; P-CIR-03).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "classification suite 260 passed/0 failed with is_imports_category_accepts_all_four_import_categories_and_rejects_others present and the old name gone from types.rs; storage modules_list_unresolved_import_count → 1 passed with modules_list_unresolved_import_count_includes_all_import_categories present and 'includes_all_three_import_categories' gone from trust_impl.rs; rgr modules_list 57 passed/0 failed with the 3 named render tests (two_crate_fixture_renders_a_to_b_edge_verbatim, list_render_empty_edges_is_zero_state, list_render_absent_edges_field_is_unavailable_with_reason); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c06a.txt",
+          "/tmp/cir-c06b.txt",
+          "/tmp/cir-c06c.txt",
+          "MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES now the full four import categories; headline counts ambiguity"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C07",
+      "obligationIds": [
+        "RG-REQ-004-L07",
+        "RG-REQ-011-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr cycles 2>&1 | tee /tmp/cir-c07a.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cir-c07a.txt && for t in zero_state_states_module_and_edge_counts zero_state_names_empty_graph_when_no_resolved_edges; do grep -qE \"^test .*$t .* ok$\" /tmp/cir-c07a.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-storage retention_prune_benchmark_gate 2>&1 | tee /tmp/cir-c07b.txt | grep -E 'test result: ok\\. 1 passed; 0 failed'",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the rgr cycles presentation tests (zero-state wording) and the storage retention benchmark gate"
+      },
+      "expected": "exit 0: the cycles zero-state tests and the retention benchmark gate remain green — no-behavior-change for the cycles walk/render (RG-REQ-004-L07) and for bounded retention (RG-REQ-011-L03); the poco store-growth cost itself is REPORTED in CIR-C14.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "rgr cycles 41 passed/0 failed with the 2 named zero-state tests (zero_state_states_module_and_edge_counts, zero_state_names_empty_graph_when_no_resolved_edges); storage retention_prune_benchmark_gate → 1 passed; 0 failed; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-c07a.txt",
+          "/tmp/cir-c07b.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C08",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-004-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/CPP-INCLUDE-ROOTS-1-ret && mkdir -p /private/tmp/CPP-INCLUDE-ROOTS-1-ret && cp \"$HOME/repo-graph-retained/audit-v0.18.0/databases/9858deeeefef8599.db\" /private/tmp/CPP-INCLUDE-ROOTS-1-ret/poco.db && D=/private/tmp/CPP-INCLUDE-ROOTS-1-ret/poco.db && R=$(sqlite3 $D \"SELECT count(*) FROM edges WHERE type='IMPORTS'\") && NF=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category='imports_file_not_found'\") && AM=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category='imports_ambiguous_match'\") && OT=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category IN ('imports_wildcard','imports_ambiguous_suffix')\") && PU=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category LIKE 'imports_%' AND target_key LIKE 'Poco/%'\") && echo \"RETAINED resolved=$R not_found=$NF ambiguous=$AM other=$OT poco_prefixed_unresolved=$PU\" | tee /tmp/cir-retained.txt && test \"$R\" = 1702 && test \"$NF\" = 13703 && test \"$AM\" = 0 && test \"$PU\" -ge 1",
+        "cwd": ".",
+        "environment": "a COPY of the retained v0.18.0 poco store (read with sqlite3 only; the retained root itself is never served)",
+        "inputs": "the retained audit root's poco database 9858deeeefef8599.db (v0.18.0, 2026-09-08); literals read by the manager on 2026-09-18: 1,702 resolved IMPORTS; 13,703 imports_file_not_found; 0 imports_ambiguous_match"
+      },
+      "expected": "exit 0: the v0.18.0 fingerprint matches exactly (1,702 resolved IMPORTS; 13,703 unresolved imports_file_not_found; 0 ambiguous) and at least one unresolved include names a Poco/… header — the defect RC-10 describes exists in the shipped store (the zero-state poco renders today is a faithful render of this never-resolved include graph).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Read-only COPY of the retained v0.18.0 poco store: resolved=1702, not_found=13703, ambiguous=0, poco_prefixed_unresolved=8827 — the exact shipped fingerprint; ≥1 unresolved names a Poco/ header (RC-10 defect present in the shipped store); EXIT=0. Retained root only copied, never served.",
+        "supportingEvidence": [
+          "/tmp/cir-retained.txt",
+          "RETAINED resolved=1702 not_found=13703 ambiguous=0 other=0 poco_prefixed_unresolved=8827"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C09",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "B=$(python3 -c \"import json;print(json.load(open('.agent-manager/slices/CPP-INCLUDE-ROOTS-1/status.json'))['candidateTracking']['baseRevision'])\") && rm -rf /private/tmp/CPP-INCLUDE-ROOTS-1-before && git worktree add --detach /private/tmp/CPP-INCLUDE-ROOTS-1-before $B && (cd /private/tmp/CPP-INCLUDE-ROOTS-1-before/rust && cargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -n1) && rm -rf /private/tmp/CPP-INCLUDE-ROOTS-1-poco-before && T0=$(date +%s) && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release:$PATH /private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release/rmap index ) >/tmp/cir-index-before.txt 2>&1 && SECS=$(( $(date +%s) - T0 )) && D=$(ls /private/tmp/CPP-INCLUDE-ROOTS-1-poco-before/databases/*.db | head -n1) && BYTES=$(stat -f %z $D) && R=$(sqlite3 $D \"SELECT count(*) FROM edges e JOIN nodes s ON s.node_uid=e.source_node_uid JOIN nodes t ON t.node_uid=e.target_node_uid WHERE e.type='IMPORTS' AND s.kind='FILE' AND t.kind='FILE'\") && ME=$(sqlite3 $D \"SELECT count(*) FROM edges e JOIN nodes s ON s.node_uid=e.source_node_uid WHERE e.type='IMPORTS' AND s.kind!='FILE'\") && NF=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category='imports_file_not_found'\") && AM=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category='imports_ambiguous_match'\") && OT=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category IN ('imports_wildcard','imports_ambiguous_suffix')\") && PU=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category LIKE 'imports_%' AND target_key LIKE 'Poco/%'\") && sqlite3 $D \"SELECT substr(s.stable_key, instr(s.stable_key, ':')+1) || ' ' || substr(t.stable_key, instr(t.stable_key, ':')+1) FROM edges e JOIN nodes s ON s.node_uid=e.source_node_uid JOIN nodes t ON t.node_uid=e.target_node_uid WHERE e.type='IMPORTS'\" | sort > /tmp/cir-poco-before-pairs.txt && echo \"BEFORE resolved=$R not_found=$NF ambiguous=$AM other=$OT poco_prefixed_unresolved=$PU total=$((R+NF+AM+OT)) module_edges=$ME secs=$SECS bytes=$BYTES\" | tee /tmp/cir-poco-before.txt && test \"$PU\" -ge 1",
+        "cwd": ".",
+        "environment": "a git worktree of the recorded base revision built once (before-binary and its rmapd); a fresh isolated index of poco in a throwaway root served over stdio with auto passes off",
+        "inputs": "the poco checkout; .agent-manager/slices/CPP-INCLUDE-ROOTS-1/status.json for the base revision"
+      },
+      "expected": "exit 0: the defect reproduces at the base revision on a FRESH poco index (at least one unresolved include names a Poco/… header); the before numbers (FILE→FILE resolved IMPORTS, module-level IMPORTS edges, unresolved by category, their total, the sorted resolved source→target pair list, wall seconds, store bytes) are RECORDED in /tmp/cir-poco-before.txt, /tmp/cir-poco-before-pairs.txt and build-progress.md. No number other than poco_prefixed_unresolved ≥ 1 is predicted.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "before-binary (rgr+rmapd built from base worktree 810a8bb in 1m40s) fresh isolated poco index: FILE→FILE resolved=1687, not_found=13703, ambiguous=0, other=0, total(FILE→FILE+unresolved)=15390, module_edges=15, poco_prefixed_unresolved=8827 (≥1), secs=32, bytes=488587264 — the defect reproduces on a fresh index; sorted resolved pair list captured; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-poco-before.txt",
+          "/tmp/cir-poco-before-pairs.txt",
+          "BEFORE resolved=1687 not_found=13703 ambiguous=0 other=0 poco_prefixed_unresolved=8827 total=15390 module_edges=15 secs=32 bytes=488587264"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C10",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02",
+        "RG-REQ-002-L01",
+        "RG-REQ-004-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo build --release -p repo-graph-rgr -p rmapd --manifest-path rust/Cargo.toml 2>&1 | tail -n1 && rm -rf /private/tmp/CPP-INCLUDE-ROOTS-1-poco && T0=$(date +%s) && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index ) >/tmp/cir-index-after.txt 2>&1 && SECS=$(( $(date +%s) - T0 )) && D=$(ls /private/tmp/CPP-INCLUDE-ROOTS-1-poco/databases/*.db | head -n1) && BYTES=$(stat -f %z $D) && R=$(sqlite3 $D \"SELECT count(*) FROM edges e JOIN nodes s ON s.node_uid=e.source_node_uid JOIN nodes t ON t.node_uid=e.target_node_uid WHERE e.type='IMPORTS' AND s.kind='FILE' AND t.kind='FILE'\") && ME=$(sqlite3 $D \"SELECT count(*) FROM edges e JOIN nodes s ON s.node_uid=e.source_node_uid WHERE e.type='IMPORTS' AND s.kind!='FILE'\") && NF=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category='imports_file_not_found'\") && AM=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category='imports_ambiguous_match'\") && OT=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category IN ('imports_wildcard','imports_ambiguous_suffix')\") && PU=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category LIKE 'imports_%' AND target_key LIKE 'Poco/%'\") && sqlite3 $D \"SELECT substr(s.stable_key, instr(s.stable_key, ':')+1) || ' ' || substr(t.stable_key, instr(t.stable_key, ':')+1) FROM edges e JOIN nodes s ON s.node_uid=e.source_node_uid JOIN nodes t ON t.node_uid=e.target_node_uid WHERE e.type='IMPORTS'\" | sort > /tmp/cir-poco-after-pairs.txt && echo \"AFTER resolved=$R not_found=$NF ambiguous=$AM other=$OT poco_prefixed_unresolved=$PU total=$((R+NF+AM+OT)) module_edges=$ME secs=$SECS bytes=$BYTES\" | tee /tmp/cir-poco-after.txt && RB=$(sed -E 's/^BEFORE resolved=([0-9]+) .*/\\1/' /tmp/cir-poco-before.txt) && TB=$(sed -E 's/^BEFORE .* total=([0-9]+) module_edges=.*/\\1/' /tmp/cir-poco-before.txt) && test \"$R\" -gt \"$RB\" && test $((R+NF+AM+OT)) = \"$TB\" && test \"$(comm -23 /tmp/cir-poco-before-pairs.txt /tmp/cir-poco-after-pairs.txt | wc -l | tr -d ' ')\" = 0 && grep -q '^Net/src/AbstractHTTPRequestHandler.cpp:FILE Foundation/include/Poco/Exception.h:FILE$' /tmp/cir-poco-after-pairs.txt && test \"$SECS\" -le 300",
+        "cwd": ".",
+        "environment": "the freshly built candidate rmap + rmapd; a fresh isolated index of poco in a throwaway root, stdio, auto passes off",
+        "inputs": "the poco checkout; /tmp/cir-poco-before.txt and /tmp/cir-poco-before-pairs.txt from CIR-C09"
+      },
+      "expected": "exit 0 requires ALL of: (1) resolved IMPORTS strictly greater than before; (2) INCLUDE-SITE CONSERVATION — FILE→FILE resolved IMPORTS + unresolved imports_* rows after == the same sum before (the persisted MODULE→MODULE directory edges are counted separately as module_edges and REPORTED — they grow as includes resolve, by construction) (no include is dropped or invented: every newly resolved include left the unresolved set, RG-REQ-006-L03/RG-REQ-001-L02); (3) NEVER-FLIP — every resolved source→target pair of the before index is still resolved to the same target after (comm -23 empty), so adding roots only turned Unresolved into Resolved or Ambiguous; (4) the witness include Net/src/AbstractHTTPRequestHandler.cpp:20 `#include \"Poco/Exception.h\"` → Foundation/include/Poco/Exception.h is a resolved FILE→FILE edge (RC-10 named HTTPClientSession.cpp, which does not include that header in the indexed revision — OC-2); (5) index wall time ≤ 300 s (the smoke client window — a STOP condition otherwise). The magnitudes (how many resolved, how many ambiguous, the residual Poco/-prefixed unresolved, store bytes) are REPORTED, never predicted.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "candidate (rgr+rmapd built 1m12s) fresh isolated poco index: FILE→FILE resolved=11580, not_found=3442, ambiguous=368, other=0, total=15390, module_edges=492, secs=31, bytes=490663936. ALL five sub-assertions pass under the OC-1/OC-2 corrected oracle: (1) R 11580 > before 1687; (2) include-site CONSERVATION FILE→FILE+unresolved = 15390 == before 15390 (persisted MODULE→MODULE edges 15→492 counted separately, reported); (3) never-flip: comm -23 before-pairs after-pairs = 0 (every before-resolved src→target pair still resolved to the same target); (4) witness 'Net/src/AbstractHTTPRequestHandler.cpp:FILE Foundation/include/Poco/Exception.h:FILE' present in after-pairs; (5) 31s ≤ 300; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-poco-after.txt",
+          "/tmp/cir-poco-after-pairs.txt",
+          "AFTER resolved=11580 not_found=3442 ambiguous=368 other=0 poco_prefixed_unresolved=368 total=15390 module_edges=492 secs=31 bytes=490663936",
+          "witness: Net/src/AbstractHTTPRequestHandler.cpp:20 #include \"Poco/Exception.h\" → Foundation/include/Poco/Exception.h (was imports_file_not_found before)"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C11",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L09",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L01",
+        "RG-REQ-009-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -f /tmp/cir-modules-before.txt /tmp/cir-modules-after.json /tmp/cir-modules-after.txt /tmp/cir-trust-before.json /tmp/cir-trust-after.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release:$PATH /private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release/rmap modules list ) 2>/dev/null > /tmp/cir-modules-before.txt && grep -q '^No cross-module dependencies detected\\.' /tmp/cir-modules-before.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list --json ) 2>/dev/null > /tmp/cir-modules-after.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list ) 2>/dev/null > /tmp/cir-modules-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release:$PATH /private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release/rmap trust --json ) 2>/dev/null > /tmp/cir-trust-before.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust --json ) 2>/dev/null > /tmp/cir-trust-after.json && D=$(ls /private/tmp/CPP-INCLUDE-ROOTS-1-poco/databases/*.db | head -n1) && STORE_UNRES=$(sqlite3 $D \"SELECT count(*) FROM unresolved_edges WHERE category IN ('imports_file_not_found','imports_ambiguous_match','imports_wildcard','imports_ambiguous_suffix')\") && python3 -c \"import json,sys\nd=json.load(open('/tmp/cir-modules-after.json'))\nedges=d['edges'] or []\nassert len(edges)>=1, 'no edges'\nname=lambda s: s.split(':')[-1].rstrip('/')\nnf=[e for e in edges if name(e['source'])=='Net' and name(e['target'])=='Foundation']\nassert nf, [ (e['source'],e['target']) for e in edges[:10]]\nassert d['unresolved_import_count']==int(sys.argv[1]), (d['unresolved_import_count'], sys.argv[1])\nprint('edges',len(edges),'| Net->Foundation import_count',nf[0]['import_count'],'| unresolved_import_count',d['unresolved_import_count'],'== store',sys.argv[1])\" \"$STORE_UNRES\" && grep -qE '^[0-9]+ cross-module dependenc(y|ies).* detected\\.' /tmp/cir-modules-after.txt && grep -q \"(${STORE_UNRES} imports unresolved)\" /tmp/cir-modules-after.txt && ! grep -q 'No cross-module dependencies detected' /tmp/cir-modules-after.txt && grep -q 'Net → Foundation (' /tmp/cir-modules-after.txt && python3 -c \"import json\nfor tag,f in (('BEFORE','/tmp/cir-trust-before.json'),('AFTER','/tmp/cir-trust-after.json')):\n    ig=json.load(open(f))['value']['reliability']['value']['import_graph']\n    assert isinstance(ig.get('level'),str) and isinstance(ig.get('reasons'),list), (tag, ig)\n    print('TRUST', tag, 'import_graph level', ig['level'], 'reasons', ig['reasons'])\"",
+        "cwd": ".",
+        "environment": "before-binary on the CIR-C09 index; candidate on the CIR-C10 index",
+        "inputs": "the two poco indexes; the store's unresolved-import count over the four import categories"
+      },
+      "expected": "exit 0: the before-binary's `modules list` on the fresh before index renders the zero-state sentence (faithful to an empty edge list); the candidate's `modules list --json` on the fresh after index has a non-empty edge list containing a Net → Foundation edge (its import_count REPORTED), and its unresolved_import_count EQUALS the store's count over all four unresolved-import categories — ambiguity is COUNTED where the user reads the count (RG-REQ-006-L03 'unresolved and counted'; RG-REQ-002-L06 coverage stated; RG-REQ-002-L01 remains satisfied: no rendered edge without a stored resolved import); the human render shows the count line, the same '(N imports unresolved)' clause, the 'Net → Foundation (' row, and no zero-state sentence. trust --json before/after is captured by failure-propagating invocations (every capture file removed first) and both documents are parsed: the Import-graph axis (`value.reliability.value.import_graph`: `level` and its `reasons`, e.g. `unresolved_imports=N`) is printed for poco before and after and REPORTED with attribution (RG-REQ-009-L04 — a pre-authorised movement, never predicted).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "before-binary `modules list` on the fresh before index renders the zero-state ('No cross-module dependencies detected.'); candidate `modules list --json` has 79 edges incl. Net → Foundation (import_count=616) and unresolved_import_count=3810 == the store's count over all four import categories (3442 imports_file_not_found + 368 imports_ambiguous_match — ambiguity COUNTED, RG-REQ-006-L03/RG-REQ-002-L06); human render shows the '(3810 imports unresolved)' clause, the 'Net → Foundation (' row, and no zero-state; trust --json Import-graph axis parsed both indexes: BEFORE LOW [alias_resolution_suspicion, unresolved_imports=13703] → AFTER LOW [unresolved_imports=3442] — level stays LOW while unresolved>0, the false alias_resolution_suspicion reason disappears, unresolved falls (RG-REQ-009-L04, reported); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-modules-before.txt",
+          "/tmp/cir-modules-after.json",
+          "/tmp/cir-modules-after.txt",
+          "/tmp/cir-trust-before.json",
+          "/tmp/cir-trust-after.json",
+          "edges 79 | Net->Foundation import_count 616 | unresolved_import_count 3810 == store 3810"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C12",
+      "obligationIds": [
+        "RG-REQ-004-L07",
+        "RG-REQ-004-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -f /tmp/cir-cyclesj-before.json /tmp/cir-cyclesj-after.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release:$PATH /private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release/rmap cycles --json ) > /tmp/cir-cyclesj-before.json 2>/dev/null && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-poco RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-poco/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" cycles --json ) > /tmp/cir-cyclesj-after.json 2>/dev/null && python3 -c \"import json\nb=json.load(open('/tmp/cir-cyclesj-before.json'))\na=json.load(open('/tmp/cir-cyclesj-after.json'))\nsets=lambda d: sorted(sorted((n.get('qualified_name') or n['name']) for n in c['nodes']) for c in d['cycles'])\nprint('BEFORE count',b['count'],'module_edge_count',b['module_edge_count'],'sets',sets(b))\nprint('AFTER count',a['count'],'module_edge_count',a['module_edge_count'],'sets',sets(a))\nassert a['module_edge_count']>=1\"",
+        "cwd": ".",
+        "environment": "before-binary on the CIR-C09 index; candidate on the CIR-C10 index",
+        "inputs": "the two poco indexes"
+      },
+      "expected": "exit 0: both `cycles --json` outputs parse; the candidate's module_edge_count is ≥ 1 (edges now exist); the cycle count and member sets before and after are REPORTED verbatim — whatever SCCs poco's real include graph has are rendered from resolved edges only (RG-REQ-004-L07), and the cycles zero-state, if any, carries its counts (RG-REQ-004-L09). No cycle count is predicted.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cycles --json before/after both parse; candidate module_edge_count=492 (≥1); cycle count 1→4; AFTER member sets add real SCCs over the resolved include graph — [Foundation/include/Poco, Foundation/include/Poco/Dynamic], [XML/include/Poco/SAX, XML/include/Poco/XML], [dependencies/quill/include/quill, …/backend, …/std]; sets reported verbatim, none predicted; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-cyclesj-before.json",
+          "/tmp/cir-cyclesj-after.json",
+          "BEFORE count 1 module_edge_count 15; AFTER count 4 module_edge_count 492"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C13",
+      "obligationIds": [
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L04",
+        "RG-REQ-005-L01",
+        "P-CIR-01",
+        "P-CIR-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "for R in leveldb nginx codegraph; do SRC='/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R; rm -rf /private/tmp/CPP-INCLUDE-ROOTS-1-$R-before /private/tmp/CPP-INCLUDE-ROOTS-1-$R; ( cd \"$SRC\" && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-$R-before RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-$R-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release:$PATH /private/tmp/CPP-INCLUDE-ROOTS-1-before/rust/target/release/rmap index ) >/dev/null 2>&1 && ( cd \"$SRC\" && export RMAP_STATE_ROOT=/private/tmp/CPP-INCLUDE-ROOTS-1-$R RMAP_SOCKET_PATH=/private/tmp/CPP-INCLUDE-ROOTS-1-$R/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index ) >/dev/null 2>&1 && Q=\"SELECT type, resolution, count(*) FROM edges GROUP BY type, resolution; SELECT category, count(*) FROM unresolved_edges GROUP BY category; SELECT count(*) FROM nodes; SELECT count(*) FROM files WHERE is_test=1;\" && sqlite3 $(ls /private/tmp/CPP-INCLUDE-ROOTS-1-$R-before/databases/*.db | head -n1) \"$Q\" > /tmp/cir-$R-before.txt && sqlite3 $(ls /private/tmp/CPP-INCLUDE-ROOTS-1-$R/databases/*.db | head -n1) \"$Q\" > /tmp/cir-$R-after.txt && cmp /tmp/cir-$R-before.txt /tmp/cir-$R-after.txt && echo \"$R byte-stable: $(wc -l < /tmp/cir-$R-after.txt) fact lines\" || exit 1; done",
+        "cwd": ".",
+        "environment": "fresh isolated indexes of leveldb (C++; exactly ONE include directory, the root-level include/ — the former literal root, now derived from the file list: the retained-root-level case), nginx (C; no include/inc directory) and codegraph (TypeScript + Rust; no include/inc directory; the audit's control repo) with the before-binary and the candidate, throwaway roots, stdio, auto passes off",
+        "inputs": "the three checkouts; the before-binary from CIR-C09"
+      },
+      "expected": "exit 0: for all three corpora the edge counts by type and resolution, the unresolved counts by category, the node count and the is_test partition are byte-identical before/after — leveldb's only include directory is the root-level include/ that the former literal already covered, so deriving it changes no resolution (the retained-root-level case); nginx and codegraph have no include/inc directory and derive no root; and the Rust/Java/TypeScript/Python stages are untouched. A differing line is a STOP (no-behavior-change for RG-REQ-006-L01/L02/L04 and RG-REQ-005-L01; P-CIR-01 other ecosystems byte-stable; P-CIR-02 call binding untouched).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "fresh before/after isolated indexes with cmp byte-identical on (edges by type+resolution, unresolved by category, node count, is_test partition): leveldb 9 fact lines (C++; only root-level include/ — the retained-root case; P-CIR-02), nginx 9 (C; no include/inc dir), codegraph 16 (TypeScript+Rust; no include/inc dir; P-CIR-01); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-leveldb-before.txt",
+          "/tmp/cir-leveldb-after.txt",
+          "/tmp/cir-nginx-before.txt",
+          "/tmp/cir-nginx-after.txt",
+          "/tmp/cir-codegraph-before.txt",
+          "/tmp/cir-codegraph-after.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C14",
+      "obligationIds": [
+        "RG-REQ-011-L03",
+        "RG-REQ-006-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "SB=$(sed -E 's/.*secs=([0-9]+) .*/\\1/' /tmp/cir-poco-before.txt) && SA=$(sed -E 's/.*secs=([0-9]+) .*/\\1/' /tmp/cir-poco-after.txt) && BB=$(sed -E 's/.*bytes=([0-9]+).*/\\1/' /tmp/cir-poco-before.txt) && BA=$(sed -E 's/.*bytes=([0-9]+).*/\\1/' /tmp/cir-poco-after.txt) && echo \"COST poco index secs before=$SB after=$SA; store bytes before=$BB after=$BA; ratio=$(python3 -c \"print(round($BA/max($BB,1),3))\")\" | tee /tmp/cir-cost.txt && test \"$SA\" -le 300",
+        "cwd": ".",
+        "environment": "the two poco indexes' recorded wall times and store sizes",
+        "inputs": "/tmp/cir-poco-before.txt and /tmp/cir-poco-after.txt"
+      },
+      "expected": "exit 0: the candidate's poco index completes within the 300 s smoke window; wall time and store size before/after and their ratio are REPORTED (a cost the human reads, never predicted). Retention behaviour itself remains as before (its gate is CIR-C07) — no-behavior-change for RG-REQ-011-L03.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "candidate poco index wall time 31s (≤300); store bytes before=488587264 after=490663936, ratio 1.004 (+0.4%) — cost reported, not predicted; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/cir-cost.txt",
+          "COST poco index secs before=32 after=31; store bytes before=488587264 after=490663936; ratio=1.004"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C15",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-CIR-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "inspection",
+        "subject": "isolation of every live proof and the cleanup of every throwaway root and the git worktree",
+        "criterion": "every rmap invocation in CIR-C08..C14 ran under an RMAP_STATE_ROOT/RMAP_SOCKET_PATH inside /private/tmp/CPP-INCLUDE-ROOTS-1-* with RMAP_TRANSPORT=stdio and RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the retained root was only ever COPIED (CIR-C08), never served; the operator's real registry '$HOME/Library/Application Support/repo-graph/registry.json' has the SAME sha256 before the first proof and after the last (shasum -a 256, both values quoted in build-progress.md); at hand-off `ls -d /private/tmp/CPP-INCLUDE-ROOTS-1-*` lists nothing, `git worktree list` shows no /private/tmp/CPP-INCLUDE-ROOTS-1-before entry, and no rmapd from /private/tmp/CPP-INCLUDE-ROOTS-1-before or rust/target survives (pgrep -fl rmapd)",
+        "inputs": "build-progress.md; the two registry digests; the final ls/worktree/pgrep outputs"
+      },
+      "expected": "the inspection finds every proof isolated, the real registry digest identical before/after, and no throwaway root, worktree or daemon left behind (no-behavior-change for RG-REQ-011-L06; P-CIR-04).",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Every rmap invocation ran under an RMAP_STATE_ROOT/RMAP_SOCKET_PATH inside /private/tmp/CPP-INCLUDE-ROOTS-1-* with RMAP_TRANSPORT=stdio and auto passes off; the retained root was only copied (CIR-C08), never served; operator registry sha256 = 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c, IDENTICAL to the cycle-1 recorded value (nothing mutated it across either cycle); at hand-off `ls -d /private/tmp/CPP-INCLUDE-ROOTS-1-*` matches nothing, `git worktree list` has no CPP-INCLUDE-ROOTS-1-before entry (removed + pruned), and no rmapd from the isolated/target dirs survives.",
+        "supportingEvidence": [
+          "/tmp/cir-registry-after.txt",
+          "4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c  (= cycle-1 value)",
+          "ls: no matches for /private/tmp/CPP-INCLUDE-ROOTS-1-*; git worktree list clean; pgrep rmapd → none from isolated/target"
+        ]
+      }
+    },
+    {
+      "checkId": "CIR-C16",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git diff --check && (cd rust && cargo fmt --check -p repo-graph-indexer -p repo-graph-classification -p repo-graph-storage -p repo-graph-repo-index && cargo clippy -p repo-graph-indexer -p repo-graph-classification -p repo-graph-storage -p repo-graph-repo-index --tests -- -D warnings 2>&1 | tail -n1) && diff <(git status --short -- rust | sort) <(printf ' M rust/crates/classification/src/types.rs\\n M rust/crates/indexer/src/include_resolver.rs\\n M rust/crates/indexer/src/orchestrator.rs\\n M rust/crates/storage/src/trust_impl.rs\\n?? rust/crates/repo-index/tests/cpp_include_roots.rs\\n')",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "git status/diff of the candidate; rustfmt and clippy over the four touched crates"
+      },
+      "expected": "exit 0: the diff is whitespace-clean, rustfmt-clean and clippy-clean with -D warnings, and the working tree under rust/ holds exactly the five candidate paths (four modified, one new) — nothing else moved.",
+      "candidateSha256": "sha256:c2ebc2c83e6f826c2f4d457b391c9161720b0498edeffef27a216566373a97f6",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "`git diff --check` clean; `cargo fmt --check` over the four crates clean; `cargo clippy --tests -- -D warnings` over the four crates clean; `diff` of `git status --short -- rust` against the expected five-path set produced no output — the working tree under rust/ holds exactly the four modified files plus the one new test file; EXIT=0.",
+        "supportingEvidence": [
+          "git status --short -- rust == ' M classification/src/types.rs; M indexer/src/include_resolver.rs; M indexer/src/orchestrator.rs; M storage/src/trust_impl.rs; ?? repo-index/tests/cpp_include_roots.rs'",
+          "cargo clippy … Finished with no -D warnings error"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/indexer/src/include_resolver.rs",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02"
+      ],
+      "summary": "Added the pure `derive_include_roots(&[String]) -> Vec<String>` (every proper directory prefix whose last segment is exactly `include`/`inc`, case-sensitive lower, sorted+deduped via BTreeSet — deterministic for any file order); replaced `IncludeResolverConfig.conventional_roots: Vec<&'static str>` with `derived_roots: Vec<String>` and had `build_include_resolution_map` derive them from the indexed file list and pool them with configured roots (resolution order and pooling-to-ambiguity unchanged). Added a `resolver_for(paths)` test helper, moved the 19 pre-existing unit tests onto the derived path (names+assertions unchanged), added the 9 `derived_root*` tests (one per §2.2 taxonomy row), and renamed `configured_root_wins_over_conventional` → `configured_and_conventional_both_matching_is_ambiguous` (body unchanged, per D-TME-TEST-NAME-1). This is the fix at the cause for RC-10: per-module `include/` roots now resolve."
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-006-L03"
+      ],
+      "summary": "The one construction site now passes only the configured (`--include-root`) roots and `derived_roots: Vec::new()`; the three repo-root-anchored literals `include`/`inc`/`src/include` are removed — they are subsumed by the derived roots (the root-level case). Deriving inside `build_include_resolution_map` is what lets this site pass no conventional list."
+    },
+    {
+      "path": "rust/crates/classification/src/types.rs",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-002-L06"
+      ],
+      "summary": "`MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` gains `ImportsAmbiguousMatch` (now the full four-category IMPORTS family) so the modules-list headline counts include-root-overlap ambiguity where the user reads the unresolved-import count; the doc comment no longer claims the exclusion. The unit test `is_imports_category_only_matches_imports_file_not_found` (a misnomer — it never asserted 'only') is expanded to assert all four import categories and rejects others, and renamed `is_imports_category_accepts_all_four_import_categories_and_rejects_others`."
+    },
+    {
+      "path": "rust/crates/storage/src/trust_impl.rs",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-002-L06"
+      ],
+      "summary": "The modules-list unresolved-count regression test is renamed `modules_list_unresolved_import_count_includes_all_import_categories` and now inserts an `imports_ambiguous_match` edge among the four counted import categories plus one CALLS edge, asserting the total is 4 (ambiguity counted, calls excluded) — pinning that the shared category set stays the full IMPORTS family."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/cpp_include_roots.rs",
+      "obligationIds": [
+        "RG-REQ-006-L03",
+        "RG-REQ-001-L02",
+        "RG-REQ-002-L01"
+      ],
+      "summary": "New source→store end-to-end test (CIR-C05): writes a C++ include fixture, indexes it through cpp-extractor+indexer+storage, and asserts (a) a header under a per-module `include/` root resolves to exactly one FILE→FILE IMPORTS edge with no imports_file_not_found row, and (b) the same header under two per-module roots yields no resolved edge and exactly one counted `imports_ambiguous_match` row — never a silent pick."
+    }
+  ],
+  "completedAt": "2026-09-18T12:23:12.195Z",
+  "limitations": [
+    "gstreamer's second cause (meson subprojects / gst-libs headers never under an `include`/`inc` directory) is out of scope — it is CPP-INCLUDE-ROOTS-2 (RG-REQ-006-L11, the unique multi-segment suffix fallback, ratified 2026-09-14 as its own slice). On poco the residual 3442 imports_file_not_found are true system headers (e.g. Foundation/src/AsyncNotificationCenter.cpp:24 `#include <vector>`), correctly unresolved.",
+    "Root-name matching is case-sensitive lower-case only (`Include`/`INC` derive nothing) — a stated, counted conservatism, proven by the unit test `derived_root_is_case_sensitive`, not a guess.",
+    "Byte-stability corpora in this cycle were leveldb/nginx/codegraph (CIR-C13); the wider operator-run corpora (duckdb, OpenXcom, vcmi, gstreamer, swupdate, sqlite) are the manager's post-accept step, not part of the builder's 16 checks.",
+    "The operator-registry isolation proof (CIR-C15) compares the current registry sha256 to the cycle-1 recorded value rather than a this-cycle 'before' snapshot; since every rmap invocation this cycle was isolated under /private/tmp, the identical digest establishes non-mutation across both cycles."
+  ],
+  "report": "CPP-INCLUDE-ROOTS-1 (Q3, RC-10) implemented at the cause: C/C++ `#include` now resolves through every `include`/`inc` directory the repository has, derived from the indexed file list, subsuming the three former repo-root-anchored literals. The cycle-1 candidate (correct; only CIR-C10's manager oracle was defective) was continued unchanged and all 16 checks were re-run under the OC-1/OC-2 corrected CIR-C09/CIR-C10 oracles. ALL 16 CHECKS EXECUTED AND PASS.\n\nPer-crate gates (C01–C07): derived_root* (9), full include_resolver module (33, misnomer renamed and gone), whole indexer lib (422; resolver.rs byte-identical — C++ call binding untouched), parity, the new source→store tests (2), classification+storage+rgr modules_list, rgr cycles+retention gate — all green.\n\nLive proofs on poco (isolated, stdio, auto passes off): the shipped defect reproduces (CIR-C08 retained fingerprint 1702/13703/0; CIR-C09 fresh before index FILE→FILE 1687 resolved, 15390 unresolved-inclusive total, 15 module edges). The candidate index (CIR-C10) raises FILE→FILE resolved 1687→11580, drops imports_file_not_found 13703→3442, records 368 imports_ambiguous_match, holds include-site CONSERVATION exactly (FILE→FILE+unresolved = 15390 == 15390; persisted MODULE→MODULE edges 15→492 reported separately), NEVER FLIPS a prior resolution (comm empty), resolves the RC-10 witness, and finishes in 31s (≤300). modules list moves from the zero-state to 79 edges (Net → Foundation = 616) with a coherent unresolved count (3810 = 3442+368, ambiguity counted); trust's Import-graph stays LOW while unresolved>0 but sheds the false alias_resolution_suspicion reason (13703→3442 reported); cycles gains real SCCs over the resolved include graph. leveldb/nginx/codegraph indexes are byte-identical before/after (other ecosystems and C++ call binding preserved). Store cost +0.4%.\n\nCode-under-analysis examples (poco): witness Net/src/AbstractHTTPRequestHandler.cpp:20 `#include \"Poco/Exception.h\"` was imports_file_not_found, now resolves to Foundation/include/Poco/Exception.h; Data/src/RowFormatter.cpp→Foundation/include/Poco/Exception.h and Util/src/SystemConfiguration.cpp→Foundation/include/Poco/DateTimeFormat.h are among the newly resolved cross-module includes; NetSSL_OpenSSL/src/SecureServerSocket.cpp:15 `#include \"Poco/Net/SecureServerSocket.h\"` is imports_ambiguous_match because the header exists under both NetSSL_Win/include/ and NetSSL_OpenSSL/include/ (never bound); Foundation/src/AsyncNotificationCenter.cpp:24 `#include <vector>` correctly stays unresolved.\n\nIsolation held: operator registry sha256 4762fd94… unchanged; all /private/tmp/CPP-INCLUDE-ROOTS-1-* roots and the before-worktree removed; no stray rmapd. Stop conditions honoured: resolver.rs untouched; no schema/wire/exit-code change; nothing outside the five candidate paths; no commit. Full progress log: .agent-manager/slices/CPP-INCLUDE-ROOTS-1/build-progress.md."
+}

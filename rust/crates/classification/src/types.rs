@@ -324,25 +324,29 @@ impl UnresolvedEdgeCategory {
 
 /// The unresolved-edge categories the `modules list` headline counts as "M imports
 /// unresolved" (IMPORT-RESOLUTION-RUST-1 §2.5, extended by IMPORT-RESOLUTION-JAVA-1 for the
-/// two Java bases). Single source of truth so the dispatch count and its regression test can
-/// never disagree — the sole current production caller is `handle_modules_list`
+/// two Java bases and by CPP-INCLUDE-ROOTS-1 for the C/C++ include-root-overlap basis).
+/// Single source of truth so the dispatch count and its regression test can never disagree —
+/// the sole current production caller is `handle_modules_list`
 /// (`daemon-runtime/src/dispatch.rs`), and `count_unresolved_by_modules_list_categories`
 /// pins the semantics.
 ///
-/// This is a DELIBERATE SUBSET of [`UnresolvedEdgeCategory::is_imports_category`], NOT all of
-/// it: it EXCLUDES `ImportsAmbiguousMatch` (the C/C++ include-root-overlap basis). That basis
-/// is out of scope for this slice, and adding it would change the headline count on C/C++
-/// repos, breaking this slice's "other ecosystems byte-stable" requirement. The three
-/// categories here are all zero on non-Java repos, so this set is additive on Java and a
-/// no-op elsewhere. STATED limitation: unresolved C/C++ `imports_ambiguous_match` edges are
-/// still excluded from this headline (pre-slice behavior, unchanged).
+/// This set is EXACTLY the IMPORTS family — it equals [`UnresolvedEdgeCategory::is_imports_category`]
+/// over the four import categories. CPP-INCLUDE-ROOTS-1 added `ImportsAmbiguousMatch`: with
+/// derived per-module include roots, a header present under two roots is unresolved AND
+/// ambiguous, and RG-REQ-006-L03 requires ambiguity to be COUNTED where the user reads the
+/// unresolved-import count — a headline that omitted it would say "N unresolved" while N +
+/// ambiguous are unresolved. On corpora with no include-root overlap (every non-C/C++ repo,
+/// and C/C++ repos without two roots holding the same header) the ambiguous-match count is 0,
+/// so the headline stays byte-stable there.
 ///
 /// Abstraction one-liner — what: a shared category set; users: the modules-list count in
 /// dispatch + its storage regression test; axis: the exact set of "unresolved import"
-/// categories, which grew this slice; rejected simpler alternative: two independent inline
-/// lists (dispatch + test) that could silently drift, defeating the regression's purpose.
-pub const MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES: [UnresolvedEdgeCategory; 3] = [
+/// categories, which grew this slice to the full four; rejected simpler alternative: two
+/// independent inline lists (dispatch + test) that could silently drift, defeating the
+/// regression's purpose.
+pub const MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES: [UnresolvedEdgeCategory; 4] = [
     UnresolvedEdgeCategory::ImportsFileNotFound,
+    UnresolvedEdgeCategory::ImportsAmbiguousMatch,
     UnresolvedEdgeCategory::ImportsWildcard,
     UnresolvedEdgeCategory::ImportsAmbiguousSuffix,
 ];
@@ -1078,8 +1082,18 @@ mod tests {
     }
 
     #[test]
-    fn is_imports_category_only_matches_imports_file_not_found() {
-        assert!(UnresolvedEdgeCategory::ImportsFileNotFound.is_imports_category());
+    fn is_imports_category_accepts_all_four_import_categories_and_rejects_others() {
+        // All four IMPORTS-family categories are accepted (CPP-INCLUDE-ROOTS-1
+        // relies on ImportsAmbiguousMatch being an import category so it is
+        // counted in the modules-list headline).
+        for import in [
+            UnresolvedEdgeCategory::ImportsFileNotFound,
+            UnresolvedEdgeCategory::ImportsAmbiguousMatch,
+            UnresolvedEdgeCategory::ImportsWildcard,
+            UnresolvedEdgeCategory::ImportsAmbiguousSuffix,
+        ] {
+            assert!(import.is_imports_category());
+        }
         for other in [
             UnresolvedEdgeCategory::InstantiatesClassNotFound,
             UnresolvedEdgeCategory::ImplementsInterfaceNotFound,

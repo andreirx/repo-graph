@@ -1333,22 +1333,23 @@ mod tests {
         assert_eq!(rows[0].count, 1);
     }
 
-    /// IMPORT-RESOLUTION-JAVA-1 (review-1 item 1) regression: the `modules list` headline count
-    /// (`M imports unresolved`) must include ALL THREE unresolved-import categories — the legacy
-    /// `imports_file_not_found` PLUS Java's `imports_wildcard` and `imports_ambiguous_suffix` —
-    /// and must EXCLUDE unrelated categories (calls, and the C/C++ `imports_ambiguous_match` that
-    /// is deliberately out of this headline for byte-stability). This drives the SAME shared
-    /// `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` the dispatch count uses, so a revert of the
-    /// dispatch filter to a single category (the regressed state) fails here.
+    /// CPP-INCLUDE-ROOTS-1 regression (extending IMPORT-RESOLUTION-JAVA-1): the `modules list`
+    /// headline count (`M imports unresolved`) must include ALL FOUR unresolved-import
+    /// categories — the legacy `imports_file_not_found`, Java's `imports_wildcard` and
+    /// `imports_ambiguous_suffix`, AND the C/C++ `imports_ambiguous_match` (a header present
+    /// under two derived include roots). RG-REQ-006-L03 requires ambiguity to be COUNTED where
+    /// the user reads the unresolved count. It must still EXCLUDE unrelated categories (calls).
+    /// This drives the SAME shared `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` the dispatch
+    /// count uses, so a revert of that set to a subset (dropping any import category) fails here.
     #[test]
-    fn modules_list_unresolved_import_count_includes_all_three_import_categories() {
+    fn modules_list_unresolved_import_count_includes_all_import_categories() {
         use repo_graph_classification::types::MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES;
 
         let mut storage = setup();
         let snap_uid = setup_with_snapshot(&storage);
         insert_dummy_node(&mut storage, &snap_uid, "n1");
 
-        // One edge in EACH of the three headline import categories …
+        // One edge in EACH of the four headline import categories …
         insert_unresolved_edge(
             &storage,
             &snap_uid,
@@ -1376,17 +1377,7 @@ mod tests {
             "imports_ambiguous_suffix",
             "unknown",
         );
-        // … plus two edges that MUST NOT be counted: a CALLS edge, and the C/C++
-        // `imports_ambiguous_match` basis deliberately excluded from this headline.
-        insert_unresolved_edge(
-            &storage,
-            &snap_uid,
-            "ue_calls",
-            "n1",
-            "unknown",
-            "calls_function_ambiguous_or_missing",
-            "unknown",
-        );
+        // … including the C/C++ `imports_ambiguous_match` basis, which IS now counted …
         insert_unresolved_edge(
             &storage,
             &snap_uid,
@@ -1394,6 +1385,16 @@ mod tests {
             "n1",
             "unknown",
             "imports_ambiguous_match",
+            "unknown",
+        );
+        // … plus one edge that MUST NOT be counted: a CALLS edge.
+        insert_unresolved_edge(
+            &storage,
+            &snap_uid,
+            "ue_calls",
+            "n1",
+            "unknown",
+            "calls_function_ambiguous_or_missing",
             "unknown",
         );
 
@@ -1410,9 +1411,9 @@ mod tests {
         .sum();
 
         assert_eq!(
-            total, 3,
-            "the headline count sums the three import categories and excludes calls + \
-             imports_ambiguous_match"
+            total, 4,
+            "the headline count sums all four import categories (incl. \
+             imports_ambiguous_match) and excludes calls"
         );
     }
 
