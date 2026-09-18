@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-CYCLES-HONEST-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-1.json",
+    "sha256": "sha256:bb3c237776da3673ae807236e078bf5c1ee00ddab5fb6bc575d15083b2de98cc"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:3f881e87d2efa5a2e6f76be990944154d595f01af73ffdc048a4e7ce34018b12"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-18T16:41:59.642Z",
+  "rationale": "Operator approves EXPLAIN-CYCLES-HONEST-1-INPUT-1 (Q4 of the ratified queue, RC-4): the stage-3 allocation (12 checks ECH-C01..C12, nine candidate paths; the vertical fix routes the focus-scoped cycle reads through the labeling kernel orient uses so a verified walk reaches explain; the renderer draws only from it; one shared walk validation) and its v2 manifest, independently reviewed by codex gpt-5.6-terra — cycle 1 refinement-required F-ECH-001..004 (bootstrap allocation pinned; the numeric latency gate removed per the withdrawn latency floor; capture exit statuses preserved; ECH-C10 self-contained), cycle 2 F-ECH-005 (cargo pipelines preserve cargo's exit status), cycle 3 accepted 16/16 with no findings. Under the human's 2026-09-14 ratification (human-authorization.md Amendment 1)."
+}
