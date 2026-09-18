@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-INCLUDE-ROOTS-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-INCLUDE-ROOTS-1-INPUT-2.json",
+    "sha256": "sha256:3906c781cd09c08f020a4ac33051b092c126e37d106840fbd5522b4009c36b10"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-INCLUDE-ROOTS-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:6e1332841c1bd57ec893841bbd69f25ebd3b93861b85d97d6fe229ce8cb57ed9"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-TEST-NAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-18T12:05:34.373Z",
+  "rationale": "Operator approves CPP-INCLUDE-ROOTS-1-INPUT-2: INPUT-1 plus oracle corrections OC-1 (conservation counts FILE→FILE IMPORTS with module edges reported; sed extractions anchored — OC-1a after PREP-3 review F-CIR-001) and OC-2 (witness Net/src/AbstractHTTPRequestHandler.cpp:20), both found by the builder's cycle-1 decision D-CIR-C10-ORACLE and verified by the manager on the checkout and the retained store; ledger docs/assurance/CPP-INCLUDE-ROOTS-1/oracle-corrections.md; codex gpt-5.6-terra review: PREP-3 cycle 0 refinement-required (F-CIR-001), cycle 1 accepted 24/24 with no findings. Text-only corrections; allocation sets, check ids, requirement text and candidate paths unchanged. Under the human's 2026-09-14 ratification (human-authorization.md Amendment 1)."
+}
