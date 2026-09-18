@@ -498,6 +498,7 @@ fn resolve_target(
             &edge.target_key,
             &edge.source_node_uid,
             &edge.extractor,
+            edge.metadata_json.as_deref(),
             &index.nodes_by_stable_key,
             &index.nodes_by_name,
             &index.nodes_by_uid,
@@ -827,6 +828,7 @@ fn resolve_call_target(
     target_key: &str,
     source_node_uid: &str,
     extractor: &str,
+    metadata_json: Option<&str>,
     _nodes_by_stable_key: &HashMap<String, ResolverNode>,
     nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
     nodes_by_uid: &HashMap<String, ResolverNode>,
@@ -834,6 +836,14 @@ fn resolve_call_target(
     import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
     node_uid_to_file_uid: &HashMap<String, String>,
 ) -> Option<String> {
+    // CALL-BINDING-RECEIVER-1 §2.1/§2.2: read the call's receiver disposition from the edge.
+    // `receiver` is the receiver expression text (`"this"` for an explicit self-call, a bare
+    // name like `"impl"`/`"versions_"` for an indirect receiver, absent for a receiverless
+    // `m()`); the receiver's declared type — when the extractor could resolve it in the same file —
+    // is CARRIED inside the `Indirect` disposition as a three-state `ReceiverTypeRead` (F-CBR-007),
+    // never as a fact that could exist beside a non-indirect receiver. Every field is absent for a
+    // non-C++ call (only the C++ extractor emits them), so this is a no-op for other languages.
+    let receiver_disposition = call_receiver_info(metadata_json);
     // ── Namespace import resolution ───────────────────────────────────
     // For calls like `fs.readFile()` where `fs` is a namespace import,
     // extract the member name and look it up in the imported module.
@@ -936,20 +946,57 @@ fn resolve_call_target(
         }
     }
 
+    // CALL-BINDING-RECEIVER-1 §2.2: RECEIVER-TYPE binding — runs BEFORE the bare-name singleton
+    // and ONLY when the edge carries a `receiverType` (an indirect call whose receiver's declared
+    // type the extractor resolved in-file). Among the same affinity/decl-filtered pool, keep the
+    // candidates whose own container IS that type; a UNIQUE survivor is the evidence-backed
+    // binding (`impl->Recover()` with `impl : DBImpl` → `leveldb::DBImpl::Recover`). Zero or many
+    // survivors → fall through (unresolved-and-counted / unique-name below), never a guess. The
+    // base-class walk of §2.2 is deferred: C++ IMPLEMENTS edges are anchored on the FILE node
+    // today (RC-3), so the inheritance closure is not reliably available here — this is the
+    // direct `<receiverType>::<name>` lookup the §4 stop condition sanctions; the walk depends on
+    // EXPLAIN-TYPE-SECTIONS-1 re-anchoring IMPLEMENTS (recorded as a follow-up, not built here).
+    // Usable receiver-type evidence is reachable ONLY through `Indirect { Present(..) }` (F-CBR-007):
+    // an `Absent` (cross-file) or `Unreadable` (malformed) type carries nothing to match, and no
+    // other disposition can carry a type at all.
+    if let ReceiverDisposition::Indirect {
+        receiver_type: ReceiverTypeRead::Present(receiver_type),
+    } = &receiver_disposition
+    {
+        if let Some(candidates) = nodes_by_name.get(target_key) {
+            let pool = resolution_pool(candidates, EdgeType::Calls, false);
+            let mut typed = pool
+                .iter()
+                .filter(|c| container_matches(c.qualified_name.as_deref(), receiver_type));
+            if let Some(first) = typed.next() {
+                if typed.next().is_none() {
+                    return Some(first.node_uid.clone());
+                }
+            }
+        }
+    }
+
     // Simple function call: "classifyMedia". A C++ `field_expression` call
     // (`impl->Recover()`) also lands here — the extractor's target_key is the bare
-    // method name (the receiver is stored, not consumed yet).
+    // method name. A UNIQUE name is evidence enough (RG-REQ-005-L02) even with an
+    // indirect receiver; only the enclosing-class guess below is receiver-gated.
     if let Some(uid) = pick_unambiguous(nodes_by_name.get(target_key), EdgeType::Calls, false) {
         return Some(uid);
     }
 
-    // CPP-DECLARATORS-1 §2.3 (AMENDED): when the bare-name lookup is AMBIGUOUS, apply the
-    // enclosing-class preference — GATED to C/C++ edges so non-C/C++ resolution stays
-    // byte-identical (the DoD's "non-C/C++ byte-stable"). A method defined in several
-    // classes resolves to the one whose container matches the CALLER's container
-    // (`leveldb::DBImpl::Open` calling `Recover` → `leveldb::DBImpl::Recover`); a call
-    // from outside all of them stays unresolved (the honest, counted remainder).
-    if is_c_family_extractor(extractor) {
+    // CPP-DECLARATORS-1 §2.3 (AMENDED by CALL-BINDING-RECEIVER-1 §2.3, F-CBR-004): when the
+    // bare-name lookup is AMBIGUOUS, apply the enclosing-class preference — GATED to C/C++ edges
+    // (non-C/C++ stays byte-identical) AND, per RG-REQ-005-L01, ONLY for a call KNOWN to be
+    // RECEIVERLESS or an explicit `this`/self call. An INDIRECT receiver (`impl->`, `versions_->`)
+    // — OR a carrier we could not READ (`Unreadable`, which could be hiding an indirect receiver)
+    // — must NEVER bind to the caller's own enclosing class without receiver-type evidence: it
+    // stays unresolved and counted (the honest remainder). A receiverless `Recover()` or
+    // `this->Recover()` inside `leveldb::DBImpl::Open` still resolves to `leveldb::DBImpl::Recover`.
+    let eligible_for_enclosing_pref = matches!(
+        receiver_disposition,
+        ReceiverDisposition::Receiverless | ReceiverDisposition::ExplicitThis
+    );
+    if is_c_family_extractor(extractor) && eligible_for_enclosing_pref {
         if let Some(candidates) = nodes_by_name.get(target_key) {
             let pool = resolution_pool(candidates, EdgeType::Calls, false);
             if pool.len() > 1 {
@@ -1131,6 +1178,169 @@ fn enclosing_class_preference(
 /// (a free function has no enclosing class).
 fn qualified_container(qualified_name: &str) -> Option<&str> {
     qualified_name.rfind("::").map(|i| &qualified_name[..i])
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.2 / §4 (F-CBR-004): whether a C++ CALLS edge's receiver disposition
+/// could be READ, and — when it could — what it was. Mirrors the [`ForwardDeclRead`] honesty
+/// pattern: a carrier that is PRESENT but UNREADABLE (did not parse as JSON, or whose `receiver`
+/// value is not a string) is a NAMED unknown, NEVER silently collapsed into "receiverless"
+/// (STANDING HONESTY RULE 1 — never swallow a fallible read whose result is consumed). This
+/// matters because the C-family enclosing-class preference is applied ONLY to a call KNOWN to be
+/// receiverless or an explicit `this`/self call; an unreadable carrier could be hiding an INDIRECT
+/// receiver, so it must NOT be eligible for that preference — otherwise a corrupt carrier recreates
+/// the RC-1 self-binding the slice exists to remove (RG-REQ-005-L01).
+/// CALL-BINDING-RECEIVER-1 §2.2 (F-CBR-007): the THREE-STATE read of a CALLS edge's `receiverType`
+/// field. Absence and malformed presence are DISTINCT states, never collapsed to one "no type":
+/// a future reader must be able to tell a legitimately-unavailable cross-file type from corrupt
+/// evidence (STANDING HONESTY RULE — `null`/unknown is never silently the same as a failed read).
+/// Only `Present` carries a usable type, and it is reachable ONLY through `ReceiverDisposition::
+/// Indirect` (below), so "a usable receiver type without an indirect receiver" is unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReceiverTypeRead {
+    /// No `receiverType` key — a legitimate INDIRECT receiver whose declared type the per-file
+    /// C++ extractor could not resolve (a cross-file member such as `versions_`). Not malformed;
+    /// there is simply no in-file type evidence. Binds nothing; resolves only by a unique name.
+    Absent,
+    /// `receiverType: "<type>"` — a non-empty string. Usable receiver-type evidence: the
+    /// receiver-type binding stage keeps the candidate whose container IS this type.
+    Present(String),
+    /// `receiverType` PRESENT but not a non-empty string (a non-string value, or an empty string)
+    /// — MALFORMED evidence. Distinct from `Absent` so a future edit never mistakes a corrupt
+    /// carrier for known-unavailable evidence (F-CBR-007). Never usable, never a binding.
+    Unreadable,
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.2: the call-receiver disposition read from a CALLS edge's
+/// `metadata_json`. The receiver's declared type is CARRIED inside `Indirect` (F-CBR-007), never
+/// beside the disposition as an independent `Option`, so the invariant "receiver-type evidence
+/// exists only for an indirect receiver" is enforced by the type, not by a match arm. The
+/// receiver-type binding stage consumes the carried type; the enclosing-class preference runs
+/// ONLY for `Receiverless` or `ExplicitThis`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReceiverDisposition {
+    /// No `receiver` recorded — carrier absent (every non-C++ call, and a C++ receiverless
+    /// `foo()`), or valid JSON with no (or an empty) `receiver` string. A KNOWN receiverless call:
+    /// eligible for the enclosing-class preference.
+    Receiverless,
+    /// `receiver: "this"` — an explicit self call. Eligible for the enclosing-class preference
+    /// (RG-REQ-005-L01 admits explicit self).
+    ExplicitThis,
+    /// `receiver: "<name>"` (a member/local other than `this`) — an INDIRECT receiver. NEVER
+    /// eligible for the enclosing-class preference; it binds only on `Present` receiver-type
+    /// evidence or stays unresolved and counted. The carried `ReceiverTypeRead` distinguishes a
+    /// legitimately-absent cross-file type from malformed type evidence.
+    Indirect { receiver_type: ReceiverTypeRead },
+    /// The carrier was PRESENT but UNREADABLE (did not parse; `receiver` was present but not a
+    /// string; or a `receiverType` appeared beside a non-indirect receiver — an internally
+    /// inconsistent carrier the real extractor never emits). Disposition UNKNOWN → conservatively
+    /// NOT eligible for the enclosing-class preference, exactly like an indirect receiver — a
+    /// corrupt carrier never fabricates a self-binding.
+    Unreadable,
+}
+
+fn call_receiver_info(metadata_json: Option<&str>) -> ReceiverDisposition {
+    // No carrier at all ⇒ a KNOWN receiverless call (non-C++ calls carry none; a C++ receiverless
+    // `foo()` stamps none). A KNOWN read, not a swallowed error.
+    let Some(raw) = metadata_json else {
+        return ReceiverDisposition::Receiverless;
+    };
+    // A carrier that does not parse is UNREADABLE — a NAMED unknown, never silently receiverless
+    // (STANDING HONESTY RULE 1): an unreadable carrier could hide an indirect receiver, so it must
+    // not become eligible for the enclosing-class preference (F-CBR-004).
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return ReceiverDisposition::Unreadable;
+    };
+    // F-CBR-015: the real extractor always emits a JSON OBJECT carrier. A syntactically VALID but
+    // NON-object root (`null`, `[]`, `"x"`, `3`) has no `receiver`/`receiverType` keys, so the
+    // `.get(...)` reads below would each answer `None` and the carrier would masquerade as a KNOWN
+    // receiverless call — eligible for the enclosing-class preference, the exact self-binding
+    // fabrication this slice forbids. Such a carrier is UNREADABLE (disposition unknown, never
+    // receiverless), completing the carrier taxonomy: absent, valid-object, unparseable, valid-
+    // non-object. Like every other `Unreadable`, it is excluded from the enclosing-class preference.
+    if !value.is_object() {
+        return ReceiverDisposition::Unreadable;
+    }
+    // F-CBR-007: THREE-STATE read of `receiverType` — absent, present-and-usable, or present-and-
+    // malformed. The three states are kept distinct all the way to the disposition.
+    let receiver_type = match value.get("receiverType") {
+        None => ReceiverTypeRead::Absent,
+        Some(serde_json::Value::String(s)) if !s.is_empty() => {
+            ReceiverTypeRead::Present(s.to_string())
+        }
+        // Present but not a non-empty string (a non-string value, or an empty string) ⇒ malformed.
+        Some(_) => ReceiverTypeRead::Unreadable,
+    };
+    // F-CBR-006/-007 (RG-REQ-005-L01/-L02): the receiver disposition and its type are ONE carrier,
+    // read together — never two independently trusted facts. The real C++ extractor stamps
+    // `receiverType` ONLY beside a bare-name (indirect) receiver. A `receiverType` present beside a
+    // receiverless, explicit-`this`, or non-string receiver is an INTERNALLY INCONSISTENT carrier we
+    // cannot trust — including its claim to be receiverless — so it becomes `Unreadable` (which also
+    // blocks the enclosing-class preference). An INDIRECT receiver carries its three-state type read:
+    // `Present` drives the receiver-type binding stage; `Absent` (a cross-file member) and
+    // `Unreadable` (corrupt type evidence) both bind nothing and are excluded from the enclosing-
+    // class guess, resolving only by a unique name — but they stay DISTINCT so corrupt evidence is
+    // never mistaken for known-unavailable evidence.
+    match value.get("receiver") {
+        // Valid JSON without a `receiver` key ⇒ a KNOWN receiverless call, UNLESS a `receiverType`
+        // rode along (inconsistent carrier ⇒ Unreadable).
+        None => receiverless_unless_type_present(ReceiverDisposition::Receiverless, &receiver_type),
+        Some(serde_json::Value::String(s)) if s.is_empty() => {
+            receiverless_unless_type_present(ReceiverDisposition::Receiverless, &receiver_type)
+        }
+        Some(serde_json::Value::String(s)) if s == "this" => {
+            receiverless_unless_type_present(ReceiverDisposition::ExplicitThis, &receiver_type)
+        }
+        Some(serde_json::Value::String(_)) => ReceiverDisposition::Indirect { receiver_type },
+        // `receiver` present but NOT a string ⇒ a CORRUPT value, distinct from receiverless.
+        Some(_) => ReceiverDisposition::Unreadable,
+    }
+}
+
+/// F-CBR-006/-007: for a NON-indirect receiver (receiverless or explicit `this`), any `receiverType`
+/// present at all — usable-looking (`Present`) or malformed (`Unreadable`) — is an internally
+/// inconsistent carrier the real extractor never emits, so the whole disposition degrades to
+/// `Unreadable`. Only an `Absent` type leaves the non-indirect disposition intact.
+fn receiverless_unless_type_present(
+    disposition: ReceiverDisposition,
+    receiver_type: &ReceiverTypeRead,
+) -> ReceiverDisposition {
+    match receiver_type {
+        ReceiverTypeRead::Absent => disposition,
+        ReceiverTypeRead::Present(_) | ReceiverTypeRead::Unreadable => {
+            ReceiverDisposition::Unreadable
+        }
+    }
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.2: does a candidate method's container match the receiver's
+/// declared type? A hit means the candidate's qualified container equals the receiver type
+/// EXACTLY (after normalizing a leading `::`), or — ONLY when the receiver type is written
+/// unqualified — the container's terminal segment is that name
+/// (`"VersionSet"` names `"leveldb::VersionSet"`, i.e. `container.ends_with("::VersionSet")`).
+///
+/// A QUALIFIED receiver type never matches a shorter container by suffix: receiver evidence
+/// `"a::Foo"` must NOT bind a candidate `"Foo::run"`, because nothing shows `a::Foo` and a
+/// global `Foo` denote the same type (F-CBR-005; RG-REQ-005-L02 — never widen what counts as
+/// evidence). The receiver-type stage requires a UNIQUE surviving candidate, so an exact/
+/// unqualified-suffix match here can only ever narrow, never invent, a target.
+fn container_matches(qualified_name: Option<&str>, receiver_type: &str) -> bool {
+    let Some(container) = qualified_name.and_then(qualified_container) else {
+        return false;
+    };
+    let rt = receiver_type.trim_start_matches("::");
+    if rt.is_empty() {
+        return false;
+    }
+    if container == rt {
+        return true;
+    }
+    // Suffix matching is admitted ONLY for an UNQUALIFIED receiver type. A qualified receiver
+    // type must match the container exactly (handled above); it never binds to a shorter,
+    // unrelated container by suffix.
+    if rt.contains("::") {
+        return false;
+    }
+    container.ends_with(&format!("::{rt}"))
 }
 
 /// Filter candidates by declaration-space affinity. Returns only
@@ -1717,52 +1927,28 @@ mod tests {
         );
     }
 
-    // ── CPP-DECLARATORS-1 §2.3 (AMENDED): enclosing-class preference ──
+    // ── CALL-BINDING-RECEIVER-1 §2.5: receiver-typed call binding ──
+    //
+    // The five §2.5 tests below (indirect-binds, explicit-this, unknown-type, receiverless-
+    // outside, never-self) REPLACE the two CPP-DECLARATORS-1 §2.3 defect-pinning tests
+    // (`enclosing_class_preference_resolves_ambiguous_method_by_caller_container`, which
+    // encoded a fictional `leveldb::DBImpl::Open` caller, and
+    // `enclosing_class_preference_leaves_outside_caller_unresolved`, which encoded the DROPPED
+    // outside caller as intended). Three review-driven regression tests follow them:
+    // `receiver_binding_malformed_metadata_stays_unresolved` (F-CBR-004),
+    // `receiver_binding_qualified_receiver_type_never_matches_a_shorter_container` (F-CBR-005),
+    // `receiver_binding_receiver_type_without_indirect_receiver_is_untrusted` (F-CBR-006 — a
+    // `receiverType` beside an absent/non-string receiver is an inconsistent carrier and binds
+    // nothing), and `receiver_binding_malformed_receiver_type_on_indirect_receiver_is_unreadable`
+    // (F-CBR-007 — a malformed `receiverType` beside a valid indirect receiver is `Unreadable`, not
+    // silently absent, and binds nothing). RG-REQ-005-L01: an indirect receiver binds to its
+    // declared type or stays unresolved — never to the caller's own class by default.
 
+    /// Two `A`/`B` fixture from the shared resolver's point of view: `impl->Recover()` with
+    /// `impl : DBImpl` binds to `DBImpl::Recover`, not `VersionSet::Recover`. (RG-REQ-005-L02:
+    /// receiver-type evidence selects the one candidate.)
     #[test]
-    fn enclosing_class_preference_resolves_ambiguous_method_by_caller_container() {
-        // `leveldb::DBImpl::Open` calling `Recover` → the DBImpl candidate wins over the
-        // VersionSet candidate; gated to C/C++ edges.
-        let dbimpl = make_qn_node(
-            "r_dbimpl",
-            "Recover",
-            "leveldb::DBImpl::Recover",
-            Some("METHOD"),
-            false,
-        );
-        let versionset = make_qn_node(
-            "r_vs",
-            "Recover",
-            "leveldb::VersionSet::Recover",
-            Some("METHOD"),
-            false,
-        );
-        let caller = make_qn_node(
-            "open",
-            "Open",
-            "leveldb::DBImpl::Open",
-            Some("METHOD"),
-            false,
-        );
-
-        let mut index = empty_index();
-        index
-            .nodes_by_name
-            .insert("Recover".into(), vec![dbimpl.clone(), versionset.clone()]);
-        index.nodes_by_uid.insert("open".into(), caller);
-
-        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
-        edge.extractor = "cpp-core:0.1.0".into();
-        edge.source_node_uid = "open".into();
-        let result = resolve_edges(&[edge], &index, None);
-        assert_eq!(result.resolved.len(), 1);
-        assert_eq!(result.resolved[0].target_node_uid, "r_dbimpl");
-    }
-
-    #[test]
-    fn enclosing_class_preference_leaves_outside_caller_unresolved() {
-        // A caller OUTSIDE both classes (`leveldb::DB::Open` calling `Recover`) matches
-        // no candidate container → stays unresolved (the honest, counted remainder).
+    fn receiver_binding_indirect_receiver_binds_to_its_declared_type() {
         let dbimpl = make_qn_node(
             "r_dbimpl",
             "Recover",
@@ -1788,9 +1974,421 @@ mod tests {
         let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
         edge.extractor = "cpp-core:0.1.0".into();
         edge.source_node_uid = "open".into();
+        edge.metadata_json =
+            Some(r#"{"calleeName":"Recover","receiver":"impl","receiverType":"DBImpl"}"#.into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 1, "receiver-typed call binds");
+        assert_eq!(result.resolved[0].target_node_uid, "r_dbimpl");
+    }
+
+    /// An explicit `this->Recover()` inside `leveldb::DBImpl::Open` legitimately binds to the
+    /// enclosing class (RG-REQ-005-L01 admits explicit self).
+    #[test]
+    fn receiver_binding_explicit_this_binds_to_enclosing_class() {
+        let dbimpl = make_qn_node(
+            "r_dbimpl",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let versionset = make_qn_node(
+            "r_vs",
+            "Recover",
+            "leveldb::VersionSet::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let caller = make_qn_node(
+            "open",
+            "Open",
+            "leveldb::DBImpl::Open",
+            Some("METHOD"),
+            false,
+        );
+
+        let mut index = empty_index();
+        index
+            .nodes_by_name
+            .insert("Recover".into(), vec![dbimpl, versionset]);
+        index.nodes_by_uid.insert("open".into(), caller);
+
+        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "open".into();
+        edge.metadata_json = Some(r#"{"calleeName":"Recover","receiver":"this"}"#.into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            1,
+            "explicit this binds to enclosing class"
+        );
+        assert_eq!(result.resolved[0].target_node_uid, "r_dbimpl");
+    }
+
+    /// An indirect receiver whose declared type is not indexed (`x_ : X`, X absent) stays
+    /// unresolved and counted — never bound to an unrelated same-named method (RG-REQ-001-L03).
+    #[test]
+    fn receiver_binding_unknown_receiver_type_stays_unresolved_and_counted() {
+        let a = make_qn_node("a", "run", "A::run", Some("METHOD"), false);
+        let b = make_qn_node("b", "run", "B::run", Some("METHOD"), false);
+        let caller = make_qn_node("br", "run", "B::run", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![a, b]);
+        index.nodes_by_uid.insert("br".into(), caller);
+
+        let mut edge = make_edge("e1", "run", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "br".into();
+        edge.metadata_json =
+            Some(r#"{"calleeName":"run","receiver":"x_","receiverType":"X"}"#.into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "unknown receiver type does not bind"
+        );
+        assert_eq!(result.still_unresolved.len(), 1, "the call is counted");
+    }
+
+    /// A RECEIVERLESS ambiguous call from OUTSIDE the candidate classes still uses the
+    /// enclosing-class preference (RG-REQ-005-L02) and honestly stays unresolved when the
+    /// caller's container matches none of them.
+    #[test]
+    fn receiver_binding_receiverless_ambiguous_call_outside_class_stays_unresolved() {
+        let dbimpl = make_qn_node(
+            "r_dbimpl",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let versionset = make_qn_node(
+            "r_vs",
+            "Recover",
+            "leveldb::VersionSet::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let caller = make_qn_node("open", "Open", "leveldb::DB::Open", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index
+            .nodes_by_name
+            .insert("Recover".into(), vec![dbimpl, versionset]);
+        index.nodes_by_uid.insert("open".into(), caller);
+
+        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "open".into();
+        // Receiverless call: no `receiver` key at all.
+        edge.metadata_json = Some(r#"{"calleeName":"Recover"}"#.into());
         let result = resolve_edges(&[edge], &index, None);
         assert_eq!(result.resolved.len(), 0);
         assert_eq!(result.still_unresolved.len(), 1);
+    }
+
+    /// The RC-1 invariant guard: an indirect receiver with NO type evidence
+    /// (`versions_->Recover()` inside `leveldb::DBImpl::Recover`) must NEVER bind to the
+    /// caller's own class (a self-loop) — it stays unresolved. This is the exact shape the
+    /// regression fabricated 155 times on leveldb.
+    #[test]
+    fn receiver_binding_indirect_receiver_never_binds_to_caller_itself() {
+        let dbimpl = make_qn_node(
+            "r_dbimpl",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            Some("METHOD"),
+            false,
+        );
+        let versionset = make_qn_node(
+            "r_vs",
+            "Recover",
+            "leveldb::VersionSet::Recover",
+            Some("METHOD"),
+            false,
+        );
+        // The caller IS `DBImpl::Recover` itself — the self-loop the regression produced.
+        let caller = make_qn_node(
+            "r_dbimpl",
+            "Recover",
+            "leveldb::DBImpl::Recover",
+            Some("METHOD"),
+            false,
+        );
+
+        let mut index = empty_index();
+        index
+            .nodes_by_name
+            .insert("Recover".into(), vec![dbimpl, versionset]);
+        index.nodes_by_uid.insert("r_dbimpl".into(), caller);
+
+        let mut edge = make_edge("e1", "Recover", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "r_dbimpl".into();
+        // Indirect receiver, no `receiverType` (cross-file member — type unknown in this TU).
+        edge.metadata_json = Some(r#"{"calleeName":"Recover","receiver":"versions_"}"#.into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "no self-bind without receiver evidence"
+        );
+        assert_eq!(result.still_unresolved.len(), 1, "the call is counted");
+    }
+
+    /// F-CBR-004 regression: a C++ CALLS edge whose `metadata_json` is PRESENT but MALFORMED (does
+    /// not parse) must be treated as "receiver disposition UNKNOWN" — NEVER eligible for the
+    /// enclosing-class preference. An ambiguous call from `B::run` carrying a corrupt carrier, with
+    /// candidates {A::run, B::run}, must NOT self-bind to `B::run`; it stays unresolved and counted.
+    /// Before the fix the malformed carrier collapsed to `CallReceiver::default()` (receiver=None),
+    /// read as receiverless, and the C-family enclosing-class guess recreated the RC-1 self-binding.
+    #[test]
+    fn receiver_binding_malformed_metadata_stays_unresolved() {
+        let a = make_qn_node("a", "run", "A::run", Some("METHOD"), false);
+        let b = make_qn_node("b", "run", "B::run", Some("METHOD"), false);
+        // The caller IS `B::run` — the enclosing-class guess, if wrongly reached, would pick it.
+        let caller = make_qn_node("br", "run", "B::run", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![a, b]);
+        index.nodes_by_uid.insert("br".into(), caller);
+
+        let mut edge = make_edge("e1", "run", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "br".into();
+        // Malformed carrier: present but not valid JSON (truncated object).
+        edge.metadata_json = Some(r#"{"calleeName":"run","receiver":"#.into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "a malformed carrier is not eligible for the enclosing-class preference"
+        );
+        assert_eq!(result.still_unresolved.len(), 1, "the call is counted");
+    }
+
+    /// F-CBR-015 regression (RG-REQ-005-L01/-L02, RG-REQ-001-L03): a C++ CALLS edge whose
+    /// `metadata_json` is VALID JSON but a NON-OBJECT root (`null`) must be UNREADABLE, never a
+    /// KNOWN receiverless call. `serde_json::Value::get` answers `None` on a non-object, so before
+    /// the object-root guard the carrier collapsed to `Receiverless` and the enclosing-class guess
+    /// recreated the RC-1 self-binding. With candidates {A::run, B::run} and caller `B::run`, the
+    /// call must NOT self-bind; it stays unresolved and counted.
+    #[test]
+    fn receiver_binding_non_object_null_carrier_stays_unresolved() {
+        let a = make_qn_node("a", "run", "A::run", Some("METHOD"), false);
+        let b = make_qn_node("b", "run", "B::run", Some("METHOD"), false);
+        let caller = make_qn_node("br", "run", "B::run", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![a, b]);
+        index.nodes_by_uid.insert("br".into(), caller);
+
+        let mut edge = make_edge("e1", "run", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "br".into();
+        // Valid JSON, but a non-object root: `null`.
+        edge.metadata_json = Some("null".into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "a valid non-object (null) carrier is unreadable, not eligible for the enclosing-class preference"
+        );
+        assert_eq!(result.still_unresolved.len(), 1, "the call is counted");
+    }
+
+    /// F-CBR-015 regression (RG-REQ-005-L01/-L02, RG-REQ-001-L03): the array sibling of the case
+    /// above — a VALID JSON array root (`[]`) is likewise UNREADABLE, never receiverless, so an
+    /// ambiguous `B::run` call carrying it does NOT self-bind and stays unresolved and counted.
+    #[test]
+    fn receiver_binding_non_object_array_carrier_stays_unresolved() {
+        let a = make_qn_node("a", "run", "A::run", Some("METHOD"), false);
+        let b = make_qn_node("b", "run", "B::run", Some("METHOD"), false);
+        let caller = make_qn_node("br", "run", "B::run", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![a, b]);
+        index.nodes_by_uid.insert("br".into(), caller);
+
+        let mut edge = make_edge("e1", "run", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "br".into();
+        // Valid JSON, but a non-object root: `[]`.
+        edge.metadata_json = Some("[]".into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "a valid non-object (array) carrier is unreadable, not eligible for the enclosing-class preference"
+        );
+        assert_eq!(result.still_unresolved.len(), 1, "the call is counted");
+    }
+
+    /// F-CBR-005 regression (RG-REQ-005-L02): a QUALIFIED receiver type never matches a
+    /// shorter, unrelated container by suffix. Receiver evidence `receiverType: "a::Foo"` must
+    /// NOT bind a candidate `Foo::run` — nothing shows `a::Foo` and a global `Foo` are the same
+    /// type. With two `run` candidates ({`Foo::run`, `Bar::run`}) the bare-name singleton cannot
+    /// fire, so the ONLY path to a binding would be the (now removed) reverse
+    /// `rt.ends_with("::" + container)` match; the call must stay unresolved and counted.
+    #[test]
+    fn receiver_binding_qualified_receiver_type_never_matches_a_shorter_container() {
+        let foo = make_qn_node("foo_run", "run", "Foo::run", Some("METHOD"), false);
+        let bar = make_qn_node("bar_run", "run", "Bar::run", Some("METHOD"), false);
+        let caller = make_qn_node(
+            "caller",
+            "method",
+            "some::Caller::method",
+            Some("METHOD"),
+            false,
+        );
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![foo, bar]);
+        index.nodes_by_uid.insert("caller".into(), caller);
+
+        let mut edge = make_edge("e1", "run", EdgeType::Calls);
+        edge.extractor = "cpp-core:0.1.0".into();
+        edge.source_node_uid = "caller".into();
+        // Qualified receiver type `a::Foo` — must NOT suffix-match the shorter container `Foo`.
+        edge.metadata_json =
+            Some(r#"{"calleeName":"run","receiver":"p","receiverType":"a::Foo"}"#.into());
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "a qualified receiver type does not bind a shorter unrelated container"
+        );
+        assert_eq!(result.still_unresolved.len(), 1, "the call is counted");
+    }
+
+    /// F-CBR-006 regression (RG-REQ-005-L01/-L02, RG-REQ-001-L03): a `receiverType` is trustworthy
+    /// ONLY on an INDIRECT (bare-name) receiver. A carrier that pairs a `receiverType` with an
+    /// ABSENT receiver (orphan) or a NON-STRING receiver (corrupt) is internally inconsistent — the
+    /// real extractor never emits it — and must NOT drive a binding through the receiver-type stage,
+    /// NOR self-bind through the enclosing-class guess. With candidates {A::run, B::run} and the
+    /// caller being `B::run`, a wrongly-trusted `receiverType:"B"` would fabricate the `B::run`
+    /// self-loop (the RC-1 shape) via corrupt persisted metadata. Both shapes must stay
+    /// unresolved-and-counted.
+    #[test]
+    fn receiver_binding_receiver_type_without_indirect_receiver_is_untrusted() {
+        // Ambiguous pool {A::run, B::run}. `b`'s container IS the receiver type `B`, and the caller
+        // IS `B::run`, so a wrongly-trusted `receiverType:"B"` (typed stage) OR the enclosing-class
+        // guess would both land on the `b` self-loop — the RC-1 shape. Neither may fire.
+        let a = make_qn_node("a", "run", "A::run", Some("METHOD"), false);
+        let b = make_qn_node("b", "run", "B::run", Some("METHOD"), false);
+        let caller = make_qn_node("br", "run", "B::run", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![a, b]);
+        index.nodes_by_uid.insert("br".into(), caller);
+
+        // Edge 1 — ORPHAN: `receiverType` present, NO `receiver` key.
+        let mut orphan = make_edge("e_orphan", "run", EdgeType::Calls);
+        orphan.extractor = "cpp-core:0.1.0".into();
+        orphan.source_node_uid = "br".into();
+        orphan.metadata_json = Some(r#"{"calleeName":"run","receiverType":"B"}"#.into());
+
+        // Edge 2 — CORRUPT: `receiverType` present beside a NON-STRING `receiver`.
+        let mut corrupt = make_edge("e_corrupt", "run", EdgeType::Calls);
+        corrupt.extractor = "cpp-core:0.1.0".into();
+        corrupt.source_node_uid = "br".into();
+        corrupt.metadata_json =
+            Some(r#"{"calleeName":"run","receiver":false,"receiverType":"B"}"#.into());
+
+        let result = resolve_edges(&[orphan, corrupt], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "an inconsistent receiver/receiverType carrier never binds (no self-loop)"
+        );
+        assert_eq!(
+            result.still_unresolved.len(),
+            2,
+            "both inconsistent carriers stay unresolved and counted"
+        );
+    }
+
+    /// F-CBR-007 regression (RG-REQ-005-L01, RG-REQ-001-L03): a `receiverType` that is PRESENT but
+    /// MALFORMED (a non-string value, or an empty string) beside a VALID indirect receiver is read
+    /// as `Unreadable`, DISTINCT from an absent type — it carries no usable type, so it drives no
+    /// receiver-type binding and (being indirect) is never eligible for the enclosing-class guess.
+    /// With candidates {A::run, B::run} and the caller being `B::run`, a `receiverType` wrongly
+    /// trusted as "B" would fabricate the `B::run` self-loop (the RC-1 shape) from corrupt persisted
+    /// metadata. Both the non-string and the empty-string shapes must stay unresolved-and-counted.
+    #[test]
+    fn receiver_binding_malformed_receiver_type_on_indirect_receiver_is_unreadable() {
+        let a = make_qn_node("a", "run", "A::run", Some("METHOD"), false);
+        let b = make_qn_node("b", "run", "B::run", Some("METHOD"), false);
+        let caller = make_qn_node("br", "run", "B::run", Some("METHOD"), false);
+
+        let mut index = empty_index();
+        index.nodes_by_name.insert("run".into(), vec![a, b]);
+        index.nodes_by_uid.insert("br".into(), caller);
+
+        // Edge 1 — NON-STRING receiverType beside a valid indirect receiver `p`.
+        let mut non_string = make_edge("e_nonstring", "run", EdgeType::Calls);
+        non_string.extractor = "cpp-core:0.1.0".into();
+        non_string.source_node_uid = "br".into();
+        non_string.metadata_json =
+            Some(r#"{"calleeName":"run","receiver":"p","receiverType":false}"#.into());
+
+        // Edge 2 — EMPTY-STRING receiverType beside a valid indirect receiver `p`.
+        let mut empty = make_edge("e_empty", "run", EdgeType::Calls);
+        empty.extractor = "cpp-core:0.1.0".into();
+        empty.source_node_uid = "br".into();
+        empty.metadata_json =
+            Some(r#"{"calleeName":"run","receiver":"p","receiverType":""}"#.into());
+
+        let result = resolve_edges(&[non_string, empty], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "a malformed receiverType on an indirect receiver never binds (no self-loop)"
+        );
+        assert_eq!(
+            result.still_unresolved.len(),
+            2,
+            "both malformed-type carriers stay unresolved and counted"
+        );
+    }
+
+    /// F-CBR-007: the three-state `ReceiverTypeRead` keeps a malformed type DISTINCT from an absent
+    /// one at the parse boundary — a present non-string / empty `receiverType` beside an indirect
+    /// receiver reads as `Indirect { Unreadable }`, never `Indirect { Absent }`, so a future edit
+    /// can tell corrupt evidence from a legitimately-unavailable cross-file type.
+    #[test]
+    fn call_receiver_info_distinguishes_malformed_from_absent_receiver_type() {
+        assert_eq!(
+            call_receiver_info(Some(r#"{"receiver":"p"}"#)),
+            ReceiverDisposition::Indirect {
+                receiver_type: ReceiverTypeRead::Absent
+            },
+        );
+        assert_eq!(
+            call_receiver_info(Some(r#"{"receiver":"p","receiverType":"X"}"#)),
+            ReceiverDisposition::Indirect {
+                receiver_type: ReceiverTypeRead::Present("X".into())
+            },
+        );
+        assert_eq!(
+            call_receiver_info(Some(r#"{"receiver":"p","receiverType":false}"#)),
+            ReceiverDisposition::Indirect {
+                receiver_type: ReceiverTypeRead::Unreadable
+            },
+        );
+        assert_eq!(
+            call_receiver_info(Some(r#"{"receiver":"p","receiverType":""}"#)),
+            ReceiverDisposition::Indirect {
+                receiver_type: ReceiverTypeRead::Unreadable
+            },
+        );
+        // A `receiverType` beside a non-indirect receiver stays an inconsistent (Unreadable) carrier.
+        assert_eq!(
+            call_receiver_info(Some(r#"{"receiver":"this","receiverType":"X"}"#)),
+            ReceiverDisposition::Unreadable,
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Uses tree-sitter-cpp to parse C++ source files and extract structural
 //! information: symbols, edges, and metrics.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use repo_graph_classification::types::{
     ImportBinding, ImportKind, RuntimeBuiltinsSet, SourceLocation,
@@ -334,6 +334,10 @@ impl ExtractorPort for CppExtractor {
             current_linkage: None,
             resolved_callsites: Vec::new(),
             local_stream_types: HashMap::new(),
+            local_var_types: HashMap::new(),
+            class_field_types: HashMap::new(),
+            shadowed_locals: HashSet::new(),
+            local_bound_names: HashSet::new(),
         };
 
         // Walk top-level declarations
@@ -393,6 +397,32 @@ fn merge_file_metadata(linkage_json: Option<String>, gtest_marker: bool) -> Opti
 
 // ── Extraction context ───────────────────────────────────────────
 
+/// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-014): a declared local variable's / parameter's type
+/// together with the LEXICAL SCOPE in which that declaration is visible. The flat per-function
+/// `local_var_types` map is filled during a single DFS walk and is never emptied when a block
+/// ends, so without a scope test an inner-block local's type would leak to a same-named receiver
+/// AFTER its block closed (F-CBR-014: `A* p` member, `{ C* p = …; p->run(); }` then a post-block
+/// `p->run()` that denotes the member was mistyped `C`). One GRAMMAR-INDEPENDENT rule (no
+/// enumeration of scoping node kinds — the F-CBR-010/F-CBR-012 lesson): the type may type a
+/// receiver at a call site only when the call lies inside the subtree of `scope_id` (the node that
+/// directly CONTAINS the declaration — a compound statement, a `for` statement, a condition clause,
+/// whatever it is) AND the call starts at or after `decl_end` (the declaration's end byte). A
+/// parameter's scope is the whole function body (`scope_id` = the body node, `decl_end` = 0), so a
+/// parameter always types. When the check fails the name is still in `local_bound_names`, so
+/// `extract_call` case (2) applies: NO `receiverType` — an indirect receiver with no type, left
+/// unresolved and counted, never the member fallback. Conservative where a declaration's C++
+/// visibility exceeds its parent's subtree (e.g. a declaration inside an `if`/`while`/`switch`
+/// condition clause is visible in the controlled body but is not typed there): a counted loss of
+/// typed bindings, never a fabricated one.
+struct LocalType {
+    ty: String,
+    /// `id()` of the tree-sitter node that directly contains the declaration (the body node for a
+    /// parameter). The call must have this node among its ancestors to be in lexical scope.
+    scope_id: usize,
+    /// End byte of the declaration (0 for a parameter). The call must start at or after this byte.
+    decl_end: usize,
+}
+
 struct ExtractionCtx<'a> {
     file_path: &'a str,
     file_uid: &'a str,
@@ -416,6 +446,49 @@ struct ExtractionCtx<'a> {
     /// CPP-SB-1 D3: Intra-function local type map for .open() resolution.
     /// Maps local variable identifier -> stream type. Cleared on function boundary.
     local_stream_types: HashMap<String, StreamType>,
+    /// CALL-BINDING-RECEIVER-1 §2.1: intra-function local variable declared types
+    /// (`DBImpl* impl = …` → `impl` -> `DBImpl`). Cleared on function boundary, alongside
+    /// `local_stream_types`. Fuels the `receiverType` metadata on a `field_expression` call
+    /// so the resolver binds `impl->Recover()` to `DBImpl::Recover` on evidence, never to the
+    /// caller's own class. Per-file only (the ctx is per translation unit).
+    /// F-CBR-014: each entry carries its declaration's LEXICAL SCOPE (`LocalType`), so an
+    /// inner-block local's type never types a same-named receiver after that block has closed.
+    local_var_types: HashMap<String, LocalType>,
+    /// CALL-BINDING-RECEIVER-1 §2.1: declared data-member types per class defined in THIS file
+    /// (class bare name -> member name -> declared type, e.g. `"B"` -> `{"a_": "A"}`). Populated
+    /// from each class body's `field_declaration`s (data members, not method prototypes) so an
+    /// INLINE method's `a_->run()` carries `receiverType`. A member used by an OUT-OF-LINE method
+    /// in another file is not typed here (that class body is a different TU) — the honest
+    /// per-file limit; such calls stay unresolved and counted.
+    class_field_types: HashMap<String, HashMap<String, String>>,
+    /// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-010): local names declared MORE THAN ONCE anywhere
+    /// in the CURRENT function body (any nesting, any construct — a plain `{ }` block, a
+    /// `for`/`while`/`if`/`switch` initializer, etc.). Computed once per function body, from that
+    /// body only. A name in this set is NEVER typed: a call whose receiver is such a name carries
+    /// no `receiverType`, so it stays an indirect receiver with no type — unresolved and counted,
+    /// never bound to a possibly-wrong shadow. One predicate closes the whole shadowing class; a
+    /// lexical scope stack (rejected) would have to enumerate every scoping node of the grammar,
+    /// and two were already missed (F-CBR-009 block, F-CBR-010 `for` initializer).
+    shadowed_locals: HashSet<String>,
+    /// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-011/F-CBR-012): the names for which the member-field
+    /// fallback (`class_field_types`) is FORBIDDEN, because the name is written locally rather than
+    /// being a pure data member. Decided by a GRAMMAR-INDEPENDENT rule (F-CBR-012): a name is in this
+    /// set iff it has AT LEAST ONE identifier-token occurrence, anywhere in the function's parameter
+    /// list or body (any depth, any construct), that is NOT the receiver of a `field_expression` call
+    /// (`p->m()` / `p.m()`). Enumerating the grammar's binding node kinds repeatedly missed one — a
+    /// `{ }` block (F-CBR-009), a `for` initializer (F-CBR-010), a structured binding and a `catch`
+    /// parameter (F-CBR-012); the inverse question cannot be escaped, because a binding must write the
+    /// name somewhere other than a receiver position (a declarator of any form, a structured-binding
+    /// name, a catch parameter, a lambda capture, a range-for var, an assignment target, an argument).
+    /// A receiver whose name is in this set is typed ONLY from its own declaration via `local_var_types`
+    /// (present iff that declaration is unique and its type extracts); otherwise it carries NO
+    /// `receiverType` — an indirect receiver with no type, left unresolved and counted, never mistyped
+    /// from a same-named data member (the F-CBR-011/F-CBR-012 defect: a parameter `C* p`, an untyped
+    /// local `auto p`, a structured-binding name `auto [_, p]`, or a `catch (C* p)` shadowing a member
+    /// `A* p` was typed `A`). The member-field lookup applies ONLY to names absent from this set. The
+    /// cost is fewer typed bindings (a member also read bare is not typed), never a fabricated one.
+    /// Computed once per body, cleared with `shadowed_locals`.
+    local_bound_names: HashSet<String>,
 }
 
 impl<'a> ExtractionCtx<'a> {
@@ -737,6 +810,29 @@ fn extract_type(
     if let Some(body) = type_body_node(frag, construct) {
         let prev_class = ctx.current_class.take();
         ctx.current_class = Some(type_name);
+
+        // CALL-BINDING-RECEIVER-1 §2.1: pre-pass — capture this class's data-member declared
+        // types BEFORE its methods are walked, so an inline method's `a_->run()` sees `a_`'s
+        // type regardless of member/method source order. Keyed by the class bare name (the same
+        // value `current_class` holds), which is how `extract_call` looks a member up.
+        if let Some(class_key) = ctx.current_class.clone() {
+            let mut member_cursor = body.walk();
+            for child in body.children(&mut member_cursor) {
+                if let Some(close) = true_close {
+                    if child.start_byte() >= close {
+                        continue;
+                    }
+                }
+                if child.kind() == "field_declaration" && !has_function_declarator(&child) {
+                    if let Some((member, ty)) = extract_field_member_type(&child, src) {
+                        ctx.class_field_types
+                            .entry(class_key.clone())
+                            .or_default()
+                            .insert(member, ty);
+                    }
+                }
+            }
+        }
 
         let mut current_visibility = if subtype == NodeSubtype::Class {
             Visibility::Private // C++ class default
@@ -1469,7 +1565,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
 
     // Extract calls and compute metrics
     if let Some(body) = node.child_by_field_name("body") {
-        extract_calls_from_body(&body, src, &func_uid, ctx);
+        extract_calls_from_body(&body, params.as_ref(), src, &func_uid, ctx);
         let metrics = compute_function_metrics(&body, params.as_ref());
         ctx.metrics.insert(stable_key, metrics);
     }
@@ -1537,7 +1633,7 @@ fn extract_method(
     });
 
     if let Some(body) = node.child_by_field_name("body") {
-        extract_calls_from_body(&body, src, &func_uid, ctx);
+        extract_calls_from_body(&body, params.as_ref(), src, &func_uid, ctx);
         let metrics = compute_function_metrics(&body, params.as_ref());
         ctx.metrics.insert(stable_key, metrics);
     }
@@ -1613,12 +1709,40 @@ fn extract_method_declaration(
 
 fn extract_calls_from_body(
     body: &tree_sitter::Node,
+    params: Option<&tree_sitter::Node>,
     src: &[u8],
     source_node_uid: &str,
     ctx: &mut ExtractionCtx,
 ) {
     // CPP-SB-1 D3: Clear local type map at function boundary.
     ctx.local_stream_types.clear();
+    // CALL-BINDING-RECEIVER-1 §2.1: local variable declared types are also intra-function.
+    ctx.local_var_types.clear();
+    // CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-010/F-CBR-011/F-CBR-012/F-CBR-013): the CONSERVATIVE binding
+    // rule, over the function's PARAMETERS and its whole body ONCE. `local_bound_names` is the set of
+    // names the member-field fallback is FORBIDDEN for — decided GRAMMAR-INDEPENDENTLY (F-CBR-012): a
+    // name whose EVERY identifier-token occurrence is the receiver of a `field_expression` call is a
+    // pure data member (fallback allowed); a name with ANY other occurrence (a declarator of any form,
+    // a structured-binding name, a catch parameter, a lambda capture — at any depth, including inside a
+    // lambda (F-CBR-013) — a range-for var, an assignment, an argument) is written locally, so the
+    // fallback is barred. `shadowed_locals` is names DECLARED more than once (still
+    // declaration-count-based — it guards LOCAL typing, unchanged). This can never fabricate: a
+    // receiver whose name is written locally is typed ONLY from its own unique, extractable declaration
+    // (F-CBR-010 rejected a per-block save/restore that missed scoping nodes), and NEVER from a
+    // same-named data member (F-CBR-011/F-CBR-012/F-CBR-013: a parameter `C* p`, an untyped local
+    // `auto p`, a structured-binding name `auto [_, p]`, a `catch (C* p)`, or a lambda binding
+    // `[p = …]` / `[](A* p){…}` shadowing a member `A* p` was mistyped `A`); when its own type is not
+    // extractable it carries no `receiverType` — unresolved and counted. The forbidden-set scan
+    // descends into lambdas; the call `walk` below does NOT (calls inside a lambda are not extracted).
+    let (bound, shadowed) = collect_local_bindings(body, params, src);
+    ctx.local_bound_names = bound;
+    ctx.shadowed_locals = shadowed;
+    // Capture parameter declared types (the body's own declarations are captured during the walk).
+    // A parameter bound more than once (also declared in the body) is shadowed and skipped, so the
+    // flat map holds only names with a single, unambiguous declared type.
+    if let Some(p) = params {
+        capture_param_types(p, body, src, ctx);
+    }
 
     fn walk(node: &tree_sitter::Node, src: &[u8], source_node_uid: &str, ctx: &mut ExtractionCtx) {
         match node.kind() {
@@ -1628,8 +1752,15 @@ fn extract_calls_from_body(
             "declaration" => {
                 // CPP-SB-1: Check for stream constructor with path.
                 try_extract_stream_declaration(node, src, source_node_uid, ctx);
+                // CALL-BINDING-RECEIVER-1 §2.1: record any declared local var type
+                // (`DBImpl* impl = …` → `impl` -> `DBImpl`) for receiver typing. A name in
+                // `shadowed_locals` (declared more than once in this body) is deliberately NOT
+                // recorded, so the flat map holds only names with a single, unambiguous declared
+                // type; the receiver-type lookup gates on the same set as a second guard.
+                capture_local_var_types(node, src, ctx);
             }
-            // Don't recurse into nested functions or lambdas
+            // Don't recurse into nested functions or lambdas — their locals are a separate scope
+            // this per-function map never types.
             "function_definition" | "lambda_expression" => {
                 return;
             }
@@ -1643,6 +1774,200 @@ fn extract_calls_from_body(
     }
 
     walk(body, src, source_node_uid, ctx);
+    ctx.shadowed_locals.clear();
+    ctx.local_bound_names.clear();
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-009/010/011/012): scan the function's PARAMETERS and its
+/// whole `body` ONCE, returning `(written_locally, shadowed)`:
+///   - `written_locally` = the member-field-fallback-FORBIDDEN set, decided GRAMMAR-INDEPENDENTLY
+///     (F-CBR-012). A name is in it iff it has AT LEAST ONE identifier-token occurrence — anywhere in
+///     the parameter list or body, at ANY depth and in ANY construct INCLUDING a lambda (F-CBR-013:
+///     a lambda capture, an init-capture `[p = …]`, a lambda parameter, or a token in the lambda
+///     body) — that is NOT the receiver of a `field_expression` call (`p->m()` / `p.m()`). Earlier
+///     revisions enumerated the grammar's binding node kinds and repeatedly missed one (a `{ }` block
+///     F-CBR-009, a `for` initializer F-CBR-010, a structured binding and a `catch` parameter
+///     F-CBR-012, a lambda capture F-CBR-013). The inverse question is unescapable: a binding must
+///     write the name somewhere other than a receiver position — a declarator of any form, a
+///     structured-binding name, a catch parameter, a lambda capture, a range-for var, an assignment
+///     target, an argument. So a name every one of whose occurrences is a call receiver is a pure
+///     data member (fallback allowed); anything else bars the fallback. The cost is fewer typed
+///     bindings (a member also read bare is not typed), never a fabricated one.
+///   - `shadowed` = names DECLARED more than once (a re-declared local, or a parameter also declared
+///     in the body). Such a name has no single unambiguous declared type, so the extractor never
+///     types it. Counted the same way `capture_local_var_types`/`capture_param_types` read a
+///     declaration, so all three agree on what "a declared local" is. This guards LOCAL typing (case
+///     1) and is UNCHANGED by F-CBR-012.
+///
+/// The two scans are ASYMMETRIC by design (F-CBR-013):
+///   - the forbidden-set scan (`scan_written`) DESCENDS into lambdas — every identifier token at any
+///     depth, including a lambda's captures/parameters/body, counts as an occurrence, because a name
+///     bound by a lambda must not be typed from a same-named data member; only a `function_definition`
+///     is skipped.
+///   - the declaration-count scan (`scan_decls`) and the call `walk` (`extract_calls_from_body`) STOP
+///     at both nested `function_definition`s and `lambda_expression`s: their locals belong to a
+///     separate scope this per-function map never TYPES, and calls inside a lambda are not extracted
+///     here (so nothing inside a lambda is ever emitted as a CALLS edge or typed as a local).
+fn collect_local_bindings(
+    body: &tree_sitter::Node,
+    params: Option<&tree_sitter::Node>,
+    src: &[u8],
+) -> (HashSet<String>, HashSet<String>) {
+    // `ident` is the receiver of a `field_expression` call iff it is the `argument` of a
+    // `field_expression` that is itself the `function` of a `call_expression` — the `p` in `p->m()`
+    // / `p.m()`. Every other position (a declarator, an argument, an assignment, a bare read, a
+    // non-call field access `p->x`) returns false, marking the name written-locally.
+    fn is_field_call_receiver(ident: &tree_sitter::Node) -> bool {
+        let parent = match ident.parent() {
+            Some(p) => p,
+            None => return false,
+        };
+        if parent.kind() != "field_expression" {
+            return false;
+        }
+        match parent.child_by_field_name("argument") {
+            Some(arg) if arg.id() == ident.id() => {}
+            _ => return false,
+        }
+        match parent.parent() {
+            Some(gp) => {
+                gp.kind() == "call_expression"
+                    && gp.child_by_field_name("function").map(|f| f.id()) == Some(parent.id())
+            }
+            None => false,
+        }
+    }
+
+    // Every identifier-token occurrence that is not a call receiver marks its name written-locally.
+    // This scan descends into lambdas (F-CBR-013): a name bound by a lambda — a capture (incl. an
+    // init-capture `[p = …]`, whose declared name AND its initializer are both occurrences), a lambda
+    // parameter, or a body declaration — is written locally, so the member-field fallback is barred
+    // for it, exactly as the doc comment on `collect_local_bindings` states. A `p->m()` inside a
+    // lambda body is still a receiver position and does not by itself bar the fallback. Only a
+    // `function_definition` (a truly separate nested scope) is skipped — never a `lambda_expression`.
+    fn scan_written(node: &tree_sitter::Node, src: &[u8], out: &mut HashSet<String>) {
+        match node.kind() {
+            "identifier" => {
+                if !is_field_call_receiver(node) {
+                    if let Ok(text) = node.utf8_text(src) {
+                        if !text.is_empty() {
+                            out.insert(text.to_string());
+                        }
+                    }
+                }
+                return;
+            }
+            "function_definition" => return,
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            scan_written(&child, src, out);
+        }
+    }
+
+    // Declaration-count guard for LOCAL typing (unchanged): count each name a `declaration` node
+    // declares, the same way `capture_local_var_types` reads it.
+    fn scan_decls(node: &tree_sitter::Node, src: &[u8], counts: &mut HashMap<String, u32>) {
+        match node.kind() {
+            "declaration" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if let Some(name) = descend_to_field_identifier(&child, src) {
+                        if !name.is_empty() {
+                            *counts.entry(name).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            "function_definition" | "lambda_expression" => return,
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            scan_decls(&child, src, counts);
+        }
+    }
+
+    let mut written_locally: HashSet<String> = HashSet::new();
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    if let Some(p) = params {
+        scan_written(p, src, &mut written_locally);
+        let mut cursor = p.walk();
+        for child in p.children(&mut cursor) {
+            if matches!(
+                child.kind(),
+                "parameter_declaration" | "optional_parameter_declaration"
+            ) {
+                if let Some(name) = param_name(&child, src) {
+                    *counts.entry(name).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    scan_written(body, src, &mut written_locally);
+    scan_decls(body, src, &mut counts);
+
+    let shadowed: HashSet<String> = counts
+        .into_iter()
+        .filter(|(_, c)| *c > 1)
+        .map(|(name, _)| name)
+        .collect();
+    (written_locally, shadowed)
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-011): the declared identifier of a `parameter_declaration`
+/// (`C* p` → `p`), read the same way local/member declarators are (`descend_to_field_identifier`).
+/// `None` for an unnamed/abstract parameter.
+fn param_name(param_decl: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    param_decl
+        .child_by_field_name("declarator")
+        .and_then(|d| descend_to_field_identifier(&d, src))
+        .filter(|s| !s.is_empty())
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-011): record each parameter's declared type into
+/// `local_var_types` (`void run(C* p)` → `p` -> `C`), so a receiver that names a parameter is
+/// typed from the parameter — never from a same-named data member. Uses the same type reader as
+/// locals/members (`extract_declaration_type`), and the same shadowing guard: a parameter bound
+/// more than once in this function (also declared in the body) is skipped, leaving it untyped and
+/// its calls unresolved and counted.
+///
+/// F-CBR-014: a parameter is visible throughout the function body, so its `LocalType` scope is the
+/// `body` node (`scope_id` = `body.id()`) with `decl_end` 0 — every call in the body is in scope.
+fn capture_param_types(
+    params: &tree_sitter::Node,
+    body: &tree_sitter::Node,
+    src: &[u8],
+    ctx: &mut ExtractionCtx,
+) {
+    let scope_id = body.id();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        if !matches!(
+            child.kind(),
+            "parameter_declaration" | "optional_parameter_declaration"
+        ) {
+            continue;
+        }
+        let ty = extract_declaration_type(&child, src);
+        if ty.is_empty() {
+            continue;
+        }
+        if let Some(name) = param_name(&child, src) {
+            if ctx.shadowed_locals.contains(&name) {
+                continue;
+            }
+            ctx.local_var_types.insert(
+                name,
+                LocalType {
+                    ty,
+                    scope_id,
+                    decl_end: 0,
+                },
+            );
+        }
+    }
 }
 
 fn extract_call(
@@ -1712,11 +2037,61 @@ fn extract_call(
         return;
     }
 
-    // `calleeName` is unchanged; `receiver` is ADDITIVE (skipped when absent) so existing
-    // consumers see a byte-identical edge for non-field calls.
-    let metadata = match &receiver {
-        Some(r) => serde_json::json!({ "calleeName": target_name, "receiver": r }),
-        None => serde_json::json!({ "calleeName": target_name }),
+    // CALL-BINDING-RECEIVER-1 §2.1: normalize the receiver and resolve its declared type.
+    // An explicit self-call (`this->m()`, `(*this).m()`) is recorded as receiver `"this"` so
+    // the resolver's enclosing-class preference may legitimately bind it to the caller's class.
+    // An INDIRECT receiver carries `receiverType` when its declared type is known in THIS file
+    // (a local var, or a data member of a class defined in this file). The resolver binds such
+    // a call to `<receiverType>::<method>` on evidence, never to the caller's own class.
+    let mut receiver_type: Option<String> = None;
+    if let Some(r) = receiver.as_deref() {
+        if is_this_receiver(r) {
+            receiver = Some("this".to_string());
+        } else if let Some(ident) = simple_identifier(r) {
+            // CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-010/F-CBR-011/F-CBR-014): three exhaustive cases
+            // for an indirect receiver, in order of decreasing evidence.
+            let in_scope_local_type = ctx
+                .local_var_types
+                .get(ident)
+                .filter(|lt| call_in_local_scope(node, lt))
+                .map(|lt| lt.ty.clone());
+            if let Some(t) = in_scope_local_type {
+                // (1) a UNIQUE, extractable local variable or parameter of this function whose
+                // declaration is IN LEXICAL SCOPE at this call site (F-CBR-014: the call is inside
+                // the declaration's containing subtree and starts at or after its end byte) — typed
+                // from its own declaration. Evidence-backed: the resolver binds `<t>::<method>`.
+                receiver_type = Some(t);
+            } else if ctx.local_bound_names.contains(ident) {
+                // (2) locally bound but NOT uniquely typed IN SCOPE — a parameter or local whose
+                // type did not extract (`auto p`, `int p`), a name declared more than once (a
+                // shadow, F-CBR-009/F-CBR-010), or a local whose unique declaration is OUT OF
+                // LEXICAL SCOPE at this call site (F-CBR-014: an inner-block `C* p` seen after its
+                // block closed). The member-field fallback is FORBIDDEN (F-CBR-011): a same-named
+                // data member is a DIFFERENT variable, so typing from it would fabricate a binding
+                // to the wrong type. The call keeps its `receiver` but carries no `receiverType` —
+                // an indirect receiver with no type, left unresolved and counted.
+                receiver_type = None;
+            } else {
+                // (3) NOT bound locally anywhere in this function — a data-member reference. Type
+                // it from the enclosing class's members when that class is defined in THIS file.
+                receiver_type = ctx
+                    .current_class
+                    .as_ref()
+                    .and_then(|cls| ctx.class_field_types.get(cls))
+                    .and_then(|members| members.get(ident))
+                    .cloned();
+            }
+        }
+    }
+
+    // `calleeName` is unchanged; `receiver` and `receiverType` are ADDITIVE (skipped when
+    // absent) so existing consumers see a byte-identical edge for non-field calls.
+    let metadata = match (&receiver, &receiver_type) {
+        (Some(r), Some(rt)) => {
+            serde_json::json!({ "calleeName": target_name, "receiver": r, "receiverType": rt })
+        }
+        (Some(r), None) => serde_json::json!({ "calleeName": target_name, "receiver": r }),
+        (None, _) => serde_json::json!({ "calleeName": target_name }),
     };
     ctx.edges.push(ExtractedEdge {
         edge_uid: uuid::Uuid::new_v4().to_string(),
@@ -2099,6 +2474,148 @@ fn try_extract_stream_declaration(
             if !var_name.is_empty() {
                 ctx.local_stream_types.insert(var_name, stream_type);
             }
+        }
+    }
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1: is a receiver expression an explicit self-reference?
+/// `this`, `(*this)`, `*this` — the only forms that legitimately bind to the enclosing class.
+fn is_this_receiver(receiver: &str) -> bool {
+    matches!(receiver.trim(), "this" | "*this" | "(*this)")
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1: a receiver text that is a single bare identifier (a plain
+/// variable/member name like `impl` or `versions_`), or `None` for anything compound
+/// (`a.b`, `get()`, `arr[i]`, `x->y`). Only a bare identifier can be looked up in the local /
+/// member type maps; a compound receiver is left untyped (stays unresolved, counted).
+fn simple_identifier(receiver: &str) -> Option<&str> {
+    let r = receiver.trim();
+    if !r.is_empty()
+        && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !r.chars().next().unwrap().is_ascii_digit()
+    {
+        Some(r)
+    } else {
+        None
+    }
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1: record declared local variable types from a `declaration`
+/// node (`DBImpl* impl = new DBImpl(...)` → `impl` -> `DBImpl`; `Foo bar;` → `bar` -> `Foo`).
+/// The type is the declaration's type identifier (pointer/reference/const stripped by
+/// `extract_declaration_type`, which returns the bare/qualified type name). Best-effort and
+/// per-function; used only to type a call receiver, never emitted as a node or edge.
+/// CALL-BINDING-RECEIVER-1 §2.1 (F-CBR-014): is the `call_node` inside the lexical scope of a
+/// declaration recorded as `lt`? One grammar-independent rule: (a) the call lies inside the subtree
+/// of `lt.scope_id` (the node that directly contains the declaration — a `{ }` block, a `for`, a
+/// condition clause, or the function body for a parameter), tested by walking the call's ancestors
+/// for that id; AND (b) the call starts at or after `lt.decl_end` (the declaration's end byte; 0 for
+/// a parameter, so a parameter is always in scope). No enumeration of scoping node kinds — the
+/// subtree-plus-byte test is the same for every construct, so it cannot miss one (the F-CBR-010/012
+/// lesson). Deliberately conservative where C++ visibility exceeds the parent's subtree (a
+/// declaration in an `if`/`while`/`switch` condition clause is visible in the controlled body but is
+/// not typed there): a counted loss of a typed binding, never a fabricated one.
+fn call_in_local_scope(call_node: &tree_sitter::Node, lt: &LocalType) -> bool {
+    // (b) the call must not precede the declaration's end.
+    if call_node.start_byte() < lt.decl_end {
+        return false;
+    }
+    // (a) the scope node must be an ancestor of (or equal to) the call node.
+    let mut cur = Some(*call_node);
+    while let Some(n) = cur {
+        if n.id() == lt.scope_id {
+            return true;
+        }
+        cur = n.parent();
+    }
+    false
+}
+
+fn capture_local_var_types(decl_node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx) {
+    let ty = extract_declaration_type(decl_node, src);
+    if ty.is_empty() {
+        return;
+    }
+    // F-CBR-014: the declaration's lexical scope is the subtree of its PARENT node (the block,
+    // `for`, condition clause, … that directly contains it), and it is visible only from its end
+    // byte onward. Record both so `extract_call` can refuse to type a same-named receiver that
+    // sits outside this scope. `scope_id` falls back to the declaration itself only if it has no
+    // parent (never happens for a body declaration), which still scopes the type to that subtree.
+    let scope_id = decl_node
+        .parent()
+        .map(|p| p.id())
+        .unwrap_or_else(|| decl_node.id());
+    let decl_end = decl_node.end_byte();
+    let mut cursor = decl_node.walk();
+    for child in decl_node.children(&mut cursor) {
+        if let Some(name) = descend_to_field_identifier(&child, src) {
+            if !name.is_empty() {
+                // F-CBR-010: never record a name declared more than once in this body — the flat
+                // map must hold only names with a single, unambiguous declared type. The lookup
+                // in `extract_call` gates on the same set, so this is a second guard, not the
+                // sole one.
+                if ctx.shadowed_locals.contains(&name) {
+                    continue;
+                }
+                ctx.local_var_types.insert(
+                    name,
+                    LocalType {
+                        ty: ty.clone(),
+                        scope_id,
+                        decl_end,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1: `(member_name, declared_type)` of a data-member
+/// `field_declaration` (`A* a_;` → `("a_", "A")`). `None` when the member name or type cannot
+/// be read. The caller has already excluded method-prototype field_declarations
+/// (`has_function_declarator`).
+fn extract_field_member_type(
+    field_decl: &tree_sitter::Node,
+    src: &[u8],
+) -> Option<(String, String)> {
+    let ty = extract_declaration_type(field_decl, src);
+    if ty.is_empty() {
+        return None;
+    }
+    let name = field_decl
+        .child_by_field_name("declarator")
+        .and_then(|d| descend_to_field_identifier(&d, src))
+        .or_else(|| {
+            let mut cursor = field_decl.walk();
+            let found = field_decl
+                .children(&mut cursor)
+                .find_map(|c| descend_to_field_identifier(&c, src));
+            found
+        })?;
+    Some((name, ty))
+}
+
+/// CALL-BINDING-RECEIVER-1 §2.1: descend through pointer/reference/array/init declarators to the
+/// declared identifier (`field_identifier` for members, `identifier` for locals). Returns the
+/// FIRST such identifier; ignores initializer expressions (only the `declarator` field is
+/// followed for wrapper declarators).
+fn descend_to_field_identifier(node: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    match node.kind() {
+        "field_identifier" | "identifier" => node.utf8_text(src).ok().map(|s| s.to_string()),
+        "pointer_declarator" | "reference_declarator" | "array_declarator" | "init_declarator" => {
+            node.child_by_field_name("declarator")
+                .and_then(|d| descend_to_field_identifier(&d, src))
+        }
+        _ => {
+            let mut cursor = node.walk();
+            let found = node.children(&mut cursor).find_map(|child| {
+                if matches!(child.kind(), "field_identifier" | "identifier") {
+                    child.utf8_text(src).ok().map(|s| s.to_string())
+                } else {
+                    None
+                }
+            });
+            found
         }
     }
 }
@@ -2780,6 +3297,498 @@ mod tests {
             "receiver stored: {:?}",
             call.metadata_json
         );
+    }
+
+    // ── CALL-BINDING-RECEIVER-1 §2.1: receiver-type facts on the call edge ──
+
+    #[test]
+    fn receiver_type_field_declaration_records_declared_type() {
+        // An inline method calling a data member (`a_ : A`) carries `receiverType: "A"` so the
+        // resolver binds `a_->run()` to `A::run`, not `B::run` (the caller's own class).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nclass B { A* a_; void run() { a_->run(); } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"a_\"")
+            })
+            .expect("a Calls edge for a_->run()");
+        assert!(
+            call.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("\"receiverType\":\"A\""),
+            "field member type recorded: {:?}",
+            call.metadata_json
+        );
+    }
+
+    #[test]
+    fn receiver_type_local_declaration_records_declared_type() {
+        // A local `A* p = make();` typed `A` → `p->run()` carries `receiverType: "A"`.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nvoid f() { A* p = make(); p->run(); }\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .expect("a Calls edge for p->run()");
+        assert!(
+            call.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("\"receiverType\":\"A\""),
+            "local var type recorded: {:?}",
+            call.metadata_json
+        );
+    }
+
+    #[test]
+    fn receiver_type_this_call_carries_this_receiver() {
+        // `this->a()` is an explicit self-call: receiver normalized to `"this"`, and NO
+        // `receiverType` (the resolver's enclosing-class preference handles explicit self).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class C { void a(); void b() { this->a(); } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| e.edge_type == EdgeType::Calls && e.target_key == "a")
+            .expect("a Calls edge for this->a()");
+        let meta = call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            meta.contains("\"receiver\":\"this\""),
+            "this receiver normalized: {meta:?}"
+        );
+        assert!(
+            !meta.contains("receiverType"),
+            "an explicit this call carries no receiverType: {meta:?}"
+        );
+    }
+
+    #[test]
+    fn block_scope_shadowed_local_is_not_typed() {
+        // F-CBR-009 / F-CBR-010: a name declared more than once in a function body — here `p`,
+        // once at the top and once inside a `{ }` block — is NEVER typed (the conservative rule).
+        // (NOTE: named WITHOUT the `receiver_type_` prefix on purpose — CBR-C05 greps that filter
+        // for EXACTLY the three extractor emission tests; this shadowing test belongs to the same
+        // fix but must not inflate that exact count. It runs under the full cpp-extractor lib suite.)
+        //   `A* p = mkA(); { B* p = mkB(); p->run(); } p->run();`
+        // The earlier fix tried to type each call by lexical scope (in-block B, post-block A) via a
+        // per-block save/restore; the reviewer found that stack missed scoping nodes (a `for`
+        // initializer, F-CBR-010). The conservative rule refuses to type a re-declared name at all,
+        // so BOTH `p->run()` calls carry a receiver but NO `receiverType` — indirect receivers with
+        // no type, left unresolved and counted, never a fabricated `A::run` or `B::run` edge.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nclass B { void run(); };\n\
+             void f() { A* p = mkA(); { B* p = mkB(); p->run(); } p->run(); }\n",
+            "src/f.cpp",
+        );
+        let p_calls: Vec<&ExtractedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .collect();
+        assert_eq!(
+            p_calls.len(),
+            2,
+            "both p->run() calls are extracted; edges: {:?}",
+            p_calls.iter().map(|e| &e.metadata_json).collect::<Vec<_>>()
+        );
+        for e in &p_calls {
+            let meta = e.metadata_json.as_deref().unwrap_or("");
+            assert!(
+                !meta.contains("receiverType"),
+                "a shadowed local (`p` declared twice) is never typed — no receiverType on any \
+                 of its calls, so neither a false A::run nor B::run edge can be bound: {meta:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn for_initializer_shadowed_local_is_not_typed() {
+        // F-CBR-010: a `for` initializer is a `declaration` node in tree-sitter-cpp, so the
+        // outer `A* p` and the for-initializer `B* p` are two declarations of `p`. The
+        // conservative rule treats `p` as shadowed and NEVER types it: neither the in-loop
+        // `p->run()` nor the post-loop `p->run()` carries a `receiverType`, so the resolver can
+        // fabricate neither a `B::run` edge nor an `A::run` edge, and no receiver-bearing
+        // self-loop is stored. (Named WITHOUT the `receiver_type_` prefix — see CBR-C05.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nclass B { void run(); };\n\
+             void f() { A* p = mkA(); for (B* p = mkB(); cond(); ) { p->run(); } p->run(); }\n",
+            "src/f.cpp",
+        );
+        let p_calls: Vec<&ExtractedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .collect();
+        assert_eq!(
+            p_calls.len(),
+            2,
+            "both p->run() calls are extracted; edges: {:?}",
+            p_calls.iter().map(|e| &e.metadata_json).collect::<Vec<_>>()
+        );
+        for e in &p_calls {
+            let meta = e.metadata_json.as_deref().unwrap_or("");
+            assert!(
+                !meta.contains("receiverType"),
+                "a for-initializer shadow (`p` declared twice) is never typed — no receiverType \
+                 on any of its calls: {meta:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_declaration_local_is_still_typed() {
+        // F-CBR-010 guard: the conservative rule must NOT over-suppress. A name declared exactly
+        // once — even inside a `for` initializer whose body uses it — keeps its type, so a real
+        // receiver-type binding still lands. `q` is declared once (the for-init `A* q`); its
+        // in-loop `q->run()` carries `receiverType "A"`.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\n\
+             void f() { for (A* q = mkA(); cond(); ) { q->run(); } }\n",
+            "src/f.cpp",
+        );
+        let q_call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"q\"")
+            })
+            .expect("a Calls edge for q->run()");
+        let meta = q_call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            meta.contains("\"receiverType\":\"A\""),
+            "a local declared exactly once is still typed: {meta:?}"
+        );
+    }
+
+    #[test]
+    fn member_shadowed_by_parameter_types_the_parameter() {
+        // F-CBR-011: a data member `A* p` shadowed by a PARAMETER `C* p`. C++ lexical lookup
+        // selects the parameter, so `p->run()` must NEVER be typed from the member (`A`). The
+        // parameter's own declared type `C` is unique and extractable, so the call carries
+        // `receiverType "C"` — the correct evidence — and never a fabricated `A`. (Named WITHOUT
+        // the `receiver_type_` prefix on purpose — CBR-C05 greps that filter for EXACTLY the three
+        // extractor emission tests; this F-CBR-011 regression runs under the full lib suite.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nclass C { void run(); };\n\
+             class B { A* p; void run(C* p) { p->run(); } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .expect("a Calls edge for p->run()");
+        let meta = call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            meta.contains("\"receiverType\":\"C\""),
+            "the parameter `C* p` types the receiver (its own declaration), not the member `A* p`: \
+             {meta:?}"
+        );
+        assert!(
+            !meta.contains("\"receiverType\":\"A\""),
+            "the shadowed member `A* p` never types a parameter receiver (F-CBR-011): {meta:?}"
+        );
+    }
+
+    #[test]
+    fn member_shadowed_by_untyped_local_is_not_typed() {
+        // F-CBR-011: a data member `A* p` shadowed by an UNTYPED local `auto p = make_c();`. The
+        // `auto` type does not extract, so `p` is bound locally but has no usable type. The
+        // member-field fallback is FORBIDDEN — the call carries NO `receiverType` (never a
+        // fabricated `A`), staying an indirect receiver with no type, left unresolved and counted.
+        // (Named WITHOUT the `receiver_type_` prefix — see CBR-C05.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\n\
+             class B { A* p; void run() { auto p = make_c(); p->run(); } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .expect("a Calls edge for p->run()");
+        let meta = call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            !meta.contains("receiverType"),
+            "an untyped local `auto p` shadowing a member `A* p` is never typed — no receiverType, \
+             never a fabricated `A` (F-CBR-011): {meta:?}"
+        );
+    }
+
+    #[test]
+    fn member_shadowed_by_structured_binding_is_not_typed() {
+        // F-CBR-012: a data member `A* p` shadowed by a STRUCTURED-BINDING name (`auto [x, p] = …`).
+        // tree-sitter models the binding's names as MULTIPLE `identifier` children, so the earlier
+        // enumerating collector — which read only the first declarator identifier — missed `p` and let
+        // the member-field fallback type it `A`. The grammar-independent rule sees `p`'s
+        // structured-binding occurrence (a non-receiver identifier token) and forbids the fallback:
+        // the call carries NO `receiverType` — an indirect receiver with no type, unresolved and
+        // counted, never a fabricated `A`. (Named WITHOUT the `receiver_type_` prefix on purpose —
+        // CBR-C05 greps that filter for EXACTLY the three extractor emission tests.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\n\
+             class B { A* p; void run() { auto [x, p] = make_pair(); p->run(); } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .expect("a Calls edge for p->run()");
+        let meta = call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            !meta.contains("receiverType"),
+            "a structured-binding name `p` shadowing a member `A* p` is never typed — no \
+             receiverType, never a fabricated `A` (F-CBR-012): {meta:?}"
+        );
+    }
+
+    #[test]
+    fn member_shadowed_by_catch_parameter_is_not_typed() {
+        // F-CBR-012: a data member `A* p` shadowed by a `catch (C* p)` parameter. A `catch_clause`
+        // owns a `parameter_list`, not a `declaration`, so the earlier enumerating collector missed
+        // it and let the member-field fallback type the call `A`. The grammar-independent rule sees
+        // `p`'s catch-parameter occurrence (a non-receiver identifier token) and forbids the
+        // fallback: the call carries NO `receiverType` — never a fabricated `A`. (The extractor does
+        // not type catch parameters, so no `C` is claimed either — the honest per-file limit; the
+        // call stays unresolved and counted.) (Named WITHOUT the `receiver_type_` prefix — CBR-C05.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nclass C { void run(); };\n\
+             class B { A* p; void run() { try { risky(); } catch (C* p) { p->run(); } } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .expect("a Calls edge for p->run()");
+        let meta = call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            !meta.contains("receiverType"),
+            "a catch parameter `p` shadowing a member `A* p` is never typed from the member — no \
+             fabricated `A` (F-CBR-012): {meta:?}"
+        );
+    }
+
+    #[test]
+    fn member_shadowed_by_lambda_capture_is_not_typed() {
+        // F-CBR-013: a data member `A* p` whose name is also bound by a lambda in the SAME function —
+        // here an init-capture `[p = make_c()]`. The forbidden-set scan (`scan_written`) used to
+        // early-return at `lambda_expression`, so the capture's `p` was never seen; only the OUTER
+        // `p->run()` (a field-call receiver) touched `p`, so the member-field fallback typed the call
+        // `A` — a guessed edge the receiver expression's own binding does not support. The corrected
+        // scan descends into lambdas: the init-capture `p` (a non-receiver identifier token) marks `p`
+        // written-locally, so the fallback is barred and the outer call carries NO `receiverType` —
+        // an indirect receiver with no type, unresolved and counted, never a fabricated `A`. The call
+        // walk still does NOT enter the lambda, so the lambda's own body produces no CALLS edge.
+        // (Named WITHOUT the `receiver_type_` prefix on purpose — CBR-C05 greps that filter for
+        // EXACTLY the three extractor emission tests.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\n\
+             class B { A* p; void run() { auto f = [p = make_c()]() { return p; }; p->run(); } };\n",
+            "src/f.cpp",
+        );
+        let call = result
+            .edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .expect("a Calls edge for the outer p->run()");
+        let meta = call.metadata_json.as_deref().unwrap_or("");
+        assert!(
+            !meta.contains("receiverType"),
+            "a member `A* p` whose name is also a lambda init-capture is never typed from the member \
+             — no receiverType, never a fabricated `A` (F-CBR-013): {meta:?}"
+        );
+    }
+
+    #[test]
+    fn member_shadowed_by_out_of_scope_local_is_not_typed() {
+        // F-CBR-014: a data member `A* p` of class B, shadowed by a UNIQUE inner-block local
+        // `C* p` (a THIRD class C). The flat per-function `local_var_types` map used to keep the
+        // inner `C` binding after its block closed, so the POST-BLOCK `p->run()` — which denotes
+        // the member `A* p` — was mistyped `C` and would evidence-bind to `C::run` (a typed edge
+        // from evidence out of lexical scope). The lexical-scope test fixes it:
+        //   in-block `p->run()`  → typed `C` (the inner local IS in scope): legitimate.
+        //   post-block `p->run()`→ NO receiverType (the inner local's scope has ended; the name is
+        //                          still locally bound, so the member fallback is barred too):
+        //                          an indirect receiver with no type, unresolved and counted —
+        //                          never `C::run`, never a `B::run → C::run` edge, never an `A`.
+        // (Named WITHOUT the `receiver_type_` prefix on purpose — CBR-C05 greps that filter for
+        // EXACTLY the three extractor emission tests.)
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class A { void run(); };\nclass C { void run(); };\n\
+             class B { A* p; void go() { { C* p = mkC(); p->run(); } p->run(); } };\n",
+            "src/f.cpp",
+        );
+        let p_calls: Vec<&ExtractedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.target_key == "run"
+                    && e.metadata_json
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("\"receiver\":\"p\"")
+            })
+            .collect();
+        assert_eq!(
+            p_calls.len(),
+            2,
+            "both p->run() calls are extracted; edges: {:?}",
+            p_calls.iter().map(|e| &e.metadata_json).collect::<Vec<_>>()
+        );
+        let typed_c = p_calls
+            .iter()
+            .filter(|e| {
+                e.metadata_json
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("\"receiverType\":\"C\"")
+            })
+            .count();
+        let untyped = p_calls
+            .iter()
+            .filter(|e| {
+                !e.metadata_json
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("receiverType")
+            })
+            .count();
+        assert_eq!(
+            typed_c,
+            1,
+            "exactly the IN-BLOCK p->run() is typed C (the inner local in scope); edges: {:?}",
+            p_calls.iter().map(|e| &e.metadata_json).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            untyped,
+            1,
+            "exactly the POST-BLOCK p->run() carries NO receiverType (inner local out of scope); \
+             edges: {:?}",
+            p_calls.iter().map(|e| &e.metadata_json).collect::<Vec<_>>()
+        );
+        for e in &p_calls {
+            let meta = e.metadata_json.as_deref().unwrap_or("");
+            assert!(
+                !meta.contains("\"receiverType\":\"A\"") && !meta.contains("\"receiverType\":\"B\""),
+                "an out-of-scope local never lets the post-block call be typed from the member `A` \
+                 or the enclosing class `B`: {meta:?}"
+            );
+        }
     }
 
     #[test]

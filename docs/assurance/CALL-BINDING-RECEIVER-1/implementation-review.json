@@ -1,0 +1,962 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-CALL-BINDING-RECEIVER-1-13",
+  "workItemId": "CALL-BINDING-RECEIVER-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-6.json",
+    "sha256": "sha256:1a6432984154da5cb95bc4c1bb42db61f5d501c3818435b1099a019331043579"
+  },
+  "allocation": {
+    "path": "docs/slices/call-binding-receiver-1.md",
+    "sha256": "sha256:0305c1f3267ab625738541ea3ad401cdc55cc66d85240179c65b892f237a19ef"
+  },
+  "subject": {
+    "candidateSha256": "sha256:a0a0bec809fef86d3502fdd4765f8d56a9ccb3ef39c02daaf922dab788a71d18",
+    "verification": {
+      "path": "docs/assurance/CALL-BINDING-RECEIVER-1/verification.json",
+      "sha256": "sha256:1df8bdce07d1f91bdabb6b1fd5ab4b7b2c4f45da35b13708afd8a369c130016d"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-CALL-BINDING-RECEIVER-1-13"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-6.json",
+      "sha256": "sha256:1a6432984154da5cb95bc4c1bb42db61f5d501c3818435b1099a019331043579"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:fbb99b8cb7349562236bf289e33f9850a8412e1272746ba53d8dc7c9f6894f75",
+        "byteLength": 26976
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/CALL-BINDING-RECEIVER-1-INPUT-6.json",
+        "sha256": "sha256:1a6432984154da5cb95bc4c1bb42db61f5d501c3818435b1099a019331043579",
+        "byteLength": 8843
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+        "sha256": "sha256:01cefeaec408d9ee6c4146da15e27791b37088e8190d9c1c6338dbb6fb3ccb99",
+        "byteLength": 14193
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:d33e566fd2b3fcf0fe4484ddf370a904b8f6b82f07eb2e08bf0d5f9f5ea4c9c9",
+        "byteLength": 13956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+        "sha256": "sha256:8c3b7d778c9f90116a7929a41c72388f87239a9af310dccc65779a66e1f044de",
+        "byteLength": 15922
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-005-symbol-relationship-discovery.md",
+        "sha256": "sha256:1a6d1535b2227f9121163f2b6716236fd6d2b38e5ba51800a839be6ae9cfd2b9",
+        "byteLength": 14876
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+        "sha256": "sha256:085d9d5a4a3e0d71421ff1bbe1e45f8c88fc722b354fa7a5b36ca586401b2256",
+        "byteLength": 15920
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-007-boundaries-surfaces-resources-inferences.md",
+        "sha256": "sha256:813a27dc312267e62b4de74330e7a26994a10a89623320deea9cbf7e3c66de22",
+        "byteLength": 13759
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-009-quality-signals-trust-reliability.md",
+        "sha256": "sha256:8ba3a63846c2fa1ef760de39197bd308c538eb2225a864a1922871441234ef39",
+        "byteLength": 16012
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+        "sha256": "sha256:60598f5c99e45318b24b424c6e5619e4c5d1c21e95530db239dcf6036122eefe",
+        "byteLength": 13094
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-013-governance-and-enforcement.md",
+        "sha256": "sha256:8d5e9524e05f0d9e076a1fee7329715ee0b2b767e5de8116145d6f4485c40056",
+        "byteLength": 9845
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/architecture/artifact-contract-model.md",
+        "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332",
+        "byteLength": 13896
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cycle-honesty-1.md",
+        "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe",
+        "byteLength": 6001
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-rust-1.md",
+        "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731",
+        "byteLength": 9053
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/anchors-everywhere-1.md",
+        "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60",
+        "byteLength": 4803
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-java-1.md",
+        "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0",
+        "byteLength": 6166
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/deps-classifier-1.md",
+        "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082",
+        "byteLength": 8808
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-1.md",
+        "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8",
+        "byteLength": 5162
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/audit5-minors-1.md",
+        "sha256": "sha256:cf4db06b57ba95e2730f0342b4b896cbd1d7758274d8daba5f0d201a85edb496",
+        "byteLength": 7535
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/inferences-surface-1.md",
+        "sha256": "sha256:cb07401a2e0fc76e7b4a224d68a63ffef12c95025e7b011455344bab158dcf85",
+        "byteLength": 3917
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/trust-model-rebase-1.md",
+        "sha256": "sha256:de1abefc05f2a6a0c9b59b2be83cb86956375def8217f080568055b8521b9305",
+        "byteLength": 12615
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/dead-causes-1.md",
+        "sha256": "sha256:653fa5e9bc26f3c6e8b4d50e40cf1fe88c9dee05c1532fea86af964aac033d1f",
+        "byteLength": 4288
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/contracts/exit-codes.md",
+        "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429",
+        "byteLength": 3756
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/economy-2.md",
+        "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4",
+        "byteLength": 4956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cursor-roundtrip-1.md",
+        "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be",
+        "byteLength": 2882
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:3e3854c5e9ed59bb2fb83b6e16d27cccaf79d61583d599bf5d65d1aad92ac553",
+        "byteLength": 2844
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:8b6891834cf3e2bf01539215df1bd5173c9ee66271b64e028de2828094681a72",
+        "byteLength": 7479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-VALIDATION-STALE-1.md",
+        "sha256": "sha256:135d5031d50b240d5d6e9cc9ce0859598265c240e775848bdb31b0fa453de133",
+        "byteLength": 2038
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370",
+        "byteLength": 1774
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CBR-XFILE-1.md",
+        "sha256": "sha256:0922afaf63b1fc85ade5a0504b862512350aa114b2e6d469ed6b8ff56d1e9b45",
+        "byteLength": 2916
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CBR-C06-HOME-1.md",
+        "sha256": "sha256:758ccd028f67c4d95a377c21de1c519c76e1a965fc6db9cb806414bafde793ec",
+        "byteLength": 2831
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/call-binding-receiver-1.md",
+        "sha256": "sha256:0305c1f3267ab625738541ea3ad401cdc55cc66d85240179c65b892f237a19ef",
+        "byteLength": 62178
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/CALL-BINDING-RECEIVER-1-INPUT-6/requirements-review.json",
+        "sha256": "sha256:31fc3a941cd42ebdf58a3d44546c2d30a887f7213cdf8c743ec0d737c0867ee7",
+        "byteLength": 52798
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/CALL-BINDING-RECEIVER-1-INPUT-6/baseline-approval.json",
+        "sha256": "sha256:bdf7b284dbf6f4e2b4e8481edd7235882471720e805ff77f442f1dbc79718822",
+        "byteLength": 2618
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:89587bc371260ae1e38f45ca3a5b0d942a62e477e6ae190ff93e01ae2379d393",
+        "byteLength": 5731
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/selection.md",
+        "sha256": "sha256:671f24dbd9906ea528baf203f249fe145fe3d1add8c34014c396ccb3c7456fd8",
+        "byteLength": 9239
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-13",
+        "sha256": "sha256:cb995a21d33729cf84f5f680b87dc2e939f7de34acb71378211422f71ff6e1ae",
+        "byteLength": 16167
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-1.json",
+        "sha256": "sha256:6d9712315f1b935de150472c0913d6ebe17027eeb7f0ce0e1a497438aa364673",
+        "byteLength": 25783
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-2.json",
+        "sha256": "sha256:2e238656130733df7aca97f500b453128a651428d716673ed68c394e49a8d2ca",
+        "byteLength": 16592
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-3.json",
+        "sha256": "sha256:849ba6fc4616843c4d41d87b4e01f800c1c6fe91f03b0076fe5d7de16ce2c2c5",
+        "byteLength": 10261
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-4.json",
+        "sha256": "sha256:dfa63bbf3016abf55a0dcdeec3609af7af73b6e33ff286db97df983c0651c1b2",
+        "byteLength": 11183
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-5.json",
+        "sha256": "sha256:c61b4b8c57e0b7ec83dd07e72862aedd1be8e4bfe46dd61818c82c900e703371",
+        "byteLength": 11675
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-6.json",
+        "sha256": "sha256:62baa3470b6f18668a449951659160e42c2a48e77f8d8470418702fec5117e7d",
+        "byteLength": 11525
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-7.json",
+        "sha256": "sha256:bb51dafbbcd022ffbf2445db9622dfe7d58f1a9391a73b71cf43973d6a5d4dec",
+        "byteLength": 25935
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-8.json",
+        "sha256": "sha256:9d9fb7c33c8f867e3df3aebdc71c20a6ee4adaf70a04bf31ee9ff439ce9e9854",
+        "byteLength": 26149
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-9.json",
+        "sha256": "sha256:171f4fc8aacb7abc932d19049874f63840e796715fd927aa063e6b464132d499",
+        "byteLength": 25031
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-10.json",
+        "sha256": "sha256:fdd7b350077cfbc06bf93801a8128dfab9aee1076f1711c9085d405fca924348",
+        "byteLength": 25333
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CALL-BINDING-RECEIVER-1/review-12.json",
+        "sha256": "sha256:a20e2f2164662e851238239a4ebe4cf8cd1ee8dcacf42cd46fdb4476ec803c20",
+        "byteLength": 13616
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-13",
+        "sha256": "sha256:c824e14f3df19fce8a1688d5c52a259b8974f099439dbb9acaf4032410e7de02",
+        "byteLength": 37355
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-13",
+        "sha256": "sha256:efbb38973fb76d259878719d673b6d62c87fd03527112ca491639b7781a8d515",
+        "byteLength": 1521
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-13",
+        "sha256": "sha256:1df8bdce07d1f91bdabb6b1fd5ab4b7b2c4f45da35b13708afd8a369c130016d",
+        "byteLength": 57993
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-13",
+        "sha256": "sha256:039f87bc59bdf706f6692dee7384db99e664b69b5b0ed30f65c196f9fe317429",
+        "byteLength": 153033
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:40452f57de6b7692811c8b1521788a706f9a6b37e9c38ac051f1df87525014a0",
+        "byteLength": 27396
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:fbb99b8cb7349562236bf289e33f9850a8412e1272746ba53d8dc7c9f6894f75",
+        "byteLength": 26976
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:a5f64ad290611b0581cfce9a6f5a41a1effda0cac91e294a1b71783523ec3fc8",
+        "byteLength": 1015406
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-005-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-007-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-013-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CBR-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CBR-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CBR-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CBR-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "CBR-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-c01.txt: 11 passed, including null and array non-object carrier regressions; mtime Sep 18 07:33:25 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: .agent-manager/slices/CALL-BINDING-RECEIVER-1/build-progress.md#cbr-c02 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-indexer-lib.txt: 413 passed; mtime Sep 18 07:33:38 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-parity.txt; builder evidence reports parity corpus passed this cycle (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: build-progress CBR-C05: receiver_type_ 3, cpp-extractor 98, c-extractor 108 passed (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-fixture.txt: 9 passed; mtime Sep 18 07:34:05, after test source mtime Sep 18 07:08:17 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: build-progress CBR-C07 preservation-suite transcript (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: build-progress CBR-C08 retained-store fingerprint (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-before.txt: self=155 calls=3261 unresolved=6152 total=9413 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-after.txt: receiver-self=0 all-self=0 calls=3488 unresolved=5925 total=9413 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-callers.json; builder transcript records sole DB::Open caller at db_impl.cc:1503 (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C12",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-callees.json; builder transcript records no DBImpl::Recover self-row (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C13",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-unresolved-after.txt; builder transcript records known existing calls category (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C14",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-trust-before.txt; /tmp/cbr-trust-after.txt; /tmp/cbr-trustj-after.json (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C15",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-explain.txt; builder transcript records Callers (1), no self-row (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C16",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-nginx-after.txt; /tmp/cbr-codegraph-after.txt (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C17",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: /tmp/cbr-cyclesj-after.json; /tmp/cbr-cycles-after.txt (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C18",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer did not execute this check (read-only review environment); relied on the builder-executed retained capture. Reviewer observation: build-progress CBR-C18: unchanged registry digest and isolated-root cleanup (reviewer outcome: passed)."
+      }
+    },
+    {
+      "checkId": "CBR-C19",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "git status --short: exactly four candidate paths; git diff --check: clean; sha256 hashes of all four paths match this cycle's expected candidate",
+          "supportingEvidence": [
+            "git status --short: exactly four candidate paths",
+            "git diff --check: clean",
+            "sha256 hashes of all four paths match this cycle's expected candidate"
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/cpp-extractor/src/extractor.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/resolver.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/tests/call_binding_receiver.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/repo-index/tests/call_binding_receiver.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-18T04:46:24.765Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nOBSERVED: the working tree contains exactly the four allocated candidate paths; diff whitespace validation is clean; all four file SHA-256 values match the cycle-14 candidate. OBSERVED: resolver.rs now rejects every successfully parsed JSON carrier whose root is not an object before examining receiver fields. Thus null and [] become ReceiverDisposition::Unreadable, cannot reach enclosing-class preference, and remain unresolved/countable; their two ambiguous B::run regressions assert that behavior. This closes F-CBR-015 without widening binding evidence. OBSERVED: fresh captures show CBR-C01 11 passed, CBR-C03 413 passed, and CBR-C06 9 passed; their mtimes follow the current resolver/test source mtimes, closing F-CBR-016. OBSERVED from builder-executed retained evidence: leveldb conservation holds (3261 + 6152 = 3488 + 5925 = 9413) while receiver-bearing self-loops fall 155 to 0. This implements the VISION's orientation-over-perfection contract: unsupported binding evidence becomes an explicit unresolved fact rather than a plausible but fabricated call edge. LIMITATION: I did not execute Cargo or isolated live-index commands in this read-only review environment; checks other than CBR-C19 rely on labeled builder-executed captures and the build-progress artifact.\n\nManager interpretation by in-place-manager: The retained reviewer output is a complete ACCEPT (26/26 obligations, 19/19 checks, 4/4 paths, no findings) whose meaning is unambiguous; it was pended only because each relied-on-builder-evidence verification carried outcome+supportingEvidence instead of the contract's limitation string, and the one reproduced verification (CBR-C19) gave its outcome as a string. Applied verbatim except: each relied-on verification's outcome and supportingEvidence text moved into its limitation string; CBR-C19's outcome expressed as the evidence-outcome object {kind, actual, supportingEvidence} from the same text. No assessment, finding or result was added, removed or changed. Manager verification before applying: resolver.rs:1260 rejects a parsed non-object root (`!value.is_object()` → Unreadable) with regression tests receiver_binding_non_object_null_carrier_stays_unresolved and receiver_binding_non_object_array_carrier_stays_unresolved (F-CBR-015); captures /tmp/cbr-c01.txt, /tmp/cbr-indexer-lib.txt, /tmp/cbr-fixture.txt (2026-09-18 07:33–07:34 EEST) postdate resolver.rs (07:32:43) and the repo-index test source (07:08:17) (F-CBR-016). Source provider run review-CALL-BINDING-RECEIVER-1-13; retained output .agent-manager/slices/CALL-BINDING-RECEIVER-1/review-13.json sha256:ae56c93a89a2343dd5b85d44f842f49161227bca21342df23fd2d9cf80c0014b. The provider remains the performer; this interpretation is not independent execution evidence."
+}

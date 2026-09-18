@@ -816,6 +816,32 @@ Carried: CLAIM-INVARIANT-1 (D-N9), D-N10 identifier spaces, D-N7 seed order, ret
 class focus (2→852 provisional); FK prune cost. Operator field checks: doctor `[note]` renders on production
 ("26 ok · 1 note").
 
+Q1 CALL-BINDING-RECEIVER-1 SHIPPED (2026-09-18; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+C++ `field_expression` calls now carry additive `receiver`/`receiverType` metadata from same-file declared types (fields,
+locals, parameters); the resolver's receiver disposition is a closed sum (Receiverless | ExplicitThis | Indirect{Absent|Present|
+Unreadable type} | Unreadable carrier), binds an indirect receiver ONLY on exact container match of its typed evidence, and
+applies the enclosing-class preference ONLY to receiverless/explicit-this calls. Binding-name rule is grammar-independent (any
+non-receiver occurrence of the name in the function, lambdas included, bars the member fallback); local typing is lexically
+scoped (declaration's parent subtree, after its end). RESULT: leveldb receiver-bearing CALLS self-loops 155→0 (all-self 0),
+9413 call sites conserved, resolved 3261→3488, trust 37%→40% honestly attributed; `callers leveldb::DBImpl::Recover` =
+DB::Open @db_impl.cc:1503 (the fabricated self-row is gone); nginx/codegraph byte-stable; cycles member sets identical.
+Manager-executed corpora: OpenXcom 497→10, vcmi 836→36, poco 1098→24, duckdb 2522→53, gstreamer 321→169 receiver-bearing
+self-loops; call sites conserved everywhere. Residuals classified: genuine self-calls on type evidence; unique-name binding
+(RG-REQ-005-L02, ratified — every "ambiguous" case was a .h declaration + .cpp definition of one method); out-of-line methods
+whose member types live in another file (D-CBR-XFILE-1). TALLY: 5 admissions, 6 baselines (INPUT-1..6), 5 oracle corrections
+(OC-1..5), 2 operator decisions (D-CBR-XFILE-1, D-CBR-C06-HOME-1), 14 document cycles + PREP-6, 14 implementation cycles;
+16 reviewer findings, all real (F-CBR-001..016: two packet defects, then carrier taxonomy, binding-name enumeration ×4,
+lexical scope, non-object carrier, stale capture); 9 provider results dropped by runtime strictness (TD-020) before the
+2026-09-18 runtime (native sessions + manager interpretation: two off-shape reviews applied without a provider call);
+TD-024 (reviewer input hit the Codex 1,048,576-char cap at cycle 14). Committed bytes = accepted candidate + rustfmt
+(manager-executed, proved whitespace-only + two trailing commas); gates ALL-GATES-GREEN. LESSONS: an evidence-taxonomy
+table in §2 (absent/valid/malformed per evidence field; every scope form per binding rule) would have collapsed eight cycles
+into one; `cargo fmt --check` belongs in the whitespace oracle. FOLLOW-UPS: CALL-BINDING-RECEIVER-2 (cross-file receiver
+typing; interface-declaration-vs-definition pool policy under unique-name binding), CYCLES-WALK-DETERMINISM-1, CALLERS-ANCHOR-1
+(callers/callees rows anchor the caller node's line, not the call site — RG-REQ-005-L08's other half), CPP-LAMBDA-CALLS-1
+(calls inside C++ lambda bodies are never extracted — pre-existing, walk skipped lambda_expression before this slice).
+NEXT: Q3 CPP-INCLUDE-ROOTS-1.
+
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
 verification criterion and a v0.18.0 evidence reading; independently reviewed (Codex gpt-5.6-terra, REFINE, findings applied;
