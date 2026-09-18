@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-3-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-3.json",
+    "sha256": "sha256:eeaa9fdc3e564ffcd18ec8902d66779472e5bea8b3e8311ed35a8c7b95afcfd3"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-3"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-3-1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-18T05:43:51.000Z",
+  "report": "PASS 1 (ACCEPT) \u2014 standalone read-only codex exec (prompts/standalone-review.md discipline; evidence inlined: the README ratified-order lines, the git diff of the two amended authority documents, the INPUT-2\u2192INPUT-3 normalised manifest diff):\nACCEPT\n\nno findings\n\nThe amendments faithfully elevate the already-ratified 2026-09-14 queue into the two baseline-pinned authorities without changing the slice catalog, operational limits, or release posture. Their scheduled order exactly matches the README; the two separately named unscheduled items are not admitted. The operator-edit reading of the prior no-edit clause is honest: the new human-authorized amendment does not permit relay roles to edit the bootstrap allocation and expressly preserves its other prohibitions. In the supplied normalized manifest diff, the baseline ID changes to INPUT-3 and exactly two SHA-256 values change\u2014the required authority-document digests\u2014with no other manifest content changed.\n\nSCOPE: RG-BOOTSTRAP-INPUT-2 plus recomputed digests for docs/assurance/RG-BOOTSTRAP/human-authorization.md (Amendment 1) and docs/slices/rg-requirements-bootstrap-1.md (Amendment 1); no requirement file changed (verified: every other digest identical). TRIGGER: Q3 document review decision D-CIR-AUTH-01 (review-CPP-INCLUDE-ROOTS-1-PREP-0, codex gpt-5.6-terra): the pinned authorities named only TRUST-MODULE-EDGES-1 while the human's 2026-09-14 ratification of the queue order lived only in docs/requirements/README.md (commit c1df38d)."
+}

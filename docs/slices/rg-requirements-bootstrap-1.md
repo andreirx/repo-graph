@@ -16,3 +16,7 @@ No code change in `rust/`; no edit to any `docs/requirements/rg-req-*.md` file, 
 ## Source of authority
 
 `docs/assurance/RG-BOOTSTRAP/human-authorization.md`.
+
+## Amendment 1 (2026-09-18) — successor document items for the ratified queue
+
+Under `docs/assurance/RG-BOOTSTRAP/human-authorization.md` Amendment 1 (the human's 2026-09-14 ratification of the queue order), this allocation also authorizes, one at a time and in the ratified order recorded in `docs/requirements/README.md`, the requirements-document item of each remaining queued slice: authoring that slice's stage-3 allocation block at the head of its SLICE_DOC (`docs/slices/<slice>.md`) and its v2 candidate manifest `docs/requirements/baselines/<WORK-ITEM>-INPUT-n.json` for independent structured review. Everything under "What it does not authorize" stands unchanged for every such item; the amendment is an operator edit under new human authority, not an edit by any relay role.

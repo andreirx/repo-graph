@@ -1,0 +1,31 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-3",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-3.json",
+    "sha256": "sha256:eeaa9fdc3e564ffcd18ec8902d66779472e5bea8b3e8311ed35a8c7b95afcfd3"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-3/requirements-review.json",
+    "sha256": "sha256:7ee77a72ee9712ce96a801c6253339eba0871d9fe269bd6cd119f213c12e8876"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    "D-CIR-AUTH-01"
+  ],
+  "decidedAt": "2026-09-18T05:44:21.000Z",
+  "rationale": "Operator approves the third bootstrap admission baseline RG-BOOTSTRAP-INPUT-3: INPUT-2 with the two authority documents amended (Amendment 1 in each) to record the human's 2026-09-14 ratification of the queue order as the authority for one requirements-document item per queued slice, in order; only those two digests change; codex gpt-5.6-terra standalone review ACCEPT with no findings. Resolves D-CIR-AUTH-01 raised by the Q3 document review. Authored by hand because the relay's approval verb serves v2 manifests only, exactly as approvals 1 and 2 were. Under the human's 2026-09-13 instruction and 2026-09-14 ratification (README, c1df38d)."
+}
