@@ -23,15 +23,7 @@
     "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
     "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
   },
-  "resolvedDecisions": [
-    {
-      "id": "D-CIR-AUTH-01",
-      "record": {
-        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CIR-AUTH-01.md",
-        "sha256": "sha256:5d9bd6ca51fa447f460ccb2f1220bfe99ec731288ab3766b4fc906af949bae05"
-      }
-    }
-  ],
+  "resolvedDecisions": [],
   "decidedAt": "2026-09-18T05:44:21.000Z",
-  "rationale": "Operator approves the third bootstrap admission baseline RG-BOOTSTRAP-INPUT-3: INPUT-2 with the two authority documents amended (Amendment 1 in each) to record the human's 2026-09-14 ratification of the queue order as the authority for one requirements-document item per queued slice, in order; only those two digests change; codex gpt-5.6-terra standalone review ACCEPT with no findings. Resolves D-CIR-AUTH-01 raised by the Q3 document review. Authored by hand because the relay's approval verb serves v2 manifests only, exactly as approvals 1 and 2 were. Under the human's 2026-09-13 instruction and 2026-09-14 ratification (README, c1df38d)."
+  "rationale": "Operator approves the third bootstrap admission baseline RG-BOOTSTRAP-INPUT-3: INPUT-2 with the two authority documents amended (Amendment 1 in each) to record the human's 2026-09-14 ratification of the queue order as the authority for one requirements-document item per queued slice, in order; only those two digests change; codex gpt-5.6-terra standalone review ACCEPT with no findings. Resolves D-CIR-AUTH-01 raised by the Q3 document review (decision record docs/assurance/RG-BOOTSTRAP/decisions/D-CIR-AUTH-01.md; not listed under resolvedDecisions because the manifest requires no decision). Authored by hand because the relay's approval verb serves v2 manifests only, exactly as approvals 1 and 2 were. Under the human's 2026-09-13 instruction and 2026-09-14 ratification (README, c1df38d)."
 }
