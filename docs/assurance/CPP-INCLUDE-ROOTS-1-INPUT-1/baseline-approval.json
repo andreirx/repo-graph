@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-INCLUDE-ROOTS-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-INCLUDE-ROOTS-1-INPUT-1.json",
+    "sha256": "sha256:7f6f823c808c6d029e4218afa6ac74622c2246c5b47565ff02af1b404a53d3d0"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-INCLUDE-ROOTS-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:6c5e9130fd737d8ed6b181963f77ec499061a37bc7ce3df1f18e6c638a80f8c3"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TME-TEST-NAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TME-TEST-NAME-1.md",
+        "sha256": "sha256:05ec91aaafe17403bc5c29f83307c5fd84f1e735ef75e88c4c539a4e3ca99370"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-18T06:09:59.804Z",
+  "rationale": "Operator approves CPP-INCLUDE-ROOTS-1-INPUT-1 (Q3 of the ratified queue, RC-10): the stage-3 allocation (16 checks CIR-C01..C16, five candidate paths, evidence taxonomy, counted-ambiguity rule) and its v2 manifest, independently reviewed by codex gpt-5.6-terra — PREP cycle 0 decision-required (D-CIR-AUTH-01, closed by RG-BOOTSTRAP-INPUT-3) + F-CIR-01..04 applied; PREP-2 cycle 0 refinement-required F-CIR-05 applied (leveldb's root-level include/ is the retained-root case); PREP-2 cycle 1 accepted 24/24 with no findings. Under the human's 2026-09-14 ratification of the queue order (human-authorization.md Amendment 1)."
+}
