@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-CYCLES-HONEST-1-BASELINE-APPROVAL-5",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-5.json",
+    "sha256": "sha256:060f8c6b053f592b8b67a4321fcb5edc4e8cd9af3b9d590127c525051dc40704"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-5/requirements-review.json",
+    "sha256": "sha256:9e4c9972d233f96614b0006ac192a2431a019c2b01f173db7a28c2dcb6bd6af4"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-19T15:24:44.566Z",
+  "rationale": "Operator approves EXPLAIN-CYCLES-HONEST-1-INPUT-5: INPUT-4 plus amendment A-2 after the fourth admission's review (codex gpt-5.6-terra, refinement-required): ECH-IR-001 — the served-route test explain_coherence_served_tests.rs::explain_cycles_serves_live_cycles_from_livegraph asserts the behaviour A-1 reverses and its file was outside the allocation (manager gap); ECH-IR-002 — the cancellable focus reads labelled after their last checkpoint. A-2: candidate path +1 (18), the test renamed to its true identity with inverted assertions (ECH-C17), one cooperative checkpoint before labeling in both cancellable focus reads with a storage regression test (ECH-C18), P-ECH-06 (boundedness by the repo-level read's ratified un-checkpointed labeling; CANCEL-LABELING-1 follow-up), ECH-C12 lists corrected. Document review: PREP-5 cycle 1 accepted 16/16 with zero findings; the author verified every point and re-emitted both deliverables unchanged. D-ECH-002 unchanged and pinned."
+}
