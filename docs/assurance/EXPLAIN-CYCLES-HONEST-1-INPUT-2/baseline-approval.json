@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-CYCLES-HONEST-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-2.json",
+    "sha256": "sha256:2b14869c843fee0648df7f5901020e258bc430f170615de56213bb726d5f77c8"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:95b7b85323bc1077adb5a3f03c06c17aa084d824e348bc754efd22d15ecd2fa3"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-19T04:10:59.774Z",
+  "rationale": "Operator approves EXPLAIN-CYCLES-HONEST-1-INPUT-2: INPUT-1 plus oracle corrections OC-1 (ECH-C09 compares both binaries on the SAME index — two independently built indexes measure index-dependent walk choice, CYCLES-WALK-DETERMINISM-1) and OC-2 (ECH-C10 same-index and the per-index Repo: line stripped), resolving the implementation review's decision D-ECH-001 (option A, docs/assurance/RG-BOOTSTRAP/decisions/D-ECH-001.md), plus OC-3 (ECH-C05 base-revision lookup guarded with a git rev-parse HEAD fallback, PREP-2 finding ECH-PREP2-F01, applied by the author); ledger docs/assurance/EXPLAIN-CYCLES-HONEST-1/oracle-corrections.md; codex gpt-5.6-terra PREP-2 review: cycle 1 refinement-required (ECH-PREP2-F01), cycle 2 accepted 16/16 with no findings. Text-only corrections; allocation sets, check ids, requirement text and candidate paths unchanged. Under the human's 2026-09-14 ratification (human-authorization.md Amendment 1)."
+}
