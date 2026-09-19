@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-CYCLES-HONEST-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-3.json",
+    "sha256": "sha256:aa4efd579e0e08b5b969985309b41c55ab02252e498a738f9cbdfb5f952d34a1"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:6c592365f2c9c43716e426661d88fc687065a89fe5da6d643da6bca5366038e0"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-19T05:03:05.136Z",
+  "rationale": "Operator approves EXPLAIN-CYCLES-HONEST-1-INPUT-3: INPUT-2 plus contract correction OC-4 — §2.1.2 and the §2.2 taxonomy row now name the line the candidate renders for a non-string modules entry (cycle members unreadable on this snapshot — run rmap cycles) instead of 'the same unreadable line' as a malformed walk; a message blaming the walk for a corrupt member list would be a wrong name (implementation review finding ECH-IR-002, second admission cycle 2); ledger docs/assurance/EXPLAIN-CYCLES-HONEST-1/oracle-corrections.md; codex gpt-5.6-terra PREP-3 review accepted 16/16 with no findings in one cycle. Text-only; allocation sets, check ids, requirement text and candidate paths unchanged. Under the human's 2026-09-14 ratification (human-authorization.md Amendment 1)."
+}
