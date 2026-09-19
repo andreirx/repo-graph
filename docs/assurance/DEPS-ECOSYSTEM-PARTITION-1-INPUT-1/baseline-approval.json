@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-ECOSYSTEM-PARTITION-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-ECOSYSTEM-PARTITION-1-INPUT-1.json",
+    "sha256": "sha256:ac0e140f0031ebbeda216942f1b44876ee3beb97293000c41944cffd4d41f25d"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-ECOSYSTEM-PARTITION-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:75bb1f66d5d0271aa69220c8abeda336ab0a37b0d17899c8fe0ae930f1f89851"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-19T18:12:37.983Z",
+  "rationale": "Operator approves DEPS-ECOSYSTEM-PARTITION-1-INPUT-1: the Q5 allocation grounded on RC-6/RC-7 re-verified on HEAD 7e20f60 (2026-09-19) and on the product's current output on four isolated proof roots (django fresh index, nginx fresh index, gstreamer and FRAKTAG retained-store copies) — implements RG-REQ-006-L08/L09/L10 + RG-REQ-002-L06, preserves 006-L06/L07, 002-L08, 011-L06, changes 012-L06 additively (cross_ecosystem); 14 checks DEP-C01..C14 over the whole daemon-runtime unit suite and same-root before/after proofs; the gstreamer inventory clause uses the ecosystem TOKEN (java) read from the store's 13 parsed manifest records, correcting the spec's 'gradle'. Author corrections at cycle 1: the second production caller of deps_reader_context_note (deps_headline.rs:564, the none-detected JSON reader_context field) named in §2.1, and django's 'from abc import' form in the DoD. Manager defect at cycle 0: the manifest lacked the closure of the parents' sources (runtime refusal source-not-found ×10) — regenerated from the requirement files. Review: codex gpt-5.6-terra accepted 13/13 with zero findings."
+}
