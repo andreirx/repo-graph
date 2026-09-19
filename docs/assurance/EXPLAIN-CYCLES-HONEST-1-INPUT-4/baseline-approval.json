@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-CYCLES-HONEST-1-BASELINE-APPROVAL-4",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-4.json",
+    "sha256": "sha256:8e6f6c596a69e108a9c43736fd3224b86206e593d116bd11efa813472e40e967"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-4/requirements-review.json",
+    "sha256": "sha256:2321ad467bea03a0bd754f9618aad1da01c623053d6ed8cdba8c3075951f4c23"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-19T14:38:44.219Z",
+  "rationale": "Operator approves EXPLAIN-CYCLES-HONEST-1-INPUT-4: INPUT-3 plus amendment A-1 under the human decision D-ECH-002 (2026-09-19, direction 2 now, direction 1 deferred as IMPORTS-WITNESS-UNION-1): the M-2 LiveGraph decorator delegates the focus cycle reads to SQLite because it cannot reproduce the verified walk; explain's cycles leaf labelled sqlite + LiveGraphRenderUnsupported; the five M-2 parity certificates kept unchanged plus two delegation tests; candidate paths +8, checks ECH-C13..C16, P-ECH-05 (repo-level M-2 serve and its ratified decoration asymmetry unchanged); the acceptance boundary now includes the whole daemon-runtime unit suite that caught the defect. Document review: codex gpt-5.6-terra cycle 1 refinement-required (ECH-PREP4-F01 ECH-C12 expected text contradiction; ECH-PREP4-F02 D-ECH-002 not pinned) — both manager defects, fixed by the author; cycle 2 accepted 16/16 with zero findings. The author also corrected the manager's unsatisfiable ECH-C16 grep (substring matched the frozen serve_cycles_fastpath) before review."
+}

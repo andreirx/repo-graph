@@ -3,7 +3,7 @@
   "formatVersion": 1,
   "kind": "implementation-allocation",
   "workItemId": "EXPLAIN-CYCLES-HONEST-1",
-  "baselinePath": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-3.json",
+  "baselinePath": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-4.json",
   "parentRequirementIds": [
     "RG-REQ-002",
     "RG-REQ-003",
@@ -29,12 +29,13 @@
     "P-ECH-01",
     "P-ECH-02",
     "P-ECH-03",
-    "P-ECH-04"
+    "P-ECH-04",
+    "P-ECH-05"
   ],
   "changes": [
     "RG-REQ-012-L06"
   ],
-  "acceptanceBoundary": "The explain / cycles / orient human and JSON outputs of the freshly built rmap on fresh isolated indexes of leveldb and vcmi (both the recorded base revision's binary and the candidate), plus cargo test -p repo-graph-rgr (lib presentation incl. explain_cycles_*) -p repo-graph-storage (lib cycle) -p repo-graph-agent (lib cycle) -p repo-graph-daemon-runtime (explain_cycle_walk_route_consistency, cycle_honesty_route_consistency) as named per check.",
+  "acceptanceBoundary": "The explain / cycles / orient human and JSON outputs of the freshly built rmap on fresh isolated indexes of leveldb and vcmi (both the recorded base revision's binary and the candidate), plus cargo test -p repo-graph-rgr (lib presentation incl. explain_cycles_*) -p repo-graph-storage (lib cycle) -p repo-graph-agent (lib cycle) -p repo-graph-daemon-runtime (explain_cycle_walk_route_consistency, cycle_honesty_route_consistency, and the WHOLE --lib unit suite including the five m2_parity_* certificates and the two A-1 delegation tests) as named per check.",
   "candidatePaths": [
     "rust/crates/storage/src/agent_impl.rs",
     "rust/crates/storage/src/agent_cycle_labeling.rs",
@@ -44,7 +45,15 @@
     "rust/crates/rgr/src/presentation/cycle_walk_display.rs",
     "rust/crates/rgr/src/presentation/mod.rs",
     "rust/crates/agent/src/explain/mod.rs",
-    "rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs"
+    "rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs",
+    "rust/crates/daemon-runtime/src/explain_lg_serve.rs",
+    "rust/crates/daemon-runtime/src/explain_lg_serve_tests.rs",
+    "rust/crates/daemon-runtime/src/explain_coherence.rs",
+    "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+    "rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+    "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+    "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+    "rust/crates/repo-graph-coherence/src/lib.rs"
   ],
   "postReviewRecordPaths": [
     "docs/assurance/EXPLAIN-CYCLES-HONEST-1/verification.json",
@@ -257,12 +266,81 @@
       "owner": "builder",
       "method": {
         "kind": "command",
-        "command": "git diff --check && (cd rust && cargo fmt --check -p repo-graph-rgr -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-agent && cargo clippy -p repo-graph-rgr -p repo-graph-storage -p repo-graph-daemon-runtime --tests -- -D warnings > /tmp/ech-clippy.log 2>&1 && tail -n1 /tmp/ech-clippy.log) && diff <(git status --short -- rust | grep -vE '^ M rust/crates/storage/src/agent_cycle_labeling.rs$' | sort) <(printf ' M rust/crates/agent/src/explain/mod.rs\\n M rust/crates/rgr/src/presentation/explain.rs\\n M rust/crates/rgr/src/presentation/explain_sections.rs\\n M rust/crates/rgr/src/presentation/mod.rs\\n M rust/crates/rgr/src/presentation/orient_guidance.rs\\n M rust/crates/storage/src/agent_impl.rs\\n?? rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs\\n?? rust/crates/rgr/src/presentation/cycle_walk_display.rs\\n' | sort)",
+        "command": "git diff --check && (cd rust && cargo fmt --check -p repo-graph-rgr -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-agent -p repo-graph-coherence && cargo clippy -p repo-graph-rgr -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-coherence --tests -- -D warnings > /tmp/ech-clippy.log 2>&1 && tail -n1 /tmp/ech-clippy.log) && diff <(git status --short -- rust | grep -vE '^ M rust/crates/storage/src/agent_cycle_labeling.rs$' | sort) <(printf ' M rust/crates/agent/src/explain/mod.rs\\n M rust/crates/daemon-runtime/src/explain_coherence.rs\\n M rust/crates/daemon-runtime/src/explain_lg_serve.rs\\n M rust/crates/daemon-runtime/src/explain_lg_serve_tests.rs\\n M rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs\\n M rust/crates/daemon-runtime/src/orient_serve/mod.rs\\n M rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs\\n M rust/crates/daemon-runtime/src/orient_serve/tests.rs\\n M rust/crates/repo-graph-coherence/src/lib.rs\\n M rust/crates/rgr/src/presentation/explain.rs\\n M rust/crates/rgr/src/presentation/explain_sections.rs\\n M rust/crates/rgr/src/presentation/mod.rs\\n M rust/crates/rgr/src/presentation/orient_guidance.rs\\n M rust/crates/storage/src/agent_impl.rs\\n?? rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs\\n?? rust/crates/rgr/src/presentation/cycle_walk_display.rs\\n' | sort)",
         "cwd": ".",
         "environment": "candidate tree",
-        "inputs": "git status/diff of the candidate; rustfmt and clippy over the touched crates"
+        "inputs": "git status/diff of the candidate; rustfmt and clippy over the touched crates (A-1 adds repo-graph-coherence and the eight daemon-runtime/coherence paths)"
       },
-      "expected": "exit 0: the diff is whitespace-clean, rustfmt-clean and clippy-clean with -D warnings (clippy's own exit status is required; its output is logged and its last line printed only after success), and — after filtering the optional ninth allowed path rust/crates/storage/src/agent_cycle_labeling.rs out of the actual status — the working tree under rust/ holds exactly the eight always-touched candidate paths (six modified, two new) and nothing else moved. The ninth path is filtered, not required: today `label_module_cycles` already accepts the pre-filtered `Vec<CycleResult>`, so the focus reads call it as-is and that file is not expected to change; the check is decidable and passes whether or not it is touched, and still fails on any OTHER moved path."
+      "expected": "exit 0 (A-1: the status list is the 14 modified + 2 new paths of the amended allocation): the diff is whitespace-clean, rustfmt-clean and clippy-clean with -D warnings (clippy's own exit status is required; its output is logged and its last line printed only after success), and — after filtering the optional allowed path rust/crates/storage/src/agent_cycle_labeling.rs out of the actual status — the working tree under rust/ holds exactly the sixteen non-optional always-touched candidate paths (fourteen modified, two new — the printf list above) and nothing else moved. The optional agent_cycle_labeling.rs path (the seventeenth candidate path) is filtered, not required: today `label_module_cycles` already accepts the pre-filtered `Vec<CycleResult>`, so the focus reads call it as-is and that file is not expected to change; the check is decidable and passes whether or not it is touched, and still fails on any OTHER moved path."
+    },
+    {
+      "checkId": "ECH-C13",
+      "obligationIds": [
+        "P-ECH-02",
+        "P-ECH-05",
+        "RG-REQ-002-L01",
+        "RG-REQ-003-L05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib m2_parity_ 2>&1 | tee /tmp/ech-c13.txt | grep -E '^test result: ok\\. 5 passed; 0 failed' && for t in m2_parity_explain_file_focus_equals_sqlite m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle m2_parity_full_serve_equals_sqlite_repo_focus m2_parity_full_serve_equals_sqlite_path_focus m2_parity_full_serve_equals_sqlite_file_focus; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c13.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the five EXISTING M-2 parity certificates in rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs and orient_serve/tests.rs — their assertions are UNCHANGED (only the two path-focus tests' doc comments are corrected: the cycles item is now SQLite-delegated and carries the walk); the two path-focus certificates failed on the third admission's accepted candidate (walk/type_only present on the SQLite serve, absent on the LiveGraph rebuild)"
+      },
+      "expected": "exit 0: all five parity certificates pass with their assertions unchanged — the two path-focus ones because the M-2 decorator now delegates the focus cycle reads to SQLite (A-1), the repo-focus and the two file-focus ones because the repo-level M-2 cycle serve and every other M-2 leaf remain unchanged (no behavior change; P-ECH-05); no route serves a focus-cycles value that differs from SQLite's (P-ECH-02)"
+    },
+    {
+      "checkId": "ECH-C14",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-012-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib focus_cycles_delegated 2>&1 | tee /tmp/ech-c14.txt | grep -E '^test result: ok\\. 2 passed; 0 failed' && for t in explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label orient_path_focus_cycles_delegated_carry_walk; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c14.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "two NEW tests (A-1). rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs::explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label: on the green fixture (`w.m2.cycle_values` asserted true) the decorator's `run_explain(REPO, MODULE_DIR)` EXPLAIN_CYCLES item carries a NON-EMPTY `walk` equal to the bare SQLite serve's for the same item, and `explain_lg_serve::cycles_leaf_label(&f.state, &snapshot_uid)` is `OrientLeafLabel::SqliteFallback { reason: CoherenceFallbackReason::LiveGraphRenderUnsupported }` (asserted with `matches!`). rust/crates/daemon-runtime/src/orient_serve/tests.rs::orient_path_focus_cycles_delegated_carry_walk: the decorator's path-focus `orient(REPO, Some(MODULE_DIR))` IMPORT_CYCLES item carries the same NON-EMPTY `walk` as the bare SQLite serve. Both assert the walk is non-empty (non-vacuous: the fixture's real src <-> lib ring)"
+      },
+      "expected": "exit 0: with a resident LiveGraph and a GREEN cycle-values cert, explain's and orient's path-focus cycle items carry the verified walk (the SQLite value, delegated), explain's cycles leaf is labelled sqlite with reason LiveGraphRenderUnsupported (never a livegraph label over a SQLite value, never an unordered LiveGraph value replacing the ring), and `explain --json` carries `walk` on this route too (RG-REQ-012-L06, reported)"
+    },
+    {
+      "checkId": "ECH-C15",
+      "obligationIds": [
+        "P-ECH-05",
+        "RG-REQ-003-L05",
+        "RG-REQ-005-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/ech-c15.txt | grep -E '^test result: ok\\. [0-9]+ passed; 0 failed' && ! grep -E '^test .* FAILED$' /tmp/ech-c15.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE daemon-runtime unit suite (about 780 tests; the operator gate suite's unit for this crate, which the third admission's acceptance boundary omitted); run to completion in the foreground"
+      },
+      "expected": "exit 0: every daemon-runtime unit test passes — no behavior change anywhere else in the daemon (the (b) leaves, module-summary, callers/callees, imports, complexity serves remain as before; P-ECH-05)"
+    },
+    {
+      "checkId": "ECH-C16",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "! grep -n 'fn serve_cycles(' rust/crates/daemon-runtime/src/explain_lg_serve.rs && ! grep -n 'fn cycle_involves(' rust/crates/daemon-runtime/src/explain_lg_serve.rs && ! grep -n 'cycles_qualified_filtered' rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs && grep -n 'fn cycles_leaf_label' rust/crates/daemon-runtime/src/explain_lg_serve.rs && grep -n 'LiveGraphRenderUnsupported' rust/crates/daemon-runtime/src/explain_lg_serve.rs && ! grep -n 'response shape (reserved)' rust/crates/repo-graph-coherence/src/lib.rs && ! grep -n 'find_cycles_involving_\\*' rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "the candidate sources: explain_lg_serve.rs (the LiveGraph focus-cycle rebuild and `cycle_involves` removed with their only callers; the leaf-label function named `cycles_leaf_label`), explain_lg_serve_tests.rs (the `cycle_involves` unit tests removed), orient_serve/storage_port_impl.rs (`cycles_qualified_filtered` removed), orient_serve/mod.rs (`M2LeafServe::cycle_values` doc names the repo-level read only), repo-graph-coherence/src/lib.rs (`LiveGraphRenderUnsupported` documented for this use, no longer '(reserved)')"
+      },
+      "expected": "exit 0: no dead LiveGraph focus-cycle rebuild remains; every name matches what the code does (a function that only labels is not called serve; a witness field's comment does not claim reads it no longer gates; a reused reason is not marked reserved). The three removal greps are scoped to each function's OWN source file (explain_lg_serve.rs for serve_cycles/cycle_involves, storage_port_impl.rs for cycles_qualified_filtered) with a literal open-paren where needed, NOT a recursive rust/crates/daemon-runtime/src scan — otherwise the negated grep can never exit 0, because the substring 'fn serve_cycles' also matches the FROZEN fn serve_cycles_fastpath / fn serve_cycles_sqlite in livegraph_feed.rs (untouched by this slice) and the generated *_MAP.md sidecars still name the removed functions. So decidability holds: the negated greps pass only when the three functions are gone from their own files; that cycle_involves' unit tests were removed with it is enforced by compilation (ECH-C13/C14/C15 would fail to build otherwise)."
     }
   ]
 }
@@ -276,7 +354,7 @@ Status: ALLOCATED (2026-09-18; specified 2026-09-12) · Track: audit round six, 
 
 **Implements:** RG-REQ-003-L01 (`explain` draws no cycle arrow without a verified walk; with a walk it draws the ring), RG-REQ-002-L01 (no surface asserts a relationship the store does not hold — the cycle-arrow half), RG-REQ-004-L07 (the unordered/ring rule on every surface — explain was the surface where it was NOT MET).
 
-**Changes (pre-authorised, REPORTED never predicted):** RG-REQ-012-L06 — `explain --json` on the SQLite route now carries `walk` (a verified ring) and `type_only` in its EXPLAIN_CYCLES items; additive (the LiveGraph serve and older daemons still carry neither); the human ring is drawn from this very field, so the two modes answer the same question (ECH-C08).
+**Changes (pre-authorised, REPORTED never predicted):** RG-REQ-012-L06 — `explain --json` on the SQLite route now carries `walk` (a verified ring) and `type_only` in its EXPLAIN_CYCLES items; additive (older daemons carry neither; the M-2 LiveGraph decorator delegates the focus cycle reads to SQLite — A-1 — so explain's and orient's path- and module-focus items carry the same fields on every route, ECH-C14); the human ring is drawn from this very field, so the two modes answer the same question (ECH-C08).
 
 **Preserves:** RG-REQ-003-L05 (orient's cycle line — its chain formatter keeps its text; ECH-C02, ECH-C09), RG-REQ-005-L06 / RG-REQ-010-L01 / RG-REQ-012-L07 (explain's confidence, seed and anchor rules — ECH-C02, ECH-C10), RG-REQ-011-L06 (isolation — ECH-C11).
 
@@ -285,9 +363,10 @@ Status: ALLOCATED (2026-09-18; specified 2026-09-12) · Track: audit round six, 
 | Id | Obligation | Proof |
 |---|---|---|
 | P-ECH-01 | `cycles` and `orient` render byte-identically before/after on leveldb and vcmi; their renderer tests stay green | ECH-C02; ECH-C09 |
-| P-ECH-02 | No route gains a walk it cannot verify: the LiveGraph explain serve and any cycle whose edge set is truncated (vcmi's 55-module cycle) still render the unordered form; the route-consistency suite stays green | ECH-C01; ECH-C04; ECH-C07 |
+| P-ECH-02 | No route gains a walk it cannot verify, and no route serves a focus-cycles value that differs from SQLite's: any cycle whose edge set is truncated (vcmi's 55-module cycle) renders the unordered form on every route; the M-2 LiveGraph decorator cannot compute the walk, so it delegates the focus cycle reads to SQLite and explain's cycles leaf is labelled `sqlite` + `LiveGraphRenderUnsupported` (A-1, D-ECH-002); the route-consistency suite and the five parity certificates stay green | ECH-C01; ECH-C04; ECH-C07; ECH-C13; ECH-C14 |
 | P-ECH-03 | Every explain section other than Import cycles is byte-identical before/after | ECH-C02; ECH-C10 |
 | P-ECH-04 | Every proof isolated; the operator's registry digest unchanged; nothing left behind | ECH-C11 |
+| P-ECH-05 | The repo-level orient headline's M-2 LiveGraph serve (`find_module_cycles{,_cancellable}` via `m2_module_cycles`) and every other M-2 / (b) leaf are unchanged — the repo-level decoration asymmetry (no split / type_only / walk on the LiveGraph route) stands as ratified by ORIENT-CYCLES-DISAGREE-1 2(1)/2(5), TYPE-ONLY-IMPORTS-1 and COHERENCE-3 and is a recorded residual of IMPORTS-WITNESS-UNION-1, not this slice's; the daemon-runtime unit suite stays green | ECH-C13; ECH-C15 |
 
 ## 1. Problem (ROOT-CAUSED — RC-4, docs/audits/2026-09-08-root-causes-v0.18.0.md)
 
@@ -300,13 +379,14 @@ Status: ALLOCATED (2026-09-18; specified 2026-09-12) · Track: audit round six, 
 1. **The focus reads carry the verified walk (storage).** `find_cycles_involving_module{,_cancellable}` and `find_cycles_involving_path{,_cancellable}` filter the raw cycles as today and then route the FILTERED cycles through `label_module_cycles` (the same call `find_module_cycles` makes), so the returned `AgentCycle`s carry `walk` (Some for a verified ring, None where the edge set is truncated) and `type_only`. One derivation for `cycles`, `orient` and `explain` (RG-REQ-004-L07). If `label_module_cycles` needs an entry that accepts the pre-filtered `CycleResult`s, it lives in `agent_cycle_labeling.rs` (the ninth allowed path). Cost: two snapshot reads (module names, tracked files) and per-cycle edge selection over the focus's few cycles — reported on vcmi (ECH-C07; a cost the human reads, not a bound).
 2. **The renderer draws only from the walk (rgr).** `render_cycles`: `Cycle N (K modules): A -> B -> A` when `item["walk"]` is a valid ring (≥ 2 non-empty strings), followed by `(+ M more members in this cycle)` when the ring visits fewer members than `length` — the exact two-line form of `cycles/walk.rs`, under explain's bullet; `Cycle N (K modules): members (unordered): A, B, … (+ K more)` (eight shown, as `cycles`) when `walk` is absent, null or empty; `Cycle N (K modules): cycle walk unreadable on this snapshot — run rmap cycles` when `walk` is present but malformed (a non-string element, an empty string, fewer than two members — the orient rule, RG-REQ-003-L05); a `modules` entry that is not a string renders its own unreadable line naming what is unreadable — `cycle members unreadable on this snapshot — run rmap cycles` — never a silently shorter list (today's `filter_map(as_str)` drops it; OC-4: the first text said 'the same unreadable line' as a malformed walk, which would blame the walk for a corrupt member list). `K` is `length`, never `modules.len()`.
 3. **One shared validation, two callers (rgr).** The strict walk validation inside `orient_guidance.rs::format_cycle_anchor` (non-string ⇒ None; empty string ⇒ None; < 2 ⇒ None) moves to a free function in the NEW `rgr/src/presentation/cycle_walk_display.rs` (registered in `presentation/mod.rs`); orient's `format_cycle_anchor` calls it and keeps its own chain text (`A -> B -> C -> A`, `first 3 -> ... -> last -> first`) byte-for-byte; explain formats the full ring. Abstraction one-liner: what — one validation function; users — orient's headline chain and explain's block; axis — the honesty rule "a walk is a ring of ≥ 2 non-empty names or it is drift"; rejected alternative — duplicating the 10-line rule in explain (a correctness rule copied is a correctness rule that drifts).
-4. **The LiveGraph serve is unchanged** (`walk: None` ⇒ the unordered form): no route gains a walk it cannot verify (P-ECH-02). The stale comments in `agent/src/explain/mod.rs` ("None on this focus-scoped serve") are corrected.
+4. **The LiveGraph route serves the focus-cycles leaf only when it can reproduce the whole value — it cannot compute the walk, so it delegates to SQLite (A-1, D-ECH-002).** The verified walk is a per-edge fact of the SQLite module edge set; the LiveGraph's dirname-aggregated module edges are not certified equal to it (`livegraph_feed.rs:2517-2524`), so a LiveGraph walk would not be certifiable and an unordered LiveGraph value would replace the ring on TypeScript repos with a resident LiveGraph (`explain_coherence.rs` swaps the leaf unconditionally). Therefore: (a) `orient_serve/storage_port_impl.rs` — `find_cycles_involving_path{,_cancellable}` and `find_cycles_involving_module{,_cancellable}` delegate to `self.inner` unconditionally; `cycles_qualified_filtered` is removed; orient_serve/mod.rs's cycle-values leaf docs (BOTH the module-level `//!` leaf list and `M2LeafServe::cycle_values`'s doc comment) name the repo-level `find_module_cycles*` read only, so the literal `find_cycles_involving_*` no longer appears anywhere in mod.rs (ECH-C16). The repo-level `find_module_cycles{,_cancellable}` M-2 serve is UNCHANGED (P-ECH-05). (b) `explain_lg_serve.rs` — `serve_cycles` no longer rebuilds the leaf; it becomes `cycles_leaf_label(repo_state, snapshot_uid) -> OrientLeafLabel`: the existing `orient_cycles_outcome` gate's fallback label when the gate is not green, else `OrientLeafLabel::SqliteFallback { reason: CoherenceFallbackReason::LiveGraphRenderUnsupported }` (the LiveGraph answer cannot be rendered into the response shape — the shape now carries the walk); `explain_coherence.rs` sets `decisions.cycles = Some(label)` and adds no replacement; `cycle_involves` and its unit tests (explain_lg_serve_tests.rs) are removed with their only caller. (c) `repo-graph-coherence/src/lib.rs` — `LiveGraphRenderUnsupported`'s doc comment names this use instead of '(reserved)'. (d) Two delegation tests (§2.2, ECH-C14) and the five existing parity certificates (ECH-C13) bind it. The stale comments in `agent/src/explain/mod.rs` ("None on this focus-scoped serve") are corrected. No corpus proof exists for the LiveGraph route (a dev-only TypeScript path); the fixture tests are the seam.
 
 ### 2.2 Evidence taxonomy — `walk` and `modules` as explain receives them (one row = one bound test)
 
 | Input shape (EXPLAIN_CYCLES item) | Outcome | Bound test |
 |---|---|---|
-| `walk` absent (LiveGraph serve; older daemon; today's JSON omits the key) | `members (unordered): …`, zero arrows | `explain_cycles_absent_walk_renders_unordered_no_arrows`; ECH-C07 (vcmi, truncated) |
+| `walk` absent (older daemon; a truncated edge set; today's JSON omits the key) | `members (unordered): …`, zero arrows | `explain_cycles_absent_walk_renders_unordered_no_arrows`; ECH-C07 (vcmi, truncated) |
+| A-1: resident LiveGraph, GREEN cycle-values cert, path focus (explain and orient) | the SQLite value with its non-empty `walk`; explain's cycles leaf labelled `sqlite` + `LiveGraphRenderUnsupported` | `explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label`, `orient_path_focus_cycles_delegated_carry_walk`; the five `m2_parity_*` certificates unchanged (ECH-C13) |
 | `walk` present, valid 3-member ring in an order that differs from `modules`' sort | ring drawn in WALK order, closing on its first member | `explain_cycles_valid_walk_renders_ring_from_walk_not_member_order`; ECH-C06 (leveldb) |
 | valid walk shorter than `length` | `(+ M more members in this cycle)` after the ring | `explain_cycles_offwalk_members_reported_as_plus_n_more`; ECH-C06 |
 | `walk` present but malformed (`["A", 42]`, `["A", ""]`, `["A"]`) | `cycle walk unreadable on this snapshot — run rmap cycles`, no ring | `explain_cycles_malformed_walk_renders_unreadable_not_ring` |
@@ -326,27 +406,29 @@ Status: ALLOCATED (2026-09-18; specified 2026-09-12) · Track: audit round six, 
 |---|---|---|
 | RG-REQ-003-L05, P-ECH-01 | orient's cycle line, `cycles` render | ECH-C02 (cycle_anchor_*, cross_surface_*, cycles/walk tests); ECH-C09 byte-identity on two corpora |
 | RG-REQ-005-L06, RG-REQ-010-L01, RG-REQ-012-L07, P-ECH-03 | other explain sections | ECH-C02; ECH-C10 |
-| P-ECH-02 | a fabricated walk on a route without one | ECH-C01 (absent/malformed rows); ECH-C04 route suite; ECH-C07 |
+| P-ECH-02 | a fabricated walk on a route without one; a LiveGraph-served focus value without the walk (route-dependent output) | ECH-C01 (absent/malformed rows); ECH-C04 route suite; ECH-C07; ECH-C13 parity certificates; ECH-C14 delegation tests |
+| P-ECH-05 | the repo-level M-2 cycle serve or any other M-2 / (b) leaf | ECH-C13 (repo- and file-focus certificates); ECH-C15 (whole daemon-runtime unit suite) |
 | RG-REQ-011-L06, P-ECH-04 | isolation | ECH-C11 |
 
 ## 4. Stop conditions
 
-Frozen: wire shapes other than the additive `walk`/`type_only` on the SQLite explain serve, storage schema, cycle computation, exit codes, the `cycles` renderer, orient's chain text. No new walk computation (the kernel is `agent::cycle_walk`); no walk on the LiveGraph serve. explain's wall time on vcmi is REPORTED before/after, never gated (RG-REQ-011-L11 withdrew the latency floor). STANDING HONESTY RULES. Unmet DoD → STOP. Do NOT commit. Nothing outside the candidate paths.
+Frozen: wire shapes other than the additive `walk`/`type_only` on the SQLite explain serve, storage schema, cycle computation, exit codes, the `cycles` renderer, orient's chain text. No new walk computation (the kernel is `agent::cycle_walk`); no walk computed on the LiveGraph route (it delegates — A-1); the repo-level `find_module_cycles` M-2 serve, `orient_cycles_outcome`, the cycles cert and the LiveGraph feed are untouched. explain's wall time on vcmi is REPORTED before/after, never gated (RG-REQ-011-L11 withdrew the latency floor). STANDING HONESTY RULES. Unmet DoD → STOP. Do NOT commit. Nothing outside the candidate paths.
 
 ## 5. Validation (ORDERED; `build-progress.md` after EACH step)
 
-1. Failing tests FIRST: the seven `explain_cycles_*` render tests (§2.2), the two storage tests, the two dispatcher tests; then the storage routing, the shared validation, the renderer, the comment fix.
-2. Chunked per-crate gates ECH-C01 → C02 → C03 → C04 — NEVER `cargo test --workspace`. Every `/tmp/ech-*.txt` capture is written by THIS cycle's run of the exact allocated command.
-3. Live proofs ECH-C05 → C06 → C07 → C08 → C09 → C10 (build `-p rmapd` with `-p repo-graph-rgr` in BOTH trees; each tree's target/release first in PATH; foreground only).
-4. ECH-C11 cleanup, ECH-C12 hygiene, hand-off with the evidence object (each check's outcome NESTED under `outcome`).
+1. Apply the preserved accepted candidate (RESUME NOTE in the packet) — it already holds the seven `explain_cycles_*` render tests (§2.2), the two storage tests, the two dispatcher tests, the storage routing, the shared validation, the renderer and the comment fix; confirm with ECH-C01 → C04.
+2. A-1 (§2.1 point 4): the two delegation tests FIRST (they fail on the applied candidate: the decorator's path-focus item carries no walk), then the port delegation, the explain leaf label, the removals and the comment corrections; ECH-C13 → C14 → C16.
+3. Chunked per-crate gates ECH-C01 → C02 → C03 → C04, then ECH-C15 (the whole daemon-runtime unit suite, foreground) — NEVER `cargo test --workspace`. Every `/tmp/ech-*.txt` capture is written by THIS cycle's run of the exact allocated command.
+4. Live proofs ECH-C05 → C06 → C07 → C08 → C09 → C10 (build `-p rmapd` with `-p repo-graph-rgr` in BOTH trees; each tree's target/release first in PATH; foreground only).
+5. ECH-C11 cleanup, ECH-C12 hygiene, hand-off with the evidence object (each check's outcome NESTED under `outcome`).
 
 ## 6. Definition of done
 
-All twelve checks pass; §2.3 holds on leveldb and vcmi; `cycles`/`orient` byte-identical; explain's other sections byte-identical; cost reported (no numeric bound).
+All sixteen checks pass; §2.3 holds on leveldb and vcmi; the five M-2 parity certificates pass unchanged and the two delegation tests prove the ring reaches the LiveGraph route by delegation; `cycles`/`orient` byte-identical; explain's other sections byte-identical; cost reported (no numeric bound).
 
 ## 7. Follow-ups (not this slice)
 
-A walk on the LiveGraph explain serve would need the live graph's intra-SCC edges on that route — the same edge cap and kernel; a separate increment if ever wanted (today it renders the honest unordered form).
+IMPORTS-WITNESS-UNION-1 (docs/TECH-DEBT.md 2026-09-19; D-ECH-002 direction 1, deferred by the human): the two engines are two witnesses of the import graph — SQLite (every language, repo-graph's own resolution stages) and the LiveGraph (TypeScript via scip-typescript, AST imports plus an in-memory tsconfig-alias / literal-dynamic overlay); a walk on the LiveGraph route, per-edge witness provenance for imports/cycles and the repo-level orient headline's decoration asymmetry all belong to it. TS-ALIAS-RESOLUTION-1 (D-ECH-002 direction 2, now — awaits ordering): a tsconfig `paths` alias resolution stage in the SQLite indexer (RG-REQ-006-L04) so that `FRAKTAG/packages/ui/src/components/ui/separator.tsx:4 import { cn } from "@/lib/utils"` (today `unresolved_edges` basis `SpecifierMatchesProjectAlias`, no module edge) resolves to `packages/ui/src/lib/utils.ts` on every route. Catalog corrections CC-1/CC-2 queued in docs/assurance/RG-BOOTSTRAP/catalog-corrections.md.
 
 CORPUS PATHS: leveldb, vcmi at /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/<name>.
 
@@ -356,3 +438,7 @@ CORPUS PATHS: leveldb, vcmi at /Users/apple/Documents/APLICATII BIJUTERIE/legacy
 - OC-2 (2026-09-19; ECH-C10; carried as INPUT-2): explain's per-index `Repo: repo_<uid>` line was not stripped; corrected (same-index comparison and the line stripped). Found by the builder at cycle 3.
 - OC-3 (2026-09-19; ECH-C05; INPUT-2 refinement, finding ECH-PREP2-F01): the base-revision lookup indexed `status.json['candidateTracking']['baseRevision']` directly, which KeyErrors at document time because the relay has not yet recorded `candidateTracking` — the check was not decidable in isolation. Corrected to read the field tolerantly (missing/null → empty) and fall back to `git rev-parse HEAD` (a durable, always-available input; the committed tip the candidate's uncommitted diff sits on), requiring a non-empty revision before the worktree is created. No allocation/check-id/requirement/candidate-path change; a method correction only. Found by the INPUT-2 document review (codex gpt-5.6-terra).
 - OC-4 (2026-09-19; §2.1.2 and the §2.2 taxonomy row for a non-string `modules` entry; carried as INPUT-3): the text said such an entry renders 'the same unreadable line' as a malformed walk; the candidate renders `cycle members unreadable on this snapshot — run rmap cycles`, which names what is unreadable. The text is corrected to the members line (a message blaming the walk for a corrupt member list would be a wrong name); the bound test name is unchanged. Found by the review of the second admission's cycle 2 (ECH-IR-002).
+
+## 9. Amendments (allocation-changing — never an oracle correction; each carried as a new baseline with its own document review)
+
+- A-1 (2026-09-19; D-ECH-002, human decision; carried as INPUT-4): the third admission's accepted candidate (13/13, 12/12) failed the operator gate suite on two M-2 parity certificates outside the allocation (`m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle`, `m2_parity_full_serve_equals_sqlite_path_focus`): the SQLite focus reads now carry `walk`/`type_only`, the LiveGraph rebuild carries neither, and on a TypeScript repo with a resident LiveGraph the decorator would have replaced the ring with an unordered value (route-dependent output; the manager's packet said 'the LiveGraph serve is unchanged' without listing the certificates in the regression watch, and the acceptance boundary omitted `daemon-runtime --lib` — a manager oracle defect). Amendment: §2.1 point 4 (the LiveGraph route delegates the focus cycle reads to SQLite and labels explain's leaf `sqlite` + `LiveGraphRenderUnsupported`); P-ECH-02 rewritten; P-ECH-05 added; candidate paths +8 (explain_lg_serve.rs, explain_lg_serve_tests.rs, explain_coherence.rs, orient_serve/storage_port_impl.rs, orient_serve/mod.rs, explain_serve_tests/mod.rs, orient_serve/tests.rs, repo-graph-coherence/src/lib.rs); checks ECH-C13..C16 added; ECH-C12's status list and crate list extended; acceptance boundary includes the whole daemon-runtime unit suite; §0 Changes note, §2.2 row, §3, §4, §5, §6, §7 updated. The repo-level orient headline's M-2 serve is outside this amendment (ratified asymmetry; P-ECH-05).
