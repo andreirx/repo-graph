@@ -33,10 +33,53 @@ use crate::connection::StorageConnection;
 /// read failure PROPAGATES; it is NEVER collapsed to a silent "no split" / production default
 /// (STANDING HONESTY RULE #1). An empty result (a legitimately file-less snapshot) yields
 /// `Unknown` per-cycle from the classifier, never a false test-only or production label.
+/// How the labeled cycle's `modules` field is filled — the ONE axis on which `orient`'s repo
+/// headline and `explain`'s focus-scoped cycle reads differ. The walk, type-only verdict and
+/// test-composition are computed IDENTICALLY for both (the shared kernels below); only the
+/// member-name vector differs, so both entry points share this one function.
+///
+/// - `Short`: the SCC members' short display names (`orient`'s repo cycles — `find_module_cycles`;
+///   `orient` renders the ring from the qualified `walk`, so its `modules` field stays the
+///   historical short-name form and this is byte-stable for that surface).
+/// - `Qualified`: the SCC members' QUALIFIED module paths (`explain`'s focus/path cycle reads).
+///   `explain` renders the unordered member listing from `modules`, so it MUST carry the same
+///   qualified display names `cycles`' `CycleNode::display()` renders — otherwise the two
+///   surfaces would list different member strings for the same cycle (EXPLAIN-CYCLES-HONEST-1).
+#[derive(Clone, Copy)]
+enum ModuleNaming {
+    Short,
+    Qualified,
+}
+
+/// EXPLAIN-CYCLES-HONEST-1 (§2.1): label a FOCUS/PATH-scoped set of module cycles the SAME way
+/// `orient`'s repo cycles are labeled — attaching the REAL directed `walk` (via the shared
+/// `cycle_walk` kernel) and the `type_only` verdict — so `explain`'s Import-cycles block draws a
+/// verified ring (or the honest unordered form) identical to what `cycles`/`orient` draw, instead
+/// of a ring fabricated from the sorted member set (RC-4). The ONLY difference from
+/// [`label_module_cycles`] is that `modules` carries the QUALIFIED display names (see
+/// [`ModuleNaming::Qualified`]) — the identity `explain`'s focus reads have always rendered and the
+/// one `cycles`' member listing uses. Same computation, same reads, same honesty rules.
+pub(crate) fn label_focus_cycles(
+    conn: &StorageConnection,
+    snapshot_uid: &str,
+    cycles: Vec<crate::queries::CycleResult>,
+) -> Result<Vec<AgentCycle>, AgentStorageError> {
+    label_cycles(conn, snapshot_uid, cycles, ModuleNaming::Qualified)
+}
+
 pub(crate) fn label_module_cycles(
     conn: &StorageConnection,
     snapshot_uid: &str,
     cycles: Vec<crate::queries::CycleResult>,
+) -> Result<Vec<AgentCycle>, AgentStorageError> {
+    label_cycles(conn, snapshot_uid, cycles, ModuleNaming::Short)
+}
+
+fn label_cycles(
+    conn: &StorageConnection,
+    snapshot_uid: &str,
+    cycles: Vec<crate::queries::CycleResult>,
+    naming: ModuleNaming,
 ) -> Result<Vec<AgentCycle>, AgentStorageError> {
     let qualified = conn
         .module_qualified_names(snapshot_uid)
@@ -144,12 +187,31 @@ pub(crate) fn label_module_cycles(
         .zip(comps)
         .zip(type_onlys)
         .zip(walks)
-        .map(|(((c, comp), type_only), walk)| AgentCycle {
-            length: c.length,
-            modules: c.nodes.into_iter().map(|n| n.name).collect(),
-            test_composition: Some(comp),
-            type_only,
-            walk,
+        .map(|(((c, comp), type_only), walk)| {
+            // EXPLAIN-CYCLES-HONEST-1: the member-name vector is the ONLY axis on which the repo
+            // and focus entry points differ (see `ModuleNaming`). `Qualified` mirrors the
+            // qualified display `cycles` renders and the `walk` uses; `Short` is `orient`'s
+            // historical short-name form (byte-stable, since `orient` renders the ring from `walk`).
+            let modules = match naming {
+                ModuleNaming::Short => c.nodes.iter().map(|n| n.name.clone()).collect(),
+                ModuleNaming::Qualified => c
+                    .nodes
+                    .iter()
+                    .map(|n| {
+                        qualified
+                            .get(&n.node_id)
+                            .cloned()
+                            .unwrap_or_else(|| n.name.clone())
+                    })
+                    .collect(),
+            };
+            AgentCycle {
+                length: c.length,
+                modules,
+                test_composition: Some(comp),
+                type_only,
+                walk,
+            }
         })
         .collect())
 }
@@ -462,5 +524,209 @@ mod tests {
         // production file IS counted ⇒ production.
         assert_eq!(orient_comps[0], CycleTestComposition::TestOnly);
         assert_eq!(orient_comps[1], CycleTestComposition::Production);
+    }
+
+    /// Build a snapshot with a real 3-module import ring `src/a -> src/b -> src/c -> src/a` and
+    /// return `(storage, snapshot_uid)` — the fixture for the EXPLAIN-CYCLES-HONEST-1 walk-agreement
+    /// tests. The MODULE→MODULE `IMPORTS` edges are the SAME set `find_cycles` runs Tarjan over AND
+    /// `module_import_edges` feeds the walk finder, so the walk is a real ring.
+    fn three_module_ring() -> (StorageConnection, String) {
+        let mut storage: StorageConnection = fresh_storage();
+        storage.add_repo(&make_repo("r1")).unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".to_string(),
+                kind: "full".to_string(),
+                basis_ref: None,
+                basis_commit: Some("abc123".to_string()),
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap();
+        let s = snap.snapshot_uid.clone();
+        storage
+            .insert_nodes(&[
+                module_node("m_a", &s, "src/a"),
+                module_node("m_b", &s, "src/b"),
+                module_node("m_c", &s, "src/c"),
+            ])
+            .unwrap();
+        storage
+            .upsert_files(&[
+                make_file("r1", "src/a/lib.rs"),
+                make_file("r1", "src/b/lib.rs"),
+                make_file("r1", "src/c/lib.rs"),
+            ])
+            .unwrap();
+        let imports = |uid: &str, from: &str, to: &str| {
+            let mut e = make_edge(uid, &s, "r1", from, to);
+            e.edge_type = "IMPORTS".to_string();
+            e
+        };
+        storage
+            .insert_edges(&[
+                imports("e_ab", "m_a", "m_b"),
+                imports("e_bc", "m_b", "m_c"),
+                imports("e_ca", "m_c", "m_a"),
+            ])
+            .unwrap();
+        (storage, s)
+    }
+
+    /// EXPLAIN-CYCLES-HONEST-1 (§2.1): the MODULE-focus cycle read carries the SAME verified `walk`
+    /// the repo read (`find_module_cycles`) carries for the SAME cycle — one derivation via the
+    /// shared `cycle_walk` kernel, so `explain` draws the ring `cycles`/`orient` draw (RC-4). Real
+    /// storage reads on both paths.
+    #[test]
+    fn focus_module_cycle_read_carries_the_same_walk_as_the_repo_read() {
+        use repo_graph_agent::AgentStorageRead;
+        let (storage, s) = three_module_ring();
+
+        let repo = AgentStorageRead::find_module_cycles(&storage, &s).unwrap();
+        assert_eq!(repo.len(), 1, "one 3-module SCC");
+        let repo_walk = repo[0]
+            .walk
+            .clone()
+            .expect("the repo read carries a verified walk over real edges");
+        assert_eq!(
+            repo_walk,
+            vec![
+                "src/a".to_string(),
+                "src/b".to_string(),
+                "src/c".to_string()
+            ],
+            "the real directed ring in qualified-display order"
+        );
+
+        let focus = AgentStorageRead::find_cycles_involving_module(&storage, &s, "src/a").unwrap();
+        assert_eq!(focus.len(), 1, "the ring involves src/a");
+        assert_eq!(
+            focus[0].walk, repo[0].walk,
+            "the focus read carries the SAME walk as the repo read (one derivation)"
+        );
+        // The focus read renders QUALIFIED member names (explain's unordered form reads these).
+        assert!(
+            focus[0].modules.contains(&"src/a".to_string()),
+            "focus modules carry qualified paths: {:?}",
+            focus[0].modules
+        );
+    }
+
+    /// EXPLAIN-CYCLES-HONEST-1 (§2.1): the PATH-focus cycle read likewise carries the repo read's
+    /// walk for the same cycle.
+    #[test]
+    fn focus_path_cycle_read_carries_the_same_walk_as_the_repo_read() {
+        use repo_graph_agent::AgentStorageRead;
+        let (storage, s) = three_module_ring();
+
+        let repo = AgentStorageRead::find_module_cycles(&storage, &s).unwrap();
+        let focus = AgentStorageRead::find_cycles_involving_path(&storage, &s, "src").unwrap();
+        assert_eq!(focus.len(), 1, "the ring is under src/");
+        assert_eq!(
+            focus[0].walk, repo[0].walk,
+            "the path read carries the SAME walk as the repo read"
+        );
+    }
+
+    /// EXPLAIN-CYCLES-HONEST-1 A-2 (ECH-IR-002, P-ECH-06): both cancellable focus reads honour ONE
+    /// cooperative checkpoint immediately BEFORE `label_focus_cycles` — the read's LAST checkpoint — so a
+    /// client that disconnected during the filter loop abandons the read before the (un-checkpointed)
+    /// labeling. Proven without hardcoding the checkpoint count: (1) an always-Continue run records N =
+    /// the total number of checkpoint calls and the labelled reference; (2) Break at exactly call N (the
+    /// pre-labeling checkpoint) cancels with the `before cycle labeling` reason and returns NO cycles;
+    /// (3) Break one past the last call (never reached) returns the SAME labelled result as (1). The
+    /// labeling that follows a Continue stays un-checkpointed exactly as the repo-level
+    /// `find_module_cycles_cancellable` already is (COHERENCE-3); per-cycle checkpoints inside labeling
+    /// are CANCEL-LABELING-1, out of scope.
+    #[test]
+    fn focus_cycle_reads_cancellable_return_cancelled_at_the_checkpoint_before_labeling() {
+        use repo_graph_agent::{AgentCycle, AgentStorageError, AgentStorageRead};
+        use std::ops::ControlFlow;
+
+        // Dispatch either cancellable focus read through one shared cancel closure.
+        fn run(
+            storage: &StorageConnection,
+            s: &str,
+            is_module: bool,
+            cancel: &mut dyn FnMut() -> ControlFlow<()>,
+        ) -> Result<Vec<AgentCycle>, AgentStorageError> {
+            if is_module {
+                AgentStorageRead::find_cycles_involving_module_cancellable(
+                    storage, s, "src/a", cancel,
+                )
+            } else {
+                AgentStorageRead::find_cycles_involving_path_cancellable(storage, s, "src", cancel)
+            }
+        }
+
+        for is_module in [true, false] {
+            let (storage, s) = three_module_ring();
+
+            // (1) never-breaking run: record N and keep the labelled reference.
+            let mut count = 0usize;
+            let reference = {
+                let mut cont = || {
+                    count += 1;
+                    ControlFlow::Continue(())
+                };
+                run(&storage, &s, is_module, &mut cont)
+                    .expect("a never-breaking checkpoint must not cancel")
+            };
+            let n = count;
+            assert!(
+                n >= 2,
+                "at least the per-cycle filter checkpoint and the pre-labeling checkpoint fire (is_module={is_module}, n={n})"
+            );
+            assert_eq!(reference.len(), 1, "the ring is a single labelled cycle");
+            assert!(
+                reference[0].walk.is_some(),
+                "the labelled reference carries a verified walk"
+            );
+
+            // (2) Break at exactly call N — the read's LAST checkpoint, immediately before labeling.
+            let mut k = 0usize;
+            let at_last = {
+                let mut brk = || {
+                    k += 1;
+                    if k == n {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                };
+                run(&storage, &s, is_module, &mut brk)
+            };
+            let err =
+                at_last.expect_err("breaking at the pre-labeling checkpoint must cancel the read");
+            assert!(
+                err.to_string().contains("before cycle labeling"),
+                "the cancel abandons the read at the checkpoint before labeling (is_module={is_module}), got: {err}"
+            );
+
+            // (3) Break one past the last call — never reached — the read completes as in (1).
+            let mut j = 0usize;
+            let past_last = {
+                let mut brk = || {
+                    j += 1;
+                    if j == n + 1 {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                };
+                run(&storage, &s, is_module, &mut brk)
+                    .expect("a checkpoint that never fires must not cancel")
+            };
+            assert_eq!(
+                past_last.len(),
+                reference.len(),
+                "a never-reached break yields the full labelled result"
+            );
+            assert_eq!(
+                past_last[0].walk, reference[0].walk,
+                "the walk is identical to the never-breaking run"
+            );
+        }
     }
 }

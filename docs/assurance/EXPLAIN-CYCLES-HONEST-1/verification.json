@@ -1,0 +1,985 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-EXPLAIN-CYCLES-HONEST-1-0",
+  "workItemId": "EXPLAIN-CYCLES-HONEST-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-5.json",
+    "sha256": "sha256:060f8c6b053f592b8b67a4321fcb5edc4e8cd9af3b9d590127c525051dc40704"
+  },
+  "allocation": {
+    "path": "docs/slices/explain-cycles-honest-1.md",
+    "sha256": "sha256:ceb6ea64440ea1e6a3e1271e0ec680235c09a269d2d25218fb1c8d2fbb95ed2c"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "b0579a4bbe069a0bd77c552ed317ca7e6d048e0e",
+    "entries": [
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4a144d0de603c19db33ba6a19118fda9382ebd6dac1617d98fc45e647e1e94fe",
+          "byteLength": 49337
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:74105309a4c76d4561034591a57dc5f283bf3c7be330b8d959e460aa5f962118",
+          "byteLength": 50081
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_coherence.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:744c8ceb545d828f5dc6a5fee4bb966c29f81bbbb47d26ad906da037bbfb2f49",
+          "byteLength": 19104
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:21a9b0539f936fede95b8c784254f0f01f3a41aecf47f85d5972c55b5fe5108f",
+          "byteLength": 18981
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6bb2f78ec5e1baa8e91f94e6e1fd346717cddc392a8b9cd70d82b11f903630ba",
+          "byteLength": 18457
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:816969010f1cfaa68feff8baec26dad94592f8c5cb0ee0244bc204dbe9e96bd4",
+          "byteLength": 19475
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_lg_serve.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:84907b76c8067040d9238d4f14c40357db99bf2e1854ed626cf80fd093460948",
+          "byteLength": 23512
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7ed30cbd06827c224c12712f0ca04c6ea7c285865facd2cb33f45a7ec75f0072",
+          "byteLength": 20333
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_lg_serve_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:bb6002617ad93c518e0319343a0a3e79dfed3a89a4c30183e7a3f4e425044661",
+          "byteLength": 5222
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:09adb9cdd76a3b8b41b967daf1145e86a25977d42d3743ccb2347330aeb90337",
+          "byteLength": 4531
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d1ad79e880ef420bb1d51921683ddb83a0b306c64f91b1ecff1035f93cec280e",
+          "byteLength": 28387
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:86fd3d54ee9d8f0dfb664cf6614a56a97be75c1e0ac2dbcb27f5e36c7fb80598",
+          "byteLength": 32009
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:06c24e52c76309bb5cca5379e81f4cfae6a3e39562074dcddf3b804aedb21ead",
+          "byteLength": 25671
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c4152c4570a3b09cecd9782f0d8476280399e57755787a6d920b3fef37929bc5",
+          "byteLength": 25942
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6152a7cf869d3346ef724d7c147079988f3f907b7e3db408fd9f5b09e173994a",
+          "byteLength": 28805
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f67d7ad47676046981f3f3387cdcc80922780a971c5a53646be3b086249b9133",
+          "byteLength": 27352
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7b14d3707b6729f029d4b1fdc585d4031365e05ec885acd553d791ee791554e3",
+          "byteLength": 74689
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9fccd014d894602d37a6c44482a96975cf0dbe72d950e19f33ebb0c675468802",
+          "byteLength": 77574
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4c84e490023597977e4dba56e0c69079abb54d429ad87ad876a332d3efdf2398",
+          "byteLength": 8271
+        }
+      },
+      {
+        "path": "rust/crates/repo-graph-coherence/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6f51d6414ab8979f2c40882cae008bba605590f9cce2c6f2e6763ec3e16db623",
+          "byteLength": 43277
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5724922969fec0504870d57ff038e42701427675d6b0e6f8201761913228a69e",
+          "byteLength": 43742
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/cycle_walk_display.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a7395679c715a8f9d2172dd48e87ecf2f3e575b506856c63592a1449a825dbfc",
+          "byteLength": 3338
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6a12b190ebbe00f4d715d5afdf02cf109a88c3dd4b42fe4e00802afe650a1bfd",
+          "byteLength": 56100
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d80a293fccf2372ad18f70807bd2c9df6ae3b04f28070cb77fdc41bdf58d0b36",
+          "byteLength": 63737
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:5a6d6c5f891ad857b7cb0d799d9e09b7d4681fd5c33151e07cc216d5a8867422",
+          "byteLength": 17344
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4fe14452a0f95dd40e055cf2f0a61f71a43994a801a21ea9ca0854ca87696246",
+          "byteLength": 23367
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:dab8c29ab547bfe6d7ab8ddd1e97ea6e4f08cd00e26ebd1fb0f8b24b0c72417a",
+          "byteLength": 25786
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3f319cc37b09a2d1e5d3c51db070cdd2d1134807a4ad0f1b62577b2a827ac576",
+          "byteLength": 25991
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_guidance.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:93cea84563289d9f87725f2ad7b7ce65bc797d400b75f9904c5a91c36d4f6eaa",
+          "byteLength": 9597
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:242195a6f12b2e459bd4b69c0bcab11d36d9da5a13885e93d0a22e63be1db426",
+          "byteLength": 8946
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_cycle_labeling.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:abc7a27500cf96ad8904aac36dbfa3d05dcd56ecaf24ef4f0395fa2ef21342e9",
+          "byteLength": 21586
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:780b03278561b2b6a1424e833b066d25606d1e8b52e704b62e1949ac4e0a8cd9",
+          "byteLength": 33663
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7514f04cefad108a01c0c7b8a1e3802a9cad8a27439cda188d860b1857e51d2e",
+          "byteLength": 78860
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:117d1f0fffa0f770aecf07bd9bd7842b0b600ac4a46f7a78ae259bfdea4c1e15",
+          "byteLength": 78174
+        }
+      }
+    ],
+    "sha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-EXPLAIN-CYCLES-HONEST-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "ECH-C01",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-004-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib explain_cycles_ 2>&1 | tee /tmp/ech-c01.txt | grep -E 'test result: ok\\. ([7-9]|[1-9][0-9]+) passed; 0 failed' && for t in explain_cycles_absent_walk_renders_unordered_no_arrows explain_cycles_valid_walk_renders_ring_from_walk_not_member_order explain_cycles_offwalk_members_reported_as_plus_n_more explain_cycles_malformed_walk_renders_unreadable_not_ring explain_cycles_empty_walk_renders_unordered explain_cycles_non_string_module_renders_unreadable_not_dropped explain_cycles_unordered_list_caps_at_eight_with_plus_k_more; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c01.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the explain_cycles_* render tests in rust/crates/rgr/src/presentation/explain.rs (section 2.2's evidence taxonomy, one test per row) plus any further regression test the family gains"
+      },
+      "expected": "exit 0: at least seven explain_cycles_* tests pass with 0 failed AND each of the seven NAMED tests is listed as ok — the count is a lower bound; a missing named test or any failure fails the check.",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib explain_cycles_ → 'test result: ok. 9 passed; 0 failed'; all seven named taxonomy tests present as ok.",
+        "supportingEvidence": [
+          "/tmp/ech-c01.txt: test result: ok. 9 passed; 0 failed; 0 ignored; 1236 filtered out",
+          "grep loop matched all 7: explain_cycles_absent_walk_renders_unordered_no_arrows, explain_cycles_valid_walk_renders_ring_from_walk_not_member_order, explain_cycles_offwalk_members_reported_as_plus_n_more, explain_cycles_malformed_walk_renders_unreadable_not_ring, explain_cycles_empty_walk_renders_unordered, explain_cycles_non_string_module_renders_unreadable_not_dropped, explain_cycles_unordered_list_caps_at_eight_with_plus_k_more",
+          "printed: ECH-C01 PASS"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C02",
+      "obligationIds": [
+        "RG-REQ-003-L05",
+        "RG-REQ-005-L06",
+        "RG-REQ-010-L01",
+        "RG-REQ-012-L07",
+        "P-ECH-01",
+        "P-ECH-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation 2>&1 | tee /tmp/ech-c02.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ech-c02.txt && for t in cycle_anchor_full_chain_for_small_cycle cycle_anchor_unordered_form_when_no_walk cycle_anchor_one_element_walk_is_not_a_fabricated_self_ring cycle_anchor_non_string_walk_element_is_unreadable_not_dropped cycle_anchor_truncates_large_cycle cross_surface_cycle_walk_agrees_ordered cross_surface_cycle_walk_agrees_unordered_without_edges no_edges_renders_unordered_with_no_arrows offwalk_members_reported_as_plus_n_more truncated_edges_render_unordered_no_arrows render_shows_cycle_count headline_counts_come_from_the_shared_partition no_high_confidence_beside_no_match render_shows_callers tier0_header_anchors_symbol_file_at_identity_line tier1_callers_anchor_file_line_when_both_present semantic_no_match_renders_labeled_candidates_in_human_mode; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(grep -cE '^test .*fn tier[01]_|^test .*tier[01]_.* ok$' /tmp/ech-c02.txt)\" -ge 6",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the whole rgr presentation test module: orient's cycle_anchor_* and cross_surface_cycle_walk_agrees_* family (orient_guidance's chain formatting must be byte-identical after the shared validation is extracted), the cycles/walk.rs unordered/off-walk/truncated tests, cycles/tests.rs count tests, explain's confidence/callers/tier anchor tests, the semantic-candidates test"
+      },
+      "expected": "exit 0: the whole presentation suite is green and every named test is listed as ok — no-behavior-change for orient's cycle line (RG-REQ-003-L05), explain's confidence/seed/anchor rules (RG-REQ-005-L06, RG-REQ-010-L01, RG-REQ-012-L07) and for the cycles renderer (P-ECH-01) and explain's other sections (P-ECH-03).",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation → 'test result: ok. 813 passed; 0 failed'; no FAILED/panicked; every named test present; tier[01]_ count ≥ 6.",
+        "supportingEvidence": [
+          "/tmp/ech-c02.txt: test result: ok. 813 passed; 0 failed; 432 filtered out",
+          "named cycle_anchor_*/cross_surface_*/no_edges/offwalk/truncated/render_shows_cycle_count/headline_counts/no_high_confidence_beside_no_match/render_shows_callers/tier0_/tier1_/semantic_no_match all matched ok",
+          "printed: ECH-C02 PASS (orient cycle line + cycles renderer + explain non-cycles sections unchanged)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C03",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-004-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --lib cycle 2>&1 | tee /tmp/ech-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ech-c03.txt && for t in focus_module_cycle_read_carries_the_same_walk_as_the_repo_read focus_path_cycle_read_carries_the_same_walk_as_the_repo_read; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-agent --lib cycle 2>&1 | tee /tmp/ech-c03b.txt | grep -E '^test result: ok\\.' && grep -qE '^test .*walk_follows_real_edges_not_member_order .* ok$' /tmp/ech-c03b.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "storage's cycle tests incl. the two NEW tests (section 2.1.1): on a fixture with a real 3-module ring, find_cycles_involving_module / find_cycles_involving_path return the SAME walk (and type_only) find_module_cycles returns for that cycle — both now pass through label_module_cycles; the agent's cycle_walk kernel tests"
+      },
+      "expected": "exit 0: the focus reads carry the repo read's walk for the same cycle (one derivation, RG-REQ-004-L07) and the walk kernel's tests stay green.",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "repo-graph-storage --lib cycle → ok 12 passed; both focus-walk tests present. repo-graph-agent --lib cycle → ok 41 passed; walk_follows_real_edges_not_member_order present.",
+        "supportingEvidence": [
+          "/tmp/ech-c03.txt: test result: ok. 12 passed; 0 failed — incl. focus_module_cycle_read_carries_the_same_walk_as_the_repo_read, focus_path_cycle_read_carries_the_same_walk_as_the_repo_read",
+          "/tmp/ech-c03b.txt: test result: ok. 41 passed; 0 failed — incl. walk_follows_real_edges_not_member_order",
+          "printed: ECH-C03 PASS (focus reads carry the repo read's walk — one derivation)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C04",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-012-L06",
+        "P-ECH-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --test explain_cycle_walk_route_consistency 2>&1 | tee /tmp/ech-c04.txt | grep -E 'test result: ok\\. ([2-9]|[1-9][0-9]+) passed; 0 failed' && for t in explain_symbol_focus_cycle_walk_equals_orient_cycle_walk explain_path_focus_cycle_walk_equals_orient_cycle_walk; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-daemon-runtime --test cycle_honesty_route_consistency 2>&1 | tee /tmp/ech-c04b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ech-c04b.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the NEW integration test rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs: an isolated dispatcher indexes a temp repo with a 3-module import ring; `explain` on a symbol in one ring module and `explain` on that module's path both return an EXPLAIN_CYCLES item whose `walk` equals the walk `orient`'s cycle leaf carries for the same member set (both from label_module_cycles); the existing cycle_honesty_route_consistency suite"
+      },
+      "expected": "exit 0: explain's carried walk equals orient's for the same cycle on the SQLite route (one derivation; the JSON now carries `walk` on this route — the RG-REQ-012-L06 additive change, REPORTED), and the existing route-consistency suite remains green (P-ECH-02: no route gains a walk it cannot verify).",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "explain_cycle_walk_route_consistency → ok 2 passed (both named); cycle_honesty_route_consistency → ok 3 passed, no FAILED/panicked.",
+        "supportingEvidence": [
+          "/tmp/ech-c04.txt: test result: ok. 2 passed; 0 failed — explain_symbol_focus_cycle_walk_equals_orient_cycle_walk, explain_path_focus_cycle_walk_equals_orient_cycle_walk",
+          "/tmp/ech-c04b.txt: test result: ok. 3 passed; 0 failed",
+          "printed: ECH-C04 PASS (explain's carried walk equals orient's on the SQLite route)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C05",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "B=$(python3 -c \"import json;d=json.load(open('.agent-manager/slices/EXPLAIN-CYCLES-HONEST-1/status.json'));v=(d.get('candidateTracking') or {}).get('baseRevision');print(v or '')\"); [ -n \"$B\" ] || B=$(git rev-parse HEAD); test -n \"$B\" && rm -rf /private/tmp/EXPLAIN-CYCLES-HONEST-1-before && git worktree add --detach /private/tmp/EXPLAIN-CYCLES-HONEST-1-before \"$B\" && (cd /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust && cargo build --release -p repo-graph-rgr -p rmapd > /tmp/ech-build-before.log 2>&1 && tail -n1 /tmp/ech-build-before.log && test -x target/release/rmap && test -x target/release/rmapd) && cargo build --release -p repo-graph-rgr -p rmapd --manifest-path rust/Cargo.toml > /tmp/ech-build-cand.log 2>&1 && tail -n1 /tmp/ech-build-cand.log && test -x rust/target/release/rmap && test -x rust/target/release/rmapd && for R in leveldb vcmi; do rm -rf /private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before /private/tmp/EXPLAIN-CYCLES-HONEST-1-$R; ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release:$PATH /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release/rmap index ) >/dev/null 2>&1 && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index ) >/dev/null 2>&1 || exit 1; done && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release:$PATH /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release/rmap explain leveldb::DBImpl::Recover ) 2>/dev/null > /tmp/ech-ldb-explain-before.txt && grep -q '^  - Cycle 1: db -> helpers/memenv -> table -> util$' /tmp/ech-ldb-explain-before.txt",
+        "cwd": ".",
+        "environment": "a git worktree of the base revision (status.json candidateTracking.baseRevision when the relay recorded it, else git rev-parse HEAD) built once (before-binary and its rmapd); fresh isolated indexes of leveldb and vcmi with BOTH binaries, throwaway roots, stdio, auto passes off",
+        "inputs": "the leveldb and vcmi checkouts; the base revision from .agent-manager/slices/EXPLAIN-CYCLES-HONEST-1/status.json candidateTracking.baseRevision when the relay has recorded it, else git rev-parse HEAD (the committed tip the candidate's uncommitted diff sits on) — a durable, always-available input, tolerant of the missing/null status field (never a KeyError)"
+      },
+      "expected": "exit 0: the defect reproduces at the base revision on a fresh leveldb index — explain's Import-cycles block draws the alphabetical member set as arrows, `  - Cycle 1: db -> helpers/memenv -> table -> util` (verified literal, 2026-09-18) — and the four indexes (two corpora × two binaries) exist for the following checks; both cargo builds must exit 0 themselves (their output goes to a log, the last line is printed only after success) and both binaries must exist in each tree — a failed build can never index a stale binary.",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Base revision b0579a4 read from status.json candidateTracking.baseRevision; before-worktree built (1m54s, rmap+rmapd present); candidate cached; leveldb+vcmi indexed under both binaries; before-binary leveldb explain reproduces the fabricated arrows '  - Cycle 1: db -> helpers/memenv -> table -> util'.",
+        "supportingEvidence": [
+          "/tmp/ech-build-before.log tail: Finished release profile in 1m 54s; /tmp/ech-build-cand.log tail: Finished release in 0.45s (cached)",
+          "/tmp/ech-ldb-explain-before.txt contains literal '  - Cycle 1: db -> helpers/memenv -> table -> util' (grep -q matched)",
+          "four isolated indexes created: /private/tmp/EXPLAIN-CYCLES-HONEST-1-{leveldb,vcmi}{,-before}; printed: ECH-C05 PASS"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C06",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-004-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain leveldb::DBImpl::Recover ) 2>/dev/null > /tmp/ech-ldb-explain-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" cycles ) 2>/dev/null > /tmp/ech-ldb-cycles-after.txt && python3 -c \"import re,sys\nex=open('/tmp/ech-ldb-explain-after.txt').read(); cy=open('/tmp/ech-ldb-cycles-after.txt').read()\nassert 'db -> helpers/memenv -> table -> util' not in ex, 'fabricated member-order ring still rendered'\nm=re.search(r'^  - Cycle 1 \\((\\d+) modules\\): (.+)$', ex, re.M); assert m, ex\nring_ex=m.group(2).strip(); size_ex=int(m.group(1))\ncm=re.search(r'^Cycle 1 \\((\\d+) modules\\):\\n  (.+)$', cy, re.M); assert cm, cy\nring_cy=cm.group(2).strip(); size_cy=int(cm.group(1))\nassert ring_ex==ring_cy and size_ex==size_cy, (ring_ex, ring_cy, size_ex, size_cy)\nassert ' -> ' in ring_ex and ring_ex.split(' -> ')[0]==ring_ex.split(' -> ')[-1], ring_ex\nmore_ex=re.search(r'^    \\(\\+ (\\d+) more members? in this cycle\\)$', ex, re.M); more_cy=re.search(r'^  \\(\\+ (\\d+) more members? in this cycle\\)$', cy, re.M)\nassert (more_ex.group(1) if more_ex else None)==(more_cy.group(1) if more_cy else None), (more_ex, more_cy)\nprint('explain ring == cycles ring:', ring_ex, '| size', size_ex, '| off-walk', more_ex.group(1) if more_ex else 0)\"",
+        "cwd": ".",
+        "environment": "candidate on the ECH-C05 leveldb index",
+        "inputs": "the candidate's explain and cycles human outputs on the same fresh leveldb index"
+      },
+      "expected": "exit 0: on leveldb (a 4-module SCC with a verified 2-member ring plus 2 off-walk members) explain's Import-cycles block renders `Cycle 1 (K modules): <ring>` with the SAME ring text and size `cycles` renders for Cycle 1 (today `util -> helpers/memenv -> util`, K=4, `(+ 2 more members in this cycle)` — REPORTED from the outputs, compared not hardcoded), the ring closes on its first member, and the fabricated member-order chain is gone.",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "leveldb candidate: explain Cycle 1 renders 'util -> helpers/memenv -> util' (4 modules, '+ 2 more members') identical to `rmap cycles`; ring closes on its first member; the fabricated member-order chain is gone.",
+        "supportingEvidence": [
+          "python assertion printed: 'explain ring == cycles ring: util -> helpers/memenv -> util | size 4 | off-walk 2'",
+          "assertion 'db -> helpers/memenv -> table -> util' not in explain output held",
+          "ring/size/off-walk compared between /tmp/ech-ldb-explain-after.txt and /tmp/ech-ldb-cycles-after.txt, not hardcoded; printed: ECH-C06 PASS"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C07",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-004-L07",
+        "P-ECH-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "T0=$(python3 -c 'import time;print(time.time())') && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain CGHeroInstance ) 2>/dev/null > /tmp/ech-vcmi-explain-after.txt && SECS=$(python3 -c \"import time;print(round(time.time()-$T0,2))\") && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" cycles ) 2>/dev/null > /tmp/ech-vcmi-cycles-after.txt && T1=$(python3 -c 'import time;print(time.time())') && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-vcmi-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-vcmi-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release:$PATH /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release/rmap explain CGHeroInstance ) 2>/dev/null > /tmp/ech-vcmi-explain-before.txt && SECSB=$(python3 -c \"import time;print(round(time.time()-$T1,2))\") && python3 -c \"import re\nex=open('/tmp/ech-vcmi-explain-after.txt').read(); cy=open('/tmp/ech-vcmi-cycles-after.txt').read(); bf=open('/tmp/ech-vcmi-explain-before.txt').read()\nblk=re.search(r'^Import cycles \\((\\d+)\\)\\n((?:  .*\\n|    .*\\n)+)', ex, re.M); assert blk, ex\nassert ' -> ' not in blk.group(2), blk.group(2)\nm=re.search(r'^  - Cycle 1 \\((\\d+) modules\\): (members \\(unordered\\): .+)$', ex, re.M); assert m, ex\ncm=re.search(r'^Cycle 1 \\((\\d+) modules\\):\\n  (members \\(unordered\\): .+)$', cy, re.M); assert cm, cy\nassert m.group(1)==cm.group(1) and m.group(2).strip()==cm.group(2).strip(), (m.groups(), cm.groups())\nassert re.search(r'^  - Cycle 1: AI/BattleAI -> AI/EmptyAI', bf, re.M), 'before-binary should still fabricate'\nprint('vcmi explain unordered == cycles unordered:', m.group(2)[:120])\" && echo \"COST vcmi explain secs before=$SECSB after=$SECS\" | tee /tmp/ech-cost.txt",
+        "cwd": ".",
+        "environment": "candidate on the ECH-C05 vcmi index; before-binary on the vcmi before index",
+        "inputs": "the vcmi checkout; vcmi's 55-module Cycle 1 (edge set over CYCLE_EDGE_CAP ⇒ no walk on every route)"
+      },
+      "expected": "exit 0: on vcmi (whose largest cycle has a truncated edge set, so no route can verify a walk) explain's Import-cycles block contains NO `->` and its Cycle 1 line renders the SAME `members (unordered): …(+ N more)` text and size `cycles` renders (compared, not hardcoded); the before-binary still renders the fabricated `AI/BattleAI -> AI/EmptyAI …` chain; explain wall time before/after is REPORTED (today 1.38 s; the labeling adds two snapshot reads and per-cycle edge selection) — a cost the human reads, never a numeric acceptance bound (RG-REQ-011-L11 withdrew the latency floor).",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "vcmi candidate: explain Import-cycles block has zero '->'; Cycle 1 'members (unordered): AI/BattleAI, AI/EmptyAI, …' equals `rmap cycles` (same size + text); before-binary still renders 'AI/BattleAI -> AI/EmptyAI …'. Cost reported.",
+        "supportingEvidence": [
+          "python assertion printed: 'vcmi explain unordered == cycles unordered: members (unordered): AI/BattleAI, AI/EmptyAI, AI/MMAI, …'",
+          "before-binary fabrication confirmed: regex '^  - Cycle 1: AI/BattleAI -> AI/EmptyAI' matched /tmp/ech-vcmi-explain-before.txt",
+          "COST vcmi explain secs before=1.26 after=1.27 (+0.01s; reported, not a bound — RG-REQ-011-L11 withdrew the floor); printed: ECH-C07 PASS"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C08",
+      "obligationIds": [
+        "RG-REQ-012-L06",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain leveldb::DBImpl::Recover --json ) 2>/dev/null > /tmp/ech-ldb-explain-after.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release:$PATH /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release/rmap explain leveldb::DBImpl::Recover --json ) 2>/dev/null > /tmp/ech-ldb-explain-before.json && python3 -c \"import json\ndef item(p):\n    d=json.load(open(p)); s=[x for x in d['value']['signals'] if x['value'].get('code')=='EXPLAIN_CYCLES'][0]; return s['value']['evidence']['items'][0]\nb=item('/tmp/ech-ldb-explain-before.json'); a=item('/tmp/ech-ldb-explain-after.json')\nassert 'walk' not in b or b['walk'] is None, b\nw=a.get('walk'); assert isinstance(w,list) and len(w)>=2 and all(isinstance(x,str) and x for x in w), a\nassert set(w) <= set(a['modules']) and a['modules']==b['modules'] and a['length']==b['length'], (a,b)\nprint('JSON walk now carried on the SQLite explain serve:', w, '| type_only present:', 'type_only' in a)\"",
+        "cwd": ".",
+        "environment": "candidate and before-binary on the two leveldb indexes",
+        "inputs": "the explain --json envelopes (value.signals[].value.code == EXPLAIN_CYCLES → evidence.items[0])"
+      },
+      "expected": "exit 0: before, the SQLite explain serve carried no `walk` (the key is absent — serde skips None); after, it carries a verified ring (≥ 2 non-empty strings, all members of `modules`) while `modules` and `length` are unchanged — the pre-authorised ADDITIVE JSON change (RG-REQ-012-L06: human and JSON answer the same question — the human ring is drawn from this very field), REPORTED with whether `type_only` now rides along.",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "leveldb: before-binary explain --json EXPLAIN_CYCLES item carried no walk; candidate carries walk ['util','helpers/memenv'] (≥2 non-empty strings ⊆ modules); modules and length unchanged. type_only not present on this C++ repo.",
+        "supportingEvidence": [
+          "python assertion printed: \"JSON walk now carried on the SQLite explain serve: ['util', 'helpers/memenv'] | type_only present: False\"",
+          "before item: 'walk' absent/None; after: isinstance(list), len≥2, all non-empty str, set(walk) ⊆ set(modules), modules & length equal before/after",
+          "the RG-REQ-012-L06 additive change: the human ring (ECH-C06) is drawn from this field; printed: ECH-C08 PASS"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C09",
+      "obligationIds": [
+        "RG-REQ-003-L05",
+        "RG-REQ-004-L07",
+        "P-ECH-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "for R in leveldb vcmi; do for C in cycles orient; do ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release:$PATH /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release/rmap $C ) > /tmp/ech-$R-$C-basebin.raw 2>/dev/null || exit 1; ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" $C ) > /tmp/ech-$R-$C-candbin.raw 2>/dev/null || exit 1; test -s /tmp/ech-$R-$C-basebin.raw && test -s /tmp/ech-$R-$C-candbin.raw || exit 1; grep -vE '^Snapshot:|^index basis:' /tmp/ech-$R-$C-basebin.raw > /tmp/ech-$R-$C-basebin.txt; grep -vE '^Snapshot:|^index basis:' /tmp/ech-$R-$C-candbin.raw > /tmp/ech-$R-$C-candbin.txt; cmp /tmp/ech-$R-$C-basebin.txt /tmp/ech-$R-$C-candbin.txt && echo \"$R $C byte-identical across binaries on one index ($(wc -l < /tmp/ech-$R-$C-candbin.txt) lines)\" || exit 1; done; done",
+        "cwd": ".",
+        "environment": "BOTH binaries served against the SAME index — the ECH-C05 before index of each corpus (leveldb, vcmi); the binary is the only variable",
+        "inputs": "the human `cycles` and `orient` outputs of the base binary and the candidate on one index per corpus — captured raw with exit status required, then normalised (Snapshot/index-basis lines)"
+      },
+      "expected": "exit 0: `cycles` and `orient` render byte-identically between the base binary and the candidate on the SAME index, for leveldb (an ordered ring) and vcmi (an unordered large cycle and ordered small ones) — no-behavior-change for the cycles renderer and orient's cycle line (RG-REQ-003-L05, RG-REQ-004-L07's cycles/orient half, P-ECH-01): extracting the walk validation into a shared function changed nothing they print. (Two independently built indexes are NOT a byte-identity oracle: a walk's ring among equally valid 2-cycles depends on the index — OC-1; CYCLES-WALK-DETERMINISM-1.)",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "For leveldb and vcmi, `cycles` and `orient` are byte-identical between the base binary and the candidate on the SAME index (Snapshot/index-basis lines stripped).",
+        "supportingEvidence": [
+          "cmp equal for all four: leveldb cycles (9 lines), leveldb orient (11), vcmi cycles (30), vcmi orient (11)",
+          "both binaries served the before index of each corpus (binary is the only variable)",
+          "printed: ECH-C09 PASS (P-ECH-01: cycles renderer + orient cycle line unchanged)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C10",
+      "obligationIds": [
+        "P-ECH-03",
+        "RG-REQ-005-L06",
+        "RG-REQ-010-L01",
+        "RG-REQ-012-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "for R in leveldb vcmi; do case $R in leveldb) T=leveldb::DBImpl::Recover;; vcmi) T=CGHeroInstance;; esac; ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release:$PATH /private/tmp/EXPLAIN-CYCLES-HONEST-1-before/rust/target/release/rmap explain $T ) > /tmp/ech-c10-$R-basebin.txt 2>/dev/null || exit 1; ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/'$R && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-CYCLES-HONEST-1-$R-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain $T ) > /tmp/ech-c10-$R-candbin.txt 2>/dev/null || exit 1; test -s /tmp/ech-c10-$R-basebin.txt && test -s /tmp/ech-c10-$R-candbin.txt || exit 1; done && python3 -c \"import re\ndef strip(p):\n    s=open(p).read(); s=re.sub(r'^(index basis:|Repo:).*\\n', '', s, flags=re.M)\n    return re.sub(r'^Import cycles \\(\\d+\\)\\n(?:(?:  |    ).*\\n)*', '', s, flags=re.M)\nfor R in ('leveldb','vcmi'):\n    b=strip(f'/tmp/ech-c10-{R}-basebin.txt'); a=strip(f'/tmp/ech-c10-{R}-candbin.txt')\n    assert a==b, f'{R}: explain differs outside the Import cycles block'\n    print(R, 'explain identical outside the Import cycles block (same index, both binaries)')\"",
+        "cwd": ".",
+        "environment": "BOTH binaries served against the SAME before index of each corpus; this check acquires its own four explain captures (exit status required, non-empty)",
+        "inputs": "explain leveldb::DBImpl::Recover and explain CGHeroInstance, base binary and candidate on one index per corpus, captured by this command"
+      },
+      "expected": "exit 0: with the Import-cycles block and the per-run `index basis:` and `Repo:` lines removed, explain's human output is byte-identical between the base binary and the candidate on the same index, on both corpora — no-behavior-change for every other explain section (P-ECH-03; confidence, seeds, anchors: RG-REQ-005-L06, RG-REQ-010-L01, RG-REQ-012-L07).",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "For leveldb (explain leveldb::DBImpl::Recover) and vcmi (explain CGHeroInstance), explain output is byte-identical between base and candidate binaries after removing the Import-cycles block and the per-run 'index basis:'/'Repo:' lines.",
+        "supportingEvidence": [
+          "python printed: 'leveldb explain identical outside the Import cycles block (same index, both binaries)' and same for vcmi",
+          "concrete untouched section quoted: leveldb Callers (1) '- Open (db)  db/db_impl.cc:1503' identical base vs candidate",
+          "printed: ECH-C10 PASS (P-ECH-03: confidence/seeds/anchors unchanged)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C11",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-ECH-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "inspection",
+        "subject": "isolation of every live proof and the cleanup of every throwaway root and the git worktree",
+        "criterion": "every rmap invocation in ECH-C05..C10 ran under an RMAP_STATE_ROOT/RMAP_SOCKET_PATH inside /private/tmp/EXPLAIN-CYCLES-HONEST-1-* with RMAP_TRANSPORT=stdio and RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the operator's real registry '$HOME/Library/Application Support/repo-graph/registry.json' has the SAME sha256 before the first proof and after the last (shasum -a 256, both values quoted in build-progress.md); at hand-off `ls -d /private/tmp/EXPLAIN-CYCLES-HONEST-1-*` lists nothing, `git worktree list` shows no /private/tmp/EXPLAIN-CYCLES-HONEST-1-before entry, and no rmapd from that worktree or rust/target survives (pgrep -fl rmapd)",
+        "inputs": "build-progress.md; the two registry digests; the final ls/worktree/pgrep outputs"
+      },
+      "expected": "the inspection finds every proof isolated, the real registry digest identical before/after, and no throwaway root, worktree or daemon left behind (no-behavior-change for RG-REQ-011-L06; P-ECH-04).",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Every proof ran under RMAP_STATE_ROOT/RMAP_SOCKET_PATH in /private/tmp/EXPLAIN-CYCLES-HONEST-1-* with stdio and auto passes off; operator registry sha256 identical before first proof and after last; no throwaway root, no EXPLAIN-CYCLES-HONEST-1 worktree, no stray rmapd left behind.",
+        "supportingEvidence": [
+          "registry sha256 BEFORE = 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c; AFTER last proof = 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c (identical; both quoted in build-progress.md)",
+          "post-cleanup: `ls -d /private/tmp/EXPLAIN-CYCLES-HONEST-1-*` → none; `git worktree list` shows only main + unrelated m-r2-baseline-worktree (not mine); `pgrep -fl rmapd | grep EXPLAIN-CYCLES-HONEST-1` → none",
+          "isolation env on every invocation: RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C12",
+      "obligationIds": [
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git diff --check && (cd rust && cargo fmt --check -p repo-graph-rgr -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-agent -p repo-graph-coherence && cargo clippy -p repo-graph-rgr -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-coherence --tests -- -D warnings > /tmp/ech-clippy.log 2>&1 && tail -n1 /tmp/ech-clippy.log) && diff <(git status --short -- rust | grep -vE '^ M rust/crates/storage/src/agent_cycle_labeling.rs$' | sort) <(printf ' M rust/crates/agent/src/explain/mod.rs\\n M rust/crates/daemon-runtime/src/explain_coherence.rs\\n M rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs\\n M rust/crates/daemon-runtime/src/explain_lg_serve.rs\\n M rust/crates/daemon-runtime/src/explain_lg_serve_tests.rs\\n M rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs\\n M rust/crates/daemon-runtime/src/orient_serve/mod.rs\\n M rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs\\n M rust/crates/daemon-runtime/src/orient_serve/tests.rs\\n M rust/crates/repo-graph-coherence/src/lib.rs\\n M rust/crates/rgr/src/presentation/explain.rs\\n M rust/crates/rgr/src/presentation/explain_sections.rs\\n M rust/crates/rgr/src/presentation/mod.rs\\n M rust/crates/rgr/src/presentation/orient_guidance.rs\\n M rust/crates/storage/src/agent_impl.rs\\n?? rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs\\n?? rust/crates/rgr/src/presentation/cycle_walk_display.rs\\n' | sort)",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "git status/diff of the candidate; rustfmt and clippy over the touched crates (A-1 adds repo-graph-coherence and the nine daemon-runtime/coherence paths)"
+      },
+      "expected": "exit 0 (A-1/A-2: the status list is the 15 modified + 2 new paths of the amended allocation): the diff is whitespace-clean, rustfmt-clean and clippy-clean with -D warnings (clippy's own exit status is required; its output is logged and its last line printed only after success), and — after filtering the optional allowed path rust/crates/storage/src/agent_cycle_labeling.rs out of the actual status — the working tree under rust/ holds exactly the seventeen non-optional always-touched candidate paths (fifteen modified, two new — the printf list above) and nothing else moved. The optional agent_cycle_labeling.rs path (the eighteenth candidate path) is filtered, not required: the candidate DOES touch it (the `label_focus_cycles` entry, the two ECH-C03 tests and ECH-C18's cancellation test live there), and the filter keeps the exact-set comparison decidable whether or not it is touched; the check still fails on any OTHER moved path.",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "git diff --check clean; cargo fmt --check clean (after `cargo fmt -p repo-graph-daemon-runtime -p repo-graph-storage` reflowed the A-2 assert! and dispatch call — whitespace only); cargo clippy --tests -D warnings clean; the working tree under rust/ holds exactly the 17 non-optional candidate paths (agent_cycle_labeling.rs filtered as the optional 18th, which is touched).",
+        "supportingEvidence": [
+          "/tmp/ech-clippy.log tail: Finished dev profile in 22.12s (clippy exit 0 with -D warnings)",
+          "diff of `git status --short -- rust` (agent_cycle_labeling.rs filtered) against the exact expected 17-path printf → empty (equal)",
+          "printed: ECH-C12 PASS; final git status: 16 modified + 2 untracked rust paths, no non-rust tracked changes"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C13",
+      "obligationIds": [
+        "P-ECH-02",
+        "P-ECH-05",
+        "RG-REQ-002-L01",
+        "RG-REQ-003-L05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib m2_parity_ 2>&1 | tee /tmp/ech-c13.txt | grep -E '^test result: ok\\. 5 passed; 0 failed' && for t in m2_parity_explain_file_focus_equals_sqlite m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle m2_parity_full_serve_equals_sqlite_repo_focus m2_parity_full_serve_equals_sqlite_path_focus m2_parity_full_serve_equals_sqlite_file_focus; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c13.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the five EXISTING M-2 parity certificates in rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs and orient_serve/tests.rs — their assertions are UNCHANGED (only the two path-focus tests' doc comments are corrected: the cycles item is now SQLite-delegated and carries the walk); the two path-focus certificates failed on the third admission's accepted candidate (walk/type_only present on the SQLite serve, absent on the LiveGraph rebuild)"
+      },
+      "expected": "exit 0: all five parity certificates pass with their assertions unchanged — the two path-focus ones because the M-2 decorator now delegates the focus cycle reads to SQLite (A-1), the repo-focus and the two file-focus ones because the repo-level M-2 cycle serve and every other M-2 leaf remain unchanged (no behavior change; P-ECH-05); no route serves a focus-cycles value that differs from SQLite's (P-ECH-02)",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-daemon-runtime --lib m2_parity_ → 'test result: ok. 5 passed; 0 failed'; all five certificates present, assertions unchanged (the two path-focus ones pass because the M-2 decorator delegates focus cycle reads to SQLite).",
+        "supportingEvidence": [
+          "/tmp/ech-c13.txt: test result: ok. 5 passed; 0 failed; 773 filtered out",
+          "all named present: m2_parity_explain_file_focus_equals_sqlite, m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle, m2_parity_full_serve_equals_sqlite_repo_focus, m2_parity_full_serve_equals_sqlite_path_focus, m2_parity_full_serve_equals_sqlite_file_focus",
+          "printed: ECH-C13 PASS (P-ECH-05 repo/file focus + P-ECH-02 no route serves a differing focus-cycles value)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C14",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-012-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib focus_cycles_delegated 2>&1 | tee /tmp/ech-c14.txt | grep -E '^test result: ok\\. 2 passed; 0 failed' && for t in explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label orient_path_focus_cycles_delegated_carry_walk; do grep -qE \"^test .*$t .* ok$\" /tmp/ech-c14.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "two NEW tests (A-1). rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs::explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label: on the green fixture (`w.m2.cycle_values` asserted true) the decorator's `run_explain(REPO, MODULE_DIR)` EXPLAIN_CYCLES item carries a NON-EMPTY `walk` equal to the bare SQLite serve's for the same item, and `explain_lg_serve::cycles_leaf_label(&f.state, &snapshot_uid)` is `OrientLeafLabel::SqliteFallback { reason: CoherenceFallbackReason::LiveGraphRenderUnsupported }` (asserted with `matches!`). rust/crates/daemon-runtime/src/orient_serve/tests.rs::orient_path_focus_cycles_delegated_carry_walk: the decorator's path-focus `orient(REPO, Some(MODULE_DIR))` IMPORT_CYCLES item carries the same NON-EMPTY `walk` as the bare SQLite serve. Both assert the walk is non-empty (non-vacuous: the fixture's real src <-> lib ring)"
+      },
+      "expected": "exit 0: with a resident LiveGraph and a GREEN cycle-values cert, explain's and orient's path-focus cycle items carry the verified walk (the SQLite value, delegated), explain's cycles leaf is labelled sqlite with reason LiveGraphRenderUnsupported (never a livegraph label over a SQLite value, never an unordered LiveGraph value replacing the ring), and `explain --json` carries `walk` on this route too (RG-REQ-012-L06, reported)",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-daemon-runtime --lib focus_cycles_delegated → 'test result: ok. 2 passed; 0 failed'; both delegation tests present: explain and orient path-focus cycle items carry the SQLite walk on a green LiveGraph, explain's cycles leaf labelled sqlite + LiveGraphRenderUnsupported.",
+        "supportingEvidence": [
+          "/tmp/ech-c14.txt: test result: ok. 2 passed; 0 failed; 776 filtered out",
+          "named present: explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label, orient_path_focus_cycles_delegated_carry_walk",
+          "printed: ECH-C14 PASS (RG-REQ-012-L06 walk on the LiveGraph route via delegation)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C15",
+      "obligationIds": [
+        "P-ECH-05",
+        "RG-REQ-003-L05",
+        "RG-REQ-005-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/ech-c15.txt | grep -E '^test result: ok\\. [0-9]+ passed; 0 failed' && ! grep -E '^test .* FAILED$' /tmp/ech-c15.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE daemon-runtime unit suite (about 780 tests; the operator gate suite's unit for this crate, which the third admission's acceptance boundary omitted); run to completion in the foreground"
+      },
+      "expected": "exit 0: every daemon-runtime unit test passes — no behavior change anywhere else in the daemon (the (b) leaves, module-summary, callers/callees, imports, complexity serves remain as before; P-ECH-05)",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "The whole repo-graph-daemon-runtime --lib unit suite passes: 'test result: ok. 777 passed; 0 failed; 1 ignored'; no FAILED lines. The one served-route test the fourth admission failed now passes under its renamed/inverted identity.",
+        "supportingEvidence": [
+          "/tmp/ech-c15.txt: test result: ok. 777 passed; 0 failed; 1 ignored; finished in 36.33s",
+          "no '^test .* FAILED$' lines",
+          "printed: ECH-C15 PASS (P-ECH-05: every other M-2 / (b) leaf unchanged)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C16",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "! grep -n 'fn serve_cycles(' rust/crates/daemon-runtime/src/explain_lg_serve.rs && ! grep -n 'fn cycle_involves(' rust/crates/daemon-runtime/src/explain_lg_serve.rs && ! grep -n 'cycles_qualified_filtered' rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs && grep -n 'fn cycles_leaf_label' rust/crates/daemon-runtime/src/explain_lg_serve.rs && grep -n 'LiveGraphRenderUnsupported' rust/crates/daemon-runtime/src/explain_lg_serve.rs && ! grep -n 'response shape (reserved)' rust/crates/repo-graph-coherence/src/lib.rs && ! grep -n 'find_cycles_involving_\\*' rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "the candidate sources: explain_lg_serve.rs (the LiveGraph focus-cycle rebuild and `cycle_involves` removed with their only callers; the leaf-label function named `cycles_leaf_label`), explain_lg_serve_tests.rs (the `cycle_involves` unit tests removed), orient_serve/storage_port_impl.rs (`cycles_qualified_filtered` removed), orient_serve/mod.rs (`M2LeafServe::cycle_values` doc names the repo-level read only), repo-graph-coherence/src/lib.rs (`LiveGraphRenderUnsupported` documented for this use, no longer '(reserved)')"
+      },
+      "expected": "exit 0: no dead LiveGraph focus-cycle rebuild remains; every name matches what the code does (a function that only labels is not called serve; a witness field's comment does not claim reads it no longer gates; a reused reason is not marked reserved). The three removal greps are scoped to each function's OWN source file (explain_lg_serve.rs for serve_cycles/cycle_involves, storage_port_impl.rs for cycles_qualified_filtered) with a literal open-paren where needed, NOT a recursive rust/crates/daemon-runtime/src scan — otherwise the negated grep can never exit 0, because the substring 'fn serve_cycles' also matches the FROZEN fn serve_cycles_fastpath / fn serve_cycles_sqlite in livegraph_feed.rs (untouched by this slice) and the generated *_MAP.md sidecars still name the removed functions. So decidability holds: the negated greps pass only when the three functions are gone from their own files; that cycle_involves' unit tests were removed with it is enforced by compilation (ECH-C13/C14/C15 would fail to build otherwise).",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "No LiveGraph focus-cycle rebuild remains: `fn serve_cycles(`/`fn cycle_involves(` absent from explain_lg_serve.rs; `cycles_qualified_filtered` absent from storage_port_impl.rs; `find_cycles_involving_*` absent from orient_serve/mod.rs; `fn cycles_leaf_label` and `LiveGraphRenderUnsupported` present in explain_lg_serve.rs; '(reserved)' text gone from coherence lib.rs.",
+        "supportingEvidence": [
+          "negated greps (scoped to each function's own file) all empty; positive greps printed: '151:pub(crate) fn cycles_leaf_label(...)' and LiveGraphRenderUnsupported at lines 17/146/155",
+          "cycle_involves' unit tests removed with it (compilation of ECH-C13/C14/C15 would otherwise fail)",
+          "printed: ECH-C16 PASS (names match behaviour — a label-only fn is not called serve)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C17",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-002-L01",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "(cd rust && cargo test -p repo-graph-daemon-runtime --lib explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green 2>&1 | tee /tmp/ech-c17.txt | grep -E '^test result: ok\\. 1 passed; 0 failed') && ! grep -n 'fn explain_cycles_serves_live_cycles_from_livegraph(' rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "the served-route e2e test in rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs (pulled in via #[path] from explain_coherence_tests.rs): the OLD identity `explain_cycles_serves_live_cycles_from_livegraph` (asserted the leaf REBUILT from module_import_cycles, provenance {livegraph}, no fallback reason — the behaviour D-ECH-002 reverses) is RENAMED to `explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green` with inverted assertions: with the cyclic LiveGraph resident and the cycles cert GREEN, the served EXPLAIN_CYCLES items are the SQLite primary's (the fixture's BOGUS_SQLITE_MODULE member PRESENT — proving no LiveGraph rebuild), `provenance.source == {Source::Sqlite}` and `provenance.fallback_reason == Some(CoherenceFallbackReason::LiveGraphRenderUnsupported)`; the section comment above it names A-1"
+      },
+      "expected": "exit 0: the served route keeps the SQLite primary (with whatever walk it carries) and labels the leaf honestly under a green LiveGraph; the old identity no longer exists (a test named for the reversed behaviour would be a false name)",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "The served-route test renamed to explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green passes (1 passed); the old identity fn explain_cycles_serves_live_cycles_from_livegraph is gone. Inverted assertions: BOGUS_SQLITE_MODULE survives; provenance.source == {Sqlite}; fallback_reason == Some(LiveGraphRenderUnsupported).",
+        "supportingEvidence": [
+          "/tmp/ech-c17.txt: test result: ok. 1 passed; 0 failed; 777 filtered out (re-run post-fmt)",
+          "grep for 'fn explain_cycles_serves_live_cycles_from_livegraph(' → absent",
+          "module docstring corrected to state cycles is the exception (walk-bearing SQLite primary served); section comment at :333 rewritten to A-1/A-2 (D-ECH-002)"
+        ]
+      }
+    },
+    {
+      "checkId": "ECH-C18",
+      "obligationIds": [
+        "P-ECH-06",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "(cd rust && cargo test -p repo-graph-storage --lib focus_cycle_reads_cancellable_return_cancelled_at_the_checkpoint_before_labeling 2>&1 | tee /tmp/ech-c18.txt | grep -E '^test result: ok\\. 1 passed; 0 failed') && test \"$(grep -c 'cancelled (client disconnected before cycle labeling)' rust/crates/storage/src/agent_impl.rs)\" = 2",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "A-2 (ECH-IR-002): in `find_cycles_involving_path_cancellable` and `find_cycles_involving_module_cancellable` (rust/crates/storage/src/agent_impl.rs) one cooperative checkpoint `cancel()` immediately BEFORE `label_focus_cycles`, returning `AgentStorageError::new(<method>, \"cancelled (client disconnected before cycle labeling)\")` on Break — the read's LAST checkpoint; the NEW storage test `focus_cycle_reads_cancellable_return_cancelled_at_the_checkpoint_before_labeling` in rust/crates/storage/src/agent_cycle_labeling.rs (beside the two ECH-C03 tests, same ring fixture): (1) run each cancellable focus read with a COUNTING closure that always returns Continue and record N = the number of checkpoint calls; (2) run it again with a closure that returns Break exactly on call N (the last checkpoint, i.e. the one before labeling) and assert `Err` whose message contains `before cycle labeling` and that no labelled cycles were returned; (3) run with Break on call N+1 (never reached) and assert the same labelled result as the Continue run"
+      },
+      "expected": "exit 0: a client that disconnects after the filter loop abandons the read at the checkpoint before labeling (the cancellable-read contract of DAEMON-CANCEL-3 remains true on the new labeling path); both cancellable focus reads carry the checkpoint (exactly two occurrences of the message literal). Boundedness of the un-checkpointed labeling that follows a Continue: it is the same `label_cycles` the repo-level `find_module_cycles_cancellable` already runs un-checkpointed after ITS Tarjan (COHERENCE-3, ratified), over a SUBSET of that read's cycles — per-cycle checkpoints inside labeling for both reads are CANCEL-LABELING-1 (§7), not this slice",
+      "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "New storage test focus_cycle_reads_cancellable_return_cancelled_at_the_checkpoint_before_labeling passes (1 passed): for both cancellable focus reads, an always-Continue run records N checkpoints; Break at call N (before labeling) returns Err containing 'before cycle labeling' with no cycles; Break at N+1 returns the same labelled result. Exactly two occurrences of the literal in agent_impl.rs.",
+        "supportingEvidence": [
+          "/tmp/ech-c18.txt: test result: ok. 1 passed; 0 failed; 681 filtered out (re-run post-fmt)",
+          "grep -c 'cancelled (client disconnected before cycle labeling)' rust/crates/storage/src/agent_impl.rs == 2 (one per cancellable focus read)",
+          "the checkpoint is the read's final checkpoint before the un-checkpointed labeling (same shape as the repo-level find_module_cycles_cancellable; P-ECH-06); per-cycle labeling checkpoints deferred to CANCEL-LABELING-1"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-004-L07",
+        "P-ECH-06"
+      ],
+      "summary": "A-1: the four focus-cycle reads (find_cycles_involving_{module,path}{,_cancellable}) route their FILTERED cycles through agent_cycle_labeling::label_focus_cycles so each AgentCycle carries the verified walk + type_only (one derivation with orient/cycles). A-2: one cooperative cancel() checkpoint immediately before label_focus_cycles in both cancellable reads (the read's final checkpoint), message 'cancelled (client disconnected before cycle labeling)'."
+    },
+    {
+      "path": "rust/crates/storage/src/agent_cycle_labeling.rs",
+      "obligationIds": [
+        "RG-REQ-004-L07",
+        "RG-REQ-003-L01",
+        "P-ECH-06"
+      ],
+      "summary": "A-1: label_focus_cycles entry (ModuleNaming::Qualified) sharing the walk/type-only kernels with label_module_cycles. Tests: the two ECH-C03 focus-walk equality tests and the ECH-C18 cancellation regression test on the three_module_ring fixture (this is the optional 18th candidate path; it IS touched)."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-004-L07"
+      ],
+      "summary": "render_cycles draws '->' only from a validated walk (ring in walk order + '(+ N more members)'), the unordered form when the walk is absent/null/empty, an unreadable line for a malformed walk or a non-string member; K = length."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01"
+      ],
+      "summary": "The seven explain_cycles_* render tests (one per §2.2 evidence-taxonomy row) plus the presentation regression coverage exercised by ECH-C02."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_guidance.rs",
+      "obligationIds": [
+        "RG-REQ-003-L05",
+        "P-ECH-01"
+      ],
+      "summary": "format_cycle_anchor now calls the shared strict walk validation in cycle_walk_display; orient's chain text is unchanged byte-for-byte (proven by ECH-C02 and ECH-C09)."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/cycle_walk_display.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-003-L05"
+      ],
+      "summary": "NEW: one shared strict walk-validation function (non-string ⇒ reject, empty string ⇒ reject, < 2 members ⇒ reject) used by orient's chain formatter and explain's ring renderer — the honesty rule 'a walk is a ring of ≥ 2 non-empty names or it is drift' in one place."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/mod.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01"
+      ],
+      "summary": "Registers the new cycle_walk_display presentation submodule."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01"
+      ],
+      "summary": "Comment-only: the stale 'None on this focus-scoped serve' notes are corrected to reflect that the focus reads now carry the walk (naming/comment accuracy)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs",
+      "obligationIds": [
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "NEW integration test: on an isolated 3-module import ring, explain symbol-focus and path-focus each return an EXPLAIN_CYCLES walk equal to orient's for the same cycle (SQLite route)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_lg_serve.rs",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01"
+      ],
+      "summary": "A-1: serve_cycles (and cycle_involves) replaced by cycles_leaf_label — returns SqliteFallback{LiveGraphRenderUnsupported} on a green member-set cert, else the cert-ladder reason; no LiveGraph rebuild (the route cannot reproduce the walk, D-ECH-002)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_lg_serve_tests.rs",
+      "obligationIds": [
+        "P-ECH-02"
+      ],
+      "summary": "A-1: the cycle_involves unit tests are removed with their only caller."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence.rs",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01"
+      ],
+      "summary": "A-1: EXPLAIN_CYCLES sets decisions.cycles = Some(cycles_leaf_label(...)) and adds NO replacement — the value stays the port-delegated walk-bearing SQLite primary."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+      "obligationIds": [
+        "P-ECH-02",
+        "P-ECH-05"
+      ],
+      "summary": "A-1: find_cycles_involving_{path,module}{,_cancellable} delegate to self.inner unconditionally; cycles_qualified_filtered removed; the repo-level find_module_cycles M-2 serve and cycles_repo_shape are unchanged."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+      "obligationIds": [
+        "P-ECH-05"
+      ],
+      "summary": "A-1: M2LeafServe::cycle_values and the leaf-list doc name the repo-level find_module_cycles read only (the literal find_cycles_involving_* no longer appears)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "A-1: the delegation test explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label; the two path-focus parity certificates' doc comments corrected (the cycles item is SQLite-delegated and carries the walk)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01"
+      ],
+      "summary": "A-1: the delegation test orient_path_focus_cycles_delegated_carry_walk."
+    },
+    {
+      "path": "rust/crates/repo-graph-coherence/src/lib.rs",
+      "obligationIds": [
+        "P-ECH-02"
+      ],
+      "summary": "A-1: CoherenceFallbackReason::LiveGraphRenderUnsupported's doc comment names this use (explain/orient focus cycles: value carries a verified walk the LiveGraph route cannot compute) instead of '(reserved)'."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+      "obligationIds": [
+        "P-ECH-02",
+        "RG-REQ-003-L01",
+        "RG-REQ-002-L01"
+      ],
+      "summary": "A-2: the served-route test renamed explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green with inverted assertions (BOGUS_SQLITE_MODULE survives; provenance.source == {Sqlite}; fallback_reason == Some(LiveGraphRenderUnsupported)); module docstring + section comment corrected so the file's names match the A-1 behaviour."
+    }
+  ],
+  "completedAt": "2026-09-19T15:51:58.241Z",
+  "limitations": [
+    "type_only is not present in the leveldb --json EXPLAIN_CYCLES item (ECH-C08) because leveldb is C++ — the TS-only type-only labeling legitimately does not apply; the check requires only that walk is carried and reports whether type_only rides along.",
+    "The LiveGraph focus-cycle route has no corpus proof (it is a dev-only scip-typescript path); its delegation/labelling is covered by the fixture-based seam tests ECH-C13/C14/C17 only, as the allocation specifies.",
+    "Per-cycle cooperative checkpoints INSIDE label_cycles are out of scope (CANCEL-LABELING-1 follow-up); the labeling after a Continue stays un-checkpointed exactly as the repo-level find_module_cycles_cancellable already ships (P-ECH-06).",
+    "explain wall-time is REPORTED (vcmi before 1.26s / after 1.27s), never gated — RG-REQ-011-L11 withdrew the latency floor."
+  ],
+  "report": "All 18 checks (ECH-C01..C18) PASS. The preserved fourth-admission candidate (accepted third-admission bytes + A-1) was applied via candidate-5-a1.patch + the two new files; the only new work this admission is amendment A-2: (e) the served-route test explain_cycles_serves_live_cycles_from_livegraph was renamed to explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green with inverted assertions (the SQLite primary survives, provenance {sqlite} + LiveGraphRenderUnsupported), which turns the fourth admission's single ECH-C15 failure green; (f) one cooperative cancel checkpoint was added immediately before label_focus_cycles in both cancellable focus reads, with a storage regression test that measures the checkpoint count and proves the break-at-N behaviour, no cycles returned, and identity on break-at-N+1. cargo fmt was applied to two files whose A-2 edits rustfmt reflowed (whitespace only). Registry sha256 is identical before and after all proofs (4762fd948a05b208…); every proof ran isolated under /private/tmp/EXPLAIN-CYCLES-HONEST-1-* with stdio and auto passes off; all throwaway roots, the before-worktree, and daemons were removed; the m-r2-baseline-worktree is unrelated and untouched.\n\nOutward outcome (code-under-analysis): explain leveldb::DBImpl::Recover previously drew the fabricated member-order chain 'db -> helpers/memenv -> table -> util'; it now draws the SAME verified ring `rmap cycles` draws — 'Cycle 1 (4 modules): util -> helpers/memenv -> util' with '(+ 2 more members in this cycle)'. That ring is real: util/testutil.h:10 `#include \"helpers/memenv/memenv.h\"` (util → helpers/memenv) and helpers/memenv/memenv.cc:17 `#include \"util/mutexlock.h\"` + helpers/memenv/memenv_test.cc:14 `#include \"util/testutil.h\"` (helpers/memenv → util). explain CGHeroInstance on vcmi previously drew a 55-arrow chain beginning 'AI/BattleAI -> AI/EmptyAI'; `grep -rn EmptyAI AI/BattleAI/` is empty, so that arrow never existed — it now renders 'members (unordered): AI/BattleAI, AI/EmptyAI, …' with zero arrows, identical to `rmap cycles`. Every other explain section is byte-identical (e.g. leveldb Callers (1) '- Open (db)  db/db_impl.cc:1503' unchanged), and `cycles`/`orient` are byte-identical between the base binary and the candidate on one index for both corpora. explain --json now additively carries the verified walk (['util','helpers/memenv']) on the SQLite serve; the human ring is drawn from that field. Cost is negligible (+0.01s on vcmi). All changes stay within the 18 candidate paths (16 modified + 2 new); no non-rust tracked changes; not committed."
+}

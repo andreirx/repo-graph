@@ -36,6 +36,9 @@
 
 pub mod check;
 pub mod cycles;
+// EXPLAIN-CYCLES-HONEST-1 (§2.1.3): the ONE strict cycle-`walk` validation, shared by
+// `orient_guidance`'s headline chain and `explain_sections`' Import-cycles ring.
+pub(crate) mod cycle_walk_display;
 pub mod deps_list;
 // DEPS-ATTRIB-2 §2.4: secondary-ecosystem view. `pub(crate)`, not `pub` (review-2 fix):
 // the packet freezes new PUBLIC Rust APIs beyond the additive JSON field; this is a

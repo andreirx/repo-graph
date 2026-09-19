@@ -573,7 +573,11 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     length: c.length,
                     modules: c.modules,
                     type_only: c.type_only,
-                    // COHERENCE-3: carried through (`None` on this focus-scoped serve).
+                    // EXPLAIN-CYCLES-HONEST-1 (§2.1): the focus-scoped SQLite read carries the REAL
+                    // directed walk (via `label_focus_cycles`); the renderer draws the verified ring
+                    // from it. `None` only when no walk closes (truncated/no edges). A-1 (D-ECH-002):
+                    // the M-2 LiveGraph route DELEGATES the focus cycle read to SQLite, so the walk is
+                    // carried on every route (never a route-dependent unordered value).
                     walk: c.walk,
                 })
                 .collect();
@@ -894,7 +898,10 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 length: c.length,
                 modules: c.modules,
                 type_only: c.type_only,
-                // COHERENCE-3: carried through (`None` on this focus-scoped serve).
+                // EXPLAIN-CYCLES-HONEST-1 (§2.1): the path-scoped SQLite read carries the REAL directed
+                // walk (via `label_focus_cycles`); the renderer draws the verified ring from it. `None`
+                // only when no walk closes (truncated/no edges). A-1 (D-ECH-002): the M-2 LiveGraph
+                // route DELEGATES the focus cycle read to SQLite, so the walk is carried on every route.
                 walk: c.walk,
             })
             .collect();

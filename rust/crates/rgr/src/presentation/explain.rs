@@ -724,6 +724,188 @@ mod tests {
         assert!(out.contains("handleLogin (src/controllers)"));
     }
 
+    // ── EXPLAIN-CYCLES-HONEST-1 (§2.2 evidence taxonomy: one test per input shape) ──
+
+    /// Build a resolved (file-focus) response carrying ONE `EXPLAIN_CYCLES` signal whose evidence
+    /// `items` are the given JSON array — the shape the daemon serializes from `CycleEvidence`.
+    fn cycles_response(count: u64, items: serde_json::Value) -> ExplainResponse {
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CYCLES".to_string(),
+            summary: format!("{count} import cycle(s)."),
+            evidence: Some(serde_json::json!({ "count": count, "items": items })),
+        })];
+        r
+    }
+
+    #[test]
+    fn explain_cycles_absent_walk_renders_unordered_no_arrows() {
+        // No `walk` (LiveGraph route / older daemon) => the honest unordered listing, ZERO arrows.
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 3, "modules": ["src/a", "src/b", "src/c"] }]),
+        );
+        let out = r.render_human(false);
+        assert!(out.contains("Import cycles (1)"), "{out}");
+        assert!(
+            out.contains("Cycle 1 (3 modules): members (unordered): src/a, src/b, src/c"),
+            "unordered listing with the full member set:\n{out}"
+        );
+        assert!(
+            !out.contains(" -> "),
+            "NO arrows without a verified walk:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_cycles_valid_walk_renders_ring_from_walk_not_member_order() {
+        // `modules` (the sorted member SET) is [a, b, c]; the REAL walk is a -> c -> b. The ring
+        // must follow the WALK, never the sorted member order (which would fabricate a -> b -> c).
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 3, "modules": ["a", "b", "c"], "walk": ["a", "c", "b"] }]),
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Cycle 1 (3 modules): a -> c -> b -> a"),
+            "ring drawn in WALK order, closing on its first member:\n{out}"
+        );
+        assert!(
+            !out.contains("a -> b -> c"),
+            "the fabricated member-order ring must NOT appear:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_cycles_offwalk_members_reported_as_plus_n_more() {
+        // length 4, the walk visits {a, b} => 2 members off the displayed loop.
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 4, "modules": ["a", "b", "c", "d"], "walk": ["a", "b"] }]),
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Cycle 1 (4 modules): a -> b -> a"),
+            "ring:\n{out}"
+        );
+        assert!(
+            out.contains("(+ 2 more members in this cycle)"),
+            "off-walk members reported as a count:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_cycles_malformed_walk_renders_unreadable_not_ring() {
+        // A PRESENT walk with a non-string element is wire/schema drift: the unknown is made
+        // VISIBLE, never a fabricated ring.
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 2, "modules": ["a", "b"], "walk": ["a", 42] }]),
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("cycle walk unreadable on this snapshot"),
+            "malformed walk => visible unknown:\n{out}"
+        );
+        assert!(
+            !out.contains(" -> "),
+            "NO ring drawn from a malformed walk:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_cycles_empty_walk_renders_unordered() {
+        // An empty `walk` array is legitimate absence (no walk could be formed) => unordered form.
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 2, "modules": ["a", "b"], "walk": [] }]),
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Cycle 1 (2 modules): members (unordered): a, b"),
+            "empty walk => unordered listing:\n{out}"
+        );
+        assert!(!out.contains(" -> "), "empty walk => no arrows:\n{out}");
+    }
+
+    #[test]
+    fn explain_cycles_non_string_module_renders_unreadable_not_dropped() {
+        // No walk => unordered path; a non-string member must surface as unreadable, NEVER be
+        // silently dropped (the prior `filter_map(as_str)` shortened the list on drift).
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 3, "modules": ["a", 7, "c"] }]),
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("cycle members unreadable on this snapshot"),
+            "non-string member => visible unknown:\n{out}"
+        );
+        assert!(
+            !out.contains("members (unordered): a, c"),
+            "never a silently shortened member list:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_cycles_unordered_list_caps_at_eight_with_plus_k_more() {
+        // 11 members, no walk => 8 shown + "(+ 3 more)", byte-mirroring `cycles`' render_unordered.
+        let mods: Vec<String> = (0..11).map(|i| format!("m{i:02}")).collect();
+        let r = cycles_response(1, serde_json::json!([{ "length": 11, "modules": mods }]));
+        let out = r.render_human(false);
+        assert!(
+            out.contains("members (unordered): m00, m01, m02, m03, m04, m05, m06, m07 (+ 3 more)"),
+            "cap at 8 with the remainder count:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_cycles_non_array_walk_renders_unreadable_not_unordered() {
+        // ECH-IR-001: a PRESENT `walk` that is not an array (here a scalar string) is wire/schema
+        // drift. It must surface as the visible unreadable state, NEVER take the unordered fallback
+        // (which would hide the drift and read like an honest "no walk").
+        let r = cycles_response(
+            1,
+            serde_json::json!([{ "length": 2, "modules": ["a", "b"], "walk": "a -> b" }]),
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("cycle walk unreadable on this snapshot"),
+            "non-array walk => visible unknown:\n{out}"
+        );
+        assert!(
+            !out.contains("members (unordered)"),
+            "a present non-array walk must NOT silently render the unordered fallback:\n{out}"
+        );
+        assert!(!out.contains(" -> "), "NO ring drawn from drift:\n{out}");
+    }
+
+    #[test]
+    fn explain_cycles_absent_or_non_numeric_length_renders_size_unreadable_never_module_count() {
+        // ECH-IR-001: K comes from the `length` fact ALONE. An absent length must render a NAMED
+        // unreadable size, never a count synthesized from `modules.len()` (here 3 members).
+        let absent = cycles_response(1, serde_json::json!([{ "modules": ["a", "b", "c"] }]));
+        let out = absent.render_human(false);
+        assert!(
+            out.contains("Cycle 1 (size unreadable):"),
+            "absent length => named unreadable size:\n{out}"
+        );
+        assert!(
+            !out.contains("(3 modules)"),
+            "the member count must NOT be presented as the cycle size:\n{out}"
+        );
+        // A non-numeric length (a string) is likewise unreadable, never coerced.
+        let non_numeric = cycles_response(
+            1,
+            serde_json::json!([{ "length": "three", "modules": ["a", "b", "c"] }]),
+        );
+        let out2 = non_numeric.render_human(false);
+        assert!(
+            out2.contains("Cycle 1 (size unreadable):"),
+            "non-numeric length => named unreadable size:\n{out2}"
+        );
+    }
+
     // ── ANCHORS-EVERYWHERE-1 (§4 unit-per-surface: present line renders `path:line`; absent renders nothing) ──
 
     /// Build a resolved SYMBOL-target response whose EXPLAIN_IDENTITY evidence optionally carries

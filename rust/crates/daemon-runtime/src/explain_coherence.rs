@@ -14,10 +14,10 @@
 //!   - **EXPLAIN_IMPORTS** — `serve_imports` rebuilds the `target_file` list from `live_import_view`, gated by
 //!     the repo-wide import no-loss cert ([`explain_imports_outcome`]) + the per-file residency precondition →
 //!     `{livegraph}`; else a labelled SQLite fallback.
-//!   - **EXPLAIN_CYCLES** — `serve_cycles` rebuilds the filtered cycle list from `module_import_cycles`, gated
-//!     by the repo-wide module-cycle field-exact cert (`orient_cycles_outcome`) → `{livegraph}`; a live filter
-//!     that cannot reproduce the SQLite-rendered subset (the Layer-1/2 vs LiveGraph module-identity gap) falls
-//!     back to `{sqlite}` + a divergence reason (NEVER a false LiveGraph value).
+//!   - **EXPLAIN_CYCLES** — the VALUE is the SQLite focus-cycle serve the M-2 port delegated (it carries a
+//!     VERIFIED walk the LiveGraph route cannot reproduce — D-ECH-002 / EXPLAIN-CYCLES-HONEST-1 A-1);
+//!     `explain_lg_serve::cycles_leaf_label` only supplies the leaf LABEL (a labelled `{sqlite}` fallback with
+//!     `LiveGraphRenderUnsupported` on the green cert, else the cert-ladder reason). NO value replacement.
 //!   - **EXPLAIN_CALLERS / EXPLAIN_CALLEES** — `serve_callers`/`serve_callees` REUSE orient's
 //!     `orient_callers_outcome`/`orient_callees_outcome` per-symbol no-loss KEY-SET compare: the LiveGraph
 //!     genuinely supplies/corroborates the caller/callee key set, while the rendered per-item `name` + owning
@@ -184,24 +184,17 @@ pub(crate) fn build_explain_envelope(
         }
     }
 
-    // EXPLAIN_CYCLES (symbol module-context / path focus): rebuild from `module_import_cycles` filtered to the
-    // target module / path, under the field-exact module-cycle no-loss cert.
-    if present.cycles {
-        if let (Some((target, is_path)), Some(cycles_sig)) = (
-            cycles_target(&result.focus, identity_module.as_deref()),
-            find_signal(&result.signals, SignalCode::ExplainCycles),
-        ) {
-            let (replacement, label) = explain_lg_serve::serve_cycles(
-                repo_state,
-                &snapshot_uid,
-                &target,
-                is_path,
-                cycles_sig,
-                budget_large,
-            );
-            decisions.cycles = label;
-            replacements.extend(replacement);
-        }
+    // EXPLAIN_CYCLES (symbol module-context / path focus): the VALUE is the SQLite focus-cycle serve the
+    // decorator's port delegated (it carries the VERIFIED walk); the LiveGraph route cannot reproduce that
+    // walk, so we only LABEL the leaf here and add NO replacement (D-ECH-002 / EXPLAIN-CYCLES-HONEST-1 A-1).
+    if present.cycles
+        && cycles_target(&result.focus, identity_module.as_deref()).is_some()
+        && find_signal(&result.signals, SignalCode::ExplainCycles).is_some()
+    {
+        decisions.cycles = Some(explain_lg_serve::cycles_leaf_label(
+            repo_state,
+            &snapshot_uid,
+        ));
     }
 
     // Swap the live-served VALUES into the bare result (by code) before the pure conversion labels them.

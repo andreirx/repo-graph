@@ -71,6 +71,93 @@ fn render_callgraph_item(item: &serde_json::Value) -> String {
     row
 }
 
+/// EXPLAIN-CYCLES-HONEST-1 (§2.1.2): the body of ONE Import-cycles row — `(ring_or_members,
+/// optional off-walk line)`. Draws a `->` ring ONLY over a walk the shared
+/// [`crate::presentation::cycle_walk_display::validate_walk`] accepts (the SAME ring `cycles`/`orient`
+/// draw); with no/empty walk falls back to the honest unordered member listing; with a
+/// present-but-malformed walk renders the unreadable line — NEVER a fabricated ring (RC-4).
+///
+/// The PRESENCE and TYPE of `walk` are made explicit (ECH-IR-001, STANDING HONESTY RULE #1): only an
+/// ABSENT key, a JSON `null`, or an EMPTY array is the honest "no ordered walk" state (LiveGraph
+/// route, older daemon, truncated edge set) → the unordered member listing. A present `walk` that is
+/// any OTHER JSON type (string / number / bool / object) is wire/schema DRIFT — the unknown is made
+/// VISIBLE with the unreadable line, never silently normalized into the unordered fallback.
+///
+/// `length` is `Some(k)` only when the cycle's `length` fact is a readable number; off-walk members
+/// can be COUNTED (`+ N more`) only then — an unreadable length yields no fabricated count.
+fn cycle_body(item: &serde_json::Value, length: Option<u64>) -> (String, Option<String>) {
+    let unreadable_walk = || {
+        (
+            "cycle walk unreadable on this snapshot — run `rmap cycles`".to_string(),
+            None,
+        )
+    };
+    match item.get("walk") {
+        // Absent or JSON null = legitimate absence => the honest unordered listing, ZERO arrows.
+        None | Some(serde_json::Value::Null) => (unordered_members(item), None),
+        Some(serde_json::Value::Array(walk)) => {
+            if walk.is_empty() {
+                // An empty array is legitimate absence, the same as null.
+                (unordered_members(item), None)
+            } else {
+                match crate::presentation::cycle_walk_display::validate_walk(walk) {
+                    Some(names) => {
+                        // The ring closes on its first member; off-walk members (the SCC is larger
+                        // than the displayed loop) are reported as a count, exactly as `cycles` does
+                        // — but ONLY when `length` is a readable fact (never synthesized).
+                        let ring = format!("{} -> {}", names.join(" -> "), names[0]);
+                        let offwalk = length.and_then(|k| {
+                            let more = (k as usize).saturating_sub(names.len());
+                            (more > 0).then(|| {
+                                format!(
+                                    "    (+ {more} more member{} in this cycle)\n",
+                                    if more == 1 { "" } else { "s" }
+                                )
+                            })
+                        });
+                        (ring, offwalk)
+                    }
+                    // A present array that is malformed (non-string / empty-string / <2 members) =
+                    // drift: make the unknown VISIBLE, never masquerade as a clean fallback or ring.
+                    None => unreadable_walk(),
+                }
+            }
+        }
+        // Present but NOT an array (string / number / bool / object) = drift: unreadable, never the
+        // silent unordered fallback (ECH-IR-001).
+        Some(_) => unreadable_walk(),
+    }
+}
+
+/// The no-arrows fallback body — `members (unordered): A, B, C` (capped at 8 with `(+ K more)`),
+/// byte-mirroring `cycles::walk::render_unordered` so the two surfaces list the same members for one
+/// cycle. A non-string member is DRIFT — surfaced, never silently dropped (the prior
+/// `filter_map(as_str)` dropped non-strings, the honesty defect this replaces).
+fn unordered_members(item: &serde_json::Value) -> String {
+    const SHOWN: usize = 8;
+    let Some(modules) = item.get("modules").and_then(|v| v.as_array()) else {
+        return "cycle members unavailable on this snapshot — run `rmap cycles`".to_string();
+    };
+    let mut names: Vec<&str> = Vec::with_capacity(modules.len());
+    for m in modules {
+        match m.as_str() {
+            Some(s) => names.push(s),
+            None => {
+                return "cycle members unreadable on this snapshot — run `rmap cycles`".to_string()
+            }
+        }
+    }
+    if names.len() <= SHOWN {
+        format!("members (unordered): {}", names.join(", "))
+    } else {
+        let more = names.len() - SHOWN;
+        format!(
+            "members (unordered): {} (+ {more} more)",
+            names[..SHOWN].join(", ")
+        )
+    }
+}
+
 impl ExplainResponse {
     /// Render a single signal's section. `full` lifts the per-section display cap (see the module doc):
     /// it is the `--full` flag, threaded so the human render is uncapped for grep.
@@ -223,6 +310,14 @@ impl ExplainResponse {
         out
     }
 
+    /// EXPLAIN-CYCLES-HONEST-1 (§2.1.2): render the Import-cycles block. An arrow (`->`) is drawn
+    /// ONLY over a VERIFIED walk — the SAME `walk` the SQLite serving computation precomputed via the
+    /// shared `cycle_walk` kernel, the SAME ring `cycles` and `orient` draw. With no walk (the
+    /// LiveGraph route, an older daemon, or a truncated edge set) the honest `members (unordered)`
+    /// form renders with ZERO arrows; a present-but-malformed walk makes the unknown VISIBLE. This
+    /// replaces the RC-4 defect where the member SET (lexically sorted by
+    /// `ordering::canonicalize_cycles`) was joined with `->` as if it were a directed ring — arrows
+    /// over edges the import graph does not hold.
     fn render_cycles(&self, evidence: &serde_json::Value, full: bool) -> Option<String> {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
         if count == 0 {
@@ -234,13 +329,25 @@ impl ExplainResponse {
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
             let shown = if full { items.len() } else { 5 };
             for (i, item) in items.iter().take(shown).enumerate() {
-                if let Some(modules) = item.get("modules").and_then(|v| v.as_array()) {
-                    let cycle_str: Vec<&str> = modules.iter().filter_map(|m| m.as_str()).collect();
-                    out.push_str(&bullet(&format!(
-                        "Cycle {}: {}",
-                        i + 1,
-                        cycle_str.join(" -> ")
-                    )));
+                // K = the cycle's full member count, taken from the `length` FACT ALONE — never
+                // synthesized from `modules.len()` (ECH-IR-001). A ring may visit only a closed loop
+                // within a larger SCC; the header states the full size, exactly as `cycles` does. An
+                // absent or non-numeric `length` renders a NAMED unreadable size, never a count the
+                // store does not carry (STANDING HONESTY RULE #1).
+                let length = item.get("length").and_then(|v| v.as_u64());
+                let size_label = match length {
+                    Some(k) => format!("{k} modules"),
+                    None => "size unreadable".to_string(),
+                };
+                let (body, offwalk) = cycle_body(item, length);
+                out.push_str(&bullet(&format!(
+                    "Cycle {} ({}): {}",
+                    i + 1,
+                    size_label,
+                    body
+                )));
+                if let Some(line) = offwalk {
+                    out.push_str(&line);
                 }
             }
             if items.len() > shown {

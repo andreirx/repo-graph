@@ -873,7 +873,73 @@ test, an unpinned citation, a false "zero include dirs" claim about leveldb, an 
 never edit a pinned input before applying a pending interpretation. FOLLOW-UPS: CPP-INCLUDE-SUFFIX-1 (RG-REQ-006-L11;
 gstreamer/vcmi/duckdb remainder); INCLUDE-NEAREST-ROOT-1 (candidate, needs a requirement refinement: whether an includer's own
 module root should win an ambiguity such as `NetSSL_OpenSSL/src/SecureServerSocket.cpp:15` between `NetSSL_OpenSSL/include/`
-and `NetSSL_Win/include/` — today counted, never bound). NEXT: Q4 EXPLAIN-CYCLES-HONEST-1.
+and `NetSSL_Win/include/` — today counted, never bound). NEXT: Q4 EXPLAIN-CYCLES-HONEST-1 (shipped below).
+
+Q4 EXPLAIN-CYCLES-HONEST-1 SHIPPED (2026-09-19; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+`explain`'s Import-cycles block draws arrows only over a verified walk — the SAME walk `cycles` and `orient` draw — and
+renders `members (unordered): …` with zero arrows where no walk exists. The fix is vertical: the two SQLite focus-scoped
+cycle reads (module and path, with their cancellable twins) route their filtered cycles through the labeling kernel
+`orient` already used (`label_focus_cycles` → `agent::cycle_walk`), so a verified walk and the type-only verdict reach
+explain; `render_cycles` draws the ring only from a validated carried walk (an unreadable line for a malformed walk or a
+non-string module, never a silently shorter list); the strict walk validation is one shared function
+(`presentation/cycle_walk_display.rs`) with two callers (orient's chain, explain's block); and the M-2 LiveGraph decorator DELEGATES the focus cycle reads to SQLite because it cannot
+reproduce the walk (amendment A-1 under D-ECH-002 — explain's cycles leaf labelled sqlite + LiveGraphRenderUnsupported; the
+five M-2 parity certificates unchanged; two delegation tests) so the ring renders on every route, TypeScript repos with a
+resident LiveGraph included. CODE UNDER ANALYSIS: leveldb — BEFORE `explain
+leveldb::DBImpl::Recover` printed `  - Cycle 1: db -> helpers/memenv -> table -> util` (the alphabetical 4-member SET drawn
+as a chain: three of those arrows are not import edges); AFTER it prints `  - Cycle 1 (4 modules): <ring>` +
+`    (+ N more members in this cycle)` where <ring> is exactly what `rmap cycles` prints on the same index (one build:
+`util -> helpers/memenv -> util`, whose two real edges are `util/testutil.h:10 #include "helpers/memenv/memenv.h"` and
+`helpers/memenv/memenv_test.cc:14 #include "util/testutil.h"`); `explain --json` now carries `walk: ["util","helpers/memenv"]`
+(absent before) — and on a TypeScript repo with a resident LiveGraph the same ring is served by delegation (the served-route
+test's fixture: the SQLite primary's members survive, provenance `{sqlite}` + `LiveGraphRenderUnsupported`). vcmi — BEFORE `explain CGHeroInstance` printed a 54-arrow chain starting
+`AI/BattleAI -> AI/EmptyAI` (`grep -rl EmptyAI AI/BattleAI/` finds nothing — the arrow was invented); AFTER it prints
+`  - Cycle 1 (55 modules): members (unordered): AI/BattleAI, AI/EmptyAI, AI/MMAI, … (+ 47 more)` — the same line `cycles`
+prints (that SCC's edge set exceeds CYCLE_EDGE_CAP, so no route can verify a ring). Every other explain section, and
+`cycles`/`orient`, byte-identical between the base binary and the candidate on the same index (leveldb, vcmi). explain
+wall time on vcmi 1.26 s → 1.27 s on the final proof (reported, never bounded — the latency floor is withdrawn). GATES: ALL-GATES-GREEN (scripts/repo-graph-gates.sh, exit 0: fmt, clippy --workspace --all-targets -D warnings, per-crate tests incl. daemon-runtime — the suite that failed the third admission's accepted candidate — consolidation witness, release bins, isolated dogfood; committed bytes = the accepted candidate, proven by diff digest). TALLY: 5
+admissions, 5 baselines and 9 document + 8 (13 builder runs) implementation cycles (INPUT-1 after 5 document findings F-ECH-001..005 — bootstrap allocation pinned, no numeric latency
+gate, exit statuses preserved in captures and cargo pipelines, self-contained checks; INPUT-2 after OC-1/OC-2/OC-3; INPUT-3 after OC-4), 1
+reviewer decision D-ECH-001 (operator resolution A: same-index cross-binary comparison) + 1 human decision D-ECH-002; implementation:
+cycle 1 session-limit stop; cycle 2 the builder BACKGROUNDED a proof and ended its turn — evidence recovered from
+its captures by interpretation; cycle 3 10/12 with two MANAGER oracle defects; second admission cycle 1 12/12 but the
+reviewer — which REPRODUCED four checks itself — found ECH-IR-001: a present non-array `walk` fell to the unordered form and
+an absent `length` was synthesized from `modules.len()` (the honesty rule for present-but-malformed evidence at the top-level
+type; fixed with two more taxonomy tests); second admission cycle 2 12/12 with 9 render tests but ECH-IR-002: my contract
+sentence said a corrupt `modules` entry renders "the same line" as a malformed walk while the code says `cycle members
+unreadable …` — the code named the right thing, the TEXT was corrected (OC-4 → INPUT-3); third admission cycle 1 12/12
+with ECH-IR-003 (the registry digest before the proofs was not captured — evidence only), cycle 2 12/12 accepted; INPUT-4 = amendment A-1 after the ACCEPTED third-admission candidate failed the operator suite's two M-2 parity
+certificates outside the allocation — a manager oracle defect: 'the LiveGraph serve is unchanged' without the certificates in
+the regression watch and without daemon-runtime --lib in the acceptance boundary; human decision D-ECH-002 reframed the two
+engines as two WITNESSES of the import graph — SQLite: every language, repo-graph's own resolution stages; LiveGraph: TypeScript
+via scip-typescript, AST imports + an in-memory tsconfig-alias/literal-dynamic overlay — direction 2 now, direction 1 deferred;
+PREP-4: terra cycle 1 refinement-required on two more manager defects (C12 text contradiction, D-ECH-002 unpinned) + the
+author's own repair of an unsatisfiable C16 grep, cycle 2 accepted 16/16; fourth admission cycle 1: the builder STOPPED correctly —
+ECH-C15 (the whole daemon-runtime unit suite A-1 added) failed ONE served-route test outside the allocation
+(`explain_cycles_serves_live_cycles_from_livegraph`, which asserted the behaviour A-1 reverses) and the terra review added a
+real preservation finding (the cancellable focus reads labelled after their last checkpoint); A-2 → INPUT-5 (served test
+renamed to its true identity with inverted assertions; one checkpoint before labeling + a storage test; P-ECH-06;
+CANCEL-LABELING-1 follow-up); PREP-5: cycle 1 accepted 16/16, zero findings; fifth admission: cycle 1 accepted 18/18 — the reviewer REPRODUCED five checks (C01, C14, C16, C17, C18) and judged the two abstractions earned (two concrete callers each)), 4 oracle/contract
+corrections (OC-1..OC-4) + 2 allocation amendments (A-1, A-2), 7 manager interpretations (six shape-only, one a prose-only builder
+turn recovered from its captures), 3 session-limit stops; reviewer findings: 6 document + 1 decision + 2 code + 1 evidence,
+all real; the reviewer reproduced checks itself in two cycles. DETERMINISM EVIDENCE (CYCLES-WALK-DETERMINISM-1, open; RG-REQ-001-L09): the ring
+a cycle renders among equally valid loops depends on the index build — vcmi rendered different rings for four SCCs on two
+builds of the same source; leveldb rendered `util -> helpers/memenv -> util` on one build and `db -> util -> helpers/memenv
+-> db` on another. LESSONS: never compare two independently built indexes byte-for-byte (serve both binaries on one index);
+a manager interpretation revalidates admission AND the candidate checkpoint (no pinned edit, no untracked file outside
+candidatePaths before applying); the foreground-only rule needs the packet to say "end your turn only with the evidence
+object". FOLLOW-UPS: CYCLES-WALK-DETERMINISM-1 (make the walk choice a deterministic function of the source — e.g. the
+lexicographically smallest ring); TS-ALIAS-RESOLUTION-1 (D-ECH-002 direction 2: a tsconfig `paths` alias resolution stage in
+the SQLite indexer — `FRAKTAG/packages/ui/src/components/ui/separator.tsx:4 import { cn } from "@/lib/utils"` is today
+`unresolved_edges` basis SpecifierMatchesProjectAlias, no module edge, on every route; 20 files under that alias; amodx
+renderer the same); IMPORTS-WITNESS-UNION-1 (direction 1, docs/TECH-DEBT.md: per-edge witness provenance for imports/cycles,
+revive CYCLE-FACTS-2(a), a compiler import witness; the repo-level orient headline's LiveGraph decoration asymmetry is its
+residual); catalog corrections CC-1 (RG-REQ-004-L02 'never persisted' vs create_module_edges) and CC-2 (stale 'alias/dynamic
+NOT captured'), CC-3 (explain-livegraph-1.md's LG-first cycles leaf superseded for the focus value) and CC-4 (no requirement
+line owns query cancellation on client disconnect — DAEMON-CANCEL-3 is a shipped contract without an L) queued in
+docs/assurance/RG-BOOTSTRAP/catalog-corrections.md for the next bootstrap revision; CANCEL-LABELING-1 (per-cycle checkpoints
+inside cycle labeling for the repo-level and focus cancellable reads — both label un-checkpointed after their Tarjan today).
+NEXT: Q5 DEPS-ECOSYSTEM-PARTITION-1 — no earlier than one hour after this closeout (human directive 2026-09-19).
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a

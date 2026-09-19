@@ -76,7 +76,12 @@ pub enum CoherenceFallbackReason {
     LiveGraphStale,
     /// Contributing languages are not exclusively `TypeScriptPrimary` (the migrated fastpath D4 scope).
     LiveGraphUnsupportedLanguage,
-    /// The LiveGraph answer could not be rendered into the response shape (reserved).
+    /// The LiveGraph answer cannot be rendered into the response shape the SQLite serve now
+    /// carries, so the proven SQLite value is served instead. Used for explain/orient FOCUS
+    /// cycles (D-ECH-002 / EXPLAIN-CYCLES-HONEST-1 A-1): the SQLite focus-cycle read carries a
+    /// VERIFIED walk (a real intra-SCC ring) that the LiveGraph's dirname-aggregated module edges
+    /// are not certified equal to, so the LiveGraph route cannot reproduce the walk and the focus
+    /// cycle leaf is served from SQLite and labelled with this reason.
     LiveGraphRenderUnsupported,
     /// A rendered node lacks display metadata, so the DEFAULT path falls back to SQLite.
     LiveGraphDisplayMetadataUnavailable,

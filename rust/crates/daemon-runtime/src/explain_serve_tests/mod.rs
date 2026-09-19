@@ -21,9 +21,10 @@
 //! - **HONEST BOUND (FILE / PATH)**: a RECORDING spy proves the M-2-LEAVES-OFF decorator (`new()` — the
 //!   pre-M-2 posture) still reads `compute_file_summary` / `list_symbols_in_file` (FILE) and
 //!   `compute_path_summary` / `list_files_in_path` (PATH) — nothing silently claimed `nodes`-free there.
-//!   EC-M2 NARROWED the green bound: through `with_leaf_serves` the summaries + cycle finders serve from
-//!   the LiveGraph (`m2_no_eager_read_explain_file_and_path_serve_from_livegraph`), and ONLY the per-item
-//!   LISTINGS remain SQLite (the DR-E3 listing half — still asserted).
+//!   EC-M2 NARROWED the green bound: through `with_leaf_serves` the summaries serve from the LiveGraph
+//!   (`m2_no_eager_read_explain_file_and_path_serve_from_livegraph`); the FOCUS cycle finders and the
+//!   per-item LISTINGS remain SQLite (the DR-E3 listing half + EXPLAIN-CYCLES-HONEST-1 A-1's delegated
+//!   focus cycles, D-ECH-002 — still asserted).
 //! - **RED FALLBACK**: on a RED bounded cert (callgraph diverges) the daemon runs the six (b) methods over
 //!   bare SQLite; the answer is the bare SQLite answer (no LiveGraph leak) and the callgraph leaf is
 //!   SQLite-LABELLED.
@@ -434,9 +435,10 @@ fn explain_red_epoch_pins_and_is_transparent() {
 }
 
 // ── EC-M2-LEAF-SERVE-1 (review-0 #3): explain FILE/PATH parity + no-eager-read through the
-//    M-2-enabled decorator — the missing GREEN-path coverage for the newly served methods
-//    (`compute_{file,path}_summary`, `find_cycles_involving_path`). Sibling of the orient proofs in
-//    `orient_serve::tests` (`m2_parity_*`), through `run_explain` — the changed explain surface. ──
+//    M-2-enabled decorator — GREEN-path coverage for the served methods (`compute_{file,path}_summary`).
+//    EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002): the focus cycle read (`find_cycles_involving_path`) now
+//    DELEGATES to SQLite (it carries the verified walk); parity + the delegation are asserted below.
+//    Sibling of the orient proofs in `orient_serve::tests` (`m2_parity_*`), through `run_explain`. ──
 
 /// The EXACT `handle_explain` capture sequence: resolve the READY snapshot, capture the FULL serve
 /// witness, pin the epoch at the witness fingerprint. Returns both so tests can assert the witness
@@ -498,9 +500,11 @@ fn m2_parity_explain_file_focus_equals_sqlite() {
 }
 
 /// explain PATH-focus parity with a NON-EMPTY cycle: `run_explain("src")` through the M-2-enabled
-/// decorator serves `compute_path_summary` + `find_cycles_involving_path` from the LiveGraph,
-/// byte/value-identical to bare SQLite — and the answer carries the REAL `src` ↔ `lib` cycle
-/// (canonical qualified members), so the cycle-VALUES serve is exercised non-vacuously.
+/// decorator serves `compute_path_summary` from the LiveGraph and DELEGATES the cycle leaf
+/// (`find_cycles_involving_path`) to SQLite (EXPLAIN-CYCLES-HONEST-1 A-1, D-ECH-002 — the SQLite
+/// serve carries the verified walk the LiveGraph route cannot reproduce), byte/value-identical to
+/// bare SQLite — and the answer carries the REAL `src` ↔ `lib` cycle (canonical qualified members),
+/// so the cycle-VALUES serve is exercised non-vacuously.
 #[test]
 fn m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle() {
     let f = test_fixture::build_fixture(false);
@@ -537,10 +541,79 @@ fn m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle() {
     );
 }
 
+/// EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002, ECH-C14): on the GREEN cycle-VALUES fixture the M-2
+/// decorator DELEGATES the explain PATH-focus cycle read to SQLite, so the served EXPLAIN_CYCLES item
+/// carries the VERIFIED walk (equal to the bare SQLite serve's for the same item), and the leaf is
+/// LABELLED `{sqlite}` + `LiveGraphRenderUnsupported` — never a LiveGraph label over a SQLite value,
+/// never an unordered LiveGraph value replacing the ring. Non-vacuous: the fixture's real `src` ↔
+/// `lib` ring yields a non-empty walk.
+#[test]
+fn explain_path_focus_cycles_delegated_carry_walk_and_sqlite_label() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let (epoch, w) = witness_epoch(&f.state, test_fixture::REPO);
+    assert!(w.bounded && w.m2.module_summary && w.m2.cycle_values);
+    let snapshot_uid = epoch.snapshot.snapshot_uid.clone();
+
+    let served = {
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        run_explain(&decorator, test_fixture::REPO, test_fixture::MODULE_DIR)
+    };
+    let plain = run_explain(&storage, test_fixture::REPO, test_fixture::MODULE_DIR);
+
+    // The decorator's cycle leaf carries the SAME verified walk as the bare SQLite serve, and it is
+    // NON-EMPTY (the real src <-> lib ring) — the ring reaches the LiveGraph route by delegation.
+    let served_v = serde_json::to_value(
+        served
+            .signals
+            .iter()
+            .find(|s| s.code() == SignalCode::ExplainCycles)
+            .expect("EXPLAIN_CYCLES present on the decorator serve"),
+    )
+    .unwrap();
+    let plain_v = serde_json::to_value(
+        plain
+            .signals
+            .iter()
+            .find(|s| s.code() == SignalCode::ExplainCycles)
+            .expect("EXPLAIN_CYCLES present on the bare SQLite serve"),
+    )
+    .unwrap();
+    let served_walk = &served_v["evidence"]["items"][0]["walk"];
+    assert!(
+        served_walk.as_array().is_some_and(|w| !w.is_empty()),
+        "the delegated explain cycle carries a NON-EMPTY verified walk, got {served_walk:?}"
+    );
+    assert_eq!(
+        served_walk, &plain_v["evidence"]["items"][0]["walk"],
+        "the decorator's cycle walk equals the bare SQLite serve's (delegated value)"
+    );
+
+    // The leaf POSTURE on the green cert is a labelled SQLite fallback naming the render-unsupported
+    // reason — the LiveGraph could serve the member set but not the walk the response shape carries.
+    let label = crate::explain_lg_serve::cycles_leaf_label(&f.state, &snapshot_uid);
+    assert!(
+        matches!(
+            label,
+            repo_graph_agent::OrientLeafLabel::SqliteFallback {
+                reason: repo_graph_coherence::CoherenceFallbackReason::LiveGraphRenderUnsupported
+            }
+        ),
+        "green cert → focus cycles labelled SQLite fallback / LiveGraphRenderUnsupported, got {label:?}"
+    );
+}
+
 /// The review-0 #3 explain NO-EAGER-READ proof: through the M-2-enabled decorator, explain FILE
 /// must NOT read `compute_file_summary` from SQLite and explain PATH must NOT read
-/// `compute_path_summary` / `find_cycles_involving_path` (all LiveGraph-served; the cancellable
-/// cycle variant funnels through the recorded non-cancellable default). The per-item LISTING reads
+/// `compute_path_summary` (LiveGraph-served). EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002): explain PATH
+/// now DELEGATES `find_cycles_involving_path` to SQLite (the SQLite serve carries the verified walk
+/// the LiveGraph route cannot reproduce), so that read IS expected. The per-item LISTING reads
 /// (`list_symbols_in_file` / `list_files_in_path`) still delegate — the DR-E3 honest bound,
 /// asserted here so this slice's claim stays bounded.
 #[test]
@@ -571,8 +644,9 @@ fn m2_no_eager_read_explain_file_and_path_serve_from_livegraph() {
         "explain PATH served compute_path_summary from the LiveGraph — zero SQLite read (M-2)"
     );
     assert!(
-        !spy.read_find_cycles_involving_path.load(Ordering::Relaxed),
-        "explain PATH served find_cycles_involving_path from the LiveGraph SCC — zero SQLite read"
+        spy.read_find_cycles_involving_path.load(Ordering::Relaxed),
+        "explain PATH DELEGATES find_cycles_involving_path to SQLite (EXPLAIN-CYCLES-HONEST-1 A-1, \
+         D-ECH-002) — the SQLite serve carries the verified walk the LiveGraph route cannot reproduce"
     );
     // The honest bound is UNCHANGED: the per-item listings still read SQLite on green.
     assert!(

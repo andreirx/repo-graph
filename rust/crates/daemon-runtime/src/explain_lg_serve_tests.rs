@@ -2,7 +2,7 @@
 //! structural guardrail — the module file keeps the serving logic only). The end-to-end LiveGraph-served
 //! value proofs live in `explain_coherence_tests.rs` (through `build_explain_envelope`).
 
-use super::{cycle_involves, explain_items_cap, rebuild_identity_rows, truncate};
+use super::{explain_items_cap, rebuild_identity_rows, truncate};
 use std::collections::BTreeMap;
 
 #[test]
@@ -24,33 +24,9 @@ fn truncate_flags_match_agent_contract() {
     assert_eq!(over.len(), 15);
 }
 
-#[test]
-fn cycle_involves_symbol_focus_is_exact_membership() {
-    let members = vec!["src/a".to_string(), "src/b".to_string()];
-    assert!(cycle_involves(&members, "src/a", false));
-    assert!(
-        !cycle_involves(&members, "src", false),
-        "no prefix match in symbol focus"
-    );
-    assert!(!cycle_involves(&members, "src/c", false));
-}
-
-#[test]
-fn cycle_involves_path_focus_matches_prefix() {
-    let members = vec!["src/core/auth".to_string(), "src/util".to_string()];
-    assert!(
-        cycle_involves(&members, "src/core/auth", true),
-        "exact member"
-    );
-    assert!(
-        cycle_involves(&members, "src/core", true),
-        "prefix `src/core/`"
-    );
-    assert!(cycle_involves(&members, "src", true), "prefix `src/`");
-    assert!(!cycle_involves(&members, "lib", true));
-    // A prefix must be a path segment boundary: `src/cor` does not match `src/core/auth`.
-    assert!(!cycle_involves(&members, "src/cor", true));
-}
+// EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002): the `cycle_involves` focus filter and its unit tests were
+// removed with `serve_cycles` — the focus cycles now delegate to SQLite (which carries the verified walk);
+// the LiveGraph route no longer rebuilds or filters a focus cycle list.
 
 // ── rebuild_identity_rows: the callgraph value-rebuild join (LG names + SQLite module/order) ──
 

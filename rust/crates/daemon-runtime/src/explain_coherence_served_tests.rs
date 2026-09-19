@@ -1,9 +1,12 @@
 //! EXPLAIN-LIVEGRAPH-IMPL: daemon-half LG-SERVED VALUE proofs (review-7 items 2+3).
 //!
-//! Through `build_explain_envelope`, prove the IDENTITY / IMPORTS / CYCLES leaf VALUES are genuinely REBUILT
-//! from the LiveGraph (`node_display` / `live_import_view` / `module_import_cycles`) — NOT merely labelled and
-//! NOT a re-labelled SQLite result. Each test feeds a DELIBERATELY-WRONG SQLite primary and asserts the served
-//! value matches what the LiveGraph surface yields (and differs from the bogus SQLite value).
+//! Through `build_explain_envelope`, prove the IDENTITY / IMPORTS leaf VALUES are genuinely REBUILT from the
+//! LiveGraph (`node_display` / `live_import_view`) — NOT merely labelled and NOT a re-labelled SQLite result:
+//! each feeds a DELIBERATELY-WRONG SQLite primary and asserts the served value matches the LiveGraph surface
+//! (and differs from the bogus value). CYCLES is the exception since EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002):
+//! the LiveGraph route cannot reproduce the verified walk the response shape now carries, so the walk-bearing
+//! SQLite primary is served and the leaf is a labelled `{sqlite}` fallback (`LiveGraphRenderUnsupported`) even
+//! on a GREEN member-set cert — the cycles test below feeds the bogus SQLite primary and asserts it SURVIVES.
 //!
 //! Child of `explain_coherence_tests` (reuses its helpers — `build_db_with_calls`, `explain_symbol_result`,
 //! `REPO` — via `use super::*`), split out to respect the >500-line structural guardrail. It HAND-BUILDS a
@@ -330,18 +333,22 @@ fn explain_imports_serves_live_view_from_livegraph() {
     assert!(imports.provenance.fallback_reason.is_none());
 }
 
-// ── Cycles: served from module_import_cycles → single-source {livegraph} ──
+// ── Cycles: the walk-bearing SQLite primary is served and the leaf is labelled LiveGraphRenderUnsupported
+//    even on a GREEN member-set cert — EXPLAIN-CYCLES-HONEST-1 A-1/A-2 (D-ECH-002). The LiveGraph route
+//    certifies the cycle MEMBER SET but not the verified walk the response shape now carries, so it MUST NOT
+//    rebuild the value; the bogus SQLite primary must survive, proving no LiveGraph rebuild happened. ──
 
 #[test]
-fn explain_cycles_serves_live_cycles_from_livegraph() {
+fn explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green() {
     let dir = tempdir().unwrap();
     let (db_path, snapshot_uid) = build_db_with_calls(dir.path(), REPO, &[]);
     let state = RepoState::open(&db_path, REPO).expect("open repo state");
     *state.livegraph.write() = Some(cyclic_lg());
 
-    // The live module cycle + a focus module that is one of its members (derived from the LiveGraph -> the
-    // daemon must serve THESE members, not the SQLite primary).
-    let (focus_module, expected_members) = {
+    // A path focus that is a member of the live module cycle, so the cycles leaf is present and labelled.
+    // Under A-1 the served VALUE is NOT rebuilt from module_import_cycles — the LiveGraph member set is
+    // certified but not the walk — so the focus only drives which leaf gets the label.
+    let focus_module = {
         let guard = state.livegraph.read();
         let lg = guard.as_ref().unwrap();
         let answer = lg.module_import_cycles();
@@ -349,13 +356,12 @@ fn explain_cycles_serves_live_cycles_from_livegraph() {
             .data()
             .and_then(|d| d.cycles.first().map(|c| c.members.clone()))
             .expect("the cyclic fixture has a module cycle");
-        let focus = members.first().cloned().expect("cycle has a member");
-        (focus, members.into_iter().collect::<BTreeSet<String>>())
+        assert!(
+            members.len() >= 2,
+            "a module cycle has at least two members"
+        );
+        members.into_iter().next().expect("cycle has a member")
     };
-    assert!(
-        expected_members.len() >= 2,
-        "a module cycle has at least two members"
-    );
 
     seed_cycles_cert_green(&state, &snapshot_uid);
 
@@ -381,7 +387,8 @@ fn explain_cycles_serves_live_cycles_from_livegraph() {
         .iter()
         .find(|l| l.value.code() == SignalCode::ExplainCycles)
         .expect("cycles leaf present");
-    // The VALUE is rebuilt from module_import_cycles, NOT the bogus SQLite primary.
+    // The VALUE stays the SQLite primary (the walk-bearing focus-cycle serve the M-2 port delegates); the
+    // bogus primary member survives, proving NO LiveGraph rebuild.
     let items = served_items(&env, "EXPLAIN_CYCLES");
     let served_members: BTreeSet<String> = items
         .as_array()
@@ -396,16 +403,20 @@ fn explain_cycles_serves_live_cycles_from_livegraph() {
         })
         .collect();
     assert_eq!(
-        served_members, expected_members,
-        "served cycle members are REBUILT from module_import_cycles (not the SQLite primary)"
+        served_members,
+        BTreeSet::from(["BOGUS_SQLITE_MODULE".to_string()]),
+        "the SQLite primary is served (NOT rebuilt from module_import_cycles): its member survives"
     );
-    assert!(!served_members.contains("BOGUS_SQLITE_MODULE"));
     assert_eq!(
         cycles.provenance.source,
-        BTreeSet::from([Source::Livegraph]),
-        "cycles served from the field-exact module-cycle cert is single-source {{livegraph}}"
+        BTreeSet::from([Source::Sqlite]),
+        "the served cycle value is the SQLite primary -> single-source {{sqlite}}"
     );
-    assert!(cycles.provenance.fallback_reason.is_none());
+    assert_eq!(
+        cycles.provenance.fallback_reason,
+        Some(CoherenceFallbackReason::LiveGraphRenderUnsupported),
+        "the leaf is labelled LiveGraphRenderUnsupported on the GREEN member-set cert (A-1, D-ECH-002)"
+    );
 }
 
 // ── EC-M2-LEAF-SERVE-1: FILE/PATH identity structural counts — the label follows the ACTUAL serve ──

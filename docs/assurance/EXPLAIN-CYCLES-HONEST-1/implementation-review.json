@@ -1,0 +1,827 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-EXPLAIN-CYCLES-HONEST-1-0",
+  "workItemId": "EXPLAIN-CYCLES-HONEST-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-5.json",
+    "sha256": "sha256:060f8c6b053f592b8b67a4321fcb5edc4e8cd9af3b9d590127c525051dc40704"
+  },
+  "allocation": {
+    "path": "docs/slices/explain-cycles-honest-1.md",
+    "sha256": "sha256:ceb6ea64440ea1e6a3e1271e0ec680235c09a269d2d25218fb1c8d2fbb95ed2c"
+  },
+  "subject": {
+    "candidateSha256": "sha256:847676d3c19293f497c60d2e7e1dc8710101d346517945112ca7dbd1aeb77b90",
+    "verification": {
+      "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1/verification.json",
+      "sha256": "sha256:e521c1feda9cf9177d9f8b661ee0b4df9d64f7ddd4688eac16af114bcf0de910"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-EXPLAIN-CYCLES-HONEST-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-5.json",
+      "sha256": "sha256:060f8c6b053f592b8b67a4321fcb5edc4e8cd9af3b9d590127c525051dc40704"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:fbb99b8cb7349562236bf289e33f9850a8412e1272746ba53d8dc7c9f6894f75",
+        "byteLength": 26976
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/EXPLAIN-CYCLES-HONEST-1-INPUT-5.json",
+        "sha256": "sha256:060f8c6b053f592b8b67a4321fcb5edc4e8cd9af3b9d590127c525051dc40704",
+        "byteLength": 6468
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:d33e566fd2b3fcf0fe4484ddf370a904b8f6b82f07eb2e08bf0d5f9f5ea4c9c9",
+        "byteLength": 13956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-003-orientation-surfaces.md",
+        "sha256": "sha256:bf4630448569e9de5b84fa874b44f0476a4656dcbd0e3627e8f2809d33b6bbcb",
+        "byteLength": 13084
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+        "sha256": "sha256:8c3b7d778c9f90116a7929a41c72388f87239a9af310dccc65779a66e1f044de",
+        "byteLength": 15922
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-005-symbol-relationship-discovery.md",
+        "sha256": "sha256:1a6d1535b2227f9121163f2b6716236fd6d2b38e5ba51800a839be6ae9cfd2b9",
+        "byteLength": 14876
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-010-semantic-seeding.md",
+        "sha256": "sha256:8f19115e822e85bf44dd57922a946933186b4c571abe28001a7ae0aaefccc64e",
+        "byteLength": 13356
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+        "sha256": "sha256:60598f5c99e45318b24b424c6e5619e4c5d1c21e95530db239dcf6036122eefe",
+        "byteLength": 13094
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cycle-honesty-1.md",
+        "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe",
+        "byteLength": 6001
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-rust-1.md",
+        "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731",
+        "byteLength": 9053
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/anchors-everywhere-1.md",
+        "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60",
+        "byteLength": 4803
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/seed-chunk-3.md",
+        "sha256": "sha256:0d377f7d7985996ce6d694ce8a70ddc94acdea4a2c92e8099e0ae24a36360685",
+        "byteLength": 7283
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/contracts/exit-codes.md",
+        "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429",
+        "byteLength": 3756
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/economy-2.md",
+        "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4",
+        "byteLength": 4956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cursor-roundtrip-1.md",
+        "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be",
+        "byteLength": 2882
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+        "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965",
+        "byteLength": 48460
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-ECH-002.md",
+        "sha256": "sha256:173d604ab8b9c0f765c47395540732407eccf7bc6a04f748eb0a2db731a3fa3e",
+        "byteLength": 8018
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e",
+        "byteLength": 12963
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:8b6891834cf3e2bf01539215df1bd5173c9ee66271b64e028de2828094681a72",
+        "byteLength": 7479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/explain-cycles-honest-1.md",
+        "sha256": "sha256:ceb6ea64440ea1e6a3e1271e0ec680235c09a269d2d25218fb1c8d2fbb95ed2c",
+        "byteLength": 69119
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-5/requirements-review.json",
+        "sha256": "sha256:9e4c9972d233f96614b0006ac192a2431a019c2b01f173db7a28c2dcb6bd6af4",
+        "byteLength": 47784
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/EXPLAIN-CYCLES-HONEST-1-INPUT-5/baseline-approval.json",
+        "sha256": "sha256:671148508cfc9a6bd70662f3d37524236cc24df1e06a8c76ea1393d6679b0a1a",
+        "byteLength": 2029
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:de26fa49e1a6929be471811dc75448ebdeb1384034fc40ff9166bc9465988d07",
+        "byteLength": 6275
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/EXPLAIN-CYCLES-HONEST-1/selection.md",
+        "sha256": "sha256:9b7a9bb13a702b4d19d67418425221dd0f0d450d991e2b948437bef44f91439b",
+        "byteLength": 13471
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:964f93c8aa49ecf51e3ee83e3e5f71b73e2cc6257dde4a906fea9d81634b7d81",
+        "byteLength": 25073
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-0",
+        "sha256": "sha256:d049eaa29b4358c9cd267f34cf62f93ced728418b63677a625f90238b38c6d8c",
+        "byteLength": 41159
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:89485831c4113f6c347c32cd61aced380f9e86ebfabbb700cbd040b395ca203e",
+        "byteLength": 7108
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-0",
+        "sha256": "sha256:e521c1feda9cf9177d9f8b661ee0b4df9d64f7ddd4688eac16af114bcf0de910",
+        "byteLength": 79155
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-0",
+        "sha256": "sha256:8b75298585372482e1526c5440abb70673de075d2e36c6095891ec6570b5e83e",
+        "byteLength": 114422
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:22f04314192800a0b4db126455ae628b7f31a54bcb5e8095134f2a7b175dedd0",
+        "byteLength": 40534
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:fbb99b8cb7349562236bf289e33f9850a8412e1272746ba53d8dc7c9f6894f75",
+        "byteLength": 26976
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:60140a8ef5177f98c81aacab6998234e317624c3041ed804944ced3a2da57865",
+        "byteLength": 789630
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-003-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-003-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-010-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-ECH-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-ECH-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-ECH-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-ECH-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-ECH-05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-ECH-06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "ECH-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "REVIEWER-EXECUTED: cargo test -p repo-graph-rgr --lib explain_cycles_ passed: 9 passed, 0 failed.",
+          "supportingEvidence": [
+            "The seven required explain_cycles taxonomy tests ran and passed on the reviewed candidate."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "ECH-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED /tmp/ech-c02.txt reports 813 presentation tests passed. I inspected the shared validation extraction and renderer diff, but did not independently rerun the full presentation suite."
+      }
+    },
+    {
+      "checkId": "ECH-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "I independently ran the module-focus walk equality test successfully, but did not rerun the complete storage and agent cycle command pair. BUILDER-EXECUTED transcripts report both required suites green."
+      }
+    },
+    {
+      "checkId": "ECH-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "REVIEWER-EXECUTED the new isolated dispatcher test: 2 passed, 0 failed. The existing cycle_honesty_route_consistency companion suite is relied on from the builder transcript."
+      }
+    },
+    {
+      "checkId": "ECH-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Live base/candidate corpus indexing and before-output capture were not rerun. BUILDER-EXECUTED evidence records isolated leveldb/vcmi indexing and the base leveldb fabricated chain."
+      }
+    },
+    {
+      "checkId": "ECH-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The candidate/base leveldb binary comparison is BUILDER-EXECUTED. I independently verified the cited source imports at leveldb util/testutil.h:10, helpers/memenv/memenv.cc:17, and helpers/memenv/memenv_test.cc:14."
+      }
+    },
+    {
+      "checkId": "ECH-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The isolated vcmi surface comparison is BUILDER-EXECUTED. I independently ran rg for EmptyAI under vcmi/AI/BattleAI; it returned no matches, supporting the report that the former first arrow was not source-backed."
+      }
+    },
+    {
+      "checkId": "ECH-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The leveldb JSON before/after assertion is BUILDER-EXECUTED; I did not recreate its isolated indexes."
+      }
+    },
+    {
+      "checkId": "ECH-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The same-index, two-binary byte comparisons for orient and cycles are BUILDER-EXECUTED; I did not rebuild or retain the temporary base worktree."
+      }
+    },
+    {
+      "checkId": "ECH-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The two corpus explain comparisons outside Import cycles are BUILDER-EXECUTED; I inspected that the renderer change is confined to the Import-cycles path."
+      }
+    },
+    {
+      "checkId": "ECH-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Registry-digest continuity, isolated-root cleanup, worktree cleanup, and daemon cleanup are operational evidence from the builder report; they cannot be reproduced after cleanup without recreating the proof."
+      }
+    },
+    {
+      "checkId": "ECH-C12",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "REVIEWER-OBSERVED: git diff --check was clean and git status contained exactly the 18 allocated Rust candidate paths. BUILDER-EXECUTED fmt and clippy gates are relied upon."
+      }
+    },
+    {
+      "checkId": "ECH-C13",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED /tmp/ech-c13.txt reports the five M-2 parity certificates passed. I inspected the port implementation: only focus-cycle methods now delegate; repo-level cycle serving remains intact."
+      }
+    },
+    {
+      "checkId": "ECH-C14",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "REVIEWER-EXECUTED: cargo test -p repo-graph-daemon-runtime --lib focus_cycles_delegated passed: 2 passed, 0 failed.",
+          "supportingEvidence": [
+            "Both the explain and orient path-focus delegation tests passed, including the SQLite fallback label assertion."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "ECH-C15",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The whole daemon-runtime unit suite is BUILDER-EXECUTED: 777 passed, 0 failed, 1 ignored. I reproduced targeted daemon-runtime tests but not the entire suite."
+      }
+    },
+    {
+      "checkId": "ECH-C16",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "REVIEWER-OBSERVED source checks found no serve_cycles, cycle_involves, cycles_qualified_filtered, or stale focus wildcard documentation. cycles_leaf_label and LiveGraphRenderUnsupported are present; the reserved wording is absent.",
+          "supportingEvidence": [
+            "Scoped rg checks over explain_lg_serve.rs, storage_port_impl.rs, orient_serve/mod.rs, and repo-graph-coherence/src/lib.rs."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "ECH-C17",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "REVIEWER-EXECUTED the renamed served-route test: 1 passed, 0 failed; REVIEWER-OBSERVED the obsolete test identity is absent.",
+          "supportingEvidence": [
+            "cargo test -p repo-graph-daemon-runtime --lib explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green",
+            "Scoped rg returned no old explain_cycles_serves_live_cycles_from_livegraph function."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "ECH-C18",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "REVIEWER-EXECUTED the cancellation regression: 1 passed, 0 failed; REVIEWER-OBSERVED exactly two pre-labeling cancellation messages in agent_impl.rs.",
+          "supportingEvidence": [
+            "cargo test -p repo-graph-storage --lib focus_cycle_reads_cancellable_return_cancelled_at_the_checkpoint_before_labeling",
+            "rg -c returned 2 for the required cancellation literal."
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_lg_serve.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_lg_serve_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/repo-graph-coherence/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_guidance.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/agent_cycle_labeling.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/tests/explain_cycle_walk_route_consistency.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/cycle_walk_display.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-19T15:57:01.815Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nACCEPTED. REVIEWER-OBSERVED: the working tree contains exactly the 18 allocated Rust paths and no unrelated tracked changes; git diff --check is clean. The implementation corrects RC-4 at the data path, not merely in text: focus SCC reads are labeled through the same walk/type-only kernel as repo cycles, and explain renders an arrow only from that carried, strictly validated directed walk. A missing walk renders the bounded unordered member set; malformed walk or member data is visibly unreadable. The renderer therefore cannot infer edges from canonical SCC-member ordering.\n\nREVIEWER-OBSERVED: the LiveGraph focus path no longer replaces a SQLite walk-bearing result with an unordered LiveGraph reconstruction. It delegates to SQLite and labels the green-cert limitation LiveGraphRenderUnsupported. This implements D-ECH-002 without disturbing repo-level M-2 cycle serving. The new final cancellation checkpoint was independently exercised and is present exactly once per cancellable focus read.\n\nThe added abstractions are earned and stated in code: cycle_walk_display::validate_walk has two concrete current consumers (orient and explain) sharing the same honesty invariant; label_cycles has two concrete current naming modes (short repo display and qualified focus display) while sharing SCC classification and verified-walk construction.\n\nREVIEWER-EXECUTED targeted evidence: ECH-C01; the new dispatcher route-consistency test; ECH-C14; ECH-C17; ECH-C18; a storage module-focus walk equality test; source checks for removed stale LiveGraph rebuild names. Remaining suite, corpus, isolation, and byte-identity evidence is explicitly BUILDER-EXECUTED as recorded in the supplied run report.\n\nCode-under-analysis evidence: REVIEWER-OBSERVED leveldb imports at util/testutil.h:10, helpers/memenv/memenv.cc:17, and helpers/memenv/memenv_test.cc:14 support the reported util↔helpers/memenv ring. REVIEWER-OBSERVED no EmptyAI reference under vcmi/AI/BattleAI, supporting the report that the former AI/BattleAI -> AI/EmptyAI presentation arrow was invented by member ordering. The change serves the VISION’s honesty commitment: agents receive directional structural evidence without a fabricated directed relationship. Maturity remains PROTOTYPE; no maturity promotion is implied.\n\nManager interpretation by in-place-manager: Shape-only interpretation: the reviewer's v3 review carried subject.allocation/baselineManifest/candidateCheckpoint instead of the runtime's subject identities; result (accepted), all 15 obligation assessments, 18 check assessments (five reproduced by the reviewer: ECH-C01, C14, C16, C17, C18), 18 changed-path assessments (per-path rationale folded away — not a record field), no findings, no decisions, and the report are taken verbatim; the manager verified the tree holds exactly the 18 allocated paths and the isolation state (no /private/tmp/EXPLAIN-CYCLES-HONEST-1-* roots, no before-worktree, registry digest unchanged). Source provider run review-EXPLAIN-CYCLES-HONEST-1-0; retained output .agent-manager/slices/EXPLAIN-CYCLES-HONEST-1/review-0.json sha256:4a2ef04a5f168e8de62416f0b378a5dc22b07d9b527928ffafa28ddcec1be6b2. The provider remains the performer; this interpretation is not independent execution evidence."
+}

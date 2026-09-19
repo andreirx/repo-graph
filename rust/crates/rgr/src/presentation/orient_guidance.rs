@@ -64,28 +64,15 @@ impl OrientResponse {
     /// `-> {first}` is the ring's back-edge. The `first 3 -> … -> last -> first` truncation for a
     /// long ring hides intermediate REAL edges but never invents one.
     ///
-    /// COHERENCE-3 review-1 #1 (STANDING HONESTY RULE #1): STRICT validation. The producer
-    /// (`agent_cycle_labeling::label_module_cycles` via `find_cycle_walk`) only ever emits a ring of
-    /// ≥2 non-empty DISPLAY strings, or `None` (which serializes as an absent/`null` leaf the caller
-    /// routes to the unordered form). So ANY non-string element, ANY empty string, or fewer than 2
-    /// members reaching here is wire/schema DRIFT, not a walk — return `None` so the caller makes the
-    /// unknown VISIBLE with its reason, NEVER a fabricated ring. The prior `filter_map(as_str)`
-    /// silently dropped non-strings, turning a two-element `["A", 42]` into the invented self-cycle
-    /// `A -> A`; that is exactly the fabrication this rejects.
+    /// COHERENCE-3 review-1 #1 (STANDING HONESTY RULE #1): STRICT validation, now via the ONE
+    /// shared [`crate::presentation::cycle_walk_display::validate_walk`] — the SAME validation
+    /// `explain`'s Import-cycles renderer uses (EXPLAIN-CYCLES-HONEST-1 §2.1.3), so a drift `walk`
+    /// is rejected identically on both surfaces. It returns a ring of ≥2 non-empty DISPLAY names or
+    /// `None`; a `None` here routes to the caller's unordered form. This formatter keeps ITS OWN
+    /// chain text (the headline `first 3 -> … -> last -> first` truncation); only the validation is
+    /// shared.
     pub(super) fn format_cycle_anchor(&self, walk: &[serde_json::Value]) -> Option<String> {
-        let mut names: Vec<&str> = Vec::with_capacity(walk.len());
-        for m in walk {
-            let s = m.as_str()?; // non-string element => drift => None (no silent drop)
-            if s.is_empty() {
-                return None; // empty display name => drift => None
-            }
-            names.push(s);
-        }
-        if names.len() < 2 {
-            // A real directed ring closes over ≥2 distinct members (a self-import is not a cycle
-            // edge). A one-element walk is the fabricated `A -> A` the reviewer flagged.
-            return None;
-        }
+        let names = crate::presentation::cycle_walk_display::validate_walk(walk)?;
 
         let chain = if names.len() <= 4 {
             // Show full chain

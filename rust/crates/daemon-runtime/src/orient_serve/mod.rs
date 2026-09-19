@@ -22,9 +22,11 @@
 //!   row builders (`callers`/`callees` + `symbol_context` enrichment), gated by `callgraph_cert`. orient
 //!   consumes these ORDER-INSENSITIVELY (`build_callers_evidence` = count + `group_by_module`), so the
 //!   multiset-proven LiveGraph rows render byte-identically.
-//! - **CYCLE VALUES** (`find_module_cycles*` / `find_cycles_involving_*`) — EC-M2-LEAF-SERVE-1
+//! - **CYCLE VALUES** (the REPO-level `find_module_cycles*` only) — EC-M2-LEAF-SERVE-1
 //!   (CYCLES-B, superseding the CYCLES-A delegate-always posture): served from the LiveGraph
 //!   module-cycle SCC when the cycles cert's `values_verdict` is GREEN at the captured fingerprint.
+//!   The FOCUS cycle reads (path/module) DELEGATE to SQLite always (EXPLAIN-CYCLES-HONEST-1 A-1,
+//!   D-ECH-002: the SQLite serve carries a verified walk the LiveGraph route cannot reproduce).
 //!   CYCLES-A's blocker (order/naming sensitivity) is dissolved by TWO mechanisms: the agent now
 //!   CANONICALIZES cycle values (`ordering::canonicalize_cycles` — members sorted, list length-DESC,
 //!   a pure function of the cycle SET on both engines), and the cert build additionally compares the
@@ -142,8 +144,9 @@ pub fn orient_bounded_cert_eligibility(
 /// serve and vice versa; a `false` simply means that leaf delegates to SQLite exactly as before.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct M2LeafServe {
-    /// Serve orient/explain cycle VALUES (`find_module_cycles*` / `find_cycles_involving_*`) from
-    /// the LiveGraph: the cycles cert's `values_verdict` is GREEN at the captured fingerprint.
+    /// Serve the REPO-level cycle VALUES (`find_module_cycles*`) from the LiveGraph: the cycles
+    /// cert's `values_verdict` is GREEN at the captured fingerprint. The FOCUS cycle reads
+    /// (path/module) delegate to SQLite always (EXPLAIN-CYCLES-HONEST-1 A-1, D-ECH-002).
     pub cycle_values: bool,
     /// Serve MODULE_SUMMARY structural counts (`compute_{repo,path,file}_summary`) from the
     /// LiveGraph: the module-summary identity-reconciliation cert is GREEN at the captured

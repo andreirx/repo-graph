@@ -947,14 +947,16 @@ fn red_bounded_cert_labels_callgraph_sqlite_despite_green_callgraph_cert() {
 // - V2 NO-EAGER-READ with the leaves ON: a spy that PANICS on the summary + cycle SQLite methods
 //   (the cancellable variants funnel through the non-cancellable ones via the trait defaults).
 
-/// A partial spy that PANICS on the SIX M-2-served value methods (three summaries + three cycle
-/// finders) and DELEGATES everything else — the complement of [`PartialSpy`] (which panics on the
-/// six focus/callgraph methods and delegates these). On `with_leaf_serves(both)` + GREEN certs the
-/// decorator serves all six from the LiveGraph, so none may reach SQLite.
+/// A partial spy that PANICS on the FOUR M-2-served value methods (three summaries + the REPO-level
+/// `find_module_cycles*`) and DELEGATES everything else — the complement of [`PartialSpy`] (which
+/// panics on the focus/callgraph methods and delegates these). On `with_leaf_serves(both)` + GREEN
+/// certs the decorator serves those four from the LiveGraph, so none may reach SQLite. The FOCUS
+/// cycle finders (`find_cycles_involving_*`) DELEGATE to SQLite always (EXPLAIN-CYCLES-HONEST-1 A-1,
+/// D-ECH-002 — the SQLite serve carries the verified walk), so they are allowed reads here.
 struct M2Spy<'a, S: ?Sized>(&'a S);
 
 impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
-    // ── the SIX M-2 served methods: must be served from the LiveGraph, NEVER reached here ──
+    // ── the FOUR M-2 served methods: must be served from the LiveGraph, NEVER reached here ──
     fn compute_repo_summary(&self, _: &str) -> Result<AgentRepoSummary, AgentStorageError> {
         panic!(
             "compute_repo_summary must be served from the LiveGraph on a GREEN module-summary cert"
@@ -981,19 +983,22 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
     fn find_module_cycles(&self, _: &str) -> Result<Vec<AgentCycle>, AgentStorageError> {
         panic!("find_module_cycles must be served from the LiveGraph on a GREEN cycle-VALUES cert")
     }
+    // EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002): the FOCUS cycle finders DELEGATE to SQLite always (the
+    // SQLite serve carries the verified walk the LiveGraph route cannot reproduce), so they are allowed
+    // reads here — not panicking M-2-served methods.
     fn find_cycles_involving_path(
         &self,
-        _: &str,
-        _: &str,
+        s: &str,
+        p: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        panic!("find_cycles_involving_path must be served from the LiveGraph on a GREEN cycle-VALUES cert")
+        self.0.find_cycles_involving_path(s, p)
     }
     fn find_cycles_involving_module(
         &self,
-        _: &str,
-        _: &str,
+        s: &str,
+        m: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        panic!("find_cycles_involving_module must be served from the LiveGraph on a GREEN cycle-VALUES cert")
+        self.0.find_cycles_involving_module(s, m)
     }
 
     // ── everything else: DELEGATED (allowed reads — focus resolution/callers are covered by the
@@ -1456,8 +1461,10 @@ fn m2_parity_full_serve_equals_sqlite_repo_focus() {
     );
 }
 
-/// V1 PARITY with the M-2 leaves ON — PATH focus (`src`): the LIKE-prefix summary + the qualified
-/// filtered cycles serve from the LiveGraph, byte/value-identical to SQLite.
+/// V1 PARITY with the M-2 leaves ON — PATH focus (`src`): the LIKE-prefix summary serves from the
+/// LiveGraph and the qualified filtered cycles DELEGATE to SQLite (EXPLAIN-CYCLES-HONEST-1 A-1,
+/// D-ECH-002 — the SQLite serve carries the verified walk the LiveGraph route cannot reproduce),
+/// byte/value-identical to SQLite.
 #[test]
 fn m2_parity_full_serve_equals_sqlite_path_focus() {
     let f = test_fixture::build_fixture(false);
@@ -1498,8 +1505,72 @@ fn m2_parity_full_serve_equals_sqlite_path_focus() {
     );
 }
 
+/// EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002, ECH-C14): on the GREEN cycle-VALUES fixture the M-2
+/// decorator DELEGATES the orient PATH-focus cycle read to SQLite, so the IMPORT_CYCLES item carries
+/// the VERIFIED walk equal to the bare SQLite serve's — the ring reaches the LiveGraph route by
+/// delegation, never a route-dependent unordered value. Non-vacuous: the real `src` ↔ `lib` ring.
+#[test]
+fn orient_path_focus_cycles_delegated_carry_walk() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let now = "2026-01-01T00:00:00Z";
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(w.bounded && w.m2.cycle_values && w.m2.module_summary);
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid);
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        repo_graph_agent::orient(
+            &decorator,
+            test_fixture::REPO,
+            Some(test_fixture::MODULE_DIR),
+            repo_graph_agent::Budget::Small,
+            now,
+        )
+        .expect("decorator orient ok")
+    };
+    let plain = repo_graph_agent::orient(
+        &storage,
+        test_fixture::REPO,
+        Some(test_fixture::MODULE_DIR),
+        repo_graph_agent::Budget::Small,
+        now,
+    )
+    .expect("sqlite orient ok");
+    let sv = serde_json::to_value(
+        served
+            .signals
+            .iter()
+            .find(|s| s.code() == repo_graph_agent::SignalCode::ImportCycles)
+            .expect("IMPORT_CYCLES present on the decorator serve"),
+    )
+    .unwrap();
+    let pv = serde_json::to_value(
+        plain
+            .signals
+            .iter()
+            .find(|s| s.code() == repo_graph_agent::SignalCode::ImportCycles)
+            .expect("IMPORT_CYCLES present on the bare SQLite serve"),
+    )
+    .unwrap();
+    let walk = &sv["evidence"]["cycles"][0]["walk"];
+    assert!(
+        walk.as_array().is_some_and(|w| !w.is_empty()),
+        "the delegated orient cycle carries a NON-EMPTY verified walk, got {walk:?}"
+    );
+    assert_eq!(
+        walk, &pv["evidence"]["cycles"][0]["walk"],
+        "the decorator's cycle walk equals the bare SQLite serve's (delegated value)"
+    );
+}
+
 /// V2 NO-EAGER-READ with the M-2 leaves ON — REPO focus: the decorator over a spy that PANICS on
-/// the six M-2 value methods completes, proving the summary + cycle values did NOT touch SQLite
+/// the four M-2 value methods completes, proving the summary + cycle values did NOT touch SQLite
 /// (the cancellable cycle variants funnel through the panicking non-cancellable defaults).
 #[test]
 fn m2_no_eager_read_repo_focus_serves_summary_and_cycles_from_livegraph() {
@@ -1594,7 +1665,7 @@ fn epoch_with(
 /// true, and the decorator must serve the M-2 leaves from the LiveGraph while the six (b)
 /// focus/callgraph methods DELEGATE to SQLite:
 ///
-/// - **Phase A (M-2 leaves SERVE):** REPO-focus orient over the `M2Spy` (PANICS on the six M-2
+/// - **Phase A (M-2 leaves SERVE):** REPO-focus orient over the `M2Spy` (PANICS on the four M-2
 ///   value methods) completes — the summary + cycle VALUES did not touch SQLite despite the RED
 ///   fold — and equals the bare-SQLite orient byte-for-byte (the certs prove value equality).
 /// - **Phase B ((b) methods DELEGATE):** after DELETING the SQLite CALLS edge (stores now

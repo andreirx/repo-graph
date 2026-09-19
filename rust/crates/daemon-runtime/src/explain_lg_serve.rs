@@ -11,8 +11,10 @@
 //!     a LABELLED SQLite fallback (D-EXPLAIN-IDENTITY).
 //!   - **EXPLAIN_IMPORTS** — rebuild the `target_file` list from `LiveGraph::live_import_view` when the
 //!     per-file residency precondition + the repo-wide import no-loss cert are green. → `{livegraph}`.
-//!   - **EXPLAIN_CYCLES** — rebuild the filtered cycle list from `LiveGraph::module_import_cycles` when the
-//!     repo-wide module-cycle no-loss cert is green. → `{livegraph}`.
+//!   - **EXPLAIN_CYCLES** — the leaf VALUE is the SQLite focus-cycle serve delegated by the M-2 port (it
+//!     carries a VERIFIED walk the LiveGraph route cannot reproduce — D-ECH-002 / EXPLAIN-CYCLES-HONEST-1
+//!     A-1); this module only supplies the leaf LABEL (`cycles_leaf_label`): a labelled SQLite fallback with
+//!     `LiveGraphRenderUnsupported` on the green cert, else the shipped cert-ladder reason. No rebuild here.
 //!   - **EXPLAIN_CALLERS / EXPLAIN_CALLEES** — the leaf VALUE is genuinely REBUILT from the migrated
 //!     `LiveGraph::callers` / `LiveGraph::callees` surfaces (review-4): the caller/callee IDENTITY SET
 //!     (`caller_identities` / `callee_identities`) + each item's current-state NAME (`LiveGraph::node_display`
@@ -36,9 +38,8 @@
 use std::collections::BTreeMap;
 
 use repo_graph_agent::{
-    CycleEvidence, ExplainCalleeItem, ExplainCalleesEvidence, ExplainCallerItem,
-    ExplainCallersEvidence, ExplainCyclesEvidence, ExplainImportItem, ExplainImportsEvidence,
-    OrientLeafLabel, Signal,
+    ExplainCalleeItem, ExplainCalleesEvidence, ExplainCallerItem, ExplainCallersEvidence,
+    ExplainImportItem, ExplainImportsEvidence, OrientLeafLabel, Signal,
 };
 use repo_graph_coherence::CoherenceFallbackReason;
 use repo_graph_trust_model::Granularity;
@@ -130,114 +131,30 @@ pub(crate) fn serve_imports(
     )
 }
 
-/// EXPLAIN_CYCLES (symbol module-context / path focus): rebuild the filtered cycle list FROM
-/// `LiveGraph::module_import_cycles`.
+/// EXPLAIN_CYCLES (symbol module-context / path focus): the leaf's cert-gated LABEL only — the VALUE is
+/// the SQLite focus-cycle serve, delegated by the M-2 port (`orient_serve::storage_port_impl`), NOT rebuilt
+/// here.
 ///
-/// The repo-wide module-cycle no-loss cert (`orient_cycles_outcome`) is a FIELD-EXACT whole-value proof; when
-/// green the value is BUILT from the live module cycles filtered to those involving `target` (membership for
-/// the symbol module-context focus, OR a path-prefix member for the path focus) → single-source `{livegraph}`.
-/// On fallback the SQLite primary is kept, labelled with the cert reason.
-pub(crate) fn serve_cycles(
-    repo_state: &RepoState,
-    snapshot_uid: &str,
-    target: &str,
-    is_path_focus: bool,
-    original: &Signal,
-    budget_large: bool,
-) -> (Option<Signal>, Option<OrientLeafLabel>) {
+/// EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002, human decision 2026-09-19): the SQLite focus-cycle reads
+/// (`find_cycles_involving_{path,module}`) now carry a VERIFIED walk — a real intra-SCC ring drawn only over
+/// stored edges. The LiveGraph's dirname-aggregated module edge set is not certified equal to the SQLite
+/// module edge set (only the cycle MEMBER SETS are, via `values_verdict`), so the LiveGraph route CANNOT
+/// reproduce that walk; a LiveGraph rebuild would drop the ring and serve an unordered value that differs
+/// from SQLite by route — route-dependent output the honesty law forbids. Therefore the focus cycles are
+/// served from SQLite on every route and this function only supplies the leaf posture:
+///   - when the module-cycle field-exact cert is GREEN (`orient_cycles_outcome` Livegraph): a labelled SQLite
+///     fallback with `LiveGraphRenderUnsupported` — the LiveGraph could have served the member set but not the
+///     walk the response shape now carries, so the proven SQLite value (with the walk) is served;
+///   - when the cert is not green (`Fallback`): the shipped cert-ladder reason via `map_outcome`.
+///
+/// Either way the caller adds NO replacement — the value stays the port-delegated SQLite item.
+pub(crate) fn cycles_leaf_label(repo_state: &RepoState, snapshot_uid: &str) -> OrientLeafLabel {
     let outcome = orient_cycles_outcome(repo_state, snapshot_uid);
     match &outcome {
-        OrientLgOutcome::Livegraph { .. } => {}
-        OrientLgOutcome::Fallback { .. } => return (None, Some(map_outcome(outcome))),
-    }
-
-    let mut cycles: Vec<CycleEvidence> = {
-        let guard = repo_state.livegraph.read();
-        let Some(lg) = guard.as_ref() else {
-            return (
-                None,
-                Some(OrientLeafLabel::SqliteFallback {
-                    reason: repo_graph_coherence::CoherenceFallbackReason::LiveGraphUnavailable,
-                }),
-            );
-        };
-        let answer = lg.module_import_cycles();
-        let all = answer.data().map(|d| d.cycles.clone()).unwrap_or_default();
-        // EC-M2-LEAF-SERVE-1 (CYCLES-B): CANONICALIZE through the SAME `canonicalize_cycles` the
-        // agent applies to its own (SQLite- or decorator-served) cycle value — members sorted, list
-        // length-DESC — BEFORE the budget cut. Without this the rebuild rendered raw Tarjan member
-        // order, so a green rebuild could differ byte-wise from the agent's canonical value; with
-        // it, both are the same pure function of the cert-proven-equal cycle set.
-        let mut agent_cycles: Vec<repo_graph_agent::AgentCycle> = all
-            .into_iter()
-            .filter(|c| cycle_involves(&c.members, target, is_path_focus))
-            .map(|c| repo_graph_agent::AgentCycle {
-                length: c.members.len(),
-                modules: c.members,
-                // ORIENT-CYCLES-DISAGREE-1: explain's focus-scoped LiveGraph cycle serve — no
-                // is_test reach (§2.3) and not the repo headline; no test-only split claimed.
-                test_composition: None,
-                type_only: None,
-                // COHERENCE-3: no walk on the LiveGraph/focus serve — renders the unordered form.
-                walk: None,
-            })
-            .collect();
-        repo_graph_agent::ordering::canonicalize_cycles(&mut agent_cycles);
-        agent_cycles
-            .into_iter()
-            .map(|c| CycleEvidence {
-                length: c.length,
-                modules: c.modules,
-                // TYPE-ONLY-IMPORTS-1: LiveGraph explain serve — the fact is not reachable here
-                // (`None`), carried through honestly (the packet forbids the warm path).
-                type_only: c.type_only,
-                // COHERENCE-3: LiveGraph explain serve — no walk reachable; `None` carried through.
-                walk: c.walk,
-            })
-            .collect()
-    };
-    if cycles.is_empty() {
-        // `serve_cycles` is only called when the agent EMITTED a (non-empty) EXPLAIN_CYCLES section, so an
-        // empty live filter means the live module-cycle representation (dirname paths) did not reproduce the
-        // SQLite-rendered subset (e.g. the symbol-focus filter target is a DISCOVERED module qualified name,
-        // not a dirname — the Layer-1/2 vs LiveGraph module-identity gap). The HONESTY LAW forbids labelling
-        // the kept SQLite value `{livegraph}` (the rendered cycles were built by SQLite). Serve the proven
-        // SQLite primary, labelled `{sqlite}` + a divergence reason. NEVER a false LiveGraph value.
-        return (
-            None,
-            Some(OrientLeafLabel::SqliteFallback {
-                reason: repo_graph_coherence::CoherenceFallbackReason::LiveGraphCycleDivergence,
-            }),
-        );
-    }
-    let count = cycles.len() as u64;
-    let cap = explain_items_cap(budget_large);
-    let (items_truncated, items_omitted_count) = truncate(&mut cycles, cap);
-    let served = Signal::explain_cycles(ExplainCyclesEvidence {
-        count,
-        items: cycles,
-        items_truncated,
-        items_omitted_count,
-    });
-    (
-        Some(original.adopt_rank_and_scope(served)),
-        Some(lg_posture()),
-    )
-}
-
-/// Does a module cycle (its `members`, repo-relative dir paths) involve the explain `target`?
-///
-/// - symbol module-context focus: the target module is a member of the cycle.
-/// - path focus: some member is at-or-under the path prefix (`m == target` or `m` starts with `target/`),
-///   mirroring the agent's path-scoped cycle filter.
-fn cycle_involves(members: &[String], target: &str, is_path_focus: bool) -> bool {
-    if is_path_focus {
-        let prefix = format!("{target}/");
-        members
-            .iter()
-            .any(|m| m == target || m.starts_with(&prefix))
-    } else {
-        members.iter().any(|m| m == target)
+        OrientLgOutcome::Livegraph { .. } => OrientLeafLabel::SqliteFallback {
+            reason: repo_graph_coherence::CoherenceFallbackReason::LiveGraphRenderUnsupported,
+        },
+        OrientLgOutcome::Fallback { .. } => map_outcome(outcome),
     }
 }
 

@@ -129,41 +129,6 @@ fn cycles_repo_shape(cycles: &[Vec<String>]) -> Vec<AgentCycle> {
         .collect()
 }
 
-/// Map + FILTER LiveGraph module cycles to the QUALIFIED agent shape of
-/// `find_cycles_involving_path` (prefix scope: member == prefix or under `prefix/`) or
-/// `find_cycles_involving_module` (exact membership) — the same predicates the SQLite
-/// implementations apply to their qualified names.
-fn cycles_qualified_filtered(
-    cycles: &[Vec<String>],
-    target: &str,
-    prefix_scope: bool,
-) -> Vec<AgentCycle> {
-    let prefix = format!("{target}/");
-    cycles
-        .iter()
-        .filter(|members| {
-            members.iter().any(|m| {
-                if prefix_scope {
-                    m == target || m.starts_with(&prefix)
-                } else {
-                    m == target
-                }
-            })
-        })
-        .map(|members| AgentCycle {
-            length: members.len(),
-            modules: members.clone(),
-            // ORIENT-CYCLES-DISAGREE-1: focus/path-scoped LiveGraph serve — no is_test reach
-            // (§2.3) and not the repo headline; no test-only split claimed.
-            test_composition: None,
-            type_only: None,
-            // COHERENCE-3: the LiveGraph/focus serve cannot reach the intra-SCC edges — no walk
-            // precomputed; orient renders the unordered form ("largest: N modules — rmap cycles").
-            walk: None,
-        })
-        .collect()
-}
-
 impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     for OrientServeDecorator<'_, S>
 {
@@ -491,14 +456,20 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             .find_boundary_declarations_in_path(repo_uid, path_prefix)
     }
 
+    // EXPLAIN-CYCLES-HONEST-1 A-1 (D-ECH-002): the FOCUS cycle reads DELEGATE to SQLite
+    // unconditionally — never served from the LiveGraph. The SQLite focus-cycle serve carries a
+    // VERIFIED walk (a real intra-SCC ring), and the LiveGraph's dirname-aggregated module edge set
+    // is not certified equal to the SQLite module edge set (only the cycle MEMBER SETS are), so a
+    // LiveGraph rebuild could not reproduce the walk and would serve a route-dependent unordered
+    // value. explain/orient LABEL the leaf `{sqlite}` + `LiveGraphRenderUnsupported` on green
+    // (`explain_lg_serve::cycles_leaf_label`). The REPO-level `find_module_cycles*` M-2 serve
+    // (above) is UNCHANGED — the repo headline's ratified decoration asymmetry stands (P-ECH-05).
+
     fn find_cycles_involving_path(
         &self,
         snapshot_uid: &str,
         path_prefix: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        if let Some(cycles) = self.m2_module_cycles() {
-            return Ok(cycles_qualified_filtered(&cycles, path_prefix, true));
-        }
         self.inner
             .find_cycles_involving_path(snapshot_uid, path_prefix)
     }
@@ -509,11 +480,6 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         path_prefix: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        if let Some(cycles) =
-            self.m2_module_cycles_cancellable("find_cycles_involving_path", &mut *cancel)?
-        {
-            return Ok(cycles_qualified_filtered(&cycles, path_prefix, true));
-        }
         self.inner
             .find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)
     }
@@ -523,13 +489,6 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
         module_qualified_name: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        if let Some(cycles) = self.m2_module_cycles() {
-            return Ok(cycles_qualified_filtered(
-                &cycles,
-                module_qualified_name,
-                false,
-            ));
-        }
         self.inner
             .find_cycles_involving_module(snapshot_uid, module_qualified_name)
     }
@@ -540,15 +499,6 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         module_qualified_name: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        if let Some(cycles) =
-            self.m2_module_cycles_cancellable("find_cycles_involving_module", &mut *cancel)?
-        {
-            return Ok(cycles_qualified_filtered(
-                &cycles,
-                module_qualified_name,
-                false,
-            ));
-        }
         self.inner.find_cycles_involving_module_cancellable(
             snapshot_uid,
             module_qualified_name,
