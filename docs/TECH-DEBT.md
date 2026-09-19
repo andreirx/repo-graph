@@ -4021,3 +4021,23 @@ Documents grant) to `~/.local/bin/rmapd` in System Settings → Privacy & Securi
 re-grant after binary-replacing installs — OR make the installer surface this
 (INSTALL-ROBUSTNESS class). Address: before the next real index on this machine.
 Status: OPEN (human action or installer slice).
+
+## IMPORTS-WITNESS-UNION-1 — two witnesses for imports and cycles (2026-09-19, roadmap item; human direction 1 deferred)
+
+Recorded from D-ECH-002 (docs/assurance/RG-BOOTSTRAP/decisions/D-ECH-002.md). repo-graph's two engines are two WITNESSES of
+the import graph with different resolution rule sets: the SQLite store (witness P — every language, repo-graph's own
+resolution stages, unresolved preserved with a basis) and the LiveGraph (witness S — TypeScript only via scip-typescript;
+AST imports resolved against the resident inventory + tsconfig aliases + literal dynamic imports, in memory). Today S is a
+CACHE of P for cycles: certified on cycle member sets only, any divergence serves P labelled, and S's knowledge P lacks (a
+ring through an aliased import such as `FRAKTAG/packages/ui/src/components/ui/separator.tsx:4 import { cn } from "@/lib/utils"`)
+is discarded. The human's framing (2026-09-19): when the engines diverge they answer DIFFERENT questions — which edge
+resolves after compiling/linking vs which resolves from the code — and orient/explain should be shaped around that, as
+M-R2 already ratified for callers/callees (P ∪ S, per-edge witness provenance, divergence surfaced; `recon-design-1.md`).
+
+Debt: for imports/cycles there is no compiler witness in either engine (S's import edges ignore SCIP roles), the cycles
+cert excludes edges/walk/type_only, and the repo-level orient headline keeps a ratified decoration asymmetry on the
+LiveGraph route (no split / type_only / walk — ORIENT-CYCLES-DISAGREE-1 2(1)/2(5), TYPE-ONLY-IMPORTS-1, COHERENCE-3).
+Proper solution (a spec, not a patch): extend M-R2's union model to imports — per-edge witness provenance on module edges,
+revive CYCLE-FACTS-2 part (a) (edge-set certification), a compiler-derived import witness for covered languages, and one
+cycles/explain/orient shape whose ring arrows name their witness. When: after the queue Q5–Q9 and TS-ALIAS-RESOLUTION-1
+(direction 2, the P-side fix that makes the alias gap visible on every route); ordering is the human's. Status: OPEN.
