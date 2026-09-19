@@ -6891,8 +6891,12 @@ impl ServiceDispatcher {
 
         // §2.3 unattributed headline — pure helper over the WHOLE repo (before any module filter),
         // so a per-module view never hides repo-level unattributed imports (glamCRM's false `0`).
-        let mut unattributed =
-            crate::deps_headline::compute_unattributed(&result, &ecosystem, &repo_languages);
+        let mut unattributed = crate::deps_headline::compute_unattributed(
+            &result,
+            &ecosystem,
+            &repo_languages,
+            &input.manifest_provenance,
+        );
         // HONESTY-GATE-1 §2.3: when Maven is the missing parser, the honest headline REASON is the
         // capability limit (a trust ceiling), not the generic "imported files outside a parsed
         // manifest scope" (which reads as a transient index state). Override only when there ARE

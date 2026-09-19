@@ -292,12 +292,20 @@ impl StorageConnection {
         // (whose target_key is the resolver's slash form); Rust (target_key == metadata specifier),
         // Java (no `specifier` key), TS and CALL edges (no `specifier` key) all fall back to
         // target_key unchanged. §2.3: `ue.type` distinguishes import sites from call sites.
+        // DEPS-ECOSYSTEM-PARTITION-1 §2.1: also read the SOURCE file's repo-relative path (join
+        // `files`, the same INNER JOIN `get_external_imports_with_locations` uses) so the query-time
+        // ecosystem partition can gate an observed reference by the importing file's ecosystem — the
+        // same `path_ecosystem` predicate the declared side already applies. Every node with a
+        // non-null `file_uid` has a `files` row (the join is 1:1, as the two sibling readers rely on),
+        // so the row set — and therefore `total_external_imports` — is byte-stable. ORDER BY unchanged.
         let mut stmt = conn.prepare(
             "SELECT n.file_uid AS source_file_uid,
+			        f.path AS source_file_path,
 			        COALESCE(json_extract(ue.metadata_json, '$.specifier'), ue.target_key) AS specifier,
 			        ue.type AS edge_type
 			 FROM unresolved_edges ue
 			 JOIN nodes n ON ue.source_node_uid = n.node_uid
+			 JOIN files f ON n.file_uid = f.file_uid
 			 WHERE ue.snapshot_uid = ?
 			   AND ue.classification = 'external_library_candidate'
 			   AND n.file_uid IS NOT NULL
@@ -308,6 +316,7 @@ impl StorageConnection {
             let edge_type: String = row.get("edge_type")?;
             Ok(ExternalImportFact {
                 source_file_uid: row.get("source_file_uid")?,
+                source_file_path: row.get("source_file_path")?,
                 specifier: row.get("specifier")?,
                 is_import_edge: edge_type == "IMPORTS",
             })
@@ -483,6 +492,12 @@ impl StorageConnection {
 pub struct ExternalImportFact {
     /// The file UID of the source file containing the import.
     pub source_file_uid: String,
+    /// DEPS-ECOSYSTEM-PARTITION-1 §2.1: the repo-relative path of the source file that CONTAINS this
+    /// import (`n.file_uid → files.path`). The query-time ecosystem partition maps this through
+    /// `path_ecosystem` to gate an observed reference by the importing file's ecosystem — so a
+    /// Python-file import is not reconciled into an npm view (RC-6). Read from the store, not stored
+    /// anew.
+    pub source_file_path: String,
     /// The import specifier (e.g., "react/jsx-runtime", "tokio::spawn").
     ///
     /// DEPS-CLASSIFIER-1 §2.2: for a Python IMPORTS edge this is the DOTTED specifier read from
@@ -710,6 +725,46 @@ mod tests {
             meta.is_type_only,
             "the `import type` binding's is_type_only survives the storage read"
         );
+    }
+
+    // ── External imports tests ─────────────────────────────────────
+
+    #[test]
+    fn external_import_facts_carry_the_source_file_path() {
+        // DEPS-ECOSYSTEM-PARTITION-1 §2.1 (DEP-C02): `get_external_imports_for_snapshot` joins
+        // `files` and returns the SOURCE file's repo-relative path, so the query-time ecosystem
+        // partition can gate an observed reference by the importing file's ecosystem. No schema
+        // change, no new persisted column — the path is read from the existing `files` row.
+        let mut conn = fresh_storage();
+        let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+        let file = make_file(&repo_uid, "django/tasks/base.py");
+        conn.upsert_files(std::slice::from_ref(&file))
+            .expect("upsert file");
+        let node = make_node("n1", &snapshot_uid, &repo_uid, "k1", &file.file_uid, "base");
+        conn.insert_nodes(&[node]).expect("insert node");
+        conn.connection()
+            .execute(
+                "INSERT INTO unresolved_edges \
+                 (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, \
+                  resolution, extractor, category, classification, classifier_version, \
+                  basis_code, observed_at) \
+                 VALUES ('u1', ?, ?, 'n1', 'asgiref.sync', 'IMPORTS', 'unresolved', 't', \
+                  'imports_file_not_found', 'external_library_candidate', 1, \
+                  'no_supporting_signal', '2024-01-01T00:00:00Z')",
+                rusqlite::params![snapshot_uid, repo_uid],
+            )
+            .expect("insert unresolved edge");
+
+        let facts = conn
+            .get_external_imports_for_snapshot(&snapshot_uid)
+            .expect("query external imports");
+        assert_eq!(facts.len(), 1, "one external import fact expected");
+        assert_eq!(
+            facts[0].source_file_path, "django/tasks/base.py",
+            "fact carries the source file's repo-relative path"
+        );
+        assert_eq!(facts[0].specifier, "asgiref.sync");
+        assert!(facts[0].is_import_edge, "an IMPORTS edge is an import site");
     }
 
     // ── Resolved imports tests ─────────────────────────────────────

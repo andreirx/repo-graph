@@ -265,6 +265,10 @@ mod tests {
         ComposeDependenciesResult {
             summaries,
             total_external_imports: 3,
+            // DEPS-ECOSYSTEM-PARTITION-1 §2.1: additive fields; this helper exercises the
+            // ecosystem-presence classification, which is unaffected by the observed-side partition.
+            cross_ecosystem: 0,
+            cross_ecosystem_by_source: vec![],
         }
     }
 

@@ -329,6 +329,7 @@ pub(crate) fn compute_unattributed(
     result: &ComposeDependenciesResult,
     ecosystem: &str,
     repo_languages: &[String],
+    manifest_provenance: &ProvenanceRead,
 ) -> Unattributed {
     let scoped_classified: usize = result
         .summaries
@@ -342,6 +343,10 @@ pub(crate) fn compute_unattributed(
         .iter()
         .map(|s| s.rejected_non_specifier)
         .sum();
+    // The cross-ecosystem references (§2.1) are no longer admitted into any module bucket, so they
+    // are neither in `scoped_classified` nor `total_rejected`; `unattributed` therefore counts them
+    // PLUS the true manifest-scope remainder. The JSON count stays this total (cross + remainder);
+    // the reason names the split.
     let unattributed = result
         .total_external_imports
         .saturating_sub(scoped_classified + total_rejected);
@@ -349,22 +354,75 @@ pub(crate) fn compute_unattributed(
     if ecosystem == "none-detected" {
         return Unattributed {
             count: result.total_external_imports,
-            reason: deps_reader_context_note(repo_languages, result.total_external_imports),
+            reason: deps_reader_context_note(
+                repo_languages,
+                result.total_external_imports,
+                manifest_provenance,
+            ),
         };
     }
     let reason = if unattributed > 0 {
-        format!(
-            "{} of {} external references not attributed to a declared manifest \
-             (imported files outside a parsed manifest scope)",
-            unattributed, result.total_external_imports
-        )
+        unattributed_reason(unattributed, result, ecosystem)
     } else {
+        // cross_ecosystem == 0 whenever unattributed == 0 (cross references are a subset of the
+        // unattributed total), so this stays byte-identical to the pre-slice output.
         "all external references attributed or classified".to_string()
     };
     Unattributed {
         count: unattributed,
         reason,
     }
+}
+
+/// Build the §2.1 unattributed-imports reason. When no reference was skipped as cross-ecosystem
+/// (`result.cross_ecosystem == 0`) the sentence is byte-identical to the pre-slice output. Otherwise
+/// it names the cross-ecosystem split (breakdown + the `--ecosystem` see-flag for the largest NAMED
+/// group) and appends the manifest-scope remainder clause when any remains.
+fn unattributed_reason(
+    unattributed: usize,
+    result: &ComposeDependenciesResult,
+    ecosystem: &str,
+) -> String {
+    let cross = result.cross_ecosystem;
+    if cross == 0 {
+        return format!(
+            "{} of {} external references not attributed to a declared manifest \
+             (imported files outside a parsed manifest scope)",
+            unattributed, result.total_external_imports
+        );
+    }
+    // The breakdown, in the compose-provided order (count DESC, named ecosystems before the
+    // no-manifest-ecosystem group). `None` = a source file whose language has no manifest ecosystem.
+    let breakdown = result
+        .cross_ecosystem_by_source
+        .iter()
+        .map(|(eco, n)| match eco {
+            Some(tok) => format!("{n} {tok}"),
+            None => format!("{n} without a manifest ecosystem"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    // The see-flag names the largest NAMED cross group (the first `Some` in the count-DESC order);
+    // omitted when every skipped reference is without a manifest ecosystem.
+    let see_clause = result
+        .cross_ecosystem_by_source
+        .iter()
+        .find_map(|(eco, _)| *eco)
+        .map(|tok| format!(" — see `deps list --ecosystem {tok}`"))
+        .unwrap_or_default();
+    let mut reason = format!(
+        "{cross} of {} external references are imports from files outside the {ecosystem} \
+         ecosystem ({breakdown}){see_clause}",
+        result.total_external_imports
+    );
+    let remainder = unattributed.saturating_sub(cross);
+    if remainder > 0 {
+        reason.push_str(&format!(
+            "; {remainder} more not attributed to a declared manifest \
+             (imported files outside a parsed manifest scope)"
+        ));
+    }
+    reason
 }
 
 /// Sum of `rejected_non_specifier` across all summaries (the §2.1 dropped-fragment total, surfaced
@@ -401,7 +459,11 @@ pub(crate) fn build_deps_list_response(
     repo_uid: &str,
     snapshot_uid: &str,
     ecosystem: &str,
-    repo_languages: &[String],
+    // DEPS-ECOSYSTEM-PARTITION-1 §2.1.5: the none-detected reader-context field now re-sources the
+    // headline `unattributed.reason` (which compute_unattributed built from the provenance records),
+    // so this no longer feeds a second `deps_reader_context_note` call here; kept in the signature
+    // for the stable call shape.
+    _repo_languages: &[String],
     result: ComposeDependenciesResult,
     module_filter: Option<&str>,
     resolution: &ResolutionState,
@@ -413,6 +475,9 @@ pub(crate) fn build_deps_list_response(
     maven_capability: Option<&str>,
 ) -> serde_json::Value {
     let total_external_imports = result.total_external_imports;
+    // DEPS-ECOSYSTEM-PARTITION-1 §2.1 (012-L06): the additive JSON field carrying the count of
+    // observed references skipped as cross-ecosystem — the same number the human ⚠ line states.
+    let cross_ecosystem = result.cross_ecosystem;
 
     // Filter to a specific module if requested (same match rule as before the extraction).
     let summaries: Vec<ModuleDependencySummary> = if let Some(filter) = module_filter {
@@ -451,6 +516,8 @@ pub(crate) fn build_deps_list_response(
         "count": count,
         "ecosystem": ecosystem,
         "total_external_imports": total_external_imports,
+        // §2.1 (012-L06): additive — the cross-ecosystem count the human ⚠ line also states.
+        "cross_ecosystem": cross_ecosystem,
         "rejected_non_specifier_total": total_rejected,
         // HONESTY-GATE-1 §2.1 (the invariant): the declared-unobserved column may render the word
         // "unused" ONLY when the ecosystem's import evidence supports ABSENCE — static resolution PLUS
@@ -556,15 +623,15 @@ pub(crate) fn build_deps_list_response(
     }
 
     // HONEST-DEGRADATION-IMPL-2 (D2): reader-context note for a no-manifest-reader language,
-    // retained (additive) alongside the §2.3 headline.
+    // retained (additive) alongside the §2.3 headline. DEPS-ECOSYSTEM-PARTITION-1 §2.1.5: for the
+    // none-detected view the headline reason IS this note (compute_unattributed built it from the
+    // provenance), so re-source it from `unattributed.reason` — never a second `deps_reader_context_note`
+    // call here (this function does not hold the provenance records).
     if ecosystem == "none-detected" {
         if let serde_json::Value::Object(ref mut map) = response {
             map.insert(
                 "reader_context".to_string(),
-                serde_json::json!(deps_reader_context_note(
-                    repo_languages,
-                    total_external_imports
-                )),
+                serde_json::json!(unattributed.reason),
             );
         }
     }
@@ -853,7 +920,82 @@ mod tests {
         ComposeDependenciesResult {
             summaries,
             total_external_imports: 3,
+            cross_ecosystem: 0,
+            cross_ecosystem_by_source: vec![],
         }
+    }
+
+    /// Like [`result_of`] but with a cross-ecosystem split, for the §2.1 reason tests.
+    fn result_with_cross(
+        summaries: Vec<ModuleDependencySummary>,
+        total_external_imports: usize,
+        cross_ecosystem: usize,
+        cross_ecosystem_by_source: Vec<(Option<&'static str>, usize)>,
+    ) -> ComposeDependenciesResult {
+        ComposeDependenciesResult {
+            summaries,
+            total_external_imports,
+            cross_ecosystem,
+            cross_ecosystem_by_source,
+        }
+    }
+
+    // ── DEPS-ECOSYSTEM-PARTITION-1 §2.1: the partitioned unattributed reason (DEP-C03) ──
+
+    #[test]
+    fn unattributed_names_cross_ecosystem_references_and_the_flag() {
+        // A specific-ecosystem view whose skipped references are all one foreign ecosystem: the
+        // reason names the cross split + the see-flag; with no in-ecosystem remainder there is no
+        // manifest-scope clause.
+        let result = result_with_cross(vec![], 100, 100, vec![(Some("python"), 100)]);
+        let un = compute_unattributed(&result, "npm", &[], &ProvenanceRead::Absent);
+        assert_eq!(un.count, 100);
+        assert_eq!(
+            un.reason,
+            "100 of 100 external references are imports from files outside the npm ecosystem \
+             (100 python) — see `deps list --ecosystem python`"
+        );
+        assert!(
+            !un.reason.contains("more not attributed"),
+            "no remainder clause when nothing is left over: {}",
+            un.reason
+        );
+    }
+
+    #[test]
+    fn unattributed_appends_the_manifest_scope_remainder_after_the_cross_ecosystem_clause() {
+        // Cross references PLUS a genuine manifest-scope remainder (imports of THIS ecosystem that no
+        // parsed manifest scope covers): the remainder is stated after the cross-ecosystem clause.
+        let result = result_with_cross(vec![], 100, 60, vec![(Some("python"), 60)]);
+        let un = compute_unattributed(&result, "npm", &[], &ProvenanceRead::Absent);
+        assert_eq!(un.count, 100);
+        assert_eq!(
+            un.reason,
+            "60 of 100 external references are imports from files outside the npm ecosystem \
+             (60 python) — see `deps list --ecosystem python`; 40 more not attributed to a \
+             declared manifest (imported files outside a parsed manifest scope)"
+        );
+    }
+
+    #[test]
+    fn unattributed_without_cross_ecosystem_references_is_byte_identical_to_before() {
+        // No reference was skipped as cross-ecosystem → the reason is byte-identical to the
+        // pre-slice sentence.
+        let result = result_with_cross(vec![], 100, 0, vec![]);
+        let un = compute_unattributed(&result, "npm", &[], &ProvenanceRead::Absent);
+        assert_eq!(un.count, 100);
+        assert_eq!(
+            un.reason,
+            "100 of 100 external references not attributed to a declared manifest \
+             (imported files outside a parsed manifest scope)"
+        );
+        // And a fully-attributed view keeps the exact clean sentence.
+        let clean = result_with_cross(vec![], 0, 0, vec![]);
+        let un_clean = compute_unattributed(&clean, "npm", &[], &ProvenanceRead::Absent);
+        assert_eq!(
+            un_clean.reason,
+            "all external references attributed or classified"
+        );
     }
 
     #[test]

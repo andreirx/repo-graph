@@ -43,6 +43,16 @@ pub struct ComposeDependenciesResult {
     pub summaries: Vec<ModuleDependencySummary>,
     /// Total external imports observed across all modules.
     pub total_external_imports: usize,
+    /// DEPS-ECOSYSTEM-PARTITION-1 §2.1: count of observed references SKIPPED from the module buckets
+    /// because their source file belongs to a DIFFERENT ecosystem than this view (RC-6 — django's
+    /// Python-file imports counted as undeclared npm packages). Always 0 for the `none-detected` view
+    /// (no ecosystem prefix → nothing is partitioned). Every skipped reference is still counted here,
+    /// never dropped silently; the headline names the split.
+    pub cross_ecosystem: usize,
+    /// Per source-ecosystem breakdown of [`Self::cross_ecosystem`], ordered count-DESC with named
+    /// ecosystems before the `None` (= file whose language has no manifest ecosystem, e.g. C/C++)
+    /// group. Drives the headline breakdown and the `deps list --ecosystem <token>` see-flag.
+    pub cross_ecosystem_by_source: Vec<(Option<&'static str>, usize)>,
 }
 
 /// Compose dependency summaries for all modules in a snapshot.
@@ -176,9 +186,29 @@ pub fn compose_dependency_summaries(
     // the unattributed headline stays honest (they are NOT unattributed imports).
     let mut module_rejected: HashMap<String, usize> = HashMap::new();
 
+    // DEPS-ECOSYSTEM-PARTITION-1 §2.1: the observed-side ecosystem partition. Symmetric with the
+    // declared side (which already gates on `path_ecosystem(&dep.file_path)`): a reference whose
+    // SOURCE file belongs to another ecosystem is not this view's evidence, so it is skipped from the
+    // module buckets and counted here (never dropped silently). `None` groups references from files
+    // whose language has no manifest ecosystem (C/C++, config). The `none-detected` view
+    // (`ecosystem_prefix == None`) is exempt — it admits every reference (P-DEP-02).
+    let mut cross_ecosystem: usize = 0;
+    let mut cross_by_source: HashMap<Option<&'static str>, usize> = HashMap::new();
+
     // Group external imports by module canonical path.
     // Resolve identifiers to specifiers using import bindings.
     for import in &external_imports {
+        if let ObservedPartition::CrossEcosystem(source_ecosystem) = partition_observed(
+            ecosystem_prefix,
+            input.ecosystem.as_str(),
+            &import.source_file_path,
+        ) {
+            // Skipped BEFORE the module lookup and `admit_observed` — a cross-ecosystem reference is
+            // not this view's evidence — but counted so the headline can name the split.
+            cross_ecosystem += 1;
+            *cross_by_source.entry(source_ecosystem).or_default() += 1;
+            continue;
+        }
         if let Some(&module_uid) = file_to_module_uid.get(import.source_file_uid.as_str()) {
             if let Some(&module) = uid_to_module.get(module_uid) {
                 let canonical_path = &module.canonical_root_path;
@@ -371,9 +401,25 @@ pub fn compose_dependency_summaries(
     // Sort summaries by module canonical path for deterministic output.
     summaries.sort_by(|a, b| a.module.cmp(&b.module));
 
+    // Deterministic breakdown of the skipped cross-ecosystem references: count DESC, then named
+    // ecosystems before the `None` (no-manifest-ecosystem) group. The renderer names the largest
+    // NAMED group in the see-flag and lists every group in the headline.
+    let mut cross_ecosystem_by_source: Vec<(Option<&'static str>, usize)> =
+        cross_by_source.into_iter().collect();
+    cross_ecosystem_by_source.sort_by(|a, b| {
+        b.1.cmp(&a.1).then_with(|| match (a.0, b.0) {
+            (Some(x), Some(y)) => x.cmp(y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        })
+    });
+
     Ok(ComposeDependenciesResult {
         summaries,
         total_external_imports,
+        cross_ecosystem,
+        cross_ecosystem_by_source,
     })
 }
 
@@ -605,6 +651,35 @@ fn module_covered_by_parsed_manifest(
             && (dir_is_ancestor_or_equal(&r.dir, canonical_path)
                 || dir_is_ancestor_or_equal(canonical_path, &r.dir))
     })
+}
+
+/// DEPS-ECOSYSTEM-PARTITION-1 §2.1: the observed-side partition decision for ONE reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservedPartition {
+    /// The reference belongs to this ecosystem view — it proceeds to the module bucket and
+    /// `admit_observed`, exactly as before this slice.
+    InView,
+    /// The reference's source file belongs to a DIFFERENT ecosystem than the view — it is skipped
+    /// from the module buckets and counted; carries the source file's ecosystem (`None` = a file
+    /// whose language has no manifest ecosystem, e.g. C/C++/config).
+    CrossEcosystem(Option<&'static str>),
+}
+
+/// Decide whether one observed reference is in-view or cross-ecosystem (§2.1). Symmetric with the
+/// declared-side gate (`path_ecosystem(&dep.file_path) != Some(ecosystem)`): under a specific
+/// ecosystem view (`ecosystem_prefix.is_some()`) a reference whose SOURCE file belongs to another
+/// ecosystem is CROSS-ECOSYSTEM. The `none-detected` view (`ecosystem_prefix == None`) admits every
+/// reference (P-DEP-02) — nothing is partitioned there, so its cross-ecosystem count stays 0.
+fn partition_observed(
+    ecosystem_prefix: Option<&str>,
+    view_ecosystem: &str,
+    source_file_path: &str,
+) -> ObservedPartition {
+    if ecosystem_prefix.is_some() && path_ecosystem(source_file_path) != Some(view_ecosystem) {
+        ObservedPartition::CrossEcosystem(path_ecosystem(source_file_path))
+    } else {
+        ObservedPartition::InView
+    }
 }
 
 /// The dependency ecosystem a source file belongs to, by extension (DEPS-LIST-REWRITE-1). Index-time
@@ -851,6 +926,60 @@ mod tests {
         assert_eq!(path_ecosystem("src/util.c"), None);
         assert_eq!(path_ecosystem("Makefile"), None);
         assert_eq!(path_ecosystem("go.mod"), None);
+    }
+
+    // ── DEPS-ECOSYSTEM-PARTITION-1 §2.1: the observed-side ecosystem partition (DEP-C01) ──
+
+    #[test]
+    fn observed_reference_from_another_ecosystem_file_is_skipped_and_counted() {
+        // RC-6: under the npm view, a Python-file import is cross-ecosystem — the compose loop
+        // SKIPS it before the module bucket / `admit_observed` and counts it under `python`, so it
+        // can never be reconciled into the npm view as an "undeclared npm package" (django's
+        // asgiref.local et al.). It is counted, never dropped silently.
+        assert_eq!(
+            partition_observed(Some("npm:"), "npm", "django/tasks/base.py"),
+            ObservedPartition::CrossEcosystem(Some("python"))
+        );
+        // A C source under the cargo view has no manifest ecosystem → counted in the `None` group
+        // ("without a manifest ecosystem").
+        assert_eq!(
+            partition_observed(Some("cargo:"), "cargo", "subprojects/gstreamer/gst/gst.c"),
+            ObservedPartition::CrossEcosystem(None)
+        );
+    }
+
+    #[test]
+    fn observed_reference_from_same_ecosystem_file_is_admitted() {
+        // A TS-file import under the npm view is in-view — admitted exactly as before the partition
+        // (P-DEP-01: in-ecosystem references are untouched).
+        assert_eq!(
+            partition_observed(Some("npm:"), "npm", "packages/ui/src/App.tsx"),
+            ObservedPartition::InView
+        );
+        // A Rust-file import under the cargo view is in-view.
+        assert_eq!(
+            partition_observed(Some("cargo:"), "cargo", "rust/crates/storage/src/lib.rs"),
+            ObservedPartition::InView
+        );
+    }
+
+    #[test]
+    fn none_detected_view_admits_every_observed_reference_and_counts_none() {
+        // P-DEP-02: the none-detected view (no ecosystem prefix) is exempt — every reference is
+        // in-view regardless of its source language, so the cross-ecosystem count stays 0 and
+        // gstreamer's `unknown-external` rows keep every import.
+        for path in [
+            "subprojects/gstreamer/gst/gst.c",
+            "packages/ui/src/App.tsx",
+            "django/x.py",
+            "rust/crates/storage/src/lib.rs",
+        ] {
+            assert_eq!(
+                partition_observed(None, "none-detected", path),
+                ObservedPartition::InView,
+                "none-detected must admit every reference: {path}"
+            );
+        }
     }
 
     #[test]

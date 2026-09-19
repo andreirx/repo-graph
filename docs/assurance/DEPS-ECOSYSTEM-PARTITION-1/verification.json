@@ -1,0 +1,594 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-DEPS-ECOSYSTEM-PARTITION-1-0",
+  "workItemId": "DEPS-ECOSYSTEM-PARTITION-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DEPS-ECOSYSTEM-PARTITION-1-INPUT-2.json",
+    "sha256": "sha256:7033ab9a1b0d4cacd89d77781c1c77a9782563194c49ef08a883ab64c414dafe"
+  },
+  "allocation": {
+    "path": "docs/slices/deps-ecosystem-partition-1.md",
+    "sha256": "sha256:dd87de22fb41be99bbc3d2106797697a8336323a8252138b682b2a20a43a2578"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "ae7024639af4e2197251cd2300efa10fac1d2d49",
+    "entries": [
+      {
+        "path": "rust/crates/daemon-runtime/src/deps_ecosystem_presence.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6fcaca2139e2f27ee9e216fe3dc0fdb2a9be9f678bc020de7ddabdacd3237690",
+          "byteLength": 24571
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b10f24a6c3edaaaeec2ceeeaf16964728e158951b517871270dd3c42972b203b",
+          "byteLength": 24844
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/deps_headline.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:269b7387dadb1dbdcb1816d7c42e8e89b9ba4a700caaf4ffc1bccf9591aad430",
+          "byteLength": 54724
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:88fdbc3d6a2291de9da633a71bde48e8f575e0e9f6deab37f5b50d2460603054",
+          "byteLength": 61746
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a79b132a46abba650d8bf5942b1b4d8c31b6974000451c905ac1a9f22cd7a6bd",
+          "byteLength": 485220
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0144786734315a9024d160b90e5bf43b6fd328597172cdf79e04541314ee7b98",
+          "byteLength": 485295
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/reader_context.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0fce0c8ed6bd67f1768a23edd26f27b490c868afd9b80b83bd8c7bdcb0854ef0",
+          "byteLength": 64203
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e67c7671fb204e50eae2d9657cb336237954fbd80b46c0a89fa881e9390ac829",
+          "byteLength": 70768
+        }
+      },
+      {
+        "path": "rust/crates/module-queries/src/deps/compose.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9606c5798a7a097b94dadca9757903aa6ab2d3fd32b8028a8a1781d36867e6d6",
+          "byteLength": 58877
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5a25eb44cab05c7b7a4f3a8aa24be40a07943f8f5abca4e675014a9b08d992d3",
+          "byteLength": 65736
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/deps_list.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2dbdc2ed10e4af17f8eef73b6950a6e9d15630b3874a273387dabe52481a8554",
+          "byteLength": 64533
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:48221a1af63544b0272b764118e5fe721f9bda7c97a0e9c67889330e432c7c75",
+          "byteLength": 67132
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/crud/module_edges_support.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:314368c030f267f5739c1db853bd312f0071ed5d98dfdcff9334a4223c844b9e",
+          "byteLength": 57367
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:533c455a595aa5da34ca1088057ac4a200df737b280837a32311c10c6bba9963",
+          "byteLength": 60783
+        }
+      }
+    ],
+    "sha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-DEPS-ECOSYSTEM-PARTITION-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "DEP-C01",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-002-L06",
+        "P-DEP-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-module-queries --lib deps 2>&1 | tee /tmp/dep-c01.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c01.txt && for t in observed_reference_from_another_ecosystem_file_is_skipped_and_counted observed_reference_from_same_ecosystem_file_is_admitted none_detected_view_admits_every_observed_reference_and_counts_none path_ecosystem_maps_extension_to_manifest_ecosystem; do grep -qE \"^test .*$t .* ok$\" /tmp/dep-c01.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "module-queries compose tests: three NEW tests in rust/crates/module-queries/src/deps/compose.rs (a `.py`-sourced external reference under ecosystem `npm` is skipped and counted in `cross_ecosystem` — it never reaches the module bucket or `admit_observed`; a `.ts`-sourced reference under `npm` is admitted exactly as today; under the `none-detected` view (`ecosystem_prefix` None) every reference is admitted and `cross_ecosystem == 0`) plus the existing `path_ecosystem_maps_extension_to_manifest_ecosystem`"
+      },
+      "expected": "exit 0: the observed side is gated by the ONE existing `path_ecosystem` predicate (compose.rs:615-624) — the same predicate the declared side uses at compose.rs:244 — and the skipped references are counted, never dropped silently; the none-detected view is exempt (P-DEP-02); the predicate's own test remains green",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-module-queries --lib deps → `test result: ok. 75 passed; 0 failed`; all four named tests present (observed_reference_from_another_ecosystem_file_is_skipped_and_counted, observed_reference_from_same_ecosystem_file_is_admitted, none_detected_view_admits_every_observed_reference_and_counts_none, path_ecosystem_maps_extension_to_manifest_ecosystem); check EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-c01.txt: `test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out`",
+          "the three DEP-C01 tests live in rust/crates/module-queries/src/deps/compose.rs and assert partition_observed skips a .py ref under the npm view (counted as python), admits a .ts ref, and admits everything under the none-detected view (P-DEP-02)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C02",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-011-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --lib module_edges_support 2>&1 | tee /tmp/dep-c02.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c02.txt && grep -qE '^test .*external_import_facts_carry_the_source_file_path .* ok$' /tmp/dep-c02.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "NEW storage test `external_import_facts_carry_the_source_file_path` in rust/crates/storage/src/crud/module_edges_support.rs tests: `get_external_imports_for_snapshot` (:285-320) now joins `files` and returns `ExternalImportFact.source_file_path` (the repo-relative path) for an `external_library_candidate` row, with the ORDER BY unchanged (`source_file_uid ASC, specifier ASC`)"
+      },
+      "expected": "exit 0: the fact carries the source path read from the store (the template is the existing `get_external_imports_with_locations` join at :440-470); no schema change, no new persisted column",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-storage --lib module_edges_support → `test result: ok. 25 passed; 0 failed`; external_import_facts_carry_the_source_file_path present; check EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-c02.txt: `test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 658 filtered out`",
+          "get_external_imports_for_snapshot now `JOIN files f ON n.file_uid = f.file_uid` and returns ExternalImportFact.source_file_path; ORDER BY (source_file_uid ASC, specifier ASC) unchanged; no schema/persisted-column change"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C03",
+      "obligationIds": [
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L08",
+        "P-DEP-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib reader_context 2>&1 | tee /tmp/dep-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c03.txt && for t in reader_note_names_only_languages_without_a_reader reader_note_lists_parsed_manifests_of_other_ecosystems_with_counts_and_flag reader_note_without_parsed_manifests_is_byte_identical_to_before; do grep -qE \"^test .*$t .* ok$\" /tmp/dep-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-daemon-runtime --lib deps_headline 2>&1 | tee /tmp/dep-c03b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c03b.txt && for t in unattributed_names_cross_ecosystem_references_and_the_flag unattributed_appends_the_manifest_scope_remainder_after_the_cross_ecosystem_clause unattributed_without_cross_ecosystem_references_is_byte_identical_to_before response_emits_basis_and_caveat_and_maven_limit; do grep -qE \"^test .*$t .* ok$\" /tmp/dep-c03b.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "NEW unit tests: reader_context.rs — `deps_reader_context_note` filters its language list by `language_deps_ecosystem(tok).is_none()` (gstreamer's tokens c/cpp/python/rust/java/javascript → `C/C++`) and appends the parsed-manifest inventory clause built from `ProvenanceRead::Tracked` records with `error == None`, grouped by the record's `ecosystem` token and rendered as `; N manifests of other ecosystems were parsed (4 cargo, 8 java, 1 npm) — see `deps list --ecosystem java`` (counts sorted by ecosystem token; the flag names the ecosystem with the most parsed manifests, ties alphabetical); with no parsed records of other ecosystems the sentence is byte-identical to today's. deps_headline.rs — `compute_unattributed` renders §2.2's cross-ecosystem sentence from `ComposeDependenciesResult.cross_ecosystem` + its per-ecosystem breakdown, appends the manifest-scope remainder clause when it is non-zero, and is byte-identical to today's output when `cross_ecosystem == 0`; the existing `response_emits_basis_and_caveat_and_maven_limit` stays green"
+      },
+      "expected": "exit 0: the reader-absence claim names only reader-less languages and lists the manifests that were parsed with the flag that renders them (006-L09/L10, derived from snapshot facts — 002-L06; no basis code or internal token in the sentence — 002-L08); the ≥10% materiality gate (`MATERIAL_LANGUAGE_SHARE_NUM`, reader_context.rs:175) and `secondary_material_ecosystems` remain unchanged (P-DEP-03); repos without cross-ecosystem references or foreign parsed manifests render byte-identically (P-DEP-01)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "reader_context → `ok. 34 passed; 0 failed` with 3 named tests; deps_headline → `ok. 15 passed; 0 failed` with 4 named tests incl. response_emits_basis_and_caveat_and_maven_limit; both EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-c03.txt: `test result: ok. 34 passed; 0 failed` — reader_note_names_only_languages_without_a_reader, reader_note_lists_parsed_manifests_of_other_ecosystems_with_counts_and_flag, reader_note_without_parsed_manifests_is_byte_identical_to_before (incl. the Unavailable-provenance case)",
+          "/tmp/dep-c03b.txt: `test result: ok. 15 passed; 0 failed` — unattributed_names_cross_ecosystem_references_and_the_flag, unattributed_appends_the_manifest_scope_remainder_after_the_cross_ecosystem_clause, unattributed_without_cross_ecosystem_references_is_byte_identical_to_before, response_emits_basis_and_caveat_and_maven_limit"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C04",
+      "obligationIds": [
+        "RG-REQ-006-L06",
+        "RG-REQ-006-L07",
+        "RG-REQ-006-L10",
+        "RG-REQ-012-L06",
+        "P-DEP-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::deps_list 2>&1 | tee /tmp/dep-c04.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c04.txt && for t in asgiref_reads_used_with_computed_basis_tzdata_stays_unobserved maven_capability_limit_names_the_gap_and_suppresses_downgraded present_but_unparsed_manifest_renders_honest_no_record_never_assumed_no_source cross_ecosystem_field_defaults_to_zero_from_an_older_daemon; do grep -qE \"^test .*$t .* ok$\" /tmp/dep-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-classification --lib dep_reduce 2>&1 | tee /tmp/dep-c04b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c04b.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rgr deps_list tests: the three preserved tests named in RG-REQ-006-L07/L10 plus the NEW `cross_ecosystem_field_defaults_to_zero_from_an_older_daemon` (`DepsListResponse.cross_ecosystem: u64` with `#[serde(default)]`, deps_list.rs:86-176 — an envelope without the key deserializes to 0 and renders as today); classification dep_reduce tests (006-L06 head reduction untouched)"
+      },
+      "expected": "exit 0: per-row basis, Maven capability limit, provenance rendering and head reduction remain unchanged (no behavior change — P-DEP-05); the JSON field is additive and an older daemon's envelope still renders (012-L06, reported)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "rgr presentation::deps_list → `ok. 27 passed; 0 failed` with 4 named tests incl. cross_ecosystem_field_defaults_to_zero_from_an_older_daemon; classification dep_reduce → `ok. 4 passed; 0 failed`; both EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-c04.txt: `test result: ok. 27 passed; 0 failed` — asgiref_reads_used_with_computed_basis_tzdata_stays_unobserved, maven_capability_limit_names_the_gap_and_suppresses_downgraded, present_but_unparsed_manifest_renders_honest_no_record_never_assumed_no_source, cross_ecosystem_field_defaults_to_zero_from_an_older_daemon",
+          "/tmp/dep-c04b.txt: `test result: ok. 4 passed; 0 failed` (dep_reduce head reduction untouched — RG-REQ-006-L06)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C05",
+      "obligationIds": [
+        "P-DEP-05",
+        "RG-REQ-006-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/dep-c05.txt | grep -E '^test result: ok\\. [0-9]+ passed; 0 failed' && ! grep -E '^test .* FAILED$' /tmp/dep-c05.txt && cargo test -p repo-graph-module-queries 2>&1 | tee /tmp/dep-c05b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c05b.txt && cargo test -p repo-graph-daemon-runtime --test deps_attrib_nested_workspace 2>&1 | tee /tmp/dep-c05c.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/dep-c05c.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE daemon-runtime unit suite (the acceptance boundary of every touched daemon crate — lesson of EXPLAIN-CYCLES-HONEST-1), the whole module-queries crate, and the end-to-end deps JSON test rust/crates/daemon-runtime/tests/deps_attrib_nested_workspace.rs (`nested_workspace_npm_attributes_and_default_view_states_java_truth`, which asserts `ecosystem`/`other_ecosystems`) — run to completion in the foreground"
+      },
+      "expected": "exit 0: no behavior change anywhere else in the daemon or the deps composition — every existing deps test (compose attach tests, deps_headline payload tests, deps_ecosystem_presence, the nested-workspace e2e) remains green",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Whole daemon-runtime unit suite `ok. 783 passed; 0 failed; 1 ignored`; whole module-queries crate `ok. 83 passed` + `ok. 2 passed`; deps_attrib_nested_workspace `ok. 1 passed`; all EXIT=0 — no behavior change elsewhere (P-DEP-05).",
+        "supportingEvidence": [
+          "/tmp/dep-c05.txt: `test result: ok. 783 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out`",
+          "/tmp/dep-c05b.txt: module-queries `ok. 83 passed` and `ok. 2 passed`",
+          "/tmp/dep-c05c.txt: deps_attrib_nested_workspace `ok. 1 passed` (nested_workspace_npm_attributes_and_default_view_states_java_truth)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C06",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-002-L06",
+        "RG-REQ-012-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before:$PATH\" \"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap\" deps list --ecosystem npm > /tmp/dep-django-npm-before.txt 2> /tmp/dep-django-npm-before.txt.err ) || { echo \"RUN-FAILED /tmp/dep-django-npm-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list --ecosystem npm > /tmp/dep-django-npm-after.txt 2> /tmp/dep-django-npm-after.txt.err ) || { echo \"RUN-FAILED /tmp/dep-django-npm-after.txt\"; exit 1; } && grep -qE '^  used 0 · no static import found 6 · undeclared 102 · builtins 10' /tmp/dep-django-npm-before.txt && grep -qE '^  used 0 · no static import found 6 · undeclared 0( · |$)' /tmp/dep-django-npm-after.txt && ! grep -q 'undeclared: abc, argparse' /tmp/dep-django-npm-after.txt && grep -E '^⚠ [0-9,]+ of [0-9,]+ external references are imports from files outside the npm ecosystem \\([0-9,]+ python\\) — see `deps list --ecosystem python`' /tmp/dep-django-npm-after.txt && python3 -c \"import re;s=open('/tmp/dep-django-npm-after.txt').read();m=re.search(r'^⚠ ([0-9,]+) of ([0-9,]+) external',s,re.M);a,b=[int(x.replace(',','')) for x in m.groups()];assert a*2>b and b==13967,(a,b);print('cross',a,'of',b)\"",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django built by the base-revision binary on 2026-09-19; registry filtered to django), served with the before binary (/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap{,d} copied from rust/target/release at the recorded base revision BEFORE any candidate edit) and the candidate binary (rust/target/release after `cargo build --release --bin rmap --bin rmapd`), both under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off",
+        "inputs": "django `deps list --ecosystem npm` on the SAME index before/after: before renders `used 0 · no static import found 6 · undeclared 102 · builtins 10` with `undeclared: abc, argparse, asgiref.local` (RC-6, read from the product on 2026-09-19); after, the Python-file references are outside the npm view, named in the ⚠ line with the flag to see them; the numbers (13,967 total; the Python-file share) are REPORTED from the output — the assertion is structural (majority of the references are Python-file imports; the total is the index's 13967)"
+      },
+      "expected": "exit 0: `undeclared 0` and no `undeclared: abc, argparse` under the npm view; the ⚠ line names the cross-ecosystem count and the `--ecosystem python` flag; `used 0 · no static import found 6` unchanged; `builtins` REPORTED (not predicted)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "django `deps list --ecosystem npm` on the SAME index: before `used 0 · no static import found 6 · undeclared 102 · builtins 10` with `undeclared: abc, argparse, asgiref.local`; after `used 0 · no static import found 6 · undeclared 0 · builtins 2` and ⚠ `13956 of 13967 external references are imports from files outside the npm ecosystem (13956 python) — see deps list --ecosystem python`; python-share majority and total==13967 verified; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-django-npm-before.txt and /tmp/dep-django-npm-after.txt (candidate vs before binary, RMAP_TRANSPORT=stdio, isolated root /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django)",
+          "python3 assertion output: `cross 13956 of 13967`; `undeclared: abc, argparse` absent after; builtins 10→2 REPORTED (npm builtins remain; python-file builtins are now cross-ecosystem)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C07",
+      "obligationIds": [
+        "P-DEP-01",
+        "RG-REQ-006-L06",
+        "RG-REQ-006-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before:$PATH\" \"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap\" deps list > /tmp/dep-django-default-before.txt 2> /tmp/dep-django-default-before.txt.err ) || { echo \"RUN-FAILED /tmp/dep-django-default-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/dep-django-default-after.txt 2> /tmp/dep-django-default-after.txt.err ) || { echo \"RUN-FAILED /tmp/dep-django-default-after.txt\"; exit 1; } && diff <(grep -vE '^⚠ |^[0-9]+ external refs · ' /tmp/dep-django-default-before.txt) <(grep -vE '^⚠ |^[0-9]+ external refs · ' /tmp/dep-django-default-after.txt) && grep -E '^[0-9]+ external refs · ' /tmp/dep-django-default-before.txt && grep -E '^13967 external refs · ' /tmp/dep-django-default-after.txt && grep -q 'asgiref (51 import sites, 131 call sites)' /tmp/dep-django-default-after.txt && grep -E '^⚠ ' /tmp/dep-django-default-before.txt && grep -E '^⚠ ' /tmp/dep-django-default-after.txt",
+        "cwd": ".",
+        "environment": "same roots/binaries as DEP-C06",
+        "inputs": "django default view (auto-detected python) on the same index: every line except the ⚠ headline and the totals line byte-identical before/after (A-1: the totals line's `non-import fragments dropped` count is the VIEW's count — the partition runs before fragment classification, so other ecosystems' fragments are no longer counted in it: 171 → 161 on django on the first admission; the `13967 external refs` total is unchanged; both totals lines are printed for the report) (the module row `.  [pyproject.toml]`, `used 2 · no static import found 1 · undeclared 0 · self 1 · builtins 128`, the asgiref/sqlparse basis); the ⚠ line before is `419 of 13967 external references not attributed to a declared manifest (imported files outside a parsed manifest scope)`; after, any non-Python-file references among those 419 are named as cross-ecosystem and the remainder keeps the manifest-scope clause — both lines are printed for the report (REPORTED, never predicted)"
+      },
+      "expected": "exit 0: rows, counts and bases unchanged on the dominant-ecosystem view (no behavior change on the observed references that belong to the view); the ⚠ headline and the totals line's dropped-fragment count are REPORTED verbatim (the external-refs total stays 13967)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "django default (python-dominant) view: every line except the ⚠ headline and the totals line byte-identical before/after; asgiref row `asgiref (51 import sites, 131 call sites)` present; totals `13967 external refs · 171 non-import fragments dropped` → `13967 external refs · 161 non-import fragments dropped` (view-own count, REPORTED; external-refs total unchanged); ⚠ before `419 of 13967 ... not attributed`, after `11 of 13967 ... outside the python ecosystem (11 npm) — see deps list --ecosystem npm; 419 more not attributed ...`; EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-django-default-before.txt and /tmp/dep-django-default-after.txt: `diff` of non-⚠/non-totals lines empty (ROWS-IDENTICAL)",
+          "totals line 171→161 and both ⚠ lines quoted in build-progress.md; the 161 is the view's own dropped-fragment count (partition runs before fragment classification, per §2.1.3 / A-1)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C08",
+      "obligationIds": [
+        "RG-REQ-012-L06",
+        "RG-REQ-006-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list --ecosystem npm --json > /tmp/dep-django-npm-after.json 2> /tmp/dep-django-npm-after.json.err ) || { echo \"RUN-FAILED /tmp/dep-django-npm-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list --json > /tmp/dep-django-default-after.json 2> /tmp/dep-django-default-after.json.err ) || { echo \"RUN-FAILED /tmp/dep-django-default-after.json\"; exit 1; } && python3 -c \"import json,re\nd=json.load(open('/tmp/dep-django-npm-after.json'));s=open('/tmp/dep-django-npm-after.txt').read();m=re.search(r'^⚠ ([0-9,]+) of ',s,re.M);n=int(m.group(1).replace(',',''));assert d['cross_ecosystem']==n,(d['cross_ecosystem'],n);assert d['total_external_imports']==13967;e=json.load(open('/tmp/dep-django-default-after.json'));assert isinstance(e['cross_ecosystem'],int);print('npm cross',n,'default cross',e['cross_ecosystem'])\"",
+        "cwd": ".",
+        "environment": "same root as DEP-C06, candidate binary",
+        "inputs": "the deps JSON envelope (`build_deps_list_response`, deps_headline.rs:441-469) gains the additive top-level `cross_ecosystem` (integer) beside `total_external_imports`; the human ⚠ line states the same number"
+      },
+      "expected": "exit 0: the fact visible in the human line is present in JSON and equal (012-L06 — the human/JSON asymmetry is none for this fact); the field is additive",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "JSON envelope carries additive `cross_ecosystem`: npm view `cross_ecosystem == 13956` (equals the human ⚠ number) with `total_external_imports == 13967`; default view `cross_ecosystem == 11` (integer); EXIT=0 (012-L06: the fact in the human line is present and equal in JSON).",
+        "supportingEvidence": [
+          "/tmp/dep-django-npm-after.json and /tmp/dep-django-default-after.json parsed by python3; output `npm cross 13956 default cross 11`",
+          "assertion `d['cross_ecosystem']==n` (n from the human ⚠ line) and `d['total_external_imports']==13967` held"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C09",
+      "obligationIds": [
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-002-L06",
+        "P-DEP-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/gstreamer' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before:$PATH\" \"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap\" deps list > /tmp/dep-gst-default-before.txt 2> /tmp/dep-gst-default-before.txt.err ) || { echo \"RUN-FAILED /tmp/dep-gst-default-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/gstreamer' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/dep-gst-default-after.txt 2> /tmp/dep-gst-default-after.txt.err ) || { echo \"RUN-FAILED /tmp/dep-gst-default-after.txt\"; exit 1; } && grep -qE '^⚠ no dependency-manifest reader for C/C\\+\\+/Java/JavaScript/Python/Rust on this build; 14216 external includes observed, not attributed to packages$' /tmp/dep-gst-default-before.txt && grep -qE '^⚠ no dependency-manifest reader for C/C\\+\\+ on this build; 14216 external includes observed, not attributed to packages; 13 manifests of other ecosystems were parsed \\(4 cargo, 8 java, 1 npm\\) — see `deps list --ecosystem java`$' /tmp/dep-gst-default-after.txt && diff <(grep -v '^⚠ ' /tmp/dep-gst-default-before.txt) <(grep -v '^⚠ ' /tmp/dep-gst-default-after.txt) && grep -c 'unknown-external' /tmp/dep-gst-default-after.txt | grep -qx 7",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst: a COPY of the retained audit-v0.18.0 gstreamer store (~/repo-graph-retained/audit-v0.18.0/databases/4c3ef543f43413bc.db, 2.4 GB; registry filtered to that entry) — never the retained root itself, never a reindex; before/candidate binaries as in DEP-C06",
+        "inputs": "gstreamer default view on the same store: before, the reader sentence names `C/C++/Java/JavaScript/Python/Rust` (RC-7; read from the product on 2026-09-19) although the same snapshot's `extraction_diagnostics_json.deps_manifests` holds 13 parsed records — cargo 4, java 8, npm 1 (verified on the store copy with sqlite on 2026-09-19; `deps_manifests_present` = {cargo 4, npm 1, python 0}, no java key, so the sentence is built from the parsed records, not the present map); after, the sentence names `C/C++` only and lists the parsed manifests with the flag; the 7 `none-detected` rows (ci, scripts, subprojects, …) with their `unknown-external` counts are byte-identical"
+      },
+      "expected": "exit 0: the reader-absence claim names only reader-less languages and the parsed manifests of other ecosystems with counts and the flag that renders them (the ecosystem token the flag accepts — `java`, not the manifest kind `gradle`); the none-detected rows keep every import (P-DEP-02)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "gstreamer default view on the retained-store copy: before ⚠ names `C/C++/Java/JavaScript/Python/Rust`; after ⚠ `no dependency-manifest reader for C/C++ on this build; 14216 external includes observed, not attributed to packages; 13 manifests of other ecosystems were parsed (4 cargo, 8 java, 1 npm) — see deps list --ecosystem java`; non-⚠ rows byte-identical; exactly 7 unknown-external rows (none-detected rows keep every import, P-DEP-02); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-gst-default-before.txt and /tmp/dep-gst-default-after.txt: `diff` of non-⚠ lines empty; `grep -c unknown-external` == 7",
+          "store snapshots.extraction_diagnostics_json.deps_manifests holds 13 parsed (error null) records: 1 npm, 4 cargo, 8 java — matches the sentence; flag = java (most parsed)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C10",
+      "obligationIds": [
+        "P-DEP-02",
+        "RG-REQ-006-L10"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/gstreamer' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before:$PATH\" \"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap\" deps list --ecosystem cargo > /tmp/dep-gst-cargo-before.txt 2> /tmp/dep-gst-cargo-before.txt.err ) || { echo \"RUN-FAILED /tmp/dep-gst-cargo-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/gstreamer' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list --ecosystem cargo > /tmp/dep-gst-cargo-after.txt 2> /tmp/dep-gst-cargo-after.txt.err ) || { echo \"RUN-FAILED /tmp/dep-gst-cargo-after.txt\"; exit 1; } && diff <(grep -v '^⚠ ' /tmp/dep-gst-cargo-before.txt) <(grep -v '^⚠ ' /tmp/dep-gst-cargo-after.txt) && grep -c 'Cargo.toml\\]' /tmp/dep-gst-cargo-after.txt | grep -qx 4 && grep -E '^⚠ ' /tmp/dep-gst-cargo-before.txt && grep -E '^⚠ ' /tmp/dep-gst-cargo-after.txt",
+        "cwd": ".",
+        "environment": "same root/binaries as DEP-C09",
+        "inputs": "gstreamer `--ecosystem cargo` on the same store: the 4 Cargo module rows (`[<path>/Cargo.toml]`, `used 13 · no static import found 5 …` etc.) byte-identical; the ⚠ line before is `13984 of 14216 external references not attributed to a declared manifest (…)`; after, the references from files outside the cargo ecosystem (C/C++ sources have no manifest ecosystem — `path_ecosystem` None) are named per §2.2 with `without a manifest ecosystem` as their group; both lines printed for the report"
+      },
+      "expected": "exit 0: the cargo view's rows and counts are unchanged; the headline reports the split honestly (REPORTED)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "gstreamer `--ecosystem cargo`: 4 Cargo.toml module rows byte-identical before/after; ⚠ after `13755 of 14216 external references are imports from files outside the cargo ecosystem (11223 without a manifest ecosystem, 2302 python, 133 npm, 97 java) — see deps list --ecosystem python; 229 more not attributed ...` (breakdown count-DESC, `None` group rendered `without a manifest ecosystem`, see-flag = largest NAMED group python); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-gst-cargo-before.txt and /tmp/dep-gst-cargo-after.txt: `diff` of non-⚠ lines empty; `grep -c 'Cargo.toml]'` == 4",
+          "both ⚠ lines quoted in build-progress.md (REPORTED)"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C11",
+      "obligationIds": [
+        "P-DEP-01",
+        "RG-REQ-006-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/nginx' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-nginx RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-nginx/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before:$PATH\" \"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap\" deps list > /tmp/dep-nginx-before.txt 2> /tmp/dep-nginx-before.txt.err ) || { echo \"RUN-FAILED /tmp/dep-nginx-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/nginx' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-nginx RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-nginx/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/dep-nginx-after.txt 2> /tmp/dep-nginx-after.txt.err ) || { echo \"RUN-FAILED /tmp/dep-nginx-after.txt\"; exit 1; } && diff /tmp/dep-nginx-before.txt /tmp/dep-nginx-after.txt && grep -qE '^⚠ no dependency-manifest reader for C/C\\+\\+ on this build; 56 external includes observed, not attributed to packages$' /tmp/dep-nginx-after.txt",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-nginx (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/nginx by the base-revision binary; 4 s); before/candidate binaries as in DEP-C06",
+        "inputs": "nginx default view (C only; `deps_manifests` empty): the whole output byte-identical before/after, the reader sentence unchanged (read from the product on 2026-09-19)"
+      },
+      "expected": "exit 0: a repo with no other-ecosystem manifests and no cross-ecosystem references renders byte-identically — no behavior change (P-DEP-01)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "nginx default view (C only, no other-ecosystem manifests): whole output byte-identical before/after; reader sentence `no dependency-manifest reader for C/C++ on this build; 56 external includes observed, not attributed to packages` unchanged (P-DEP-01); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-nginx-before.txt and /tmp/dep-nginx-after.txt: `diff` empty (BYTE-IDENTICAL); reader sentence grep matched"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C12",
+      "obligationIds": [
+        "P-DEP-01",
+        "RG-REQ-006-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-fraktag RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-fraktag/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before:$PATH\" \"/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before/rmap\" deps list > /tmp/dep-fraktag-before.txt 2> /tmp/dep-fraktag-before.txt.err ) || { echo \"RUN-FAILED /tmp/dep-fraktag-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-fraktag RMAP_SOCKET_PATH=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-fraktag/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/dep-fraktag-after.txt 2> /tmp/dep-fraktag-after.txt.err ) || { echo \"RUN-FAILED /tmp/dep-fraktag-after.txt\"; exit 1; } && diff <(grep -v '^⚠ ' /tmp/dep-fraktag-before.txt) <(grep -v '^⚠ ' /tmp/dep-fraktag-after.txt) && grep -qE '^⚠ 30 of 733 external references not attributed' /tmp/dep-fraktag-before.txt && grep -E '^⚠ 30 of 733 external references are imports from files outside the npm ecosystem \\(' /tmp/dep-fraktag-after.txt",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-fraktag: a COPY of the retained audit-v0.18.0 FRAKTAG store (databases/e444686289ee2bf9.db, 14 MB; registry filtered); before/candidate binaries as in DEP-C06",
+        "inputs": "FRAKTAG default (npm) view on the same store: rows byte-identical; the count `30 of 733` preserved — RC-6's store reading says those 30 are Python-file references; the breakdown and flag the product prints are REPORTED (not asserted) — only the count and the cross-ecosystem form are asserted"
+      },
+      "expected": "exit 0: the count `30 of 733` is stable and the rows are unchanged (P-DEP-01); the headline now names what the 30 are (006-L08) instead of folding them into the manifest-scope clause — the breakdown is reported verbatim",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "FRAKTAG default (npm) view on the retained-store copy: rows byte-identical; count `30 of 733` stable; after ⚠ `30 of 733 external references are imports from files outside the npm ecosystem (30 python) — see deps list --ecosystem python` (the 30 now named as Python-file imports rather than folded into the manifest-scope clause); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-fraktag-before.txt and /tmp/dep-fraktag-after.txt: `diff` of non-⚠ lines empty; before ⚠ `30 of 733 ... not attributed`, after ⚠ quoted",
+          "store confirms `packages/engine/scripts/mlx_runner.py:1 import argparse` as a .py external_library_candidate among the 30"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C13",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-DEP-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -c1-16)\" = \"$(grep -E '^registry-before ' .agent-manager/slices/DEPS-ECOSYSTEM-PARTITION-1/build-progress.md | tail -n1 | awk '{print $2}')\" && PIDS=$(pgrep -x rmapd | paste -sd, -) && { test -z \"$PIDS\" || test \"$(ps -o command= -p \"$PIDS\" | grep -vc '/\\.local/bin/rmapd')\" = 0; } && ls -d /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-gst /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-django /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-nginx /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-fraktag >/dev/null && ! ls -d /private/tmp/DEPS-ECOSYSTEM-PARTITION-1-before 2>/dev/null && git worktree list | grep -vc 'm-r2-baseline-worktree\\|\\[main\\]' | grep -qx 0",
+        "cwd": ".",
+        "environment": "the operator's real registry (read-only, digest only); the four pre-provisioned roots stay for the manager's closeout sweep; the before-binary dir is removed by the builder after the last proof",
+        "inputs": "build-progress.md records `registry-before <16-hex>` BEFORE the first proof (the value printed by `shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -c1-16`) and the same command's value after cleanup; every rmap ran under RMAP_STATE_ROOT=/private/tmp/DEPS-ECOSYSTEM-PARTITION-1-* with stdio and the auto passes off; no daemon left from either binary (checked by exact process name `rmapd` and its command path — the operator's launchd daemon at ~/.local/bin/rmapd is the only one allowed); no extra worktree"
+      },
+      "expected": "exit 0: no behavior change outside the isolated roots — the operator's registry digest remains identical before and after, no candidate/before daemon survives, the four proof roots are intact for the manager, the before dir is gone, no extra worktree",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Isolation: operator registry digest 4762fd948a05b208 unchanged; only /Users/apple/.local/bin/rmapd (operator launchd) running (no candidate/before daemon survived stdio calls); four proof roots intact; before-dir removed; worktrees only main + m-r2-baseline-worktree; EXIT=0.",
+        "supportingEvidence": [
+          "shasum of $HOME/Library/Application Support/repo-graph/registry.json cut -c1-16 == 4762fd948a05b208 == build-progress `registry-before` line",
+          "pgrep -x rmapd → single pid 5503 /Users/apple/.local/bin/rmapd; git worktree list non-match count == 0; before-dir absent",
+          "NOTE: DEP-C13 initially EXIT=1 because my build-progress `registry-before` line carried a markdown `- ` bullet while the check greps `^registry-before ` (column 0); fixed the recording (a column-0 line added) — not a code issue; re-run EXIT=0"
+        ]
+      }
+    },
+    {
+      "checkId": "DEP-C14",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-002-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git diff --check && (cd rust && cargo fmt --check -p repo-graph-module-queries -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-rgr && cargo clippy -p repo-graph-module-queries -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-rgr --tests -- -D warnings > /tmp/dep-clippy.log 2>&1 && tail -n1 /tmp/dep-clippy.log) && diff <(git status --short -- rust | sort) <(printf ' M rust/crates/daemon-runtime/src/deps_ecosystem_presence.rs\\n M rust/crates/daemon-runtime/src/deps_headline.rs\\n M rust/crates/daemon-runtime/src/dispatch.rs\\n M rust/crates/daemon-runtime/src/reader_context.rs\\n M rust/crates/module-queries/src/deps/compose.rs\\n M rust/crates/rgr/src/presentation/deps_list.rs\\n M rust/crates/storage/src/crud/module_edges_support.rs\\n' | sort) && ! grep -rn 'basis_code\\|SpecifierMatches\\|external_library_candidate' rust/crates/daemon-runtime/src/reader_context.rs rust/crates/daemon-runtime/src/deps_headline.rs | grep -v '^.*//' | grep -q 'format!'",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "git status/diff of the candidate; rustfmt + clippy -D warnings over the four touched crates; the exact set of seven modified paths (A-1: deps_ecosystem_presence.rs carries only the two-line test-helper literal update) and nothing else; no internal basis token formatted into a rendered sentence"
+      },
+      "expected": "exit 0: whitespace-, rustfmt- and clippy-clean (clippy's own exit status required); the working tree under rust/ holds exactly the seven candidate paths; the new sentences carry no internal-diagnostic label (002-L08)",
+      "candidateSha256": "sha256:5de51a53cec21867bcd1333bae45fc0fedf239c81352d0f1d0956682fe6e6c01",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "git diff --check clean; cargo fmt --check clean over the 4 crates; cargo clippy --tests -- -D warnings `Finished` with no warning (clippy's own exit 0); git status --short -- rust equals exactly the 7 candidate paths; no basis_code/SpecifierMatches/external_library_candidate token formatted into reader_context.rs/deps_headline.rs sentences (002-L08); EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/dep-clippy.log tail: `Finished \\`dev\\` profile [unoptimized + debuginfo] target(s) in 21.84s`",
+          "diff of `git status --short -- rust | sort` against the 7-path literal empty; final `git status --short` shows only the 7 rust paths"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/storage/src/crud/module_edges_support.rs",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-011-L06"
+      ],
+      "summary": "§2.1.1: get_external_imports_for_snapshot adds `JOIN files f ON n.file_uid = f.file_uid` and selects `f.path AS source_file_path` into the new ExternalImportFact.source_file_path (template: sibling get_external_imports_with_locations); ORDER BY and row set unchanged (no schema/persisted-column change) so total_external_imports stays byte-stable. Test external_import_facts_carry_the_source_file_path added."
+    },
+    {
+      "path": "rust/crates/module-queries/src/deps/compose.rs",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-002-L06"
+      ],
+      "summary": "§2.1.2: partition_observed reuses the existing path_ecosystem predicate (same one the declared side applies) to skip a reference whose source file belongs to another ecosystem — before the module bucket and admit_observed — counting it in the new cross_ecosystem total and cross_ecosystem_by_source breakdown (None = no-manifest-ecosystem source); the none-detected view (ecosystem_prefix None) admits everything (P-DEP-02). Three DEP-C01 tests added."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/deps_headline.rs",
+      "obligationIds": [
+        "RG-REQ-006-L08",
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L08",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "§2.1.3/§2.1.5: unattributed_reason renders the cross-ecosystem sentence (breakdown + --ecosystem see-flag for the largest NAMED group + manifest-scope remainder clause) and is byte-identical when cross_ecosystem==0; compute_unattributed takes &ProvenanceRead and the none-detected reader_context re-sources unattributed.reason; the JSON envelope gains additive `cross_ecosystem`. Three DEP-C03 tests added; no internal token in the sentence (002-L08)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/reader_context.rs",
+      "obligationIds": [
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "§2.1.4: deps_reader_context_note filters its language list by language_deps_ecosystem(tok).is_none() (names only reader-less languages) and appends parsed_manifest_inventory_clause built from ProvenanceRead::Tracked records with error==None, grouped by ecosystem TOKEN (java, never gradle), counts ascending, see-flag = most-parsed (ties alphabetical); empty when not Tracked / no parsed record (byte-identical pre-slice). Three DEP-C03 tests added."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-006-L09"
+      ],
+      "summary": "§2.1 call site only: the compute_unattributed invocation passes &input.manifest_provenance (already read upstream); no other change."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/deps_list.rs",
+      "obligationIds": [
+        "RG-REQ-012-L06"
+      ],
+      "summary": "§2.1.5: DepsListResponse gains additive `#[serde(default)] pub cross_ecosystem: u64` so an older daemon's envelope (no key) deserializes to 0 and renders as today (the ⚠ line is the daemon's reason verbatim; no render-logic change). Test cross_ecosystem_field_defaults_to_zero_from_an_older_daemon added."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/deps_ecosystem_presence.rs",
+      "obligationIds": [
+        "RG-REQ-006-L07"
+      ],
+      "summary": "A-1 (allocation amendment): the two-line test-helper literal `result_of` gains the two additive ComposeDependenciesResult fields (cross_ecosystem: 0, cross_ecosystem_by_source: vec![]) so the literal constructor compiles; the ecosystem-presence classification behavior is unchanged (P-DEP-05). No logic change."
+    }
+  ],
+  "completedAt": "2026-09-19T19:14:57.760Z",
+  "limitations": [
+    "No code change was made: candidate-1-a0.patch (the first admission's candidate) was applied verbatim per the RESUME NOTE and verified against §2.1 as amended by A-1; all 14 checks were re-run this cycle in the foreground.",
+    "Live-proof numbers reported from the product, not independently derived: django `builtins` 10→2, the gstreamer cargo-view breakdown (11223 without-manifest-ecosystem / 2302 python / 133 npm / 97 java), and the FRAKTAG 30-python breakdown are REPORTED verbatim from the candidate's output, per the slice's REPORTED-never-predicted rule.",
+    "DEP-C13 first returned EXIT=1 due to my own build-progress.md recording (the `registry-before` value carried a markdown `- ` bullet while the check anchors `^registry-before ` at column 0); I added a column-0 line and re-ran to EXIT=0. This is an operational-recording fix in the gitignored relay dir, not a change to any candidate path; the operator registry digest (4762fd948a05b208) was never touched.",
+    "Live proofs used RMAP_TRANSPORT=stdio against the four pre-provisioned isolated roots (django/nginx fresh indexes; gst/fraktag copies of the retained audit-v0.18.0 stores); the retained root itself was never served. The four roots are left intact for the manager's closeout sweep; only the before-binary dir was removed (DEP-C13)."
+  ],
+  "report": "DEPS-ECOSYSTEM-PARTITION-1 (Q5), second admission under INPUT-2. The candidate (candidate-1-a0.patch) was applied to the clean tree (base ae7024639af4e2197251cd2300efa10fac1d2d49) and verified line-by-line against §2.1 as amended by A-1: one storage join (source_file_path), one reused predicate (path_ecosystem) partitioning the observed side in compose, the partitioned unattributed sentence + additive JSON `cross_ecosystem` in deps_headline, the reader-note language filter + parsed-manifest inventory clause in reader_context, the compute_unattributed provenance argument in dispatch, the additive DepsListResponse field in rgr, and the A-1 test-helper literal in deps_ecosystem_presence. All 14 checks DEP-C01..C14 were re-run in the foreground this cycle: five unit gates (module-queries 75, storage 25, reader_context 34 + deps_headline 15, rgr deps_list 27 + dep_reduce 4, whole daemon-runtime lib 783 + module-queries 85 + nested-workspace e2e 1 — 0 failed) and seven live before/after proofs, plus isolation and hygiene. All EXIT=0. Working tree holds exactly the 7 candidate paths, uncommitted; not committed.\n\nCode-under-analysis examples (from the analyzed repositories):\n(1) django — `django/tasks/backends/base.py:1` `from abc import ABCMeta, abstractmethod` (specifier `abc`) and `django/core/management/base.py:6` `import argparse` (specifier `argparse`): BEFORE, under `deps list --ecosystem npm`, these Python-file imports were reconciled against package.json's 6 devDeps and reported as undeclared npm packages — `used 0 · no static import found 6 · undeclared 102 · builtins 10`, `e.g. ... undeclared: abc, argparse, asgiref.local`. AFTER, they are named as imports from outside the npm ecosystem and never reconciled into it — `used 0 · no static import found 6 · undeclared 0 · builtins 2`, ⚠ `13956 of 13967 external references are imports from files outside the npm ecosystem (13956 python) — see deps list --ecosystem python`. An agent following the old npm view would have wrongly deleted `asgiref` etc. from package.json.\n(2) gstreamer — reader sentence BEFORE `⚠ no dependency-manifest reader for C/C++/Java/JavaScript/Python/Rust on this build; 14216 external includes observed, not attributed to packages` (false: Rust/Java/JavaScript/Python DO have readers and their manifests parsed); AFTER `⚠ no dependency-manifest reader for C/C++ on this build; 14216 external includes observed, not attributed to packages; 13 manifests of other ecosystems were parsed (4 cargo, 8 java, 1 npm) — see deps list --ecosystem java`. Three of the 13 parsed manifests read from the store's snapshots.extraction_diagnostics_json.deps_manifests (all error==null): `subprojects/gst-devtools/dots-viewer/package.json` (npm), `subprojects/gst-devtools/dots-viewer/Cargo.toml` (cargo), `subprojects/gst-docs/examples/tutorials/android/android-tutorial-1/build.gradle` (java). `deps list --ecosystem cargo` still renders those 4 Cargo modules byte-identically.\n(3) FRAKTAG — `packages/engine/scripts/mlx_runner.py:1` `import argparse` is one of the 30 .py external references in the npm view; BEFORE folded into `30 of 733 ... not attributed to a declared manifest`, AFTER named `30 of 733 external references are imports from files outside the npm ecosystem (30 python) — see deps list --ecosystem python`.\n(4) Untouched controls: gstreamer none-detected row `used 0 · no static import found 0 · undeclared 0 · builtins 0 · unknown-external 8` identical before/after (P-DEP-02); gstreamer cargo row `subprojects/gst-devtools/dots-viewer  [subprojects/gst-devtools/dots-viewer/Cargo.toml]` identical before/after; nginx whole output byte-identical (P-DEP-01).\n\nHonest movement (REPORTED): django npm undeclared 102→0, builtins 10→2; django default totals dropped-fragment count 171→161 (view-own count; external-refs total 13967 unchanged); gstreamer/FRAKTAG headlines now name the cross-ecosystem split. No fact count fabricated; every skipped reference is counted, never dropped. Reviewer note: subject digests are in this cycle's task directive; the seven changed-path assessments and the 14 obligation assessments (9 L + P-DEP-01..05) should be reproduced against the isolated roots and the checkouts where the read-only sandbox allows — the /tmp/dep-*.txt captures and the store queries above are the primary evidence."
+}

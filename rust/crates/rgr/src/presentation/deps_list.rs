@@ -102,6 +102,12 @@ pub struct DepsListResponse {
     pub resolution_downgraded: bool,
     #[serde(default)]
     pub total_external_imports: u64,
+    /// DEPS-ECOSYSTEM-PARTITION-1 §2.1 (012-L06): observed references skipped because their source
+    /// file belongs to a different ecosystem than the view — the same count the human ⚠ line states.
+    /// Additive: `#[serde(default)]` so an envelope from an older daemon (no key) deserializes to 0
+    /// and renders exactly as today (the ⚠ line is the daemon's `unattributed_reason`, verbatim).
+    #[serde(default)]
+    pub cross_ecosystem: u64,
     #[serde(default)]
     pub rejected_non_specifier_total: u64,
     /// HONESTY-GATE-1 §2.3: the Maven capability-limit sentence (java view, pom.xml present, no
@@ -1366,6 +1372,48 @@ mod tests {
             out.matches("Maven manifests are not parsed").count(),
             1,
             "capability sentence must not duplicate: {out}"
+        );
+    }
+
+    #[test]
+    fn cross_ecosystem_field_defaults_to_zero_from_an_older_daemon() {
+        // DEPS-ECOSYSTEM-PARTITION-1 §2.1 (012-L06): the `cross_ecosystem` field is additive — an
+        // envelope from an older daemon that never emitted the key deserializes to 0 and renders
+        // exactly as today (the ⚠ line is the daemon's `unattributed_reason`, verbatim).
+        let older = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "unattributed_external_imports": 4,
+            "unattributed_reason": "4 of 10 external references not attributed to a declared manifest (imported files outside a parsed manifest scope)",
+            "total_external_imports": 10,
+            "count": 0,
+            "results": []
+        }));
+        assert_eq!(older.cross_ecosystem, 0, "absent key defaults to 0");
+        let out = older.render_human();
+        assert!(
+            out.contains(
+                "⚠ 4 of 10 external references not attributed to a declared manifest (imported files outside a parsed manifest scope)"
+            ),
+            "older-daemon envelope still renders its ⚠ headline verbatim: {out}"
+        );
+
+        // A current envelope carrying the cross-ecosystem headline populates the field and renders
+        // the daemon reason verbatim.
+        let current = resp(serde_json::json!({
+            "ecosystem": "npm",
+            "unattributed_external_imports": 13967,
+            "unattributed_reason": "13956 of 13967 external references are imports from files outside the npm ecosystem (13956 python) — see `deps list --ecosystem python`",
+            "cross_ecosystem": 13956,
+            "total_external_imports": 13967,
+            "count": 0,
+            "results": []
+        }));
+        assert_eq!(current.cross_ecosystem, 13956);
+        assert!(
+            current.render_human().contains(
+                "⚠ 13956 of 13967 external references are imports from files outside the npm ecosystem (13956 python) — see `deps list --ecosystem python`"
+            ),
+            "current envelope renders the cross-ecosystem headline verbatim"
         );
     }
 }

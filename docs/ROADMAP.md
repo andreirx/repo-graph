@@ -939,7 +939,51 @@ NOT captured'), CC-3 (explain-livegraph-1.md's LG-first cycles leaf superseded f
 line owns query cancellation on client disconnect — DAEMON-CANCEL-3 is a shipped contract without an L) queued in
 docs/assurance/RG-BOOTSTRAP/catalog-corrections.md for the next bootstrap revision; CANCEL-LABELING-1 (per-cycle checkpoints
 inside cycle labeling for the repo-level and focus cancellable reads — both label un-checkpointed after their Tarjan today).
-NEXT: Q5 DEPS-ECOSYSTEM-PARTITION-1 — no earlier than one hour after this closeout (human directive 2026-09-19).
+NEXT: Q5 DEPS-ECOSYSTEM-PARTITION-1 (shipped below).
+
+Q5 DEPS-ECOSYSTEM-PARTITION-1 SHIPPED (2026-09-19; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+`deps list --ecosystem <eco>` now partitions the OBSERVED side by the importing file's ecosystem with the ONE predicate the
+declared side already used (`path_ecosystem`, compose.rs) and names what it skipped; the reader-absence sentence names only
+languages without a reader and lists the manifests of other ecosystems that WERE parsed, with the flag that renders them
+(RC-6 never worked / visibility regressed via DEPS-CLASSIFIER-1B; RC-7 never worked). Storage carries the source file path on
+`ExternalImportFact` (a `files` join, no schema change); `ComposeDependenciesResult` gains `cross_ecosystem` + its per-source
+breakdown; `compute_unattributed` renders `N of M external references are imports from files outside the <eco> ecosystem
+(<count> <token>, …) — see `deps list --ecosystem <tok>`` (+ `; R more not attributed to a declared manifest …` when a
+manifest-scope remainder exists; byte-identical to before when nothing is skipped); `deps_reader_context_note` filters by
+`language_deps_ecosystem` and appends `; N manifests of other ecosystems were parsed (4 cargo, 8 java, 1 npm) — see …` from
+the snapshot's parsed `deps_manifests` records (the ecosystem TOKEN the flag accepts — `java`, not `gradle`); the JSON gains
+`cross_ecosystem` additively (RG-REQ-006-L08/L09/L10, 002-L06 implemented; 012-L06 additive change). CODE UNDER ANALYSIS:
+django — `django/core/management/base.py:6 import argparse` and `django/tasks/backends/base.py:1 from abc import ABCMeta,
+abstractmethod` were reconciled against package.json's 6 devDeps: BEFORE `deps list --ecosystem npm` → `used 0 · no static
+import found 6 · undeclared 102 · builtins 10 … undeclared: abc, argparse, asgiref.local` (an agent following it would have
+"fixed" package.json); AFTER → `used 0 · no static import found 6 · undeclared 0 · builtins 2` + `⚠ 13956 of 13967 external
+references are imports from files outside the npm ecosystem (13956 python) — see deps list --ecosystem python`; the default
+(python) view's rows, bases (`asgiref (51 import sites, 131 call sites)`) and counts are unchanged, its ⚠ line now names the
+11 npm-file references and the manifest-scope remainder, and its `non-import fragments dropped` is the view's own count (171
+→ 161; the 13967 total unchanged). gstreamer (retained-store copy) — BEFORE `⚠ no dependency-manifest reader for
+C/C++/Java/JavaScript/Python/Rust on this build; 14216 external includes observed …` while the snapshot's own diagnostics held
+13 parsed manifests (`subprojects/gst-devtools/dots-viewer/package.json`, `…/dots-viewer/Cargo.toml`,
+`subprojects/gst-docs/examples/tutorials/android/android-tutorial-1/build.gradle`, …); AFTER `⚠ no dependency-manifest reader
+for C/C++ on this build; 14216 external includes observed, not attributed to packages; 13 manifests of other ecosystems were
+parsed (4 cargo, 8 java, 1 npm) — see deps list --ecosystem java`; the 7 none-detected rows and the 4 Cargo rows of
+`--ecosystem cargo` byte-identical (its ⚠: `13755 of 14216 … outside the cargo ecosystem (11223 without a manifest ecosystem,
+2302 python, 133 npm, 97 java) — see deps list --ecosystem python; 229 more not attributed …`). FRAKTAG —
+`packages/engine/scripts/mlx_runner.py:1 import argparse` is one of the 30 Python-file references: BEFORE folded into `30 of
+733 … not attributed to a declared manifest`, AFTER `30 of 733 external references are imports from files outside the npm
+ecosystem (30 python) — see deps list --ecosystem python`; rows byte-identical. nginx byte-identical (C only, no foreign
+manifests). GATES: ALL-GATES-GREEN (scripts/repo-graph-gates.sh, exit 0: fmt, clippy --workspace --all-targets -D warnings, per-crate tests incl. daemon-runtime, consolidation witness, release bins, isolated dogfood; run on the unchanged candidate before the interpretation — it is the evidence F-DEP-01 asked for; committed bytes = the accepted candidate, proven by diff digest). TALLY: 2 admissions, 2 baselines (INPUT-1 grounded on RC-6/RC-7 re-verified on HEAD — one line
+number drifted — and on the product's output on four pre-provisioned same-index roots; PREP cycle 0 refused by the runtime
+for a manifest that lacked the closure of its parents' sources, cycle 1 accepted 13/13 with two real author corrections: the
+second production caller of `deps_reader_context_note` and django's `from abc import` form; INPUT-2 = A-1 after the first
+admission ran ALL fourteen checks green on the product and the runtime refused a seventh path — a test helper's struct
+literal my allocation missed — plus my DEP-C07 oracle that asserted byte-identity on a view-scoped totals line; PREP-2 accepted
+13/13 zero findings), 2 document review cycles, 2 implementation cycles (first admission: all 14 checks green, checkpoint refused; second admission: 14/14, review 13/14 obligations accepted with ONE finding F-DEP-01 — the target CLAUDE.md's end-of-slice workspace test/dogfood phase read as a builder duty; by ratified process it is the operator gate suite after review acceptance, resolved at interpretation by the green gate log; CC-5 queued to say so in the pinned file), 0 oracle corrections, 1 amendment (A-1),
+1 manager interpretation (shape + the F-DEP-01 resolution). Manager defects this slice: manifest closure; struct-literal grep; a derived-line byte-identity
+oracle; three self-caught before launch (pgrep self-match, a predicted FRAKTAG breakdown, a thousands-separator contradiction).
+FOLLOW-UPS: the per-row `[no manifest — imports unattributed]` rendering in the none-detected view; a `deps_manifests_present`
+java key (present counts for gradle/maven are not tracked at index time); RG-REQ-006-L08/L09 evidence lines → OBSERVED MET at
+the next catalog revision.
+NEXT: Q6 EXPLAIN-TYPE-SECTIONS-1 — no earlier than one hour after this closeout (human directive 2026-09-19).
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a

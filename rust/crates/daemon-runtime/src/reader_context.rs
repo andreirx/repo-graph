@@ -12,6 +12,7 @@
 //! the unit tests import that source via `crate::dispatch::configured_resolver_languages`.
 
 use enrichment::EnrichmentLanguage;
+use repo_graph_module_queries::ProvenanceRead;
 
 /// Map an indexer `files.language` token (`indexer::routing::detect_language`'s output, e.g.
 /// `"typescript"`, `"tsx"`, `"c"`) to the enrichment language whose resolver covers it, or `None` if no
@@ -131,16 +132,77 @@ pub(crate) fn dominant_deps_ecosystem(language_counts: &[(String, u64)]) -> &'st
 /// Names the language(s) and surfaces the EXISTING external-import count honestly — observed, not
 /// attributed (no resolver ran; attribution numbers unchanged). `external_imports` is the already-counted
 /// `total_external_imports`.
-pub(crate) fn deps_reader_context_note(languages: &[String], external_imports: usize) -> String {
-    let names = display_language_names(languages);
+pub(crate) fn deps_reader_context_note(
+    languages: &[String],
+    external_imports: usize,
+    provenance: &ProvenanceRead,
+) -> String {
+    // RC-7: name ONLY the languages with NO manifest reader on this build. A language whose deps
+    // ecosystem exists (`language_deps_ecosystem` `Some`) may have had its manifests parsed even when
+    // it is not the dominant one — listing it as reader-less is the false claim this filter removes
+    // (gstreamer named Rust/Java/JavaScript/Python as reader-less while their manifests were parsed).
+    let reader_less: Vec<String> = languages
+        .iter()
+        .filter(|l| language_deps_ecosystem(l).is_none())
+        .cloned()
+        .collect();
+    let names = display_language_names(&reader_less);
     let lang = if names.is_empty() {
         "this language".to_string()
     } else {
         names
     };
-    format!(
+    let mut note = format!(
         "no dependency-manifest reader for {lang} on this build; {external_imports} external includes \
          observed, not attributed to packages"
+    );
+    note.push_str(&parsed_manifest_inventory_clause(provenance));
+    note
+}
+
+/// DEPS-ECOSYSTEM-PARTITION-1 §2.1.4: the "; N manifests of other ecosystems were parsed (…) — see
+/// `deps list --ecosystem <tok>`" clause appended to the reader-context note, built from the PARSED
+/// (`error == None`) provenance records grouped by ecosystem TOKEN (the token the `--ecosystem` flag
+/// accepts — `java`, never the manifest kind `gradle`). Empty when provenance is not `Tracked` or no
+/// record parsed, so the note stays byte-identical to the pre-slice form on a repo with no
+/// other-ecosystem manifests (RC-7 fix: gstreamer's 13 parsed cargo/java/npm manifests are named,
+/// nginx's empty set changes nothing). Counts are listed by ecosystem token ascending; the see-flag
+/// names the ecosystem with the most parsed manifests, ties broken alphabetically.
+fn parsed_manifest_inventory_clause(provenance: &ProvenanceRead) -> String {
+    let ProvenanceRead::Tracked(records) = provenance else {
+        return String::new();
+    };
+    let mut by_eco: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for r in records {
+        if r.error.is_none() {
+            *by_eco.entry(r.ecosystem.as_str()).or_default() += 1;
+        }
+    }
+    if by_eco.is_empty() {
+        return String::new();
+    }
+    let total: usize = by_eco.values().sum();
+    // "4 cargo, 8 java, 1 npm" — BTreeMap iterates keys ascending.
+    let counts = by_eco
+        .iter()
+        .map(|(eco, n)| format!("{n} {eco}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // The see-flag: ecosystem with the most parsed manifests; on a tie, the alphabetically-first
+    // (ascending key order, replaced only on a strictly greater count).
+    let mut flag = "";
+    let mut best = 0usize;
+    for (eco, n) in &by_eco {
+        if *n > best {
+            best = *n;
+            flag = eco;
+        }
+    }
+    format!(
+        "; {total} manifest{} of other ecosystems {} parsed ({counts}) — \
+         see `deps list --ecosystem {flag}`",
+        if total == 1 { "" } else { "s" },
+        if total == 1 { "was" } else { "were" },
     )
 }
 
@@ -697,7 +759,7 @@ mod honest_degradation_tests {
 
     #[test]
     fn deps_note_names_language_and_keeps_count() {
-        let note = deps_reader_context_note(&["c".to_string()], 56);
+        let note = deps_reader_context_note(&["c".to_string()], 56, &ProvenanceRead::Absent);
         assert!(
             note.contains("no dependency-manifest reader for C on this build"),
             "{note}"
@@ -707,6 +769,97 @@ mod honest_degradation_tests {
             "{note}"
         );
         assert!(!note.contains("npm"), "must not mention npm: {note}");
+    }
+
+    // ── DEPS-ECOSYSTEM-PARTITION-1 §2.1.4: reader note filtering + parsed-manifest inventory (DEP-C03) ──
+
+    fn prov_rec(path: &str, dir: &str, eco: &str) -> repo_graph_module_queries::ManifestProvenance {
+        repo_graph_module_queries::ManifestProvenance {
+            path: path.to_string(),
+            dir: dir.to_string(),
+            ecosystem: eco.to_string(),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn reader_note_names_only_languages_without_a_reader() {
+        // RC-7: gstreamer's language set has readers for Rust/Java/JavaScript/Python — the note must
+        // name ONLY C/C++, never the reader-bearing languages (whose manifests actually parsed).
+        let langs = ["c", "cpp", "python", "rust", "java", "javascript"].map(String::from);
+        let note = deps_reader_context_note(&langs, 14216, &ProvenanceRead::Absent);
+        assert!(
+            note.starts_with("no dependency-manifest reader for C/C++ on this build;"),
+            "must name only reader-less languages: {note}"
+        );
+        for reader_bearing in ["Python", "Rust", "Java", "JavaScript"] {
+            assert!(
+                !note.contains(reader_bearing),
+                "reader-bearing language {reader_bearing} must not be named reader-less: {note}"
+            );
+        }
+    }
+
+    #[test]
+    fn reader_note_lists_parsed_manifests_of_other_ecosystems_with_counts_and_flag() {
+        // gstreamer's 13 parsed manifests (4 cargo, 8 java, 1 npm) are named with the flag that
+        // renders the largest group (java, 8) — counts by ecosystem token ascending.
+        let langs = ["c", "cpp", "rust", "java", "javascript"].map(String::from);
+        let mut records = vec![prov_rec(
+            "subprojects/x/package.json",
+            "subprojects/x",
+            "npm",
+        )];
+        for i in 0..4 {
+            records.push(prov_rec(
+                &format!("r{i}/Cargo.toml"),
+                &format!("r{i}"),
+                "cargo",
+            ));
+        }
+        for i in 0..8 {
+            records.push(prov_rec(
+                &format!("j{i}/build.gradle"),
+                &format!("j{i}"),
+                "java",
+            ));
+        }
+        let note = deps_reader_context_note(&langs, 14216, &ProvenanceRead::Tracked(records));
+        assert!(
+            note.contains(
+                "; 13 manifests of other ecosystems were parsed (4 cargo, 8 java, 1 npm) — \
+                 see `deps list --ecosystem java`"
+            ),
+            "parsed-manifest inventory clause wrong: {note}"
+        );
+    }
+
+    #[test]
+    fn reader_note_without_parsed_manifests_is_byte_identical_to_before() {
+        // A repo with no other-ecosystem manifests (nginx: C only, Absent/Tracked-empty/Unavailable
+        // provenance) renders exactly the pre-slice sentence — no appended clause.
+        let expected =
+            "no dependency-manifest reader for C on this build; 56 external includes observed, \
+             not attributed to packages";
+        assert_eq!(
+            deps_reader_context_note(&["c".to_string()], 56, &ProvenanceRead::Absent),
+            expected
+        );
+        assert_eq!(
+            deps_reader_context_note(&["c".to_string()], 56, &ProvenanceRead::Tracked(vec![])),
+            expected
+        );
+        assert_eq!(
+            deps_reader_context_note(
+                &["c".to_string()],
+                56,
+                &ProvenanceRead::Unavailable {
+                    reason: "diagnostics unreadable".to_string()
+                }
+            ),
+            expected,
+            "an Unavailable provenance never appends a clause and never leaks its reason"
+        );
     }
 
     // ── D5 line selection (configured set injected — deterministic, no env) ──
