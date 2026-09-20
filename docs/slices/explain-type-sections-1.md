@@ -3,7 +3,7 @@
   "formatVersion": 1,
   "kind": "implementation-allocation",
   "workItemId": "EXPLAIN-TYPE-SECTIONS-1",
-  "baselinePath": "docs/requirements/baselines/EXPLAIN-TYPE-SECTIONS-1-INPUT-1.json",
+  "baselinePath": "docs/requirements/baselines/EXPLAIN-TYPE-SECTIONS-1-INPUT-2.json",
   "parentRequirementIds": [
     "RG-REQ-001",
     "RG-REQ-002",
@@ -295,7 +295,7 @@ Status: SPECIFIED 2026-09-12; increment 1 GROUNDED and re-verified on HEAD 45cc3
 
 **Implements (increment 1):** RG-REQ-005-L04 — the members half, the referenced-by half, AND the type zero-line `Callers (0) — a type is not called; see Members / Referenced by` (all three are RG-REQ-005-L04's own text; L04 stays PARTIALLY MET until increments 2–3 deliver its bases/derived half — the allocation says so, it does not predict them).
 
-**Not implemented here — deferred (corrected 2026-09-20 per review finding F1):** RG-REQ-005-L09 — the classified unresolved-call COUNT beside a zero (`0 resolved callers; N unresolved calls name x`) — is NOT delivered by this increment; it is CLAIM-INVARIANT-1's work, deferred there in full (no half is done here). The 2026-09-12 draft mis-credited the type zero-line to L09; that sentence is RG-REQ-005-L04's own text and is now attributed to L04 above. L09 stays in the manifest `reviewObligationIds` as a reviewed-but-deferred obligation (the obligation set is preserved), and is absent from `implements`/`preserves`/`changes` because the increment neither implements, preserves nor changes it.
+**Not implemented here — deferred (corrected 2026-09-20 per review finding F1):** RG-REQ-005-L09 — the classified unresolved-call COUNT beside a zero (`0 resolved callers; N unresolved calls name x`) — is NOT delivered by this increment; it is CLAIM-INVARIANT-1's work, deferred there in full (no half is done here). The 2026-09-12 draft mis-credited the type zero-line to L09; that sentence is RG-REQ-005-L04's own text and is now attributed to L04 above. L09 is absent from the manifest `reviewObligationIds` (INPUT-2 — see §9) and from `implements`/`preserves`/`changes` because the increment neither implements, preserves nor changes it, and the admission rule refuses a reviewed obligation that is neither allocated nor contextual; its deferral is recorded in this prose and in §8, not carried as a reviewed obligation of this increment.
 
 **Changes (pre-authorised, REPORTED never predicted):** RG-REQ-012-L06 — the explain JSON gains two additive signals (`EXPLAIN_MEMBERS`, `EXPLAIN_REFERENCED_BY`); the human text renders the same counts and rows (ETS-C08, ETS-C10).
 
@@ -393,3 +393,7 @@ All thirteen checks pass; §2.3 holds on vcmi, leveldb, django, FRAKTAG; `explai
 ## 8. Follow-ups (not this slice)
 
 Increment 2 (C++ ANCHOR: `extract_base_clause` emits the IMPLEMENTS edge from the type node — extractor.rs:1387; bases/derived sections; the IMPLEMENTS shape histogram loses SOURCE→CLASS; consumers keyed on the FILE anchor re-checked) and increment 3 (MACRO RECOVERY: base tokens inside ERROR nodes on `class DLL_LINKAGE X : …`, extractor.rs:797-799). The unresolved-call count beside a zero (RG-REQ-005-L09 in full — no half is done in this slice; deferred to CLAIM-INVARIANT-1). A `parent_node_uid`-based containment (today None in every extractor; containment rides in `qualified_name`).
+
+## 9. Baseline history
+
+- INPUT-1 (2026-09-20): reviewed and accepted 19/19 at cycle 2 (after F1/F2), never approved — its review set kept RG-REQ-005-L09 as an explicitly deferred obligation, which the allocation rule refuses at admission (every reviewed L must be allocated). INPUT-2 (2026-09-20): the same allocation; the review set drops RG-REQ-005-L09 (its deferral — the unresolved-call count beside a zero — is stated in §0 and §8, not reviewed as an obligation of this increment). No other change.

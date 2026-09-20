@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-TYPE-SECTIONS-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-TYPE-SECTIONS-1-INPUT-2.json",
+    "sha256": "sha256:9791d835f0dca7ef5eba104c62158121d28d1274fa9d7ee35c846e3166b40fdc"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-TYPE-SECTIONS-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:4271f59af323f2d044d0f267e008af7bf902a53c56b1d43b1268e29de068fed1"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-20T14:20:44.456Z",
+  "rationale": "Operator approves EXPLAIN-TYPE-SECTIONS-1-INPUT-2: the Q6 increment-1 allocation (members + referenced-by sections for a type focus; two REQUIRED port reads with seven implementors; renderer-side type zero-line credited to RG-REQ-005-L04; RG-REQ-002-L07 deliberately not implemented — its sentence would read the same on every repo; 13 checks over four pre-provisioned same-index roots; the whole unit suite of every touched crate in the boundary). INPUT-1 was accepted 19/19 but could not admit (its review set kept RG-REQ-005-L09 as a deferred obligation, refused by the allocation rule); INPUT-2 drops it from the review set — the deferral stays in prose. PREP-2: codex gpt-5.6-terra accepted 18/18 at cycle 1; the author ran the validator itself and corrected one stale §0 clause. Approval id 1 was never issued."
+}
