@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "COMPLEXITY-SCOPE-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/COMPLEXITY-SCOPE-1-INPUT-1.json",
+    "sha256": "sha256:31135bfbae3e80ada3622249d6238fe833297d365793fed670d87343f94f0089"
+  },
+  "review": {
+    "path": "docs/assurance/COMPLEXITY-SCOPE-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:c618f24fe2d63d8e4a061a7989d2fef49a4189a38c1b99cdcf8ae711c377e207"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-20T17:51:19.167Z",
+  "rationale": "Q7 COMPLEXITY-SCOPE-1 INPUT-1: allocation and manifest grounded on RC-9 re-verified on HEAD 821c59a; codex gpt-5.6-terra document review accepted 23/23 at cycle 2 after one verifiability finding (CS-C16 porcelain status pattern) was corrected by the claude-opus-4-8 author; validator ALLOCATION VALID; four marker sniff frozen after corpus measurement."
+}
