@@ -22,11 +22,12 @@ use std::collections::HashMap;
 
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentComplexityMeasurement,
-    AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge,
-    AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
-    AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
+    AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFileImporter,
+    AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentMemberEntry, AgentModuleSize,
+    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
+    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
+    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentSymbolResolution,
+    AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -121,6 +122,9 @@ pub struct FakeAgentStorage {
     pub symbols_in_file: HashMap<(String, String), Vec<AgentSymbolEntry>>,
     pub files_in_path: HashMap<(String, String), Vec<AgentFileEntry>>,
     pub file_imports: HashMap<(String, String), Vec<AgentImportEntry>>,
+    // ── EXPLAIN-TYPE-SECTIONS-1 type-focus seed data ────────
+    pub members_of_type: HashMap<(String, String), Vec<AgentMemberEntry>>,
+    pub file_importers: HashMap<(String, String), Vec<AgentFileImporter>>,
 
     // ── Gate-port seed data (Rust-43A) ──────────────────────
     //
@@ -584,6 +588,26 @@ impl AgentStorageRead for FakeAgentStorage {
         self.fail_if_forced("find_file_imports")?;
         let key = (snapshot_uid.to_string(), file_path.to_string());
         Ok(self.file_imports.get(&key).cloned().unwrap_or_default())
+    }
+
+    fn list_members_of_type(
+        &self,
+        snapshot_uid: &str,
+        qualified_name: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError> {
+        self.fail_if_forced("list_members_of_type")?;
+        let key = (snapshot_uid.to_string(), qualified_name.to_string());
+        Ok(self.members_of_type.get(&key).cloned().unwrap_or_default())
+    }
+
+    fn find_file_importers(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        self.fail_if_forced("find_file_importers")?;
+        let key = (snapshot_uid.to_string(), file_path.to_string());
+        Ok(self.file_importers.get(&key).cloned().unwrap_or_default())
     }
 
     fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {

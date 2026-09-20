@@ -365,6 +365,42 @@ impl ExplainResponse {
         None
     }
 
+    /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the focus symbol's `subtype` from the identity
+    /// evidence (already on the wire). `None` for a non-symbol focus or when absent.
+    fn get_identity_subtype(&self) -> Option<String> {
+        for signal in &self.signals {
+            if signal.value.code == "EXPLAIN_IDENTITY" {
+                if let Some(ref ev) = signal.value.evidence {
+                    return ev
+                        .get("subtype")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// EXPLAIN-TYPE-SECTIONS-1: is the focus a TYPE (class/struct/enum/interface/trait)? A type is
+    /// never called, so its `Callers`/`Callees` zero-lines point the reader at Members / Referenced by.
+    pub(super) fn focus_is_type(&self) -> bool {
+        matches!(
+            self.get_identity_subtype().as_deref(),
+            Some("CLASS" | "STRUCT" | "ENUM" | "INTERFACE" | "TRAIT")
+        )
+    }
+
+    /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the ` — a type is not called; see Members /
+    /// Referenced by` suffix appended to a `Callers (0)` / `Callees (0)` heading ONLY on a type focus.
+    /// Empty for a function/method focus (byte-identical to before) and for any nonzero count.
+    pub(super) fn type_not_called_suffix(&self, count: u64) -> String {
+        if count == 0 && self.focus_is_type() {
+            " — a type is not called; see Members / Referenced by".to_string()
+        } else {
+            String::new()
+        }
+    }
+
     fn get_identity_info(&self) -> Option<String> {
         for signal in &self.signals {
             if signal.value.code == "EXPLAIN_IDENTITY" {
@@ -1482,6 +1518,345 @@ mod tests {
         assert!(
             !out.contains("Use --json for full results"),
             "the misleading bare-`--json` wording must be gone:\n{out}"
+        );
+    }
+
+    // ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): Members / Referenced by / type zero-line (ETS-C03) ──
+
+    /// Build a resolved SYMBOL-target response carrying an EXPLAIN_IDENTITY of the given `subtype`
+    /// plus the provided section signals — the substrate for the type-focus render tests.
+    fn typed_response(subtype: &str, mut sections: Vec<ExplainSignal>) -> ExplainResponse {
+        let mut r = minimal_response();
+        r.focus = ExplainFocus {
+            input: Some("MyType".to_string()),
+            resolved: true,
+            resolved_kind: Some("symbol".to_string()),
+            resolved_path: Some("src/a.h".to_string()),
+            reason: None,
+            candidates: vec![],
+        };
+        let mut signals = vec![ExplainSignal {
+            code: "EXPLAIN_IDENTITY".to_string(),
+            summary: "Identity: symbol target.".to_string(),
+            evidence: Some(serde_json::json!({ "name": "MyType", "subtype": subtype })),
+        }];
+        signals.append(&mut sections);
+        r.signals = signals.into_iter().map(leaf).collect();
+        r
+    }
+
+    fn members_signal(count: u64, items: serde_json::Value) -> ExplainSignal {
+        ExplainSignal {
+            code: "EXPLAIN_MEMBERS".to_string(),
+            summary: format!("{count} member(s)."),
+            evidence: Some(serde_json::json!({ "count": count, "items": items })),
+        }
+    }
+
+    #[test]
+    fn explain_members_section_anchors_file_line_and_marks_decl() {
+        let r = typed_response(
+            "CLASS",
+            vec![members_signal(
+                2,
+                serde_json::json!([
+                    {"name": "Recover", "subtype": "METHOD", "file": "db/db_impl.cc", "line": 292, "forward_decl": false},
+                    {"name": "Open", "subtype": "METHOD", "file": "db/db_impl.h", "line": 40, "forward_decl": true}
+                ]),
+            )],
+        );
+        let out = r.render_human(false);
+        assert!(out.contains("Members (2)"), "header:\n{out}");
+        assert!(
+            out.contains("- Recover (METHOD)  db/db_impl.cc:292"),
+            "member row anchors path:line:\n{out}"
+        );
+        assert!(
+            out.contains("- Open (METHOD, decl)  db/db_impl.h:40"),
+            "a forward_decl member renders the (decl) marker:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_members_section_omits_absent_line_never_zero() {
+        let r = typed_response(
+            "CLASS",
+            vec![members_signal(
+                2,
+                serde_json::json!([
+                    {"name": "noLine", "subtype": "METHOD", "file": "src/a.h", "forward_decl": false},
+                    {"name": "zeroLine", "subtype": "METHOD", "file": "src/a.h", "line": 0, "forward_decl": false}
+                ]),
+            )],
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("- noLine (METHOD)  src/a.h"),
+            "absent line renders the bare path:\n{out}"
+        );
+        assert!(
+            out.contains("- zeroLine (METHOD)  src/a.h"),
+            "a 0 line renders the bare path, never `:0`:\n{out}"
+        );
+        assert!(!out.contains("src/a.h:0"), "no fabricated `:0`:\n{out}");
+    }
+
+    #[test]
+    fn explain_members_over_cap_renders_more_line_and_full_uncaps() {
+        let items: Vec<serde_json::Value> = (0..16)
+            .map(|i| {
+                serde_json::json!({"name": format!("m{i:02}"), "subtype": "METHOD", "file": "src/a.h", "line": 10 + i, "forward_decl": false})
+            })
+            .collect();
+        let r = typed_response("CLASS", vec![members_signal(16, serde_json::json!(items))]);
+        // Default: 15 rows + "... (1 more)".
+        let out = r.render_human(false);
+        assert!(out.contains("- m00 (METHOD)"), "first member:\n{out}");
+        assert!(out.contains("- m14 (METHOD)"), "15th member kept:\n{out}");
+        assert!(
+            !out.contains("- m15 (METHOD)"),
+            "16th dropped at the cap:\n{out}"
+        );
+        assert!(
+            out.contains("  ... (1 more)"),
+            "the remainder is named:\n{out}"
+        );
+        // --full: every member, no more-line.
+        let full = r.render_human(true);
+        assert!(
+            full.contains("- m15 (METHOD)"),
+            "--full renders all:\n{full}"
+        );
+        assert!(!full.contains("more)"), "--full has no more-line:\n{full}");
+    }
+
+    #[test]
+    fn explain_referenced_by_section_names_count_top_modules_and_files() {
+        let r = typed_response(
+            "CLASS",
+            vec![ExplainSignal {
+                code: "EXPLAIN_REFERENCED_BY".to_string(),
+                summary: "referenced by 2 files.".to_string(),
+                evidence: Some(serde_json::json!({
+                    "count": 2,
+                    "top_modules": [{"module": "lib", "count": 1}, {"module": "client", "count": 1}],
+                    "items": [{"file": "lib/x.cpp", "module": "lib"}, {"file": "client/y.cpp", "module": "client"}]
+                })),
+            }],
+        );
+        let out = r.render_human(false);
+        assert!(out.contains("Referenced by (2 files)"), "header:\n{out}");
+        assert!(
+            out.contains("  top modules: lib (1), client (1)"),
+            "top modules line:\n{out}"
+        );
+        assert!(out.contains("- lib/x.cpp"), "file row:\n{out}");
+        assert!(out.contains("- client/y.cpp"), "file row:\n{out}");
+    }
+
+    #[test]
+    fn explain_type_zero_callers_line_says_a_type_is_not_called() {
+        let r = typed_response(
+            "CLASS",
+            vec![
+                ExplainSignal {
+                    code: "EXPLAIN_CALLERS".to_string(),
+                    summary: "0 direct callers.".to_string(),
+                    evidence: Some(serde_json::json!({ "count": 0, "items": [] })),
+                },
+                ExplainSignal {
+                    code: "EXPLAIN_CALLEES".to_string(),
+                    summary: "0 direct callees.".to_string(),
+                    evidence: Some(serde_json::json!({ "count": 0, "items": [] })),
+                },
+            ],
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Callers (0) — a type is not called; see Members / Referenced by"),
+            "type Callers zero-line:\n{out}"
+        );
+        assert!(
+            out.contains("Callees (0) — a type is not called; see Members / Referenced by"),
+            "type Callees zero-line:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_function_zero_callers_line_is_unchanged() {
+        let r = typed_response(
+            "FUNCTION",
+            vec![ExplainSignal {
+                code: "EXPLAIN_CALLERS".to_string(),
+                summary: "0 direct callers.".to_string(),
+                evidence: Some(serde_json::json!({ "count": 0, "items": [] })),
+            }],
+        );
+        let out = r.render_human(false);
+        assert!(out.contains("Callers (0)"), "plain zero-line:\n{out}");
+        assert!(
+            !out.contains("Callers (0) —"),
+            "a function's Callers (0) carries no type suffix:\n{out}"
+        );
+        assert!(
+            !out.contains("a type is not called"),
+            "a function is not a type:\n{out}"
+        );
+    }
+
+    /// A raw EXPLAIN_MEMBERS signal carrying an ARBITRARY evidence object, so a malformed
+    /// `count`/`items` (which [`members_signal`] cannot express) can be exercised.
+    fn members_evidence(evidence: serde_json::Value) -> ExplainSignal {
+        ExplainSignal {
+            code: "EXPLAIN_MEMBERS".to_string(),
+            summary: "members.".to_string(),
+            evidence: Some(evidence),
+        }
+    }
+
+    /// A raw EXPLAIN_REFERENCED_BY signal carrying an ARBITRARY evidence object.
+    fn referenced_by_evidence(evidence: serde_json::Value) -> ExplainSignal {
+        ExplainSignal {
+            code: "EXPLAIN_REFERENCED_BY".to_string(),
+            summary: "referenced by.".to_string(),
+            evidence: Some(evidence),
+        }
+    }
+
+    #[test]
+    fn explain_members_rows_render_only_from_carried_evidence() {
+        // F-ETS-01 (the class, not the instance): the COMPLETE carried evidence of both type
+        // sections is validated before any row renders. ANY malformed field makes the WHOLE section
+        // exactly its heading + the single unreadable line — never a fabricated count, a bare
+        // heading, a partial row list, or a silently dropped top-module entry (STANDING HONESTY RULE).
+
+        // ── Members ──
+
+        // (1) missing count → unreadable, and NO fabricated `Members (0)` count parenthetical.
+        let missing_count = typed_response(
+            "CLASS",
+            vec![members_evidence(serde_json::json!({
+                "items": [{"name": "m", "subtype": "METHOD", "file": "src/a.h", "line": 1}]
+            }))],
+        );
+        let out = missing_count.render_human(false);
+        assert!(
+            out.contains("members unreadable on this snapshot"),
+            "missing count → unreadable:\n{out}"
+        );
+        assert!(
+            !out.contains("Members (0)"),
+            "missing count must NOT fabricate `Members (0)`:\n{out}"
+        );
+        assert!(
+            !out.contains("- m (METHOD)"),
+            "missing count → no partial rows:\n{out}"
+        );
+
+        // (2) non-integer count → unreadable, no rows.
+        let bad_count = typed_response(
+            "CLASS",
+            vec![members_evidence(serde_json::json!({
+                "count": "many",
+                "items": [{"name": "m", "subtype": "METHOD", "file": "src/a.h", "line": 1}]
+            }))],
+        );
+        let out = bad_count.render_human(false);
+        assert!(
+            out.contains("members unreadable on this snapshot"),
+            "non-integer count → unreadable:\n{out}"
+        );
+        assert!(
+            !out.contains("- m (METHOD)"),
+            "non-integer count → no partial rows:\n{out}"
+        );
+
+        // (3) non-array items → unreadable (never a bare `Members (N)` heading with no rows/line).
+        let non_array_items = typed_response(
+            "CLASS",
+            vec![members_evidence(
+                serde_json::json!({ "count": 3, "items": {} }),
+            )],
+        );
+        let out = non_array_items.render_human(false);
+        assert!(
+            out.contains("Members (3)") && out.contains("members unreadable on this snapshot"),
+            "non-array items → heading with real count + unreadable line:\n{out}"
+        );
+
+        // (4) non-string name → unreadable, no partial rows.
+        let bad_name = typed_response(
+            "CLASS",
+            vec![members_signal(
+                1,
+                serde_json::json!([{"name": 42, "subtype": "METHOD", "file": "src/a.h", "line": 1}]),
+            )],
+        );
+        let out = bad_name.render_human(false);
+        assert!(
+            out.contains("members unreadable on this snapshot"),
+            "non-string name → unreadable:\n{out}"
+        );
+
+        // (5) non-integer line on the SECOND item → unreadable, no partial list of the first (valid) row.
+        let bad_line = typed_response(
+            "CLASS",
+            vec![members_signal(
+                2,
+                serde_json::json!([
+                    {"name": "ok", "subtype": "METHOD", "file": "src/a.h", "line": 5},
+                    {"name": "bad", "subtype": "METHOD", "file": "src/a.h", "line": "five"}
+                ]),
+            )],
+        );
+        let out = bad_line.render_human(false);
+        assert!(
+            out.contains("members unreadable on this snapshot"),
+            "non-integer line → unreadable:\n{out}"
+        );
+        assert!(
+            !out.contains("- ok (METHOD)"),
+            "never a partial list when an item is malformed:\n{out}"
+        );
+
+        // ── Referenced by ──
+
+        // (6) a malformed top-module entry (missing its count) → unreadable; NEVER a silently dropped
+        //     entry and never the authoritative file rows beneath a partial `top modules:` line.
+        let bad_top_module = typed_response(
+            "CLASS",
+            vec![referenced_by_evidence(serde_json::json!({
+                "count": 1,
+                "top_modules": [{"module": "lib"}],
+                "items": [{"file": "lib/x.cpp", "module": "lib"}]
+            }))],
+        );
+        let out = bad_top_module.render_human(false);
+        assert!(
+            out.contains("referenced-by unreadable on this snapshot"),
+            "malformed top-module entry → unreadable:\n{out}"
+        );
+        assert!(
+            !out.contains("top modules:"),
+            "malformed top-module entry → no partial `top modules:` line:\n{out}"
+        );
+        assert!(
+            !out.contains("- lib/x.cpp"),
+            "malformed top-module entry → no file rows:\n{out}"
+        );
+
+        // (7) a malformed referenced-by file row (missing its `file`) → unreadable, no partial rows.
+        let bad_refby_row = typed_response(
+            "CLASS",
+            vec![referenced_by_evidence(serde_json::json!({
+                "count": 1,
+                "items": [{"module": "lib"}]
+            }))],
+        );
+        let out = bad_refby_row.render_human(false);
+        assert!(
+            out.contains("referenced-by unreadable on this snapshot"),
+            "malformed referenced-by file row → unreadable:\n{out}"
         );
     }
 }

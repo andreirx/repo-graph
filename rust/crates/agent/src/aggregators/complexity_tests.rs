@@ -269,6 +269,25 @@ impl AgentStorageRead for FakeStorage {
         Ok(Vec::new())
     }
 
+    // EXPLAIN-TYPE-SECTIONS-1: the complexity fake carries no type members / importers — this
+    // double drives the complexity aggregator only, never a type-focus explain. Empty is honest
+    // here (an unused fixture), NOT a defaulted read on a serving path.
+    fn list_members_of_type(
+        &self,
+        _snapshot_uid: &str,
+        _qualified_name: &str,
+    ) -> Result<Vec<crate::AgentMemberEntry>, AgentStorageError> {
+        Ok(Vec::new())
+    }
+
+    fn find_file_importers(
+        &self,
+        _snapshot_uid: &str,
+        _file_path: &str,
+    ) -> Result<Vec<crate::AgentFileImporter>, AgentStorageError> {
+        Ok(Vec::new())
+    }
+
     fn get_doc_inventory(
         &self,
         _repo_uid: &str,

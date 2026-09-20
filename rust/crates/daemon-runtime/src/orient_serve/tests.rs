@@ -20,8 +20,9 @@ use crate::callgraph_cert::test_fixture;
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentImportEdge, AgentImportEntry, AgentModuleSummary, AgentRepo, AgentRepoSummary,
-    AgentSnapshot, AgentStaleFile, AgentStorageError, AgentSymbolEntry, AgentTrustSummary,
+    AgentFileImporter, AgentImportEdge, AgentImportEntry, AgentMemberEntry, AgentModuleSummary,
+    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
+    AgentSymbolEntry, AgentTrustSummary,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -550,6 +551,21 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for PartialSpy<'_, S> {
         p: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.0.find_file_imports(s, p)
+    }
+    // EXPLAIN-TYPE-SECTIONS-1: the two type-focus reads delegate to the inner port (unchanged).
+    fn list_members_of_type(
+        &self,
+        s: &str,
+        q: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError> {
+        self.0.list_members_of_type(s, q)
+    }
+    fn find_file_importers(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        self.0.find_file_importers(s, p)
     }
     fn get_doc_inventory(&self, r: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
         self.0.get_doc_inventory(r)
@@ -1125,6 +1141,21 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
         p: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.0.find_file_imports(s, p)
+    }
+    // EXPLAIN-TYPE-SECTIONS-1: the two type-focus reads delegate to the inner port (unchanged).
+    fn list_members_of_type(
+        &self,
+        s: &str,
+        q: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError> {
+        self.0.list_members_of_type(s, q)
+    }
+    fn find_file_importers(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        self.0.find_file_importers(s, p)
     }
     fn get_doc_inventory(&self, r: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
         self.0.get_doc_inventory(r)

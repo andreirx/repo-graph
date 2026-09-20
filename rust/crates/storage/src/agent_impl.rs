@@ -26,11 +26,11 @@
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,
-    AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
-    AgentImportEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
-    AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
+    AgentDocEntry, AgentFileEntry, AgentFileImporter, AgentFocusCandidate, AgentFocusKind,
+    AgentImportEdge, AgentImportEntry, AgentMemberEntry, AgentModuleSize, AgentModuleSummary,
+    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+    AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
+    AgentSymbolEntry, AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::{assemble_trust_report_cancellable, TrustReportOutcome};
 use repo_graph_trust::types::{
@@ -45,6 +45,20 @@ fn map_level(level: TrustLevel) -> AgentReliabilityLevel {
         TrustLevel::MEDIUM => AgentReliabilityLevel::Medium,
         TrustLevel::LOW => AgentReliabilityLevel::Low,
     }
+}
+
+/// EXPLAIN-TYPE-SECTIONS-1: escape the SQLite `LIKE` wildcards (`%`, `_`) and the escape char (`\`)
+/// in a literal so a qualified name carrying an underscore (common in identifiers) does not match an
+/// arbitrary character. Used with `ESCAPE '\'`.
+fn like_escape(literal: &str) -> String {
+    let mut out = String::with_capacity(literal.len());
+    for ch in literal.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Map a trust-crate reliability axis score into the agent
@@ -1467,6 +1481,161 @@ impl AgentStorageRead for StorageConnection {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(map_err("find_file_imports"))
+    }
+
+    // ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): type-focus member + referenced-by reads ──
+
+    fn list_members_of_type(
+        &self,
+        snapshot_uid: &str,
+        qualified_name: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError> {
+        let conn = self.connection();
+
+        // The type's own (definition-preferred) file: members declared there rank FIRST (a C++
+        // header's in-class declarations before the .cpp out-of-line definitions). Prefer the
+        // non-forward-decl node, then the earliest line — the same definition the resolver picks.
+        let focus_file: Option<String> = match conn.query_row(
+            "SELECT f.path FROM nodes n \
+             JOIN files f ON n.file_uid = f.file_uid \
+             WHERE n.snapshot_uid = ? AND n.qualified_name = ? AND n.kind = 'SYMBOL' \
+               AND n.subtype IN ('CLASS','STRUCT','ENUM','INTERFACE','TRAIT') \
+             ORDER BY COALESCE(json_extract(n.metadata_json, '$.forward_decl'), 0) ASC, \
+                      n.line_start ASC \
+             LIMIT 1",
+            rusqlite::params![snapshot_uid, qualified_name],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(path) => Some(path),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(e) => return Err(map_err("list_members_of_type")(e)),
+        };
+
+        // Direct-member candidates: a SYMBOL whose `qualified_name` begins with `<qn>::` or `<qn>.`.
+        // LIKE narrows the prefix (wildcards `%`/`_`/`\` in the type name ESCAPED so an identifier
+        // underscore never matches an arbitrary char); Rust then keeps only DIRECT members — the
+        // remainder after the separator must carry no further `::`/`.` (a nested `A::Inner::m3` is
+        // NOT a direct member of `A`).
+        let esc = like_escape(qualified_name);
+        let cc_pattern = format!("{esc}::%");
+        let dot_pattern = format!("{esc}.%");
+        let mut stmt = conn
+            .prepare(
+                "SELECT n.name, n.qualified_name, n.subtype, f.path, n.line_start, \
+                        json_extract(n.metadata_json, '$.forward_decl') AS fd \
+                 FROM nodes n \
+                 JOIN files f ON n.file_uid = f.file_uid \
+                 WHERE n.snapshot_uid = ?1 AND n.kind = 'SYMBOL' \
+                   AND (n.qualified_name LIKE ?2 ESCAPE '\\' \
+                        OR n.qualified_name LIKE ?3 ESCAPE '\\')",
+            )
+            .map_err(map_err("list_members_of_type"))?;
+
+        let rows = stmt
+            .query_map(
+                rusqlite::params![snapshot_uid, cc_pattern, dot_pattern],
+                |row| {
+                    let name: String = row.get(0)?;
+                    let qualified: String = row.get(1)?;
+                    let subtype: Option<String> = row.get(2)?;
+                    let file: String = row.get(3)?;
+                    // ANCHORS-EVERYWHERE-1: a NULL/absent OR non-positive (0-sentinel) line degrades
+                    // to None so no fabricated `:0` anchor reaches the DTO/JSON.
+                    let line_start: Option<u64> = row
+                        .get::<_, Option<i64>>(4)?
+                        .filter(|v| *v > 0)
+                        .map(|v| v as u64);
+                    // forward_decl tri-state: SQL NULL (absent key) => false; a JSON bool maps to
+                    // SQLite integer 0/1; a present-but-non-integer value (malformed) makes the
+                    // `Option<i64>` read a FromSql type error that PROPAGATES as an
+                    // AgentStorageError — never silently defaulted (STANDING HONESTY RULE).
+                    let forward_decl: bool = row
+                        .get::<_, Option<i64>>(5)?
+                        .map(|v| v != 0)
+                        .unwrap_or(false);
+                    Ok(AgentMemberEntry {
+                        name,
+                        qualified_name: qualified,
+                        subtype,
+                        file,
+                        line_start,
+                        forward_decl,
+                    })
+                },
+            )
+            .map_err(map_err("list_members_of_type"))?;
+
+        let sep_prefix_cc = format!("{qualified_name}::");
+        let sep_prefix_dot = format!("{qualified_name}.");
+        let mut members: Vec<AgentMemberEntry> = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_err("list_members_of_type"))?
+            .into_iter()
+            .filter(|m| {
+                let remainder = m
+                    .qualified_name
+                    .strip_prefix(&sep_prefix_cc)
+                    .or_else(|| m.qualified_name.strip_prefix(&sep_prefix_dot));
+                match remainder {
+                    // A direct member: exactly one more segment (no further separator).
+                    Some(rest) => !rest.contains("::") && !rest.contains('.'),
+                    None => false,
+                }
+            })
+            .collect();
+
+        // Order: focus-file members first by line, then other files by path then line; a stable
+        // final tiebreak on qualified_name keeps the order total.
+        members.sort_by(|a, b| {
+            let a_focus = focus_file.as_deref() == Some(a.file.as_str());
+            let b_focus = focus_file.as_deref() == Some(b.file.as_str());
+            b_focus
+                .cmp(&a_focus)
+                .then_with(|| a.file.cmp(&b.file))
+                .then_with(|| a.line_start.cmp(&b.line_start))
+                .then_with(|| a.qualified_name.cmp(&b.qualified_name))
+        });
+        Ok(members)
+    }
+
+    fn find_file_importers(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        let conn = self.connection();
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT src_f.path AS source_file, \
+                        mod_n.qualified_name AS module_path \
+                 FROM edges e \
+                 JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
+                 JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
+                 JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
+                 JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+                 LEFT JOIN nodes src_file_node ON src_file_node.file_uid = src_n.file_uid \
+                    AND src_file_node.kind = 'FILE' \
+                    AND src_file_node.snapshot_uid = e.snapshot_uid \
+                 LEFT JOIN edges own ON own.type = 'OWNS' \
+                    AND own.target_node_uid = src_file_node.node_uid \
+                    AND own.snapshot_uid = e.snapshot_uid \
+                 LEFT JOIN nodes mod_n ON own.source_node_uid = mod_n.node_uid \
+                 WHERE e.snapshot_uid = ? AND e.type = 'IMPORTS' AND tgt_f.path = ? \
+                 ORDER BY src_f.path ASC",
+            )
+            .map_err(map_err("find_file_importers"))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![snapshot_uid, file_path], |row| {
+                Ok(AgentFileImporter {
+                    file: row.get(0)?,
+                    module_path: row.get(1)?,
+                })
+            })
+            .map_err(map_err("find_file_importers"))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(map_err("find_file_importers"))
     }
 
     // ── Documentation inventory (docs-primary pivot) ───────────────

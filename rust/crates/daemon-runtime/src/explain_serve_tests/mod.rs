@@ -655,3 +655,355 @@ fn m2_no_eager_read_explain_file_and_path_serve_from_livegraph() {
         "the FILE/PATH per-item LISTINGS still delegate to SQLite (the DR-E3 honest bound)"
     );
 }
+
+// ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04, ETS-C04): the two type-focus reads are SQLite-served
+//    on green (no LiveGraph answer class), recorded by the spy, never a defaulted empty section. ──
+
+mod type_fixture {
+    use repo_graph_ir::{
+        CanonicalKey, EdgeBasis, EdgeType, IdentitySource, ImportEdgeMeta, ImportResolution,
+        IrEdge, IrNode, IrVisibility, PartitionId, PartitionIr, PartitionKind, Provenance,
+        SourceRange, SymbolAttributes,
+    };
+    use repo_graph_livegraph::LiveGraph;
+    use repo_graph_storage::types::{
+        CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile,
+        UpdateSnapshotStatusInput,
+    };
+    use repo_graph_storage::StorageConnection;
+    use repo_graph_trust_model::LanguageSupport;
+
+    use crate::callgraph_cert::test_fixture::Fixture;
+    use crate::state::RepoState;
+
+    pub(super) const REPO: &str = "repo_type_sections";
+    const CLASS_FILE: &str = "src/a.h";
+    const IMPORTER_FILE: &str = "other/b.cpp";
+
+    pub(super) fn class_key() -> String {
+        format!("{REPO}:{CLASS_FILE}#MyClass:SYMBOL:CLASS")
+    }
+    fn m1_key() -> String {
+        format!("{REPO}:{CLASS_FILE}#MyClass::m1:SYMBOL:METHOD")
+    }
+    fn m2_key() -> String {
+        format!("{REPO}:{CLASS_FILE}#MyClass::m2:SYMBOL:METHOD")
+    }
+    fn file_key(path: &str) -> String {
+        format!("{REPO}:{path}:FILE")
+    }
+    fn module_key(dir: &str) -> String {
+        format!("{REPO}:{dir}:MODULE")
+    }
+    fn file_uid(path: &str) -> String {
+        format!("fuid::{path}")
+    }
+
+    fn prov() -> Provenance {
+        Provenance {
+            indexer: "cpp-extractor".into(),
+            indexer_version: "0.1.0".into(),
+            scip_symbol_id: None,
+            build_inputs_hash: "h".into(),
+        }
+    }
+
+    fn ir_file(path: &str) -> IrNode {
+        IrNode {
+            key: CanonicalKey::from_existing(file_key(path)),
+            subtype: "File".into(),
+            name: path.rsplit('/').next().unwrap_or(path).into(),
+            range: None,
+            partition_id: PartitionId::new("p"),
+            identity_source: IdentitySource::AstFileScope,
+            provenance: prov(),
+            attributes: None,
+        }
+    }
+
+    fn ir_symbol(key: &str, name: &str, path: &str, kind: &str, line: u32) -> IrNode {
+        IrNode {
+            key: CanonicalKey::from_existing(key.to_string()),
+            subtype: "Term".into(),
+            name: name.into(),
+            range: Some(SourceRange {
+                file: path.into(),
+                start_line: line,
+                start_col: 0,
+                end_line: line,
+                end_col: 0,
+            }),
+            partition_id: PartitionId::new("p"),
+            identity_source: IdentitySource::AstAdopted,
+            provenance: prov(),
+            attributes: Some(SymbolAttributes {
+                visibility: Some(IrVisibility::Export),
+                is_top_level: true,
+                symbol_kind: Some(kind.into()),
+            }),
+        }
+    }
+
+    fn build_ir() -> PartitionIr {
+        let partition = repo_graph_ir::Partition {
+            id: PartitionId::new("p"),
+            kind: PartitionKind::TsPackage,
+            root: ".".into(),
+            indexer: "cpp-extractor".into(),
+            indexer_version: "0.1.0".into(),
+            build_inputs_hash: "h".into(),
+            package_name: None,
+            declared_dependencies: std::collections::BTreeSet::new(),
+            tsconfig_aliases: None,
+        };
+        let mut ir = PartitionIr::new(partition);
+        ir.nodes.push(ir_file(CLASS_FILE));
+        ir.nodes.push(ir_file(IMPORTER_FILE));
+        ir.nodes
+            .push(ir_symbol(&class_key(), "MyClass", CLASS_FILE, "CLASS", 5));
+        ir.nodes
+            .push(ir_symbol(&m1_key(), "m1", CLASS_FILE, "METHOD", 6));
+        ir.nodes
+            .push(ir_symbol(&m2_key(), "m2", CLASS_FILE, "METHOD", 7));
+        // The importer includes the class header (FILE-level import; one direction, no cycle).
+        ir.edges.push(IrEdge {
+            src: CanonicalKey::from_existing(file_key(IMPORTER_FILE)),
+            dst: CanonicalKey::from_existing(file_key(CLASS_FILE)),
+            edge_type: EdgeType::Imports,
+            basis: EdgeBasis::AstImport,
+            provenance: prov(),
+            import: Some(ImportEdgeMeta {
+                raw_specifier: "a.h".into(),
+                resolved_path: CLASS_FILE.into(),
+                resolution: ImportResolution::StaticResolved,
+            }),
+        });
+        ir
+    }
+
+    fn graph_node(uid: &str, snapshot_uid: &str, stable_key: &str, kind: &str) -> GraphNode {
+        GraphNode {
+            node_uid: uid.into(),
+            snapshot_uid: snapshot_uid.into(),
+            repo_uid: REPO.into(),
+            stable_key: stable_key.into(),
+            kind: kind.into(),
+            subtype: None,
+            name: String::new(),
+            qualified_name: None,
+            file_uid: None,
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        }
+    }
+
+    /// A faithful class fixture: LiveGraph + byte-mirrored SQLite (a CLASS with two members, plus an
+    /// importer file that includes the class's header). No CALLS edges → the callgraph cert is
+    /// trivially GREEN; the nodes are mirrored 1:1 → the focus-resolution cert is GREEN; so the
+    /// bounded cert is GREEN and the class focus resolves through the LiveGraph-served (b) methods.
+    pub(super) fn build() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("repo.db");
+        let mut conn = StorageConnection::open(&db_path).expect("open storage");
+        conn.add_repo(&Repo {
+            repo_uid: REPO.into(),
+            name: REPO.into(),
+            root_path: ".".into(),
+            default_branch: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            metadata_json: None,
+        })
+        .expect("add repo");
+        let snap = conn
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: REPO.into(),
+                kind: "full".into(),
+                basis_ref: None,
+                basis_commit: None,
+                parent_snapshot_uid: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .expect("create snapshot");
+        let snapshot_uid = snap.snapshot_uid;
+
+        let tracked: Vec<TrackedFile> = [CLASS_FILE, IMPORTER_FILE]
+            .iter()
+            .map(|path| TrackedFile {
+                file_uid: file_uid(path),
+                repo_uid: REPO.into(),
+                path: (*path).into(),
+                language: Some("cpp".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            })
+            .collect();
+        conn.upsert_files(&tracked).expect("upsert files");
+        let versions: Vec<FileVersion> = [CLASS_FILE, IMPORTER_FILE]
+            .iter()
+            .map(|path| FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: file_uid(path),
+                content_hash: "deadbeef".into(),
+                ast_hash: None,
+                extractor: Some("test".into()),
+                parse_status: "parsed".into(),
+                size_bytes: Some(1),
+                line_count: Some(1),
+                indexed_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .collect();
+        conn.upsert_file_versions(&versions)
+            .expect("upsert file versions");
+
+        let mut nodes: Vec<GraphNode> = Vec::new();
+        // FILE nodes.
+        for (uid, path) in [("nfc", CLASS_FILE), ("nfi", IMPORTER_FILE)] {
+            let mut n = graph_node(uid, &snapshot_uid, &file_key(path), "FILE");
+            n.name = path.rsplit('/').next().unwrap_or(path).into();
+            n.file_uid = Some(file_uid(path));
+            nodes.push(n);
+        }
+        // MODULE nodes (directory modules — dirnames of the two files: src, other).
+        for (uid, dir) in [("nms", "src"), ("nmo", "other")] {
+            let mut n = graph_node(uid, &snapshot_uid, &module_key(dir), "MODULE");
+            n.name = dir.into();
+            n.qualified_name = Some(dir.into());
+            nodes.push(n);
+        }
+        // SYMBOL nodes: the class + two members.
+        for (uid, key, name, qn, subtype, line) in [
+            ("nc", class_key(), "MyClass", "MyClass", "CLASS", 5),
+            ("nm1", m1_key(), "m1", "MyClass::m1", "METHOD", 6),
+            ("nm2", m2_key(), "m2", "MyClass::m2", "METHOD", 7),
+        ] {
+            let mut n = graph_node(uid, &snapshot_uid, &key, "SYMBOL");
+            n.name = name.into();
+            n.qualified_name = Some(qn.into());
+            n.subtype = Some(subtype.into());
+            n.file_uid = Some(file_uid(CLASS_FILE));
+            n.location = Some(SourceLocation {
+                line_start: line,
+                col_start: 0,
+                line_end: line,
+                col_end: 0,
+            });
+            nodes.push(n);
+        }
+        conn.insert_nodes(&nodes).expect("insert nodes");
+
+        let edge = |uid: &str, src: &str, dst: &str, ty: &str| GraphEdge {
+            edge_uid: uid.into(),
+            snapshot_uid: snapshot_uid.clone(),
+            repo_uid: REPO.into(),
+            source_node_uid: src.into(),
+            target_node_uid: dst.into(),
+            edge_type: ty.into(),
+            resolution: "resolved".into(),
+            extractor: "test".into(),
+            location: None,
+            metadata_json: None,
+        };
+        conn.insert_edges(&[
+            edge("eos", "nms", "nfc", "OWNS"), // src module owns the class file
+            edge("eoo", "nmo", "nfi", "OWNS"), // other module owns the importer file
+            edge("ei", "nfi", "nfc", "IMPORTS"), // importer includes the class header (FILE→FILE)
+        ])
+        .expect("insert edges");
+
+        conn.update_snapshot_status(&UpdateSnapshotStatusInput {
+            snapshot_uid: snapshot_uid.clone(),
+            status: "ready".into(),
+            completed_at: None,
+        })
+        .expect("ready snapshot");
+
+        let mut lg = LiveGraph::new();
+        lg.load_partition("p", build_ir(), LanguageSupport::TypeScriptPrimary);
+
+        let state = RepoState::open(&db_path, REPO).expect("open repo state");
+        *state.livegraph.write() = Some(lg);
+        Fixture {
+            _dir: dir,
+            state,
+            snapshot_uid,
+        }
+    }
+}
+
+#[test]
+fn type_focus_members_and_referenced_by_are_sqlite_delegated_on_green() {
+    let f = type_fixture::build();
+    let storage = f.state.storage().unwrap();
+    assert!(
+        orient_bounded_cert_is_green(&f.state, &f.snapshot_uid),
+        "the faithful class mirror → bounded cert GREEN"
+    );
+
+    // PANIC on the six served (b) methods; the two new type-focus reads DELEGATE (recorded) to SQLite.
+    let spy = ServeSpy::panicking(&storage);
+    let target = type_fixture::class_key();
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, type_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
+        run_explain(&decorator, type_fixture::REPO, &target)
+    };
+
+    // The two type-focus sections are present and NON-EMPTY (a defaulted empty read would pass the
+    // spy silently — this is why the port methods are REQUIRED and this asserts non-emptiness).
+    let members = served
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainMembers)
+        .and_then(|s| match s.evidence() {
+            repo_graph_agent::SignalEvidence::ExplainMembers(e) => Some(e.clone()),
+            _ => None,
+        })
+        .expect("EXPLAIN_MEMBERS present on the class focus");
+    assert_eq!(
+        members.count, 2,
+        "the class's two members served from SQLite"
+    );
+    let refs = served
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainReferencedBy)
+        .and_then(|s| match s.evidence() {
+            repo_graph_agent::SignalEvidence::ExplainReferencedBy(e) => Some(e.clone()),
+            _ => None,
+        })
+        .expect("EXPLAIN_REFERENCED_BY present on the class focus");
+    assert_eq!(refs.count, 1, "the one importing file served from SQLite");
+
+    // The spy recorded both reads as SQLite-delegated (the ruling-B shape).
+    assert!(
+        spy.read_list_members_of_type.load(Ordering::Relaxed),
+        "list_members_of_type was SQLite-delegated (recorded)"
+    );
+    assert!(
+        spy.read_find_file_importers.load(Ordering::Relaxed),
+        "find_file_importers was SQLite-delegated (recorded)"
+    );
+
+    // The served values equal the bare SQLite serve's (delegation, never a LiveGraph value).
+    let plain = run_explain(&storage, type_fixture::REPO, &target);
+    let plain_members = plain
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainMembers)
+        .map(|s| serde_json::to_value(s.evidence()).unwrap());
+    let served_members = served
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainMembers)
+        .map(|s| serde_json::to_value(s.evidence()).unwrap());
+    assert_eq!(
+        served_members, plain_members,
+        "the decorator-served members equal the bare SQLite serve's"
+    );
+}

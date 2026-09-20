@@ -1,0 +1,757 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-EXPLAIN-TYPE-SECTIONS-1-1",
+  "workItemId": "EXPLAIN-TYPE-SECTIONS-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/EXPLAIN-TYPE-SECTIONS-1-INPUT-3.json",
+    "sha256": "sha256:af360a62733f07208d99eb1b9741e639582f05b38f082dcca110bf2a5c2e7fff"
+  },
+  "allocation": {
+    "path": "docs/slices/explain-type-sections-1.md",
+    "sha256": "sha256:91b6e6c0b75b8be68885545e020b1f040f2bb8df8f97e9ef99001bd382abab66"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "425c0d1be514b2506a9f933f41eed5087c90c5a5",
+    "entries": [
+      {
+        "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:742d25ab5bcdad5588df28af00d3ee98680bbd5705824856f871a19eea0b4d7d",
+          "byteLength": 11915
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4edc487bad254ac6bf5cdbe8729f0e8995195cb34f0b5e9f67302f6b82795d9b",
+          "byteLength": 12579
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/signal.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:138fc0fcd6b628da24558a87a9ad1a5971c50bee049a0f00c420861e87b8071a",
+          "byteLength": 92725
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0194a91fb3e6bdffcd51ff20f361536ad52900f6ed931d2d2d03bfd88ffb56c5",
+          "byteLength": 96657
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:74105309a4c76d4561034591a57dc5f283bf3c7be330b8d959e460aa5f962118",
+          "byteLength": 50081
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e4ce861b8a0adf2cf6e06e5b6bbc175ff679ed99f220bd7af7b0ac1590e4afb5",
+          "byteLength": 52590
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8afa03ae6e1b1b7881a429eecf65d8a74051674088f0d0385316d8ba5c7637e4",
+          "byteLength": 6683
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e234a0ea992b20bb20a9a7c2239a29ace305342230cc2f33663f27967310993e",
+          "byteLength": 6849
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d400a13bca22f0f60cb888a34573d4bfd20bd92da9fefbd680761ae0a6282699",
+          "byteLength": 58038
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ab650f0f5bb9072c3e2e5edb9b15863696d12b088a76bfffae0be65ec392a1d9",
+          "byteLength": 61299
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/common/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f902b617966203ef6cc6133a67435fc1740536e6cb06fb850eb53095a5d951cc",
+          "byteLength": 32660
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8fd3c18c5797673f78ca7445bd2324c76acd93807b88133e060dd238527349f6",
+          "byteLength": 33661
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/explain_symbol.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:309a69e2434b9bbc5e3d876d2f2f41b3f453294e8b6302305b55e7129cced255",
+          "byteLength": 17709
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:cb2ddfb39f6edb8bb0e9a45465e7128872e5baea56d7f48609b123489ef9f7dd",
+          "byteLength": 23890
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:86fd3d54ee9d8f0dfb664cf6614a56a97be75c1e0ac2dbcb27f5e36c7fb80598",
+          "byteLength": 32009
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:04a45c979732331a1a8ce241c57693fa301ec0a646b9c00212398558dbea980f",
+          "byteLength": 45543
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:414e454eaf57d90778f1db71e5afcccac8aa165bd4471f54dc360c5f56efdc17",
+          "byteLength": 14744
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:21328f28a08b665c2eeaf901030766dc3257760ad2ae3d38d2c234362f3c32d3",
+          "byteLength": 16106
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f67d7ad47676046981f3f3387cdcc80922780a971c5a53646be3b086249b9133",
+          "byteLength": 27352
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:23f1177f17f8f0920ec56fa1e01e88436f1d6c7f680d118e480ec7030b5b80f0",
+          "byteLength": 28363
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9fccd014d894602d37a6c44482a96975cf0dbe72d950e19f33ebb0c675468802",
+          "byteLength": 77574
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7cda590b027e472ca0dec8d7c370396f18315f2b34ed0329c8dfbdaf82f28035",
+          "byteLength": 78551
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d80a293fccf2372ad18f70807bd2c9df6ae3b04f28070cb77fdc41bdf58d0b36",
+          "byteLength": 63737
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:418bfb79fc6030b2aa97403c105ba2feef8b03f3e628a0935a956c4efb4e3adb",
+          "byteLength": 78855
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4fe14452a0f95dd40e055cf2f0a61f71a43994a801a21ea9ca0854ca87696246",
+          "byteLength": 23367
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fca5df6bce7bccc1e9beef2b58021bc5896875ca38a3d89bd8e1254a4187ffee",
+          "byteLength": 33273
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:117d1f0fffa0f770aecf07bd9bd7842b0b600ac4a46f7a78ae259bfdea4c1e15",
+          "byteLength": 78174
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:be96e3bf5e224182accc5ba31907ea8097d463096b6082aed695a8a096e21b2c",
+          "byteLength": 86157
+        }
+      },
+      {
+        "path": "rust/crates/storage/tests/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8ab917a90f8b74497262f6d70db9bb94fabf2680a2ab9b4f9573588036b6d175",
+          "byteLength": 49032
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:78e3f514c61d24a6a4445aad3aaf710461b5477694871fca752ec39d5b70bc41",
+          "byteLength": 67124
+        }
+      }
+    ],
+    "sha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-EXPLAIN-TYPE-SECTIONS-1-1"
+  },
+  "checks": [
+    {
+      "checkId": "ETS-C01",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-001-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --test agent_impl 2>&1 | tee /tmp/ets-c01.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c01.txt && for t in list_members_of_type_returns_direct_members_only list_members_of_type_orders_focus_file_first_then_other_files_by_path_and_line list_members_of_type_marks_forward_declarations find_file_importers_lists_importing_files_with_owning_module find_file_importers_is_empty_for_a_file_nobody_imports list_symbols_in_file_returns_ordered_entries; do grep -qE \"^test .*$t .* ok$\" /tmp/ets-c01.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "storage integration tests in rust/crates/storage/tests/agent_impl.rs (the file that already tests `list_symbols_in_file_returns_ordered_entries`, kept green): NEW `list_members_of_type_returns_direct_members_only` (fixture nodes `A`, `A::m1`, `A::m2`, `A::Inner`, `A::Inner::m3`, `A.m4`-style dotted sibling in another file; the read for `A` returns m1, m2, Inner (direct members: one more `::` or `.` segment and NO further separator), never `A::Inner::m3`), `…orders_focus_file_first_then_other_files_by_path_and_line`, `…marks_forward_declarations` (a member node whose metadata `forward_decl` is true is returned with `forward_decl: true`; unreadable metadata is an error, never defaulted), NEW `find_file_importers_lists_importing_files_with_owning_module` (IMPORTS edges whose TARGET is the FILE node of the given path → distinct importing file paths with their OWNS-edge module_path, ordered by path) and `…is_empty_for_a_file_nobody_imports`"
+      },
+      "expected": "exit 0: the two new SQLite reads select exactly what §2.1.1 states — direct members by qualified-name containment (no schema change, no new column; stable keys untouched — RG-REQ-001-L04 preserved as no behavior change) and reverse IMPORTS edges into a FILE node grouped by the OWNS-edge module — with deterministic order",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-storage --test agent_impl → `test result: ok. 24 passed; 0 failed`; no FAILED/panicked; all 6 named tests present (list_members_of_type_returns_direct_members_only, …_orders_focus_file_first_then_other_files_by_path_and_line, …_marks_forward_declarations, find_file_importers_lists_importing_files_with_owning_module, find_file_importers_is_empty_for_a_file_nobody_imports, list_symbols_in_file_returns_ordered_entries). ETS-C01-EXIT=0 (re-run fresh this cycle).",
+        "supportingEvidence": [
+          "/tmp/ets-c01.txt (cycle-2 run)",
+          "No schema/column change; stable keys untouched (RG-REQ-001-L04)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C02",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-005-L05",
+        "RG-REQ-010-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-agent 2>&1 | tee /tmp/ets-c02.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c02.txt && for t in explain_type_focus_emits_members_and_referenced_by explain_function_focus_emits_no_members_or_referenced_by explain_type_focus_members_count_is_the_pre_truncation_total explain_symbol_no_file_only_sections explain_resolves_qualified_suffix_through_shared_resolver; do grep -qE \"^test .*$t .* ok$\" /tmp/ets-c02.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the whole agent crate (unit + integration; the fakes `FakeStorage` and `FakeAgentStorage` gain the two REQUIRED port methods). NEW in rust/crates/agent/tests/explain_symbol.rs: `explain_type_focus_emits_members_and_referenced_by` (a CLASS focus on the fake yields EXPLAIN_MEMBERS with the fake's members and EXPLAIN_REFERENCED_BY with the fake's importers grouped by module — top_modules like Callers' `group_by_module`), `explain_function_focus_emits_no_members_or_referenced_by` (a FUNCTION focus emits neither code — byte-identical signal set to today), `explain_type_focus_members_count_is_the_pre_truncation_total` (with 20 members and Budget::Small the evidence `count` is 20 while `items` is capped by `items_cap` and `items_truncated`/`items_omitted_count` say so); the existing `explain_symbol_no_file_only_sections` (a symbol focus still never carries EXPLAIN_SYMBOLS/EXPLAIN_IMPORTS/EXPLAIN_FILES) and `explain_resolves_qualified_suffix_through_shared_resolver` (resolution routing untouched — RG-REQ-005-L05) stay green; seed-candidate behaviour untouched (RG-REQ-010-L01 preserved: `semantic_no_match_*` paths unchanged)"
+      },
+      "expected": "exit 0: a type focus gains the two additive signals, a non-type focus is unchanged (no behavior change for FUNCTION/METHOD), the count is budget-invariant, resolution and seed tiers remain untouched",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-agent → every sub-suite `ok … 0 failed`; no FAILED/panicked; all 5 named tests present (explain_type_focus_emits_members_and_referenced_by, explain_function_focus_emits_no_members_or_referenced_by, explain_type_focus_members_count_is_the_pre_truncation_total, explain_symbol_no_file_only_sections, explain_resolves_qualified_suffix_through_shared_resolver). ETS-C02-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-c02.txt (cycle-2 run)",
+          "Type focus gains the two additive signals; FUNCTION focus unchanged; count budget-invariant; resolution/seed tiers untouched."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C03",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L07",
+        "RG-REQ-012-L04",
+        "RG-REQ-005-L06",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::explain 2>&1 | tee /tmp/ets-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c03.txt && for t in explain_members_section_anchors_file_line_and_marks_decl explain_members_section_omits_absent_line_never_zero explain_members_over_cap_renders_more_line_and_full_uncaps explain_referenced_by_section_names_count_top_modules_and_files explain_type_zero_callers_line_says_a_type_is_not_called explain_function_zero_callers_line_is_unchanged explain_members_rows_render_only_from_carried_evidence tier0_symbols_section_anchors_present_line_and_omits_absent tier0_symbols_section_never_emits_zero_line tier1_callers_anchor_file_line_when_both_present no_high_confidence_beside_no_match semantic_no_match_renders_labeled_candidates_in_human_mode explain_cycles_absent_walk_renders_unordered_no_arrows; do grep -qE \"^test .*$t .* ok$\" /tmp/ets-c03.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rgr render tests in rust/crates/rgr/src/presentation/explain.rs (JSON-fixture style like `tier0_symbols_section_anchors_present_line_and_omits_absent`): NEW `explain_members_section_anchors_file_line_and_marks_decl` (`Members (N)` header; row `  - <name> (<subtype>)  <path>:<line>`; a `forward_decl: true` item renders `(<subtype>, decl)`), `…omits_absent_line_never_zero` (no line or line 0 → bare row through the shared `anchor()` chokepoint), `…over_cap_renders_more_line_and_full_uncaps` (16 items: 15 rows + `  ... (1 more)`; `--full` renders all), `explain_referenced_by_section_names_count_top_modules_and_files` (`Referenced by (N files)`; a `top modules:` line from `top_modules`; file rows capped at 15 with the same overflow line), `explain_type_zero_callers_line_says_a_type_is_not_called` (identity `subtype` ∈ CLASS|STRUCT|ENUM|INTERFACE|TRAIT and callers count 0 → `Callers (0) — a type is not called; see Members / Referenced by`; the same for Callees), `explain_function_zero_callers_line_is_unchanged` (subtype FUNCTION → `Callers (0)` exactly as today), `explain_members_rows_render_only_from_carried_evidence` (a malformed item — non-string name, non-integer line — renders `members unreadable on this snapshot`, never a fabricated or silently shorter list); the existing anchor/tier tests, `no_high_confidence_beside_no_match`, `semantic_no_match_renders_labeled_candidates_in_human_mode` and Q4's `explain_cycles_absent_walk_renders_unordered_no_arrows` stay green"
+      },
+      "expected": "exit 0: every member row anchors `path:line` from the carried evidence only (RG-REQ-012-L07), caps change length never counts (RG-REQ-012-L04), the type zero-line reads `a type is not called; see Members / Referenced by` (RG-REQ-005-L04) only for type subtypes, and the confidence, seed-candidate and cycles renderings remain unchanged (no behavior change)",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::explain → `test result: ok. 45 passed; 0 failed`; no FAILED/panicked; all 13 named tests present, including the strengthened explain_members_rows_render_only_from_carried_evidence (F-ETS-01) and explain_cycles_absent_walk_renders_unordered_no_arrows. ETS-C03-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-c03.txt (cycle-2 run)",
+          "Malformed count/items/item-fields/top_modules → heading + single unreadable line, no partial rows, no fabricated Members (0), no dropped top-module entry."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C04",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "P-ETS-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib explain_serve 2>&1 | tee /tmp/ets-c04.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c04.txt && for t in type_focus_members_and_referenced_by_are_sqlite_delegated_on_green m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle m2_parity_explain_file_focus_equals_sqlite; do grep -qE \"^test .*$t .* ok$\" /tmp/ets-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-daemon-runtime --lib orient_serve 2>&1 | tee /tmp/ets-c04b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c04b.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "NEW rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs::`type_focus_members_and_referenced_by_are_sqlite_delegated_on_green`: on the green fixture with the M-2 decorator wrapped in the `ServeSpy`, `run_explain` on a CLASS focus yields a NON-EMPTY EXPLAIN_MEMBERS and an EXPLAIN_REFERENCED_BY whose values equal the bare SQLite serve's (the spy's explicit delegating overrides for the two new methods record the calls as allowed reads; the six (b) methods still panic on the spy) — the ruling-B shape (`resolve_symbol`, `count_symbol_definitions_by_name`): SQLite-delegated, recorded, never silently empty; the two M-2 explain parity certificates and the orient_serve suite (PartialSpy/M2Spy gain delegating impls) stay green"
+      },
+      "expected": "exit 0: the two new reads are honestly `{sqlite}`-served through the decorator on a green LiveGraph (the nodes-free-on-green invariant is amended for these two reads exactly as ruling B amended it for resolution — recorded in §2.1.4), the parity certificates unchanged (no behavior change on every other leaf — P-ETS-02)",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-daemon-runtime --lib explain_serve → `ok. 13 passed; 0 failed` with the 3 named tests (type_focus_members_and_referenced_by_are_sqlite_delegated_on_green, m2_parity_explain_path_focus_equals_sqlite_with_nonempty_cycle, m2_parity_explain_file_focus_equals_sqlite); orient_serve → `ok. 22 passed; 0 failed`. ETS-C04-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-c04.txt",
+          "/tmp/ets-c04b.txt (cycle-2 run)",
+          "The two new reads are SQLite-delegated through the M-2 decorator and recorded by the spy (ruling-B); non-empty Members proven on the green fixture; parity certificates unchanged (P-ETS-02)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C05",
+      "obligationIds": [
+        "P-ETS-02",
+        "P-ETS-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/ets-c05.txt | grep -E '^test result: ok\\. [0-9]+ passed; 0 failed' && ! grep -E '^test .* FAILED$' /tmp/ets-c05.txt && cargo test -p repo-graph-storage --lib 2>&1 | tee /tmp/ets-c05b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c05b.txt && cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/ets-c05c.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/ets-c05c.txt && cargo test -p repo-graph-daemon-runtime --test explain_cycle_walk_route_consistency --test cycle_honesty_route_consistency 2>&1 | tee /tmp/ets-c05d.txt | grep -cE '^test result: ok\\.' | grep -qx 2",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE daemon-runtime unit suite, the whole storage and rgr lib suites, and Q4's two explain route-consistency integration suites — the acceptance boundary of every crate the candidate touches, run to completion in the foreground"
+      },
+      "expected": "exit 0: no behavior change anywhere else in the daemon, storage or renderer crates (every other explain section, orient, cycles, deps, trust remain as before)",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-daemon-runtime --lib → `ok. 784 passed; 0 failed; 1 ignored`; -p repo-graph-storage --lib → `ok. 680 passed; 0 failed; 3 ignored`; -p repo-graph-rgr --lib → `ok. 1253 passed; 0 failed`; the two route-consistency integration suites both `test result: ok.` (grep -cE == 2). ETS-C05-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-c05.txt, /tmp/ets-c05b.txt, /tmp/ets-c05c.txt, /tmp/ets-c05d.txt (cycle-2 run)",
+          "No behavior change elsewhere in daemon/storage/renderer crates (P-ETS-04)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C06",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before:$PATH\" \"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before/rmap\" explain leveldb::DBImpl > /tmp/ets-ldb-class-before.txt 2> /tmp/ets-ldb-class-before.txt.err ) || { echo \"RUN-FAILED /tmp/ets-ldb-class-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain leveldb::DBImpl > /tmp/ets-ldb-class-after.txt 2> /tmp/ets-ldb-class-after.txt.err ) || { echo \"RUN-FAILED /tmp/ets-ldb-class-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain leveldb::DBImpl --full > /tmp/ets-ldb-class-full.txt 2> /tmp/ets-ldb-class-full.txt.err ) || { echo \"RUN-FAILED /tmp/ets-ldb-class-full.txt\"; exit 1; } && ! grep -qE '^Members' /tmp/ets-ldb-class-before.txt && grep -qE '^Members \\(73\\)$' /tmp/ets-ldb-class-after.txt && grep -qE '^  - Recover \\(METHOD\\)  db/db_impl.cc:292$' /tmp/ets-ldb-class-full.txt && grep -qE '^  \\.\\.\\. \\(58 more\\)$' /tmp/ets-ldb-class-after.txt && grep -qE '^Referenced by \\(9 files\\)$' /tmp/ets-ldb-class-after.txt && grep -qE '^Callers \\(0\\) — a type is not called; see Members / Referenced by$' /tmp/ets-ldb-class-after.txt && grep -qE '^Callers \\(0\\)$' /tmp/ets-ldb-class-before.txt",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb by the base-revision binary on 2026-09-20, 1 s; served with the before binary /private/tmp/EXPLAIN-TYPE-SECTIONS-1-before/rmap{,d} — copied from rust/target/release on the CLEAN tree BEFORE any candidate edit — and the candidate binary, both under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off)",
+        "inputs": "leveldb `explain leveldb::DBImpl` (the class, definition db/db_impl.h:29) on the SAME index: BEFORE (read from the product 2026-09-20) prints `Callers (0)`, `Callees (0)`, a cycle line and trust — nothing about the class; the store holds 73 direct member nodes `leveldb::DBImpl::<name>` (CONSTRUCTOR/DESTRUCTOR/METHOD, declarations in db/db_impl.h and definitions in db/db_impl.cc — e.g. `Recover` defined at db/db_impl.cc:292) and 9 files import db/db_impl.h (db 8, helpers/memenv 1); AFTER: `Members (73)` with 15 rows + `  ... (58 more)` in the default view and every row under `--full`, `Referenced by (9 files)`, and the type zero-line"
+      },
+      "expected": "exit 0: the class answer describes the class — 73 anchored members (decl rows marked), 9 referencing files, the honest zero-line — where before it said nothing; counts are the store's, read from the same index",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "leveldb `explain leveldb::DBImpl` (before vs candidate, same isolated index, stdio, auto passes off): before has NO `Members` line and prints `Callers (0)`; candidate prints `Members (73)`, `  ... (58 more)` (default), `Referenced by (9 files)`, and `Callers (0) — a type is not called; see Members / Referenced by`; `--full` shows `  - Recover (METHOD)  db/db_impl.cc:292`. ETS-C06-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-ldb-class-before.txt, /tmp/ets-ldb-class-after.txt, /tmp/ets-ldb-class-full.txt (cycle-2 run)"
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C07",
+      "obligationIds": [
+        "P-ETS-01",
+        "RG-REQ-005-L05",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before:$PATH\" \"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before/rmap\" explain leveldb::DBImpl::Recover > /tmp/ets-ldb-method-before.txt 2> /tmp/ets-ldb-method-before.txt.err ) || { echo \"RUN-FAILED /tmp/ets-ldb-method-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain leveldb::DBImpl::Recover > /tmp/ets-ldb-method-after.txt 2> /tmp/ets-ldb-method-after.txt.err ) || { echo \"RUN-FAILED /tmp/ets-ldb-method-after.txt\"; exit 1; } && diff /tmp/ets-ldb-method-before.txt /tmp/ets-ldb-method-after.txt && grep -qE '^Callers \\(1\\)$' /tmp/ets-ldb-method-after.txt && ! grep -qE '^Members|^Referenced by|a type is not called' /tmp/ets-ldb-method-after.txt",
+        "cwd": ".",
+        "environment": "same root/binaries as ETS-C06",
+        "inputs": "leveldb `explain leveldb::DBImpl::Recover` (a METHOD focus) on the same index: the whole output byte-identical before/after — `Callers (1)` / `- Open (db)  db/db_impl.cc:1503`, the callees, the cycles block (Q4's ring), trust — and no Members/Referenced-by/type zero-line"
+      },
+      "expected": "exit 0: a non-type focus is byte-identical (no behavior change — P-ETS-01); resolution and the cycles block untouched",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "leveldb `explain leveldb::DBImpl::Recover` (METHOD focus): `diff before after` empty (byte-identical); candidate prints `Callers (1)` and NO `Members`/`Referenced by`/`a type is not called`. ETS-C07-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-ldb-method-before.txt, /tmp/ets-ldb-method-after.txt (cycle-2 run)",
+          "Non-type focus unchanged (P-ETS-01); resolution and cycles block untouched (RG-REQ-005-L05, RG-REQ-003-L01)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C08",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-django RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before:$PATH\" \"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before/rmap\" explain BaseHandler > /tmp/ets-dj-class-before.txt 2> /tmp/ets-dj-class-before.txt.err ) || { echo \"RUN-FAILED /tmp/ets-dj-class-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-django RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain BaseHandler > /tmp/ets-dj-class-after.txt 2> /tmp/ets-dj-class-after.txt.err ) || { echo \"RUN-FAILED /tmp/ets-dj-class-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-django RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-django/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain BaseHandler --json > /tmp/ets-dj-class-after.json 2> /tmp/ets-dj-class-after.json.err ) || { echo \"RUN-FAILED /tmp/ets-dj-class-after.json\"; exit 1; } && grep -qE '^Members \\(10\\)$' /tmp/ets-dj-class-after.txt && grep -qE '^  - load_middleware \\(METHOD\\)  django/core/handlers/base.py:27$' /tmp/ets-dj-class-after.txt && ! grep -q 'load_middleware\\.' /tmp/ets-dj-class-after.txt && grep -qE '^Referenced by \\(1 files\\)$' /tmp/ets-dj-class-after.txt && python3 -c \"import json\nd=json.load(open('/tmp/ets-dj-class-after.json'))\nsig=[s for s in d['value']['signals'] if s['value'].get('code')=='EXPLAIN_MEMBERS'][0]['value']\nrb=[s for s in d['value']['signals'] if s['value'].get('code')=='EXPLAIN_REFERENCED_BY'][0]['value']\nassert sig['evidence']['count']==10 and rb['evidence']['count']==1, (sig['evidence']['count'], rb['evidence']['count'])\nprint('json members',sig['evidence']['count'],'referenced_by',rb['evidence']['count'])\"",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/EXPLAIN-TYPE-SECTIONS-1-django (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django, 22 s); before/candidate binaries as in ETS-C06",
+        "inputs": "django `explain BaseHandler` (Python; definition django/core/handlers/base.py:21): the store holds 10 direct methods (`BaseHandler.load_middleware` at :27, `adapt_method_mode` :106, `get_response` :138, …) and 24 NESTED nodes such as `BaseHandler.load_middleware.get_response` that the direct-member rule must exclude; 1 file imports django/core/handlers/base.py (django/test); JSON carries the same counts as the human text (the coherence envelope `value.signals[].value.{code,evidence}` shape the existing explain JSON uses — read it, do not assume)"
+      },
+      "expected": "exit 0: Python types list their methods (the fix is not C++-gated), nested closures are not members, JSON and human agree on the counts (RG-REQ-012-L06, additive fields reported)",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "django `explain BaseHandler`: candidate prints `Members (10)`, `  - load_middleware (METHOD)  django/core/handlers/base.py:27`, no `load_middleware.` nested-closure row, `Referenced by (1 files)`; JSON parity `json members 10 referenced_by 1`. ETS-C08-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-dj-class-after.txt, /tmp/ets-dj-class-after.json (cycle-2 run)",
+          "Python types list methods (not C++-gated); nested closures excluded; human/JSON counts agree (RG-REQ-012-L06)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C09",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-005-L05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-fraktag RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-fraktag/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before:$PATH\" \"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before/rmap\" explain ConversationManager > /tmp/ets-frk-class-before.txt 2> /tmp/ets-frk-class-before.txt.err ) || { echo \"RUN-FAILED /tmp/ets-frk-class-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-fraktag RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-fraktag/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain ConversationManager > /tmp/ets-frk-class-after.txt 2> /tmp/ets-frk-class-after.txt.err ) || { echo \"RUN-FAILED /tmp/ets-frk-class-after.txt\"; exit 1; } && grep -qE '^File: packages/engine/src/core/ConversationManager.ts:61$' /tmp/ets-frk-class-after.txt && grep -qE '^Members \\(8\\)$' /tmp/ets-frk-class-after.txt && grep -qE '^  - createSession \\(METHOD\\)  packages/engine/src/core/ConversationManager.ts:71$' /tmp/ets-frk-class-after.txt && grep -qE '^Referenced by \\(1 files\\)$' /tmp/ets-frk-class-after.txt && ! grep -qE '^Members' /tmp/ets-frk-class-before.txt",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/EXPLAIN-TYPE-SECTIONS-1-fraktag: a COPY of the retained audit-v0.18.0 FRAKTAG store (databases/e444686289ee2bf9.db, registry filtered); before/candidate binaries as in ETS-C06",
+        "inputs": "FRAKTAG `explain ConversationManager` BY NAME (TypeScript; SYMBOL-IDENTITY-1's earlier 'lists its methods' was a FILE-focus answer): the store holds 8 direct members (`constructor` :62, `createSession` :71, `listSessions` :103, `logTurn` :133, …) and 1 importing file; the focus resolves by name to packages/engine/src/core/ConversationManager.ts:61 (RG-REQ-005-L05 unchanged)"
+      },
+      "expected": "exit 0: a TypeScript class explained BY NAME lists its members and referencing files — the proof that the fix is neither path-focus nor C++-gated",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "FRAKTAG `explain ConversationManager` BY NAME: candidate prints `File: packages/engine/src/core/ConversationManager.ts:61`, `Members (8)`, `  - createSession (METHOD)  packages/engine/src/core/ConversationManager.ts:71`, `Referenced by (1 files)`; before has NO `Members`. ETS-C09-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-frk-class-before.txt, /tmp/ets-frk-class-after.txt (cycle-2 run)"
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C10",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before:$PATH\" \"/private/tmp/EXPLAIN-TYPE-SECTIONS-1-before/rmap\" explain CGHeroInstance > /tmp/ets-vcmi-class-before.txt 2> /tmp/ets-vcmi-class-before.txt.err ) || { echo \"RUN-FAILED /tmp/ets-vcmi-class-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain CGHeroInstance > /tmp/ets-vcmi-class-after.txt 2> /tmp/ets-vcmi-class-after.txt.err ) || { echo \"RUN-FAILED /tmp/ets-vcmi-class-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain CGHeroInstance --json > /tmp/ets-vcmi-class-after.json 2> /tmp/ets-vcmi-class-after.json.err ) || { echo \"RUN-FAILED /tmp/ets-vcmi-class-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain CGHeroInstance --budget large --json > /tmp/ets-vcmi-class-large.json 2> /tmp/ets-vcmi-class-large.json.err ) || { echo \"RUN-FAILED /tmp/ets-vcmi-class-large.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain CGHeroInstance --full --json > /tmp/ets-vcmi-class-fulljson.json 2> /tmp/ets-vcmi-class-fulljson.json.err ) || { echo \"RUN-FAILED /tmp/ets-vcmi-class-fulljson.json\"; exit 1; } && grep -qE '^File: lib/mapObjects/CGHeroInstance.h:55$' /tmp/ets-vcmi-class-after.txt && grep -qE '^Members \\(135\\)$' /tmp/ets-vcmi-class-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi RMAP_SOCKET_PATH=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain CGHeroInstance --full > /tmp/ets-vcmi-class-full.txt 2> /tmp/ets-vcmi-class-full.txt.err ) || { echo \"RUN-FAILED /tmp/ets-vcmi-class-full.txt\"; exit 1; } && grep -qE '^  - getFactionID \\(METHOD\\)  lib/mapObjects/CGHeroInstance.cpp:81$' /tmp/ets-vcmi-class-full.txt && grep -qE '^  \\.\\.\\. \\(120 more\\)$' /tmp/ets-vcmi-class-after.txt && grep -qE '^Referenced by \\(178 files\\)$' /tmp/ets-vcmi-class-after.txt && grep -qE '^  top modules: ' /tmp/ets-vcmi-class-after.txt && grep -qE '^Callers \\(0\\) — a type is not called; see Members / Referenced by$' /tmp/ets-vcmi-class-after.txt && python3 -c \"import json\ndef cnt(p,code):\n    d=json.load(open(p)); s=[s for s in d['value']['signals'] if s['value'].get('code')==code][0]['value']; return s['evidence']['count'], len(s['evidence']['items'])\nfor code in ('EXPLAIN_MEMBERS','EXPLAIN_REFERENCED_BY'):\n    a=cnt('/tmp/ets-vcmi-class-after.json',code); l=cnt('/tmp/ets-vcmi-class-large.json',code); f=cnt('/tmp/ets-vcmi-class-fulljson.json',code)\n    assert a[0]==l[0]==f[0], (code,a,l,f); assert a[1]<=l[1]<=f[1]==f[0], (code,a,l,f); print(code,'count',a[0],'items medium/large/full',a[1],l[1],f[1])\"",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi: a COPY of the retained audit-v0.18.0 vcmi store (databases/c956217ff5c253d9.db, snapshot …/2834d519 — the audit's own snapshot; registry filtered); before/candidate binaries as in ETS-C06",
+        "inputs": "vcmi `explain CGHeroInstance` (C++; 71 CLASS nodes of that name — 70 forward declarations + the definition at lib/mapObjects/CGHeroInstance.h:55, which the resolver already picks, RG-REQ-005-L07): the store holds 135 direct member nodes `CGHeroInstance::<name>` (declared in lib/mapObjects/CGHeroInstance.h:176 and, as the stored node, defined at lib/mapObjects/CGHeroInstance.cpp:81 — vcmi's in-class prototypes are not separate nodes, so the members are the definitions plus in-header inline members; header rows come first by the ordering rule, the .cpp definitions after, so `getFactionID (METHOD)  lib/mapObjects/CGHeroInstance.cpp:81` is asserted under `--full` and the default view shows 15 rows + `... (120 more)`) and 178 files importing lib/mapObjects/CGHeroInstance.h (top-level dirs lib 61, client 57, test 27, mapeditor 10, server 9 — the `top modules:` line names the OWNS-edge modules, REPORTED); across the default (`medium`), `--budget large` and `--full` — explain's whole budget surface (parser at `rgr/src/commands/orient.rs:498`: `--budget medium|large` or `--full`; `small` is an orient-only tier, :159; OC-1) — the JSON `count` of both new signals is identical while `items` length is monotonic and equals `count` under `--full`"
+      },
+      "expected": "exit 0: the audit's flagship probe now describes the class — 135 anchored members (header-first, then the .cpp definitions), 178 referencing files with their top modules, the honest zero-line — and budgets change length, never the counts (RG-REQ-012-L04)",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "vcmi `explain CGHeroInstance`: `File: lib/mapObjects/CGHeroInstance.h:55`, `Members (135)`, `  ... (120 more)` (default), `Referenced by (178 files)` + `top modules:` line, `Callers (0) — a type is not called; see Members / Referenced by`; `--full` shows `  - getFactionID (METHOD)  lib/mapObjects/CGHeroInstance.cpp:81`. Budget invariance (medium/large/full JSON): EXPLAIN_MEMBERS count 135, items 15/50/135; EXPLAIN_REFERENCED_BY count 178, items 15/50/178. ETS-C10-EXIT=0 (fresh; OC-1 tiers medium/large/--full).",
+        "supportingEvidence": [
+          "/tmp/ets-vcmi-class-after.txt, /tmp/ets-vcmi-class-full.txt, /tmp/ets-vcmi-class-after.json, /tmp/ets-vcmi-class-large.json, /tmp/ets-vcmi-class-fulljson.json (cycle-2 run)",
+          "Budgets change length, never the counts (RG-REQ-012-L04)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C11",
+      "obligationIds": [
+        "P-ETS-03",
+        "RG-REQ-003-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "for t in ldb-class dj-class frk-class vcmi-class; do diff <(sed -n '/^Import cycles/,/^Trust/p' /tmp/ets-$t-before.txt) <(sed -n '/^Import cycles/,/^Trust/p' /tmp/ets-$t-after.txt) || { echo \"CYCLES-BLOCK-MOVED $t\"; exit 1; }; diff <(sed -n '/^Trust/,$p' /tmp/ets-$t-before.txt) <(sed -n '/^Trust/,$p' /tmp/ets-$t-after.txt) || { echo \"TRUST-BLOCK-MOVED $t\"; exit 1; }; diff <(sed -n '1,/^Confidence/p' /tmp/ets-$t-before.txt) <(sed -n '1,/^Confidence/p' /tmp/ets-$t-after.txt) || { echo \"HEADER-MOVED $t\"; exit 1; }; done",
+        "cwd": ".",
+        "environment": "the captures of ETS-C06/C08/C09/C10",
+        "inputs": "on all four type probes, the header (Repo/Target/Kind/File/Confidence), the Import-cycles block (Q4's ring or unordered form) and the Trust block are byte-identical before/after; only the Callers/Callees zero-lines and the two NEW sections differ"
+      },
+      "expected": "exit 0: every existing explain section renders exactly as before on a type focus (no behavior change — P-ETS-03); the cycles block keeps Q4's rule (RG-REQ-003-L01)",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "For all four type probes (ldb-class, dj-class, frk-class, vcmi-class): `diff` of the Import-cycles block, the Trust block, and the header (1..Confidence) between before and candidate is EMPTY — every existing section byte-identical on a type focus; only the Callers/Callees zero-lines and the two new sections differ. ETS-C11-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          "/tmp/ets-*-before.txt and /tmp/ets-*-after.txt for the four probes (cycle-2 run)",
+          "P-ETS-03 preserved; cycles block keeps Q4's rule (RG-REQ-003-L01)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C12",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-ETS-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -c1-16)\" = \"$(grep -E '^registry-before ' .agent-manager/slices/EXPLAIN-TYPE-SECTIONS-1/build-progress.md | tail -n1 | awk '{print $2}')\" && PIDS=$(pgrep -x rmapd | paste -sd, -) && { test -z \"$PIDS\" || test \"$(ps -o command= -p \"$PIDS\" | grep -vc '/\\.local/bin/rmapd')\" = 0; } && ls -d /private/tmp/EXPLAIN-TYPE-SECTIONS-1-leveldb /private/tmp/EXPLAIN-TYPE-SECTIONS-1-django /private/tmp/EXPLAIN-TYPE-SECTIONS-1-fraktag /private/tmp/EXPLAIN-TYPE-SECTIONS-1-vcmi >/dev/null && ! ls -d /private/tmp/EXPLAIN-TYPE-SECTIONS-1-before 2>/dev/null && git worktree list | grep -vc 'm-r2-baseline-worktree\\|\\[main\\]' | grep -qx 0",
+        "cwd": ".",
+        "environment": "the operator's real registry (digest only); the four pre-provisioned roots stay for the manager's closeout sweep; the before-binary dir is removed after the last proof",
+        "inputs": "build-progress.md records `registry-before <16-hex>` (the value printed by `shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -c1-16`) BEFORE the first proof and the same command's value after cleanup; every rmap ran under RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-* with stdio and the auto passes off; the only surviving `rmapd` is the operator's ~/.local/bin one; no extra worktree"
+      },
+      "expected": "exit 0: no behavior change outside the isolated roots — the operator's registry digest remains identical before and after, no candidate/before daemon survives, the four proof roots remain for the manager, the before dir is gone, no extra worktree",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Operator registry sha (first 16) == build-progress `registry-before` (unchanged, 4762fd948a05b208); the only running rmapd is /Users/apple/.local/bin/rmapd (grep -vc == 0); the four proof roots exist; /private/tmp/EXPLAIN-TYPE-SECTIONS-1-before removed; `git worktree list` has no extra worktree beyond [main] and m-r2-baseline-worktree. ETS-C12-EXIT=0 (fresh).",
+        "supportingEvidence": [
+          ".agent-manager/slices/EXPLAIN-TYPE-SECTIONS-1/build-progress.md (registry-before line)",
+          "Every rmap ran under RMAP_STATE_ROOT=/private/tmp/EXPLAIN-TYPE-SECTIONS-1-* with RMAP_TRANSPORT=stdio and auto passes off (RG-REQ-011-L06, P-ETS-05)."
+        ]
+      }
+    },
+    {
+      "checkId": "ETS-C13",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-002-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git diff --check && (cd rust && cargo fmt --check -p repo-graph-agent -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-rgr && cargo clippy -p repo-graph-agent -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-rgr --tests -- -D warnings > /tmp/ets-clippy.log 2>&1 && tail -n1 /tmp/ets-clippy.log) && diff <(git status --short -- rust | sort) <(printf ' M rust/crates/agent/src/aggregators/complexity_tests.rs\\n M rust/crates/agent/src/dto/signal.rs\\n M rust/crates/agent/src/explain/mod.rs\\n M rust/crates/agent/src/lib.rs\\n M rust/crates/agent/src/storage_port.rs\\n M rust/crates/agent/tests/common/mod.rs\\n M rust/crates/agent/tests/explain_symbol.rs\\n M rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs\\n M rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs\\n M rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs\\n M rust/crates/daemon-runtime/src/orient_serve/tests.rs\\n M rust/crates/rgr/src/presentation/explain.rs\\n M rust/crates/rgr/src/presentation/explain_sections.rs\\n M rust/crates/storage/src/agent_impl.rs\\n M rust/crates/storage/tests/agent_impl.rs\\n' | sort) && ! grep -n 'fn list_members_of_type' rust/crates/agent/src/storage_port.rs | grep -q 'Ok(Vec::new())' && grep -c 'fn list_members_of_type' rust/crates/agent/src/storage_port.rs rust/crates/storage/src/agent_impl.rs rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs rust/crates/daemon-runtime/src/orient_serve/tests.rs rust/crates/agent/tests/common/mod.rs rust/crates/agent/src/aggregators/complexity_tests.rs | awk -F: '{s+=$2} END {exit !(s>=8)}'",
+        "cwd": ".",
+        "environment": "candidate tree",
+        "inputs": "git status/diff of the candidate; rustfmt + clippy -D warnings over the four touched crates; the exact set of fifteen modified paths and nothing else; the two new port methods are REQUIRED (no defaulted body in the trait) and implemented in every implementor (trait + StorageConnection + decorator + ServeSpy + PartialSpy + M2Spy + FakeAgentStorage + FakeStorage = ≥8 occurrences of `fn list_members_of_type`)"
+      },
+      "expected": "exit 0: whitespace-, rustfmt- and clippy-clean; the working tree under rust/ holds exactly the fifteen candidate paths; no defaulted read that could render an empty Members section as verified (the dormant-capability shape); the new sentences carry no internal label — the reader-facing labels remain as today, no behavior change for RG-REQ-002-L08",
+      "candidateSha256": "sha256:e973bb6837196692d1e2642e0bde3ecc0617232f8df50df51c4c10d5b86427c2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "git diff --check clean; cargo fmt --check clean for the four crates; cargo clippy --tests -- -D warnings finished clean; `git status --short -- rust` equals exactly the 15 allocated paths; no defaulted `Ok(Vec::new())` beside `fn list_members_of_type` in storage_port.rs; `fn list_members_of_type` occurs ≥8 times across trait + implementors. ETS-C13-EXIT=0 (fresh; no code change this cycle).",
+        "supportingEvidence": [
+          "/tmp/ets-clippy.log (cycle-2 run)",
+          "git status --short -- rust (15 paths)",
+          "Two REQUIRED port methods (no defaulted trait body); no internal label in new sentences (RG-REQ-002-L08)."
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-001-L04"
+      ],
+      "summary": "Two REQUIRED AgentStorageRead methods (list_members_of_type, find_file_importers; no defaulted body) + DTOs AgentMemberEntry/AgentFileImporter."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-005-L05",
+        "RG-REQ-012-L04"
+      ],
+      "summary": "explain_symbol pushes EXPLAIN_MEMBERS + EXPLAIN_REFERENCED_BY only when is_type_subtype; count = pre-truncation total; items via items_cap/truncate_items; top_modules via group_by_module; non-type focus and resolution unchanged."
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "SignalCode::ExplainMembers/ExplainReferencedBy in every exhaustive arm; evidence structs + constructors + Serialize/variant_name (additive JSON)."
+    },
+    {
+      "path": "rust/crates/agent/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04"
+      ],
+      "summary": "Re-export the new evidence/DTO types."
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+      "obligationIds": [
+        "P-ETS-04"
+      ],
+      "summary": "FakeStorage implements the two new port methods (empty, with a comment naming why the double has none)."
+    },
+    {
+      "path": "rust/crates/agent/tests/common/mod.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "P-ETS-04"
+      ],
+      "summary": "FakeAgentStorage serves the new members/importers from fixture maps."
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_symbol.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-005-L05",
+        "RG-REQ-010-L01"
+      ],
+      "summary": "ETS-C02 tests: type focus emits the two signals, function focus emits neither, count is pre-truncation total; resolution and seed-candidate paths stay green."
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-001-L04"
+      ],
+      "summary": "The two SQLite reads: direct members by qualified_name containment (forward_decl tri-state) and reverse IMPORTS into the FILE node joined to the OWNS module; no schema/column change."
+    },
+    {
+      "path": "rust/crates/storage/tests/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04"
+      ],
+      "summary": "ETS-C01 tests for direct-member selection/order/forward-decl and reverse-importer grouping."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "P-ETS-02"
+      ],
+      "summary": "OrientServeDecorator delegates both new reads to self.inner (ruling-B shape)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+      "obligationIds": [
+        "P-ETS-02"
+      ],
+      "summary": "PartialSpy/M2Spy gain delegating impls for the two new methods."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs",
+      "obligationIds": [
+        "P-ETS-02"
+      ],
+      "summary": "ServeSpy adds explicit delegating overrides recorded as allowed reads for the two new methods."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "P-ETS-02"
+      ],
+      "summary": "ETS-C04 test type_focus_members_and_referenced_by_are_sqlite_delegated_on_green: non-empty Members/Referenced-by delegated through the decorator + recorded by the spy."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L07",
+        "RG-REQ-012-L04",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "render_members/render_referenced_by sections + type zero-line; F-ETS-01 CLASS FIX (cycle 1): validate the complete carried evidence up front (count u64, items array, every carried item fully typed, top_modules every entry {module,count}); any malformed field ⇒ heading + single unreadable line, no partial rows/fabricated count/dropped entry; render_member_row rejects present-but-wrong-type subtype/forward_decl; members_unreadable/referenced_by_unreadable helpers. No change this cycle."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L07"
+      ],
+      "summary": "ETS-C03 render tests; F-ETS-01 (cycle 1): explain_members_rows_render_only_from_carried_evidence strengthened to 7 malformed cases, each expecting the unreadable line and no partial rows. No change this cycle."
+    }
+  ],
+  "completedAt": "2026-09-20T16:05:27.189Z",
+  "limitations": [
+    "Cycle 2 made NO code change: the working tree is byte-for-byte the cycle-1 candidate (15 rust paths). The only response to F-ETS-02 is the corrected evidence text in this report; all 13 checks were nonetheless re-run fresh this cycle with fresh /tmp/ets-* captures and fresh before/candidate binaries.",
+    "Per the packet and repo-graph relay rules, the repository-wide `cargo test --workspace`, the smoke protocol, and the isolated dogfood are the OPERATOR's post-acceptance gate and were NOT run by the builder — their absence is not a gap.",
+    "The 'before' binaries were rebuilt from a `git worktree add … HEAD` at base revision 425c0d1 and removed at ETS-C12; this honours the relay 'before-binary' rule and does not touch the working tree.",
+    "This is increment 1 (RENDER only). RG-REQ-005-L04 stays PARTIALLY MET: bases/derived deferred to increments 2 (C++ anchor) and 3 (macro recovery); the classified unresolved-call count beside a zero (RG-REQ-005-L09) is deferred in full to CLAIM-INVARIANT-1 and is neither implemented, preserved, nor changed here."
+  ],
+  "report": "RESULT: all 13 checks (ETS-C01..C13) PASS, re-run fresh this cycle. This iteration addresses the sole prior finding F-ETS-02 (category: evidence; RG-REQ-005-L04) — a REPORT correction, no code change. The reviewer had reproduced ETS-C01/C03/C04/C13 green and found no code defect; the cycle-1 report (a) quoted only two vcmi member declarations and (b) made a false 'header declarations first, then .cpp definitions' ordering claim for vcmi. Both are corrected below against the checkout and the fresh capture.\n\nCORRECTED vcmi ORDERING FACT (F-ETS-02): vcmi's Members section is NOT header-first. Of its 135 rendered member rows, ZERO are in lib/mapObjects/CGHeroInstance.h and all 135 are out-of-line definitions in lib/mapObjects/CGHeroInstance.cpp (the section begins `getFactionID (METHOD) …CGHeroInstance.cpp:81`, `getBonusBearer …:86`, `isNativeTerrain …:91`). The reason: vcmi's in-class prototypes are NOT stored as separate member nodes — the stored node for each method IS its .cpp definition. So a header declaration such as `getFactionID() const override;` at CGHeroInstance.h:176 produces no `(decl)` member row; its single node is the definition at CGHeroInstance.cpp:81. leveldb, by contrast, DOES surface header declaration rows marked `(decl)` because leveldb's in-class prototypes ARE stored nodes — e.g. `Recover (METHOD, decl)  db/db_impl.h:113` alongside the definition `Recover (METHOD)  db/db_impl.cc:292` (leveldb's full Members list carries 34 `(decl)`-marked rows). The renderer's focus-file-first ordering rule is unchanged; the observed difference is purely which nodes each language's extractor stores, read from the fresh captures (/tmp/ets-vcmi-class-full.txt has 0 member rows on CGHeroInstance.h; /tmp/ets-ldb-class-full.txt has 34 decl rows on db/db_impl.h).\n\nCODE-UNDER-ANALYSIS EXAMPLES (quoted from the checkouts and the fresh candidate captures):\n\n(1) vcmi — THREE real member declarations in lib/mapObjects/CGHeroInstance.h, each an in-class prototype whose STORED node is the .cpp definition (so each renders as a .cpp row, not a header row): line 176 `\tFactionID getFactionID() const override;` → member row `  - getFactionID (METHOD)  lib/mapObjects/CGHeroInstance.cpp:81`; line 177 `\tbool isNativeTerrain(TerrainId terrain) const override;` → `  - isNativeTerrain (METHOD)  lib/mapObjects/CGHeroInstance.cpp:91`; line 178 `\tint getLowestCreatureSpeed() const;` → `  - getLowestCreatureSpeed (METHOD)  lib/mapObjects/CGHeroInstance.cpp:210`. Two #include sites among the 178 referencing files: client/UIHelper.cpp:16 `#include \"../lib/mapObjects/CGHeroInstance.h\"` (under client/) and lib/CStack.h:16 `#include \"mapObjects/CGHeroInstance.h\" // for commander serialization` (under lib/). BEFORE: `explain CGHeroInstance` printed `Callers (0)` / `Callees (0)` + cycle + trust, nothing about the class. AFTER: `File: lib/mapObjects/CGHeroInstance.h:55`, `Members (135)` (all .cpp definitions), `  ... (120 more)` in the default view, `Referenced by (178 files)` with a `top modules:` line, and `Callers (0) — a type is not called; see Members / Referenced by`.\n\n(2) django — load_middleware is a direct member at django/core/handlers/base.py:27 `    def load_middleware(self, is_async=False):`, rendered `  - load_middleware (METHOD)  django/core/handlers/base.py:27`. Inside load_middleware the local binding at base.py:38 `        get_response = self._get_response_async if is_async else self._get_response` yields the store node qualified `BaseHandler.load_middleware.get_response`, which the direct-member rule EXCLUDES (two separators after BaseHandler) — the candidate output has no `load_middleware.` row (the direct method BaseHandler.get_response at :138 is still a member). The single importer is django/test/client.py:17 `from django.core.handlers.base import BaseHandler`, rendered `Referenced by (1 files)` / `top modules: django/test (1)` / `- django/test/client.py`.\n\n(3) FRAKTAG — createSession at packages/engine/src/core/ConversationManager.ts:71 `  async createSession(`, rendered `  - createSession (METHOD)  packages/engine/src/core/ConversationManager.ts:71`. The importer packages/engine/src/index.ts:51 `import { ConversationManager, TurnData, ConversationSession, ConversationTurn, ConversationReference } from './core/ConversationManager.js';` produces `Referenced by (1 files)` / `- packages/engine/src/index.ts`. Explained BY NAME, resolving to `File: packages/engine/src/core/ConversationManager.ts:61`.\n\n(4) leveldb — Recover is declared (in-class prototype) at db/db_impl.h:113 `  Status Recover(VersionEdit* edit, bool* save_manifest)`, rendered `  - Recover (METHOD, decl)  db/db_impl.h:113` (leveldb prototypes ARE nodes), and defined at db/db_impl.cc:292 `Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {`, rendered `  - Recover (METHOD)  db/db_impl.cc:292` under --full. `#include \"db/db_impl.h\"` appears e.g. in db/recovery_test.cc and db/fault_injection_test.cc, contributing to `Referenced by (9 files)`. The class answer went from nothing (before: `Callers (0)`) to `Members (73)` + `Referenced by (9 files)` + the zero-line.\n\n(5) leveldb `explain leveldb::DBImpl::Recover` (a METHOD focus) is byte-identical before/after (diff empty); its `Callers (1)` / `  - Open (db)  db/db_impl.cc:1503` and the whole cycles/trust output are unchanged — P-ETS-01 holds.\n\nAll 16 obligations' regression proofs hold as in cycle 1: RG-REQ-005-L05 (ETS-C02/C04/C07/C09), RG-REQ-005-L06 (ETS-C03), RG-REQ-003-L01 (ETS-C03/C07/C11), RG-REQ-010-L01 (ETS-C02/C03), RG-REQ-012-L07 (ETS-C03/C06), RG-REQ-012-L04 (ETS-C02/C10), RG-REQ-001-L04 (ETS-C01), RG-REQ-011-L06/P-ETS-05 (ETS-C12), RG-REQ-002-L08 (ETS-C13), P-ETS-01/03 (ETS-C07/C11), P-ETS-02 (ETS-C04/C05), P-ETS-04 (ETS-C05); RG-REQ-012-L06 verified (ETS-C08/C10). No STOP condition hit; no commit; no file outside the 15 candidate paths; the working tree is unchanged from the cycle-1 candidate."
+}

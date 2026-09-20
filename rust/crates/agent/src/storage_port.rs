@@ -982,6 +982,34 @@ pub trait AgentStorageRead {
         file_path: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
 
+    /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): list the DIRECT members of the type named by
+    /// `qualified_name` — SYMBOL nodes whose `qualified_name` is `<qualified_name><sep><name>`
+    /// (`sep` ∈ {`::`, `.`}) with no further `::`/`.` in `<name>`. Ordered so that members declared
+    /// in the type's own (definition-preferred) file come first by line, then members in other files
+    /// by path then line (a C++ out-of-line `.cpp` definition follows the header's declarations).
+    ///
+    /// REQUIRED (no default body): a defaulted `Ok(Vec::new())` would let a test double or the serve
+    /// spy render an empty `Members` section as if VERIFIED — the dormant-capability shape the honesty
+    /// rules forbid. Every `AgentStorageRead` implementor names this method explicitly.
+    fn list_members_of_type(
+        &self,
+        snapshot_uid: &str,
+        qualified_name: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError>;
+
+    /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): list the distinct files that REFERENCE `file_path` —
+    /// the inverse of [`find_file_imports`](Self::find_file_imports). Source files of IMPORTS edges
+    /// whose TARGET is the FILE node of `file_path`, each with its owning module (OWNS-edge join),
+    /// ordered by path.
+    ///
+    /// REQUIRED (no default body) for the same reason as [`list_members_of_type`](Self::list_members_of_type):
+    /// an empty `Referenced by` section must be an observed fact, never a silent default.
+    fn find_file_importers(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError>;
+
     // ── Documentation inventory (docs-primary pivot) ────────────────
 
     /// Discover documentation files from the repo's filesystem.
@@ -1202,6 +1230,36 @@ pub struct AgentFileEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentImportEntry {
     pub target_file: String,
+}
+
+/// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): one DIRECT member of a type — a SYMBOL node whose
+/// `qualified_name` is `<type_qn><sep><name>` (`sep` ∈ {`::`, `.`}) with NO further separator in
+/// `<name>` (a nested member such as `A::Inner::m3` is NOT a direct member of `A`). Carries the
+/// stored anchor (`file` + `line_start`) so `explain <Type>` cites each member at `path:line`.
+///
+/// `forward_decl` is the stored tri-state fact (`metadata_json.forward_decl`): a C++ in-class
+/// prototype / forward declaration renders `(decl)` below its definition. It is read as a fact, not
+/// a default — an unreadable metadata value is an `AgentStorageError` at the adapter, never silently
+/// `false` (STANDING HONESTY RULE: absent → false, present-and-unreadable → error).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMemberEntry {
+    pub name: String,
+    pub qualified_name: String,
+    pub subtype: Option<String>,
+    pub file: String,
+    pub line_start: Option<u64>,
+    pub forward_decl: bool,
+}
+
+/// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): one file that REFERENCES a given file — the inverse of
+/// [`AgentImportEntry`]. A distinct source-file path of an IMPORTS edge whose TARGET is the FILE node
+/// of the queried path, enriched with the source file's owning module (via its FILE node's OWNS edge,
+/// the SAME join `find_symbol_callers` uses). `module_path` is `None` when no module owns the file —
+/// honest, never guessed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFileImporter {
+    pub file: String,
+    pub module_path: Option<String>,
 }
 
 // ── Documentation inventory ─────────────────────────────────────────

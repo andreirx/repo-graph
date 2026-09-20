@@ -478,3 +478,160 @@ fn explain_resolves_qualified_suffix_through_shared_resolver() {
         "the resolved symbol emits EXPLAIN_IDENTITY: {codes:?}"
     );
 }
+
+// ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): type-focus members + referenced-by (ETS-C02) ──
+
+use repo_graph_agent::{
+    AgentFileImporter, AgentMemberEntry, ExplainMembersEvidence, ExplainReferencedByEvidence,
+    SignalEvidence,
+};
+
+fn members_evidence(result: &repo_graph_agent::OrientResult) -> Option<ExplainMembersEvidence> {
+    result.signals.iter().find_map(|s| match s.evidence() {
+        SignalEvidence::ExplainMembers(e) => Some(e.clone()),
+        _ => None,
+    })
+}
+
+fn referenced_by_evidence(
+    result: &repo_graph_agent::OrientResult,
+) -> Option<ExplainReferencedByEvidence> {
+    result.signals.iter().find_map(|s| match s.evidence() {
+        SignalEvidence::ExplainReferencedBy(e) => Some(e.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn explain_type_focus_emits_members_and_referenced_by() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake); // MyService is a CLASS, qualified_name src/service.ts:MyService.
+
+    fake.members_of_type.insert(
+        ("snap1".into(), "src/service.ts:MyService".into()),
+        vec![
+            AgentMemberEntry {
+                name: "start".into(),
+                qualified_name: "src/service.ts:MyService::start".into(),
+                subtype: Some("METHOD".into()),
+                file: "src/service.ts".into(),
+                line_start: Some(12),
+                forward_decl: false,
+            },
+            AgentMemberEntry {
+                name: "stop".into(),
+                qualified_name: "src/service.ts:MyService::stop".into(),
+                subtype: Some("METHOD".into()),
+                file: "src/service.ts".into(),
+                line_start: Some(20),
+                forward_decl: false,
+            },
+        ],
+    );
+    fake.file_importers.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![AgentFileImporter {
+            file: "src/main.ts".into(),
+            module_path: Some("src".into()),
+        }],
+    );
+
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+
+    let members = members_evidence(&result).expect("type focus emits EXPLAIN_MEMBERS");
+    assert_eq!(members.count, 2, "the fake's two members");
+    let names: Vec<&str> = members.items.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["start", "stop"]);
+
+    let refs = referenced_by_evidence(&result).expect("type focus emits EXPLAIN_REFERENCED_BY");
+    assert_eq!(refs.count, 1, "the one importing file");
+    assert_eq!(refs.items[0].file, "src/main.ts");
+    // top_modules grouped exactly like callers' group_by_module.
+    assert_eq!(refs.top_modules.len(), 1);
+    assert_eq!(refs.top_modules[0].module, "src");
+    assert_eq!(refs.top_modules[0].count, 1);
+}
+
+#[test]
+fn explain_function_focus_emits_no_members_or_referenced_by() {
+    let mut fake = FakeAgentStorage::new();
+    fake.seed_minimal_repo("r1", "my-repo", "snap1");
+    // A FUNCTION focus (not a type).
+    fake.symbol_name_results.insert(
+        ("snap1".into(), "doWork".into()),
+        vec![AgentFocusCandidate {
+            stable_key: "r1:src/w.ts:doWork:SYMBOL".into(),
+            kind: AgentFocusKind::Symbol,
+            file: Some("src/w.ts".into()),
+            line: None,
+        }],
+    );
+    fake.symbol_contexts.insert(
+        ("snap1".into(), "r1:src/w.ts:doWork:SYMBOL".into()),
+        AgentSymbolContext {
+            file_path: Some("src/w.ts".into()),
+            module_path: Some("src".into()),
+            module_stable_key: Some("r1:src:MODULE".into()),
+            name: "doWork".into(),
+            qualified_name: Some("src/w.ts:doWork".into()),
+            subtype: Some("FUNCTION".into()),
+            line_start: Some(5),
+        },
+    );
+    // Even if members/importers were (erroneously) seeded, a FUNCTION focus must not read them.
+    fake.members_of_type.insert(
+        ("snap1".into(), "src/w.ts:doWork".into()),
+        vec![AgentMemberEntry {
+            name: "ghost".into(),
+            qualified_name: "src/w.ts:doWork::ghost".into(),
+            subtype: Some("METHOD".into()),
+            file: "src/w.ts".into(),
+            line_start: Some(6),
+            forward_decl: false,
+        }],
+    );
+
+    let result = run_explain(&fake, "r1", "doWork", Budget::Medium, TEST_NOW).unwrap();
+    assert!(
+        members_evidence(&result).is_none(),
+        "a FUNCTION focus emits NO EXPLAIN_MEMBERS"
+    );
+    assert!(
+        referenced_by_evidence(&result).is_none(),
+        "a FUNCTION focus emits NO EXPLAIN_REFERENCED_BY"
+    );
+    // The signal set is exactly today's function-focus set (identity, callers, callees, trust).
+    let codes: Vec<_> = result.signals.iter().map(|s| s.code()).collect();
+    assert!(codes.contains(&SignalCode::ExplainIdentity));
+    assert!(codes.contains(&SignalCode::ExplainCallers));
+    assert!(codes.contains(&SignalCode::ExplainCallees));
+    assert!(!codes.contains(&SignalCode::ExplainMembers));
+    assert!(!codes.contains(&SignalCode::ExplainReferencedBy));
+}
+
+#[test]
+fn explain_type_focus_members_count_is_the_pre_truncation_total() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+
+    let members: Vec<AgentMemberEntry> = (0..20)
+        .map(|i| AgentMemberEntry {
+            name: format!("m{i:02}"),
+            qualified_name: format!("src/service.ts:MyService::m{i:02}"),
+            subtype: Some("METHOD".into()),
+            file: "src/service.ts".into(),
+            line_start: Some(10 + i as u64),
+            forward_decl: false,
+        })
+        .collect();
+    fake.members_of_type
+        .insert(("snap1".into(), "src/service.ts:MyService".into()), members);
+
+    // Budget::Small floors to Medium (cap 15); 20 members → count 20, items 15, truncation set.
+    let result = run_explain(&fake, "r1", "MyService", Budget::Small, TEST_NOW).unwrap();
+    let ev = members_evidence(&result).expect("EXPLAIN_MEMBERS present");
+    assert_eq!(ev.count, 20, "count is the PRE-truncation total");
+    assert_eq!(ev.items.len(), 15, "items capped by items_cap(Medium)");
+    assert_eq!(ev.items_truncated, Some(true));
+    assert_eq!(ev.items_omitted_count, Some(5));
+}

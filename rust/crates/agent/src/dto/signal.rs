@@ -284,6 +284,9 @@ pub enum SignalCode {
     ExplainIdentity,
     ExplainCallers,
     ExplainCallees,
+    // EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the type-focus sections, ranked right after callees.
+    ExplainMembers,
+    ExplainReferencedBy,
     ExplainImports,
     ExplainSymbols,
     ExplainFiles,
@@ -319,6 +322,8 @@ impl SignalCode {
             Self::ExplainIdentity => "EXPLAIN_IDENTITY",
             Self::ExplainCallers => "EXPLAIN_CALLERS",
             Self::ExplainCallees => "EXPLAIN_CALLEES",
+            Self::ExplainMembers => "EXPLAIN_MEMBERS",
+            Self::ExplainReferencedBy => "EXPLAIN_REFERENCED_BY",
             Self::ExplainImports => "EXPLAIN_IMPORTS",
             Self::ExplainSymbols => "EXPLAIN_SYMBOLS",
             Self::ExplainFiles => "EXPLAIN_FILES",
@@ -370,14 +375,18 @@ impl SignalCode {
             Self::ExplainIdentity => 0,
             Self::ExplainCallers => 1,
             Self::ExplainCallees => 2,
-            Self::ExplainImports => 3,
-            Self::ExplainSymbols => 4,
-            Self::ExplainFiles => 5,
-            Self::ExplainCycles => 6,
-            Self::ExplainBoundary => 7,
-            Self::ExplainGate => 8,
-            Self::ExplainTrust => 9,
-            Self::ExplainMeasurements => 10,
+            // EXPLAIN-TYPE-SECTIONS-1: members + referenced-by rank right after callees; the tail
+            // (imports…measurements) is renumbered by +2 to keep the fixed section order.
+            Self::ExplainMembers => 3,
+            Self::ExplainReferencedBy => 4,
+            Self::ExplainImports => 5,
+            Self::ExplainSymbols => 6,
+            Self::ExplainFiles => 7,
+            Self::ExplainCycles => 8,
+            Self::ExplainBoundary => 9,
+            Self::ExplainGate => 10,
+            Self::ExplainTrust => 11,
+            Self::ExplainMeasurements => 12,
         }
     }
 
@@ -414,6 +423,8 @@ impl SignalCode {
             Self::ExplainIdentity => (Explain, Low),
             Self::ExplainCallers => (Explain, Low),
             Self::ExplainCallees => (Explain, Low),
+            Self::ExplainMembers => (Explain, Low),
+            Self::ExplainReferencedBy => (Explain, Low),
             Self::ExplainImports => (Explain, Low),
             Self::ExplainSymbols => (Explain, Low),
             Self::ExplainFiles => (Explain, Low),
@@ -872,6 +883,56 @@ pub struct ExplainCalleesEvidence {
     pub items_omitted_count: Option<u64>,
 }
 
+// ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): type-focus member + referenced-by evidence ──
+
+/// One DIRECT member of a type, for the `Members` section. `line` is the member's start line
+/// (already normalised: a `0`/absent line means no anchor — RG-REQ-012-L07); `forward_decl` renders
+/// the `(decl)` marker below the definition (RG-REQ-005-L07).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainMemberItem {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtype: Option<String>,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
+    pub forward_decl: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainMembersEvidence {
+    /// The PRE-truncation total member count (RG-REQ-012-L04: budget changes `items` length, never
+    /// this count).
+    pub count: u64,
+    pub items: Vec<ExplainMemberItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_omitted_count: Option<u64>,
+}
+
+/// One file that references the focused type's file, for the `Referenced by` section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainReferencedByItem {
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainReferencedByEvidence {
+    /// The PRE-truncation total count of distinct referencing files.
+    pub count: u64,
+    /// Top owning modules of the referencing files (grouped exactly as `EXPLAIN_CALLERS` groups
+    /// its `top_modules`, via the shared `group_by_module`).
+    pub top_modules: Vec<ModuleCountEvidence>,
+    pub items: Vec<ExplainReferencedByItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_omitted_count: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExplainImportItem {
     pub target_file: String,
@@ -1030,6 +1091,8 @@ pub enum SignalEvidence {
     ExplainIdentity(ExplainIdentityEvidence),
     ExplainCallers(ExplainCallersEvidence),
     ExplainCallees(ExplainCalleesEvidence),
+    ExplainMembers(ExplainMembersEvidence),
+    ExplainReferencedBy(ExplainReferencedByEvidence),
     ExplainImports(ExplainImportsEvidence),
     ExplainSymbols(ExplainSymbolsEvidence),
     ExplainFiles(ExplainFilesEvidence),
@@ -1063,6 +1126,8 @@ impl Serialize for SignalEvidence {
             Self::ExplainIdentity(e) => e.serialize(serializer),
             Self::ExplainCallers(e) => e.serialize(serializer),
             Self::ExplainCallees(e) => e.serialize(serializer),
+            Self::ExplainMembers(e) => e.serialize(serializer),
+            Self::ExplainReferencedBy(e) => e.serialize(serializer),
             Self::ExplainImports(e) => e.serialize(serializer),
             Self::ExplainSymbols(e) => e.serialize(serializer),
             Self::ExplainFiles(e) => e.serialize(serializer),
@@ -1102,6 +1167,8 @@ impl SignalEvidence {
             Self::ExplainIdentity(_) => "ExplainIdentity",
             Self::ExplainCallers(_) => "ExplainCallers",
             Self::ExplainCallees(_) => "ExplainCallees",
+            Self::ExplainMembers(_) => "ExplainMembers",
+            Self::ExplainReferencedBy(_) => "ExplainReferencedBy",
             Self::ExplainImports(_) => "ExplainImports",
             Self::ExplainSymbols(_) => "ExplainSymbols",
             Self::ExplainFiles(_) => "ExplainFiles",
@@ -1709,6 +1776,34 @@ impl Signal {
             SignalCode::ExplainCallees,
             summary,
             SignalEvidence::ExplainCallees(evidence),
+            SourceRef::ExplainPipeline,
+        )
+    }
+
+    pub fn explain_members(evidence: ExplainMembersEvidence) -> Self {
+        let summary = format!(
+            "{} member{}.",
+            evidence.count,
+            if evidence.count == 1 { "" } else { "s" },
+        );
+        Self::build(
+            SignalCode::ExplainMembers,
+            summary,
+            SignalEvidence::ExplainMembers(evidence),
+            SourceRef::ExplainPipeline,
+        )
+    }
+
+    pub fn explain_referenced_by(evidence: ExplainReferencedByEvidence) -> Self {
+        let summary = format!(
+            "referenced by {} file{}.",
+            evidence.count,
+            if evidence.count == 1 { "" } else { "s" },
+        );
+        Self::build(
+            SignalCode::ExplainReferencedBy,
+            summary,
+            SignalEvidence::ExplainReferencedBy(evidence),
             SourceRef::ExplainPipeline,
         )
     }

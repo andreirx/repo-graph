@@ -20,9 +20,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
-    AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
-    AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentFileImporter, AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentMemberEntry,
+    AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary, AgentSnapshot,
+    AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
     AgentSymbolResolution, AgentTrustSummary,
 };
 use repo_graph_gate::{
@@ -46,6 +46,12 @@ pub(super) struct ServeSpy<'a, S: ?Sized> {
     /// through the trait defaults) — must stay FALSE through the M-2-enabled decorator.
     pub(super) read_find_cycles_involving_path: AtomicBool,
     pub(super) read_find_cycles_involving_module: AtomicBool,
+    /// EXPLAIN-TYPE-SECTIONS-1 (ETS-C04): the two type-focus reads are SQLite-DELEGATED on green (no
+    /// LiveGraph answer class), so — unlike the six (b) methods — they DELEGATE here and are RECORDED
+    /// as allowed reads. `type_focus_members_and_referenced_by_are_sqlite_delegated_on_green` asserts
+    /// both fired (the reads reached SQLite, never a defaulted empty section).
+    pub(super) read_list_members_of_type: AtomicBool,
+    pub(super) read_find_file_importers: AtomicBool,
 }
 
 impl<'a, S: ?Sized> ServeSpy<'a, S> {
@@ -74,6 +80,8 @@ impl<'a, S: ?Sized> ServeSpy<'a, S> {
             read_list_files_in_path: AtomicBool::new(false),
             read_find_cycles_involving_path: AtomicBool::new(false),
             read_find_cycles_involving_module: AtomicBool::new(false),
+            read_list_members_of_type: AtomicBool::new(false),
+            read_find_file_importers: AtomicBool::new(false),
         }
     }
 }
@@ -287,6 +295,25 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
         p: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.inner.find_file_imports(s, p)
+    }
+    // EXPLAIN-TYPE-SECTIONS-1 (ETS-C04): explicit delegating overrides — SQLite-served (recorded as
+    // allowed reads), NEVER panicking like the six (b) methods.
+    fn list_members_of_type(
+        &self,
+        s: &str,
+        q: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError> {
+        self.read_list_members_of_type
+            .store(true, Ordering::Relaxed);
+        self.inner.list_members_of_type(s, q)
+    }
+    fn find_file_importers(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        self.read_find_file_importers.store(true, Ordering::Relaxed);
+        self.inner.find_file_importers(s, p)
     }
     fn get_doc_inventory(&self, r: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
         self.inner.get_doc_inventory(r)

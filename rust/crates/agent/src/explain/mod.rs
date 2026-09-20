@@ -556,6 +556,57 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         }));
     }
 
+    // ── EXPLAIN_MEMBERS + EXPLAIN_REFERENCED_BY (type focus only) ──
+    // EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): a TYPE is described by its members and the files
+    // that reference it — never "Callers (0) / Callees (0)". Emitted ONLY when the focus subtype is
+    // a type (a function/method focus is byte-identical to before). Both counts are the PRE-truncation
+    // totals; `items` are budget-capped exactly like every other explain section (RG-REQ-012-L04).
+    if context.subtype.as_deref().is_some_and(is_type_subtype) {
+        if let Some(ref qualified_name) = context.qualified_name {
+            let members = storage.list_members_of_type(snapshot_uid, qualified_name)?;
+            let count = members.len() as u64;
+            let mut items: Vec<ExplainMemberItem> = members
+                .into_iter()
+                .map(|m| ExplainMemberItem {
+                    name: m.name,
+                    subtype: m.subtype,
+                    file: m.file,
+                    // ANCHORS-EVERYWHERE-1: the member's stored start line (already 0→None normalised
+                    // by the adapter), for the `path:line` anchor.
+                    line: m.line_start,
+                    forward_decl: m.forward_decl,
+                })
+                .collect();
+            let (trunc, omitted) = truncate_items(&mut items, cap);
+            signals.push(Signal::explain_members(ExplainMembersEvidence {
+                count,
+                items,
+                items_truncated: trunc,
+                items_omitted_count: omitted,
+            }));
+        }
+        if let Some(ref file_path) = context.file_path {
+            let importers = storage.find_file_importers(snapshot_uid, file_path)?;
+            let count = importers.len() as u64;
+            let top_modules = group_by_module(importers.iter().map(|i| i.module_path.as_deref()));
+            let mut items: Vec<ExplainReferencedByItem> = importers
+                .into_iter()
+                .map(|i| ExplainReferencedByItem {
+                    file: i.file,
+                    module: i.module_path,
+                })
+                .collect();
+            let (trunc, omitted) = truncate_items(&mut items, cap);
+            signals.push(Signal::explain_referenced_by(ExplainReferencedByEvidence {
+                count,
+                top_modules,
+                items,
+                items_truncated: trunc,
+                items_omitted_count: omitted,
+            }));
+        }
+    }
+
     // ── Inherited module-context signals ────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
     if let Some(ref module_path) = context.module_path {

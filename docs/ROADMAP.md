@@ -983,7 +983,50 @@ oracle; three self-caught before launch (pgrep self-match, a predicted FRAKTAG b
 FOLLOW-UPS: the per-row `[no manifest — imports unattributed]` rendering in the none-detected view; a `deps_manifests_present`
 java key (present counts for gradle/maven are not tracked at index time); RG-REQ-006-L08/L09 evidence lines → OBSERVED MET at
 the next catalog revision.
-NEXT: Q6 EXPLAIN-TYPE-SECTIONS-1 — no earlier than one hour after this closeout (human directive 2026-09-19).
+NEXT: Q6 EXPLAIN-TYPE-SECTIONS-1 (shipped below).
+
+Q6 EXPLAIN-TYPE-SECTIONS-1 increment 1 SHIPPED (2026-09-20; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+`explain <Type>` now describes the type — its direct members, anchored and decl-marked, and the files that reference it —
+in every language (RC-3 never worked, language-wide): two REQUIRED `AgentStorageRead` reads with seven implementors
+(`list_members_of_type`: nodes whose `qualified_name` is `<qn>::<name>`/`<qn>.<name>` with no further separator, focus
+file first then other files by path and line, `forward_decl` read as the stored tri-state; `find_file_importers`: the
+inverse of `find_file_imports` — IMPORTS edges into the type's FILE node with the OWNS-edge module), two additive signals
+(`EXPLAIN_MEMBERS`, `EXPLAIN_REFERENCED_BY`, SQLite-served on every route: the decorator delegates, the explain-serve spy
+records — ruling-B shape), two renderer sections (15 rows + `... (K more)`, `--full` uncaps; malformed evidence renders
+exactly the heading + `members unreadable on this snapshot` / `referenced-by unreadable on this snapshot`, never a partial
+list or a bare `Members (0)`), and the renderer-side type zero-line `Callers (0) — a type is not called; see Members /
+Referenced by` (RG-REQ-005-L04 members/referenced-by halves implemented; bases/derived = increments 2–3; 012-L06 additive).
+CODE UNDER ANALYSIS: vcmi `explain CGHeroInstance` — BEFORE only `Callers (0)`, `Callees (0)`, the cycle line and trust;
+AFTER `Members (135)` (the stored nodes are the definitions: `getFactionID (METHOD)  lib/mapObjects/CGHeroInstance.cpp:81`
+for `lib/mapObjects/CGHeroInstance.h:176 FactionID getFactionID() const override;`), `... (120 more)`, `Referenced by (178
+files)` with `top modules: lib/mapObjects (14), client/widgets (11), client/windows (11)` (e.g. `client/UIHelper.cpp:16
+#include "../lib/mapObjects/CGHeroInstance.h"`, `lib/CStack.h:16 #include "mapObjects/CGHeroInstance.h"`), and the zero-line.
+django `explain BaseHandler` — `Members (10)` (`load_middleware (METHOD)  django/core/handlers/base.py:27`; the nested
+closure `BaseHandler.load_middleware.get_response` at base.py:38 correctly EXCLUDED), `Referenced by (1 files)`
+(`django/test/client.py:17 from django.core.handlers.base import BaseHandler`); JSON counts equal the text. FRAKTAG `explain
+ConversationManager` BY NAME — `File: packages/engine/src/core/ConversationManager.ts:61`, `Members (8)` (`createSession
+(METHOD)  …/ConversationManager.ts:71`), `Referenced by (1 files)` — neither path-focus nor C++-gated. leveldb `explain
+leveldb::DBImpl` — `Members (73)` (`db/db_impl.h:113 Status Recover(…)` declared, `Recover (METHOD)  db/db_impl.cc:292`
+defined), `Referenced by (9 files)`; `explain leveldb::DBImpl::Recover` (a METHOD) BYTE-IDENTICAL. On all four probes the
+header, the Import-cycles block (Q4's rule) and Trust are byte-identical; member counts identical across medium/large/--full
+with monotonic item lists. GATES: ALL-GATES-GREEN (scripts/repo-graph-gates.sh, exit 0: fmt, clippy --workspace --all-targets -D warnings, per-crate tests incl. daemon-runtime, consolidation witness, release bins, isolated dogfood; on the unchanged accepted candidate; committed bytes = the accepted candidate, proven by diff digest). TALLY: 2 admissions, 3 baselines (INPUT-1 accepted 19/19 at PREP cycle 2 after
+F1 — the type zero-line is RG-REQ-005-L04's, not L09's — and F2 — the status line overstated product observation — but
+unadmittable because its review set kept L09 as a deferred obligation; INPUT-2 dropped it, PREP-2 accepted 18/18 at cycle 1
+with the author running the allocation validator itself; INPUT-3 = OC-1 after the first implementation review's
+D-ETS-C10: ETS-C10 invoked `explain --budget small`, a tier explain's parser rejects — operator resolution option 1 under the
+oracle-correction procedure; PREP-3 accepted 18/18), 4 document + 2 implementation review cycles, 1 reviewer decision
+(D-ETS-C10, operator-resolved), 1 oracle correction, 1 real code finding (F-ETS-01: the two new renderers defaulted a
+malformed `count` to 0 and rendered no unreadable line for a non-array `items` — the `unwrap_or(0)` class the bound test
+had not covered; closed as a class with one validator per section and seven malformed-evidence cases), second admission cycle 1: 13/13, review refinement-required on ONE evidence finding (F-ETS-02: two quoted vcmi declarations instead of three and a stale 'header first' sentence — vcmi's in-class prototypes are not member nodes, so the .cpp definitions lead); cycle 2: report corrected (`CGHeroInstance.h:176-178` incl. `int getLowestCreatureSpeed() const;` → `CGHeroInstance.cpp:210`), 13/13, ACCEPTED with ETS-C01/C03/C04/C13 reproduced by the reviewer; 4 manager interpretations (shape-only; one carried the D-ETS-C10 mapping). Runtime
+context: this slice ran across the agent-manager update 2d32c62 (curated rules, generic role prompts, reference delivery);
+the repo-graph relay isolation rules rode in the implementation packet pending the bootstrap re-baseline (Change 1 + CC-5).
+Manager defects this slice: L09 mis-attribution; the "read from the product" status wording; an unverified CLI flag literal;
+a bound malformed-evidence test that did not enumerate the cases (the evidence-taxonomy rule applied to renderers, not just
+storage). FOLLOW-UPS: increment 2 (C++ base-clause anchor on the type node, extractor.rs:1387; bases/derived sections),
+increment 3 (macro-decorated base clauses, extractor.rs:797-799); RG-REQ-005-L09's unresolved-call count beside a zero
+(CLAIM-INVARIANT-1); a `parent_node_uid` containment model (None in every extractor today).
+NEXT: the bootstrap re-baseline (repo-graph CLAUDE.md relay rules + CC-5; ready catalog corrections), then Q7 COMPLEXITY-SCOPE-1
+after the standing one-hour wait.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a

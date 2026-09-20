@@ -158,6 +158,67 @@ fn unordered_members(item: &serde_json::Value) -> String {
     }
 }
 
+/// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04 / RG-REQ-012-L07): the body of ONE member row —
+/// `<name> (<subtype>)  <path>:<line>`, or `<name> (<subtype>, decl)  …` for a forward declaration,
+/// or bare `<name>  <path>` when subtype is absent. Returns `None` on ANY malformed field so the
+/// caller renders the visible unreadable line instead of a fabricated/silently-shorter row (STANDING
+/// HONESTY RULE): a non-string `name`, a non-string `file`, a PRESENT-but-non-string `subtype`, a
+/// PRESENT-but-non-bool `forward_decl`, or a PRESENT-but-non-integer `line`. Only an ABSENT (or JSON
+/// `null`) optional field is legitimate absence — `subtype`/`line` → omitted, `forward_decl` → false;
+/// an absent or `0` line renders the bare path (never `:0`). A present field of the wrong JSON type is
+/// wire/schema drift, never silently coerced to a default.
+fn render_member_row(item: &serde_json::Value) -> Option<String> {
+    let name = item.get("name")?.as_str()?;
+    let file = item.get("file")?.as_str()?;
+    // subtype: absent / null = legitimate absence (None). A PRESENT non-string value is drift → None.
+    let subtype = match item.get("subtype") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(v) => Some(v.as_str()?),
+    };
+    // forward_decl: absent / null = false. A PRESENT non-bool value is drift → None.
+    let forward_decl = match item.get("forward_decl") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(v) => v.as_bool()?,
+    };
+    // line: absent / null = legitimate absence (None). A PRESENT non-integer value is drift → None
+    // for the WHOLE row (the caller renders the unreadable line).
+    let line = match item.get("line") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(v) => Some(v.as_u64()?),
+    };
+    let head = match subtype {
+        Some(st) if forward_decl => format!("{name} ({st}, decl)"),
+        Some(st) => format!("{name} ({st})"),
+        None => name.to_string(),
+    };
+    Some(format!("{head}  {}", anchor(file, line)))
+}
+
+/// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04, F-ETS-01): the unreadable render of the `Members`
+/// section — the section heading followed by the SINGLE `members unreadable on this snapshot` line,
+/// with NO rows. The heading keeps the real `count` only when it is itself a readable `u64` (never a
+/// fabricated `0`); a malformed count drops the parenthetical entirely rather than inventing one.
+fn members_unreadable(count: Option<u64>) -> String {
+    let mut out = match count {
+        Some(c) => heading(&format!("Members ({c})")),
+        None => heading("Members"),
+    };
+    out.push_str(&bullet("members unreadable on this snapshot"));
+    out
+}
+
+/// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04, F-ETS-01): the unreadable render of the `Referenced by`
+/// section — the heading followed by the SINGLE `referenced-by unreadable on this snapshot` line, no
+/// rows and no `top modules:` line. Keeps the real `count` only when it is a readable `u64`.
+fn referenced_by_unreadable(count: Option<u64>) -> String {
+    let mut out = match count {
+        Some(c) => heading(&format!("Referenced by ({c} files)")),
+        None => heading("Referenced by"),
+    };
+    out.push_str(&bullet("referenced-by unreadable on this snapshot"));
+    out
+}
+
 impl ExplainResponse {
     /// Render a single signal's section. `full` lifts the per-section display cap (see the module doc):
     /// it is the `--full` flag, threaded so the human render is uncapped for grep.
@@ -171,6 +232,8 @@ impl ExplainResponse {
         match signal.code.as_str() {
             "EXPLAIN_CALLERS" => Some(self.render_callers(evidence, full)),
             "EXPLAIN_CALLEES" => Some(self.render_callees(evidence, full)),
+            "EXPLAIN_MEMBERS" => Some(self.render_members(evidence, full)),
+            "EXPLAIN_REFERENCED_BY" => Some(self.render_referenced_by(evidence, full)),
             "EXPLAIN_IMPORTS" => Some(self.render_imports(evidence, full)),
             "EXPLAIN_SYMBOLS" => Some(self.render_symbols(evidence, full)),
             "EXPLAIN_FILES" => Some(self.render_files(evidence, full)),
@@ -187,9 +250,10 @@ impl ExplainResponse {
     fn render_callers(&self, evidence: &serde_json::Value, full: bool) -> String {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
         let mut out = heading(&format!(
-            "Callers ({}{})",
+            "Callers ({}{}){}",
             count,
-            union_degree_suffix(evidence)
+            union_degree_suffix(evidence),
+            self.type_not_called_suffix(count),
         ));
 
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
@@ -208,9 +272,10 @@ impl ExplainResponse {
     fn render_callees(&self, evidence: &serde_json::Value, full: bool) -> String {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
         let mut out = heading(&format!(
-            "Callees ({}{})",
+            "Callees ({}{}){}",
             count,
-            union_degree_suffix(evidence)
+            union_degree_suffix(evidence),
+            self.type_not_called_suffix(count),
         ));
 
         if let Some(items) = evidence.get("items").and_then(|v| v.as_array()) {
@@ -223,6 +288,126 @@ impl ExplainResponse {
             }
         }
 
+        out
+    }
+
+    /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): render the `Members` section of a type focus. Each
+    /// row is `<name> (<subtype>)  <path>:<line>` (a `forward_decl` member renders `(<subtype>, decl)`),
+    /// the anchor through the shared [`anchor`] chokepoint so an absent/0 line renders no `:N`
+    /// (RG-REQ-012-L07). The default view caps at 15 rows and names the omitted remainder from the
+    /// PRE-truncation `count` (RG-REQ-012-L04); `--full` renders all.
+    ///
+    /// F-ETS-01 (STANDING HONESTY RULE — the class, not the instance): the COMPLETE carried evidence
+    /// is validated BEFORE anything renders. `count` must be a `u64` (a missing or non-integer count
+    /// is malformed — never `unwrap_or(0)`), `items` must be an array, and EVERY carried item must be
+    /// a fully typed member row (see [`render_member_row`]). On any malformed field the section is
+    /// exactly its heading followed by the single `members unreadable on this snapshot` line — never a
+    /// fabricated `Members (0)`, a bare heading, a partial row list, or a silently shortened set.
+    fn render_members(&self, evidence: &serde_json::Value, full: bool) -> String {
+        const DISPLAY_CAP: usize = 15;
+        // count MUST be a readable u64; items MUST be an array. Either malformed ⇒ unreadable.
+        let count = evidence.get("count").and_then(|v| v.as_u64());
+        let items = evidence.get("items").and_then(|v| v.as_array());
+        let (Some(count), Some(items)) = (count, items) else {
+            return members_unreadable(count);
+        };
+        // Validate every carried item up front (close the class): a single malformed row makes the
+        // WHOLE section unreadable, so no partial list can ever escape.
+        let mut rows = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(row) = render_member_row(item) else {
+                return members_unreadable(Some(count));
+            };
+            rows.push(row);
+        }
+        let shown = if full {
+            rows.len()
+        } else {
+            rows.len().min(DISPLAY_CAP)
+        };
+        let mut out = heading(&format!("Members ({count})"));
+        for row in rows.iter().take(shown) {
+            out.push_str(&bullet(row));
+        }
+        let remaining = count.saturating_sub(shown as u64);
+        if remaining > 0 {
+            out.push_str(&format!("  ... ({} more)\n", remaining));
+        }
+        out
+    }
+
+    /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): render the `Referenced by (N files)` section — the
+    /// files that reference the focused type's file. Names the top owning modules (`top modules:`),
+    /// then the file rows (capped at 15, remainder named from the PRE-truncation `count`).
+    ///
+    /// F-ETS-01 (STANDING HONESTY RULE — the class, not the instance): the COMPLETE carried evidence
+    /// is validated BEFORE anything renders. `count` must be a `u64` (never `unwrap_or(0)`); `items`
+    /// must be an array of fully typed rows (`file` a string, `module` a string or absent); and, when
+    /// present, `top_modules` must be an array whose every entry is `{module: string, count: u64}`. On
+    /// any malformed field — including a single malformed top-module entry — the section is exactly its
+    /// heading followed by the single `referenced-by unreadable on this snapshot` line: never a
+    /// fabricated count, a shortened row list, or a SILENTLY DROPPED top-module entry.
+    fn render_referenced_by(&self, evidence: &serde_json::Value, full: bool) -> String {
+        const DISPLAY_CAP: usize = 15;
+        // count MUST be a readable u64; items MUST be an array. Either malformed ⇒ unreadable.
+        let count = evidence.get("count").and_then(|v| v.as_u64());
+        let items = evidence.get("items").and_then(|v| v.as_array());
+        let (Some(count), Some(items)) = (count, items) else {
+            return referenced_by_unreadable(count);
+        };
+
+        // top_modules: absent / null is legitimate (no line). A PRESENT value MUST be an array whose
+        // every entry carries a string `module` and a u64 `count`; any malformed entry is drift → the
+        // WHOLE section is unreadable (never a silently dropped entry).
+        let top_parts: Vec<String> = match evidence.get("top_modules") {
+            None | Some(serde_json::Value::Null) => Vec::new(),
+            Some(serde_json::Value::Array(top)) => {
+                let mut parts = Vec::with_capacity(top.len());
+                for m in top {
+                    match (
+                        m.get("module").and_then(|v| v.as_str()),
+                        m.get("count").and_then(|v| v.as_u64()),
+                    ) {
+                        (Some(name), Some(c)) => parts.push(format!("{name} ({c})")),
+                        _ => return referenced_by_unreadable(Some(count)),
+                    }
+                }
+                parts
+            }
+            // Present but not an array = wire/schema drift.
+            Some(_) => return referenced_by_unreadable(Some(count)),
+        };
+
+        // Validate every carried file row up front (`file` string required; `module` string or absent).
+        let mut rows = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(file) = item.get("file").and_then(|v| v.as_str()) else {
+                return referenced_by_unreadable(Some(count));
+            };
+            match item.get("module") {
+                None | Some(serde_json::Value::Null) => {}
+                Some(v) if v.as_str().is_some() => {}
+                Some(_) => return referenced_by_unreadable(Some(count)),
+            }
+            rows.push(file.to_string());
+        }
+
+        let mut out = heading(&format!("Referenced by ({count} files)"));
+        if !top_parts.is_empty() {
+            out.push_str(&format!("  top modules: {}\n", top_parts.join(", ")));
+        }
+        let shown = if full {
+            rows.len()
+        } else {
+            rows.len().min(DISPLAY_CAP)
+        };
+        for row in rows.iter().take(shown) {
+            out.push_str(&bullet(row));
+        }
+        let remaining = count.saturating_sub(shown as u64);
+        if remaining > 0 {
+            out.push_str(&format!("  ... ({} more)\n", remaining));
+        }
         out
     }
 

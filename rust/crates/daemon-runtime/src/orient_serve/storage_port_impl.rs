@@ -12,10 +12,11 @@
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,
-    AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentImportEdge, AgentImportEntry,
-    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentRepo, AgentRepoSummary,
-    AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-    AgentSymbolEntry, AgentSymbolResolution, AgentTrustSummary, ManifestRoot,
+    AgentDocEntry, AgentFileEntry, AgentFileImporter, AgentFocusCandidate, AgentImportEdge,
+    AgentImportEntry, AgentMemberEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
+    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
+    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentSymbolResolution,
+    AgentTrustSummary, ManifestRoot,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -528,6 +529,28 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         file_path: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.inner.find_file_imports(snapshot_uid, file_path)
+    }
+
+    // EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the two type-focus reads are SQLite-served, a plain
+    // delegation like `count_symbol_definitions_by_name` / `resolve_symbol` (ruling-B shape). There
+    // is no LiveGraph answer class for a type's member set or its reverse-import fan-in, so they
+    // reach the pinned SQLite snapshot on EVERY route — the nodes-free-on-green invariant is amended
+    // for exactly these two reads (§2.1.4), recorded, never a defaulted empty read.
+    fn list_members_of_type(
+        &self,
+        snapshot_uid: &str,
+        qualified_name: &str,
+    ) -> Result<Vec<AgentMemberEntry>, AgentStorageError> {
+        self.inner
+            .list_members_of_type(snapshot_uid, qualified_name)
+    }
+
+    fn find_file_importers(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        self.inner.find_file_importers(snapshot_uid, file_path)
     }
 
     fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {

@@ -1307,3 +1307,544 @@ fn get_module_summary_no_fallback_after_phase_4() {
 		 is empty, even if MODULE nodes exist. No fallback."
     );
 }
+
+// ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): list_members_of_type + find_file_importers ──
+
+/// Build a SYMBOL GraphNode for a member fixture: `qualified_name`-keyed, in `file_uid`, with an
+/// optional line and optional raw `metadata_json` (for the forward_decl tri-state).
+#[allow(clippy::too_many_arguments)]
+fn member_node(
+    uid: &str,
+    snapshot_uid: &str,
+    stable_key: &str,
+    name: &str,
+    qualified_name: &str,
+    subtype: &str,
+    file_uid: &str,
+    line: Option<i64>,
+    metadata_json: Option<&str>,
+) -> GraphNode {
+    GraphNode {
+        node_uid: uid.into(),
+        snapshot_uid: snapshot_uid.into(),
+        repo_uid: "r1".into(),
+        stable_key: stable_key.into(),
+        kind: "SYMBOL".into(),
+        subtype: Some(subtype.into()),
+        name: name.into(),
+        qualified_name: Some(qualified_name.into()),
+        file_uid: Some(file_uid.into()),
+        parent_node_uid: None,
+        location: line.map(|l| SourceLocation {
+            line_start: l,
+            col_start: 0,
+            line_end: l,
+            col_end: 0,
+        }),
+        signature: None,
+        visibility: None,
+        doc_comment: None,
+        metadata_json: metadata_json.map(|s| s.to_string()),
+    }
+}
+
+fn seed_file(storage: &mut StorageConnection, snapshot_uid: &str, file_uid: &str, path: &str) {
+    storage
+        .upsert_files(&[TrackedFile {
+            file_uid: file_uid.into(),
+            repo_uid: "r1".into(),
+            path: path.into(),
+            language: Some("cpp".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[FileVersion {
+            snapshot_uid: snapshot_uid.into(),
+            file_uid: file_uid.into(),
+            content_hash: "h".into(),
+            ast_hash: None,
+            extractor: None,
+            parse_status: "ok".into(),
+            size_bytes: Some(1),
+            line_count: Some(1),
+            indexed_at: "2026-04-15T00:00:00Z".into(),
+        }])
+        .unwrap();
+}
+
+#[test]
+fn list_members_of_type_returns_direct_members_only() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    seed_file(&mut storage, &snapshot_uid, "f1", "src/a.h");
+    seed_file(&mut storage, &snapshot_uid, "f2", "src/other.py");
+
+    storage
+        .insert_nodes(&[
+            // The type itself (subtype CLASS) — used only for the focus-file ordering probe.
+            member_node(
+                "nt",
+                &snapshot_uid,
+                "r1:src/a.h#A:SYMBOL:CLASS",
+                "A",
+                "A",
+                "CLASS",
+                "f1",
+                Some(1),
+                None,
+            ),
+            // Direct members via `::`.
+            member_node(
+                "n1",
+                &snapshot_uid,
+                "r1:src/a.h#A::m1:SYMBOL:METHOD",
+                "m1",
+                "A::m1",
+                "METHOD",
+                "f1",
+                Some(3),
+                None,
+            ),
+            member_node(
+                "n2",
+                &snapshot_uid,
+                "r1:src/a.h#A::m2:SYMBOL:METHOD",
+                "m2",
+                "A::m2",
+                "METHOD",
+                "f1",
+                Some(4),
+                None,
+            ),
+            // A nested TYPE `A::Inner` — a direct member of A (one more `::` segment).
+            member_node(
+                "n3",
+                &snapshot_uid,
+                "r1:src/a.h#A::Inner:SYMBOL:CLASS",
+                "Inner",
+                "A::Inner",
+                "CLASS",
+                "f1",
+                Some(5),
+                None,
+            ),
+            // `A::Inner::m3` — NESTED under Inner, NOT a direct member of A (two `::` segments).
+            member_node(
+                "n4",
+                &snapshot_uid,
+                "r1:src/a.h#A::Inner::m3:SYMBOL:METHOD",
+                "m3",
+                "A::Inner::m3",
+                "METHOD",
+                "f1",
+                Some(6),
+                None,
+            ),
+            // A dotted sibling `A.m4` in ANOTHER file — a direct member via the `.` separator.
+            member_node(
+                "n5",
+                &snapshot_uid,
+                "r1:src/other.py#A.m4:SYMBOL:METHOD",
+                "m4",
+                "A.m4",
+                "METHOD",
+                "f2",
+                Some(2),
+                None,
+            ),
+        ])
+        .unwrap();
+
+    let members =
+        <StorageConnection as AgentStorageRead>::list_members_of_type(&storage, &snapshot_uid, "A")
+            .unwrap();
+
+    let qns: Vec<&str> = members.iter().map(|m| m.qualified_name.as_str()).collect();
+    // Direct members only: `::` members, the nested TYPE, AND the dotted `.` member — never the
+    // doubly-nested `A::Inner::m3`.
+    assert!(qns.contains(&"A::m1"), "A::m1 is a direct member: {qns:?}");
+    assert!(qns.contains(&"A::m2"), "A::m2 is a direct member: {qns:?}");
+    assert!(
+        qns.contains(&"A::Inner"),
+        "A::Inner is a direct member: {qns:?}"
+    );
+    assert!(
+        qns.contains(&"A.m4"),
+        "A.m4 (dotted sibling) is a direct member: {qns:?}"
+    );
+    assert!(
+        !qns.contains(&"A::Inner::m3"),
+        "A::Inner::m3 is nested, NOT a direct member of A: {qns:?}"
+    );
+    assert!(
+        !qns.contains(&"A"),
+        "the type itself is not its own member: {qns:?}"
+    );
+    assert_eq!(members.len(), 4, "exactly the four direct members: {qns:?}");
+}
+
+#[test]
+fn list_members_of_type_orders_focus_file_first_then_other_files_by_path_and_line() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    // The type is DEFINED in the header (focus file); one member is defined out-of-line in a `.cpp`
+    // whose path sorts BEFORE the header ("a.cpp" < "a.h"), proving focus-file-first beats path order.
+    seed_file(&mut storage, &snapshot_uid, "fh", "src/a.h");
+    seed_file(&mut storage, &snapshot_uid, "fc", "src/a.cpp");
+
+    storage
+        .insert_nodes(&[
+            member_node(
+                "nt",
+                &snapshot_uid,
+                "r1:src/a.h#A:SYMBOL:CLASS",
+                "A",
+                "A",
+                "CLASS",
+                "fh",
+                Some(1),
+                None,
+            ),
+            // Header members (focus file), out of line order — later line first to prove line-sort.
+            member_node(
+                "nh2",
+                &snapshot_uid,
+                "r1:src/a.h#A::later:SYMBOL:METHOD",
+                "later",
+                "A::later",
+                "METHOD",
+                "fh",
+                Some(20),
+                None,
+            ),
+            member_node(
+                "nh1",
+                &snapshot_uid,
+                "r1:src/a.h#A::early:SYMBOL:METHOD",
+                "early",
+                "A::early",
+                "METHOD",
+                "fh",
+                Some(10),
+                None,
+            ),
+            // A definition in a.cpp (other file, path sorts first alphabetically).
+            member_node(
+                "nc",
+                &snapshot_uid,
+                "r1:src/a.cpp#A::defd:SYMBOL:METHOD",
+                "defd",
+                "A::defd",
+                "METHOD",
+                "fc",
+                Some(81),
+                None,
+            ),
+        ])
+        .unwrap();
+
+    let members =
+        <StorageConnection as AgentStorageRead>::list_members_of_type(&storage, &snapshot_uid, "A")
+            .unwrap();
+
+    let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
+    // Focus file (src/a.h) members first, by line (early < later); THEN the other file (src/a.cpp).
+    assert_eq!(
+        names,
+        vec!["early", "later", "defd"],
+        "focus-file-first by line, then other files by path/line: {names:?}"
+    );
+}
+
+#[test]
+fn list_members_of_type_marks_forward_declarations() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    seed_file(&mut storage, &snapshot_uid, "f1", "src/a.h");
+
+    storage
+        .insert_nodes(&[
+            member_node(
+                "nt",
+                &snapshot_uid,
+                "r1:src/a.h#A:SYMBOL:CLASS",
+                "A",
+                "A",
+                "CLASS",
+                "f1",
+                Some(1),
+                None,
+            ),
+            // forward_decl: true → true.
+            member_node(
+                "n1",
+                &snapshot_uid,
+                "r1:src/a.h#A::decl:SYMBOL:METHOD",
+                "decl",
+                "A::decl",
+                "METHOD",
+                "f1",
+                Some(3),
+                Some(r#"{"forward_decl": true}"#),
+            ),
+            // No metadata (absent key) → false.
+            member_node(
+                "n2",
+                &snapshot_uid,
+                "r1:src/a.h#A::def:SYMBOL:METHOD",
+                "def",
+                "A::def",
+                "METHOD",
+                "f1",
+                Some(4),
+                None,
+            ),
+        ])
+        .unwrap();
+
+    let members =
+        <StorageConnection as AgentStorageRead>::list_members_of_type(&storage, &snapshot_uid, "A")
+            .unwrap();
+    let decl = members.iter().find(|m| m.name == "decl").unwrap();
+    let def = members.iter().find(|m| m.name == "def").unwrap();
+    assert!(decl.forward_decl, "forward_decl:true is read as a fact");
+    assert!(!def.forward_decl, "absent metadata is false, not an error");
+
+    // A PRESENT-but-unreadable forward_decl value (a string) is an ERROR, never defaulted to false.
+    storage
+        .insert_nodes(&[member_node(
+            "n3",
+            &snapshot_uid,
+            "r1:src/a.h#A::weird:SYMBOL:METHOD",
+            "weird",
+            "A::weird",
+            "METHOD",
+            "f1",
+            Some(5),
+            Some(r#"{"forward_decl": "yes"}"#),
+        )])
+        .unwrap();
+    let err =
+        <StorageConnection as AgentStorageRead>::list_members_of_type(&storage, &snapshot_uid, "A");
+    assert!(
+        err.is_err(),
+        "an unreadable forward_decl value is an error, never a silent default"
+    );
+}
+
+#[test]
+fn find_file_importers_lists_importing_files_with_owning_module() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    seed_file(&mut storage, &snapshot_uid, "ft", "zzz/target.h");
+    seed_file(&mut storage, &snapshot_uid, "fa", "aaa/a.cpp");
+    seed_file(&mut storage, &snapshot_uid, "fb", "bbb/b.cpp");
+
+    // FILE nodes for each file; MODULE nodes for aaa/bbb with OWNS edges to their files.
+    storage
+        .insert_nodes(&[
+            GraphNode {
+                node_uid: "nft".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:zzz/target.h:FILE".into(),
+                kind: "FILE".into(),
+                subtype: None,
+                name: "target.h".into(),
+                qualified_name: None,
+                file_uid: Some("ft".into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "nfa".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:aaa/a.cpp:FILE".into(),
+                kind: "FILE".into(),
+                subtype: None,
+                name: "a.cpp".into(),
+                qualified_name: None,
+                file_uid: Some("fa".into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "nfb".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:bbb/b.cpp:FILE".into(),
+                kind: "FILE".into(),
+                subtype: None,
+                name: "b.cpp".into(),
+                qualified_name: None,
+                file_uid: Some("fb".into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "nma".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:aaa:MODULE".into(),
+                kind: "MODULE".into(),
+                subtype: None,
+                name: "aaa".into(),
+                qualified_name: Some("aaa".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "nmb".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:bbb:MODULE".into(),
+                kind: "MODULE".into(),
+                subtype: None,
+                name: "bbb".into(),
+                qualified_name: Some("bbb".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
+    storage
+        .insert_edges(&[
+            // OWNS module → file.
+            GraphEdge {
+                edge_uid: "eoa".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: "nma".into(),
+                target_node_uid: "nfa".into(),
+                edge_type: "OWNS".into(),
+                resolution: "resolved".into(),
+                extractor: "t".into(),
+                location: None,
+                metadata_json: None,
+            },
+            GraphEdge {
+                edge_uid: "eob".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: "nmb".into(),
+                target_node_uid: "nfb".into(),
+                edge_type: "OWNS".into(),
+                resolution: "resolved".into(),
+                extractor: "t".into(),
+                location: None,
+                metadata_json: None,
+            },
+            // IMPORTS: a.cpp and b.cpp both include target.h (FILE → FILE).
+            GraphEdge {
+                edge_uid: "eia".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: "nfa".into(),
+                target_node_uid: "nft".into(),
+                edge_type: "IMPORTS".into(),
+                resolution: "static".into(),
+                extractor: "t".into(),
+                location: None,
+                metadata_json: None,
+            },
+            GraphEdge {
+                edge_uid: "eib".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: "nfb".into(),
+                target_node_uid: "nft".into(),
+                edge_type: "IMPORTS".into(),
+                resolution: "static".into(),
+                extractor: "t".into(),
+                location: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
+
+    let importers = <StorageConnection as AgentStorageRead>::find_file_importers(
+        &storage,
+        &snapshot_uid,
+        "zzz/target.h",
+    )
+    .unwrap();
+
+    assert_eq!(
+        importers.len(),
+        2,
+        "two files import target.h: {importers:?}"
+    );
+    // Ordered by path: aaa/a.cpp before bbb/b.cpp, each with its owning module.
+    assert_eq!(importers[0].file, "aaa/a.cpp");
+    assert_eq!(importers[0].module_path.as_deref(), Some("aaa"));
+    assert_eq!(importers[1].file, "bbb/b.cpp");
+    assert_eq!(importers[1].module_path.as_deref(), Some("bbb"));
+}
+
+#[test]
+fn find_file_importers_is_empty_for_a_file_nobody_imports() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    seed_file(&mut storage, &snapshot_uid, "ft", "zzz/lonely.h");
+    storage
+        .insert_nodes(&[GraphNode {
+            node_uid: "nft".into(),
+            snapshot_uid: snapshot_uid.clone(),
+            repo_uid: "r1".into(),
+            stable_key: "r1:zzz/lonely.h:FILE".into(),
+            kind: "FILE".into(),
+            subtype: None,
+            name: "lonely.h".into(),
+            qualified_name: None,
+            file_uid: Some("ft".into()),
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        }])
+        .unwrap();
+
+    let importers = <StorageConnection as AgentStorageRead>::find_file_importers(
+        &storage,
+        &snapshot_uid,
+        "zzz/lonely.h",
+    )
+    .unwrap();
+    assert!(
+        importers.is_empty(),
+        "a file nobody imports has no importers"
+    );
+}
