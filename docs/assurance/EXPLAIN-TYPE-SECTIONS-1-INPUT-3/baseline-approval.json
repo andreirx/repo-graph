@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "EXPLAIN-TYPE-SECTIONS-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/EXPLAIN-TYPE-SECTIONS-1-INPUT-3.json",
+    "sha256": "sha256:af360a62733f07208d99eb1b9741e639582f05b38f082dcca110bf2a5c2e7fff"
+  },
+  "review": {
+    "path": "docs/assurance/EXPLAIN-TYPE-SECTIONS-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:8eb8788937c1f76f7c3911d9df65639a0d86dd0da441aac7866666bb7b35c908"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-20T15:28:15.772Z",
+  "rationale": "Operator approves EXPLAIN-TYPE-SECTIONS-1-INPUT-3: INPUT-2 plus oracle correction OC-1 — ETS-C10 invoked explain --budget small, a tier explain's CLI rejects (parser rgr/src/commands/orient.rs:498: medium|large or --full); the check's tiers are now medium (default) / large / --full with the same count-invariance oracle. Raised by the first implementation review as D-ETS-C10 (codex gpt-5.6-terra, recommending exactly this), resolved by the operator under the ratified oracle-correction procedure (docs/assurance/RG-BOOTSTRAP/decisions/D-ETS-C10.md; ledger). Text-only: no allocation, check-id, requirement or path change. PREP-3 review accepted 18/18 with zero findings; the author ran the validator and re-emitted both files unchanged. The review's code finding F-ETS-01 is corrected in the candidate at the second admission."
+}
