@@ -1,0 +1,221 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "COMPLEXITY-SCOPE-1-INPUT-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+      "sha256": "sha256:01cefeaec408d9ee6c4146da15e27791b37088e8190d9c1c6338dbb6fb3ccb99"
+    },
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:d33e566fd2b3fcf0fe4484ddf370a904b8f6b82f07eb2e08bf0d5f9f5ea4c9c9"
+    },
+    {
+      "path": "docs/requirements/rg-req-003-orientation-surfaces.md",
+      "sha256": "sha256:bf4630448569e9de5b84fa874b44f0476a4656dcbd0e3627e8f2809d33b6bbcb"
+    },
+    {
+      "path": "docs/requirements/rg-req-008-documentation-inventory.md",
+      "sha256": "sha256:2b290fdde2d22f4d91981f27b0535c2e75abb60df46818e674964ce4e6759b71"
+    },
+    {
+      "path": "docs/requirements/rg-req-009-quality-signals-trust-reliability.md",
+      "sha256": "sha256:8ba3a63846c2fa1ef760de39197bd308c538eb2225a864a1922871441234ef39"
+    },
+    {
+      "path": "docs/requirements/rg-req-010-semantic-seeding.md",
+      "sha256": "sha256:8f19115e822e85bf44dd57922a946933186b4c571abe28001a7ae0aaefccc64e"
+    },
+    {
+      "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+      "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb"
+    },
+    {
+      "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+      "sha256": "sha256:60598f5c99e45318b24b424c6e5619e4c5d1c21e95530db239dcf6036122eefe"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35"
+    },
+    {
+      "role": "source",
+      "path": "docs/architecture/artifact-contract-model.md",
+      "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/symbol-identity-1.md",
+      "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cpp-declarators-1.md",
+      "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/modules-method-1.md",
+      "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/docs-list-2.md",
+      "sha256": "sha256:edc2185eee6bd8a9206b777b03c50d4988368e83b59ef5b38d3d6b0390b90c1f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/audit5-minors-1.md",
+      "sha256": "sha256:cf4db06b57ba95e2730f0342b4b896cbd1d7758274d8daba5f0d201a85edb496"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/self-pollution-1.md",
+      "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/trust-model-rebase-1.md",
+      "sha256": "sha256:de1abefc05f2a6a0c9b59b2be83cb86956375def8217f080568055b8521b9305"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/dead-causes-1.md",
+      "sha256": "sha256:653fa5e9bc26f3c6e8b4d50e40cf1fe88c9dee05c1532fea86af964aac033d1f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/seed-chunk-3.md",
+      "sha256": "sha256:0d377f7d7985996ce6d694ce8a70ddc94acdea4a2c92e8099e0ae24a36360685"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/state-root-separation-1.md",
+      "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408"
+    },
+    {
+      "role": "source",
+      "path": "docs/contracts/exit-codes.md",
+      "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/economy-2.md",
+      "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cursor-roundtrip-1.md",
+      "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/anchors-everywhere-1.md",
+      "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60"
+    },
+    {
+      "role": "source",
+      "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+      "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CS-001.md",
+      "sha256": "sha256:5455ebedd16c2110335e6a9c0e322d7567e11981bb2735a8c196fdf522ba6709"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/COMPLEXITY-SCOPE-1/oracle-corrections.md",
+      "sha256": "sha256:3b163da3565c9b3b4da6491cfff88e787d002b92ddc7c02610f919e0a0c8d503"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/complexity-scope-1.md",
+      "sha256": "sha256:63992946a27f6c41e93eb5467a26a481045fe2817b2b6deb013fb0cb10b60f24"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-001",
+    "RG-REQ-002",
+    "RG-REQ-003",
+    "RG-REQ-008",
+    "RG-REQ-009",
+    "RG-REQ-010",
+    "RG-REQ-011",
+    "RG-REQ-012",
+    "RG-REQ-009-L01",
+    "RG-REQ-001-L08",
+    "RG-REQ-003-L02",
+    "RG-REQ-002-L02",
+    "RG-REQ-003-L07",
+    "RG-REQ-012-L04",
+    "RG-REQ-010-L06",
+    "RG-REQ-010-L01",
+    "RG-REQ-001-L07",
+    "RG-REQ-001-L09",
+    "RG-REQ-012-L01",
+    "RG-REQ-011-L06",
+    "RG-REQ-002-L08",
+    "RG-REQ-008-L04",
+    "RG-REQ-012-L06"
+  ],
+  "requiredDecisionIds": []
+}

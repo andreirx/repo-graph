@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "COMPLEXITY-SCOPE-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/COMPLEXITY-SCOPE-1-INPUT-2.json",
+    "sha256": "sha256:dc52ed420e33f814e828f4b005188955146d5e556040cda912cad91caa52a7ce"
+  },
+  "review": {
+    "path": "docs/assurance/COMPLEXITY-SCOPE-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:954bbc54450ebb3b01da56d52164b5953e57df888ba560af475d10b73bbace78"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-20T18:58:55.417Z",
+  "rationale": "Q7 INPUT-2: oracle corrections OC-1/OC-2 (CS-C12/CS-C13 negative greps made predicate-based) under D-CS-001 (raised by the INPUT-1 implementation review; operator resolution option 1, the ratified L's own rule; human may override); allocation unchanged; codex gpt-5.6-terra document review accepted 23/23 at cycle 1 with zero findings; validator ALLOCATION VALID."
+}
