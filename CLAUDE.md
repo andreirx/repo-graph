@@ -111,15 +111,53 @@ This builds release binaries, restarts the daemon, and validates the installatio
 When a slice's code work is done, run the three phases defined in
 `docs/testing/end-of-slice-procedure.md`: **Test → Install/deploy → Cleanup**.
 
-- **Test** (always, before handoff): `cargo build/fmt/clippy/test` in `rust/`, the
+- **Test** (always, before the slice is committed): `cargo build/fmt/clippy/test` in `rust/`, the
   smoke scripts (`docs/testing/rmap-test-protocol.md`), AND the isolated live `rmap`
   dogfood `./scripts/dogfood-isolated.sh` — runs `orient`/`explain`/`check` on a
   fixture in a throwaway state root, never touching the operator's daemon/registry.
+  Under Agent Manager's relay this phase is the OPERATOR's gate, run on the accepted candidate
+  before the commit; the relay builder runs the packet's checks (see "Relay Builder and Reviewer
+  Rules").
 - **Install / deploy** (`./scripts/dev-install-local.sh`): ONLY after reviewer approval.
 - **Cleanup** (`./scripts/clean-build.sh --all`): at slice end (debug artifacts measured ~14 GB).
 
 To run `rmap` when no repo is indexed (the `error: repo not indexed` case), use the
 isolated dogfood — never index into the operator's real registry to test.
+
+## Relay Builder and Reviewer Rules
+
+These bind any agent that builds or reviews this repository through Agent Manager's relay.
+
+- **Isolation.** Every `rmap`/`rmapd` invocation, including a "what does this print" probe, sets
+  `RMAP_STATE_ROOT` and `RMAP_SOCKET_PATH` to the isolated state the packet names. A bare
+  invocation reaches the operator's real daemon and mutates the operator's registry. If you are
+  unsure whether a command is isolated, do not run it. A Codex builder cannot bind a Unix socket
+  in its sandbox: use `RMAP_TRANSPORT=stdio`, or report the socket proof as operator-run.
+- **A retained state root is not read-only under a serving daemon.** Querying it starts a daemon
+  whose enrichment and WAL side-writes change the stores. A "before" baseline is a COPY of the
+  root (`cp -R`, served with `RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off`) or a before-binary
+  built once from `git worktree add /private/tmp/<SLICE_ID>-before HEAD` and run on the same small
+  isolated index as the candidate. Never stash or reset the working tree to get a baseline.
+- **Smallest corpus.** Live proofs use the smallest corpus that demonstrates the contract
+  (leveldb, a fixture, a copied retained root). Never index a large repository twice for a
+  before/after. Record gates before running proofs.
+- **Gates in a relay run.** The builder runs the packet's checks: `cargo fmt --check -p <touched
+  crates>`, clippy and tests per touched crate, and the whole `--lib` unit suite of every daemon
+  crate the change touches. The builder does NOT run `cargo test --workspace` or the dogfood; those
+  are the operator's gate after acceptance, and their absence from builder evidence is not a
+  finding.
+- **Cleanup.** Name every isolated root, worktree and proof directory `/private/tmp/<SLICE_ID>-*`
+  and delete the ones you created before finishing (an isolated index is 2–5 GB). Never delete a
+  root you did not create. Retained audit roots live under `~/repo-graph-retained/`.
+- **Code-under-analysis examples.** This product's output is what it answers about OTHER
+  repositories' source. For every problem a slice solves, the builder's report quotes the real
+  source line from the analyzed repository the packet names (repo-relative `file:line` and the
+  statement) that was answered wrongly or not at all before, and what the product answers about it
+  now (the resolved target, the rendered row, the counted category), plus one example per residual
+  class. Quote from the checkout and the candidate's store or captures; never invent or paraphrase
+  a line. Counts alone are not evidence of a product outcome. The reviewer verifies the packet's
+  named witness and one residual example against the checkout and treats a report without such
+  examples as incomplete evidence.
 
 ## End-of-Track Gate (major branch/track)
 

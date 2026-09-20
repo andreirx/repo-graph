@@ -230,3 +230,7 @@ LIVE (EXECUTED): scripts/compare-module-cycles.sh PASS (exit 0) — dirname-aggr
 - `rust/crates/repo-graph-livegraph/src/lib.rs` (`file_import_cycles` + the overlay — the FILE graph to aggregate)
 - `docs/slices/sqlite-raw-decommission-readiness-3.md` (the audit that gates `rmap cycles` on this)
 - `rust/crates/repo-graph-scip-ingest/tests/fixtures/xpart-monorepo/` + `scripts/validate-xpart-fixture.sh` (the comparison fixture/harness)
+
+## Correction note (2026-09-20, catalog correction CC-2, D-ECH-002)
+
+D4's "package / path-alias / dynamic / re-export NOT captured" is partly stale: the in-memory cross-partition overlay (`repo-graph-livegraph/src/lib.rs::rebuild_xpart_overlay`) now resolves tsconfig `paths` aliases (`AstImportTsconfigPathResolved`) and LITERAL dynamic imports (`AstDynamicImportResolved`), and `file_import_edges` pushes every overlay edge into the SCC universe. Still uncaptured: package/workspace-external specifiers, non-literal `import(expr)`, re-exports, and targets not in the resident inventory. The lib.rs doc comments (:2249-2252, :2283-2287) carry the same stale wording; TS-ALIAS-RESOLUTION-1 corrects them when it touches that scope.

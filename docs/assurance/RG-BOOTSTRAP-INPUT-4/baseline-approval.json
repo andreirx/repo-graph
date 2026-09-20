@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-4",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-4.json",
+    "sha256": "sha256:3bbdc3bb83a5ccdbb1ab16bc6db6eb89f5a93c371812ee3d03b1a1dd8d04c5df"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-4/requirements-review.json",
+    "sha256": "sha256:442094fb2a341ae9066d2c8d35f76bdce7824b228dfb68e493ead9a185573640"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-20T16:22:20.000Z",
+  "rationale": "Operator approves the fourth bootstrap baseline RG-BOOTSTRAP-INPUT-4: INPUT-3 with one changed pin — repo-graph CLAUDE.md gains the 'Relay Builder and Reviewer Rules' section (Change 1 of the 2026-09-20 staging note written by the agent-manager prompt-curation session at the human's direction: isolation, retained roots are copies, smallest corpus, builder gates vs the operator's gate, cleanup, code-under-analysis examples) and the End-of-Slice 'Test' bullet names the operator's gate under the relay (catalog correction CC-5). Two unpinned slice documents receive dated append-only correction notes (CC-2, CC-3; D-ECH-002). CC-1 and CC-4 (human decisions) are NOT applied. Standalone codex gpt-5.6-terra pass: ACCEPT, no correction required (fidelity, consistency, scope, maintainer clarity all PASS). Authored as INPUT-3's approval was (v1 record; the relay's approval verb serves v2 manifests only)."
+}

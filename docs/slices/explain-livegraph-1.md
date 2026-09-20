@@ -1198,3 +1198,7 @@ EVIDENCE LOG:
   correction (explain DOES inject the trust overlay; orient's "explain produces no overlay" is wrong) is
   recorded (D-EXPLAIN-TRUST-BRIEFING / RISK-E-G), strengthening — not re-opening — the ratified O2.
 ```
+
+## Correction note (2026-09-20, catalog correction CC-3, D-ECH-002)
+
+"CALLEES/IMPORTS/cycles sections become LG-first leaves" is superseded for the explain FOCUS cycles value by D-ECH-002 / EXPLAIN-CYCLES-HONEST-1 A-1: the LiveGraph route cannot reproduce the verified walk, so the focus cycle reads delegate to SQLite and the leaf is labelled `sqlite` + `LiveGraphRenderUnsupported`; the served-route test was renamed to `explain_cycles_keeps_sqlite_primary_labelled_render_unsupported_when_livegraph_green`. The repo-level M-2 cycle serve is unchanged.

@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-4-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-4.json",
+    "sha256": "sha256:3bbdc3bb83a5ccdbb1ab16bc6db6eb89f5a93c371812ee3d03b1a1dd8d04c5df"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-4"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-4-1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-20T16:22:20.000Z",
+  "report": "PASS 1 (ACCEPT) — standalone read-only codex exec (prompts/standalone-review.md discipline; evidence inlined: the staging note repo-graph/.agent-manager/pending-governance-claude-md-relay-rules.md, the git diff of CLAUDE.md (Change 1 'Relay Builder and Reviewer Rules' inserted before 'End-of-Track Gate'; Change 2 = CC-5 'Test' bullet), the git diff of the two dated correction notes (CC-2 module-aggregation-1.md, CC-3 explain-livegraph-1.md; both unpinned), the INPUT-3→INPUT-4 normalized manifest diff (only baselineId and CLAUDE.md's digest), the catalog-corrections queue):\n## ACCEPT\n\nNo correction required on the supplied evidence.\n\n- **Fidelity — PASS.** The `Test` bullet and the complete **Relay Builder and Reviewer Rules** section match Change 1 and Change 2 byte-for-byte, including wrapping and wording. The section is placed after End-of-Slice Procedure and before End-of-Track Gate as directed.\n- **Consistency — PASS.** The new rules preserve isolation, distinguish builder evidence from the operator gate, require source-backed product examples, and do not present inferred information as extracted fact. No internal implementation label is prescribed for a product surface by the new CLAUDE text.\n- **Scope — PASS, based on the supplied normalized manifest diff.** INPUT-4 changes only `baselineId` and the `CLAUDE.md` SHA-256 pin. CC-2 and CC-3 are dated append-only correction notes citing `D-ECH-002`; their original historical statements remain intact. No diff applies CC-1 or CC-4.\n- **Maintainer clarity — PASS.** The added text explicitly identifies the operational hazards that matter: accidental real-daemon access, state-root mutation during queries, unsafe baseline creation, inappropriate relay test expectations, and evidence that proves only counts rather than product behavior.\n\n**Evidence basis:** pure comparison of the inlined staging note and diffs. The claim that all other manifest pins are unchanged is accepted only to the extent represented by the supplied normalized manifest diff; no independent manifest recomputation was performed."
+}
