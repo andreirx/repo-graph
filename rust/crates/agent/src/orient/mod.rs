@@ -91,6 +91,9 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
         &snapshot,
         focus,
         budget,
+        // COMPLEXITY-SCOPE-1: the 5-argument `orient()` convenience wrapper is the
+        // production-scope entry point — it never sets `--include-all`.
+        false,
         now,
         // ORIENT-FACT-COHERENCE-1: the non-cancellable CLI/test boundary has no daemon coordinator, so
         // it never observes an in-flight pass — `None` (derive from storage) preserves byte-identical
@@ -118,6 +121,10 @@ pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
     snapshot: &AgentSnapshot,
     focus: Option<&str>,
     budget: Budget,
+    // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): `--include-all` — forwarded to the repo-level
+    // pipeline only (complexity centers are a repository section). A focused orient ignores
+    // it (`orient_focused` has no complexity section).
+    include_all: bool,
     now: &str,
     // ORIENT-FACT-COHERENCE-1 (operator ruling review-3 = Option 2): the daemon-injected enrichment-
     // lifecycle override, an enum-typed fact the pure core cannot derive from storage (the `IndexDrift`
@@ -136,6 +143,7 @@ pub fn orient_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
             repo_uid,
             snapshot,
             budget,
+            include_all,
             now,
             enrich_state_override,
             cancel,

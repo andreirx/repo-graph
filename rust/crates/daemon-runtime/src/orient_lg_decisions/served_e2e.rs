@@ -18,9 +18,9 @@ use super::{
 use crate::livegraph_feed::{import_cert_fingerprint, CycleNoLossCert};
 use crate::state::RepoState;
 use repo_graph_agent::{
-    CalleesSummaryEvidence, CallersSummaryEvidence, Confidence, Focus, HighComplexityEvidence,
-    ImportCyclesEvidence, OrientResult, Signal, SignalCode, SnapshotInfoEvidence, ORIENT_COMMAND,
-    ORIENT_SCHEMA,
+    CalleesSummaryEvidence, CallersSummaryEvidence, ComplexityScope, Confidence, Focus,
+    HighComplexityEvidence, ImportCyclesEvidence, OrientResult, Signal, SignalCode,
+    SnapshotInfoEvidence, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use repo_graph_coherence::Source;
 use repo_graph_ir::EdgeType;
@@ -288,6 +288,7 @@ fn high_complexity_signal() -> Signal {
         high_complexity_count: 0,
         threshold: repo_graph_agent::aggregators::complexity::DEFAULT_COMPLEXITY_THRESHOLD,
         top_complex: Vec::new(),
+        scope: ComplexityScope::Production { excluded_count: 0 },
     })
 }
 

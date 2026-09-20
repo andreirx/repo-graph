@@ -23,33 +23,21 @@ pub fn resolve_root_path(db_path: &Path, relative_root_path: &str) -> PathBuf {
     resolved.canonicalize().unwrap_or(resolved)
 }
 
-/// Vendored directory segments (exact match only).
-///
-/// DOCS-LIST-2 (2026-09-01): added `site-packages` / `dist-packages` — the pip/virtualenv install
-/// target, the Python structural equivalent of the `node_modules` already listed here. The list was
-/// authored TS-first and under-covered Python; FRAKTAG's `fraktag-env/lib/pythonX.Y/site-packages/**`
-/// docs proved the gap (they are vendored dependency content, not the reader's code). Shared with
-/// `hotspots --exclude-vendored` (strictly more correct there too: a site-packages hotspot IS
-/// vendored). One-line revert if the reviewer wants the pre-Python list.
-pub const VENDORED_SEGMENTS: &[&str] = &[
-    "vendor",
-    "vendors",
-    "third_party",
-    "third-party",
-    "external",
-    "deps",
-    "node_modules",
-    "site-packages",
-    "dist-packages",
-];
-
-/// Check if path contains a vendored directory segment.
-pub fn is_vendored_path(path: &str) -> bool {
-    path.split('/').any(|segment| {
-        let lower = segment.to_lowercase();
-        VENDORED_SEGMENTS.contains(&lower.as_str())
-    })
-}
+// COMPLEXITY-SCOPE-1 (§2.1.2): the vendored-path predicate now has ONE definition,
+// in the inner `classification` crate, so the agent complexity aggregator can call
+// the SAME function the daemon consumers do (RG-REQ-002-L02). This module forwards
+// BOTH names — the predicate (`is_vendored_path`) and its segment list
+// (`VENDORED_SEGMENTS`) — from that one definition so the allocated forwarding surface
+// is complete; `classification::vendored_path` stays the single home.
+//
+// `#[allow(unused_imports)]`: `support` is a `pub(crate)` module (see quality/mod.rs),
+// so this `pub use` is capped at crate visibility rather than being a crate-public
+// re-export. No in-crate code references `VENDORED_SEGMENTS` today (every mention is a
+// comment), so without this allow the `-D warnings` gate rejects the re-export as
+// `unused_imports`. The allow keeps the intentional forwarding surface without adding a
+// contrived in-crate consumer; the segment list has exactly one definition, upstream.
+#[allow(unused_imports)]
+pub use repo_graph_classification::{is_vendored_path, VENDORED_SEGMENTS};
 
 /// CHURN-SHALLOW-1 §2: diagnose the repo's history shape and serialize it as the
 /// additive `history` block shared by the churn/hotspots/risk responses.

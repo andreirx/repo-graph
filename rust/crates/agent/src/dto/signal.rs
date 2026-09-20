@@ -715,12 +715,42 @@ pub struct ModuleSummaryEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HighComplexityEvidence {
-    /// Count of symbols exceeding the complexity threshold.
+    /// Count of symbols exceeding the complexity threshold, AFTER scope filtering
+    /// (COMPLEXITY-SCOPE-1 / RG-REQ-009-L01). In `Production` scope this is the count
+    /// of ranked (non-generated/vendored/test) symbols; in `All` scope it is every
+    /// above-threshold symbol. The `scope` field states which.
     pub high_complexity_count: u64,
     /// Threshold used (e.g., 20).
     pub threshold: u64,
-    /// Top N most complex symbols.
+    /// Top N most complex symbols (from the scoped set).
     pub top_complex: Vec<ComplexSymbolEvidence>,
+    /// COMPLEXITY-SCOPE-1 (RG-REQ-009-L01, RG-REQ-012-L06): which symbols this ranking
+    /// covers and how many were set aside. Additive field — a consumer reading pre-slice
+    /// evidence (no `scope`) renders exactly as before.
+    pub scope: ComplexityScope,
+}
+
+/// The scope of a `HIGH_COMPLEXITY` ranking (COMPLEXITY-SCOPE-1 / RG-REQ-009-L01).
+///
+/// Two mutually exclusive scopes, one carrying a count that is meaningless in the
+/// other: in `Production` the ranking excludes generated/vendored/test symbols and
+/// reports how many it set aside; in `All` (the `--include-all` request) every
+/// above-threshold symbol is ranked, so no exclusion count applies. Concrete users
+/// are the complexity aggregator, the coherence fixture and the served-e2e fixture.
+/// Axis = the reader's chosen scope (fixed variants, growing consumers → a sum type
+/// with an exhaustive match), rejected in favour of a `bool include_all` +
+/// `excluded_count` whose validity would depend on the bool.
+///
+/// Serializes with an internal `kind` tag: `{"kind":"production","excluded_count":N}`
+/// or `{"kind":"all"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ComplexityScope {
+    /// Ranking covers production code only; `excluded_count` generated/vendored/test
+    /// symbols above the threshold were set aside.
+    Production { excluded_count: u64 },
+    /// Ranking covers every above-threshold symbol (`--include-all`).
+    All,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

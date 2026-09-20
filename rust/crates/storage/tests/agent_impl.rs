@@ -25,8 +25,8 @@
 
 use repo_graph_agent::AgentStorageRead;
 use repo_graph_storage::types::{
-    CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile,
-    UpdateSnapshotStatusInput,
+    CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, MeasurementInput, Repo, SourceLocation,
+    TrackedFile, UpdateSnapshotStatusInput,
 };
 use repo_graph_storage::StorageConnection;
 
@@ -1847,4 +1847,139 @@ fn find_file_importers_is_empty_for_a_file_nobody_imports() {
         importers.is_empty(),
         "a file nobody imports has no importers"
     );
+}
+
+// ── COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): the complexity read carries file flags ──
+
+#[test]
+fn query_high_complexity_symbols_carries_the_file_flags_and_keeps_every_row() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+    // Three files: production, test, generated.
+    storage
+        .upsert_files(&[
+            TrackedFile {
+                file_uid: "f_a".into(),
+                repo_uid: "r1".into(),
+                path: "src/a.rs".into(),
+                language: Some("rust".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f_t".into(),
+                repo_uid: "r1".into(),
+                path: "tests/t.rs".into(),
+                language: Some("rust".into()),
+                is_test: true,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f_g".into(),
+                repo_uid: "r1".into(),
+                path: "gen/g.rs".into(),
+                language: Some("rust".into()),
+                is_test: false,
+                is_generated: true,
+                is_excluded: false,
+            },
+        ])
+        .unwrap();
+
+    // One SYMBOL node per file, linked via file_uid so the files LEFT JOIN resolves.
+    let node = |uid: &str, key: &str, name: &str, file_uid: &str| GraphNode {
+        node_uid: uid.into(),
+        snapshot_uid: snapshot_uid.clone(),
+        repo_uid: "r1".into(),
+        stable_key: key.into(),
+        kind: "SYMBOL".into(),
+        subtype: Some("FUNCTION".into()),
+        name: name.into(),
+        qualified_name: Some(name.into()),
+        file_uid: Some(file_uid.into()),
+        parent_node_uid: None,
+        location: Some(SourceLocation {
+            line_start: 10,
+            col_start: 0,
+            line_end: 20,
+            col_end: 0,
+        }),
+        signature: None,
+        visibility: Some("pub".into()),
+        doc_comment: None,
+        metadata_json: None,
+    };
+    storage
+        .insert_nodes(&[
+            node("n_a", "r1:src/a.rs:fa:SYMBOL", "fa", "f_a"),
+            node("n_t", "r1:tests/t.rs:ft:SYMBOL", "ft", "f_t"),
+            node("n_g", "r1:gen/g.rs:fg:SYMBOL", "fg", "f_g"),
+        ])
+        .unwrap();
+
+    // Four measurements at cx 30: one per node, plus one whose target has NO node.
+    let meas = |uid: &str, target: &str| MeasurementInput {
+        measurement_uid: uid.into(),
+        snapshot_uid: snapshot_uid.clone(),
+        repo_uid: "r1".into(),
+        target_stable_key: target.into(),
+        kind: "cyclomatic_complexity".into(),
+        value_json: "{\"value\": 30}".into(),
+        source: "test".into(),
+        created_at: "2026-04-15T00:02:00Z".into(),
+    };
+    storage
+        .insert_measurements(&[
+            meas("m_a", "r1:src/a.rs:fa:SYMBOL"),
+            meas("m_t", "r1:tests/t.rs:ft:SYMBOL"),
+            meas("m_g", "r1:gen/g.rs:fg:SYMBOL"),
+            meas("m_nf", "r1:nowhere:missing:SYMBOL"), // fileless (no node)
+        ])
+        .unwrap();
+
+    // The read returns ALL FOUR rows (no filter in SQL — the certificate's set is unchanged).
+    let rows = <StorageConnection as AgentStorageRead>::query_high_complexity_symbols(
+        &storage,
+        &snapshot_uid,
+        20,
+        i64::MAX as usize,
+    )
+    .unwrap();
+    assert_eq!(
+        rows.len(),
+        4,
+        "the read keeps every above-threshold row: {rows:?}"
+    );
+
+    let by_key = |key: &str| {
+        rows.iter()
+            .find(|m| m.stable_key == key)
+            .unwrap_or_else(|| panic!("row {key} missing: {rows:?}"))
+    };
+    // Flags per row.
+    let a = by_key("r1:src/a.rs:fa:SYMBOL");
+    assert!(!a.is_test && !a.is_generated, "production row: 0/0");
+    let t = by_key("r1:tests/t.rs:ft:SYMBOL");
+    assert!(t.is_test && !t.is_generated, "test row: is_test");
+    let g = by_key("r1:gen/g.rs:fg:SYMBOL");
+    assert!(!g.is_test && g.is_generated, "generated row: is_generated");
+    // The fileless row reads false/false (no persisted fact) and has no file path.
+    let nf = by_key("r1:nowhere:missing:SYMBOL");
+    assert!(
+        !nf.is_test && !nf.is_generated && nf.file_path.is_none(),
+        "fileless row: 0/0, no file path: {nf:?}",
+    );
+
+    // count_high_complexity_symbols still counts all four (unfiltered).
+    let count = <StorageConnection as AgentStorageRead>::count_high_complexity_symbols(
+        &storage,
+        &snapshot_uid,
+        20,
+    )
+    .unwrap();
+    assert_eq!(count, 4, "count is the unfiltered above-threshold total");
 }

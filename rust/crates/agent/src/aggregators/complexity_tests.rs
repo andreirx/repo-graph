@@ -5,6 +5,7 @@
 //! module is dominated by a ~290-line `FakeStorage` trait-stub. Pure relocation.
 
 use super::*;
+use crate::dto::signal::{ComplexityScope, SignalEvidence};
 use crate::storage_port::AgentComplexityMeasurement;
 
 struct FakeStorage {
@@ -20,6 +21,46 @@ impl FakeStorage {
 
     fn with_measurements(measurements: Vec<AgentComplexityMeasurement>) -> Self {
         Self { measurements }
+    }
+}
+
+/// A production-code measurement (not test / not generated) at `path`.
+fn prod(key: &str, path: &str, complexity: u64) -> AgentComplexityMeasurement {
+    AgentComplexityMeasurement {
+        stable_key: key.to_string(),
+        symbol_name: format!("sym_{key}"),
+        file_path: Some(path.to_string()),
+        line: None,
+        complexity,
+        is_test: false,
+        is_generated: false,
+    }
+}
+
+/// A measurement at `path` with the two file facts set explicitly.
+fn meas(
+    key: &str,
+    path: Option<&str>,
+    complexity: u64,
+    is_test: bool,
+    is_generated: bool,
+) -> AgentComplexityMeasurement {
+    AgentComplexityMeasurement {
+        stable_key: key.to_string(),
+        symbol_name: format!("sym_{key}"),
+        file_path: path.map(|p| p.to_string()),
+        line: None,
+        complexity,
+        is_test,
+        is_generated,
+    }
+}
+
+/// The HIGH_COMPLEXITY evidence from a single-signal aggregator output.
+fn complexity_evidence(out: &AggregatorOutput) -> &crate::dto::signal::HighComplexityEvidence {
+    match out.signals[0].evidence() {
+        SignalEvidence::HighComplexity(ev) => ev,
+        other => panic!("expected HighComplexity, got {other:?}"),
     }
 }
 
@@ -332,6 +373,8 @@ fn empty_when_below_threshold() {
         file_path: Some("foo.rs".into()),
         line: None,
         complexity: 10, // Below default threshold of 20
+        is_test: false,
+        is_generated: false,
     }]);
     let result = aggregate(&storage, "snap1", Budget::Small).unwrap();
     assert!(result.signals.is_empty());
@@ -345,6 +388,8 @@ fn emits_signal_when_above_threshold() {
         file_path: Some("src/complex.rs".into()),
         line: None,
         complexity: 25,
+        is_test: false,
+        is_generated: false,
     }]);
     let result = aggregate(&storage, "snap1", Budget::Small).unwrap();
     assert_eq!(result.signals.len(), 1);
@@ -359,13 +404,15 @@ fn custom_threshold_works() {
         file_path: Some("mod.rs".into()),
         line: None,
         complexity: 15,
+        is_test: false,
+        is_generated: false,
     }]);
     // Default threshold (20) - should not emit
     let result = aggregate(&storage, "snap1", Budget::Small).unwrap();
     assert!(result.signals.is_empty());
 
     // Lower threshold (10) - should emit
-    let result = aggregate_with_threshold(&storage, "snap1", 10, Budget::Small).unwrap();
+    let result = aggregate_with_threshold(&storage, "snap1", 10, Budget::Small, false).unwrap();
     assert_eq!(result.signals.len(), 1);
 }
 
@@ -378,6 +425,8 @@ fn evidence_contains_top_complex_symbols() {
             file_path: Some("a.rs".into()),
             line: None,
             complexity: 50,
+            is_test: false,
+            is_generated: false,
         },
         AgentComplexityMeasurement {
             stable_key: "k2".into(),
@@ -385,6 +434,8 @@ fn evidence_contains_top_complex_symbols() {
             file_path: Some("b.rs".into()),
             line: None,
             complexity: 30,
+            is_test: false,
+            is_generated: false,
         },
     ]);
     let result = aggregate(&storage, "snap1", Budget::Small).unwrap();
@@ -407,6 +458,8 @@ fn budget_trades_complexity_evidence_depth_small_subset_of_full() {
             file_path: Some(format!("src/f{i}.rs")),
             line: None,
             complexity: 100 - i as u64, // descending → deterministic order
+            is_test: false,
+            is_generated: false,
         })
         .collect();
     let storage = FakeStorage::with_measurements(measurements);
@@ -432,4 +485,137 @@ fn budget_trades_complexity_evidence_depth_small_subset_of_full() {
         small["high_complexity_count"], 8,
         "true total honest at small"
     );
+}
+
+// ── COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): production scope + --include-all ──────
+
+#[test]
+fn generated_vendored_and_test_rows_are_excluded_and_counted() {
+    let storage = FakeStorage::with_measurements(vec![
+        prod("p1", "src/a.rs", 50),
+        prod("p2", "src/b.rs", 40),
+        prod("p3", "src/c.rs", 30),
+        meas("t1", Some("tests/x.rs"), 60, true, false), // is_test
+        meas("g1", Some("gen/p.c"), 55, false, true),    // is_generated
+        meas(
+            "v1",
+            Some("dependencies/pcre2/src/pcre2_match.c"),
+            70,
+            false,
+            false,
+        ), // vendored
+    ]);
+    // Budget::Full so no budget truncation hides an unexpected row.
+    let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
+    assert_eq!(out.signals.len(), 1);
+    let ev = complexity_evidence(&out);
+    assert_eq!(
+        ev.high_complexity_count, 3,
+        "count is the production subset"
+    );
+    assert_eq!(ev.scope, ComplexityScope::Production { excluded_count: 3 });
+    let syms: Vec<&str> = ev.top_complex.iter().map(|c| c.symbol.as_str()).collect();
+    assert_eq!(syms, vec!["sym_p1", "sym_p2", "sym_p3"]);
+    // The vendored row (cx 70) was the highest; excluded, it does not lead the ranking.
+    for s in &ev.top_complex {
+        assert!(!s.symbol.starts_with("sym_t"), "no test symbol");
+        assert!(!s.symbol.starts_with("sym_g"), "no generated symbol");
+        assert!(!s.symbol.starts_with("sym_v"), "no vendored symbol");
+    }
+}
+
+#[test]
+fn include_all_keeps_every_row_and_reports_scope_all() {
+    let storage = FakeStorage::with_measurements(vec![
+        prod("p1", "src/a.rs", 50),
+        meas("t1", Some("tests/x.rs"), 60, true, false),
+        meas("g1", Some("gen/p.c"), 55, false, true),
+        meas(
+            "v1",
+            Some("dependencies/pcre2/src/pcre2_match.c"),
+            70,
+            false,
+            false,
+        ),
+    ]);
+    let out = aggregate_with_threshold(&storage, "snap1", 20, Budget::Full, true).unwrap();
+    let ev = complexity_evidence(&out);
+    assert_eq!(
+        ev.high_complexity_count, 4,
+        "every above-threshold row kept"
+    );
+    assert_eq!(ev.scope, ComplexityScope::All);
+    assert_eq!(ev.top_complex.len(), 4);
+}
+
+#[test]
+fn all_rows_excluded_still_emits_the_signal_with_the_excluded_count() {
+    let storage = FakeStorage::with_measurements(vec![
+        meas("t1", Some("tests/a.rs"), 30, true, false),
+        meas("t2", Some("tests/b.rs"), 31, true, false),
+        meas("g1", Some("gen/c.c"), 32, false, true),
+        meas("v1", Some("vendor/d.rs"), 33, false, false),
+        meas("v2", Some("node_modules/e.js"), 34, false, false),
+        meas("v3", Some("third_party/f.c"), 35, false, false),
+    ]);
+    let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
+    assert_eq!(
+        out.signals.len(),
+        1,
+        "the signal is emitted even when scoping excludes every row"
+    );
+    let ev = complexity_evidence(&out);
+    assert_eq!(ev.high_complexity_count, 0);
+    assert!(ev.top_complex.is_empty());
+    assert_eq!(ev.scope, ComplexityScope::Production { excluded_count: 6 });
+}
+
+#[test]
+fn high_complexity_count_is_the_filtered_total_not_the_storage_count() {
+    // The fake's `count_high_complexity_symbols` returns the UNFILTERED count (6); the
+    // aggregator must report the SCOPED count (3), proving it counts the retained rows and
+    // never the storage count.
+    let storage = FakeStorage::with_measurements(vec![
+        prod("p1", "src/a.rs", 50),
+        prod("p2", "src/b.rs", 40),
+        prod("p3", "src/c.rs", 30),
+        meas("t1", Some("tests/x.rs"), 60, true, false),
+        meas("g1", Some("gen/p.c"), 55, false, true),
+        meas("v1", Some("vendor/y.rs"), 70, false, false),
+    ]);
+    assert_eq!(
+        storage.count_high_complexity_symbols("snap1", 20).unwrap(),
+        6,
+        "the fake's storage count is the unfiltered total"
+    );
+    let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
+    let ev = complexity_evidence(&out);
+    assert_eq!(ev.high_complexity_count, 3);
+}
+
+#[test]
+fn a_row_without_a_file_stays_ranked() {
+    // No owning file → no persisted fact → the row is KEPT (never a fabricated exclusion).
+    let storage = FakeStorage::with_measurements(vec![
+        meas("nf", None, 40, false, false),
+        meas("t1", Some("tests/x.rs"), 50, true, false),
+    ]);
+    let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
+    let ev = complexity_evidence(&out);
+    assert_eq!(ev.high_complexity_count, 1);
+    assert_eq!(ev.scope, ComplexityScope::Production { excluded_count: 1 });
+    assert_eq!(ev.top_complex.len(), 1);
+    assert_eq!(ev.top_complex[0].symbol, "sym_nf");
+    assert!(ev.top_complex[0].file.is_none());
+}
+
+#[test]
+fn no_rows_above_threshold_emits_no_signal() {
+    // Every measurement is below threshold — the unfiltered read is empty → no signal
+    // (the former `count == 0` early return, now keyed on the empty read).
+    let storage =
+        FakeStorage::with_measurements(vec![prod("p1", "src/a.rs", 5), prod("p2", "src/b.rs", 10)]);
+    let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
+    assert!(out.signals.is_empty());
+    assert!(out.limits.is_empty());
 }

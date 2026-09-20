@@ -119,6 +119,10 @@ fn seed_depth_repo() -> FakeAgentStorage {
             line: None,
             // 50 down to 21 — all >= the default threshold (20).
             complexity: (50 - i) as u64,
+            // Production code: none excluded, so `high_complexity_count` stays 30
+            // at every budget (RG-REQ-009-L01 does not touch the invariance contract).
+            is_test: false,
+            is_generated: false,
         })
         .collect();
     fake.complexity_measurements

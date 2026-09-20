@@ -256,6 +256,46 @@ fn orient_full_with_budget_mutually_exclusive() {
     );
 }
 
+// ── COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): --include-all ────────────────────────
+
+#[test]
+fn orient_include_all_is_an_accepted_flag() {
+    // --include-all is a value-less flag; parse must SUCCEED → daemon-unavailable (exit 2),
+    // not usage error (exit 1). Proves the flag the exclusion line names is accepted and
+    // threaded to the request.
+    let output = run_cmd_isolated(&["orient", "--include-all"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--include-all must parse (exit 2 daemon error), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unknown flag"),
+        "--include-all is a known flag: {stderr}"
+    );
+}
+
+#[test]
+fn orient_include_all_with_focus_usage_error() {
+    // --include-all governs the repo-level complexity section, which a focused orient does
+    // not render → combining them is a usage error (exit 1) BEFORE any daemon connection.
+    let output = run_cmd_isolated(&["orient", "--include-all", "--focus", "x"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--include-all") && stderr.contains("--focus"),
+        "stderr must name both flags: {stderr}"
+    );
+}
+
 #[test]
 fn orient_budget_then_full_mutually_exclusive_order_independent() {
     // Order independence: --budget first, then --full → still exit 1.

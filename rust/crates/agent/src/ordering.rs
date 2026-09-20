@@ -301,6 +301,8 @@ mod tests {
             file_path: Some(format!("src/{key}.rs")),
             line: None,
             complexity,
+            is_test: false,
+            is_generated: false,
         }
     }
 

@@ -492,3 +492,164 @@ fn complexity_malformed_evidence_renders_named_unavailable_not_cx_zero() {
         "a well-formed row still renders its real cx:\n{out}"
     );
 }
+
+// ── COMPLEXITY-SCOPE-1 (RG-REQ-009-L01, RG-REQ-003-L02, RG-REQ-002-L08): the scope clause ──
+
+/// Build the nginx-shaped fixture with the HIGH_COMPLEXITY leaf's evidence set to `ev`.
+fn complexity_fixture(ev: serde_json::Value) -> OrientResponse {
+    let mut r = nginx_like();
+    for leaf in &mut r.signals {
+        if leaf.value.code == "HIGH_COMPLEXITY" {
+            leaf.value.evidence = Some(ev.clone());
+        }
+    }
+    r
+}
+
+#[test]
+fn complexity_headline_states_the_excluded_count_with_the_include_all_flag() {
+    use serde_json::json;
+    // 4 named centers, true production total 12 (so Small's 3-cap leaves "+9 more"), plus a
+    // production scope that set 10 symbols aside.
+    let top: Vec<_> = (0..4)
+        .map(|i| json!({"symbol": format!("fn{i}"), "file": format!("src/f{i}.c"), "complexity": 40 - i}))
+        .collect();
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 12,
+        "threshold": 20,
+        "top_complex": top,
+        "scope": {"kind": "production", "excluded_count": 10}
+    }));
+    let out = r.render_human(OrientDepth::Small);
+    // Both parts ride ONE parenthetical, joined by "; ".
+    assert!(
+        out.contains(
+            "(+9 more above threshold — rmap hotspots; 10 generated/vendored/test symbols excluded — --include-all)"
+        ),
+        "headline states the excluded count with the flag, joined to the +N more part:\n{out}"
+    );
+}
+
+#[test]
+fn complexity_breakdown_states_the_excluded_count_with_the_include_all_flag() {
+    use serde_json::json;
+    // 4 centers, true production total 4 (no "+N more (showing)" tail), scope excluded 10.
+    let top: Vec<_> = (0..4)
+        .map(|i| json!({"symbol": format!("fn{i}"), "file": format!("src/f{i}.c"), "complexity": 40 - i}))
+        .collect();
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 4,
+        "threshold": 20,
+        "top_complex": top,
+        "scope": {"kind": "production", "excluded_count": 10}
+    }));
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains("- 10 generated/vendored/test symbols excluded — --include-all"),
+        "the breakdown section carries the exclusion bullet:\n{out}"
+    );
+}
+
+#[test]
+fn complexity_scope_all_names_the_included_scope() {
+    use serde_json::json;
+    let top = json!([{"symbol": "hot", "file": "src/a.c", "complexity": 40}]);
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 1,
+        "threshold": 20,
+        "top_complex": top,
+        "scope": {"kind": "all"}
+    }));
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("generated/vendored/test symbols included — --include-all"),
+        "scope=all names the included scope (no excluded count):\n{out}"
+    );
+    assert!(
+        !out.contains("excluded — --include-all"),
+        "scope=all never says 'excluded':\n{out}"
+    );
+}
+
+#[test]
+fn complexity_all_symbols_excluded_states_the_exclusion_without_centers() {
+    use serde_json::json;
+    // No center survived: empty top_complex, count 0, but 6 symbols were set aside.
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 0,
+        "threshold": 20,
+        "top_complex": [],
+        "scope": {"kind": "production", "excluded_count": 6}
+    }));
+    // Headline (Small) states production has nothing above threshold + the excluded count.
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains(
+            "Complexity centers: none above threshold in production code (6 generated/vendored/test symbols excluded — --include-all)"
+        ),
+        "the headline states no production centers + the excluded count:\n{small}"
+    );
+    // The detail section renders the heading + the exclusion bullet (no rows).
+    let full = r.render_human(OrientDepth::Full);
+    assert!(
+        full.contains("Complexity centers (by cyclomatic complexity)"),
+        "the section heading renders even with no centers:\n{full}"
+    );
+    assert!(
+        full.contains("- 6 generated/vendored/test symbols excluded — --include-all"),
+        "the section carries the exclusion bullet:\n{full}"
+    );
+}
+
+#[test]
+fn complexity_scope_absent_renders_as_before() {
+    use serde_json::json;
+    // Pre-slice evidence (no `scope`): the additive field is absent, so the lines are
+    // byte-identical to today — no exclusion clause anywhere.
+    let top = json!([{"symbol": "hot", "file": "src/a.c", "complexity": 40}]);
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 1, "threshold": 20, "top_complex": top
+    }));
+    for depth in [OrientDepth::Small, OrientDepth::Full] {
+        let out = r.render_human(depth);
+        assert!(
+            !out.contains("--include-all"),
+            "absent scope never mentions --include-all ({depth:?}):\n{out}"
+        );
+        assert!(
+            !out.contains("generated/vendored/test"),
+            "absent scope never renders the exclusion clause ({depth:?}):\n{out}"
+        );
+        assert!(
+            !out.contains("scope unreadable"),
+            "absent scope is not 'unreadable' ({depth:?}):\n{out}"
+        );
+    }
+}
+
+#[test]
+fn complexity_scope_malformed_renders_the_unreadable_line() {
+    use serde_json::json;
+    let top = json!([{"symbol": "hot", "file": "src/a.c", "complexity": 40}]);
+    // Three malformed shapes: not an object, unknown kind, production without an integer count.
+    let malformed = [
+        json!("bogus"),
+        json!({"kind": "weird"}),
+        json!({"kind": "production"}),
+    ];
+    for scope in malformed {
+        let r = complexity_fixture(json!({
+            "high_complexity_count": 1, "threshold": 20, "top_complex": top.clone(), "scope": scope.clone()
+        }));
+        let out = r.render_human(OrientDepth::Small);
+        assert!(
+            out.contains("complexity scope unreadable on this snapshot"),
+            "malformed scope renders the named-unavailable line (scope={scope}):\n{out}"
+        );
+        // Never a defaulted zero / silently dropped part.
+        assert!(
+            !out.contains("0 generated/vendored/test symbols excluded"),
+            "malformed scope never fabricates a zero count (scope={scope}):\n{out}"
+        );
+    }
+}

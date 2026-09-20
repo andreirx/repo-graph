@@ -46,6 +46,37 @@ fn complexity_cx_label(entry: &serde_json::Value) -> String {
     }
 }
 
+/// COMPLEXITY-SCOPE-1 (RG-REQ-009-L01, RG-REQ-002-L08): the reader-frame clause naming
+/// how many symbols the complexity ranking set aside (and how to see them), from the
+/// HIGH_COMPLEXITY evidence's additive `scope` object.
+///
+/// `None` means "no clause" — either the field is absent (pre-slice evidence: today's
+/// lines render byte-identical) or nothing was excluded (production scope with
+/// `excluded_count == 0`: a line that would read the same on every repo is not printed).
+/// A `scope` that is present but not an object, an unknown `kind`, or `production`
+/// without an integer `excluded_count` renders the named-unavailable marker — never a
+/// defaulted zero, never a silently dropped part (the STANDING HONESTY RULE for
+/// present-but-malformed carried evidence). The clause names only the flag, no engine or
+/// basis label (RG-REQ-002-L08).
+fn complexity_scope_clause(ev: &serde_json::Value) -> Option<String> {
+    const UNREADABLE: &str = "complexity scope unreadable on this snapshot";
+    let scope = ev.get("scope")?; // absent → today's lines (additive field)
+    let Some(obj) = scope.as_object() else {
+        return Some(UNREADABLE.to_string()); // present but not an object
+    };
+    match obj.get("kind").and_then(|v| v.as_str()) {
+        Some("all") => Some("generated/vendored/test symbols included — --include-all".to_string()),
+        Some("production") => match obj.get("excluded_count").and_then(|v| v.as_u64()) {
+            Some(0) => None, // nothing excluded → no clause
+            Some(n) => Some(format!(
+                "{n} generated/vendored/test symbols excluded — --include-all"
+            )),
+            None => Some(UNREADABLE.to_string()), // production without an integer count
+        },
+        _ => Some(UNREADABLE.to_string()), // unknown / missing kind
+    }
+}
+
 /// The labelled declared/inferred-module count phrase from a MODULE_SUMMARY
 /// payload — e.g. `1 declared module`, `5 inferred modules`, `3 modules`. The
 /// `module_candidates` notion (Layer 1/2), kept DISTINCT from the package
@@ -222,22 +253,42 @@ impl OrientResponse {
             shown.push(label);
         }
         if shown.is_empty() {
+            // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): no center survived. When scoping set
+            // rows aside (or --include-all is in effect), still STATE it on the headline
+            // — the reader is told production code has nothing above threshold and how
+            // many symbols were excluded. Without a scope clause this is today's `None`.
+            if !depth.shows_detail() {
+                if let Some(clause) = complexity_scope_clause(ev) {
+                    return Some(format!(
+                        "Complexity centers: none above threshold in production code ({clause})"
+                    ));
+                }
+            }
             return None;
         }
 
         let mut line = format!("Complexity centers: {}", shown.join(", "));
         // The headline "+N more" pointer is honest ONLY at `small` (the sole
         // complexity surface there); at `medium`+ the dedicated section carries
-        // the tail, so the headline stays clean (no double "+N more").
+        // the tail, so the headline stays clean (no double "+N more"). The scope
+        // clause (COMPLEXITY-SCOPE-1) rides the same guard — the section carries it
+        // at `medium`+. Both parts join with `; ` inside one parenthetical.
         if !depth.shows_detail() {
+            let mut parts: Vec<String> = Vec::new();
             if let Some(total) = ev.get("high_complexity_count").and_then(|v| v.as_u64()) {
                 let shown_n = shown.len() as u64;
                 if total > shown_n {
-                    line.push_str(&format!(
-                        " (+{} more above threshold — rmap hotspots)",
+                    parts.push(format!(
+                        "+{} more above threshold — rmap hotspots",
                         total - shown_n
                     ));
                 }
+            }
+            if let Some(clause) = complexity_scope_clause(ev) {
+                parts.push(clause);
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" ({})", parts.join("; ")));
             }
         }
         Some(line)
@@ -260,8 +311,21 @@ impl OrientResponse {
         let Some(top) = ev.get("top_complex").and_then(|v| v.as_array()) else {
             return String::new();
         };
+        // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): the exclusion clause, rendered as the last
+        // bullet after the rows. `None` (absent scope, or nothing excluded) → today's
+        // section, byte-identical.
+        let scope_clause = complexity_scope_clause(ev);
         if top.is_empty() {
-            return String::new();
+            // No center survived. With a scope clause, still render the heading + the
+            // exclusion bullet so the section says what was set aside; otherwise empty.
+            return match &scope_clause {
+                Some(clause) => {
+                    let mut out = heading("Complexity centers (by cyclomatic complexity)");
+                    out.push_str(&bullet(clause));
+                    out
+                }
+                None => String::new(),
+            };
         }
 
         let limit = cap.unwrap_or(top.len());
@@ -301,6 +365,10 @@ impl OrientResponse {
                     total - shown
                 )));
             }
+        }
+        // COMPLEXITY-SCOPE-1: the exclusion/inclusion bullet, last, after the tail.
+        if let Some(clause) = &scope_clause {
+            out.push_str(&bullet(clause));
         }
         out
     }

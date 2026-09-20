@@ -92,6 +92,7 @@
 
 pub mod cargo_manifest;
 pub mod extractor_port;
+pub mod generated_sniff;
 pub mod grpc_client_hint;
 pub mod grpc_impl_hint;
 pub mod grpc_link;

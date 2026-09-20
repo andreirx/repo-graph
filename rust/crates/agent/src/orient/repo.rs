@@ -81,11 +81,17 @@ const HEADLINE_SIGNAL_CODES: &[SignalCode] = &[
 /// rationale; the previous `AGENT_NOW_SENTINEL` constant was
 /// removed in the P2 fix because a far-future or far-past
 /// sentinel silently mis-evaluates finite-expiry waivers.
+#[allow(clippy::too_many_arguments)] // repo pipeline: +include_all (COMPLEXITY-SCOPE-1)
 pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
     storage: &S,
     repo_uid: &str,
     snapshot: &AgentSnapshot,
     budget: Budget,
+    // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): `--include-all` — when true the complexity
+    // aggregator ranks every above-threshold symbol; when false (the default) it ranks
+    // production code only and reports the excluded count. Repo-level only; complexity is
+    // not a focused-orient section.
+    include_all: bool,
     now: &str,
     // ORIENT-FACT-COHERENCE-1: daemon-injected enrichment-lifecycle override (see
     // `aggregators::trust::aggregate`). `None` = derive from storage; `Some(state)` = authoritative.
@@ -174,8 +180,13 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
         // budget drives how many NAMED complexity centers ride in the evidence
         // (ORIENT-DENSITY-1 §5: small/medium = lean headline, large/full = every
         // above-threshold center for the `--full` complexity breakdown).
-        let complexity_out =
-            aggregators::complexity::aggregate_cancellable(storage, &snapshot_uid, budget, cancel)?;
+        let complexity_out = aggregators::complexity::aggregate_cancellable(
+            storage,
+            &snapshot_uid,
+            budget,
+            include_all,
+            cancel,
+        )?;
         merge(&mut all_signals, &mut all_limits, complexity_out);
     } else {
         all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));

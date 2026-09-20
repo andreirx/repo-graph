@@ -4293,6 +4293,24 @@ impl ServiceDispatcher {
             }
         };
 
+        // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): optional `include_all` — the complexity
+        // aggregator ranks every above-threshold symbol instead of production-only. Absent
+        // → false; a non-boolean value is an invalid_request (the `budget` precedent above).
+        let include_all = match request.params.get("include_all") {
+            None => false,
+            Some(v) => match v.as_bool() {
+                Some(b) => b,
+                None => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::invalid_request(
+                            "invalid include_all value (expected boolean)",
+                        ),
+                    );
+                }
+            },
+        };
+
         // Acquire read lock
         let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -4490,6 +4508,7 @@ impl ServiceDispatcher {
                     &epoch.snapshot,
                     focus,
                     budget,
+                    include_all,
                     &now,
                     enrich_state_override,
                     &mut checkpoint,
@@ -4501,6 +4520,7 @@ impl ServiceDispatcher {
                     &epoch.snapshot,
                     focus,
                     budget,
+                    include_all,
                     &now,
                     enrich_state_override,
                     &mut checkpoint,

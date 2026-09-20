@@ -1,0 +1,1080 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-COMPLEXITY-SCOPE-1-1",
+  "workItemId": "COMPLEXITY-SCOPE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/COMPLEXITY-SCOPE-1-INPUT-2.json",
+    "sha256": "sha256:dc52ed420e33f814e828f4b005188955146d5e556040cda912cad91caa52a7ce"
+  },
+  "allocation": {
+    "path": "docs/slices/complexity-scope-1.md",
+    "sha256": "sha256:63992946a27f6c41e93eb5467a26a481045fe2817b2b6deb013fb0cb10b60f24"
+  },
+  "subject": {
+    "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+    "verification": {
+      "path": "docs/assurance/COMPLEXITY-SCOPE-1/verification.json",
+      "sha256": "sha256:29255d50c1217d0b233f011b75b3b0d612c623b519ec3db8598c13b0d3e03805"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-COMPLEXITY-SCOPE-1-1"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/COMPLEXITY-SCOPE-1-INPUT-2.json",
+      "sha256": "sha256:dc52ed420e33f814e828f4b005188955146d5e556040cda912cad91caa52a7ce"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/COMPLEXITY-SCOPE-1-INPUT-2.json",
+        "sha256": "sha256:dc52ed420e33f814e828f4b005188955146d5e556040cda912cad91caa52a7ce",
+        "byteLength": 7530,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+        "sha256": "sha256:01cefeaec408d9ee6c4146da15e27791b37088e8190d9c1c6338dbb6fb3ccb99",
+        "byteLength": 14193,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:d33e566fd2b3fcf0fe4484ddf370a904b8f6b82f07eb2e08bf0d5f9f5ea4c9c9",
+        "byteLength": 13956,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-003-orientation-surfaces.md",
+        "sha256": "sha256:bf4630448569e9de5b84fa874b44f0476a4656dcbd0e3627e8f2809d33b6bbcb",
+        "byteLength": 13084,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-008-documentation-inventory.md",
+        "sha256": "sha256:2b290fdde2d22f4d91981f27b0535c2e75abb60df46818e674964ce4e6759b71",
+        "byteLength": 12604,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-009-quality-signals-trust-reliability.md",
+        "sha256": "sha256:8ba3a63846c2fa1ef760de39197bd308c538eb2225a864a1922871441234ef39",
+        "byteLength": 16012,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-010-semantic-seeding.md",
+        "sha256": "sha256:8f19115e822e85bf44dd57922a946933186b4c571abe28001a7ae0aaefccc64e",
+        "byteLength": 13356,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+        "sha256": "sha256:60598f5c99e45318b24b424c6e5619e4c5d1c21e95530db239dcf6036122eefe",
+        "byteLength": 13094,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/architecture/artifact-contract-model.md",
+        "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332",
+        "byteLength": 13896,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/docs-list-2.md",
+        "sha256": "sha256:edc2185eee6bd8a9206b777b03c50d4988368e83b59ef5b38d3d6b0390b90c1f",
+        "byteLength": 3486,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/audit5-minors-1.md",
+        "sha256": "sha256:cf4db06b57ba95e2730f0342b4b896cbd1d7758274d8daba5f0d201a85edb496",
+        "byteLength": 7535,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/trust-model-rebase-1.md",
+        "sha256": "sha256:de1abefc05f2a6a0c9b59b2be83cb86956375def8217f080568055b8521b9305",
+        "byteLength": 12615,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/dead-causes-1.md",
+        "sha256": "sha256:653fa5e9bc26f3c6e8b4d50e40cf1fe88c9dee05c1532fea86af964aac033d1f",
+        "byteLength": 4288,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/seed-chunk-3.md",
+        "sha256": "sha256:0d377f7d7985996ce6d694ce8a70ddc94acdea4a2c92e8099e0ae24a36360685",
+        "byteLength": 7283,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/contracts/exit-codes.md",
+        "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429",
+        "byteLength": 3756,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/economy-2.md",
+        "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4",
+        "byteLength": 4956,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cursor-roundtrip-1.md",
+        "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be",
+        "byteLength": 2882,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/anchors-everywhere-1.md",
+        "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60",
+        "byteLength": 4803,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+        "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965",
+        "byteLength": 48460,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CS-001.md",
+        "sha256": "sha256:5455ebedd16c2110335e6a9c0e322d7567e11981bb2735a8c196fdf522ba6709",
+        "byteLength": 4435,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/COMPLEXITY-SCOPE-1/oracle-corrections.md",
+        "sha256": "sha256:3b163da3565c9b3b4da6491cfff88e787d002b92ddc7c02610f919e0a0c8d503",
+        "byteLength": 2838,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e",
+        "byteLength": 12963,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/complexity-scope-1.md",
+        "sha256": "sha256:63992946a27f6c41e93eb5467a26a481045fe2817b2b6deb013fb0cb10b60f24",
+        "byteLength": 94090,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/COMPLEXITY-SCOPE-1-INPUT-2/requirements-review.json",
+        "sha256": "sha256:954bbc54450ebb3b01da56d52164b5953e57df888ba560af475d10b73bbace78",
+        "byteLength": 56716,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/COMPLEXITY-SCOPE-1-INPUT-2/baseline-approval.json",
+        "sha256": "sha256:e178c10b5da4201ce8e44dc645c19c645bad7863156b84a22cc0f14f00e23599",
+        "byteLength": 1396,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:004436c6c7ea7f33b212f36251189f0f513516c75c2d1b94deddbdbc786443fe",
+        "byteLength": 7524,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/COMPLEXITY-SCOPE-1/selection.md",
+        "sha256": "sha256:51ef108d7dbced456f4a76ac1b53ca569a6239e364803bedb20792579a82e47d",
+        "byteLength": 14027
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-1",
+        "sha256": "sha256:0ac03f63e56df04ce364c42cecee97b2b21c954809dabd7345b6f7a1286a1079",
+        "byteLength": 25935
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/COMPLEXITY-SCOPE-1/review-0.json",
+        "sha256": "sha256:36fcf05a62711800447e8ed478d1f1f9e86a43088c96d69b9391d39a7c77a56b",
+        "byteLength": 13509
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-1",
+        "sha256": "sha256:5d22f74327f3cb95bb0d942df566995910da6a5264deeb45721020089bd026ce",
+        "byteLength": 66946,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-1",
+        "sha256": "sha256:7a708c3fe3bc748d6a51092368e40fe287471863af17178d95d75fca78835293",
+        "byteLength": 10721
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-1",
+        "sha256": "sha256:29255d50c1217d0b233f011b75b3b0d612c623b519ec3db8598c13b0d3e03805",
+        "byteLength": 110886
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-1",
+        "sha256": "sha256:0ddf32235be2362f95cb4890da4bab3f90df08e8354af49658f69dea98ca4f82",
+        "byteLength": 84918
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:9113f82c631a340b92c400a0552d90ef3f5a06f3ea198ca2dc6965c1e3395672",
+        "byteLength": 41952
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:3559d16106db61bd8e5c2ba355cb4b099a726fe2475f609188e024fe660a7507",
+        "byteLength": 317356
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-009-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-003-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-003-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-010-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-010-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CS-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CS-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CS-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CS-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CS-05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "CS-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: indexer generated_sniff unit suite passed 4/4 on the candidate.",
+          "supportingEvidence": [
+            "Reviewer execution in rust/: cargo test -p repo-graph-indexer --lib generated_sniff."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "CS-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: three repo-index reproduction suites passed; reviewer inspected the fresh-extraction and copy-forward paths in the candidate diff."
+      }
+    },
+    {
+      "checkId": "CS-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: daemon quality suite passed 17/17; support.rs forwards both allocated names from classification.",
+          "supportingEvidence": [
+            "Reviewer execution: cargo test -p repo-graph-daemon-runtime --lib handlers::quality.",
+            "Reviewer source inspection: support.rs contains #[allow(unused_imports)] pub use repo_graph_classification::{is_vendored_path, VENDORED_SEGMENTS};.",
+            "Reviewer source inspection: quality/mod.rs:22 declares support as pub(crate), substantiating the intentional lint allowance."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "CS-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED storage integration suite passed; reviewer inspected the unchanged SQL filter and additive file-fact projection."
+      }
+    },
+    {
+      "checkId": "CS-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: agent complexity aggregation suite passed 12/12.",
+          "supportingEvidence": [
+            "Reviewer execution in rust/: cargo test -p repo-graph-agent --lib aggregators::complexity."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "CS-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED whole-agent suite passed; reviewer inspected production-scope forwarding and retained budget-identity fixture."
+      }
+    },
+    {
+      "checkId": "CS-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: renderer orient suite passed 131/131.",
+          "supportingEvidence": [
+            "Reviewer execution in rust/: cargo test -p repo-graph-rgr --lib presentation::orient."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "CS-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: orient-command and exit-code-contract integration suites passed.",
+          "supportingEvidence": [
+            "Reviewer execution in rust/: cargo test -p repo-graph-rgr --test orient_command --test exit_code_contract."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "CS-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED preservation suites and byte-identical guards passed; reviewer independently reproduced the affected daemon quality suite."
+      }
+    },
+    {
+      "checkId": "CS-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED scoped fmt/clippy passed. Reviewer clippy attempt was blocked by sandbox inability to open rust/target/debug/.cargo-lock, not a product failure; source inspection confirms the narrow allow is on the intentional crate-capped re-export."
+      }
+    },
+    {
+      "checkId": "CS-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated codegraph old-index comparison and store seam."
+      }
+    },
+    {
+      "checkId": "CS-C12",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED fresh codegraph index, generated-file set, CLI comparison, and store seam."
+      }
+    },
+    {
+      "checkId": "CS-C13",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED fresh poco index, documentation comparison, and store seam."
+      }
+    },
+    {
+      "checkId": "CS-C14",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED candidate self-index and store seam."
+      }
+    },
+    {
+      "checkId": "CS-C15",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED leveldb preservation comparison."
+      }
+    },
+    {
+      "checkId": "CS-C16",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: only the 27 allocated Rust candidate paths are modified or added, and git diff --check HEAD emitted no diagnostics.",
+          "supportingEvidence": [
+            "Reviewer execution: git status --short rust.",
+            "Reviewer execution: git diff --check HEAD."
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/indexer/src/generated_sniff.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/repo-index/tests/is_generated_reproduction.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/classification/src/vendored_path.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/classification/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/support.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_lg_decisions/served_e2e.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/dto/coherent.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/ordering.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/orient/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/orient/repo.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/tests/orient_repo_budget_identity.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/tests/orient_epoch_injection.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/tests/agent_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/orient.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/cli/usage.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_sections.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_density_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/tests/orient_command.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-20T19:51:06.909Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nACCEPTED. OBSERVED: F-CS-002 is closed. support.rs now re-exports both is_vendored_path and VENDORED_SEGMENTS from the sole classification definition. The #[allow(unused_imports)] is justified locally: support is pub(crate), therefore the re-export is not externally visible and VENDORED_SEGMENTS has no in-crate consumer. It preserves the allocated forwarding surface while keeping the deny-warnings gate meaningful; no fake consumer, visibility change, dependency edge, or additional abstraction was introduced.\n\nOBSERVED architecture: generated_sniff records a deterministic Layer-0 file fact at the content-aware index point and refresh carries that stored fact forward. Storage deliberately retains the full certificate row set and merely carries file facts. Pure agent logic applies one post-read predicate before sort/truncation, derives the scoped count from retained rows, and emits a typed ComplexityScope. This serves the VISION: the default orientation shows the repository's own code while explicitly stating what was excluded and how --include-all reveals it, rather than implying completeness.\n\nOBSERVED abstractions are earned. ComplexityScope has two mutually exclusive states, Production{excluded_count} and All; current users are the complexity aggregator and two DTO fixtures; axis: fixed scope variants with growing readers; rejected alternative: boolean plus conditionally-valid excluded_count. classification::vendored_path is the single predicate/segment-list home for the agent aggregator and daemon quality/docs/orient consumers; axis: shared classification rule across those current consumers; rejected alternative: duplicate predicates that could drift. No new crate edge or cycle was introduced.\n\nOBSERVED checkout witnesses: codegraph parser.c:1 is /* Automatically @generated by tree-sitter */; poco bison_parser.cpp:1 is /* A Bison parser, made by GNU Bison 3.8.2.  */; codegraph worker-configuration.d.ts:1 is // Generated by wrangler. DO NOT EDIT.; and leveldb table/block.cc:5 is // Decodes the blocks generated by block_builder.cc. The first three are within the frozen first-eight-line marker rule; the leveldb line explains why generated by is excluded. OBSERVED residual witness: codegraph __tests__/generated-flag-index.test.ts:5 quotes a DO NOT EDIT banner. BUILDER-EXECUTED corpus captures report these generated/test/vendored rows are excluded by default and visible under --include-all, including repo-graph dispatch_op and compose_dependency_summaries; the latter remains an honestly reported pre-existing deps-segment residual. BUILDER-EXECUTED captures also report the intended codegraph, poco, repo-graph, and leveldb before/after headlines and store-predicate seams.\n\nOBSERVED scope: git status lists exactly the 27 allocated Rust paths; git diff --check HEAD is clean. BUILDER-EXECUTED evidence reports all CS-C01..C16 passed. The workspace-wide suite, smoke protocol, and isolated dogfood remain the operator gate specified by CLAUDE.md, not a missing builder requirement.\n\nManager interpretation by in-place-manager: The reviewer's message is a complete implementation review whose only off-shape part is the subject block (the runtime reported subject-mismatch: the reviewer echoed candidate/verification identities that do not match the derived ones for this cycle). Interpretation drops the subject and reshapes nothing: result, the 20 obligation, 16 check and 27 path assessments, findings, decisions and report are the reviewer's own text. Source provider run review-COMPLEXITY-SCOPE-1-1; retained output .agent-manager/slices/COMPLEXITY-SCOPE-1/review-1.json sha256:24a8b7bf108d058829552c700852eb73b1eace5341d121404b187b9a4a6a26bf. The provider remains the performer; this interpretation is not independent execution evidence."
+}

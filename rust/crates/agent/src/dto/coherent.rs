@@ -742,6 +742,7 @@ mod tests {
                 line: Some(10),
                 complexity: 40,
             }],
+            scope: crate::dto::signal::ComplexityScope::Production { excluded_count: 0 },
         })
     }
 

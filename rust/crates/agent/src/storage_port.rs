@@ -329,6 +329,14 @@ pub struct AgentComplexityMeasurement {
     pub line: Option<u64>,
     /// The cyclomatic complexity value.
     pub complexity: u64,
+    /// COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): the owning file's `files.is_test` fact,
+    /// carried on the measurement so the agent aggregator can partition production
+    /// code without a second read. A measurement whose node has no file row (a fileless
+    /// symbol) reads `false` — no persisted fact means "kept, not excluded".
+    pub is_test: bool,
+    /// COMPLEXITY-SCOPE-1 (RG-REQ-001-L08): the owning file's `files.is_generated`
+    /// fact, carried on the measurement. Same fileless→`false` rule as `is_test`.
+    pub is_generated: bool,
 }
 
 // ── Reliability axis (projection of trust axis scores) ──────────

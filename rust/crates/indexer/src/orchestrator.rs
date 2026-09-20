@@ -541,6 +541,12 @@ fn run_pipeline<S: IndexerStoragePort>(
         // sniff adds no I/O. Genuine TypeScript is byte-identical.
         let language = classify_file_language(&file.rel_path, Some(file.content.as_bytes()));
         let is_test = is_test_file(&file.rel_path);
+        // RG-REQ-001-L08: the generated fact is computed HERE, the one site with
+        // `file.content` in hand (the same place `is_test` and the language sniff
+        // run). A first-lines banner marks the file as generated; a hand-written
+        // file is never flagged. Pure content function — survives a no-change
+        // refresh unchanged (the copy-forward site below carries the stored flag).
+        let is_generated = crate::generated_sniff::is_generated_content(&file.content);
 
         tracked_files.push(TrackedFile {
             file_uid: file_uid.clone(),
@@ -548,7 +554,7 @@ fn run_pipeline<S: IndexerStoragePort>(
             path: file.rel_path.clone(),
             language: language.map(|s| s.to_string()),
             is_test,
-            is_generated: false,
+            is_generated,
             is_excluded: false,
         });
 
@@ -1877,29 +1883,44 @@ pub fn refresh_repo<
     // treated as absent). The path fallback applies only to a copied file with
     // no prior `files` row — which cannot happen for a carried-forward file, but
     // is the honest best-effort when no content and no stored fact exist.
-    let existing_languages: std::collections::HashMap<String, Option<String>> =
+    // RG-REQ-001-L08: carry BOTH the stored language AND the stored `is_generated`
+    // flag for a copied file. A copied file is UNCHANGED, so its content-derived
+    // facts must not change — and, critically, the `upsert_files` ON CONFLICT clause
+    // sets `is_generated = excluded.is_generated`, so re-tracking a carried-forward
+    // file with a hard-coded `false` would ERASE the flag on every refresh. We have
+    // no content in hand here to re-sniff, so the stored fact (computed by the
+    // content-aware extraction path in the parent snapshot) is the authority. The
+    // path fallback (`false`) applies only to a copied file with no prior `files`
+    // row — which cannot happen for a genuine carry-forward.
+    let existing_facts: std::collections::HashMap<String, (Option<String>, bool)> =
         match storage.get_files_by_repo(repo_uid) {
-            Ok(files) => files.into_iter().map(|f| (f.path, f.language)).collect(),
+            Ok(files) => files
+                .into_iter()
+                .map(|f| (f.path, (f.language, f.is_generated)))
+                .collect(),
             Err(e) => return Err(IndexError::Storage(e)),
         };
     let copied_tracked: Vec<TrackedFile> = plan
         .files_to_copy
         .iter()
-        .map(|path| TrackedFile {
-            file_uid: format!("{}:{}", repo_uid, path),
-            repo_uid: repo_uid.into(),
-            path: path.clone(),
-            language: existing_languages.get(path).cloned().unwrap_or_else(|| {
-                // No stored fact for a copied file (cannot happen for a genuine
-                // carry-forward). No content in hand → §2.4: do not assert the
-                // ambiguous TS family; `classify_file_language(_, None)` yields
-                // `None` for `.ts`/`.mts`/`.cts` and the extension language
-                // otherwise.
-                classify_file_language(path, None).map(|s| s.to_string())
-            }),
-            is_test: is_test_file(path),
-            is_generated: false,
-            is_excluded: false,
+        .map(|path| {
+            let stored = existing_facts.get(path);
+            TrackedFile {
+                file_uid: format!("{}:{}", repo_uid, path),
+                repo_uid: repo_uid.into(),
+                path: path.clone(),
+                language: stored.map(|(lang, _)| lang.clone()).unwrap_or_else(|| {
+                    // No stored fact for a copied file (cannot happen for a genuine
+                    // carry-forward). No content in hand → §2.4: do not assert the
+                    // ambiguous TS family; `classify_file_language(_, None)` yields
+                    // `None` for `.ts`/`.mts`/`.cts` and the extension language
+                    // otherwise.
+                    classify_file_language(path, None).map(|s| s.to_string())
+                }),
+                is_test: is_test_file(path),
+                is_generated: stored.map(|(_, gen)| *gen).unwrap_or(false),
+                is_excluded: false,
+            }
         })
         .collect();
     storage

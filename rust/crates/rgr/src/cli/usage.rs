@@ -63,7 +63,9 @@ pub fn print_usage() {
     eprintln!("  rmap repo rebuild <repo> [--yes]       Discard the store and reindex from scratch (destructive; keeps the registry entry)");
     eprintln!();
     eprintln!("Agent orientation (resolve repo from cwd):");
-    eprintln!("  rmap orient [--focus <path>] [--budget small|medium|large] [--full]");
+    eprintln!(
+        "  rmap orient [--focus <path>] [--budget small|medium|large] [--full] [--include-all]"
+    );
     eprintln!("  rmap check [--full]");
     eprintln!("  rmap explain <target> [--budget medium|large] [--full]");
     eprintln!("  rmap find \"<concept>\" [--exact] [--full] [--json]");

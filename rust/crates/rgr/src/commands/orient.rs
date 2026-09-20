@@ -57,6 +57,9 @@ pub fn run_orient(args: &[String]) -> ExitCode {
     let mut focus_raw: Option<String> = None;
     let mut json_mode = false;
     let mut full = false;
+    // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): rank every above-threshold complexity symbol,
+    // including generated/vendored/test, instead of production-only.
+    let mut include_all = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -67,6 +70,9 @@ pub fn run_orient(args: &[String]) -> ExitCode {
             }
             "--full" => {
                 full = true;
+            }
+            "--include-all" => {
+                include_all = true;
             }
             // TRUNCATION-AUDIT-1 review-1 #3: `rmap orient --help` must print usage (documenting `--full`)
             // and exit 0, matching the codebase convention (maintenance/doctor/perf). Without this arm
@@ -146,6 +152,14 @@ pub fn run_orient(args: &[String]) -> ExitCode {
         print_orient_usage();
         return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
+    // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): --include-all governs the repository-level
+    // complexity-centers section, which a focused orient does not render — so combining
+    // them is meaningless. Same usage-error precedent as --full + --budget above.
+    if include_all && focus_raw.is_some() {
+        eprintln!("error: --include-all cannot be combined with --focus (complexity centers are a repository-level section)");
+        print_orient_usage();
+        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+    }
     let budget = if full {
         "full"
     } else {
@@ -199,6 +213,11 @@ pub fn run_orient(args: &[String]) -> ExitCode {
 
     if let Some(focus) = focus_raw {
         params["focus"] = serde_json::Value::String(focus);
+    }
+
+    // COMPLEXITY-SCOPE-1: only send the flag when set (additive request field).
+    if include_all {
+        params["include_all"] = serde_json::Value::Bool(true);
     }
 
     // ── Execute request ──────────────────────────────────────
@@ -255,9 +274,10 @@ pub fn run_orient(args: &[String]) -> ExitCode {
 
 fn print_orient_usage() {
     eprintln!(
-        "usage: rmap orient [--focus <path>] [--budget small|medium|large] [--full] [--json]"
+        "usage: rmap orient [--focus <path>] [--budget small|medium|large] [--full] [--include-all] [--json]"
     );
     eprintln!("  --full   deepest tier: caps the package-group and complexity long tails at 200 rows each (ECONOMY-2 §2.3), each with an honest `… and N more (showing 200) — <where>` omission line; every other list carries its omission line too — complete listings ride --json / `stats --json` / `rmap hotspots`");
+    eprintln!("  --include-all   rank ALL complexity centers (including generated/vendored/test); default ranks production code only and states how many it excluded (cannot combine with --focus)");
 }
 
 // ── check command (REG-1) ────────────────────────────────────────────

@@ -285,6 +285,7 @@ pub(crate) mod signals;
 pub mod spring_liveness;
 pub mod types;
 pub(crate) mod unresolved_classifier;
+pub mod vendored_path;
 pub mod weighted_neighbors;
 
 // ── Public re-exports (locked R3 API surface) ─────────────────
@@ -302,3 +303,4 @@ pub use framework_boundary::detect_framework_boundary;
 pub use framework_entrypoints::detect_lambda_entrypoints;
 pub use spring_liveness::{classify_spring_liveness, SpringLivenessInference, SpringNodeInput};
 pub use unresolved_classifier::{classify_unresolved_edge, resolve_external_dependency_name};
+pub use vendored_path::{is_vendored_path, VENDORED_SEGMENTS};

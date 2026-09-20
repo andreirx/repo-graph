@@ -1,0 +1,1126 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-COMPLEXITY-SCOPE-1-1",
+  "workItemId": "COMPLEXITY-SCOPE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/COMPLEXITY-SCOPE-1-INPUT-2.json",
+    "sha256": "sha256:dc52ed420e33f814e828f4b005188955146d5e556040cda912cad91caa52a7ce"
+  },
+  "allocation": {
+    "path": "docs/slices/complexity-scope-1.md",
+    "sha256": "sha256:63992946a27f6c41e93eb5467a26a481045fe2817b2b6deb013fb0cb10b60f24"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "9f18488b8721fcdc7890a378ea3607e5bf2c1141",
+    "entries": [
+      {
+        "path": "rust/crates/agent/src/aggregators/complexity.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:c16045d3c46ec1eabbb9aabfeca6a5b701b259653a633c8ae9b73c620eab7e5b",
+          "byteLength": 6263
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7815389578d6ac21c0484155530aeea0337c9e2c7b38335429f93818deeb8b6b",
+          "byteLength": 7340
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4edc487bad254ac6bf5cdbe8729f0e8995195cb34f0b5e9f67302f6b82795d9b",
+          "byteLength": 12579
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fad24cb5569e94559ad621cd6dce593a207525d493e79ba18d25b18d61944a00",
+          "byteLength": 19491
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/coherent.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:cc66aaef0dc597c8212cad7a5975bee04a4a54004f58f081d98e7a171a34cce2",
+          "byteLength": 65253
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2f1fb64e8339fa148e58b4242561ac245332a5cf1f6eb299cbeccceeb55ef245",
+          "byteLength": 65343
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/signal.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0194a91fb3e6bdffcd51ff20f361536ad52900f6ed931d2d2d03bfd88ffb56c5",
+          "byteLength": 96657
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7abceb684a141cedf5e79b23d3bad1c7c33057bcb235397f7c9ec6d02c6d6fa8",
+          "byteLength": 98438
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:e234a0ea992b20bb20a9a7c2239a29ace305342230cc2f33663f27967310993e",
+          "byteLength": 6849
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5f9fe2853a3a90632b44b62972dddc0cdb90e159840d28e583180583c94d5aad",
+          "byteLength": 6874
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/ordering.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2907637d476358cae6ebfd9f580585067442360d665aea8221b2515e091301c5",
+          "byteLength": 27886
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d5e281a08cc9a25a190b807496a3483195bc84da7babc5a7f76fc6395460f821",
+          "byteLength": 27947
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/orient/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:51db58e2b40c7cefe1533ebfdb4e1fdc457f3a68fe7bf86d5b0baeb1d0a64d64",
+          "byteLength": 16756
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:44cd0876948fa1cf5337cc277847c2ea33ec3b1e77b8388ce649e3d431c40184",
+          "byteLength": 17219
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/orient/repo.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d8842c1660aa30bd4515041cfbc96b5154ffc59f1f6b836e98018d7b2ff7907a",
+          "byteLength": 13998
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:82daa0abf00fa8a7a3a6f241fe788b73ac003bd17af2cb310f40d83263dd0667",
+          "byteLength": 14487
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ab650f0f5bb9072c3e2e5edb9b15863696d12b088a76bfffae0be65ec392a1d9",
+          "byteLength": 61299
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b95fc196b6622865fe938bedd8e5007be8c78b3c4ea040900aff65c19b88d744",
+          "byteLength": 61857
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/orient_epoch_injection.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:5c34c67c772a53ee5c2a8d124bcfff9d77cfc524976c93d6f44fe90ddeeba689",
+          "byteLength": 4066
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ceee434d955e3cc9d0a9c5cd52b16893f91ffdd8f6bce2e0bb2cd52412e7fc60",
+          "byteLength": 4135
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/orient_repo_budget_identity.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f5cf34d77ef8ba3179e3d7cb1dc6df6083a70da68af57594e0569587d1bba264",
+          "byteLength": 12321
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f4cce466a0fa197e561d9e60ad7d23d36a623f9129d09f189f9580743cd79b37",
+          "byteLength": 12553
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9353840426ca43d0a14b5a570f7a3d0097c48774c82102bbe8a97fddf84205eb",
+          "byteLength": 13587
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ab8403b979aa86eb3245add3f9933d04c643a78393c0db177aa73e7145c60dc7",
+          "byteLength": 13672
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/vendored_path.rs",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:5b68492ff1b6418f0fad821763b57ee5b67fbbe995638ebd92e2b88cb37d5ddb",
+          "byteLength": 3418
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5b68492ff1b6418f0fad821763b57ee5b67fbbe995638ebd92e2b88cb37d5ddb",
+          "byteLength": 3418
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0144786734315a9024d160b90e5bf43b6fd328597172cdf79e04541314ee7b98",
+          "byteLength": 485295
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8bf97c68b2f288e0a73c35ee7834f04623d3fcfdc9bd360617b3dbb569c69de1",
+          "byteLength": 486145
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/handlers/quality/support.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9b9d1ee7fa3dd36620d17ed8c4bbba60e3ba050d9cb053333bcd8169540aa467",
+          "byteLength": 4565
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b32b28dc5b3a98ec57aaa46edea2a22e3721757895faa534ab6bac7b5b52cb7d",
+          "byteLength": 4598
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_lg_decisions/served_e2e.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:652970fe7a8afbe45d654f0b1935f19e0773a4d77008b1d8bb142714a1c081ce",
+          "byteLength": 38637
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:59cb569c4caf5062e9572ac1e53347e93e0ba5b0c4e44f2a9dd3f87751fcdabe",
+          "byteLength": 38720
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/generated_sniff.rs",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d0fbaf6fdd253c9bfbd343313e1c66ef28da206708ac6df0fbfa89db18623e2d",
+          "byteLength": 4541
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d0fbaf6fdd253c9bfbd343313e1c66ef28da206708ac6df0fbfa89db18623e2d",
+          "byteLength": 4541
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:198ac3c4a0a06bdfabc6652f69ac9a2de6e11828a9f625a90074258a711d205b",
+          "byteLength": 8585
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7c01525f4358699316d6af23456aefa2484201b1a05ea17d7a07704c39616761",
+          "byteLength": 8610
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:258531d5f6f6ab526aeb8fd7ff3c965d30aa173ed4e6cd7bce2133767bb624af",
+          "byteLength": 173326
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:af3db0635c7e6125fbb0c11735a482324b265c7b524bf2e326249e71b339971b",
+          "byteLength": 174799
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/is_generated_reproduction.rs",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:48cff19db884f2aac13e191c952c1d694d6bc1d6b77e9869da2e6f177baf3965",
+          "byteLength": 6579
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:48cff19db884f2aac13e191c952c1d694d6bc1d6b77e9869da2e6f177baf3965",
+          "byteLength": 6579
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/cli/usage.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4e606a4503c94371d5ef01f4453641ef102255956b67267e909ed4be85ec2e20",
+          "byteLength": 8408
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f20b2089f53aa6a2c135c96c3ecbea01cff061fd67cc7bb5b5a0674e785d8641",
+          "byteLength": 8438
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/orient.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f2bcf6418f843d9578137c9d27bdb342853b6bbda40bd68fc7fad4b0900803ee",
+          "byteLength": 27651
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8eb51cb36762854a924c99fcfa85019d6a6ca2ec46d8fae2a12a2417dcfa5fbb",
+          "byteLength": 28853
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_density_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b8ea142e57ed29ea5da64131cb03af2d1d3bc6f31a1cced51ba2ab67ece5e76e",
+          "byteLength": 20625
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:73fafaf3c3552fdc8289ccc7390bf42ca323011c9e8c8d4de1d0bc0e2d1c6a54",
+          "byteLength": 26905
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a31693dbf1062eae85360647fa58d82df9396feffae08389d7697d70ac1d7225",
+          "byteLength": 40450
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7f05632620b6323f3a536ae379cad7a2187cb0e41242fe3b31dc71a64f032b43",
+          "byteLength": 44317
+        }
+      },
+      {
+        "path": "rust/crates/rgr/tests/orient_command.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:191c44d6c32d853647a5efddc0ed82e41a159d37e9be4f144f68a05af7ec26df",
+          "byteLength": 10729
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0f85dab0392cb2a70a7d01443aa9c119bd4e6c9e8caa300fdfa8957204caf1b7",
+          "byteLength": 12285
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:be96e3bf5e224182accc5ba31907ea8097d463096b6082aed695a8a096e21b2c",
+          "byteLength": 86157
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d85cdffd17dd1d831af0d8a322c9923b80acd3ddcbfa776f5b4f44dfc5393471",
+          "byteLength": 87393
+        }
+      },
+      {
+        "path": "rust/crates/storage/tests/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:78e3f514c61d24a6a4445aad3aaf710461b5477694871fca752ec39d5b70bc41",
+          "byteLength": 67124
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:eea949da68329a4f4096fc5840d964b7dbca1f1f98d6fb02b7a8c849b6abca50",
+          "byteLength": 71902
+        }
+      }
+    ],
+    "sha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-COMPLEXITY-SCOPE-1-1"
+  },
+  "checks": [
+    {
+      "checkId": "CS-C01",
+      "obligationIds": [
+        "RG-REQ-001-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer --lib generated_sniff 2>&1 | tee /tmp/cs-c01.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c01.txt && for t in generated_marker_within_first_eight_lines_is_generated marker_beyond_the_eighth_line_is_not_generated hand_written_body_mentioning_generated_is_not_generated empty_content_is_not_generated; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c01.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "NEW rust/crates/indexer/src/generated_sniff.rs: `is_generated_content(content: &str) -> bool` — true iff one of the FROZEN case-sensitive markers `@generated`, `Automatically generated`, `DO NOT EDIT`, `made by GNU Bison` occurs within the first 8 lines; unit tests: one positive per marker placed on line 1 and on line 8 (`/* Automatically @generated by tree-sitter v0.25.10 */`, `/* A Bison parser, made by GNU Bison 3.8.2.  */`, `// Generated by wrangler. DO NOT EDIT.`), a marker on line 9 is NOT generated, leveldb's hand-written `table/block.cc` header (`// Decodes the blocks generated by block_builder.cc.` on line 5 — the reason `generated by` is NOT a marker) is NOT generated, empty content is NOT generated"
+      },
+      "expected": "exit 0: the sniff is a pure function of the first eight lines over the frozen marker list — every marker recognised, nothing beyond line 8, and a hand-written header that merely mentions generation stays unflagged",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-indexer --lib generated_sniff: `ok. 4 passed; 0 failed`; all four named cases present.",
+        "supportingEvidence": [
+          "EXECUTED in rust/ on the cycle-2 candidate; /tmp/cs-c01.txt",
+          "Unaffected by the F-CS-002 change; re-run per the manager note."
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C02",
+      "obligationIds": [
+        "RG-REQ-001-L08",
+        "RG-REQ-001-L09",
+        "RG-REQ-001-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-repo-index --test is_generated_reproduction --test is_test_cpp_reproduction --test is_test_rust_reproduction 2>&1 | tee /tmp/cs-c02.txt | grep -cE '^test result: ok\\.' | grep -qx 3 && ! grep -E 'FAILED|panicked' /tmp/cs-c02.txt && for t in generated_flag_is_persisted_from_a_first_lines_marker hand_written_files_stay_unflagged is_generated_survives_no_change_refresh structural_is_test_survives_no_change_refresh; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c02.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "NEW rust/crates/repo-index/tests/is_generated_reproduction.rs, modelled on is_test_cpp_reproduction.rs (tempdir fixture → `index_into_storage` → `FileCatalogPort::get_files_by_repo`): fixture files `src/parser.c` (line 1 `/* Automatically @generated by tree-sitter v0.25.10 */`), `src/grammar.cpp` (line 1 `/* A Bison parser, made by GNU Bison 3.8.2.  */`), `src/types.d.ts` (line 1 `// Generated by wrangler. DO NOT EDIT.`), `src/block.cc` (line 5 `// Decodes the blocks generated by block_builder.cc.`, hand-written), `src/late.c` (the `@generated` marker on line 9 only); `generated_flag_is_persisted_from_a_first_lines_marker` asserts `is_generated` true for the first three and `SELECT count(*) FROM files WHERE is_generated=1` == 3 through the port; `hand_written_files_stay_unflagged` asserts false for block.cc and late.c; `is_generated_survives_no_change_refresh` runs `refresh_into_storage` on the unchanged tree and asserts the same flags (the copy-forward site orchestrator.rs:1901 carries the stored flag — today it hard-codes false and the ON CONFLICT upsert would erase the flag on every refresh); the two existing is_test suites stay green (RG-REQ-001-L07: `is_test` computation untouched)"
+      },
+      "expected": "exit 0: `files.is_generated` is populated at index time from content and survives a no-change refresh unchanged (RG-REQ-001-L09 for this fact), while `is_test` remains as before (no behavior change)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "repo-index --test is_generated_reproduction/is_test_cpp_reproduction/is_test_rust_reproduction: 3 `ok` lines, 0 failed; generated_flag_is_persisted_from_a_first_lines_marker, hand_written_files_stay_unflagged, is_generated_survives_no_change_refresh, structural_is_test_survives_no_change_refresh all present.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c02.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C03",
+      "obligationIds": [
+        "RG-REQ-001-L08",
+        "RG-REQ-002-L02",
+        "RG-REQ-008-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-classification --lib vendored_path 2>&1 | tee /tmp/cs-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c03.txt && for t in dependencies_and_contrib_segments_are_vendored existing_segments_remain_vendored substring_and_prefix_matches_are_not_segments; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-daemon-runtime --lib handlers::quality 2>&1 | tee /tmp/cs-c03b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c03b.txt && for t in is_vendored_path_detects_vendor_segment is_vendored_path_detects_python_site_packages is_vendored_path_rejects_non_vendored; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c03b.txt || { echo \"MISSING $t\"; exit 1; }; done && [ \"$(git grep -l 'pub fn is_vendored_path' -- 'crates/**/*.rs' | wc -l | tr -d ' ')\" = 1 ] && git grep -l 'pub fn is_vendored_path' -- 'crates/**/*.rs' | grep -qx crates/classification/src/vendored_path.rs && [ \"$(git grep -l 'pub const VENDORED_SEGMENTS' -- 'crates/**/*.rs' | wc -l | tr -d ' ')\" = 1 ] && grep -qE '^pub use repo_graph_classification::(vendored_path::)?\\{?(is_vendored_path|VENDORED_SEGMENTS)' crates/daemon-runtime/src/handlers/quality/support.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "NEW rust/crates/classification/src/vendored_path.rs holds the ONE definition of `VENDORED_SEGMENTS` (the nine existing segments + `dependencies` + `contrib`) and `is_vendored_path` (segment-exact, lower-cased — the body moved verbatim from daemon-runtime/src/handlers/quality/support.rs:34-52); classification/src/lib.rs exports both; support.rs REPLACES its definitions with `pub use repo_graph_classification::{is_vendored_path, VENDORED_SEGMENTS};` so hotspots.rs:183, docs_list_overlay.rs:26, orient_additive_fields.rs:179, dispatch.rs:9496 and quality/tests.rs compile unchanged; new unit tests: `dependencies/pcre2/src/pcre2_match.c` and `contrib/x/y.c` are vendored, every existing segment still is, `src/vendors_list.js` / `myvendor/lib.js` / `dependencies_map.rs` are not"
+      },
+      "expected": "exit 0: one vendored predicate in an inner crate, called by the agent aggregator and by every daemon consumer — the docs vendored line (RG-REQ-008-L04) keeps reading the same predicate, now with `dependencies`/`contrib`",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "classification --lib vendored_path: 3 passed. daemon-runtime --lib handlers::quality: 17 passed. git grep: exactly ONE `pub fn is_vendored_path` (classification/src/vendored_path.rs) and ONE `pub const VENDORED_SEGMENTS`; support.rs re-export matches the CS-C03 regex AND now forwards BOTH names (`is_vendored_path, VENDORED_SEGMENTS`) per F-CS-002.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c03.txt, /tmp/cs-c03b.txt",
+          "The 3 new files remain staged (git add, not committed) so git grep resolves the one-definition assertion.",
+          "This is the F-CS-002-affected check: both names are now forwarded, closing the reviewer finding."
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C04",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "P-CS-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --test agent_impl 2>&1 | tee /tmp/cs-c04.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c04.txt && for t in query_high_complexity_symbols_carries_the_file_flags_and_keeps_every_row; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && ! grep -nE 'is_test *= *0|is_generated *= *0' crates/storage/src/agent_impl.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/storage/src/agent_impl.rs `query_high_complexity_symbols_cancellable` (:1669) SELECTs two more columns from the files join it already has — `f.is_test, f.is_generated` — into the two new `AgentComplexityMeasurement` fields (NULL, i.e. a measurement whose node has no file row, reads as false: no persisted fact); the WHERE clause is unchanged (no filter in SQL). NEW test in rust/crates/storage/tests/agent_impl.rs: files `src/a.rs` (0/0), `tests/t.rs` (is_test 1), `gen/g.rs` (is_generated 1), one measurement each at cx 30 plus a measurement whose target has no node; the read returns ALL FOUR rows (the set the LiveGraph certificate compares is unchanged — P-CS-01), with the flags per row and false/false for the fileless row; `count_high_complexity_symbols` still returns 4"
+      },
+      "expected": "exit 0: the storage read carries the persisted flags without narrowing its row set — the certificate's comparison set is byte-for-byte what it was (no behavior change in the read consumed by the cert)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "storage --test agent_impl: `ok. 25 passed; 0 failed`, incl. query_high_complexity_symbols_carries_the_file_flags_and_keeps_every_row; no is_test=0/is_generated=0 literal in agent_impl.rs.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c04.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C05",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-002-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-agent --lib aggregators::complexity 2>&1 | tee /tmp/cs-c05.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c05.txt && for t in generated_vendored_and_test_rows_are_excluded_and_counted include_all_keeps_every_row_and_reports_scope_all all_rows_excluded_still_emits_the_signal_with_the_excluded_count high_complexity_count_is_the_filtered_total_not_the_storage_count a_row_without_a_file_stays_ranked no_rows_above_threshold_emits_no_signal; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c05.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/agent/src/aggregators/complexity.rs `aggregate_with_threshold_cancellable` (:76): rows = the unchanged storage read (FETCH_ALL); empty → `AggregatorOutput::empty()` exactly as the `count == 0` early return did (the aggregator no longer calls `count_high_complexity_symbols`; the port method stays for the certificate); otherwise `include_all` → keep every row, `scope: ComplexityScope::All`; else drop rows where `is_test || is_generated || is_vendored_path(file_path)` (a `file_path: None` row is kept — no persisted fact), `scope: ComplexityScope::Production { excluded_count }`, `high_complexity_count` = the KEPT row count, then the existing sort/truncate. Tests in complexity_tests.rs on `FakeStorage` (whose `count_high_complexity_symbols` deliberately returns the UNFILTERED count so `high_complexity_count_is_the_filtered_total_not_the_storage_count` can tell the two apart): six rows — three production, `tests/x.rs` (is_test), `gen/p.c` (is_generated), `dependencies/pcre2/src/pcre2_match.c` (vendored) → count 3, `Production { excluded_count: 3 }`, none of the three in `top_complex`; `include_all` → six rows, `All`; every row excluded → the signal is still emitted with count 0, empty `top_complex`, `excluded_count` 6; a row with `file_path: None` ranks; no rows → no signal"
+      },
+      "expected": "exit 0: the agent-side filter applies ONE predicate set (the persisted `is_test`/`is_generated` facts and the classification crate's `is_vendored_path`) after the storage read and before truncation, counts from the filtered set, carries the excluded count as evidence, and `--include-all` restores the unfiltered ranking",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "agent --lib aggregators::complexity: `ok. 12 passed; 0 failed`; all six named cases present.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c05.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C06",
+      "obligationIds": [
+        "RG-REQ-003-L07",
+        "RG-REQ-012-L04",
+        "P-CS-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-agent 2>&1 | tee /tmp/cs-c06.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c06.txt && for t in budgets_change_length_never_numbers orient_use_case_consumes_injected_snapshot_without_re_resolving; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c06.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE agent crate (unit + integration): `orient_repo_budget_identity.rs`'s 30-measurement fixture (:115, gains `is_test: false, is_generated: false`; no path is test/vendored) still asserts `high_complexity_count == 30` at every budget; `orient_epoch_injection.rs:39` passes the new `include_all: false` argument; `ordering.rs:298` and the six complexity_tests.rs literals gain the two fields; the 5-argument `orient(...)` convenience wrapper keeps its signature (production scope) so its ten test callers are untouched"
+      },
+      "expected": "exit 0: budgets still change length never numbers and every existing agent test remains green (no behavior change outside the complexity filter)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-agent (whole crate): 23 `ok` lines, 0 failed; budgets_change_length_never_numbers and orient_use_case_consumes_injected_snapshot_without_re_resolving present.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c06.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C07",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-003-L02",
+        "RG-REQ-012-L04",
+        "RG-REQ-002-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::orient 2>&1 | tee /tmp/cs-c07.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c07.txt && for t in complexity_headline_states_the_excluded_count_with_the_include_all_flag complexity_breakdown_states_the_excluded_count_with_the_include_all_flag complexity_scope_all_names_the_included_scope complexity_all_symbols_excluded_states_the_exclusion_without_centers complexity_scope_absent_renders_as_before complexity_scope_malformed_renders_the_unreadable_line complexity_headline_names_symbols_not_file_rollup rendered_numbers_are_budget_invariant_length_is_monotonic small_complexity_centers_are_named; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c07.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/rgr/src/presentation/orient_sections.rs `complexity_line` (:199) and `complexity_breakdown_section` (:256); NEW JSON-fixture tests in orient_density_tests.rs (the `complexity_headline_names_symbols_not_file_rollup` style): evidence `{high_complexity_count: 2, threshold: 20, top_complex: [...], scope: {kind: 'production', excluded_count: 10}}` at Small renders the headline suffix `(+N more above threshold — rmap hotspots; 10 generated/vendored/test symbols excluded — --include-all)` (the parts joined by `; `, each present only when non-zero) and at Full the breakdown bullet `  - 10 generated/vendored/test symbols excluded — --include-all` after the rows; `scope: {kind: 'all'}` renders `generated/vendored/test symbols included — --include-all` in the same positions; `top_complex: []` with `excluded_count: 6` renders `Complexity centers: none above threshold in production code (6 generated/vendored/test symbols excluded — --include-all)` and the section heading with the bullet; an evidence object WITHOUT `scope` renders exactly today's lines (additive field); `scope` present but not an object / unknown kind / production without an integer `excluded_count` renders `complexity scope unreadable on this snapshot` as the suffix/bullet — never a defaulted zero, never a dropped part; the three existing tests stay green"
+      },
+      "expected": "exit 0: both surfaces state the excluded count with the flag that shows everything, in the reader's terms (no engine or basis label — RG-REQ-002-L08), budgets change only length, malformed carried evidence renders an unreadable line rather than a number, and today's lines (an evidence object without `scope`) remain byte-identical — no behavior change to the existing renderings and no internal label anywhere (RG-REQ-002-L08 preserved)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "rgr --lib presentation::orient: `ok. 131 passed; 0 failed`; all nine named cases present incl. complexity_scope_absent_renders_as_before and complexity_scope_malformed_renders_the_unreadable_line.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c07.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C08",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-012-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --test orient_command --test exit_code_contract 2>&1 | tee /tmp/cs-c08.txt | grep -cE '^test result: ok\\.' | grep -qx 2 && ! grep -E 'FAILED|panicked' /tmp/cs-c08.txt && for t in orient_include_all_with_focus_usage_error orient_include_all_is_an_accepted_flag orient_unknown_flag_usage_error orient_full_with_budget_mutually_exclusive exit_code_values_preserve_both_contract_families every_process_exit_site_uses_a_named_constant; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c08.txt || { echo \"MISSING $t\"; exit 1; }; done && grep -q 'include-all' crates/rgr/src/cli/usage.rs && grep -q 'include-all' crates/rgr/src/commands/orient.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/rgr/src/commands/orient.rs: a new value-less flag `--include-all` in the orient arm loop (:64-125); with `--focus` it is a usage error (`error: --include-all cannot be combined with --focus (complexity centers are a repository-level section)`, EXIT_USAGE_ERROR — the `--full`/`--budget` precedent at :484); when set, `params[\"include_all\"] = true` beside `budget` (:194); usage text in `print_orient_usage` (:256) and cli/usage.rs:66. NEW tests in rust/crates/rgr/tests/orient_command.rs via `run_cmd_isolated`: `orient_include_all_with_focus_usage_error` (exit 1, stderr names both flags), `orient_include_all_is_an_accepted_flag` (modelled on the existing `orient_full_flag_accepted`: `orient --include-all` against the nonexistent-daemon socket fails at the daemon step, not at parsing — no `unknown flag`, not exit 1); the exit-code contract suite unchanged"
+      },
+      "expected": "exit 0: the flag the exclusion line names exists, parses, is rejected only where it is meaningless, and every exit site still uses a named constant (no behavior change to the exit-code contract)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "rgr --test orient_command --test exit_code_contract: 2 `ok` lines, 0 failed; all six named cases present; include-all in cli/usage.rs and commands/orient.rs.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c08.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C09",
+      "obligationIds": [
+        "P-CS-02",
+        "P-CS-03",
+        "RG-REQ-008-L04",
+        "RG-REQ-010-L06",
+        "RG-REQ-010-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/cs-c09.txt | grep -E '^test result: ok\\. [0-9]+ passed; 0 failed' && ! grep -E '^test .* FAILED$' /tmp/cs-c09.txt && for t in orient_complexity_outcome_serves_livegraph_with_green_cert build_orient_envelope_complexity_no_livegraph_falls_back_unavailable vendored_override_clears_release_family; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c09.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/cs-c09b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c09b.txt && for t in vendored_demoted_from_headline_and_listing_but_stated all_vendored_does_not_claim_no_docs; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c09b.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --test hotspots_command --test cli_out_6_quality 2>&1 | tee /tmp/cs-c09c.txt | grep -cE '^test result: ok\\.' | grep -qx 2 && ! grep -E 'FAILED|panicked' /tmp/cs-c09c.txt && cargo test -p repo-graph-storage --lib 2>&1 | tee /tmp/cs-c09d.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c09d.txt && cargo test -p repo-graph-seed 2>&1 | tee /tmp/cs-c09e.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/cs-c09e.txt && for t in production_ranks_above_test_even_when_test_scores_higher a_test_partition_field_stays_within_the_test_partition; do grep -qE \"^test .*$t .* ok$\" /tmp/cs-c09e.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet -- crates/storage/src/seed_impl.rs crates/daemon-runtime/src/handlers/quality/hotspots.rs crates/daemon-runtime/src/orient_lg_decisions/complexity_cert.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the acceptance boundary of every crate the candidate touches, run to completion in the foreground: the WHOLE daemon-runtime unit suite (the complexity certificate `served_e2e.rs` tests, orient_serve, docs_list_overlay, handlers::quality), the whole rgr lib (docs_tests, orient tests), rgr's hotspots and quality CLI suites, the whole storage lib, the whole repo-graph-seed crate; and three files this slice must NOT touch are byte-identical to HEAD: `storage/src/seed_impl.rs` (the seed corpus read `AND f.is_generated = 0` at :81 is the pre-existing consumer of the flag — the corpus narrows only because the flag is now populated), `handlers/quality/hotspots.rs` (its own `--exclude-tests/--exclude-vendored` flags), `orient_lg_decisions/complexity_cert.rs` (the certificate's comparison)"
+      },
+      "expected": "exit 0: the LiveGraph complexity certificate, the M-2 parity certificates, the docs vendored line's logic, the seed partition and tiering logic, and `hotspots` remain exactly as before (no behavior change beyond the populated flag and the widened segment list)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "daemon-runtime --lib 784 passed / 0 failed (incl. orient_complexity_outcome_serves_livegraph_with_green_cert, build_orient_envelope_complexity_no_livegraph_falls_back_unavailable, vendored_override_clears_release_family); rgr --lib 1259 passed (incl. vendored_demoted_from_headline_and_listing_but_stated, all_vendored_does_not_claim_no_docs); rgr hotspots_command+cli_out_6_quality 2 ok; storage --lib 680 passed; seed 68 passed (incl. production_ranks_above_test_even_when_test_scores_higher, a_test_partition_field_stays_within_the_test_partition); byte-identical guards on seed_impl.rs, hotspots.rs, complexity_cert.rs clean.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c09.txt, cs-c09b.txt, cs-c09c.txt, cs-c09d.txt, cs-c09e.txt",
+          "daemon-runtime is the crate the F-CS-002 change touches; its whole lib suite is green."
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C10",
+      "obligationIds": [
+        "P-CS-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-indexer -p repo-graph-repo-index -p repo-graph-classification -p repo-graph-daemon-runtime -p repo-graph-agent -p repo-graph-storage -p repo-graph-rgr && cargo clippy -p repo-graph-indexer -p repo-graph-repo-index -p repo-graph-classification -p repo-graph-daemon-runtime -p repo-graph-agent -p repo-graph-storage -p repo-graph-rgr --all-targets -- -D warnings > /tmp/cs-c10.txt 2>&1; rc=$?; tail -3 /tmp/cs-c10.txt; test $rc -eq 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rustfmt and clippy (deny warnings, all targets) over the seven touched crates — the tracked gate suite's fmt and clippy gates scoped to the candidate"
+      },
+      "expected": "exit 0: no formatting or lint debt enters with the candidate (the operator's workspace-wide fmt/clippy gate then only re-confirms)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo fmt --check over the 7 crates clean; cargo clippy --all-targets -D warnings over the 7 crates `Finished`, rc 0. The support.rs `#[allow(unused_imports)]` on the `pub use {is_vendored_path, VENDORED_SEGMENTS}` keeps the both-names forwarding surface lint-clean (see the F-CS-002 note below).",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-c10.txt",
+          "Confirmed independently: WITHOUT the allow, clippy on daemon-runtime errors `unused import: VENDORED_SEGMENTS ... -D unused-imports implied by -D warnings` — the reviewer/manager 'clippy green either way' premise is false because `support` is a pub(crate) module."
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C11",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-012-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" orient --budget small > /tmp/cs-cg-b-small.txt 2> /tmp/cs-cg-b-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-cg-b-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" orient --json > /tmp/cs-cg-b.json 2> /tmp/cs-cg-b.json.err ) || { echo \"RUN-FAILED /tmp/cs-cg-b.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget small > /tmp/cs-cg-c-small.txt 2> /tmp/cs-cg-c-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-cg-c-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --json > /tmp/cs-cg-c.json 2> /tmp/cs-cg-c.json.err ) || { echo \"RUN-FAILED /tmp/cs-cg-c.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --include-all --budget small > /tmp/cs-cg-c-all-small.txt 2> /tmp/cs-cg-c-all-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-cg-c-all-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --include-all --json > /tmp/cs-cg-c-all.json 2> /tmp/cs-cg-c-all.json.err ) || { echo \"RUN-FAILED /tmp/cs-cg-c-all.json\"; exit 1; } && grep -qE '^Complexity centers: codegraph-kernel/grammars/lua/parser\\.c — ts_lex \\(cx 322\\), src/mcp/tools\\.ts — handleExplore \\(cx 256\\), src/extraction/tree-sitter\\.ts — extractCall \\(cx 244\\) \\(\\+188 more above threshold — rmap hotspots\\)$' /tmp/cs-cg-b-small.txt && grep -qE '^Complexity centers: codegraph-kernel/grammars/lua/parser\\.c — ts_lex \\(cx 322\\), src/mcp/tools\\.ts — handleExplore \\(cx 256\\), src/extraction/tree-sitter\\.ts — extractCall \\(cx 244\\) \\(\\+178 more above threshold — rmap hotspots; 10 generated/vendored/test symbols excluded — --include-all\\)$' /tmp/cs-cg-c-small.txt && grep -qE '^Complexity centers: codegraph-kernel/grammars/lua/parser\\.c — ts_lex \\(cx 322\\), .*\\(\\+188 more above threshold — rmap hotspots; generated/vendored/test symbols included — --include-all\\)$' /tmp/cs-cg-c-all-small.txt && python3 -c \"import json\nev = lambda p: [s for s in json.load(open(p))['value']['signals'] if s['value'].get('code') == 'HIGH_COMPLEXITY'][0]['value']['evidence']\nb, c, a = ev('/tmp/cs-cg-b.json'), ev('/tmp/cs-cg-c.json'), ev('/tmp/cs-cg-c-all.json')\nassert 'scope' not in b and c['scope'] == {'kind': 'production', 'excluded_count': 10} and c['high_complexity_count'] == 181, (b.get('scope'), c['scope'], c['high_complexity_count'])\nassert a['scope'] == {'kind': 'all'}; del a['scope']\nassert a == b, 'include-all evidence must equal the before binary evidence'\nprint('before count', b['high_complexity_count'], 'candidate count', c['high_complexity_count'], 'include-all == before: ok')\" && python3 - /private/tmp/COMPLEXITY-SCOPE-1-codegraph-before /tmp/cs-cg-c.json <<'PY'\nimport sqlite3, glob, json, sys\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsegs = {'vendor','vendors','third_party','third-party','external','deps','node_modules','site-packages','dist-packages','dependencies','contrib'}\nvend = lambda p: p is not None and any(s.lower() in segs for s in p.split('/'))\nrows = k.execute(\"select f.path, n.name, cast(json_extract(m.value_json,'$.value') as integer) cx, f.is_test, f.is_generated from measurements m left join nodes n on m.target_stable_key = n.stable_key and n.snapshot_uid = m.snapshot_uid left join files f on n.file_uid = f.file_uid where m.snapshot_uid = (select snapshot_uid from snapshots order by created_at desc limit 1) and m.kind = 'cyclomatic_complexity' and cast(json_extract(m.value_json,'$.value') as integer) >= 20\").fetchall()\ndrop = lambda r: r[3] == 1 or r[4] == 1 or vend(r[0])\nex = [r for r in rows if drop(r)]\nd = json.load(open(jf)); ev = [s for s in d['value']['signals'] if s['value'].get('code') == 'HIGH_COMPLEXITY'][0]['value']['evidence']\nassert ev['scope'] == {'kind': 'production', 'excluded_count': len(ex)}, (ev['scope'], len(ex))\nassert ev['high_complexity_count'] == len(rows) - len(ex), (ev['high_complexity_count'], len(rows), len(ex))\nfor t in ev['top_complex']:\n    assert not any(r[0] == t.get('file') and drop(r) for r in rows), t\nprint('seam ok: rows', len(rows), 'excluded', len(ex), 'count', ev['high_complexity_count'], 'generated files', k.execute('select count(*) from files where is_generated = 1').fetchone()[0])\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/COMPLEXITY-SCOPE-1-codegraph-before (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph by the base-revision binary on 2026-09-20, 21 s; every file has is_generated=0 — the OLD index), served by the before binary /private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap{,d} (copied from rust/target/release on the CLEAN tree before any candidate edit) and by the candidate binary, both under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off",
+        "inputs": "codegraph on the SAME old index: the before binary prints the audit's headline (`parser.c — ts_lex (cx 322)` first, `+188 more`); the candidate on the same index — where no file is flagged generated yet — excludes exactly the 10 test-file rows (`__tests__/fixtures/displacement-ts/src/pipeline/ingest.ts — ingestRecords (cx 212)` is the largest; all ten have `files.is_test = 1`), so the count is 181, `+178 more`, and the headline gains `; 10 generated/vendored/test symbols excluded — --include-all`; `--include-all` restores the before evidence exactly (JSON equal after removing the additive `scope`); the store-derived seam (`is_test`/`is_generated`/segment rule recomputed in python over the store) equals the evidence"
+      },
+      "expected": "exit 0: on one index the only difference between the two binaries is the filter and its stated count — the flag returns the identical evidence, and the JSON `scope` field reports what the human suffix reports (RG-REQ-012-L06, additive field REPORTED)",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "codegraph OLD index, before vs candidate binary. Before headline `…lua/parser.c — ts_lex (cx 322), …handleExplore (cx 256), …extractCall (cx 244) (+188 more …)`; candidate `(+178 more …; 10 generated/vendored/test symbols excluded — --include-all)`; --include-all restores before with `…included — --include-all`. JSON: before count 191 (no scope), candidate scope production/10 count 181, include-all==before. Store seam: rows 191, excluded 10, count 181, 0 generated — equals evidence.",
+        "supportingEvidence": [
+          "EXECUTED under isolated stdio on /private/tmp/COMPLEXITY-SCOPE-1-codegraph-before with the worktree-built before binary and the cycle-2 candidate; /tmp/cs-cg-b-small.txt, cs-cg-c-small.txt, cs-cg-c-all-small.txt, cs-cg-b.json, cs-cg-c.json, cs-cg-c-all.json",
+          "Identical to cycle 1 (support.rs change is runtime-neutral)."
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C12",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-001-L08",
+        "RG-REQ-003-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/COMPLEXITY-SCOPE-1-codegraph-after && mkdir -p /private/tmp/COMPLEXITY-SCOPE-1-codegraph-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/cs-cg-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/cs-cg-index.txt\"; exit 1; } && python3 -c \"import sqlite3, glob\ndb = glob.glob('/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\ngot = sorted(r[0] for r in k.execute('select path from files where is_generated = 1'))\nassert got == ['__tests__/fixtures/tail-render-ts/types/worker-configuration.d.ts', '__tests__/generated-flag-index.test.ts', 'codegraph-kernel/grammars/dart/parser.c', 'codegraph-kernel/grammars/lua/parser.c', 'codegraph-kernel/grammars/scala/parser.c'], got\nprint('is_generated=1:', got)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget small > /tmp/cs-cg-a-small.txt 2> /tmp/cs-cg-a-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-cg-a-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --full > /tmp/cs-cg-a-full.txt 2> /tmp/cs-cg-a-full.txt.err ) || { echo \"RUN-FAILED /tmp/cs-cg-a-full.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --json > /tmp/cs-cg-a.json 2> /tmp/cs-cg-a.json.err ) || { echo \"RUN-FAILED /tmp/cs-cg-a.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-codegraph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --include-all --budget small > /tmp/cs-cg-a-all-small.txt 2> /tmp/cs-cg-a-all-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-cg-a-all-small.txt\"; exit 1; } && grep -qE '^Complexity centers: src/mcp/tools\\.ts — handleExplore \\(cx 256\\), src/extraction/tree-sitter\\.ts — extractCall \\(cx 244\\), ' /tmp/cs-cg-a-small.txt && ! grep -E '^Complexity centers:' /tmp/cs-cg-a-small.txt | grep -q 'parser\\.c' && grep -qE '^Complexity centers: codegraph-kernel/grammars/lua/parser\\.c — ts_lex \\(cx 322\\), ' /tmp/cs-cg-a-all-small.txt && ! sed -n '/^Complexity centers (by cyclomatic complexity)/,/^$/p' /tmp/cs-cg-a-full.txt | grep -qE 'grammars/[a-z_]+/parser\\.c|__tests__/' && sed -n '/^Complexity centers (by cyclomatic complexity)/,/^$/p' /tmp/cs-cg-a-full.txt | grep -qE '^  - [0-9]+ generated/vendored/test symbols excluded — --include-all$' && python3 - /private/tmp/COMPLEXITY-SCOPE-1-codegraph-after /tmp/cs-cg-a.json <<'PY'\nimport sqlite3, glob, json, sys\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsegs = {'vendor','vendors','third_party','third-party','external','deps','node_modules','site-packages','dist-packages','dependencies','contrib'}\nvend = lambda p: p is not None and any(s.lower() in segs for s in p.split('/'))\nrows = k.execute(\"select f.path, n.name, cast(json_extract(m.value_json,'$.value') as integer) cx, f.is_test, f.is_generated from measurements m left join nodes n on m.target_stable_key = n.stable_key and n.snapshot_uid = m.snapshot_uid left join files f on n.file_uid = f.file_uid where m.snapshot_uid = (select snapshot_uid from snapshots order by created_at desc limit 1) and m.kind = 'cyclomatic_complexity' and cast(json_extract(m.value_json,'$.value') as integer) >= 20\").fetchall()\ndrop = lambda r: r[3] == 1 or r[4] == 1 or vend(r[0])\nex = [r for r in rows if drop(r)]\nd = json.load(open(jf)); ev = [s for s in d['value']['signals'] if s['value'].get('code') == 'HIGH_COMPLEXITY'][0]['value']['evidence']\nassert ev['scope'] == {'kind': 'production', 'excluded_count': len(ex)}, (ev['scope'], len(ex))\nassert ev['high_complexity_count'] == len(rows) - len(ex), (ev['high_complexity_count'], len(rows), len(ex))\nfor t in ev['top_complex']:\n    assert not any(r[0] == t.get('file') and drop(r) for r in rows), t\nprint('seam ok: rows', len(rows), 'excluded', len(ex), 'count', ev['high_complexity_count'], 'generated files', k.execute('select count(*) from files where is_generated = 1').fetchone()[0])\nPY",
+        "cwd": ".",
+        "environment": "NEW isolated root /private/tmp/COMPLEXITY-SCOPE-1-codegraph-after: a fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/codegraph by the CANDIDATE binary (~21 s) under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the root STAYS for the manager",
+        "inputs": "codegraph reindexed by the candidate: `files.is_generated = 1` for exactly the five files whose first eight lines carry a marker — `codegraph-kernel/grammars/{dart,lua,scala}/parser.c` (line 1 `/* Automatically @generated by tree-sitter */`, dart's line adding a ` v0.25.10` version), `__tests__/fixtures/tail-render-ts/types/worker-configuration.d.ts` (line 1 `// Generated by wrangler. DO NOT EDIT.`) and `__tests__/generated-flag-index.test.ts` (line 5 quotes the `DO NOT EDIT` banner inside a doc comment — a hand-written test read as generated: the residual of the `DO NOT EDIT` marker, REPORTED, harmless here because the file is also `is_test = 1`); the headline now opens `src/mcp/tools.ts — handleExplore (cx 256), src/extraction/tree-sitter.ts — extractCall (cx 244)` (the third entry is REPORTED — whichever production symbol follows), no `parser.c` on it; `--include-all` puts `ts_lex (cx 322)` back first; the `--full` section lists no generated `parser.c` row and no `__tests__/` row (every codegraph `__tests__/` row above threshold carries `is_test = 1` on the fresh store) and ends with the exclusion bullet; hand-written tree-sitter EXTERNAL SCANNERS under the same directory — `codegraph-kernel/grammars/scala/scanner.c:295 tree_sitter_scala_external_scanner_scan (cx 83)`, `kotlin/scanner.c scan_automatic_semicolon (cx 38)` — begin with `#include` lines, carry no marker and NO persisted exclusion fact, and therefore STAY RANKED (RG-REQ-009-L01: a file distinguishable by no persisted fact stays ranked; OC-1 — the INPUT-1 oracle asserted the directory, not the fact); the seam equals the evidence"
+      },
+      "expected": "exit 0: with the flag populated, codegraph's complexity centers rank its own TypeScript instead of tree-sitter's generated C, and the section says how many symbols it set aside and how to see them",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "codegraph FRESH candidate index. is_generated=1 == the 5 expected files exactly. Headline opens `src/mcp/tools.ts — handleExplore (cx 256), src/extraction/tree-sitter.ts — extractCall (cx 244), …`, no parser.c. --full section (OC-1 fact-based grep) has no grammars/*/parser.c, no __tests__/, ends with the excluded bullet. --include-all restores lua/parser.c ts_lex. Seam: rows 191, excluded 12, count 179, 5 generated — equals evidence (scope production/12).",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-cg-index.txt, cs-cg-a-small.txt, cs-cg-a-full.txt, cs-cg-a-all-small.txt, cs-cg-a.json; -after root kept for the manager"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C13",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-001-L08",
+        "RG-REQ-008-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/COMPLEXITY-SCOPE-1-poco-after && mkdir -p /private/tmp/COMPLEXITY-SCOPE-1-poco-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-poco-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-poco-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/cs-po-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/cs-po-index.txt\"; exit 1; } && python3 -c \"import sqlite3, glob\ndb = glob.glob('/private/tmp/COMPLEXITY-SCOPE-1-poco-after/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\ngot = sorted(r[0] for r in k.execute('select path from files where is_generated = 1'))\nassert got == ['Data/SQLParser/src/parser/bison_parser.cpp', 'Data/SQLParser/src/parser/bison_parser.h'], got\nprint('is_generated=1:', got)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-poco-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-poco-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget small > /tmp/cs-po-a-small.txt 2> /tmp/cs-po-a-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-po-a-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-poco-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-poco-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --full > /tmp/cs-po-a-full.txt 2> /tmp/cs-po-a-full.txt.err ) || { echo \"RUN-FAILED /tmp/cs-po-a-full.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-poco-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-poco-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --json > /tmp/cs-po-a.json 2> /tmp/cs-po-a.json.err ) || { echo \"RUN-FAILED /tmp/cs-po-a.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-poco-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-poco-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" docs list > /tmp/cs-po-docs-before.txt 2> /tmp/cs-po-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/cs-po-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-poco-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-poco-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/cs-po-docs-after.txt 2> /tmp/cs-po-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/cs-po-docs-after.txt\"; exit 1; } && grep -qE '^Complexity centers: Foundation/src/Windows1251Encoding\\.cpp — convert \\(cx 345\\), Foundation/src/Windows1250Encoding\\.cpp — convert \\(cx 225\\), ' /tmp/cs-po-a-small.txt && ! grep -E '^Complexity centers:' /tmp/cs-po-a-small.txt | grep -qE 'dependencies/|bison_parser' && ! sed -n '/^Complexity centers (by cyclomatic complexity)/,/^$/p' /tmp/cs-po-a-full.txt | grep -qE 'dependencies/|bison_parser' && grep -qE '^14 documents$' /tmp/cs-po-docs-before.txt && grep -qE '^  dependencies/README\\.md  readme$' /tmp/cs-po-docs-before.txt && grep -qE '^13 documents$' /tmp/cs-po-docs-after.txt && grep -qE '^\\+1 vendored doc \\(excluded; third-party/dependency directories — see --json for the full set\\)$' /tmp/cs-po-docs-after.txt && ! grep -q 'dependencies/README' /tmp/cs-po-docs-after.txt && python3 - /private/tmp/COMPLEXITY-SCOPE-1-poco-after /tmp/cs-po-a.json <<'PY'\nimport sqlite3, glob, json, sys\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsegs = {'vendor','vendors','third_party','third-party','external','deps','node_modules','site-packages','dist-packages','dependencies','contrib'}\nvend = lambda p: p is not None and any(s.lower() in segs for s in p.split('/'))\nrows = k.execute(\"select f.path, n.name, cast(json_extract(m.value_json,'$.value') as integer) cx, f.is_test, f.is_generated from measurements m left join nodes n on m.target_stable_key = n.stable_key and n.snapshot_uid = m.snapshot_uid left join files f on n.file_uid = f.file_uid where m.snapshot_uid = (select snapshot_uid from snapshots order by created_at desc limit 1) and m.kind = 'cyclomatic_complexity' and cast(json_extract(m.value_json,'$.value') as integer) >= 20\").fetchall()\ndrop = lambda r: r[3] == 1 or r[4] == 1 or vend(r[0])\nex = [r for r in rows if drop(r)]\nd = json.load(open(jf)); ev = [s for s in d['value']['signals'] if s['value'].get('code') == 'HIGH_COMPLEXITY'][0]['value']['evidence']\nassert ev['scope'] == {'kind': 'production', 'excluded_count': len(ex)}, (ev['scope'], len(ex))\nassert ev['high_complexity_count'] == len(rows) - len(ex), (ev['high_complexity_count'], len(rows), len(ex))\nfor t in ev['top_complex']:\n    assert not any(r[0] == t.get('file') and drop(r) for r in rows), t\nprint('seam ok: rows', len(rows), 'excluded', len(ex), 'count', ev['high_complexity_count'], 'generated files', k.execute('select count(*) from files where is_generated = 1').fetchone()[0])\nPY",
+        "cwd": ".",
+        "environment": "NEW isolated root /private/tmp/COMPLEXITY-SCOPE-1-poco-after: a fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/poco by the candidate (~30 s); the pre-provisioned /private/tmp/COMPLEXITY-SCOPE-1-poco-before served by the before binary for the docs comparison; all under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the after root STAYS",
+        "inputs": "poco reindexed by the candidate: exactly two files flagged generated — `Data/SQLParser/src/parser/bison_parser.cpp` and `.h` (line 1 `/* A Bison parser, made by GNU Bison 3.8.2.  */`); the headline no longer opens with `dependencies/pcre2/src/pcre2_match.c — match (cx 1580)` (vendored by the new `dependencies` segment; 217 rows under `dependencies/` or `is_test` on the old index) nor `Data/SQLParser/src/parser/bison_parser.cpp — yyparse (cx 391)` (generated) but with `Foundation/src/Windows1251Encoding.cpp — convert (cx 345), Foundation/src/Windows1250Encoding.cpp — convert (cx 225)`; the excluded count is REPORTED (the seam derives it from the store); poco's `*/testsuite/*` files (788, CppUnit) carry `is_test = 0` on the before AND after stores — the shipped structural detector (RG-REQ-001-L07, gtest markers) does not recognise CppUnit, so e.g. `Foundation/testsuite/src/TestApp.cpp:240 main (cx 42)` STAYS RANKED (no persisted fact; OC-2 — the INPUT-1 oracle asserted the directory; follow-up IS-TEST-CPPUNIT-1 in §8). Docs (RG-REQ-008-L04, a pre-authorised CHANGE): before `14 documents` listing `dependencies/README.md  readme`; after `13 documents` and `+1 vendored doc (excluded; third-party/dependency directories — see --json for the full set)` — the one document under the widened segment list"
+      },
+      "expected": "exit 0: poco's complexity centers rank poco's own code (its Windows codepage encoders) and the docs inventory counts its one dependency README out loud — both from the one vendored predicate",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "poco FRESH candidate index. is_generated=1 == bison_parser.cpp and .h exactly. Headline opens `Foundation/src/Windows1251Encoding.cpp — convert (cx 345), Foundation/src/Windows1250Encoding.cpp — convert (cx 225), …`, no dependencies/ or bison; --full (OC-2 fact-based grep) clean. docs: before `14 documents` incl. `dependencies/README.md  readme`; after `13 documents` + `+1 vendored doc (excluded; third-party/dependency directories — see --json for the full set)`, dependencies/README dropped. Seam: rows 389, excluded 218, count 171, 2 generated — equals evidence (scope production/218).",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-po-index.txt, cs-po-a-small.txt, cs-po-a-full.txt, cs-po-a.json, cs-po-docs-before.txt, cs-po-docs-after.txt; -after root kept"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C14",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-003-L02",
+        "RG-REQ-001-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after && mkdir -p /private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/cs-rg-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/cs-rg-index.txt\"; exit 1; } && python3 -c \"import sqlite3, glob\ndb = glob.glob('/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\ngot = sorted(r[0] for r in k.execute('select path from files where is_generated = 1'))\nassert got == [], got\nprint('is_generated=1:', got)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget small > /tmp/cs-rg-a-small.txt 2> /tmp/cs-rg-a-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-rg-a-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --full > /tmp/cs-rg-a-full.txt 2> /tmp/cs-rg-a-full.txt.err ) || { echo \"RUN-FAILED /tmp/cs-rg-a-full.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --include-all --full > /tmp/cs-rg-a-all-full.txt 2> /tmp/cs-rg-a-all-full.txt.err ) || { echo \"RUN-FAILED /tmp/cs-rg-a-all-full.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --json > /tmp/cs-rg-a.json 2> /tmp/cs-rg-a.json.err ) || { echo \"RUN-FAILED /tmp/cs-rg-a.json\"; exit 1; } && grep -qE '^Complexity centers: rust/crates/storage/src/indexer_impl\\.rs — copy_forward_unchanged_files \\(cx 93\\), ' /tmp/cs-rg-a-small.txt && ! grep -E '^Complexity centers:' /tmp/cs-rg-a-small.txt | grep -q '/tests/' && ! sed -n '/^Complexity centers (by cyclomatic complexity)/,/^$/p' /tmp/cs-rg-a-full.txt | grep -qE 'rust/crates/[^ ]*/tests/|src/deps/' && sed -n '/^Complexity centers (by cyclomatic complexity)/,/^$/p' /tmp/cs-rg-a-all-full.txt | grep -qE '^  - rust/crates/storage/tests/parity\\.rs:[0-9]+ — dispatch_op \\(cx 92\\)$' && sed -n '/^Complexity centers (by cyclomatic complexity)/,/^$/p' /tmp/cs-rg-a-all-full.txt | grep -qE '^  - rust/crates/module-queries/src/deps/compose\\.rs:[0-9]+ — compose_dependency_summaries \\(cx 36\\)$' && python3 - /private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after /tmp/cs-rg-a.json <<'PY'\nimport sqlite3, glob, json, sys\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsegs = {'vendor','vendors','third_party','third-party','external','deps','node_modules','site-packages','dist-packages','dependencies','contrib'}\nvend = lambda p: p is not None and any(s.lower() in segs for s in p.split('/'))\nrows = k.execute(\"select f.path, n.name, cast(json_extract(m.value_json,'$.value') as integer) cx, f.is_test, f.is_generated from measurements m left join nodes n on m.target_stable_key = n.stable_key and n.snapshot_uid = m.snapshot_uid left join files f on n.file_uid = f.file_uid where m.snapshot_uid = (select snapshot_uid from snapshots order by created_at desc limit 1) and m.kind = 'cyclomatic_complexity' and cast(json_extract(m.value_json,'$.value') as integer) >= 20\").fetchall()\ndrop = lambda r: r[3] == 1 or r[4] == 1 or vend(r[0])\nex = [r for r in rows if drop(r)]\nd = json.load(open(jf)); ev = [s for s in d['value']['signals'] if s['value'].get('code') == 'HIGH_COMPLEXITY'][0]['value']['evidence']\nassert ev['scope'] == {'kind': 'production', 'excluded_count': len(ex)}, (ev['scope'], len(ex))\nassert ev['high_complexity_count'] == len(rows) - len(ex), (ev['high_complexity_count'], len(rows), len(ex))\nfor t in ev['top_complex']:\n    assert not any(r[0] == t.get('file') and drop(r) for r in rows), t\nprint('seam ok: rows', len(rows), 'excluded', len(ex), 'count', ev['high_complexity_count'], 'generated files', k.execute('select count(*) from files where is_generated = 1').fetchone()[0])\nPY",
+        "cwd": ".",
+        "environment": "NEW isolated root /private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after: a fresh index of the CANDIDATE tree of this repository by the candidate (~8 s); STAYS",
+        "inputs": "repo-graph indexed by the candidate: no file carries a marker (0 generated — which requires that no candidate source file, `generated_sniff.rs` and the new tests included, has a marker literal within its first eight lines; §2.1.1); the headline opens with `rust/crates/storage/src/indexer_impl.rs — copy_forward_unchanged_files (cx 93)` and `rust/crates/storage/tests/parity.rs — dispatch_op (cx 92)` (the audit's #2, `is_test = 1`) is gone from every production view but present under `--include-all --full`; RESIDUAL (REPORTED, one example per class — a pre-existing predicate outcome this slice neither introduces nor fixes): `rust/crates/module-queries/src/deps/compose.rs — compose_dependency_summaries (cx 36)` is excluded because the pre-existing `deps` segment reads repo-graph's own `src/deps/` module as vendored (it shows under `--include-all --full`); follow-up VENDORED-SEGMENT-DEPS-1 in §8"
+      },
+      "expected": "exit 0: repo-graph's own complexity centers name production code, tests are set aside and recoverable, and the `deps`-segment residual is visible to the reader through the flag rather than hidden",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "repo-graph SELF index (cycle-2 candidate tree). is_generated=1 == [] — no candidate file (generated_sniff.rs, new tests, edited support.rs) carries a marker in its first 8 lines. Headline opens `rust/crates/storage/src/indexer_impl.rs — copy_forward_unchanged_files (cx 93), …`, no /tests/. --full has no rust/crates/*/tests/ or src/deps/. --include-all --full shows `rust/crates/storage/tests/parity.rs:159 — dispatch_op (cx 92)` and `rust/crates/module-queries/src/deps/compose.rs — compose_dependency_summaries (cx 36)`. Seam: rows 191, excluded 2, count 189, 0 generated — equals evidence.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-rg-index.txt, cs-rg-a-small.txt, cs-rg-a-full.txt, cs-rg-a-all-full.txt, cs-rg-a.json; -after root kept"
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C15",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-001-L08",
+        "P-CS-04",
+        "RG-REQ-008-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" orient --budget small > /tmp/cs-lv-b-small.txt 2> /tmp/cs-lv-b-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-lv-b-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" orient --json > /tmp/cs-lv-b.json 2> /tmp/cs-lv-b.json.err ) || { echo \"RUN-FAILED /tmp/cs-lv-b.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget small > /tmp/cs-lv-c-small.txt 2> /tmp/cs-lv-c-small.txt.err ) || { echo \"RUN-FAILED /tmp/cs-lv-c-small.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --json > /tmp/cs-lv-c.json 2> /tmp/cs-lv-c.json.err ) || { echo \"RUN-FAILED /tmp/cs-lv-c.json\"; exit 1; } && grep '^Complexity centers' /tmp/cs-lv-b-small.txt > /tmp/cs-lv-b-line.txt && grep '^Complexity centers' /tmp/cs-lv-c-small.txt > /tmp/cs-lv-c-line.txt && diff /tmp/cs-lv-b-line.txt /tmp/cs-lv-c-line.txt && grep -qE '^Complexity centers: benchmarks/db_bench\\.cc — Run \\(cx 36\\), benchmarks/db_bench\\.cc — main \\(cx 32\\), db/db_impl\\.cc — DoCompactionWork \\(cx 32\\) \\(\\+5 more above threshold — rmap hotspots\\)$' /tmp/cs-lv-c-small.txt && rm -rf /private/tmp/COMPLEXITY-SCOPE-1-leveldb-after && mkdir -p /private/tmp/COMPLEXITY-SCOPE-1-leveldb-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/cs-lv-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/cs-lv-index.txt\"; exit 1; } && python3 -c \"import sqlite3, glob\ndb = glob.glob('/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\ngot = sorted(r[0] for r in k.execute('select path from files where is_generated = 1'))\nassert got == [], got\nprint('is_generated=1:', got)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" hotspots > /tmp/cs-lv-hot-before.txt 2> /tmp/cs-lv-hot-before.txt.err ) || { echo \"RUN-FAILED /tmp/cs-lv-hot-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" hotspots > /tmp/cs-lv-hot-after.txt 2> /tmp/cs-lv-hot-after.txt.err ) || { echo \"RUN-FAILED /tmp/cs-lv-hot-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/COMPLEXITY-SCOPE-1-before-bin:$PATH\" \"/private/tmp/COMPLEXITY-SCOPE-1-before-bin/rmap\" docs list > /tmp/cs-lv-docs-before.txt 2> /tmp/cs-lv-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/cs-lv-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after RMAP_SOCKET_PATH=/private/tmp/COMPLEXITY-SCOPE-1-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/cs-lv-docs-after.txt 2> /tmp/cs-lv-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/cs-lv-docs-after.txt\"; exit 1; } && diff /tmp/cs-lv-hot-before.txt /tmp/cs-lv-hot-after.txt && diff /tmp/cs-lv-docs-before.txt /tmp/cs-lv-docs-after.txt && python3 -c \"import json\nev = lambda p: [s for s in json.load(open(p))['value']['signals'] if s['value'].get('code') == 'HIGH_COMPLEXITY'][0]['value']['evidence']\nb, c = ev('/tmp/cs-lv-b.json'), ev('/tmp/cs-lv-c.json')\nassert c['scope'] == {'kind': 'production', 'excluded_count': 0}, c['scope']\ndel c['scope']; assert b == c, 'leveldb evidence must be identical apart from the additive scope'\nprint('leveldb: nothing excluded, evidence identical')\"",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/COMPLEXITY-SCOPE-1-leveldb-before (both binaries) and NEW /private/tmp/COMPLEXITY-SCOPE-1-leveldb-after (fresh index by the candidate, ~1 s); under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the after root STAYS",
+        "inputs": "leveldb — a repository with nothing to exclude: 8 rows above threshold, none in a test or vendored path; `table/block.cc` line 5 `// Decodes the blocks generated by block_builder.cc.` is the hand-written header that a `generated by` marker would have flagged (the marker was dropped from the frozen list for this reason) — the reindex flags 0 files; the complexity line is byte-identical between the binaries with NO exclusion suffix (a line that would read the same on every repo is not printed when nothing was excluded), the JSON evidence identical apart from `scope`, and `hotspots` / `docs list` byte-identical between the before index+binary and the after index+binary"
+      },
+      "expected": "exit 0: a repository with nothing to exclude reads exactly as before (no behavior change) — hotspots and docs untouched, and the narrowed marker list leaves a hand-written file unflagged",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "leveldb — nothing to exclude. On the -before OLD index the `Complexity centers` line is byte-identical before vs candidate (diff empty) with NO exclusion suffix: `benchmarks/db_bench.cc — Run (cx 36), benchmarks/db_bench.cc — main (cx 32), db/db_impl.cc — DoCompactionWork (cx 32) (+5 more above threshold — rmap hotspots)`. Fresh candidate index: is_generated == []. `hotspots` and `docs list` STDOUT byte-identical before/after (diffs empty). JSON evidence identical apart from additive scope production/0.",
+        "supportingEvidence": [
+          "EXECUTED; /tmp/cs-lv-b-small.txt, cs-lv-c-small.txt, cs-lv-b.json, cs-lv-c.json, cs-lv-hot-before/after.txt, cs-lv-docs-before/after.txt",
+          "The hotspots/docs comparison uses stdout only (stderr → separate .err per the check); the `note: running in sandbox-local mode (state root: …)` line is a stderr diagnostic that names the necessarily-different root path and is not product output."
+        ]
+      }
+    },
+    {
+      "checkId": "CS-C16",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-CS-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/COMPLEXITY-SCOPE-1/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && ! test -d /private/tmp/COMPLEXITY-SCOPE-1-before-bin && ls -d /private/tmp/COMPLEXITY-SCOPE-1-codegraph-after /private/tmp/COMPLEXITY-SCOPE-1-poco-after /private/tmp/COMPLEXITY-SCOPE-1-repo-graph-after /private/tmp/COMPLEXITY-SCOPE-1-leveldb-after >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] (rust/crates/indexer/src/generated_sniff\\.rs|rust/crates/indexer/src/lib\\.rs|rust/crates/indexer/src/orchestrator\\.rs|rust/crates/repo\\-index/tests/is_generated_reproduction\\.rs|rust/crates/classification/src/vendored_path\\.rs|rust/crates/classification/src/lib\\.rs|rust/crates/daemon\\-runtime/src/handlers/quality/support\\.rs|rust/crates/daemon\\-runtime/src/dispatch\\.rs|rust/crates/daemon\\-runtime/src/orient_lg_decisions/served_e2e\\.rs|rust/crates/agent/src/storage_port\\.rs|rust/crates/agent/src/dto/signal\\.rs|rust/crates/agent/src/dto/coherent\\.rs|rust/crates/agent/src/lib\\.rs|rust/crates/agent/src/aggregators/complexity\\.rs|rust/crates/agent/src/aggregators/complexity_tests\\.rs|rust/crates/agent/src/ordering\\.rs|rust/crates/agent/src/orient/mod\\.rs|rust/crates/agent/src/orient/repo\\.rs|rust/crates/agent/tests/orient_repo_budget_identity\\.rs|rust/crates/agent/tests/orient_epoch_injection\\.rs|rust/crates/storage/src/agent_impl\\.rs|rust/crates/storage/tests/agent_impl\\.rs|rust/crates/rgr/src/commands/orient\\.rs|rust/crates/rgr/src/cli/usage\\.rs|rust/crates/rgr/src/presentation/orient_sections\\.rs|rust/crates/rgr/src/presentation/orient_density_tests\\.rs|rust/crates/rgr/tests/orient_command\\.rs)$' | grep -q . && git diff --check && ! grep -nE ' +$' rust/crates/indexer/src/generated_sniff.rs rust/crates/repo-index/tests/is_generated_reproduction.rs rust/crates/classification/src/vendored_path.rs",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in build-progress.md at step 0 equals the current one; no stray isolated daemon; the before-binary directory removed; the four `-after` roots kept for the manager's gate; `git status --short` names only the 27 candidate paths — the predicate matches the two porcelain XY status columns generically (each column ∈ {space, M, A, ?}, so the uncommitted worktree forms ` M `, `?? ` and staged `A `/`AM` all pass), never anchoring a status letter at column 1, then the path must equal one of the 27; no trailing whitespace"
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry byte-identical — no behavior change outside the isolated roots), the tree holds only the allocated paths, and nothing the builder created outlives the run except the four roots the manager sweeps at closeout",
+      "candidateSha256": "sha256:ffa49d83680bec541f729496adb33afe33a40c3112775263d0692c9f5931ad63",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "registry-before (4762fd94…d64c) == current registry digest (operator registry byte-identical). Only rmapd running is the operator's /Users/apple/.local/bin/rmapd. `git worktree remove --force` of the before-worktree done (the unrelated m-r2-baseline-worktree is not mine, untouched); /private/tmp/COMPLEXITY-SCOPE-1-before-bin removed. Four -after roots present. `git status --short` names only the 27 allocated paths (all under rust/crates/). `git diff --check` clean. No trailing whitespace in the 3 new files.",
+        "supportingEvidence": [
+          "EXECUTED; registry digest 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c before and after",
+          "Cycle-2 before binaries were built in a git worktree at HEAD (never a stash/checkout of the dirty tree), per the manager note (RG-REQ-011-L06)."
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/indexer/src/generated_sniff.rs",
+      "obligationIds": [
+        "RG-REQ-001-L08"
+      ],
+      "summary": "NEW pure is_generated_content(&str)->bool: true iff one of the four FROZEN markers occurs in the first 8 lines; no marker literal in its own first 8 lines."
+    },
+    {
+      "path": "rust/crates/indexer/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-001-L08"
+      ],
+      "summary": "Declare the generated_sniff module."
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-001-L08",
+        "RG-REQ-001-L09"
+      ],
+      "summary": "Wire the sniff at the fresh-extraction site; carry the STORED is_generated flag at the copy-forward site so a no-change refresh preserves it."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/is_generated_reproduction.rs",
+      "obligationIds": [
+        "RG-REQ-001-L08",
+        "RG-REQ-001-L09"
+      ],
+      "summary": "NEW reproduction test: flag persisted from a first-lines marker, hand-written files unflagged, flag survives a no-change refresh."
+    },
+    {
+      "path": "rust/crates/classification/src/vendored_path.rs",
+      "obligationIds": [
+        "RG-REQ-001-L08",
+        "RG-REQ-002-L02"
+      ],
+      "summary": "NEW single home for VENDORED_SEGMENTS (nine existing + dependencies + contrib) and is_vendored_path, moved verbatim."
+    },
+    {
+      "path": "rust/crates/classification/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-001-L08",
+        "RG-REQ-002-L02"
+      ],
+      "summary": "Export vendored_path so the agent aggregator and daemon consumers share one predicate."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/support.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02"
+      ],
+      "summary": "F-CS-002 FIX (cycle 2): re-export BOTH names — `#[allow(unused_imports)] pub use repo_graph_classification::{is_vendored_path, VENDORED_SEGMENTS};` — completing the allocated forwarding surface (§2.1.2). The allow is required because `support` is a pub(crate) module with no in-crate consumer of the constant, so a bare re-export trips the -D warnings gate; documented in-place."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "handle_orient reads include_all (absent→false, non-boolean→invalid_request) and forwards it to orient_cancellable."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_lg_decisions/served_e2e.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "P-CS-02"
+      ],
+      "summary": "Construct the new ComplexityScope in the served-e2e fixture; the certificate comparison is unchanged."
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "P-CS-01"
+      ],
+      "summary": "AgentComplexityMeasurement gains is_test and is_generated (NULL→false)."
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "HighComplexityEvidence gains scope: ComplexityScope (serde kind-tagged sum Production{excluded_count} | All)."
+    },
+    {
+      "path": "rust/crates/agent/src/dto/coherent.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01"
+      ],
+      "summary": "Construct scope at the coherent-DTO literal site."
+    },
+    {
+      "path": "rust/crates/agent/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01"
+      ],
+      "summary": "Re-export ComplexityScope beside HighComplexityEvidence."
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-002-L02"
+      ],
+      "summary": "The scope filter after the unchanged FETCH_ALL read and before truncation; count from kept rows; signal emitted whenever the unfiltered set is non-empty. PLUS the F-CS-001 fix (cycle 1, retained): the doc comment states the aggregator makes only the one checkpointed FETCH_ALL read and does not call count_high_complexity_symbols (that port method stays for the LiveGraph certificate)."
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01"
+      ],
+      "summary": "Aggregator unit tests over FakeStorage covering exclusion+count, include-all, all-excluded, fileless, storage-count vs kept-count, no-row."
+    },
+    {
+      "path": "rust/crates/agent/src/ordering.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01"
+      ],
+      "summary": "Update the measurement literal for the two new flag fields."
+    },
+    {
+      "path": "rust/crates/agent/src/orient/mod.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-012-L06"
+      ],
+      "summary": "orient_cancellable takes include_all and forwards it; the 5-arg orient(...) wrapper keeps its signature (passes false)."
+    },
+    {
+      "path": "rust/crates/agent/src/orient/repo.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01"
+      ],
+      "summary": "Pass include_all into aggregate_cancellable."
+    },
+    {
+      "path": "rust/crates/agent/tests/orient_repo_budget_identity.rs",
+      "obligationIds": [
+        "RG-REQ-003-L07",
+        "RG-REQ-012-L04"
+      ],
+      "summary": "Budget-identity fixture gains the two false flags; still asserts high_complexity_count==30 at every budget."
+    },
+    {
+      "path": "rust/crates/agent/tests/orient_epoch_injection.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01"
+      ],
+      "summary": "Pass the new include_all:false argument to orient_cancellable."
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "P-CS-01"
+      ],
+      "summary": "query_high_complexity_symbols_cancellable selects f.is_test, f.is_generated; WHERE unchanged so the certificate row set is preserved."
+    },
+    {
+      "path": "rust/crates/storage/tests/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "P-CS-01"
+      ],
+      "summary": "NEW test that the read returns all four rows with flags per row and false/false for the fileless row; count still 4."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/orient.rs",
+      "obligationIds": [
+        "RG-REQ-009-L01",
+        "RG-REQ-012-L01"
+      ],
+      "summary": "New value-less --include-all flag; usage error with --focus; sets params[include_all]."
+    },
+    {
+      "path": "rust/crates/rgr/src/cli/usage.rs",
+      "obligationIds": [
+        "RG-REQ-012-L01"
+      ],
+      "summary": "Document --include-all in orient usage."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_sections.rs",
+      "obligationIds": [
+        "RG-REQ-003-L02",
+        "RG-REQ-012-L04",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "Headline suffix parts and the --full breakdown bullet naming the excluded count and the --include-all flag (no engine/basis label); scope absent→today's lines; malformed→`complexity scope unreadable on this snapshot`."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_density_tests.rs",
+      "obligationIds": [
+        "RG-REQ-003-L02",
+        "RG-REQ-012-L04"
+      ],
+      "summary": "Renderer JSON-fixture tests for production/all/empty-top/absent/malformed scope and budget invariance."
+    },
+    {
+      "path": "rust/crates/rgr/tests/orient_command.rs",
+      "obligationIds": [
+        "RG-REQ-012-L01",
+        "RG-REQ-009-L01"
+      ],
+      "summary": "CLI tests: --include-all with --focus is a usage error; --include-all is an accepted flag."
+    }
+  ],
+  "completedAt": "2026-09-20T19:46:32.031Z",
+  "limitations": [
+    "F-CS-002 RESOLUTION carries a correction to the reviewer/manager premise, reported transparently rather than bent to fit: re-exporting BOTH names from support.rs was allocated, and the review/manager stated `a pub use is public API, not an unused import — clippy is green either way`. That is EMPIRICALLY FALSE here — `support` is `pub(crate) mod support` (quality/mod.rs:22), so the `pub use` is crate-capped, and with no in-crate consumer of VENDORED_SEGMENTS a bare re-export makes clippy `-D warnings` fail with `unused import: VENDORED_SEGMENTS` (verified by executing clippy on daemon-runtime before adding the allow). To honour BOTH the reviewer's required action (both names forwarded) AND CS-C10, the re-export carries `#[allow(unused_imports)]` — the exact override rustc's help text names for an intentional-but-unconsumed re-export — with an in-file comment stating why. No contrived in-crate consumer was invented and no gate was bent. If the reviewer prefers the bare `pub use` without the allow, that requires either making `support` a `pub mod` (out of the 27 allocated paths — quality/mod.rs is not allocated) or adding a real consumer; both exceed this slice and would be a DECISION for the human.",
+    "Per CLAUDE.md 'Gates in a relay run', the whole-workspace cargo test, the smoke protocol and the isolated dogfood are the OPERATOR's gate after acceptance; not run by the builder and not a gap. The per-crate suites the packet names (CS-C01..C10) were all run to completion in the foreground.",
+    "The three new files remain staged (git add, not committed) so the CS-C03 git grep one-definition assertion resolves; the working tree is uncommitted for review and CS-C16's status regex admits the staged `A` column.",
+    "HEAD is 9f18488 (the selection packet's base revision); `git diff --stat 821c59a HEAD -- rust` is EMPTY so the rust tree IS the verified tree — recorded in build-progress.md."
+  ],
+  "report": "RESULT (cycle 2, revision iteration 1): all 16 checks CS-C01..C16 PASS; the sole cycle-1 blocking finding F-CS-002 is resolved. The tree still held the cycle-1 candidate (not re-applied); the one change this cycle is in the allocated path rust/crates/daemon-runtime/src/handlers/quality/support.rs — it now forwards BOTH `is_vendored_path` and `VENDORED_SEGMENTS` from the single classification::vendored_path definition, completing the allocated §2.1.2 forwarding surface, with `#[allow(unused_imports)]` and an explanatory comment (see the first limitation for why the allow is necessary and why the review's 'clippy green either way' premise is false). The F-CS-001 doc-comment fix from cycle 1 is retained. 27 files changed (24 M + 3 A), all under rust/crates/; git diff --check clean.\n\nCODE-UNDER-ANALYSIS EXAMPLES (quoted from the checkouts and the cycle-2 candidate stores):\n(1) MARKER LINES and what orient answers now — codegraph `codegraph-kernel/grammars/lua/parser.c:1` = `/* Automatically @generated by tree-sitter */`: on the fresh candidate index is_generated=1 and its `ts_lex (cx 322)` LEAVES the headline (before: first entry; after: `src/mcp/tools.ts — handleExplore (cx 256), src/extraction/tree-sitter.ts — extractCall (cx 244), src/ui-server/api/steps.ts — buildSteps (cx 211)`) and returns under `orient --include-all` (first entry again). poco `Data/SQLParser/src/parser/bison_parser.cpp:1` = `/* A Bison parser, made by GNU Bison 3.8.2.  */`: is_generated=1, yyparse gone. codegraph `__tests__/fixtures/tail-render-ts/types/worker-configuration.d.ts:1` = `// Generated by wrangler. DO NOT EDIT.`: is_generated=1, excluded.\n(2) EXCLUDED TEST SYMBOL per corpus — codegraph `__tests__/fixtures/displacement-ts/src/pipeline/ingest.ts:13` = `export function ingestRecords(batch: RawRecord[], options: PipelineOptions): PipelineRecord[] {` (is_test=1). repo-graph `rust/crates/storage/tests/parity.rs:159` = `fn dispatch_op(` (is_test=1, cx 92): excluded from production, shown under --include-all --full. poco: its CppUnit testsuite files carry is_test=0 (the shipped detector recognises gtest, not CppUnit), so poco has NO is_test exclusion — its 218 excluded rows are VENDORED (dependencies/…) + the 2 generated bison files; `Foundation/testsuite/src/TestApp.cpp:240` = `int main(int argc, char** argv)` STAYS RANKED (honest residual OC-2 / follow-up IS-TEST-CPPUNIT-1).\n(3) VENDORED SYMBOL — poco `dependencies/pcre2/src/pcre2_match.c:687` = `match(PCRE2_SPTR start_eptr, PCRE2_SPTR start_ecode, uint16_t top_bracket,` (the cx-1580 static `match` that headlined poco before): excluded by the `dependencies` segment.\n(4) RESIDUALS — codegraph `__tests__/generated-flag-index.test.ts:5` = ` * filenames, a `// Code generated by … DO NOT EDIT.` banner in the header — is` : a hand-written test whose doc comment quotes the DO NOT EDIT banner, so flagged is_generated=1 (harmless — also is_test=1). repo-graph `rust/crates/module-queries/src/deps/compose.rs` `compose_dependency_summaries (cx 36)` (is_test=0/is_generated=0): excluded by the PRE-EXISTING `deps` vendored segment reading repo-graph's own src/deps/ as vendored — visible under --include-all --full (follow-up VENDORED-SEGMENT-DEPS-1). Hand-written tree-sitter external scanner `codegraph-kernel/grammars/scala/scanner.c:295` = `bool tree_sitter_scala_external_scanner_scan(void *payload, TSLexer *lexer,` : no marker, no persisted exclusion fact → STAYS RANKED (RG-REQ-009-L01). Narrowing witness leveldb `table/block.cc:5` = `// Decodes the blocks generated by block_builder.cc.` : the hand-written header the dropped `generated by` marker would have false-flagged — the four-marker list leaves it unflagged (0 generated on leveldb).\n(5) BEFORE/AFTER HEADLINES — codegraph BEFORE `…lua/parser.c — ts_lex (cx 322), …handleExplore (cx 256), …extractCall (cx 244) (+188 more …)` → AFTER `src/mcp/tools.ts — handleExplore (cx 256), src/extraction/tree-sitter.ts — extractCall (cx 244), src/ui-server/api/steps.ts — buildSteps (cx 211) (+176 more …; 12 generated/vendored/test symbols excluded — --include-all)`. poco AFTER `Foundation/src/Windows1251Encoding.cpp — convert (cx 345), Foundation/src/Windows1250Encoding.cpp — convert (cx 225), Foundation/src/Latin2Encoding.cpp — convert (cx 177) (+168 more …; 218 … excluded — --include-all)`; docs 14 → 13 + `+1 vendored doc (…)`. repo-graph AFTER `rust/crates/storage/src/indexer_impl.rs — copy_forward_unchanged_files (cx 93), rust/crates/indexer/src/orchestrator.rs — run_pipeline (cx 76), rust/crates/storage/src/migrations/mod.rs — run_migrations (cx 76) (+186 more …; 2 … excluded — --include-all)`. leveldb: byte-identical before/after, no suffix.\n\nSTORE SEAMS (python recomputes is_test||is_generated||is_vendored_path over each store and equals the JSON evidence): codegraph old-index 191/10/181/0gen; codegraph fresh 191/12/179/5gen; poco 389/218/171/2gen; repo-graph 191/2/189/0gen; leveldb 0 excluded, evidence identical apart from additive scope.\n\nABSTRACTIONS: ComplexityScope is a serde-kind-tagged sum (Production{excluded_count} | All), concrete users the aggregator + coherent DTO + served-e2e fixture — fixed variants, growing consumers → sum type + exhaustive match. classification::vendored_path is one home earned by the agent aggregator and the daemon hotspots/docs/orient consumers sharing one predicate; no new crate edge (agent→classification and storage→classification already exist), no cycle.\n\nPreservation: the LiveGraph complexity certificate read/comparison, hotspots, docs logic, seed partition/tiering, is_test, exit codes and schema are unchanged (byte-identical guards on seed_impl.rs, hotspots.rs, complexity_cert.rs; P-CS-01..05). Isolation held: every rmap/rmapd ran under an isolated RMAP_STATE_ROOT + stdio transport; the operator registry digest (4762fd94…d64c) is byte-identical before and after; cycle-2 before binaries came from a git worktree at HEAD (removed before CS-C16); the four -after roots are left for the manager."
+}

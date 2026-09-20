@@ -1682,7 +1682,13 @@ impl AgentStorageRead for StorageConnection {
             .prepare(
                 // ANCHORS-EVERYWHERE-1: also SELECT n.line_start (same joined `nodes` row as
                 // f.path) so the complexity breakdown row can anchor `file:line`.
-                "SELECT m.target_stable_key, n.name, f.path, n.line_start, m.value_json \
+                // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): also SELECT f.is_test, f.is_generated —
+                // the persisted file facts the agent aggregator partitions on. The WHERE clause
+                // is UNCHANGED (no filter in SQL): the LiveGraph complexity certificate compares
+                // the FULL above-threshold set this read returns (P-CS-01), so any scope filter
+                // stays agent-side.
+                "SELECT m.target_stable_key, n.name, f.path, n.line_start, m.value_json, \
+				        f.is_test, f.is_generated \
 				 FROM measurements m \
 				 LEFT JOIN nodes n ON m.target_stable_key = n.stable_key \
 				   AND n.snapshot_uid = m.snapshot_uid \
@@ -1706,6 +1712,12 @@ impl AgentStorageRead for StorageConnection {
                     .filter(|v| *v > 0)
                     .map(|v| v as u64);
                 let value_json: String = row.get(4)?;
+                // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): the file facts, columns 5/6. A LEFT JOIN
+                // miss (a measurement whose node has no file row) yields SQL NULL → `Option`
+                // None → `false`: no persisted fact means "kept, not excluded", never a
+                // fabricated exclusion.
+                let is_test: bool = row.get::<_, Option<i64>>(5)?.unwrap_or(0) == 1;
+                let is_generated: bool = row.get::<_, Option<i64>>(6)?.unwrap_or(0) == 1;
 
                 // Parse the complexity value from JSON {"value": N}
                 let complexity: u64 = serde_json::from_str::<serde_json::Value>(&value_json)
@@ -1713,7 +1725,15 @@ impl AgentStorageRead for StorageConnection {
                     .and_then(|v| v.get("value").and_then(|n| n.as_u64()))
                     .unwrap_or(0);
 
-                Ok((stable_key, symbol_name, file_path, line, complexity))
+                Ok((
+                    stable_key,
+                    symbol_name,
+                    file_path,
+                    line,
+                    complexity,
+                    is_test,
+                    is_generated,
+                ))
             })
             .map_err(map_err("query_high_complexity_symbols"))?;
 
@@ -1754,7 +1774,7 @@ impl AgentStorageRead for StorageConnection {
                     "cancelled (client disconnected during complexity materialization)",
                 ));
             }
-            let (stable_key, symbol_name, file_path, line, complexity) =
+            let (stable_key, symbol_name, file_path, line, complexity, is_test, is_generated) =
                 row.map_err(map_err("query_high_complexity_symbols"))?;
 
             if complexity >= min_threshold {
@@ -1764,6 +1784,8 @@ impl AgentStorageRead for StorageConnection {
                     file_path,
                     line,
                     complexity,
+                    is_test,
+                    is_generated,
                 });
             }
         }

@@ -6,9 +6,10 @@
 
 use super::AggregatorOutput;
 use crate::dto::budget::Budget;
-use crate::dto::signal::{ComplexSymbolEvidence, HighComplexityEvidence, Signal};
+use crate::dto::signal::{ComplexSymbolEvidence, ComplexityScope, HighComplexityEvidence, Signal};
 use crate::errors::AgentStorageError;
 use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
+use repo_graph_classification::is_vendored_path;
 
 /// Default complexity threshold for HIGH_COMPLEXITY signal.
 /// Symbols with cyclomatic complexity >= this value are flagged.
@@ -35,7 +36,8 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     snapshot_uid: &str,
     budget: Budget,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    aggregate_cancellable(storage, snapshot_uid, budget, &mut || {
+    // Production scope (`include_all = false`): the default orientation view.
+    aggregate_cancellable(storage, snapshot_uid, budget, false, &mut || {
         std::ops::ControlFlow::Continue(())
     })
 }
@@ -47,6 +49,7 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
     budget: Budget,
+    include_all: bool,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<AggregatorOutput, AgentStorageError> {
     aggregate_with_threshold_cancellable(
@@ -54,6 +57,7 @@ pub fn aggregate_cancellable<S: AgentStorageRead + ?Sized>(
         snapshot_uid,
         DEFAULT_COMPLEXITY_THRESHOLD,
         budget,
+        include_all,
         cancel,
     )
 }
@@ -64,56 +68,87 @@ pub fn aggregate_with_threshold<S: AgentStorageRead + ?Sized>(
     snapshot_uid: &str,
     threshold: u64,
     budget: Budget,
+    include_all: bool,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    aggregate_with_threshold_cancellable(storage, snapshot_uid, threshold, budget, &mut || {
-        std::ops::ControlFlow::Continue(())
-    })
+    aggregate_with_threshold_cancellable(
+        storage,
+        snapshot_uid,
+        threshold,
+        budget,
+        include_all,
+        &mut || std::ops::ControlFlow::Continue(()),
+    )
 }
 
-/// DAEMON-CANCEL-3: cancellable variant of [`aggregate_with_threshold`]. Only the
-/// FETCH_ALL `query_high_complexity_symbols` read is checkpointed — `count_*` is a
-/// single fast aggregate (not a materialization), left alone per the NARROW scope.
+/// DAEMON-CANCEL-3: cancellable variant of [`aggregate_with_threshold`]. This aggregator
+/// makes exactly one storage read — the FETCH_ALL `query_high_complexity_symbols` read,
+/// which is the checkpointed one — and derives `high_complexity_count` from the rows it
+/// retains after scoping. It does NOT call `count_high_complexity_symbols`; that port
+/// method remains only for the LiveGraph certificate, which compares the full storage set.
 pub fn aggregate_with_threshold_cancellable<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
     threshold: u64,
     budget: Budget,
+    include_all: bool,
     cancel: AgentCancelCheck<'_>,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-    // Get the true count of symbols exceeding threshold (not limited)
-    let count = storage.count_high_complexity_symbols(snapshot_uid, threshold)?;
-
-    if count == 0 {
-        return Ok(AggregatorOutput::empty());
-    }
-
-    // TRUNCATION-AUDIT-1: fetch the FULL above-threshold set, then apply a TOTAL deterministic
-    // sort (complexity DESC, then the unique stable_key) and cut to the budget cap HERE in the
-    // agent. We deliberately do NOT accept storage's `ORDER BY complexity DESC LIMIT N` cut: its
-    // ties at the cut boundary fall to SQLite rowid order, so the surviving sample would depend on
-    // storage row order rather than on the SET (the DR-EXPLAIN-CALLER-ORDER hazard). Owning the cut
-    // here makes the top-N sample a pure function of the above-threshold set — identical regardless
-    // of which store answered. Cost (honest): the table SCAN is already paid — `count_*` above passes
-    // over the same `cyclomatic_complexity` measurements. The added work is MATERIALISING the rows
-    // (`query_*` joins nodes+files and JSON-parses each, and filters the threshold in Rust, so it
-    // materialises every complexity row, not just the above-threshold minority) to pick the
-    // budget-capped top-N. This is bounded and paid once per orient (not a hot loop); the
-    // cost-OPTIMAL fix — a total `ORDER BY complexity DESC, target_stable_key LIMIT N` in the storage
-    // SQL so the LIMIT cut is itself deterministic — lives in the storage adapter, outside this
-    // slice's file scope, and is recorded as the follow-up. Determinism here is required NOW and is
-    // achievable agent-side.
-    let mut high_complexity = storage.query_high_complexity_symbols_cancellable(
+    // COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): read the FULL above-threshold set (unchanged
+    // FETCH_ALL read — the set the LiveGraph certificate compares, P-CS-01), then scope
+    // it HERE, agent-side. The aggregator no longer calls `count_high_complexity_symbols`
+    // (which counts the UNFILTERED set): `high_complexity_count` must be the count of the
+    // SCOPED set, so it is derived from the retained rows below. The port method stays for
+    // the LiveGraph certificate, which deliberately compares the full storage read.
+    //
+    // TRUNCATION-AUDIT-1: the top-N cut is owned here (a TOTAL sort by complexity DESC then
+    // the unique stable_key) so the sample is a pure function of the SET, not of storage row
+    // order. The cost-optimal `ORDER BY … LIMIT N` in SQL is recorded as a follow-up.
+    let mut rows = storage.query_high_complexity_symbols_cancellable(
         snapshot_uid,
         threshold,
         FETCH_ALL,
         cancel,
     )?;
-    crate::ordering::sort_complexity(&mut high_complexity);
+
+    // The UNFILTERED read being empty means no symbol exceeds the threshold — no signal
+    // (the former `count == 0` early return). When it is non-empty the signal is ALWAYS
+    // emitted, even if scoping excludes every row, so the reader is told what was set aside.
+    if rows.is_empty() {
+        return Ok(AggregatorOutput::empty());
+    }
+
+    // Scope the ranking. `--include-all` keeps every above-threshold symbol; the default
+    // production scope drops generated/vendored/test symbols (decided from the persisted
+    // `is_test`/`is_generated` file facts and the ONE `is_vendored_path` predicate) and
+    // reports how many it set aside. A row with no owning file (`file_path == None`) carries
+    // no persisted fact, so it is KEPT — never a fabricated exclusion.
+    let scope = if include_all {
+        ComplexityScope::All
+    } else {
+        let before = rows.len();
+        rows.retain(|m| {
+            let vendored = m
+                .file_path
+                .as_deref()
+                .map(is_vendored_path)
+                .unwrap_or(false);
+            !(m.is_test || m.is_generated || vendored)
+        });
+        ComplexityScope::Production {
+            excluded_count: (before - rows.len()) as u64,
+        }
+    };
+
+    // The honest total is the count of the SCOPED set (RG-REQ-009-L01), never the storage
+    // count of the unfiltered set.
+    let high_complexity_count = rows.len() as u64;
+
+    crate::ordering::sort_complexity(&mut rows);
     // ORIENT-DENSITY-1 §5: budget trades DEPTH — lean top-N at small/medium,
     // EVERY center (cap usize::MAX) at large/--full for a complete breakdown.
-    high_complexity.truncate(budget.max_complexity_centers());
+    rows.truncate(budget.max_complexity_centers());
 
-    let top: Vec<ComplexSymbolEvidence> = high_complexity
+    let top: Vec<ComplexSymbolEvidence> = rows
         .into_iter()
         .map(|m| ComplexSymbolEvidence {
             symbol: m.symbol_name,
@@ -125,9 +160,10 @@ pub fn aggregate_with_threshold_cancellable<S: AgentStorageRead + ?Sized>(
         .collect();
 
     let evidence = HighComplexityEvidence {
-        high_complexity_count: count,
+        high_complexity_count,
         threshold,
         top_complex: top,
+        scope,
     };
 
     Ok(AggregatorOutput {

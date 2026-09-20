@@ -113,6 +113,7 @@ pub use dto::{
         CheckIncompleteEvidence,
         CheckPassEvidence,
         ComplexSymbolEvidence,
+        ComplexityScope,
         CycleEvidence,
         // DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
         ExplainBoundaryEvidence,
