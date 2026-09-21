@@ -1087,7 +1087,64 @@ content-marker list on the real corpora before freezing it; a heredoc must be th
 allocate a forwarding surface nobody consumes. FOLLOW-UPS: IS-TEST-CPPUNIT-1, VENDORED-SEGMENT-DEPS-1, SUPPORT-REEXPORT-1,
 GENERATED-DECLARED-1 (repository-declared exclusions in one ecosystem-declarations module, per RG-REQ-009-L01's refinement),
 COMPLEXITY-SQL-LIMIT-1 (unchanged).
-NEXT: Q8 DOCS-DISCOVERY-1 needs RG-REQ-008-L01 ratified (open human decision); Q9 PYTHON-SELF-BINDING-1 is next launchable — one hour after this closeout.
+NEXT: Q8 DOCS-DISCOVERY-1 needs RG-REQ-008-L01 ratified (open human decision); Q9 PYTHON-SELF-BINDING-1 (shipped below, after the INPUT-5 re-baseline).
+
+RG-BOOTSTRAP-INPUT-5 re-baseline LANDED (2026-09-21, 0f815dc): the human ratified RG-REQ-005-L03's wording (D-PSB-002, option B — "Option b then"): a same-depth Python MRO collision "stays unresolved with its own basis code (`self_call_ambiguous_mro` … the row keeps the category `calls_obj_method_needs_type_info`) and its candidates persisted as evidence" — the earlier "its own category" named an axis with no reader mapping while the L's own verification criterion had always named the basis-code test; the criterion also states callers rows anchor the caller's declaration line. CC-6 (RG-REQ-009-L02's renamed test) and CC-7 (a dated evidence line: Q2 shipped df08725; residual RC-11 → ALIAS-SUSPICION-1) applied. codex gpt-5.6-terra standalone pass REFINE (the criterion must assert the persisted candidate evidence — applied) then ACCEPT; approval 5. Only rg-req-005 and rg-req-009 digests moved. CC-1 (RG-REQ-004-L02) and CC-4 (a cancellation L) still await the human.
+
+Q9 PYTHON-SELF-BINDING-1 SHIPPED (2026-09-21; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+`self.method()` / `cls.method()` in Python now binds through the class hierarchy on evidence, or stays unresolved and says
+why (RC-2 never worked: the extractor emitted `self.get_response` as a string target with no metadata, the resolver's only
+receiver-aware branch was spelled `this.`, and every such call ended as `calls_obj_method_needs_type_info` /
+`no_supporting_signal` — "couldn't attribute"). The fix is vertical and gated on one carrier: the extractor stamps
+`{"selfCall": true, "enclosingClass": "C"}` on 2-part `self.`/`cls.` keys inside a class (`emit_call_edge`, no key
+rewrite; chains and module-level calls carry nothing); `ResolverNode.superclasses` is parsed from the class's stored
+`superclass` text (raw `base.BaseHandler`, `Base, metaclass=ABCMeta`, `Generic[T]` → simple names; unreadable → empty,
+never a guess) at the storage read that already selected the metadata (no SQL change) and `ResolverIndex` gains
+`nodes_by_qualified_name`; ONE stage before the dotted fallback runs only on the carrier — the own class is the unique CLASS
+node named `enclosingClass` in the CALLER's file, the walk is breadth-first over unique same-named ancestor class nodes
+(0 or >1 end that branch), hits are METHOD nodes `<Class>.<m>` in that class's file, one hit binds, two or more at the first
+non-empty depth is the TERMINAL `TargetResolution::SelfCallAmbiguousMro(candidates)` (category unchanged, the row's metadata
+gains `mroCandidates` — the first resolver-written metadata key), no hit falls through to today's fallbacks; the classifier's
+first rule turns `mroCandidates` into `internal_candidate` + the NEW basis `self_call_ambiguous_mro` (additive vocabulary,
+version stays 6), `attribution_class` maps it to `your own code (call target not resolved)` (`EXPECTED` 17 → 18 — the
+criterion RG-REQ-005-L03 names), a parity fixture pins it; a malformed carrier never binds. CODE UNDER ANALYSIS: django —
+`explain BaseHandler.get_response` (django/core/handlers/base.py:138) BEFORE `Callers (0)`, AFTER `Callers (2)`: `__call__
+(django/core/handlers)  django/core/handlers/wsgi.py:120` (`class WSGIHandler(base.BaseHandler)` :113, call site :124
+`response = self.get_response(request)`) and `__call__ (django/test)  django/test/client.py:169` (`class
+ClientHandler(BaseHandler)` :158, call site :186); `callers` → `2 callers found`; `asgi.py:231 await
+self.get_response_async(request)` correctly absent. Declined and NAMED: `django/contrib/auth/forms.py:576
+self.validate_passwords()` in `AdminPasswordChangeForm(SetUnusablePasswordMixin, SetPasswordMixin, forms.Form)` (:550) —
+both mixins define it (:107, :166): the row keeps its category, carries `self_call_ambiguous_mro`, classification
+`internal_candidate`, `mroCandidates [SetPasswordMixin.validate_passwords, SetUnusablePasswordMixin.validate_passwords]`
+(Python's MRO would pick the first base; the L declines on purpose). Own-class binding:
+`MigrationAutodetector._get_dependencies_for_model` (django/db/migrations/autodetector.py:1738) →
+`MigrationAutodetector._get_dependencies_for_foreign_key` (:1641). Stays unresolved, correctly: `self.extra.get(...)`
+(django/contrib/gis/db/models/aggregates.py:34 — a 3-part chain, no carrier) and `self.assertIs(...)` in
+`TestCheckErrors(SimpleTestCase)` (tests/utils_tests/test_autoreload.py:447 — external base, no defining ancestor indexed).
+SEAM (both stores, rows keyed by caller qualified_name + file + target + line as a multiset): CALLS 60,414 → 64,354
+(+3,940 = exactly the unresolved rows that left, all 2-part self/cls keys; none appeared); 4 MRO collisions; unresolved
+91,514 → 87,574; MANAGER CHECK on the edge set: 0 previously bound targets lost or replaced, +3,940 targets added — the
+change is purely additive on django's call graph (36,161 self/cls call sites carry the carrier; 32,244 bind to the same
+target as before, 3,793 were unresolved). trust: `your code's calls 43% resolved (60414 of 140705)` → `46% (64354 of
+140705)`; `your own code (call target not resolved): 42` → `46` (= 42 + the 4 collisions). leveldb (C++) and FRAKTAG
+(TypeScript) byte-stable (counts, per-category/basis breakdown, `trust`). GATES: ALL-GATES-GREEN (scripts/repo-graph-gates.sh, exit 0: fmt, clippy --workspace --all-targets -D warnings, per-crate tests incl. daemon-runtime, consolidation witness, release bins, isolated dogfood; on the unchanged accepted candidate; committed bytes = the accepted candidate, proven by diff digest d49b4a12…; commit f52e4e6). TALLY: 2 admissions, 3 baselines
+(INPUT-1 reviewed, never approved: D-PSB-002 — the L's word "category" vs its basis-code criterion — and F-PSB-001 —
+callers rows anchor the declaration line; INPUT-2 under the ratified wording, accepted 15/15 at PREP-2 cycle 1; INPUT-3 =
+OC-1, accepted 15/15 at PREP-3 cycle 1, zero findings), 2 decisions (D-PSB-001 operator implementation shape; D-PSB-002
+HUMAN ratification, option B), 1 bootstrap re-baseline (INPUT-5), 3 document + 2 implementation cycles: first admission —
+the builder delivered all six parts in one cycle with every product-facing assertion green, but the runtime refused the
+candidate checkpoint over `git add -N` porcelain (` A`) and PSB-C08's seam script was the manager's and wrong (keyed by
+`stable_key`, which embeds each index's own repo_uid; a dict that collapsed 700 duplicate call-site rows) — candidate
+preserved as a patch; second admission cycle 1 — patch re-applied, no code change, 11/11, reviewer reproduced C01–C03 and
+the C++ receiver integration suite, zero findings. 1 manager interpretation (reviewer subject shape). LESSONS: a
+cross-index seam keys on identities that survive a reindex (qualified name + file + target + line), never `stable_key`, and
+counts a multiset; packets with new files say `git add` or untracked, never `git add -N`; a requirement's wording is the
+human's — when the text and its verification criterion disagree, ask before allocating. FOLLOW-UPS: PYTHON-BASES-EDGES-1
+(real inheritance edges for Python → `explain <Class>` bases/derived; node-identity ancestors), PYTHON-ATTRIBUTE-CALLS-1
+(`self.attr.m()` chains, 8,362 on django), TRUST-CEILING-WORDING-1 (`call-graph resolution is at this build's ceiling for
+Python (no resolver exists)` reads the enrichment table and now reads as false beside resolved self-calls), CLAIM-INVARIANT-1
+unchanged.
+NEXT: ALIAS-SUSPICION-1 (grounded; RC-11) — one hour after this closeout; Q8 DOCS-DISCOVERY-1 still needs RG-REQ-008-L01 ratified.
 after the standing one-hour wait.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
