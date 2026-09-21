@@ -1144,7 +1144,61 @@ human's — when the text and its verification criterion disagree, ask before al
 (`self.attr.m()` chains, 8,362 on django), TRUST-CEILING-WORDING-1 (`call-graph resolution is at this build's ceiling for
 Python (no resolver exists)` reads the enrichment table and now reads as false beside resolved self-calls), CLAIM-INVARIANT-1
 unchanged.
-NEXT: ALIAS-SUSPICION-1 (grounded; RC-11) — one hour after this closeout; Q8 DOCS-DISCOVERY-1 still needs RG-REQ-008-L01 ratified.
+NEXT: ALIAS-SUSPICION-1 (shipped below); Q8 DOCS-DISCOVERY-1 still needs RG-REQ-008-L01 ratified.
+
+ALIAS-SUSPICION-1 SHIPPED (2026-09-21; builder claude-opus-4-8, reviewer codex gpt-5.6-terra):
+trust's "alias resolution suspected" downgrade now fires on EVIDENCE — a zero-connectivity module with imports that failed
+through a project alias (basis `specifier_matches_project_alias`) — instead of on a COUNT of isolated modules (the bare
+`>= 3` literal at rules.rs:194, calibrated in RC-5's all-zero world; RC-11), and it names each such module with its count
+(RG-REQ-009-L04 "a reason never outlives its cause"; RG-REQ-002-L08 reader-frame lines). The fix is vertical and needs no
+reindex: `compute_module_stats` gains one LEFT JOIN counting alias-basis unresolved IMPORTS per module through the SAME
+ownership join the fans use (`TrustModuleStats.alias_unresolved_imports`; the resolved-edge CTEs byte-identical); the
+zero-connectivity predicate exists ONCE (`rules::is_zero_connectivity`, used by the counter and by the service's row flag —
+the duplicated inline copy at service.rs:529-533 is gone, RG-REQ-009-L02); `detect_alias_resolution_suspicion` takes the
+alias-isolated modules and emits ONE reason string PER module, `alias_isolated_module=<n> <path>` (count first, path
+verbatim — reversible for any path; A-2/D-AS1-002 after the review found the comma-joined form could render a false name);
+the row note is `alias_resolution_candidate` only with that evidence and `isolated` otherwise (`ModuleTrustRow.alias_unresolved_imports`
+additive on the wire); the human render shows `  - <module> — N imports through a project alias did not resolve` in the
+Suspicious Modules list and `  - Alias resolution suspected — <module> (N imports through a project alias did not resolve)`
+in the downgrades block (the raw key `alias_resolution_suspicion: suspicious_zero_connectivity_modules=N` is gone from
+human output; the machine key stays in `--json`); the axis token, humanizer, overlay flag and every inheriting renderer are
+untouched. CODE UNDER ANALYSIS: FRAKTAG — `packages/ui/src/components/ui/button.tsx:5 import { cn } from "@/lib/utils"` and
+`packages/ui/src/components/fraktag/IngestionDialog.tsx:9 } from "@/components/ui/dialog"` are two of 55 imports through the
+tsconfig `@/…` alias that do not resolve; BEFORE `alias_resolution_suspicion: suspicious_zero_connectivity_modules=3` (a
+count), AFTER `Alias resolution suspected — packages/ui (55 imports through a project alias did not resolve)` and the row
+`packages/ui — 55 imports through a project alias did not resolve`, while `packages` and `packages/engine` are listed as
+plainly isolated. kafka — BEFORE `Import-graph: LOW (alias resolution suspected; 44704 unresolved imports)` and
+`Change-impact: LOW (alias resolution suspected; registry/factory patterns detected)` although none of its five isolated
+modules (`.github`, `committer-tools`, `docker`, `generator` — 217 `no_supporting_signal` rows, 0 alias — `release`) has a
+single alias-basis import; AFTER `Import-graph: LOW (44704 unresolved imports)`, `Change-impact: LOW (registry/factory
+patterns detected)`, and the `deps list` footnote clause `alias/workspace resolution is downgraded on this index`
+(daemon-runtime/src/deps_headline.rs:300, derived from the overlay flag) disappears with the false trigger — a reason that
+had outlived its cause on a second surface. repo-graph — the reason stays, honestly scoped: `Alias resolution suspected —
+rust (1 import through a project alias did not resolve)`: `rust/crates/repo-index/tests/fixtures/typescript/classifier-repo/src/index.ts:7
+import aliased from "@/lib/missing"`, a deliberately unresolvable test fixture inside the `rust` umbrella module — stated as
+the residual, not special-cased; the other five isolated modules plain. vcmi — byte-identical (normalized for the per-index
+repo_uid). SEAMS (python recomputing fans over resolved static IMPORTS through `module_file_ownership` and the per-module
+alias counts over each after-store) equal the JSON on FRAKTAG, kafka and repo-graph. GATES: ALL-GATES-GREEN (scripts/repo-graph-gates.sh, exit 0: fmt, clippy --workspace --all-targets -D warnings, per-crate tests incl. daemon-runtime, consolidation witness, release bins, isolated dogfood; on the unchanged accepted candidate; committed bytes = the accepted candidate, proven by diff digest deb9a303…; commit dc99c94). TALLY: 3 admissions,
+3 baselines (INPUT-1 accepted 9/9 at PREP cycle 2 after F-AS-001 — the human downgrades line kept the raw key, an
+RG-REQ-002-L08 point against the packet; INPUT-2 = A-1 + OC-1 accepted 9/9 at PREP-2 cycle 1; INPUT-3 = A-2 accepted 9/9 at
+PREP-3 cycle 2 after a stale grammar line in a seam), 2 operator decisions (D-AS1-001 evidence-based trigger; D-AS1-002
+per-module reason grammar — both overridable), 5 document + 3 implementation cycles: first admission — the whole fix in one
+cycle, every product witness green, refused by the runtime's checkpoint on ONE path outside the allocation (the whole-report
+parity fixture pins the serialized module row — A-1) and failing AS-C09 on two manager oracle defects (kafka's deps footnote
+correctly disappears — the pre-read grepped a paraphrase; the vcmi control diff needed repo_uid normalization — OC-1); second
+admission — 11/11, the reviewer's one finding a real defect in the manager's reason grammar (comma-joined paths;
+D-AS-REASON-ENCODING → A-2); third admission — 11/11, zero findings, six checks reproduced. 1 manager interpretation
+(reviewer subject shape). LESSONS: when a serialized struct gains a field, grep the JSON parity corpora for its siblings, not
+only `Struct {` literals; a pre-read grep quotes the renderer's literal, never a paraphrase; a cross-index byte diff
+normalizes `repo_[0-9a-z]+` first; a machine reason that lists paths uses one string per item with the path last, never a
+joined list. FOLLOW-UPS: DOWNGRADE-LABELS-1 (the sibling downgrade bullets — `missing_entrypoint_declarations:
+active_entrypoint_count=0`, `registry_pattern_suspicion: …` — still print raw keys on the human surface),
+CLASSIFIER-PYTHON-BASIS-1 (kafka's Python bare imports `bs4`, `gpg` classified `internal_candidate` with the Rust-named
+basis `rust_crate_internal_module_heuristic`), RELATIVE-IMPORT-ISOLATION-1 (repo-graph's `rust/crates/detectors`: 56
+`relative_import_target_unresolved` rows — isolation by a relative-import gap the alias rule deliberately does not count),
+TS-ALIAS-RESOLUTION-1 clears FRAKTAG's true reason when it ships; no requirement line owns the `deps list` footnote (catalog
+gap, noted).
+NEXT: SEED-DOCUMENT-1 (RG-REQ-010) — one hour after this closeout; Q8 DOCS-DISCOVERY-1 still needs RG-REQ-008-L01 ratified.
 after the standing one-hour wait.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
