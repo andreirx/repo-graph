@@ -1,0 +1,14 @@
+# ALIAS-SUSPICION-1 — oracle corrections and allocation amendments ledger
+
+Append-only. Each entry is carried as the next INPUT-n baseline with a document item (agent-manager docs/MANAGER.md § Oracle corrections; an allocation-changing edit is an AMENDMENT recorded in the slice's §9).
+
+## A-1 (2026-09-21) — allocation amendment: the whole-report parity fixture pins the serialized `ModuleTrustRow` (→ INPUT-2)
+
+- **Defect (in the INPUT-1 allocation):** `trust-parity-fixtures/report__diagnostics-with-calls/expected.json` pins the whole trust report JSON, which now carries the additive per-module field `alias_unresolved_imports`; the fixture must gain the field (`"alias_unresolved_imports": 0` on its two module rows) and was not a candidate path — the manager grepped struct literals (`ModuleTrustRow {`, `TrustModuleStats {`) but not the JSON parity corpora for serialized fields. The runtime's candidate checkpoint refused the first admission's candidate on that path alone; every product-facing assertion of AS-C01..C08 and C10 passed.
+- **Correction:** the path is added to `candidatePaths` (13 → 14); AS-C11's status pattern follows. No check or obligation set changes.
+
+## OC-1 (2026-09-21) — AS-C09 asserted kafka's `deps list` byte-identical, and compared vcmi's `trust` across two indexes without normalizing the per-index repo_uid (→ INPUT-2)
+
+- **Defect (in the INPUT-1 oracle):** (1) the manager's pre-read grepped `deps list` for the phrase "resolution downgraded on this index" and, finding none on kafka, asserted byte-identity; the actual clause is `alias/workspace resolution is downgraded on this index` (rgr/src/presentation/deps_list.rs), present on kafka, FRAKTAG and repo-graph BEFORE — and on kafka it CORRECTLY disappears with the false alias trigger (dispatch.rs:6946-6961 derives the deps resolution state from the trust overlay's degradation flag; the overlay CODE is untouched, its OUTPUT follows the trigger — RG-REQ-009-L04's cause-and-reason rule reaching a second surface). §0 and P-AS-02 said the marker "does not move on any of the four corpora" — wrong on kafka. (2) the vcmi control diff stripped only `Snapshot:`; the `registry_pattern_suspicion` reason embeds the index's own repo_uid (`ancestor_with_22_parent_child_cycles:repo_01m…:lib:MODULE`), so two independent indexes never byte-match on that line.
+- **Correction:** AS-C09 asserts the kafka footnote clause PRESENT before and ABSENT after (`deps list` otherwise identical), and normalizes `repo_[0-9a-z]+` → `repo_X` on both vcmi captures before the diff; AS-C08 and AS-C10 assert the clause STAYS on FRAKTAG and repo-graph (their triggers stay); §0 "Changes" and P-AS-02 state the deps-footnote movement as a REPORTED, asserted consequence (no requirement line owns the deps footnote — noted for the catalog).
+- **Basis:** the builder's captures of the first admission (/tmp/as-kf-deps-{before,after}.txt, /tmp/as-vc-t{b,a}.txt), read by the manager 2026-09-21.

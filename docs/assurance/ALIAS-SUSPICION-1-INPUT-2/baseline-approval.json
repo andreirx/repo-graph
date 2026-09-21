@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "ALIAS-SUSPICION-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/ALIAS-SUSPICION-1-INPUT-2.json",
+    "sha256": "sha256:cf3f9c4fd34df5a369d540c52268aa3afcba0cd0fca31d206f9de894b24e58e0"
+  },
+  "review": {
+    "path": "docs/assurance/ALIAS-SUSPICION-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:99700822ffb7196d48e443a6182d618fcbbaf8bc9176adcb3f85e9105fc9b477"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-21T08:33:09.498Z",
+  "rationale": "ALIAS-SUSPICION-1 INPUT-2: allocation amendment A-1 (the whole-report parity fixture pins the serialized module row — path added) and oracle correction OC-1 (AS-C09: kafka's deps footnote correctly disappears with the trigger; vcmi control diff normalizes the per-index repo_uid); contract unchanged; codex gpt-5.6-terra document review accepted 9/9 at PREP-2 cycle 1 (the author corrected the footnote's provenance to daemon-runtime/src/deps_headline.rs:300); validator ALLOCATION VALID."
+}
