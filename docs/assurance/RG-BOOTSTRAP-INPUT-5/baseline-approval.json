@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-5",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-5.json",
+    "sha256": "sha256:2ebb3032a128c9ad1982d446d1b14f916287da3ce5f721daae0423a25c154b94"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-5/requirements-review.json",
+    "sha256": "sha256:d2d111e745c9b34aa645bed8475c3b349771d7fb8ab9ce81340980895d0178db"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-21T03:31:56.000Z",
+  "rationale": "Operator approves the fifth bootstrap baseline: the human's ratification of RG-REQ-005-L03's wording (D-PSB-002, option B, 2026-09-21 — 'Option b then'), plus the text-only catalog corrections CC-6 and CC-7 on RG-REQ-009-L02; codex gpt-5.6-terra standalone review REFINE (criterion must assert the persisted candidate evidence — applied) then ACCEPT; only the two requirement files' digests move. The human's authority for requirement wording is the ratification itself; the operator records it under docs/assurance/RG-BOOTSTRAP/human-authorization.md."
+}

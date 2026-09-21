@@ -59,9 +59,11 @@ Refinement ratified 2026-09-14 (human, option A): generated/vendored/test are de
 
 `trust`'s per-module fan-in/fan-out, its "Suspicious Modules (zero connectivity)" list and the `alias_resolution_suspicion` downgrade shall be computed from the same module-dependency edge set `modules list` and `modules deps` render (resolved file→file imports aggregated through module ownership to the module candidate on both endpoints). A module with rendered edges shall never be listed as zero-connectivity.
 
-**Verification criterion:** `trust --json modules[].fan_in/fan_out` equals `modules deps` per module on repo-graph, kafka, hadoop, FRAKTAG; `SELECT` over the store shows rows-with-fan>0 > 0 where `modules list` renders edges; the existing `rules.rs::count_suspicious_modules_matches_all_criteria` and `trust_tests.rs::suspicious_modules_state_basis_and_point_at_stats` are rewritten to the true behaviour.
+**Verification criterion:** `trust --json modules[].fan_in/fan_out` equals `modules deps` per module on repo-graph, kafka, hadoop, FRAKTAG; `SELECT` over the store shows rows-with-fan>0 > 0 where `modules list` renders edges; the existing `rules.rs::count_suspicious_modules_matches_all_criteria` and `trust_tests.rs::suspicious_modules_basis_in_reader_frame_no_internal_wording` (renamed under D-TME-TEST-NAME-1; CC-6) are rewritten to the true behaviour; `rgr/tests/trust_module_edges_seam.rs::trust_module_fans_equal_modules_deps` is the seam.
 
 **Evidence (v0.18.0):** NOT MET — RC-5 (regression 28126a2: exact join on the crate-root directory node; structurally zero on Cargo/Gradle/Maven/TS; repo-graph 48/61, kafka 65/65, hadoop 8/9, FRAKTAG 3/4). Queue Q2 TRUST-MODULE-EDGES-1. Import-graph remains LOW while `unresolved_imports_count > 0` — the fix removes the false reason, not the level.
+
+**Evidence (2026-09-21, CC-7):** PARTIALLY MET — the structural half shipped in df08725 (TRUST-MODULE-EDGES-1: fans and the zero-connectivity list come from the derived module edge set; repo-graph 48 → 6 candidates, all genuinely isolated); the residual is RC-11 — `detect_alias_resolution_suspicion` (trust/src/rules.rs:190-207) still counts genuine isolation as alias suspicion (≥ 3 candidates) on repo-graph, kafka and FRAKTAG, and the per-module `trust_notes` value `alias_resolution_candidate` names the same unproven cause — queued as ALIAS-SUSPICION-1.
 
 ### RG-REQ-009-L03 — Resolution percentages count only evidence-bound edges
 

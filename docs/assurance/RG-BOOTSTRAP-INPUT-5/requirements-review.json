@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-5-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-5.json",
+    "sha256": "sha256:2ebb3032a128c9ad1982d446d1b14f916287da3ce5f721daae0423a25c154b94"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-5"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-5-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-21T03:31:56.000Z",
+  "report": "PASS 1 (REFINE, one finding) then PASS 2 (ACCEPT) — standalone read-only codex exec (prompts/standalone-review.md discipline; evidence inlined: the git diffs of rg-req-005 and rg-req-009, RG-REQ-001-L03 and RG-REQ-005-L02 as context, the decision records D-PSB-001 and D-PSB-002, the catalog-corrections ledger diff, the normalized INPUT-4 → INPUT-5 manifest diff). Scope of INPUT-5: (1) RG-REQ-005-L03's wording ratified by the human 2026-09-21 (D-PSB-002, option B): a same-depth MRO collision stays unresolved with its own BASIS CODE `self_call_ambiguous_mro` (category `calls_obj_method_needs_type_info` retained, candidates persisted as evidence) — the category axis has no reader mapping and the L's own criterion had always named the basis-code test; the criterion also states the callers rows anchor the caller's declaration line; (2) CC-6: RG-REQ-009-L02's criterion named a test renamed by TRUST-MODULE-EDGES-1; (3) CC-7: a dated evidence line appended to RG-REQ-009-L02 (v0.18.0 line kept verbatim). PASS 1 finding: the L03 criterion did not assert that the collision's candidates survive as persisted row evidence — corrected (the collision fixture now requires an unresolved_edges row with the basis and `metadata_json.mroCandidates` listing both candidates); rg-req-005 re-pinned. PASS 1 also ruled: consistent with RG-REQ-001-L03 and RG-REQ-005-L02 (L02's generic 'named category' needs no edit); CC-6/CC-7 append-only discipline appropriate; manifest scope limited; D-PSB-001/D-PSB-002 mutually consistent. Reviewer's pass-1 text: ## REFINE\n\n**Finding 1 — candidate-evidence promise lacks a verification assertion**\n\n- **File:** `docs/requirements/rg-req-005-symbol-relationship-discovery.md`\n- **Quoted text:** “*…its candidates persisted as evidence.*”\n- **Issue:** The revised criterion proves unresolved handling and basis-code reader mapping, but not that the same-depth candidates survive as row evidence. That persistence is part of the ratified contract and is the causal evidence needed to distinguish an MRO collision from the retained generic category.\n- **Smallest correction:** Extend the existing collision fixture clause to require that the unresolved row contains `self_call_ambiguous_mro` **and its candidate list as persisted evidence** (using the implementation’s `mroCandidates` representation if that is the ratified stored field).\n\nAll other supplied evidence supports acceptance:\n\n- **Fidelity:** L03 now states the ratified basis code, retains `calls_obj_method_needs_type_info`, requires candidate evidence, names the attribution mapping, and records the human ratification. The declaration-anchor clarification is explicitly within the stated ratified revision; no unrelated L03 behavior changed.\n- **Consistency:** This aligns with RG-REQ-001-L03: the collision remains an unresolved, counted row with category, classification, and a named basis code. It also aligns with L02: its “named category” is a generic requirement for unresolved ambiguous pools, not a mandate for a collision-specific category. **L02 needs no matching edit.**\n- **Append-only discipline:** CC-7 retains the v0.18.0 evidence verbatim and appends a dated current-state line. CC-6 corrects a stale test identifier without changing the asserted behavior; that is appropriate.\n- **Scope:** The supplied normalized manifest diff changes only `baselineId` and the two requirement digests, with unchanged entry counts. D-PSB-001’s implementation shape and D-PSB-002’s human-ratified requirement amendment are mutually consistent.\n- **Maintainer clarity:** The document correctly makes the basis code—not the retained broad category—the discriminator. A reader relying only on category cannot distinguish this collision; that is a deliberate, explicitly documented consequence of the ratified design, not a misleading claim. || Reviewer's pass-2 text: ## ACCEPT\n\n1. **Finding 1 closed exactly:** the collision fixture now requires an `unresolved_edges` row with `self_call_ambiguous_mro` and `metadata_json.mroCandidates` listing both candidates as persisted evidence.\n\n2. **No other semantic change in the corrected criterion:** it retains the existing unresolved-row and basis-code assertions; the added clause only makes the previously promised candidate persistence testable.\n\n3. **Manifest scope is limited:** the supplied normalized diff changes only `baselineId` and the digests for RG-REQ-005 and RG-REQ-009; entry counts are unchanged.\n\n**Evidence basis:** PURE-REASONING over the supplied inline criterion and normalized manifest diff; no local files or tools used."
+}

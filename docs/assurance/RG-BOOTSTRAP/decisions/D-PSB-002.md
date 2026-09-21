@@ -1,0 +1,13 @@
+# D-PSB-002 — Must a same-depth Python MRO collision have its own UnresolvedEdgeCategory as RG-REQ-005-L03 said, or is L03 ratified to require a distinct basis code?
+
+Raised: 2026-09-20 by the PYTHON-SELF-BINDING-1-PREP document review (review-PYTHON-SELF-BINDING-1-PREP-0 under PYTHON-SELF-BINDING-1-INPUT-1, codex gpt-5.6-terra), result decision-required; blocking reason: "D-PSB-001 intentionally retains `calls_obj_method_needs_type_info` and adds only `self_call_ambiguous_mro` as a basis, while RG-REQ-005-L03 explicitly requires the collision to remain unresolved with its own category. The operator decision is not a ratified amendment to that requirement; accepting would silently claim compliance with behavior the allocation expressly declines."
+Resolved: 2026-09-21 by the HUMAN — option B ("Option b then"), after the self-contained question of 2026-09-21 (problem: the L's text named the category axis while its verification criterion named the basis-code test; on HEAD the category axis has no reader mapping and a new category fans out across eleven hand-maintained registries; a basis code is additive with one compile-forced site and lands in the reader class "your own code (call target not resolved)").
+
+## Options (as the reviewer put them)
+
+- A — implement the category as the text said. Reward: no requirement edit; the collision visible through the established category vocabulary. Risk: the broader category-registry, classifier, trust and wire updates plus their preservation evidence; the L's own verification criterion stays unsatisfiable.
+- B — ratify L03 to require a distinct basis code. Reward: the smaller basis-code design of D-PSB-001 using the existing exhaustive attribution mapping and preserving the category vocabulary. Risk: changes the stated L03 contract — requires the human's ratification, an amended requirement and baseline, and a new review before implementation. RECOMMENDED by the reviewer and by the manager.
+
+## Resolution — option B, ratified by the human
+
+RG-REQ-005-L03's text now reads "stays unresolved with its own basis code (`self_call_ambiguous_mro`, mapped by `agent/src/attribution.rs` to the reader's own-code class; the row keeps the category `calls_obj_method_needs_type_info`) and its candidates persisted as evidence", with the ratification noted inline; its verification criterion names the basis-code test explicitly. Carried by the bootstrap re-baseline RG-BOOTSTRAP-INPUT-5 (standalone review + operator approval 5, same commit) and by PYTHON-SELF-BINDING-1-INPUT-2 (document item PREP-2). D-PSB-001's operator resolution stands as the implementation shape.

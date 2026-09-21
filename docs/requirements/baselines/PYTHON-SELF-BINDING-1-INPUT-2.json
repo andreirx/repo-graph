@@ -1,0 +1,157 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "PYTHON-SELF-BINDING-1-INPUT-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+      "sha256": "sha256:01cefeaec408d9ee6c4146da15e27791b37088e8190d9c1c6338dbb6fb3ccb99"
+    },
+    {
+      "path": "docs/requirements/rg-req-005-symbol-relationship-discovery.md",
+      "sha256": "sha256:d0843d13bc003fe4c023ac317f96d8e784aa3a187f8851e6c25241d37cdd28da"
+    },
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:085d9d5a4a3e0d71421ff1bbe1e45f8c88fc722b354fa7a5b36ca586401b2256"
+    },
+    {
+      "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+      "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35"
+    },
+    {
+      "role": "source",
+      "path": "docs/architecture/artifact-contract-model.md",
+      "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/symbol-identity-1.md",
+      "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cpp-declarators-1.md",
+      "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/anchors-everywhere-1.md",
+      "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-rust-1.md",
+      "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-java-1.md",
+      "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/deps-classifier-1.md",
+      "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-1.md",
+      "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/state-root-separation-1.md",
+      "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/self-pollution-1.md",
+      "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199"
+    },
+    {
+      "role": "source",
+      "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+      "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSB-001.md",
+      "sha256": "sha256:4a404b61788887de94665755f855039200af82675311c33f35f8356c364c8562"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSB-002.md",
+      "sha256": "sha256:4b5860649168cf9dbcf7ea317d9e61c79c05d10a6186abe733be785ebfb9686b"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/call-binding-receiver-1.md",
+      "sha256": "sha256:0305c1f3267ab625738541ea3ad401cdc55cc66d85240179c65b892f237a19ef"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/python-self-binding-1.md",
+      "sha256": "sha256:53f488f73abec8039948c12ffb37eff4f229713b1e3cfc3bddad82bc859c840c"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-001",
+    "RG-REQ-005",
+    "RG-REQ-006",
+    "RG-REQ-011",
+    "RG-REQ-005-L03",
+    "RG-REQ-005-L02",
+    "RG-REQ-001-L03",
+    "RG-REQ-005-L01",
+    "RG-REQ-006-L01",
+    "RG-REQ-006-L02",
+    "RG-REQ-006-L04",
+    "RG-REQ-005-L07",
+    "RG-REQ-005-L09",
+    "RG-REQ-001-L09",
+    "RG-REQ-011-L06"
+  ],
+  "requiredDecisionIds": []
+}
