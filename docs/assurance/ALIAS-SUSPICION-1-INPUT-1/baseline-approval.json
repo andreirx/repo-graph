@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "ALIAS-SUSPICION-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/ALIAS-SUSPICION-1-INPUT-1.json",
+    "sha256": "sha256:65090c298aa05a50572fc5f2ab7c741c55503c32588e5235da5d9a27318a471e"
+  },
+  "review": {
+    "path": "docs/assurance/ALIAS-SUSPICION-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:2ab81304ac3fef9f1e4157dd256381f422531771bb89545dfc6715fafd050384"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-21T07:19:16.265Z",
+  "rationale": "ALIAS-SUSPICION-1 INPUT-1: specification and allocation grounded on RC-11 re-verified on HEAD da29560 with four fresh isolated roots; codex gpt-5.6-terra document review cycle 1 refinement-required on one correctness finding (F-AS-001: the human downgrades line kept the raw key alias_resolution_suspicion — RG-REQ-002-L08; corrected by the claude-opus-4-8 author to 'Alias resolution suspected — …' with the machine key kept in --json only; sibling raw labels filed as DOWNGRADE-LABELS-1), cycle 2 accepted 9/9; validator ALLOCATION VALID; D-AS1-001 (evidence-based trigger) unchallenged."
+}
