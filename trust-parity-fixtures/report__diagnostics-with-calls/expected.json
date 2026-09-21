@@ -95,6 +95,7 @@
       "fan_out": 2,
       "file_count": 2,
       "suspicious_zero_connectivity": false,
+      "alias_unresolved_imports": 0,
       "trust_notes": []
     },
     {
@@ -104,6 +105,7 @@
       "fan_out": 1,
       "file_count": 3,
       "suspicious_zero_connectivity": false,
+      "alias_unresolved_imports": 0,
       "trust_notes": []
     }
   ],

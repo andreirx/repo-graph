@@ -50,6 +50,16 @@ pub struct TrustModuleStats {
     pub fan_in: u64,
     pub fan_out: u64,
     pub file_count: u64,
+    /// ALIAS-SUSPICION-1 (RG-REQ-009-L04): how many of this module's IMPORTS failed
+    /// to resolve because the specifier matched a project path alias
+    /// (`basis_code = specifier_matches_project_alias`) — the only unresolved-import
+    /// basis that literally means "an alias path did not resolve". Read from the SAME
+    /// `module_file_ownership` join `fan_in`/`fan_out` use, so the alias-suspicion
+    /// downgrade names a cause the store actually holds instead of guessing from a bare
+    /// count of isolated modules. `#[serde(default)]` keeps pre-slice fixture JSON that
+    /// omits the field deserializing (the `top_external_types` precedent).
+    #[serde(default)]
+    pub alias_unresolved_imports: u64,
 }
 
 /// A path-prefix module cycle (ancestor → descendant).
@@ -399,6 +409,7 @@ mod tests {
             fan_in: 5,
             fan_out: 3,
             file_count: 12,
+            alias_unresolved_imports: 0,
         };
         let s = serde_json::to_string(&ms).unwrap();
         assert!(s.contains("\"stableKey\":"));

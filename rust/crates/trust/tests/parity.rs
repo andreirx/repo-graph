@@ -158,8 +158,18 @@ fn dispatch_detect_framework_heavy(input: &Value) -> Result<Value, String> {
 }
 
 fn dispatch_detect_alias_resolution(input: &Value) -> Result<Value, String> {
-    let count: usize = get_field(input, "suspiciousModuleCount", "detect_alias_resolution")?;
-    let result = detect_alias_resolution_suspicion(count);
+    // ALIAS-SUSPICION-1: the evidence-based trigger takes the alias-isolated modules
+    // (path + failed-alias-import count), not a bare count of isolated modules.
+    #[derive(serde::Deserialize)]
+    struct AliasIsolatedModuleInput {
+        path: String,
+        count: u64,
+    }
+    let modules: Vec<AliasIsolatedModuleInput> =
+        get_field(input, "aliasIsolatedModules", "detect_alias_resolution")?;
+    let alias_isolated: Vec<(String, u64)> =
+        modules.into_iter().map(|m| (m.path, m.count)).collect();
+    let result = detect_alias_resolution_suspicion(&alias_isolated);
     serde_json::to_value(&result).map_err(|e| e.to_string())
 }
 

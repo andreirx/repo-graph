@@ -1,0 +1,665 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-ALIAS-SUSPICION-1-0",
+  "workItemId": "ALIAS-SUSPICION-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/ALIAS-SUSPICION-1-INPUT-3.json",
+    "sha256": "sha256:c66a266f980385402b7cfc8244ba6c781689e4c55ef7f7268475047797647a85"
+  },
+  "allocation": {
+    "path": "docs/slices/alias-suspicion-1.md",
+    "sha256": "sha256:4c35f80dfeaa74f5e6bc1e2cd85ef41e575a7520f9104571f72f82fe0a43e96b"
+  },
+  "subject": {
+    "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+    "verification": {
+      "path": "docs/assurance/ALIAS-SUSPICION-1/verification.json",
+      "sha256": "sha256:6439bb43d55388c62e30343a93648ee27f4661b46143b0e3b323ab4646eec0ba"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-ALIAS-SUSPICION-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/ALIAS-SUSPICION-1-INPUT-3.json",
+      "sha256": "sha256:c66a266f980385402b7cfc8244ba6c781689e4c55ef7f7268475047797647a85"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/ALIAS-SUSPICION-1-INPUT-3.json",
+        "sha256": "sha256:c66a266f980385402b7cfc8244ba6c781689e4c55ef7f7268475047797647a85",
+        "byteLength": 4407
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:d33e566fd2b3fcf0fe4484ddf370a904b8f6b82f07eb2e08bf0d5f9f5ea4c9c9",
+        "byteLength": 13956
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-009-quality-signals-trust-reliability.md",
+        "sha256": "sha256:e4c3fb95cfdcc03ebe8e043d61dcb9f0a6f34c1db880c8c1c4df52e7bff416c8",
+        "byteLength": 16724
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/trust-model-rebase-1.md",
+        "sha256": "sha256:de1abefc05f2a6a0c9b59b2be83cb86956375def8217f080568055b8521b9305",
+        "byteLength": 12615,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/dead-causes-1.md",
+        "sha256": "sha256:653fa5e9bc26f3c6e8b4d50e40cf1fe88c9dee05c1532fea86af964aac033d1f",
+        "byteLength": 4288,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+        "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965",
+        "byteLength": 48460,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/trust-module-edges-1.md",
+        "sha256": "sha256:151a6b29ad5bb5977d34d4f84161c69b4a98a9f94dcfbb3cf48978b89fc5e42e",
+        "byteLength": 46375,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/ALIAS-SUSPICION-1/oracle-corrections.md",
+        "sha256": "sha256:cdb36a232ebe6a1ee778f756df72f53c1fa0f4fabfaa488008c216835251847c",
+        "byteLength": 4973,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e",
+        "byteLength": 12963
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/alias-suspicion-1.md",
+        "sha256": "sha256:4c35f80dfeaa74f5e6bc1e2cd85ef41e575a7520f9104571f72f82fe0a43e96b",
+        "byteLength": 69223
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/ALIAS-SUSPICION-1-INPUT-3/requirements-review.json",
+        "sha256": "sha256:2a38b837af34a0e5c7cdfdee2e76ee454be77bf0aa5e30daa3d5a20d69256667",
+        "byteLength": 53617
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/ALIAS-SUSPICION-1-INPUT-3/baseline-approval.json",
+        "sha256": "sha256:de56aae9539d906ecd1ed869fb3a2140e6eacc507f7d93d2c2ee355d80bcc91c",
+        "byteLength": 1485
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:004436c6c7ea7f33b212f36251189f0f513516c75c2d1b94deddbdbc786443fe",
+        "byteLength": 7524
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/ALIAS-SUSPICION-1/selection.md",
+        "sha256": "sha256:36b7f82999a941eb77d520f51bfb717dc96db6aff77d29af87fd67f6699e8098",
+        "byteLength": 12228
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:1b04f3d41b3a33e70181bac05b13ee3abedcb8f7b49564073793b55ac1d379a4",
+        "byteLength": 19388
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-0",
+        "sha256": "sha256:1533828083e5f59cca8a5b4afd5caf07f7da91d7642e33f648e003c3c79d0037",
+        "byteLength": 46337
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:50e14f868d771eb5603ba1e34ceec149067af6a22794ae03d7d9adc9faf92b03",
+        "byteLength": 4943
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-0",
+        "sha256": "sha256:6439bb43d55388c62e30343a93648ee27f4661b46143b0e3b323ab4646eec0ba",
+        "byteLength": 73348
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-0",
+        "sha256": "sha256:6c166c73d376af9acbb8256a341e892cfc7b5f96aea60b6768e20a194211237d",
+        "byteLength": 45886
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:1f550ea7f9d78bfcfa6e23525f6fd34c0f06dff41b15fca935dddfcc4b5017b7",
+        "byteLength": 33606
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:10b0b531a1b5809f4b0958e1c6b97a3fcaa98a8e53605f190031a8ead677295e",
+        "byteLength": 454454
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-009-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-009-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-AS-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-AS-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-AS-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-AS-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "AS-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: cargo test -p repo-graph-storage --lib trust_impl passed: 35 passed, 0 failed. Diff inspection confirms the resolved static-import CTE predicate is retained and the added CTE counts only unresolved IMPORTS with basis_code specifier_matches_project_alias.",
+          "supportingEvidence": [
+            "Reviewer command output: 35 passed, 0 failed.",
+            "git diff inspection of rust/crates/storage/src/trust_impl.rs."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "AS-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: cargo test -p repo-graph-trust --lib rules passed: 51 passed, 0 failed. The rule sorts evidenced modules by path and emits one alias_isolated_module=<count> <path> reason per module.",
+          "supportingEvidence": [
+            "Reviewer command output: 51 passed, 0 failed.",
+            "rust/crates/trust/src/rules.rs inspection."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "AS-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: cargo test -p repo-graph-trust --lib service passed: 31 passed, 0 failed. Service delegates zero-connectivity to rules::is_zero_connectivity and distinguishes isolated from alias_resolution_candidate.",
+          "supportingEvidence": [
+            "Reviewer command output: 31 passed, 0 failed.",
+            "rust/crates/trust/src/service.rs inspection."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "AS-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: cargo test -p repo-graph-trust --test parity passed: 1 passed, 0 failed.",
+          "supportingEvidence": [
+            "Reviewer command output.",
+            "Parity fixture diff carries aliasIsolatedModules and alias_isolated_module=55 packages/ui."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "AS-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: presentation::trust tests passed: 40 passed, 0 failed; trust_module_edges_seam passed: 1 passed, 0 failed.",
+          "supportingEvidence": [
+            "Reviewer cargo test outputs.",
+            "Renderer inspection confirms reader-frame alias text and comma-bearing path coverage."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "AS-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: trust whole suite passed (118 unit tests plus parity); rgr --lib passed (1262); storage --lib passed (682, 3 ignored); agent reliability passed (24); daemon-runtime trust_coherence passed (7). Protected renderer and overlay paths are byte-identical to HEAD.",
+          "supportingEvidence": [
+            "Reviewer cargo test outputs.",
+            "Reviewer git diff --quiet protected-path command exited 0."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "AS-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED: reviewer reproduced cargo fmt --check successfully. Reviewer clippy execution was blocked opening rust/target/debug/.cargo-lock (EPERM), so the -D warnings pass relies on builder evidence."
+      }
+    },
+    {
+      "checkId": "AS-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated FRAKTAG index/trust/JSON/store seam. OBSERVED reviewer inspection of /tmp/as-frk-trust-after.txt confirms packages/ui is rendered with 55 alias imports while packages and packages/engine remain plain."
+      }
+    },
+    {
+      "checkId": "AS-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated kafka/vcmi comparison and JSON seam. OBSERVED reviewer inspection of /tmp/as-kf-trust-after.txt confirms Import-graph LOW (44704 unresolved imports) and Change-impact LOW (registry/factory patterns detected), without an alias-resolution clause."
+      }
+    },
+    {
+      "checkId": "AS-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated repo-graph index/trust/JSON seam. OBSERVED reviewer inspection of /tmp/as-rg-trust-after.txt confirms singular reader-frame output for rust: 1 import through a project alias did not resolve."
+      }
+    },
+    {
+      "checkId": "AS-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED registry digest, daemon, and isolated-root checks. OBSERVED reviewer git status shows exactly the 12 allocated modified paths and git diff --check is clean."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/rgr/src/presentation/trust.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/trust_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/trust/src/rules.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/trust/src/service.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/trust/src/storage_port.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/trust/src/types.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/trust/tests/parity.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "trust-parity-fixtures/report__diagnostics-with-calls/expected.json",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "trust-parity-fixtures/rules__detect-alias-resolution__not-triggered/input.json",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "trust-parity-fixtures/rules__detect-alias-resolution__triggered/expected.json",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "trust-parity-fixtures/rules__detect-alias-resolution__triggered/input.json",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-21T10:06:50.827Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nOBSERVED: candidate checkpoint content matches the inspected working tree for trust.rs, rules.rs, and trust_impl.rs; git status contains only 12 allocated paths and git diff --check is clean. The implementation replaces an ungrounded threshold with a query-time fact: unresolved alias-basis IMPORTS are attributed to the owning module, zero-connectivity is defined once, and downgrade reasons name each evidenced module and count. This serves the VISION's trustworthy orientation principle: a user can distinguish genuine isolation from unresolved project-alias evidence. OBSERVED source witnesses: FRAKTAG packages/ui/src/components/ui/button.tsx contains `import { cn } from \"@/lib/utils\"`; FRAKTAG IngestionDialog.tsx imports from `@/components/ui/dialog`; repo-graph's classifier fixture contains `import aliased from \"@/lib/missing\"`. OBSERVED captures show the corresponding FRAKTAG and repo-graph reader-frame outputs. No unearned module, dependency, or interface was introduced; the shared predicate has concrete current users in the count, trigger selection, and rendered-row flag. Operator-owned workspace, smoke, dogfood, and deployment gates remain outside this review."
+}

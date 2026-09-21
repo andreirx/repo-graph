@@ -316,6 +316,12 @@ pub struct ModuleTrustRow {
     pub fan_out: u64,
     pub file_count: u64,
     pub suspicious_zero_connectivity: bool,
+    /// ALIAS-SUSPICION-1 (RG-REQ-009-L04): how many of this module's imports failed
+    /// through a project alias. Non-zero on a zero-connectivity module is the evidence
+    /// behind the `alias_resolution_candidate` note and the alias-suspicion downgrade;
+    /// zero means the module is merely isolated.
+    #[serde(default)]
+    pub alias_unresolved_imports: u64,
     pub trust_notes: Vec<String>,
 }
 

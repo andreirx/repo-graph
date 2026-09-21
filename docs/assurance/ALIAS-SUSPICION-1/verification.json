@@ -1,0 +1,627 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-ALIAS-SUSPICION-1-0",
+  "workItemId": "ALIAS-SUSPICION-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/ALIAS-SUSPICION-1-INPUT-3.json",
+    "sha256": "sha256:c66a266f980385402b7cfc8244ba6c781689e4c55ef7f7268475047797647a85"
+  },
+  "allocation": {
+    "path": "docs/slices/alias-suspicion-1.md",
+    "sha256": "sha256:4c35f80dfeaa74f5e6bc1e2cd85ef41e575a7520f9104571f72f82fe0a43e96b"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "42d7e0431e4251ad93d533b72017f16cb5be7bef",
+    "entries": [
+      {
+        "path": "rust/crates/rgr/src/presentation/trust.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f57280e36250f559b701b9ba14e455e63e0258ebb48ab80cdefdd5f01b1da2c6",
+          "byteLength": 38097
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:36a92e9f9b641af2ef423bb0582d85ce3726f425963cc8cd30270783b4532cb9",
+          "byteLength": 40715
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/trust_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:de4ecb824ee1d14aea2d6249d87f8521dece052f464380d339bf4e1ba3acd65d",
+          "byteLength": 70655
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:211ef257c7a8e5d5abe4e263c6095c5100e8e1da28deffae05ee39b0c6bab09d",
+          "byteLength": 74244
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/trust_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ff3f9798ba42ff27687cd5aff67a66b9327d86ef5399512486c60f3def3a9e97",
+          "byteLength": 106263
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:68aac252943d1235bb9ca50def395f6548bf9067bd8dc60cbcf88875582be64d",
+          "byteLength": 113502
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/rules.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b36da495d3cfd81321c6035649d0cd4fedf7baa1e6e894c7b8556f8a7871b6eb",
+          "byteLength": 32151
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c60e93e57af33ada430d2fbe759906a6c05cc80a21d3dbe023e0b36c10f372e7",
+          "byteLength": 39456
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/service.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:25bb2711be1f3295b7471d577fba1f39559aeb056b8a428d61bcb3727e16504c",
+          "byteLength": 86888
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b3bec29d54e579a45c4e03afff015f67ed7fd05aeacd3090078d724133de969e",
+          "byteLength": 91095
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7400b634f4f6b85e9ee5c099e410befd6a345abc79b502f118244e9148c3d52d",
+          "byteLength": 22839
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fc176920c2fa15b5a5048a4ebc23eb4c1ee46e9ea408c6a7a5cae7d971d8fe1c",
+          "byteLength": 23609
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/types.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:12148fec48d79a11eb02ac872f0ba167f4ed7a8b47cbc5bacfb2d7c6b2de1d64",
+          "byteLength": 26341
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b5e0c210589eda0034a1c77650a39c867d0fa8250b0cd919abed8b6369074625",
+          "byteLength": 26713
+        }
+      },
+      {
+        "path": "rust/crates/trust/tests/parity.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9d7154aac7849c72f71fa4d2464d29402448dcad58ecd72eb0ee461f5deb7952",
+          "byteLength": 18381
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2fb0e43b48b276adcb2e00f0e2db3946fdb9aac397deb69f8d2cb6627d946aab",
+          "byteLength": 18822
+        }
+      },
+      {
+        "path": "trust-parity-fixtures/report__diagnostics-with-calls/expected.json",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:83da6e77ee8a9b528659056cfa105cd35498b3035407b1209e560e259f755f8c",
+          "byteLength": 3034
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7c92120cba90f112f71cca3eeb7f6ef02ba590da27780bc437c1a7a01bd24d44",
+          "byteLength": 3108
+        }
+      },
+      {
+        "path": "trust-parity-fixtures/rules__detect-alias-resolution__not-triggered/input.json",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:547978b863a18c59e48f92d19095ff06bff062e332788ca741c5e8a3733ad698",
+          "byteLength": 68
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5a1b2b9e7fe9bfd2bb5252732ee6983f2f61999ed841b8acb65bb991c28859b1",
+          "byteLength": 68
+        }
+      },
+      {
+        "path": "trust-parity-fixtures/rules__detect-alias-resolution__triggered/expected.json",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:198b410605d347a1257040f7e56755d496be608a2c88d287de38cc945f5101d5",
+          "byteLength": 89
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c15d4a94370034d9fa71dd8ec42d34f7b1b785b703f807e6d0921e54fe6c228d",
+          "byteLength": 87
+        }
+      },
+      {
+        "path": "trust-parity-fixtures/rules__detect-alias-resolution__triggered/input.json",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a9b62439c1a98e0e90e89cb0a372adb456b8733ec5a5b1b737707768125e9138",
+          "byteLength": 68
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2598755b3f4e8d7fda85d579ac4fabad9a472c4b1adbbb619bf0db8dcf680664",
+          "byteLength": 101
+        }
+      }
+    ],
+    "sha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-ALIAS-SUSPICION-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "AS-C01",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --lib trust_impl 2>&1 | tee /tmp/as-c01.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c01.txt && for t in compute_module_stats_counts_unresolved_alias_imports_per_module compute_module_stats_empty_snapshot compute_module_stats_returns_fan_in_fan_out_file_count compute_module_stats_excludes_modules_with_no_owned_files; do grep -qE \"^test .*$t .* ok$\" /tmp/as-c01.txt || { echo \"MISSING $t\"; exit 1; }; done && ! git diff HEAD -- crates/storage/src/trust_impl.rs | grep -E \"^-.*resolution = 'static'\"",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/storage/src/trust_impl.rs `compute_module_stats` (:755-852): the derived-edge CTEs (`file_owner`, `resolved_imports` over `e.resolution = 'static'`, `module_pairs`) are UNCHANGED (the negated grep: no removed line touches the resolved-imports predicate); ONE more LEFT JOIN — a CTE counting `unresolved_edges` rows with `type = 'IMPORTS'` and `basis_code = 'specifier_matches_project_alias'` per `module_file_ownership.module_candidate_uid` — fills the new `TrustModuleStats.alias_unresolved_imports: u64` (rust/crates/trust/src/storage_port.rs:46-53; the two literal sites :396 and trust_impl.rs:842 and the six service.rs fixture literals gain the field). NEW test `compute_module_stats_counts_unresolved_alias_imports_per_module` (beside the three existing `compute_module_stats_*` tests at :1602-1775, using the `unresolved_edges` insert helpers at :1140/:1176): two modules with owned files, one with two alias-basis unresolved IMPORTS rows and one relative-import row → `alias_unresolved_imports` 2 and 0; fans/file_count unchanged"
+      },
+      "expected": "exit 0: the module stats read carries, per module, how many imports failed through a project alias — from the same ownership join the fans use (RG-REQ-009-L02: one edge set, one ownership) — with the resolved-edge derivation byte-identical (no behavior change to fan-in/fan-out/file_count)",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-storage --lib trust_impl: test result: ok. 35 passed; 0 failed. The four named tests present (compute_module_stats_counts_unresolved_alias_imports_per_module, _empty_snapshot, _returns_fan_in_fan_out_file_count, _excludes_modules_with_no_owned_files). git diff HEAD on trust_impl.rs removes no line touching resolution = 'static'. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c01.txt: test result: ok. 35 passed; 0 failed; 650 filtered out",
+          "resolved-edge CTEs byte-identical (negated grep on removed resolution='static' lines succeeded)"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C02",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --lib rules 2>&1 | tee /tmp/as-c02.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c02.txt && for t in alias_suspicion_fires_on_one_alias_isolated_module alias_suspicion_silent_when_isolated_modules_have_no_failed_alias_imports alias_suspicion_reason_names_each_module_with_its_count_in_path_order alias_suspicion_reason_survives_commas_parentheses_and_spaces_in_the_module_path zero_connectivity_predicate_excludes_root_empty_and_single_file_modules count_suspicious_modules_matches_all_criteria import_low_with_alias_suspicion change_low_if_alias_suspicion; do grep -qE \"^test .*$t .* ok$\" /tmp/as-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && ! git grep -qE 'fn alias_suspicion_triggered_at_3|fn alias_suspicion_not_triggered_below_3' -- crates/trust",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/trust/src/rules.rs: `ModuleForSuspicionCheck` (:407-413) gains `alias_unresolved_imports: u64`; the five-condition zero-connectivity test becomes ONE pure function `is_zero_connectivity(&ModuleForSuspicionCheck) -> bool` (fan 0/0, file_count ≥ 2, name not `.`/empty) used by `count_suspicious_zero_connectivity_modules` (:392-405, unchanged semantics) AND by the service's row flag (AS-C03) — the duplicated predicate at service.rs:529-533 is removed; NEW `alias_isolated_modules(&[ModuleForSuspicionCheck]) -> Vec<(String, u64)>` = the zero-connectivity modules with `alias_unresolved_imports ≥ 1`, sorted by path; `detect_alias_resolution_suspicion` (:190-207) now takes that list: triggered iff it is non-empty, ONE reason string PER module — `alias_isolated_module=<n> <path>` (count first, path last; A-2/D-AS1-002: reversible for any path — the count never contains a space and the path takes the remainder verbatim; never a comma-joined list) — the bare `>= 3` count rule at :194 and the reason `suspicious_zero_connectivity_modules=N` are retired (a reason must name its cause, RG-REQ-009-L04); `alias_suspicion_reason_survives_commas_parentheses_and_spaces_in_the_module_path` pins a path like `packages/ui,legacy (old)`. Tests: the two retired names (`alias_suspicion_triggered_at_3`, `…not_triggered_below_3`) are REPLACED by the four new names (the negated grep proves the old identities are gone — never keep a false name); `count_suspicious_modules_matches_all_criteria` (:861; its five literals gain the field) stays; `import_low_with_alias_suspicion` / `change_low_if_alias_suspicion` (bool inputs) unchanged"
+      },
+      "expected": "exit 0: the alias downgrade fires only when a zero-connectivity module has imports that failed through a project alias, names every such module with its count, and stays silent for modules that are merely isolated; the zero-connectivity predicate exists once (RG-REQ-009-L02's list and the downgrade can no longer disagree)",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-trust --lib rules: test result: ok. 51 passed; 0 failed. All eight named tests present incl. the NEW alias_suspicion_reason_survives_commas_parentheses_and_spaces_in_the_module_path; the retired names alias_suspicion_triggered_at_3 / _not_triggered_below_3 are absent (git grep negated). EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c02.txt: test result: ok. 51 passed; 0 failed; 67 filtered out",
+          "one shared is_zero_connectivity predicate; alias_isolated_modules evidence gate; per-module reason grammar"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C03",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02",
+        "RG-REQ-002-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --lib service 2>&1 | tee /tmp/as-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c03.txt && for t in module_row_note_is_alias_candidate_only_with_failed_alias_imports module_row_note_is_isolated_without_failed_alias_imports module_zero_connectivity_flag_uses_the_shared_predicate root_module_not_flagged_suspicious; do grep -qE \"^test .*$t .* ok$\" /tmp/as-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && ! git grep -qE 'fn module_suspicious_zero_connectivity_flagged' -- crates/trust && ! grep -nE 'm\\.fan_in == 0' crates/trust/src/service.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/trust/src/service.rs: the rule wiring (:294-308) maps `alias_unresolved_imports` into `ModuleForSuspicionCheck` and passes `alias_isolated_modules(...)` to `detect_alias_resolution_suspicion`; the row flag (:526-548) calls `rules::is_zero_connectivity` (the inline five-condition copy is gone — the negated grep) and `trust_notes` becomes `[\"alias_resolution_candidate\"]` ONLY when the module has failed alias imports, else `[\"isolated\"]` (a reader-frame note: the module is isolated, nothing suspected); `ModuleTrustRow` (rust/crates/trust/src/types.rs:312-320) gains `alias_unresolved_imports: u64` (literals service.rs:538, rgr trust_tests.rs:93). `module_suspicious_zero_connectivity_flagged` (:1552) is RENAMED to `module_zero_connectivity_flag_uses_the_shared_predicate` (its assertion on the note changes); two new note tests; `root_module_not_flagged_suspicious` stays"
+      },
+      "expected": "exit 0: the per-module note names alias candidacy only where the evidence exists and genuine isolation as isolation — the same predicate feeds the list and the downgrade (RG-REQ-009-L02), and a note no longer outlives its cause (RG-REQ-009-L04) in the reader's terms (RG-REQ-002-L08)",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-trust --lib service: test result: ok. 31 passed; 0 failed. The four named tests present (module_row_note_is_alias_candidate_only_with_failed_alias_imports, _is_isolated_without_failed_alias_imports, module_zero_connectivity_flag_uses_the_shared_predicate, root_module_not_flagged_suspicious). The renamed test's old identity module_suspicious_zero_connectivity_flagged is gone; the inline 'm.fan_in == 0' predicate copy is gone from service.rs. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c03.txt: test result: ok. 31 passed; 0 failed; 87 filtered out",
+          "service delegates to rules::is_zero_connectivity; trust_notes alias_resolution_candidate only with evidence else isolated"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C04",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust --test parity 2>&1 | tee /tmp/as-c04.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c04.txt && grep -q 'aliasIsolatedModules' ../trust-parity-fixtures/rules__detect-alias-resolution__triggered/input.json && grep -q 'alias_isolated_module=55 packages/ui' ../trust-parity-fixtures/rules__detect-alias-resolution__triggered/expected.json && grep -q '\"reasons\": \\[\\]' ../trust-parity-fixtures/rules__detect-alias-resolution__not-triggered/expected.json",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/trust/tests/parity.rs: the dispatcher (:138, :160-164 `dispatch_detect_alias_resolution`) reads `aliasIsolatedModules: [{\"path\", \"count\"}]` instead of `suspiciousModuleCount` and calls `detect_alias_resolution_suspicion(&alias_isolated)`; `FixtureMockStorage::compute_module_stats` (:315, `Ok(self.module_stats.clone())`) is UNTOUCHED — the detect-alias fixtures dispatch straight to `dispatch_detect_alias_resolution` and never read module_stats, and the struct's `#[serde(default)]` keeps every other fixture's `module_stats` deserializing; the two fixtures are rewritten: `…__triggered` input `[{\"path\":\"packages/ui\",\"count\":55}]` → expected `{\"triggered\":true,\"reasons\":[\"alias_isolated_module=55 packages/ui\"]}`; `…__not-triggered` input `[]` → `{\"triggered\":false,\"reasons\":[]}`"
+      },
+      "expected": "exit 0: the parity corpus pins the new contract — the reason string names the module and its count — and the old count-only contract is gone",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-trust --test parity: test result: ok. 1 passed; 0 failed. Fixture triggered/input.json carries aliasIsolatedModules; triggered/expected.json reason is 'alias_isolated_module=55 packages/ui'; not-triggered/expected.json has \"reasons\": []. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c04.txt: test result: ok. 1 passed",
+          "trust-parity-fixtures/rules__detect-alias-resolution__triggered/expected.json: alias_isolated_module=55 packages/ui (A-2 grammar)"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C05",
+      "obligationIds": [
+        "RG-REQ-002-L08",
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::trust 2>&1 | tee /tmp/as-c05.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c05.txt && for t in suspicious_modules_rows_name_failed_alias_imports_only_where_they_exist downgrades_block_states_the_alias_reason_in_reader_frame downgrades_block_renders_a_module_path_containing_a_comma_verbatim suspicious_modules_basis_in_reader_frame_no_internal_wording render_shows_reliability_levels render_carries_per_section_source_labels render_drops_the_livegraph_posture_section; do grep -qE \"^test .*$t .* ok$\" /tmp/as-c05.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --test trust_module_edges_seam 2>&1 | tee /tmp/as-c05b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c05b.txt && for t in trust_module_fans_equal_modules_deps; do grep -qE \"^test .*$t .* ok$\" /tmp/as-c05b.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/rgr/src/presentation/trust.rs: `render_suspicious_modules` (:623-654) keeps its heading and basis sentence and renders a flagged module with failed alias imports as `  - <module> — N imports through a project alias did not resolve` and a merely isolated one as `  - <module>`; `render_downgrades` (:689-697) renders the alias line reader-facing as `  - Alias resolution suspected — <module> (N imports through a project alias did not resolve)[; …]` from each `alias_isolated_module=<n> <path>` reason (A-2), with NO `alias_resolution_suspicion:` key prefix on human output (RG-REQ-002-L08) — the raw reason token `suspicious_zero_connectivity_modules=N` and the raw rule-key prefix are both gone from human `trust`; the machine key `alias_resolution_suspicion` remains only in `--json`. The three sibling downgrade bullets keep their raw `key:` prefix (untouched — §8 residual). The axis lines (:376-377) and `agent/src/reliability.rs:541-542`'s humanizer are untouched (the JSON/axis token `alias_resolution_suspicion` is unchanged — orient, deps and stats inherit unchanged). NEW test `downgrades_block_states_the_alias_reason_in_reader_frame` asserts the reader-facing bullet AND that no `alias_resolution_suspicion` key appears in the human downgrades block; NEW test `downgrades_block_renders_a_module_path_containing_a_comma_verbatim` renders a reason whose `<path>` contains a comma and asserts the bullet carries the path verbatim (A-2). NEW render tests in trust_tests.rs (the `ModuleTrustRow` literal :93 gains the field); the existing four stay green; `rgr/tests/trust_module_edges_seam.rs::assert_fans_agree` (:66) consumes the real `compute_module_stats` result (`m.path`/`m.fan_out`/`m.fan_in` only — it never constructs `TrustModuleStats`, so it needs no edit for the new field) and still proves fans == `modules deps`"
+      },
+      "expected": "exit 0: the reader sees which isolated module has failed alias imports and how many, and the downgrade reason reads in the reader's frame; the fan seam with `modules deps` remains (no behavior change to fans or the list membership)",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-rgr --lib presentation::trust: test result: ok. 40 passed; 0 failed (all seven named tests incl. NEW downgrades_block_renders_a_module_path_containing_a_comma_verbatim). cargo test -p repo-graph-rgr --test trust_module_edges_seam: test result: ok. 1 passed (trust_module_fans_equal_modules_deps). Both EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c05.txt: test result: ok. 40 passed; 1222 filtered out",
+          "/tmp/as-c05b.txt: test result: ok. 1 passed (fan seam with modules deps preserved)"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C06",
+      "obligationIds": [
+        "P-AS-01",
+        "P-AS-02",
+        "P-AS-03",
+        "RG-REQ-009-L06",
+        "RG-REQ-009-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-trust 2>&1 | tee /tmp/as-c06.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c06.txt && cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/as-c06b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c06b.txt && cargo test -p repo-graph-storage --lib 2>&1 | tee /tmp/as-c06c.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c06c.txt && cargo test -p repo-graph-agent --lib reliability 2>&1 | tee /tmp/as-c06d.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c06d.txt && for t in humanize_other_reasons_unchanged; do grep -qE \"^test .*$t .* ok$\" /tmp/as-c06d.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-daemon-runtime --lib trust_coherence 2>&1 | tee /tmp/as-c06e.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/as-c06e.txt && git diff --quiet HEAD -- crates/agent/src/reliability.rs crates/trust/src/overlay.rs crates/trust/src/coherent.rs crates/daemon-runtime crates/rgr/src/presentation/stats.rs crates/rgr/src/presentation/orient_reliability.rs crates/classification",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the acceptance boundary: the whole trust crate (unit + parity), the whole rgr lib, the storage lib, agent's reliability humanizer tests, daemon-runtime's trust_coherence; and the byte-identity of every path the slice must NOT touch — the humanizer, the overlay (degradation flag token), the coherent envelope, daemon-runtime, stats and orient reliability renderers, the classification crate"
+      },
+      "expected": "exit 0: the reliability vocabulary (RG-REQ-009-L06), the first-party rules (RG-REQ-009-L07), the overlay token, orient/deps/stats inheritance and every existing test remain exactly as before (no behavior change outside the alias predicate, its evidence and its two rendered lines)",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Whole suites green: repo-graph-trust (unit 118 passed), repo-graph-rgr --lib, repo-graph-storage --lib (1262 passed), repo-graph-agent --lib reliability (24 passed, humanize_other_reasons_unchanged present), repo-graph-daemon-runtime --lib trust_coherence (7 passed). git diff --quiet HEAD on reliability.rs, overlay.rs, coherent.rs, daemon-runtime, stats.rs, orient_reliability.rs, classification: clean (no change outside the alias predicate/evidence/two lines). EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c06.txt trust 118 passed; /tmp/as-c06c.txt storage 1262 passed; /tmp/as-c06d.txt agent reliability 24 passed; /tmp/as-c06e.txt daemon-runtime trust_coherence 7 passed",
+          "byte-identity of the humanizer, overlay token, coherent envelope, daemon-runtime, stats/orient renderers and classification confirmed by git diff --quiet"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C07",
+      "obligationIds": [
+        "P-AS-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-trust -p repo-graph-storage -p repo-graph-rgr && cargo clippy -p repo-graph-trust -p repo-graph-storage -p repo-graph-rgr --all-targets -- -D warnings > /tmp/as-c07.txt 2>&1; rc=$?; tail -3 /tmp/as-c07.txt; test $rc -eq 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rustfmt and clippy (deny warnings, all targets) over the three touched crates"
+      },
+      "expected": "exit 0: no formatting or lint debt enters with the candidate",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo fmt --check -p repo-graph-trust -p repo-graph-storage -p repo-graph-rgr: clean (after wrapping one assert_eq! in rules.rs to rustfmt's form). cargo clippy on the three crates --all-targets -D warnings: Finished, no warnings. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-c07.txt: clippy Finished dev profile, no -D warnings triggered",
+          "rustfmt --check clean on the three touched crates"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C08",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-002-L08",
+        "RG-REQ-009-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/ALIAS-SUSPICION-1-fraktag-after && mkdir -p /private/tmp/ALIAS-SUSPICION-1-fraktag-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/as-frk-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/as-frk-index.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/ALIAS-SUSPICION-1-before-bin:$PATH\" \"/private/tmp/ALIAS-SUSPICION-1-before-bin/rmap\" trust > /tmp/as-frk-trust-before.txt 2> /tmp/as-frk-trust-before.txt.err ) || { echo \"RUN-FAILED /tmp/as-frk-trust-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/as-frk-trust-after.txt 2> /tmp/as-frk-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/as-frk-trust-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust --json > /tmp/as-frk-trust-after.json 2> /tmp/as-frk-trust-after.json.err ) || { echo \"RUN-FAILED /tmp/as-frk-trust-after.json\"; exit 1; } && grep -qE '^  - alias_resolution_suspicion: suspicious_zero_connectivity_modules=3$' /tmp/as-frk-trust-before.txt && grep -qE '^  - Import-graph: LOW \\(alias resolution suspected; 183 unresolved imports\\)$' /tmp/as-frk-trust-after.txt && grep -qE '^  - Alias resolution suspected — packages/ui \\(55 imports through a project alias did not resolve\\)$' /tmp/as-frk-trust-after.txt && grep -qE '^  - packages/ui — 55 imports through a project alias did not resolve$' /tmp/as-frk-trust-after.txt && grep -qE '^  - packages/engine$' /tmp/as-frk-trust-after.txt && grep -qE '^  - packages$' /tmp/as-frk-trust-after.txt && ! grep -q 'suspicious_zero_connectivity_modules' /tmp/as-frk-trust-after.txt && ! grep -q 'alias_resolution_suspicion' /tmp/as-frk-trust-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/as-frk-deps-after.txt 2> /tmp/as-frk-deps-after.txt.err ) && grep -q 'alias/workspace resolution is downgraded on this index' /tmp/as-frk-deps-after.txt && python3 - /private/tmp/ALIAS-SUSPICION-1-fraktag-after /tmp/as-frk-trust-after.json <<'PY'\nimport sqlite3, glob, json, sys, collections\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsnap = k.execute(\"select snapshot_uid from snapshots order by created_at desc limit 1\").fetchone()[0]\nmods = {r[0]: r[1] for r in k.execute(\"select module_candidate_uid, canonical_root_path from module_candidates where snapshot_uid = ?\", (snap,))}\nown = {r[0]: r[1] for r in k.execute(\"select file_uid, module_candidate_uid from module_file_ownership where snapshot_uid = ?\", (snap,))}\nfiles = collections.Counter(own.values()); fan_in = collections.Counter(); fan_out = collections.Counter(); pairs = set()\nfor sf, tf in k.execute(\"select s.file_uid, t.file_uid from edges e join nodes s on e.source_node_uid = s.node_uid and s.snapshot_uid = e.snapshot_uid join nodes t on e.target_node_uid = t.node_uid and t.snapshot_uid = e.snapshot_uid where e.snapshot_uid = ? and e.type = 'IMPORTS' and e.resolution = 'static'\", (snap,)):\n    a, b = own.get(sf), own.get(tf)\n    if a and b and a != b: pairs.add((a, b))\nfor a, b in pairs: fan_out[a] += 1; fan_in[b] += 1\nalias = collections.Counter()\nfor m, n in k.execute(\"select o.module_candidate_uid, count(*) from unresolved_edges u join nodes n on u.source_node_uid = n.node_uid and n.snapshot_uid = u.snapshot_uid join module_file_ownership o on o.file_uid = n.file_uid and o.snapshot_uid = u.snapshot_uid where u.snapshot_uid = ? and u.type = 'IMPORTS' and u.basis_code = 'specifier_matches_project_alias' group by 1\", (snap,)): alias[m] = n\nzero = {mods[m]: alias[m] for m in mods if fan_in[m] == 0 and fan_out[m] == 0 and files[m] >= 2 and mods[m] not in ('.', '')}\nexpected_alias = {p: n for p, n in zero.items() if n > 0}\nd = json.load(open(jf)); v = d['value']\nrows = {m['qualified_name']: m for m in v['modules']['value']}\nflagged = {q: m for q, m in rows.items() if m['suspicious_zero_connectivity']}\nassert set(flagged) == set(zero), (sorted(flagged), sorted(zero))\nfor q, m in flagged.items():\n    assert m['alias_unresolved_imports'] == zero[q], (q, m['alias_unresolved_imports'], zero[q])\n    assert m['trust_notes'] == (['alias_resolution_candidate'] if zero[q] > 0 else ['isolated']), (q, m['trust_notes'])\ndg = v['triggered_downgrades']['value']['alias_resolution_suspicion']\nassert dg['triggered'] == bool(expected_alias), (dg, expected_alias)\nif expected_alias:\n    assert dg['reasons'] == [f'alias_isolated_module={n} {p}' for p, n in sorted(expected_alias.items())], (dg['reasons'], expected_alias)\nelse:\n    assert dg['reasons'] == [], dg\nprint('seam ok: zero-connectivity', sorted(zero.items()), '| alias-isolated', sorted(expected_alias.items()), '| triggered', dg['triggered'])\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/ALIAS-SUSPICION-1-fraktag-before (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG by the base-revision binary on 2026-09-21, 0 s; served by the before binary /private/tmp/ALIAS-SUSPICION-1-before-bin/rmap{,d} copied from rust/target/release on the CLEAN tree) and NEW /private/tmp/ALIAS-SUSPICION-1-fraktag-after (fresh index by the candidate); under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the after root STAYS",
+        "inputs": "FRAKTAG (TypeScript; 5 modules, 3 zero-connectivity: `packages`, `packages/engine`, `packages/ui`) — BEFORE: `alias_resolution_suspicion: suspicious_zero_connectivity_modules=3`, three bare rows. The store: `packages/ui` has 55 unresolved IMPORTS with basis `specifier_matches_project_alias` (`packages/ui/src/components/ui/button.tsx` `import … from \"@/lib/utils\"`, `…/IngestionDialog.tsx` `@/components/ui/dialog` — the tsconfig alias TS-ALIAS-RESOLUTION-1 will resolve); `packages/engine` and `packages` have none. AFTER: the alias reason is TRUE and named — `packages/ui (55 imports through a project alias did not resolve)`; the row `packages/ui — 55 …`; `packages` and `packages/engine` plain (isolated); Import-graph LOW unchanged (the reason is real here); the store-derived seam (python recomputes fans over resolved static IMPORTS through `module_file_ownership` and the per-module alias-basis counts) equals the JSON `modules[].alias_unresolved_imports`, `trust_notes` and `triggered_downgrades.alias_resolution_suspicion.reasons`"
+      },
+      "expected": "exit 0: where the alias explanation is true, the reader is told which module and how many imports — and which isolated modules carry no such evidence",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "FRAKTAG after-index by candidate. BEFORE downgrade: '  - alias_resolution_suspicion: suspicious_zero_connectivity_modules=3'. AFTER: Import-graph LOW (alias resolution suspected; 183 unresolved imports); '  - Alias resolution suspected — packages/ui (55 imports through a project alias did not resolve)'; suspicious rows '  - packages/ui — 55 imports through a project alias did not resolve', '  - packages/engine', '  - packages'; no 'suspicious_zero_connectivity_modules' and no raw 'alias_resolution_suspicion' in human output. deps list footnote clause present. Python seam over the store equals JSON: zero-connectivity [(packages,0),(packages/engine,0),(packages/ui,55)], alias-isolated [(packages/ui,55)], triggered True. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-frk-trust-before.txt line 47; /tmp/as-frk-trust-after.txt lines 40-42,47",
+          "seam ok: zero-connectivity [('packages', 0), ('packages/engine', 0), ('packages/ui', 55)] | alias-isolated [('packages/ui', 55)] | triggered True",
+          "witness FRAKTAG packages/ui/src/components/ui/button.tsx:5 import { cn } from \"@/lib/utils\""
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C09",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "P-AS-02",
+        "P-AS-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/ALIAS-SUSPICION-1-kafka-after && mkdir -p /private/tmp/ALIAS-SUSPICION-1-kafka-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-kafka-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-kafka-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/as-kf-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/as-kf-index.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/ALIAS-SUSPICION-1-before-bin:$PATH\" \"/private/tmp/ALIAS-SUSPICION-1-before-bin/rmap\" trust > /tmp/as-kf-trust-before.txt 2> /tmp/as-kf-trust-before.txt.err ) || { echo \"RUN-FAILED /tmp/as-kf-trust-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-kafka-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-kafka-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/as-kf-trust-after.txt 2> /tmp/as-kf-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/as-kf-trust-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-kafka-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-kafka-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust --json > /tmp/as-kf-trust-after.json 2> /tmp/as-kf-trust-after.json.err ) || { echo \"RUN-FAILED /tmp/as-kf-trust-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/ALIAS-SUSPICION-1-before-bin:$PATH\" \"/private/tmp/ALIAS-SUSPICION-1-before-bin/rmap\" deps list > /tmp/as-kf-deps-before.txt 2> /tmp/as-kf-deps-before.txt.err ) || { echo \"RUN-FAILED /tmp/as-kf-deps-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-kafka-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-kafka-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/as-kf-deps-after.txt 2> /tmp/as-kf-deps-after.txt.err ) || { echo \"RUN-FAILED /tmp/as-kf-deps-after.txt\"; exit 1; } && grep -qE '^  - Import-graph: LOW \\(alias resolution suspected; 44704 unresolved imports\\)$' /tmp/as-kf-trust-before.txt && grep -qE '^  - Import-graph: LOW \\(44704 unresolved imports\\)$' /tmp/as-kf-trust-after.txt && grep -qE '^  - Change-impact: LOW \\(registry/factory patterns detected\\)$' /tmp/as-kf-trust-after.txt && ! grep -q 'alias resolution' /tmp/as-kf-trust-after.txt && grep -qE '^Suspicious Modules \\(zero connectivity\\)' /tmp/as-kf-trust-after.txt && grep -qE '^  - generator$' /tmp/as-kf-trust-after.txt && ! grep -q 'through a project alias' /tmp/as-kf-trust-after.txt && grep -q 'alias/workspace resolution is downgraded on this index' /tmp/as-kf-deps-before.txt && ! grep -q 'alias/workspace resolution is downgraded on this index' /tmp/as-kf-deps-after.txt && sed 's/; alias\\/workspace resolution is downgraded on this index//' /tmp/as-kf-deps-before.txt > /tmp/as-kf-deps-b.txt && diff /tmp/as-kf-deps-b.txt /tmp/as-kf-deps-after.txt && rm -rf /private/tmp/ALIAS-SUSPICION-1-vcmi-after && mkdir -p /private/tmp/ALIAS-SUSPICION-1-vcmi-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-vcmi-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-vcmi-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/as-vc-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/as-vc-index.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-vcmi-before RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-vcmi-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/ALIAS-SUSPICION-1-before-bin:$PATH\" \"/private/tmp/ALIAS-SUSPICION-1-before-bin/rmap\" trust > /tmp/as-vc-trust-before.txt 2> /tmp/as-vc-trust-before.txt.err ) || { echo \"RUN-FAILED /tmp/as-vc-trust-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/vcmi' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-vcmi-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-vcmi-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/as-vc-trust-after.txt 2> /tmp/as-vc-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/as-vc-trust-after.txt\"; exit 1; } && grep -v '^Snapshot:' /tmp/as-vc-trust-before.txt | sed -E 's/repo_[0-9a-z]+/repo_X/g' > /tmp/as-vc-tb.txt && grep -v '^Snapshot:' /tmp/as-vc-trust-after.txt | sed -E 's/repo_[0-9a-z]+/repo_X/g' > /tmp/as-vc-ta.txt && diff /tmp/as-vc-tb.txt /tmp/as-vc-ta.txt && python3 - /private/tmp/ALIAS-SUSPICION-1-kafka-after /tmp/as-kf-trust-after.json <<'PY'\nimport sqlite3, glob, json, sys, collections\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsnap = k.execute(\"select snapshot_uid from snapshots order by created_at desc limit 1\").fetchone()[0]\nmods = {r[0]: r[1] for r in k.execute(\"select module_candidate_uid, canonical_root_path from module_candidates where snapshot_uid = ?\", (snap,))}\nown = {r[0]: r[1] for r in k.execute(\"select file_uid, module_candidate_uid from module_file_ownership where snapshot_uid = ?\", (snap,))}\nfiles = collections.Counter(own.values()); fan_in = collections.Counter(); fan_out = collections.Counter(); pairs = set()\nfor sf, tf in k.execute(\"select s.file_uid, t.file_uid from edges e join nodes s on e.source_node_uid = s.node_uid and s.snapshot_uid = e.snapshot_uid join nodes t on e.target_node_uid = t.node_uid and t.snapshot_uid = e.snapshot_uid where e.snapshot_uid = ? and e.type = 'IMPORTS' and e.resolution = 'static'\", (snap,)):\n    a, b = own.get(sf), own.get(tf)\n    if a and b and a != b: pairs.add((a, b))\nfor a, b in pairs: fan_out[a] += 1; fan_in[b] += 1\nalias = collections.Counter()\nfor m, n in k.execute(\"select o.module_candidate_uid, count(*) from unresolved_edges u join nodes n on u.source_node_uid = n.node_uid and n.snapshot_uid = u.snapshot_uid join module_file_ownership o on o.file_uid = n.file_uid and o.snapshot_uid = u.snapshot_uid where u.snapshot_uid = ? and u.type = 'IMPORTS' and u.basis_code = 'specifier_matches_project_alias' group by 1\", (snap,)): alias[m] = n\nzero = {mods[m]: alias[m] for m in mods if fan_in[m] == 0 and fan_out[m] == 0 and files[m] >= 2 and mods[m] not in ('.', '')}\nexpected_alias = {p: n for p, n in zero.items() if n > 0}\nd = json.load(open(jf)); v = d['value']\nrows = {m['qualified_name']: m for m in v['modules']['value']}\nflagged = {q: m for q, m in rows.items() if m['suspicious_zero_connectivity']}\nassert set(flagged) == set(zero), (sorted(flagged), sorted(zero))\nfor q, m in flagged.items():\n    assert m['alias_unresolved_imports'] == zero[q], (q, m['alias_unresolved_imports'], zero[q])\n    assert m['trust_notes'] == (['alias_resolution_candidate'] if zero[q] > 0 else ['isolated']), (q, m['trust_notes'])\ndg = v['triggered_downgrades']['value']['alias_resolution_suspicion']\nassert dg['triggered'] == bool(expected_alias), (dg, expected_alias)\nif expected_alias:\n    assert dg['reasons'] == [f'alias_isolated_module={n} {p}' for p, n in sorted(expected_alias.items())], (dg['reasons'], expected_alias)\nelse:\n    assert dg['reasons'] == [], dg\nprint('seam ok: zero-connectivity', sorted(zero.items()), '| alias-isolated', sorted(expected_alias.items()), '| triggered', dg['triggered'])\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/ALIAS-SUSPICION-1-kafka-before (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka, 100 s) and /private/tmp/ALIAS-SUSPICION-1-vcmi-before (48 s) by the base binary; NEW -after roots by the candidate; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the after roots STAY",
+        "inputs": "kafka (Java; 67 modules; 5 zero-connectivity candidates `.github`, `committer-tools`, `docker`, `generator`, `release` — none has a single alias-basis unresolved import; `generator` has 217 `no_supporting_signal` rows) — BEFORE: `Import-graph: LOW (alias resolution suspected; 44704 unresolved imports)`, `Change-impact: LOW (alias resolution suspected; registry/factory patterns detected)`, the downgrade line with `=5`. AFTER: the alias reason is GONE (`Import-graph: LOW (44704 unresolved imports)` — LOW stays for its true cause; `Change-impact: LOW (registry/factory patterns detected)`), the five modules still listed as isolated, plain; `deps list`'s footnote clause `alias/workspace resolution is downgraded on this index` (the caveat literal is assembled in daemon-runtime/src/deps_headline.rs:300 `declared_unobserved_caveat` and rendered as an opaque JSON string by rgr/src/presentation/deps_list.rs; the `Downgraded` posture that gates it is derived by daemon-runtime/src/dispatch.rs:6946-6961 from the trust overlay's `alias_resolution_suspicion` degradation flag — overlay CODE untouched, its OUTPUT follows the trigger) is PRESENT before and ABSENT after, the rest of `deps list` byte-identical — a reason that outlived its cause on a second surface, now gone (OC-1: the INPUT-1 oracle wrongly asserted byte-identity). vcmi (C++; 2 candidates `CI`, `android`, no alias rows; the alias reason never fired) — `trust` byte-identical apart from the `Snapshot:` line and the per-index repo_uid embedded in the `registry_pattern_suspicion` reason, normalized to `repo_X` on both sides (OC-1; the control). The kafka seam equals the JSON"
+      },
+      "expected": "exit 0: a reason that named a cause the store never had disappears — from trust and from the deps footnote that inherits it — the level stays where its real cause keeps it, and a repository the old rule never touched remains byte-stable (no behavior change where nothing was wrong)",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "kafka after-index by candidate. BEFORE: Import-graph LOW (alias resolution suspected; 44704 unresolved imports); Change-impact LOW (alias resolution suspected; registry/factory patterns detected); downgrade suspicious_zero_connectivity_modules=5. AFTER: Import-graph LOW (44704 unresolved imports); Change-impact LOW (registry/factory patterns detected); no 'alias resolution'; Suspicious Modules section present incl. '  - generator'; no 'through a project alias'. deps list: 'alias/workspace resolution is downgraded on this index' present BEFORE, absent AFTER; the rest of deps list byte-identical after stripping that clause (diff clean). vcmi before/after trust byte-identical apart from Snapshot line and per-index repo_uid (normalized). kafka python seam: five zero-connectivity modules all alias 0, alias-isolated [], triggered False. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-kf-trust-before.txt lines 13-14,35; /tmp/as-kf-trust-after.txt lines 13-14",
+          "kafka seam ok: zero-connectivity [('.github',0),('committer-tools',0),('docker',0),('generator',0),('release',0)] | alias-isolated [] | triggered False",
+          "vcmi diff exit 0 (byte-identical after repo_uid normalization); kafka deps diff clean after stripping the alias clause"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C10",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-002-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/ALIAS-SUSPICION-1-repo-graph-after && mkdir -p /private/tmp/ALIAS-SUSPICION-1-repo-graph-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/as-rg-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/as-rg-index.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/as-rg-trust-after.txt 2> /tmp/as-rg-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/as-rg-trust-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust --json > /tmp/as-rg-trust-after.json 2> /tmp/as-rg-trust-after.json.err ) || { echo \"RUN-FAILED /tmp/as-rg-trust-after.json\"; exit 1; } && grep -qE '^  - Alias resolution suspected — rust \\(1 import through a project alias did not resolve\\)$' /tmp/as-rg-trust-after.txt && grep -qE '^  - rust — 1 import through a project alias did not resolve$' /tmp/as-rg-trust-after.txt && grep -qE '^  - rust/crates/detectors$' /tmp/as-rg-trust-after.txt && grep -qE '^  - tools$' /tmp/as-rg-trust-after.txt && ! grep -q 'suspicious_zero_connectivity_modules' /tmp/as-rg-trust-after.txt && ! grep -q 'alias_resolution_suspicion' /tmp/as-rg-trust-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after RMAP_SOCKET_PATH=/private/tmp/ALIAS-SUSPICION-1-repo-graph-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" deps list > /tmp/as-rg-deps-after.txt 2> /tmp/as-rg-deps-after.txt.err ) && grep -q 'alias/workspace resolution is downgraded on this index' /tmp/as-rg-deps-after.txt && python3 - /private/tmp/ALIAS-SUSPICION-1-repo-graph-after /tmp/as-rg-trust-after.json <<'PY'\nimport sqlite3, glob, json, sys, collections\nroot, jf = sys.argv[1], sys.argv[2]\ndb = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsnap = k.execute(\"select snapshot_uid from snapshots order by created_at desc limit 1\").fetchone()[0]\nmods = {r[0]: r[1] for r in k.execute(\"select module_candidate_uid, canonical_root_path from module_candidates where snapshot_uid = ?\", (snap,))}\nown = {r[0]: r[1] for r in k.execute(\"select file_uid, module_candidate_uid from module_file_ownership where snapshot_uid = ?\", (snap,))}\nfiles = collections.Counter(own.values()); fan_in = collections.Counter(); fan_out = collections.Counter(); pairs = set()\nfor sf, tf in k.execute(\"select s.file_uid, t.file_uid from edges e join nodes s on e.source_node_uid = s.node_uid and s.snapshot_uid = e.snapshot_uid join nodes t on e.target_node_uid = t.node_uid and t.snapshot_uid = e.snapshot_uid where e.snapshot_uid = ? and e.type = 'IMPORTS' and e.resolution = 'static'\", (snap,)):\n    a, b = own.get(sf), own.get(tf)\n    if a and b and a != b: pairs.add((a, b))\nfor a, b in pairs: fan_out[a] += 1; fan_in[b] += 1\nalias = collections.Counter()\nfor m, n in k.execute(\"select o.module_candidate_uid, count(*) from unresolved_edges u join nodes n on u.source_node_uid = n.node_uid and n.snapshot_uid = u.snapshot_uid join module_file_ownership o on o.file_uid = n.file_uid and o.snapshot_uid = u.snapshot_uid where u.snapshot_uid = ? and u.type = 'IMPORTS' and u.basis_code = 'specifier_matches_project_alias' group by 1\", (snap,)): alias[m] = n\nzero = {mods[m]: alias[m] for m in mods if fan_in[m] == 0 and fan_out[m] == 0 and files[m] >= 2 and mods[m] not in ('.', '')}\nexpected_alias = {p: n for p, n in zero.items() if n > 0}\nd = json.load(open(jf)); v = d['value']\nrows = {m['qualified_name']: m for m in v['modules']['value']}\nflagged = {q: m for q, m in rows.items() if m['suspicious_zero_connectivity']}\nassert set(flagged) == set(zero), (sorted(flagged), sorted(zero))\nfor q, m in flagged.items():\n    assert m['alias_unresolved_imports'] == zero[q], (q, m['alias_unresolved_imports'], zero[q])\n    assert m['trust_notes'] == (['alias_resolution_candidate'] if zero[q] > 0 else ['isolated']), (q, m['trust_notes'])\ndg = v['triggered_downgrades']['value']['alias_resolution_suspicion']\nassert dg['triggered'] == bool(expected_alias), (dg, expected_alias)\nif expected_alias:\n    assert dg['reasons'] == [f'alias_isolated_module={n} {p}' for p, n in sorted(expected_alias.items())], (dg['reasons'], expected_alias)\nelse:\n    assert dg['reasons'] == [], dg\nprint('seam ok: zero-connectivity', sorted(zero.items()), '| alias-isolated', sorted(expected_alias.items()), '| triggered', dg['triggered'])\nPY",
+        "cwd": ".",
+        "environment": "NEW isolated root /private/tmp/ALIAS-SUSPICION-1-repo-graph-after: a fresh index of the CANDIDATE tree of this repository by the candidate (~10 s); STAYS",
+        "inputs": "repo-graph itself (61 modules; 6 zero-connectivity candidates `rust`, `rust/crates/detectors`, `rust/crates/git`, `rust/crates/repo-index/tests/fixtures/rust/simple-crate`, `scripts`, `tools`): exactly ONE alias-basis row exists — `rust/crates/repo-index/tests/fixtures/typescript/classifier-repo/src/index.ts` importing `@/lib/missing`, a deliberately unresolvable TEST FIXTURE owned by the `rust` umbrella module. AFTER: the alias reason stays, now honestly scoped to `rust (1 import through a project alias did not resolve)` — the RESIDUAL this slice states rather than special-cases (a fixture repository inside the repository; the reader sees the module and the count and can judge); the other five rows plain; the seam equals the JSON. Singular/plural: `1 import` / `N imports`"
+      },
+      "expected": "exit 0: repo-graph's own alias note names its one true cause instead of six false ones; a fixture-caused residual is visible and countable, never hidden",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "repo-graph after-index by candidate. AFTER: '  - Alias resolution suspected — rust (1 import through a project alias did not resolve)'; suspicious row '  - rust — 1 import through a project alias did not resolve'; '  - rust/crates/detectors' and '  - tools' listed plain; no 'suspicious_zero_connectivity_modules', no raw 'alias_resolution_suspicion' in human output. deps list footnote clause present. Python seam: six zero-connectivity modules, only 'rust' has alias 1, alias-isolated [(rust,1)], triggered True. EXIT=0.",
+        "supportingEvidence": [
+          "/tmp/as-rg-trust-after.txt lines 51,60 (singular '1 import')",
+          "repo-graph seam ok: zero-connectivity [('rust',1),('rust/crates/detectors',0),('rust/crates/git',0),('rust/crates/repo-index/tests/fixtures/rust/simple-crate',0),('scripts',0),('tools',0)] | alias-isolated [('rust',1)] | triggered True",
+          "witness rust/crates/repo-index/tests/fixtures/typescript/classifier-repo/src/index.ts:7 import aliased from \"@/lib/missing\";"
+        ]
+      }
+    },
+    {
+      "checkId": "AS-C11",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-AS-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/ALIAS-SUSPICION-1/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && ! test -d /private/tmp/ALIAS-SUSPICION-1-before-bin && ls -d /private/tmp/ALIAS-SUSPICION-1-fraktag-after /private/tmp/ALIAS-SUSPICION-1-kafka-after /private/tmp/ALIAS-SUSPICION-1-vcmi-after /private/tmp/ALIAS-SUSPICION-1-repo-graph-after >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] (rust/crates/trust/src/storage_port\\.rs|rust/crates/storage/src/trust_impl\\.rs|rust/crates/trust/src/rules\\.rs|rust/crates/trust/src/service\\.rs|rust/crates/trust/src/types\\.rs|rust/crates/trust/tests/parity\\.rs|trust\\-parity\\-fixtures/rules__detect\\-alias\\-resolution__triggered/input\\.json|trust\\-parity\\-fixtures/rules__detect\\-alias\\-resolution__triggered/expected\\.json|trust\\-parity\\-fixtures/rules__detect\\-alias\\-resolution__not\\-triggered/input\\.json|trust\\-parity\\-fixtures/rules__detect\\-alias\\-resolution__not\\-triggered/expected\\.json|trust\\-parity\\-fixtures/report__diagnostics\\-with\\-calls/expected\\.json|rust/crates/rgr/src/presentation/trust\\.rs|rust/crates/rgr/src/presentation/trust_tests\\.rs|rust/crates/rgr/tests/trust_module_edges_seam\\.rs)$' | grep -q . && git diff --check",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in build-progress.md at step 0 equals the current one; no stray isolated daemon; the before-binary directory removed; the four `-after` roots kept for the manager's gate; `git status --short` (porcelain ` M`, `A `, `AM`, `??`) names only the 14 candidate paths (no new files in this slice); no trailing whitespace"
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry byte-identical — no behavior change outside the isolated roots), the tree holds only the allocated paths",
+      "candidateSha256": "sha256:cd65f2d369fbfae1d94c214f89d1eb04bf75b19e2fb66309a6543d2d554045eb",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Isolation and hygiene: registry-before digest 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c equals current operator registry digest; the only running rmapd is the operator's /Users/apple/.local/bin/rmapd (no stray isolated daemon); /private/tmp/ALIAS-SUSPICION-1-before-bin removed; the four -after roots present; git status --short names only the 12 candidate paths; git diff --check clean (no trailing whitespace). EXIT=0.",
+        "supportingEvidence": [
+          "operator registry sha256 unchanged before/after every isolated run",
+          "git status --short: 12 modified paths, all within the 14 candidate paths; no new files"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/storage/src/trust_impl.rs",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02"
+      ],
+      "summary": "compute_module_stats gains one LEFT JOIN counting alias-basis (specifier_matches_project_alias) unresolved IMPORTS per module through the same module_file_ownership join the fans use, filling TrustModuleStats.alias_unresolved_imports; the resolved-edge CTEs are byte-identical (no fan/file_count change)."
+    },
+    {
+      "path": "rust/crates/trust/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "TrustModuleStats gains alias_unresolved_imports: u64 (the port field the storage read fills and the rule consumes)."
+    },
+    {
+      "path": "rust/crates/trust/src/rules.rs",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02"
+      ],
+      "summary": "Single is_zero_connectivity predicate; alias_isolated_modules evidence selector; detect_alias_resolution_suspicion now fires iff at least one zero-connectivity module has failed alias imports and emits ONE reason per module 'alias_isolated_module=<n> <path>' (A-2/D-AS1-002, reversible for any path); the >= 3 count rule and its reason are retired; the two count tests renamed to their true identities and the comma-path reversibility test added."
+    },
+    {
+      "path": "rust/crates/trust/src/service.rs",
+      "obligationIds": [
+        "RG-REQ-009-L04",
+        "RG-REQ-009-L02",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "Wires alias_unresolved_imports into ModuleForSuspicionCheck and passes alias_isolated_modules to the trigger; the inline five-condition zero-connectivity copy is deleted in favor of rules::is_zero_connectivity; trust_notes is alias_resolution_candidate only with evidence, else isolated."
+    },
+    {
+      "path": "rust/crates/trust/src/types.rs",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "ModuleTrustRow gains alias_unresolved_imports: u64 so the per-module count reaches the renderer and JSON consumers."
+    },
+    {
+      "path": "rust/crates/trust/tests/parity.rs",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "The detect-alias dispatcher reads aliasIsolatedModules [{path,count}] and calls the evidence-based trigger; FixtureMockStorage untouched."
+    },
+    {
+      "path": "trust-parity-fixtures/rules__detect-alias-resolution__triggered/input.json",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Input carries aliasIsolatedModules [{path:packages/ui,count:55}] instead of a bare suspiciousModuleCount."
+    },
+    {
+      "path": "trust-parity-fixtures/rules__detect-alias-resolution__triggered/expected.json",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Expected reason is the A-2 per-module grammar 'alias_isolated_module=55 packages/ui'."
+    },
+    {
+      "path": "trust-parity-fixtures/rules__detect-alias-resolution__not-triggered/input.json",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Input carries an empty aliasIsolatedModules list (no evidence)."
+    },
+    {
+      "path": "trust-parity-fixtures/report__diagnostics-with-calls/expected.json",
+      "obligationIds": [
+        "RG-REQ-009-L04"
+      ],
+      "summary": "The two serialized ModuleTrustRow entries gain alias_unresolved_imports: 0 (additive field)."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust.rs",
+      "obligationIds": [
+        "RG-REQ-002-L08",
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Suspicious Modules rows name failed alias imports only where they exist ('N imports through a project alias did not resolve', singular '1 import'); format_alias_downgrade parses each per-module reason with split_once('=') then split_once(' ') and renders 'Alias resolution suspected — <module> (...)' joined with '; ', with NO raw alias_resolution_suspicion key prefix on human output; the machine key stays in --json."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/trust_tests.rs",
+      "obligationIds": [
+        "RG-REQ-002-L08",
+        "RG-REQ-009-L04"
+      ],
+      "summary": "Renderer tests: rows name alias imports only where present; the downgrade bullet reads in the reader's frame with no raw key (reason updated to the A-2 grammar); NEW downgrades_block_renders_a_module_path_containing_a_comma_verbatim proves a comma-bearing path renders whole; ModuleTrustRow literal gains the new field."
+    }
+  ],
+  "completedAt": "2026-09-21T10:00:03.762Z",
+  "limitations": [
+    "The workspace suite (cargo test --workspace), the smoke scripts and the isolated dogfood are the operator's gate after acceptance (CLAUDE.md Gates in a relay run); they were not run by the builder and their absence is not a finding.",
+    "The -before roots and the before-binary were built from the clean HEAD (42d7e04); git diff --stat da29560 HEAD -- rust is empty, so the before binary reflects the grounding revision da29560.",
+    "The four -after roots (fraktag, kafka, vcmi, repo-graph) are left in place under /private/tmp/ALIAS-SUSPICION-1-*-after for the operator's gate, per the slice's cleanup rule."
+  ],
+  "report": "ALIAS-SUSPICION-1 (INPUT-3, third admission): candidate-2.patch applied to the clean HEAD 42d7e04, then the single A-2 / D-AS1-002 code change made — the alias-resolution downgrade now emits ONE reason string per evidenced module, 'alias_isolated_module=<n> <path>' (count first, one space, then the module path verbatim, reversible for any path), the renderer parses it with split_once('=') then split_once(' '), the triggered parity fixture's expected reason became 'alias_isolated_module=55 packages/ui', and the two bound tests were added (rules alias_suspicion_reason_survives_commas_parentheses_and_spaces_in_the_module_path; renderer downgrades_block_renders_a_module_path_containing_a_comma_verbatim). All 11 checks AS-C01..C11 PASS in the foreground on a fresh build. What the product now answers about real analyzed source: (1) FRAKTAG packages/ui/src/components/ui/button.tsx:5 'import { cn } from \"@/lib/utils\"' and packages/ui/src/components/fraktag/IngestionDialog.tsx:9 '} from \"@/components/ui/dialog\";' are two of the 55 imports that failed through the tsconfig '@/…' alias — BEFORE trust said only '  - alias_resolution_suspicion: suspicious_zero_connectivity_modules=3', AFTER it names '  - Alias resolution suspected — packages/ui (55 imports through a project alias did not resolve)' and lists packages/engine and packages as plain isolated modules. (2) repo-graph rust/crates/repo-index/tests/fixtures/typescript/classifier-repo/src/index.ts:7 'import aliased from \"@/lib/missing\";' is the single alias-basis unresolved import behind AFTER '  - Alias resolution suspected — rust (1 import through a project alias did not resolve)'; the other five zero-connectivity modules (rust/crates/detectors, rust/crates/git, the simple-crate fixture, scripts, tools) are listed plain — a fixture-caused residual made visible and countable rather than hidden. (3) kafka's five zero-connectivity modules (.github, committer-tools, docker, generator, release) have zero alias-basis imports in the store (generator has 217 no_supporting_signal rows, 0 alias); BEFORE Import-graph read 'LOW (alias resolution suspected; 44704 unresolved imports)' and Change-impact 'LOW (alias resolution suspected; registry/factory patterns detected)', AFTER they read 'LOW (44704 unresolved imports)' and 'LOW (registry/factory patterns detected)' — the false alias cause disappears while the real causes keep the level LOW; on a second surface the 'deps list' footnote clause 'alias/workspace resolution is downgraded on this index' (derived from the overlay degradation flag) is present BEFORE and gone AFTER, the rest of deps list byte-identical. (4) vcmi (the control the old rule never touched) is byte-identical before/after apart from the Snapshot line and the per-index repo_uid. Per-corpus store-derived seams (python recomputing fans over resolved static IMPORTS through module_file_ownership and per-module alias-basis counts) equal the JSON modules[].alias_unresolved_imports, trust_notes and triggered_downgrades.alias_resolution_suspicion.reasons on all three live corpora. Preservation: the resolved-edge derivation, the fan seam with 'modules deps', the reliability caveat vocabulary and humanizer, the first-party rules, the overlay token CODE and every inheriting renderer are byte-identical (AS-C06 git diff --quiet); isolation held (operator registry digest unchanged; only the operator daemon running). D-AS1-001 (evidence-based trigger) judged against the §2.3 reader outcomes: where the alias explanation is true (FRAKTAG packages/ui, repo-graph rust) the reader is told which module and how many imports; where it was never true (kafka's isolated modules) the reason disappears; a merely isolated module is named 'isolated', not 'suspected'."
+}

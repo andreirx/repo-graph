@@ -97,6 +97,7 @@ fn suspicious_modules_basis_in_reader_frame_no_internal_wording() {
         fan_out: 0,
         file_count: 3,
         suspicious_zero_connectivity: true,
+        alias_unresolved_imports: 0,
         trust_notes: vec![],
     }];
     let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
@@ -123,6 +124,93 @@ fn suspicious_modules_basis_in_reader_frame_no_internal_wording() {
     assert!(
         !out.contains("`stats`"),
         "the false cross-check-stats pointer must be gone:\n{out}"
+    );
+}
+
+#[test]
+fn suspicious_modules_rows_name_failed_alias_imports_only_where_they_exist() {
+    // ALIAS-SUSPICION-1 (RG-REQ-009-L04): a flagged module with failed alias imports names
+    // the evidence and its count; a merely isolated one is listed plain.
+    let mut r = report();
+    r.modules = vec![
+        ModuleTrustRow {
+            module_stable_key: "repo:packages/ui:MODULE".into(),
+            qualified_name: "packages/ui".into(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 4,
+            suspicious_zero_connectivity: true,
+            alias_unresolved_imports: 55,
+            trust_notes: vec!["alias_resolution_candidate".into()],
+        },
+        ModuleTrustRow {
+            module_stable_key: "repo:packages/engine:MODULE".into(),
+            qualified_name: "packages/engine".into(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 4,
+            suspicious_zero_connectivity: true,
+            alias_unresolved_imports: 0,
+            trust_notes: vec!["isolated".into()],
+        },
+    ];
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains("packages/ui — 55 imports through a project alias did not resolve"),
+        "alias-isolated module names its count:\n{out}"
+    );
+    assert!(
+        out.contains("  - packages/engine"),
+        "merely isolated module listed plain:\n{out}"
+    );
+    assert!(
+        !out.contains("packages/engine — "),
+        "isolated module must not claim alias imports (no ' — ' clause):\n{out}"
+    );
+}
+
+#[test]
+fn downgrades_block_states_the_alias_reason_in_reader_frame() {
+    // ALIAS-SUSPICION-1 (RG-REQ-002-L08): the downgrade bullet reads in the reader's frame
+    // with NO raw `alias_resolution_suspicion:` key prefix; the machine key stays in --json.
+    let mut r = report();
+    r.summary.triggered_downgrades.alias_resolution_suspicion = DowngradeTrigger {
+        triggered: true,
+        reasons: vec!["alias_isolated_module=55 packages/ui".into()],
+    };
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains(
+            "- Alias resolution suspected — packages/ui (55 imports through a project alias did not resolve)"
+        ),
+        "reader-frame alias downgrade bullet:\n{out}"
+    );
+    assert!(
+        !out.contains("alias_resolution_suspicion"),
+        "raw rule key must not leak to the human downgrades block:\n{out}"
+    );
+}
+
+#[test]
+fn downgrades_block_renders_a_module_path_containing_a_comma_verbatim() {
+    // A-2 / D-AS1-002: a per-module reason `alias_isolated_module=<n> <path>` carries the
+    // path verbatim, so a path containing a comma (and parentheses and a space) renders
+    // whole — the reader sees the real module name, never a name split at its comma.
+    let mut r = report();
+    r.summary.triggered_downgrades.alias_resolution_suspicion = DowngradeTrigger {
+        triggered: true,
+        reasons: vec!["alias_isolated_module=2 packages/ui,legacy (old)".into()],
+    };
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains(
+            "- Alias resolution suspected — packages/ui,legacy (old) (2 imports through a project alias did not resolve)"
+        ),
+        "module path with a comma renders verbatim:\n{out}"
+    );
+    assert!(
+        !out.contains("alias_resolution_suspicion"),
+        "raw rule key must not leak to the human downgrades block:\n{out}"
     );
 }
 

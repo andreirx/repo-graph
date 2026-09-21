@@ -1,1 +1,1 @@
-{"fn":"detect_alias_resolution_suspicion","suspiciousModuleCount":5}
+{"fn":"detect_alias_resolution_suspicion","aliasIsolatedModules":[{"path":"packages/ui","count":55}]}

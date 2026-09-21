@@ -783,6 +783,15 @@ impl TrustStorageRead for StorageConnection {
         // endpoint module is not a candidate is dropped there); `module_pairs` are the
         // cross-module directed (source_module, target_module) pairs, one row per resolved
         // file→file import that crosses a module boundary.
+        //
+        // ALIAS-SUSPICION-1 (RG-REQ-009-L04): the `alias_unresolved` LEFT JOIN counts, per
+        // module, the UNRESOLVED IMPORTS whose `basis_code` is
+        // `specifier_matches_project_alias` — the only basis meaning "an alias path did not
+        // resolve". It rides the SAME `module_file_ownership` join the fans use (one edge
+        // set, one ownership — RG-REQ-009-L02), reached from each unresolved edge's source
+        // node file via `nodes.file_uid`. The resolved-edge CTEs above are untouched: this
+        // is a read-only addition that gives the alias-suspicion downgrade an evidenced
+        // cause instead of a bare count of isolated modules.
         let mut stmt = self.connection().prepare(
             "WITH file_owner AS ( \
                SELECT o.file_uid AS file_uid, o.module_candidate_uid AS module_uid \
@@ -815,7 +824,8 @@ impl TrustStorageRead for StorageConnection {
                mc.canonical_root_path AS path, \
                COALESCE(fan_in.cnt, 0) AS fan_in, \
                COALESCE(fan_out.cnt, 0) AS fan_out, \
-               COALESCE(files.cnt, 0) AS file_count \
+               COALESCE(files.cnt, 0) AS file_count, \
+               COALESCE(alias_unresolved.cnt, 0) AS alias_unresolved_imports \
              FROM module_candidates mc \
              LEFT JOIN ( \
                SELECT tgt_mod AS mid, COUNT(DISTINCT src_mod) AS cnt \
@@ -833,6 +843,20 @@ impl TrustStorageRead for StorageConnection {
                WHERE snapshot_uid = ?1 \
                GROUP BY module_candidate_uid \
              ) files ON files.module_candidate_uid = mc.module_candidate_uid \
+             LEFT JOIN ( \
+               SELECT o.module_candidate_uid AS mid, COUNT(*) AS cnt \
+               FROM unresolved_edges u \
+               JOIN nodes n \
+                 ON u.source_node_uid = n.node_uid \
+                AND n.snapshot_uid = u.snapshot_uid \
+               JOIN module_file_ownership o \
+                 ON o.file_uid = n.file_uid \
+                AND o.snapshot_uid = u.snapshot_uid \
+               WHERE u.snapshot_uid = ?1 \
+                 AND u.type = 'IMPORTS' \
+                 AND u.basis_code = 'specifier_matches_project_alias' \
+               GROUP BY o.module_candidate_uid \
+             ) alias_unresolved ON alias_unresolved.mid = mc.module_candidate_uid \
              WHERE mc.snapshot_uid = ?1 \
                AND COALESCE(files.cnt, 0) > 0 \
              ORDER BY mc.canonical_root_path",
@@ -845,6 +869,7 @@ impl TrustStorageRead for StorageConnection {
                 fan_in: row.get::<_, i64>(2).map(|v| v as u64)?,
                 fan_out: row.get::<_, i64>(3).map(|v| v as u64)?,
                 file_count: row.get::<_, i64>(4).map(|v| v as u64)?,
+                alias_unresolved_imports: row.get::<_, i64>(5).map(|v| v as u64)?,
             })
         })?;
 
@@ -1799,6 +1824,120 @@ mod tests {
 
         let stats = TrustStorageRead::compute_module_stats(&storage, &snap_uid).unwrap();
         assert_eq!(stats.len(), 0);
+    }
+
+    #[test]
+    fn compute_module_stats_counts_unresolved_alias_imports_per_module() {
+        // ALIAS-SUSPICION-1 (RG-REQ-009-L04 / RG-REQ-009-L02): the per-module count of
+        // unresolved IMPORTS whose basis is `specifier_matches_project_alias` rides the
+        // SAME `module_file_ownership` join the fans use. Only alias-basis IMPORTS count —
+        // a relative-import gap on the same module does NOT. Fans/file_count are unchanged.
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+
+        // Two modules, one file each, no cross-module resolved imports (both isolated).
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_candidates \
+                 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+                  module_kind, canonical_root_path, confidence) VALUES \
+                 ('mc_ui', '{snap_uid}', 'r1', 'dir:packages/ui', 'directory', 'packages/ui', 1.0), \
+                 ('mc_engine', '{snap_uid}', 'r1', 'dir:packages/engine', 'directory', 'packages/engine', 1.0)"
+            ))
+            .unwrap();
+        storage
+            .connection()
+            .execute_batch(
+                "INSERT INTO files (file_uid, repo_uid, path, is_test, is_generated, is_excluded) VALUES \
+                 ('r1:packages/ui/button.tsx', 'r1', 'packages/ui/button.tsx', 0, 0, 0), \
+                 ('r1:packages/engine/core.ts', 'r1', 'packages/engine/core.ts', 0, 0, 0)",
+            )
+            .unwrap();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_file_ownership \
+                 (snapshot_uid, repo_uid, file_uid, module_candidate_uid, assignment_kind, confidence) VALUES \
+                 ('{snap_uid}', 'r1', 'r1:packages/ui/button.tsx', 'mc_ui', 'directory', 1.0), \
+                 ('{snap_uid}', 'r1', 'r1:packages/engine/core.ts', 'mc_engine', 'directory', 1.0)"
+            ))
+            .unwrap();
+        storage
+            .insert_nodes(&[
+                crate::types::GraphNode {
+                    node_uid: "f_ui".into(),
+                    snapshot_uid: snap_uid.clone(),
+                    repo_uid: "r1".into(),
+                    stable_key: "r1:packages/ui/button.tsx:FILE".into(),
+                    kind: "FILE".into(),
+                    subtype: None,
+                    name: "button.tsx".into(),
+                    qualified_name: Some("packages/ui/button.tsx".into()),
+                    file_uid: Some("r1:packages/ui/button.tsx".into()),
+                    parent_node_uid: None,
+                    location: None,
+                    signature: None,
+                    visibility: None,
+                    doc_comment: None,
+                    metadata_json: None,
+                },
+                crate::types::GraphNode {
+                    node_uid: "f_engine".into(),
+                    snapshot_uid: snap_uid.clone(),
+                    repo_uid: "r1".into(),
+                    stable_key: "r1:packages/engine/core.ts:FILE".into(),
+                    kind: "FILE".into(),
+                    subtype: None,
+                    name: "core.ts".into(),
+                    qualified_name: Some("packages/engine/core.ts".into()),
+                    file_uid: Some("r1:packages/engine/core.ts".into()),
+                    parent_node_uid: None,
+                    location: None,
+                    signature: None,
+                    visibility: None,
+                    doc_comment: None,
+                    metadata_json: None,
+                },
+            ])
+            .unwrap();
+
+        // mc_ui: two alias-basis unresolved IMPORTS + one relative-import IMPORTS.
+        // mc_engine: no unresolved edges at all.
+        let insert_unresolved_import = |edge_uid: &str, source: &str, basis: &str| {
+            storage
+                .connection()
+                .execute(
+                    "INSERT INTO unresolved_edges \
+                     (edge_uid, snapshot_uid, repo_uid, source_node_uid, \
+                      target_key, type, resolution, extractor, \
+                      category, classification, classifier_version, \
+                      basis_code, observed_at) \
+                     VALUES (?, ?, 'r1', ?, \
+                      '@/lib/utils', 'IMPORTS', 'unresolved', 'ts-base:1', \
+                      'imports_file_not_found', 'import_bound_internal', 1, ?, '2025-01-01T00:00:00.000Z')",
+                    rusqlite::params![edge_uid, snap_uid, source, basis],
+                )
+                .unwrap();
+        };
+        insert_unresolved_import("ue_alias1", "f_ui", "specifier_matches_project_alias");
+        insert_unresolved_import("ue_alias2", "f_ui", "specifier_matches_project_alias");
+        insert_unresolved_import("ue_rel", "f_ui", "relative_import_target_unresolved");
+
+        let stats = TrustStorageRead::compute_module_stats(&storage, &snap_uid).unwrap();
+        // ORDER BY canonical_root_path: packages/engine, packages/ui
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].path, "packages/engine");
+        assert_eq!(stats[0].alias_unresolved_imports, 0);
+        assert_eq!(stats[0].fan_in, 0);
+        assert_eq!(stats[0].fan_out, 0);
+        assert_eq!(stats[0].file_count, 1);
+        assert_eq!(stats[1].path, "packages/ui");
+        // Only the two alias-basis rows count; the relative-import row does not.
+        assert_eq!(stats[1].alias_unresolved_imports, 2);
+        assert_eq!(stats[1].fan_in, 0);
+        assert_eq!(stats[1].fan_out, 0);
+        assert_eq!(stats[1].file_count, 1);
     }
 
     // ── malformed enum regression tests ──────────────────────

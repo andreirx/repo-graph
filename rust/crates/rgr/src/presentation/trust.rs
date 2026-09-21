@@ -646,13 +646,31 @@ fn render_suspicious_modules(v: &CoherentTrustReport) -> String {
          snapshot (no incoming and no outgoing cross-module imports); open the module \
          to confirm whether that is expected.\n",
     );
+    // ALIAS-SUSPICION-1 (RG-REQ-009-L04): a flagged module that ALSO has imports which
+    // failed through a project alias names that evidence and its count; a module that is
+    // merely isolated is listed plain (no cause is asserted the store does not hold).
     for m in suspicious.iter().take(10) {
-        out.push_str(&bullet(&m.qualified_name));
+        if m.alias_unresolved_imports >= 1 {
+            out.push_str(&bullet(&format!(
+                "{} — {}",
+                m.qualified_name,
+                alias_import_phrase(m.alias_unresolved_imports)
+            )));
+        } else {
+            out.push_str(&bullet(&m.qualified_name));
+        }
     }
     if suspicious.len() > 10 {
         out.push_str(&bullet(&format!("... ({} more)", suspicious.len() - 10)));
     }
     out
+}
+
+/// Reader-frame phrase for a module's failed alias imports (ALIAS-SUSPICION-1,
+/// RG-REQ-002-L08): "N imports through a project alias did not resolve", singular for one.
+fn alias_import_phrase(count: u64) -> String {
+    let noun = if count == 1 { "import" } else { "imports" };
+    format!("{count} {noun} through a project alias did not resolve")
 }
 
 fn render_downgrades(v: &CoherentTrustReport) -> String {
@@ -687,13 +705,13 @@ fn render_downgrades(v: &CoherentTrustReport) -> String {
         items.push(format!("missing_entrypoint_declarations: {}", reason));
     }
     if d.alias_resolution_suspicion.triggered {
-        let reason = d
-            .alias_resolution_suspicion
-            .reasons
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("alias resolution issues");
-        items.push(format!("alias_resolution_suspicion: {}", reason));
+        // ALIAS-SUSPICION-1 (RG-REQ-002-L08): reader-frame, NO raw `alias_resolution_suspicion:`
+        // key prefix (the rule key is itself an internal-diagnostic label). The machine key
+        // survives only in `--json` `triggered_downgrades`. The three sibling downgrades keep
+        // their raw key prefix — a separate pre-existing L08 residual (DOWNGRADE-LABELS-1).
+        items.push(format_alias_downgrade(
+            &d.alias_resolution_suspicion.reasons,
+        ));
     }
 
     if items.is_empty() {
@@ -711,6 +729,38 @@ fn render_downgrades(v: &CoherentTrustReport) -> String {
         out.push_str(&bullet(&item));
     }
     out
+}
+
+/// Render the alias-resolution downgrade in the reader's frame (ALIAS-SUSPICION-1,
+/// RG-REQ-002-L08). Parses ONE machine reason PER module, `alias_isolated_module=<n> <path>`
+/// (A-2 / D-AS1-002): `split_once('=')` off the key, then `split_once(' ')` to peel the count
+/// from the path — the path is the remainder VERBATIM (a path may contain commas, parentheses
+/// or spaces; the count never does, so this is reversible). Rendered as
+/// "Alias resolution suspected — <module> (N imports through a project alias did not
+/// resolve)[; …]" joined in the reason order (path order). No raw rule-key prefix on human
+/// output; the machine key stays in `--json`.
+fn format_alias_downgrade(reasons: &[String]) -> String {
+    let pairs: Vec<String> = reasons
+        .iter()
+        .filter_map(|reason| {
+            let (key, rest) = reason.split_once('=')?;
+            if key != "alias_isolated_module" {
+                return None;
+            }
+            let (count, path) = rest.split_once(' ')?;
+            let count: u64 = count.parse().ok()?;
+            if path.is_empty() {
+                return None;
+            }
+            Some(format!("{} ({})", path, alias_import_phrase(count)))
+        })
+        .collect();
+    if pairs.is_empty() {
+        // Defensive: an unparseable reason still reads in the reader's frame, never a raw token.
+        "Alias resolution suspected".to_string()
+    } else {
+        format!("Alias resolution suspected — {}", pairs.join("; "))
+    }
 }
 
 fn format_axis(name: &str, axis: &ReliabilityAxisScore) -> String {

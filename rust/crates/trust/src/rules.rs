@@ -187,22 +187,35 @@ pub fn detect_missing_entrypoint_declarations(active_entrypoint_count: usize) ->
     }
 }
 
-/// Alias-resolution suspicion: suspicious module count >= 3.
+/// Alias-resolution suspicion: fires only on EVIDENCE.
 ///
-/// Mirror of `detectAliasResolutionSuspicion` from `rules.ts:141`.
-pub fn detect_alias_resolution_suspicion(suspicious_module_count: usize) -> DowngradeTrigger {
-    if suspicious_module_count >= 3 {
-        DowngradeTrigger {
-            triggered: true,
-            reasons: vec![format!(
-                "suspicious_zero_connectivity_modules={}",
-                suspicious_module_count
-            )],
-        }
-    } else {
+/// ALIAS-SUSPICION-1 (RG-REQ-009-L04, decision D-AS1-001): the old rule fired on a bare
+/// COUNT of zero-connectivity modules (`>= 3`), a threshold calibrated in a world where
+/// the fans were structurally zero (RC-5). With the fans fixed (TRUST-MODULE-EDGES-1) that
+/// count no longer implies an alias problem — it named a cause the store never verified
+/// (RC-11). The rule now takes the zero-connectivity modules that ALSO have at least one
+/// import that failed through a project alias (`alias_isolated_modules`) and fires iff that
+/// list is non-empty, naming each module with its count so the reason cannot outlive its
+/// cause. A module that is merely isolated (no failed alias import) is NOT evidence.
+///
+/// Reason grammar (A-2 / D-AS1-002): ONE reason string PER evidenced module,
+/// `alias_isolated_module=<n> <path>` — the count first, one space, then the module path
+/// VERBATIM as the remainder. This is reversible for any path (a path may contain commas,
+/// parentheses or spaces; the count never does), unlike a comma-joined `path(count)` list
+/// which could render a false module name for a path containing a comma.
+pub fn detect_alias_resolution_suspicion(alias_isolated: &[(String, u64)]) -> DowngradeTrigger {
+    if alias_isolated.is_empty() {
         DowngradeTrigger {
             triggered: false,
             reasons: vec![],
+        }
+    } else {
+        DowngradeTrigger {
+            triggered: true,
+            reasons: alias_isolated
+                .iter()
+                .map(|(path, count)| format!("alias_isolated_module={count} {path}"))
+                .collect(),
         }
     }
 }
@@ -385,31 +398,57 @@ pub(crate) fn sum_unresolved_imports(diagnostics: &ExtractionDiagnostics) -> u64
         .unwrap_or(0)
 }
 
+/// The zero-connectivity predicate, defined ONCE.
+///
+/// ALIAS-SUSPICION-1 (RG-REQ-009-L02): a module is zero-connectivity when it has no
+/// incoming AND no outgoing cross-module import (fans from the derived module-dependency
+/// edge set — TRUST-MODULE-EDGES-1), holds at least two files, and is neither the repo
+/// root (`.`) nor unnamed. This single function feeds BOTH the counter and the service's
+/// per-row `suspicious_zero_connectivity` flag, so the "Suspicious Modules" list and any
+/// count of it can never disagree (the inline copy in `service.rs` is gone).
+pub(crate) fn is_zero_connectivity(m: &ModuleForSuspicionCheck) -> bool {
+    m.fan_in == 0
+        && m.fan_out == 0
+        && m.file_count >= 2
+        && m.qualified_name != "."
+        && !m.qualified_name.is_empty()
+}
+
 /// Count modules matching the suspicious-zero-connectivity pattern.
 ///
 /// Mirror of `countSuspiciousZeroConnectivityModules` from
-/// `rules.ts:346`.
+/// `rules.ts:346`. Semantics unchanged; now delegates to the shared
+/// `is_zero_connectivity` predicate.
 pub(crate) fn count_suspicious_zero_connectivity_modules(
     modules: &[ModuleForSuspicionCheck],
 ) -> usize {
-    modules
-        .iter()
-        .filter(|m| {
-            m.fan_in == 0
-                && m.fan_out == 0
-                && m.file_count >= 2
-                && m.qualified_name != "."
-                && !m.qualified_name.is_empty()
-        })
-        .count()
+    modules.iter().filter(|m| is_zero_connectivity(m)).count()
 }
 
-/// Input shape for `count_suspicious_zero_connectivity_modules`.
+/// The zero-connectivity modules that ALSO have at least one import that failed through a
+/// project alias, paired with that count, sorted by path.
+///
+/// ALIAS-SUSPICION-1 (RG-REQ-009-L04): this is the evidence the alias-suspicion downgrade
+/// fires on — a module that is isolated AND whose imports genuinely failed through an alias
+/// (`specifier_matches_project_alias`), not merely a module nothing imports.
+pub(crate) fn alias_isolated_modules(modules: &[ModuleForSuspicionCheck]) -> Vec<(String, u64)> {
+    let mut out: Vec<(String, u64)> = modules
+        .iter()
+        .filter(|m| is_zero_connectivity(m) && m.alias_unresolved_imports >= 1)
+        .map(|m| (m.qualified_name.clone(), m.alias_unresolved_imports))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Input shape for the zero-connectivity predicate and the alias-suspicion trigger.
 pub(crate) struct ModuleForSuspicionCheck {
     pub qualified_name: String,
     pub fan_in: u64,
     pub fan_out: u64,
     pub file_count: u64,
+    /// ALIAS-SUSPICION-1: how many of this module's imports failed through a project alias.
+    pub alias_unresolved_imports: u64,
 }
 
 /// Group path-prefix cycles by ancestor stable_key and return
@@ -682,14 +721,123 @@ mod tests {
 
     // ── Alias resolution ─────────────────────────────────────
 
-    #[test]
-    fn alias_suspicion_triggered_at_3() {
-        assert!(detect_alias_resolution_suspicion(3).triggered);
+    fn module_check(
+        name: &str,
+        fan_in: u64,
+        fan_out: u64,
+        files: u64,
+        alias: u64,
+    ) -> ModuleForSuspicionCheck {
+        ModuleForSuspicionCheck {
+            qualified_name: name.to_string(),
+            fan_in,
+            fan_out,
+            file_count: files,
+            alias_unresolved_imports: alias,
+        }
     }
 
     #[test]
-    fn alias_suspicion_not_triggered_below_3() {
-        assert!(!detect_alias_resolution_suspicion(2).triggered);
+    fn alias_suspicion_fires_on_one_alias_isolated_module() {
+        // A single zero-connectivity module whose imports failed through an alias IS
+        // evidence — the downgrade fires and names it with its count (ALIAS-SUSPICION-1).
+        let modules = vec![module_check("packages/ui", 0, 0, 3, 55)];
+        let isolated = alias_isolated_modules(&modules);
+        let trigger = detect_alias_resolution_suspicion(&isolated);
+        assert!(trigger.triggered);
+        assert_eq!(
+            trigger.reasons,
+            vec!["alias_isolated_module=55 packages/ui"]
+        );
+    }
+
+    #[test]
+    fn alias_suspicion_silent_when_isolated_modules_have_no_failed_alias_imports() {
+        // Three isolated modules but NONE has a failed alias import — no evidence, so the
+        // downgrade stays silent (the old count-of-3 rule would have fired falsely: RC-11).
+        let modules = vec![
+            module_check("a", 0, 0, 2, 0),
+            module_check("b", 0, 0, 4, 0),
+            module_check("c", 0, 0, 3, 0),
+        ];
+        let isolated = alias_isolated_modules(&modules);
+        let trigger = detect_alias_resolution_suspicion(&isolated);
+        assert!(!trigger.triggered);
+        assert!(trigger.reasons.is_empty());
+    }
+
+    #[test]
+    fn alias_suspicion_reason_names_each_module_with_its_count_in_path_order() {
+        // Two evidenced modules → ONE reason string PER module, sorted by path (a module
+        // with a failed alias import that is NOT isolated is excluded). A-2 / D-AS1-002.
+        let modules = vec![
+            module_check("zeta", 0, 0, 2, 3),
+            module_check("alpha", 0, 0, 2, 7),
+            module_check("connected", 1, 0, 2, 9),
+        ];
+        let isolated = alias_isolated_modules(&modules);
+        let trigger = detect_alias_resolution_suspicion(&isolated);
+        assert!(trigger.triggered);
+        assert_eq!(
+            trigger.reasons,
+            vec![
+                "alias_isolated_module=7 alpha",
+                "alias_isolated_module=3 zeta",
+            ]
+        );
+    }
+
+    #[test]
+    fn alias_suspicion_reason_survives_commas_parentheses_and_spaces_in_the_module_path() {
+        // A-2 / D-AS1-002: the reason grammar is reversible for ANY path. A module path
+        // containing a comma, parentheses and a space is carried VERBATIM as the remainder
+        // after `alias_isolated_module=<n> `; parsing back with split_once('=') then
+        // split_once(' ') recovers exactly the count and the path — a comma-joined
+        // `path(count)` list could not (it would split the path at its comma).
+        let modules = vec![module_check("packages/ui,legacy (old)", 0, 0, 2, 2)];
+        let isolated = alias_isolated_modules(&modules);
+        let trigger = detect_alias_resolution_suspicion(&isolated);
+        assert!(trigger.triggered);
+        assert_eq!(
+            trigger.reasons,
+            vec!["alias_isolated_module=2 packages/ui,legacy (old)"]
+        );
+        // Reversible: recover the count and the path verbatim.
+        let reason = &trigger.reasons[0];
+        let (key, rest) = reason.split_once('=').unwrap();
+        assert_eq!(key, "alias_isolated_module");
+        let (count, path) = rest.split_once(' ').unwrap();
+        assert_eq!(count, "2");
+        assert_eq!(path, "packages/ui,legacy (old)");
+    }
+
+    #[test]
+    fn zero_connectivity_predicate_excludes_root_empty_and_single_file_modules() {
+        // The ONE predicate: fan 0/0, ≥2 files, not root/empty (ALIAS-SUSPICION-1).
+        assert!(is_zero_connectivity(&module_check("src/api", 0, 0, 5, 0)));
+        assert!(!is_zero_connectivity(&module_check(".", 0, 0, 5, 0)));
+        assert!(!is_zero_connectivity(&module_check("", 0, 0, 5, 0)));
+        assert!(!is_zero_connectivity(&module_check(
+            "src/single",
+            0,
+            0,
+            1,
+            0
+        )));
+        assert!(!is_zero_connectivity(&module_check(
+            "src/outbound",
+            0,
+            1,
+            5,
+            0
+        )));
+        assert!(!is_zero_connectivity(&module_check(
+            "src/inbound",
+            1,
+            0,
+            5,
+            0
+        )));
     }
 
     // ── Import graph reliability ──────────────────────────────
@@ -871,6 +1019,7 @@ mod tests {
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 5,
+                alias_unresolved_imports: 0,
             },
             // Fully connected → not suspicious.
             ModuleForSuspicionCheck {
@@ -878,6 +1027,7 @@ mod tests {
                 fan_in: 3,
                 fan_out: 2,
                 file_count: 10,
+                alias_unresolved_imports: 0,
             },
             // A single OUTGOING edge is still a rendered edge → not suspicious.
             ModuleForSuspicionCheck {
@@ -885,6 +1035,7 @@ mod tests {
                 fan_in: 0,
                 fan_out: 1,
                 file_count: 4,
+                alias_unresolved_imports: 0,
             },
             // A single INCOMING edge is still a rendered edge → not suspicious.
             ModuleForSuspicionCheck {
@@ -892,12 +1043,14 @@ mod tests {
                 fan_in: 1,
                 fan_out: 0,
                 file_count: 4,
+                alias_unresolved_imports: 0,
             },
             ModuleForSuspicionCheck {
                 qualified_name: ".".into(), // repo root — excluded
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 50,
+                alias_unresolved_imports: 0,
             },
         ];
         assert_eq!(count_suspicious_zero_connectivity_modules(&modules), 1);

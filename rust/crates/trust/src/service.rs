@@ -29,8 +29,9 @@ use repo_graph_classification::derive_blast_radius;
 use repo_graph_classification::types::{BlastRadiusLevel, UnresolvedEdgeCategory};
 
 use crate::rules::{
-    self, count_suspicious_zero_connectivity_modules, group_path_prefix_cycles_by_ancestor,
-    sum_unresolved_calls, sum_unresolved_imports, ModuleForSuspicionCheck, PathPrefixCycleInput,
+    self, alias_isolated_modules, count_suspicious_zero_connectivity_modules,
+    group_path_prefix_cycles_by_ancestor, is_zero_connectivity, sum_unresolved_calls,
+    sum_unresolved_imports, ModuleForSuspicionCheck, PathPrefixCycleInput,
 };
 use crate::storage_port::{
     BasisCodeCountRow, ClassificationCountRow, ExternalDependencyAttribution,
@@ -300,12 +301,18 @@ pub fn compute_trust_report_cancellable(
             fan_in: m.fan_in,
             fan_out: m.fan_out,
             file_count: m.file_count,
+            alias_unresolved_imports: m.alias_unresolved_imports,
         })
         .collect();
+    // ALIAS-SUSPICION-1 (RG-REQ-009-L04): the alias downgrade now fires on evidence — the
+    // zero-connectivity modules that ALSO have a failed alias import — not on a bare count
+    // of isolated modules. `suspicious_module_count` is retained as the self-consistency
+    // basis for the per-row flags below (RG-REQ-009-L02: one predicate, one count).
     let suspicious_module_count =
         count_suspicious_zero_connectivity_modules(&module_stats_for_rules);
+    let alias_isolated = alias_isolated_modules(&module_stats_for_rules);
 
-    let alias_resolution = rules::detect_alias_resolution_suspicion(suspicious_module_count);
+    let alias_resolution = rules::detect_alias_resolution_suspicion(&alias_isolated);
 
     let cycle_inputs: Vec<PathPrefixCycleInput> = input
         .path_prefix_cycles
@@ -526,14 +533,27 @@ pub fn compute_trust_report_cancellable(
         .module_stats
         .iter()
         .map(|m| {
-            let suspicious = m.fan_in == 0
-                && m.fan_out == 0
-                && m.file_count >= 2
-                && m.path != "."
-                && !m.path.is_empty();
+            // ALIAS-SUSPICION-1 (RG-REQ-009-L02): the row flag uses the SAME predicate the
+            // counter and the alias trigger use — the inline five-condition copy is gone,
+            // so the "Suspicious Modules" list and the count can never disagree.
+            let check = ModuleForSuspicionCheck {
+                qualified_name: m.path.clone(),
+                fan_in: m.fan_in,
+                fan_out: m.fan_out,
+                file_count: m.file_count,
+                alias_unresolved_imports: m.alias_unresolved_imports,
+            };
+            let suspicious = is_zero_connectivity(&check);
+            // RG-REQ-009-L04: name the cause only where the evidence exists. An isolated
+            // module with a failed alias import is an `alias_resolution_candidate`; one that
+            // is merely isolated is `isolated` (a reader-frame note, nothing suspected).
             let mut trust_notes = Vec::new();
             if suspicious {
-                trust_notes.push("alias_resolution_candidate".to_string());
+                if m.alias_unresolved_imports >= 1 {
+                    trust_notes.push("alias_resolution_candidate".to_string());
+                } else {
+                    trust_notes.push("isolated".to_string());
+                }
             }
             ModuleTrustRow {
                 module_stable_key: m.stable_key.clone(),
@@ -542,11 +562,23 @@ pub fn compute_trust_report_cancellable(
                 fan_out: m.fan_out,
                 file_count: m.file_count,
                 suspicious_zero_connectivity: suspicious,
+                alias_unresolved_imports: m.alias_unresolved_imports,
                 trust_notes,
             }
         })
         .collect();
     modules.sort_by(|a, b| a.qualified_name.cmp(&b.qualified_name));
+    // RG-REQ-009-L02: the count and the per-row flags derive from ONE predicate, so they
+    // cannot disagree. This ties `count_suspicious_zero_connectivity_modules` (the trigger
+    // basis) to the rendered list as a runtime invariant.
+    debug_assert_eq!(
+        suspicious_module_count,
+        modules
+            .iter()
+            .filter(|m| m.suspicious_zero_connectivity)
+            .count(),
+        "zero-connectivity count must equal the per-row suspicious flags (one predicate)"
+    );
 
     // ── Phase 7: Caveats ─────────────────────────────────────
     let caveats = build_caveats(
@@ -1549,7 +1581,11 @@ mod tests {
     // ── Module suspicious flag ───────────────────────────────
 
     #[test]
-    fn module_suspicious_zero_connectivity_flagged() {
+    fn module_zero_connectivity_flag_uses_the_shared_predicate() {
+        // ALIAS-SUSPICION-1 (RG-REQ-009-L02): the per-row flag comes from the SAME
+        // `is_zero_connectivity` predicate as the counter. `src/orphan` is isolated with no
+        // failed alias import → flagged, note `isolated` (NOT `alias_resolution_candidate`,
+        // which the old code emitted for every isolated module — RC-11).
         let mut input = minimal_input();
         input.module_stats = vec![
             TrustModuleStats {
@@ -1558,6 +1594,7 @@ mod tests {
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 3,
+                alias_unresolved_imports: 0,
             },
             TrustModuleStats {
                 stable_key: "r1:src/connected:MODULE".into(),
@@ -1565,6 +1602,7 @@ mod tests {
                 fan_in: 2,
                 fan_out: 1,
                 file_count: 5,
+                alias_unresolved_imports: 0,
             },
         ];
 
@@ -1576,10 +1614,49 @@ mod tests {
         assert!(report.modules[0].trust_notes.is_empty());
         assert_eq!(report.modules[1].qualified_name, "src/orphan");
         assert!(report.modules[1].suspicious_zero_connectivity);
+        assert_eq!(report.modules[1].trust_notes, vec!["isolated"]);
+    }
+
+    #[test]
+    fn module_row_note_is_alias_candidate_only_with_failed_alias_imports() {
+        // A zero-connectivity module whose imports failed through an alias carries the
+        // `alias_resolution_candidate` note and its count (RG-REQ-009-L04).
+        let mut input = minimal_input();
+        input.module_stats = vec![TrustModuleStats {
+            stable_key: "r1:packages/ui:MODULE".into(),
+            path: "packages/ui".into(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 4,
+            alias_unresolved_imports: 55,
+        }];
+
+        let report = compute_trust_report(&input);
+        assert!(report.modules[0].suspicious_zero_connectivity);
+        assert_eq!(report.modules[0].alias_unresolved_imports, 55);
         assert_eq!(
-            report.modules[1].trust_notes,
+            report.modules[0].trust_notes,
             vec!["alias_resolution_candidate"]
         );
+    }
+
+    #[test]
+    fn module_row_note_is_isolated_without_failed_alias_imports() {
+        // A merely isolated module (no failed alias import) is `isolated`, not suspected.
+        let mut input = minimal_input();
+        input.module_stats = vec![TrustModuleStats {
+            stable_key: "r1:packages/engine:MODULE".into(),
+            path: "packages/engine".into(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 4,
+            alias_unresolved_imports: 0,
+        }];
+
+        let report = compute_trust_report(&input);
+        assert!(report.modules[0].suspicious_zero_connectivity);
+        assert_eq!(report.modules[0].alias_unresolved_imports, 0);
+        assert_eq!(report.modules[0].trust_notes, vec!["isolated"]);
     }
 
     #[test]
@@ -1591,6 +1668,7 @@ mod tests {
             fan_in: 0,
             fan_out: 0,
             file_count: 10,
+            alias_unresolved_imports: 0,
         }];
 
         let report = compute_trust_report(&input);
@@ -1608,6 +1686,7 @@ mod tests {
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 1,
+                alias_unresolved_imports: 0,
             },
             TrustModuleStats {
                 stable_key: "r1:src/a:MODULE".into(),
@@ -1615,6 +1694,7 @@ mod tests {
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 1,
+                alias_unresolved_imports: 0,
             },
             TrustModuleStats {
                 stable_key: "r1:src/m:MODULE".into(),
@@ -1622,6 +1702,7 @@ mod tests {
                 fan_in: 0,
                 fan_out: 0,
                 file_count: 1,
+                alias_unresolved_imports: 0,
             },
         ];
 
