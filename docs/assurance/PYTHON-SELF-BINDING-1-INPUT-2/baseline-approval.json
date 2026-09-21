@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-SELF-BINDING-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-SELF-BINDING-1-INPUT-2.json",
+    "sha256": "sha256:3bb2fc87f6eddbd0d71040c7bd58fe2fd3a6ace03d058b6084b86b32a3ebc821"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-SELF-BINDING-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:469c00a1c42d0a35e6f0c9f3fde0528bcc612a5f39dca3031f8f8309298821a9"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-21T03:57:07.211Z",
+  "rationale": "Q9 PYTHON-SELF-BINDING-1 INPUT-2: allocation under the human-ratified RG-REQ-005-L03 wording (D-PSB-002 option B; bootstrap INPUT-5); codex gpt-5.6-terra document review accepted 15/15 at PREP-2 cycle 1 after the claude-opus-4-8 author corrected two literal-count claims (thirteen ResolverIndex literals, not fourteen; two storage fixture references were not ResolverNode literals); validator ALLOCATION VALID; INPUT-1 was reviewed (decision-required D-PSB-002 + F-PSB-001) and never approved."
+}

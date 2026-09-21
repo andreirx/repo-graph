@@ -133,7 +133,7 @@
     {
       "role": "allocation",
       "path": "docs/slices/python-self-binding-1.md",
-      "sha256": "sha256:53f488f73abec8039948c12ffb37eff4f229713b1e3cfc3bddad82bc859c840c"
+      "sha256": "sha256:11c71cc1c166f5d53e75068c9f7ebb0911d47a461227680b9ce7782e1d042018"
     }
   ],
   "reviewObligationIds": [
