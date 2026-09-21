@@ -63,6 +63,17 @@ pub fn classify_unresolved_edge(
     snapshot_signals: &SnapshotSignals,
     file_signals: &FileSignals,
 ) -> ClassifierVerdict {
+    // Rule 0 (PYTHON-SELF-BINDING-1, RG-REQ-005-L03): a declined MRO collision. The resolver,
+    // having found the method at ONE breadth-first depth in two or more ancestors of the caller's
+    // own class, left the edge unresolved and stamped `mroCandidates` (≥2 strings) as persisted
+    // evidence. The collision is inside the reader's OWN class hierarchy — an internal candidate,
+    // carried by its own named basis (the `this`-receiver precedent below). A present-but-malformed
+    // `mroCandidates` (not an array, fewer than two entries, a non-string entry) is IGNORED and the
+    // rules below run; the key is written and read inside ONE index run, never across a build.
+    if has_mro_candidates(edge.metadata_json.as_deref()) {
+        return internal(UnresolvedEdgeBasisCode::SelfCallAmbiguousMro);
+    }
+
     // Rule 1: `this`-receiver shortcut.
     if category == UnresolvedEdgeCategory::CallsThisMethodNeedsClassContext
         || category == UnresolvedEdgeCategory::CallsThisWildcardMethodNeedsTypeInfo
@@ -338,6 +349,28 @@ fn is_simple_identifier(s: &str) -> bool {
         _ => return false,
     }
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+// ── PYTHON-SELF-BINDING-1: MRO-collision evidence ────────────────
+
+/// Does the edge carry `mroCandidates` — a well-formed array of at least two strings — the
+/// evidence the resolver stamps on a declined Python self-call MRO collision? A malformed carrier
+/// (not an array, fewer than two entries, a non-string entry) returns `false`, so the remaining
+/// rules classify it as they would any other unresolved call (never a binding on unreadable
+/// evidence).
+fn has_mro_candidates(metadata_json: Option<&str>) -> bool {
+    let Some(raw) = metadata_json else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    match value.get("mroCandidates") {
+        Some(serde_json::Value::Array(items)) => {
+            items.len() >= 2 && items.iter().all(|item| item.is_string())
+        }
+        _ => false,
+    }
 }
 
 // ── Verdict constructors ─────────────────────────────────────────
@@ -657,6 +690,64 @@ mod tests {
             v.basis_code,
             UnresolvedEdgeBasisCode::ThisReceiverImpliesInternal
         );
+    }
+
+    // ── Rule 0: Python self-call MRO collision (PYTHON-SELF-BINDING-1) ──
+
+    #[test]
+    fn mro_candidates_carrier_yields_internal_candidate_with_the_self_call_ambiguous_mro_basis() {
+        let e = edge_with_meta(
+            "self.validate_passwords",
+            r#"{"selfCall":true,"enclosingClass":"AdminPasswordChangeForm","mroCandidates":["SetPasswordMixin.validate_passwords","SetUnusablePasswordMixin.validate_passwords"]}"#,
+        );
+        let v = classify_unresolved_edge(
+            &e,
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            &empty_snapshot(),
+            &empty_file(),
+        );
+        assert_eq!(
+            v.classification,
+            UnresolvedEdgeClassification::InternalCandidate
+        );
+        assert_eq!(v.basis_code, UnresolvedEdgeBasisCode::SelfCallAmbiguousMro);
+    }
+
+    #[test]
+    fn malformed_mro_candidates_carrier_falls_through_to_the_existing_rules() {
+        // A single-entry array, a non-array, and a non-string entry are all malformed → the rule
+        // does not fire and the edge classifies as an ordinary unresolved obj-method call (unknown
+        // / no_supporting_signal), never as a collision on unreadable evidence.
+        for meta in [
+            r#"{"selfCall":true,"enclosingClass":"C","mroCandidates":["OnlyOne.m"]}"#,
+            r#"{"selfCall":true,"enclosingClass":"C","mroCandidates":"notarray"}"#,
+            r#"{"selfCall":true,"enclosingClass":"C","mroCandidates":[1,2]}"#,
+        ] {
+            let v = classify_unresolved_edge(
+                &edge_with_meta("self.m", meta),
+                UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+                &empty_snapshot(),
+                &empty_file(),
+            );
+            assert_ne!(
+                v.basis_code,
+                UnresolvedEdgeBasisCode::SelfCallAmbiguousMro,
+                "malformed mroCandidates must not classify as a collision: {meta}"
+            );
+            assert_eq!(
+                v.classification,
+                UnresolvedEdgeClassification::Unknown,
+                "falls through to the ordinary obj-method rules: {meta}"
+            );
+        }
+    }
+
+    #[test]
+    fn basis_code_round_trips_self_call_ambiguous_mro() {
+        let wire = serde_json::to_value(UnresolvedEdgeBasisCode::SelfCallAmbiguousMro).unwrap();
+        assert_eq!(wire, serde_json::json!("self_call_ambiguous_mro"));
+        let parsed: UnresolvedEdgeBasisCode = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, UnresolvedEdgeBasisCode::SelfCallAmbiguousMro);
     }
 
     // ── IMPORTS_FILE_NOT_FOUND ────────────────────────────────

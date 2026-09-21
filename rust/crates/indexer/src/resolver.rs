@@ -123,6 +123,46 @@ pub fn metadata_forward_decl(metadata_json: Option<&str>) -> bool {
     }
 }
 
+/// PYTHON-SELF-BINDING-1 (RG-REQ-005-L03): parse a Python CLASS node's base-class SIMPLE names
+/// from its stored `metadata_json.superclass` — the raw parenthesised base text the Python
+/// extractor stamps (`"base.BaseHandler"`, `"Base, metaclass=ABCMeta"`, `"Generic[T]"`).
+///
+/// The transform, per base: split the list on `,`, trim; DROP any part carrying `=` (a keyword
+/// argument such as `metaclass=ABCMeta`, never a base); strip a `[...]` subscript suffix
+/// (`Generic[T]` → `Generic`); keep the LAST dotted segment (`base.BaseHandler` → `BaseHandler`).
+/// A residue that is not a plain identifier is dropped (never a guess that could match a class by
+/// accident). Absent or unreadable metadata → empty. Empty for every non-Python node — only the
+/// Python extractor stamps `superclass` (this is a KNOWN read of an absent fact, not a swallowed
+/// error: the value is used ONLY to widen the self-call hierarchy walk, never persisted as a
+/// classified fact, so a missing base can only MISS a binding, never mis-bind).
+pub fn superclasses_from_metadata(metadata_json: Option<&str>) -> Vec<String> {
+    let Some(raw) = metadata_json else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
+    };
+    let Some(superclass) = value.get("superclass").and_then(|v| v.as_str()) else {
+        return Vec::new();
+    };
+    superclass
+        .split(',')
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() || part.contains('=') {
+                return None;
+            }
+            // Strip a subscript (`Generic[T]` → `Generic`), then keep the last dotted segment.
+            let base = part.split('[').next().unwrap_or(part).trim();
+            let simple = base.rsplit('.').next().unwrap_or(base).trim();
+            if simple.is_empty() || !simple.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return None;
+            }
+            Some(simple.to_string())
+        })
+        .collect()
+}
+
 // ── Resolution outcome ───────────────────────────────────────────
 
 /// Result of attempting to resolve an edge target.
@@ -141,6 +181,14 @@ enum TargetResolution {
     /// indexed `.java` file (shaded/duplicated copies). Stays unresolved with the NAMED, COUNTED
     /// basis `ImportsAmbiguousSuffix`.
     JavaAmbiguousSuffix,
+    /// PYTHON-SELF-BINDING-1 (RG-REQ-005-L03 / RG-REQ-001-L03): a Python `self.<m>()` / `cls.<m>()`
+    /// whose method is declared at ONE breadth-first depth of the caller's own-class superclass
+    /// closure by TWO OR MORE ancestors — a genuine MRO ambiguity. The call stays UNRESOLVED
+    /// (never a silent pick of Python's actual MRO winner) with the candidate `<Class>.<method>`
+    /// labels carried as persisted evidence: `resolve_edges` stamps them as `mroCandidates` on the
+    /// edge's `metadata_json` and keeps the category (`calls_obj_method_needs_type_info`). The
+    /// classifier reads `mroCandidates` and assigns the named basis `self_call_ambiguous_mro`.
+    SelfCallAmbiguousMro(Vec<String>),
 }
 
 // ── Resolver types ───────────────────────────────────────────────
@@ -163,6 +211,13 @@ pub struct ResolverNode {
     /// resolves to its definition, and the header prototype no longer makes a call
     /// ambiguous. `false` for every non-C++ node (their extractors set no such key).
     pub forward_decl: bool,
+    /// PYTHON-SELF-BINDING-1 (RG-REQ-005-L03): a Python CLASS node's base-class SIMPLE names,
+    /// derived once from the stored `metadata_json.superclass` by [`superclasses_from_metadata`].
+    /// Used ONLY by the Python self/cls call hierarchy walk (`resolve_self_call`); empty for every
+    /// non-Python node (only the Python extractor stamps `superclass`) and for a class with no
+    /// bases. Superclass EDGES are not modelled for Python yet — this simple-name list is the
+    /// substrate the walk uses, resolving each name to a unique CLASS node by simple name.
+    pub superclasses: Vec<String>,
 }
 
 /// The in-memory index used for edge resolution. Built from
@@ -176,6 +231,12 @@ pub struct ResolverIndex {
     pub nodes_by_stable_key: HashMap<String, ResolverNode>,
     /// Name → all nodes with that name (may be ambiguous).
     pub nodes_by_name: HashMap<String, Vec<ResolverNode>>,
+    /// PYTHON-SELF-BINDING-1 (RG-REQ-005-L03): qualified name → all nodes with that qualified
+    /// name. Populated beside `nodes_by_name` at index build. One current consumer — the Python
+    /// self/cls call hierarchy walk (`resolve_self_call`), which looks up `<Class>.<method>`
+    /// method nodes directly. A plain map, not an abstraction; the singular by-name map cannot
+    /// answer "the method named `m` DECLARED on class `C`" without a per-lookup scan.
+    pub nodes_by_qualified_name: HashMap<String, Vec<ResolverNode>>,
     /// Node UID → node. CPP-DECLARATORS-1 §2.3 (AMENDED): the enclosing-class preference
     /// needs the CALLER node's `qualified_name` from its `source_node_uid`, and no other
     /// map is keyed by uid (`stable_key_to_uid` is the reverse). One concrete current user
@@ -395,6 +456,27 @@ pub fn resolve_edges(
                     source_file_uid,
                 });
             }
+            // PYTHON-SELF-BINDING-1 (RG-REQ-001-L03): a declined MRO collision. The edge stays
+            // UNRESOLVED with its category unchanged; its candidates ride into `metadata_json` as
+            // `mroCandidates` (the first resolver-written metadata key, beside the extractor's
+            // self-call carrier), which the classifier reads to assign `self_call_ambiguous_mro`.
+            TargetResolution::SelfCallAmbiguousMro(candidates) => {
+                let source_file_uid = index
+                    .node_uid_to_file_uid
+                    .get(&edge.source_node_uid)
+                    .cloned();
+                let mut unresolved_edge = edge.clone();
+                unresolved_edge.metadata_json = Some(inject_mro_candidates(
+                    unresolved_edge.metadata_json.as_deref(),
+                    &candidates,
+                ));
+                let category = categorize_unresolved_edge(&unresolved_edge);
+                still_unresolved.push(CategorizedUnresolvedEdge {
+                    edge: unresolved_edge,
+                    category,
+                    source_file_uid,
+                });
+            }
             TargetResolution::Unresolved => {
                 let category = categorize_unresolved_edge(edge);
                 let source_file_uid = index
@@ -494,18 +576,19 @@ fn resolve_target(
                 None => TargetResolution::Unresolved,
             }
         }
-        EdgeType::Calls => option_to_resolution(resolve_call_target(
+        EdgeType::Calls => resolve_call_target(
             &edge.target_key,
             &edge.source_node_uid,
             &edge.extractor,
             edge.metadata_json.as_deref(),
             &index.nodes_by_stable_key,
             &index.nodes_by_name,
+            &index.nodes_by_qualified_name,
             &index.nodes_by_uid,
             &index.file_resolution,
             import_bindings_by_file,
             &index.node_uid_to_file_uid,
-        )),
+        ),
         EdgeType::Instantiates => option_to_resolution(resolve_named_target(
             &edge.target_key,
             &index.nodes_by_name,
@@ -831,11 +914,12 @@ fn resolve_call_target(
     metadata_json: Option<&str>,
     _nodes_by_stable_key: &HashMap<String, ResolverNode>,
     nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+    nodes_by_qualified_name: &HashMap<String, Vec<ResolverNode>>,
     nodes_by_uid: &HashMap<String, ResolverNode>,
     file_resolution: &HashMap<String, String>,
     import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
     node_uid_to_file_uid: &HashMap<String, String>,
-) -> Option<String> {
+) -> TargetResolution {
     // CALL-BINDING-RECEIVER-1 §2.1/§2.2: read the call's receiver disposition from the edge.
     // `receiver` is the receiver expression text (`"this"` for an explicit self-call, a bare
     // name like `"impl"`/`"versions_"` for an indirect receiver, absent for a receiverless
@@ -884,12 +968,42 @@ fn resolve_call_target(
                                     if let Some(uid) =
                                         pick_unambiguous(Some(&in_file), EdgeType::Calls, false)
                                     {
-                                        return Some(uid);
+                                        return TargetResolution::Resolved(uid);
                                     }
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // ── Python self/cls call binding through the class hierarchy ──────
+    // PYTHON-SELF-BINDING-1 (RG-REQ-005-L03/L02): gated ONLY on the self-call carrier the Python
+    // extractor stamps (`{"selfCall":true,"enclosingClass":"C"}`) — a no-op for every other
+    // language (no carrier). Runs BEFORE the dotted fallback so a `self.<m>()` / `cls.<m>()` binds
+    // on hierarchy EVIDENCE (the caller's own class node and its stored superclass facts), not on a
+    // bare-name coincidence. A malformed carrier yields no enclosing class → the stage does not run
+    // and the edge follows today's path (never a binding on unreadable evidence — Q1's rule).
+    if let Some(enclosing_class) = self_call_enclosing_class(metadata_json) {
+        if let Some((_receiver, method)) = target_key.split_once('.') {
+            if let Some(caller_file) = node_uid_to_file_uid.get(source_node_uid) {
+                match resolve_self_call(
+                    &enclosing_class,
+                    method,
+                    caller_file,
+                    nodes_by_name,
+                    nodes_by_qualified_name,
+                ) {
+                    SelfCallResolution::Resolved(uid) => return TargetResolution::Resolved(uid),
+                    SelfCallResolution::AmbiguousMro(candidates) => {
+                        return TargetResolution::SelfCallAmbiguousMro(candidates)
+                    }
+                    // No hit anywhere in the hierarchy → fall through to today's fallbacks
+                    // unchanged (a self-call whose method name is globally unique still binds by
+                    // the bare-name rule below, exactly as before this slice).
+                    SelfCallResolution::NoHit => {}
                 }
             }
         }
@@ -933,7 +1047,7 @@ fn resolve_call_target(
                 if let Some(uid) =
                     pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls, false)
                 {
-                    return Some(uid);
+                    return TargetResolution::Resolved(uid);
                 }
             }
 
@@ -941,7 +1055,7 @@ fn resolve_call_target(
             if let Some(uid) =
                 pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls, false)
             {
-                return Some(uid);
+                return TargetResolution::Resolved(uid);
             }
         }
     }
@@ -970,7 +1084,7 @@ fn resolve_call_target(
                 .filter(|c| container_matches(c.qualified_name.as_deref(), receiver_type));
             if let Some(first) = typed.next() {
                 if typed.next().is_none() {
-                    return Some(first.node_uid.clone());
+                    return TargetResolution::Resolved(first.node_uid.clone());
                 }
             }
         }
@@ -981,7 +1095,7 @@ fn resolve_call_target(
     // method name. A UNIQUE name is evidence enough (RG-REQ-005-L02) even with an
     // indirect receiver; only the enclosing-class guess below is receiver-gated.
     if let Some(uid) = pick_unambiguous(nodes_by_name.get(target_key), EdgeType::Calls, false) {
-        return Some(uid);
+        return TargetResolution::Resolved(uid);
     }
 
     // CPP-DECLARATORS-1 §2.3 (AMENDED by CALL-BINDING-RECEIVER-1 §2.3, F-CBR-004): when the
@@ -1002,7 +1116,7 @@ fn resolve_call_target(
             if pool.len() > 1 {
                 let caller = nodes_by_uid.get(source_node_uid);
                 if let Some(uid) = enclosing_class_preference(&pool, caller) {
-                    return Some(uid);
+                    return TargetResolution::Resolved(uid);
                 }
             }
         }
@@ -1034,7 +1148,7 @@ fn resolve_call_target(
                             if let Some(uid) =
                                 pick_unambiguous(Some(&in_file), EdgeType::Calls, false)
                             {
-                                return Some(uid);
+                                return TargetResolution::Resolved(uid);
                             }
                         }
                     }
@@ -1043,7 +1157,175 @@ fn resolve_call_target(
         }
     }
 
-    None
+    TargetResolution::Unresolved
+}
+
+// ── Python self/cls call hierarchy binding (PYTHON-SELF-BINDING-1) ─
+
+/// Outcome of the Python self-call hierarchy walk.
+enum SelfCallResolution {
+    /// Exactly one METHOD named `<m>` was declared at the first non-empty BFS depth.
+    Resolved(String),
+    /// Two or more ancestors at ONE depth declare `<m>` — a genuine MRO ambiguity. Carries the
+    /// sorted candidate `<Class>.<method>` labels (persisted as evidence, never silently picked).
+    AmbiguousMro(Vec<String>),
+    /// The method is not declared anywhere in the caller's own-class superclass closure — the
+    /// caller falls through to the shared fallbacks unchanged.
+    NoHit,
+}
+
+/// Read the Python self/cls call carrier's enclosing class name from an edge's `metadata_json`.
+///
+/// `Some("C")` ONLY when the carrier has `selfCall == true` (a real boolean) AND `enclosingClass`
+/// is a non-empty string. `None` for an absent carrier OR any malformed shape (a non-boolean
+/// `selfCall`, a missing/non-string/empty `enclosingClass`): a malformed carrier never binds — the
+/// stage does not run and the edge follows the shared fallbacks (Q1's honesty rule). This gates
+/// only WHETHER a resolution stage runs; it records no classified fact, so absent and malformed
+/// collapse to the same "do not run" without loss.
+fn self_call_enclosing_class(metadata_json: Option<&str>) -> Option<String> {
+    let raw = metadata_json?;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if value.get("selfCall") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    let class = value.get("enclosingClass")?.as_str()?;
+    if class.is_empty() {
+        None
+    } else {
+        Some(class.to_string())
+    }
+}
+
+/// Bind a Python `self.<m>()` / `cls.<m>()` call by breadth-first walk over the caller's own class
+/// and its superclass closure (RG-REQ-005-L03).
+///
+/// Depth 0 is the own class: the UNIQUE CLASS node named `enclosing_class` in the caller's file
+/// (0 or >1 such nodes → no binding). At each depth the hits are the METHOD nodes whose qualified
+/// name is `<Class>.<method>` and whose file is that class node's file. The FIRST depth with
+/// exactly one hit binds; two or more hits at that depth is an MRO collision (declined, named);
+/// no hit at any depth is `NoHit`. Descent resolves each stored superclass SIMPLE name to a unique
+/// CLASS node repo-wide (0 or >1 → that branch ends — cross-package and same-name bases stay
+/// unresolved, never guessed); a visited set and a depth cap bound the walk. Deterministic: the
+/// outcome depends only on the set of hits at each depth, not on map iteration order.
+fn resolve_self_call(
+    enclosing_class: &str,
+    method: &str,
+    caller_file: &str,
+    nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+    nodes_by_qualified_name: &HashMap<String, Vec<ResolverNode>>,
+) -> SelfCallResolution {
+    const DEPTH_CAP: usize = 16;
+
+    let Some(own) = unique_class_in_file(enclosing_class, caller_file, nodes_by_name) else {
+        return SelfCallResolution::NoHit;
+    };
+
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    visited.insert(own.node_uid.clone());
+    let mut frontier: Vec<ResolverNode> = vec![own];
+    let mut depth = 0;
+
+    while !frontier.is_empty() && depth <= DEPTH_CAP {
+        // Collect the METHOD hits declared on the classes at THIS depth. `(label, uid)` where
+        // `label` is the method node's qualified name (`<Class>.<method>`).
+        let mut hits: Vec<(String, String)> = Vec::new();
+        for class_node in &frontier {
+            let class_name = class_node
+                .qualified_name
+                .as_deref()
+                .unwrap_or(class_node.name.as_str());
+            let class_file = class_node.file_uid.as_deref();
+            let qualified = format!("{class_name}.{method}");
+            if let Some(candidates) = nodes_by_qualified_name.get(&qualified) {
+                for candidate in candidates {
+                    if candidate.subtype.as_deref() == Some("METHOD")
+                        && candidate.file_uid.as_deref() == class_file
+                    {
+                        let label = candidate
+                            .qualified_name
+                            .clone()
+                            .unwrap_or_else(|| qualified.clone());
+                        hits.push((label, candidate.node_uid.clone()));
+                    }
+                }
+            }
+        }
+
+        match hits.len() {
+            0 => {}
+            1 => return SelfCallResolution::Resolved(hits.into_iter().next().unwrap().1),
+            _ => {
+                let mut candidates: Vec<String> =
+                    hits.into_iter().map(|(label, _)| label).collect();
+                candidates.sort();
+                return SelfCallResolution::AmbiguousMro(candidates);
+            }
+        }
+
+        // Descend to the superclasses of the current frontier (unique CLASS node per simple name).
+        let mut next: Vec<ResolverNode> = Vec::new();
+        for class_node in &frontier {
+            for base in &class_node.superclasses {
+                if let Some(base_node) = unique_class_by_name(base, nodes_by_name) {
+                    if visited.insert(base_node.node_uid.clone()) {
+                        next.push(base_node);
+                    }
+                }
+            }
+        }
+        frontier = next;
+        depth += 1;
+    }
+
+    SelfCallResolution::NoHit
+}
+
+/// The UNIQUE CLASS node named `name` in `file`, or `None` when zero or more than one exists.
+fn unique_class_in_file(
+    name: &str,
+    file: &str,
+    nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+) -> Option<ResolverNode> {
+    let mut matches =
+        nodes_by_name.get(name).into_iter().flatten().filter(|n| {
+            n.subtype.as_deref() == Some("CLASS") && n.file_uid.as_deref() == Some(file)
+        });
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first.clone())
+}
+
+/// The UNIQUE CLASS node named `name` anywhere in the snapshot, or `None` when zero or more than
+/// one exists (a same-name or cross-package base ends the walk branch, never a guess).
+fn unique_class_by_name(
+    name: &str,
+    nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+) -> Option<ResolverNode> {
+    let mut matches = nodes_by_name
+        .get(name)
+        .into_iter()
+        .flatten()
+        .filter(|n| n.subtype.as_deref() == Some("CLASS"));
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first.clone())
+}
+
+/// Add `mroCandidates` (the sorted collision labels) to an edge's `metadata_json`, preserving the
+/// extractor's existing keys (the self-call carrier). The first resolver-written metadata key;
+/// mirrors `orchestrator::inject_import_type_only`'s additive merge. Used only for the
+/// `SelfCallAmbiguousMro` terminal.
+fn inject_mro_candidates(metadata_json: Option<&str>, candidates: &[String]) -> String {
+    let mut obj = metadata_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    obj.insert("mroCandidates".to_string(), serde_json::json!(candidates));
+    serde_json::Value::Object(obj).to_string()
 }
 
 /// Resolve a relative import specifier to a file UID.
@@ -1663,6 +1945,7 @@ mod tests {
             subtype: subtype.map(|s| s.into()),
             file_uid: file_uid.map(|s| s.into()),
             forward_decl: false,
+            superclasses: Vec::new(),
         }
     }
 
@@ -1684,6 +1967,7 @@ mod tests {
             subtype: subtype.map(|s| s.into()),
             file_uid: None,
             forward_decl,
+            superclasses: Vec::new(),
         }
     }
 
@@ -2415,6 +2699,7 @@ mod tests {
         ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -2425,6 +2710,263 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
         }
+    }
+
+    // ── Python self/cls call hierarchy binding (PYTHON-SELF-BINDING-1) ──
+
+    fn py_class(uid: &str, name: &str, file: &str, superclasses: &[&str]) -> ResolverNode {
+        ResolverNode {
+            node_uid: uid.into(),
+            stable_key: format!("r:{file}#{name}:SYMBOL:CLASS"),
+            name: name.into(),
+            qualified_name: Some(name.into()),
+            kind: "SYMBOL".into(),
+            subtype: Some("CLASS".into()),
+            file_uid: Some(file.into()),
+            forward_decl: false,
+            superclasses: superclasses.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn py_symbol(
+        uid: &str,
+        name: &str,
+        qualified: &str,
+        subtype: &str,
+        file: &str,
+    ) -> ResolverNode {
+        ResolverNode {
+            node_uid: uid.into(),
+            stable_key: format!("r:{file}#{qualified}:SYMBOL:{subtype}"),
+            name: name.into(),
+            qualified_name: Some(qualified.into()),
+            kind: "SYMBOL".into(),
+            subtype: Some(subtype.into()),
+            file_uid: Some(file.into()),
+            forward_decl: false,
+            superclasses: Vec::new(),
+        }
+    }
+
+    fn py_method(uid: &str, class: &str, method: &str, file: &str) -> ResolverNode {
+        py_symbol(uid, method, &format!("{class}.{method}"), "METHOD", file)
+    }
+
+    fn py_index(nodes: &[ResolverNode]) -> ResolverIndex {
+        let mut index = empty_index();
+        for n in nodes {
+            index
+                .nodes_by_name
+                .entry(n.name.clone())
+                .or_default()
+                .push(n.clone());
+            if let Some(ref qn) = n.qualified_name {
+                index
+                    .nodes_by_qualified_name
+                    .entry(qn.clone())
+                    .or_default()
+                    .push(n.clone());
+            }
+            index.nodes_by_uid.insert(n.node_uid.clone(), n.clone());
+            if let Some(ref f) = n.file_uid {
+                index
+                    .node_uid_to_file_uid
+                    .insert(n.node_uid.clone(), f.clone());
+            }
+        }
+        index
+    }
+
+    fn self_call_edge(
+        uid: &str,
+        caller_uid: &str,
+        target_key: &str,
+        enclosing_class: &str,
+    ) -> ExtractedEdge {
+        let mut e = make_edge(uid, target_key, EdgeType::Calls);
+        e.extractor = "python-core:0.1.0".into();
+        e.source_node_uid = caller_uid.into();
+        e.metadata_json = Some(
+            serde_json::json!({ "selfCall": true, "enclosingClass": enclosing_class }).to_string(),
+        );
+        e
+    }
+
+    #[test]
+    fn self_call_binds_to_the_own_class_method_in_the_same_file() {
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &[]),
+            py_method("c_f", "C", "f", "r:f.py"),
+            py_method("c_g", "C", "g", "r:f.py"),
+        ]);
+        let edge = self_call_edge("e1", "c_f", "self.g", "C");
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 1, "own-class method binds");
+        assert_eq!(result.resolved[0].target_node_uid, "c_g");
+        assert!(result.still_unresolved.is_empty());
+    }
+
+    #[test]
+    fn self_call_binds_to_a_unique_ancestor_method() {
+        // `run` is ambiguous globally (Base.run + Other.run), so ONLY the hierarchy walk can bind.
+        let index = py_index(&[
+            py_class("base", "Base", "r:base.py", &[]),
+            py_method("base_run", "Base", "run", "r:base.py"),
+            py_class("sub", "Sub", "r:sub.py", &["Base"]),
+            py_method("sub_caller", "Sub", "handle", "r:sub.py"),
+            py_method("other_run", "Other", "run", "r:other.py"),
+        ]);
+        let edge = self_call_edge("e1", "sub_caller", "self.run", "Sub");
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 1, "ancestor method binds");
+        assert_eq!(result.resolved[0].target_node_uid, "base_run");
+    }
+
+    #[test]
+    fn self_call_same_depth_ancestor_collision_stays_unresolved_with_mro_candidates() {
+        let index = py_index(&[
+            py_class("a", "A", "r:a.py", &[]),
+            py_method("a_run", "A", "run", "r:a.py"),
+            py_class("b", "B", "r:b.py", &[]),
+            py_method("b_run", "B", "run", "r:b.py"),
+            py_class("sub", "Sub", "r:sub.py", &["A", "B"]),
+            py_method("caller", "Sub", "go", "r:sub.py"),
+        ]);
+        let edge = self_call_edge("e1", "caller", "self.run", "Sub");
+        let result = resolve_edges(&[edge], &index, None);
+        assert!(
+            result.resolved.is_empty(),
+            "collision is not silently picked"
+        );
+        assert_eq!(result.still_unresolved.len(), 1);
+        let ue = &result.still_unresolved[0];
+        assert_eq!(
+            ue.category,
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            "category unchanged (D-PSB-001: the collision is a BASIS, not a category)"
+        );
+        let meta: serde_json::Value =
+            serde_json::from_str(ue.edge.metadata_json.as_ref().unwrap()).unwrap();
+        let cands = meta["mroCandidates"].as_array().unwrap();
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[0], "A.run", "candidates are sorted");
+        assert_eq!(cands[1], "B.run");
+        // The extractor's carrier is preserved beside the resolver-written mroCandidates.
+        assert_eq!(meta["selfCall"], serde_json::json!(true));
+        assert_eq!(meta["enclosingClass"], "Sub");
+    }
+
+    #[test]
+    fn self_call_with_no_defining_ancestor_falls_through_unchanged() {
+        // `helper` is a module-level function, globally unique, NOT in C's hierarchy. The walk
+        // finds no hit and the call binds by the SAME bare-name fallback as before this slice.
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &[]),
+            py_method("caller", "C", "f", "r:f.py"),
+            py_symbol("helper", "helper", "helper", "FUNCTION", "r:other.py"),
+        ]);
+        let edge = self_call_edge("e1", "caller", "self.helper", "C");
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(
+            result.resolved.len(),
+            1,
+            "fall-through bare-name bind unchanged"
+        );
+        assert_eq!(result.resolved[0].target_node_uid, "helper");
+    }
+
+    #[test]
+    fn self_call_same_name_ancestor_classes_stop_the_walk() {
+        // The base name `Base` matches TWO CLASS nodes — the walk cannot descend that branch
+        // (no guess), and the ambiguous `run` name leaves the call unresolved with NO collision.
+        let index = py_index(&[
+            py_class("sub", "Sub", "r:sub.py", &["Base"]),
+            py_method("caller", "Sub", "go", "r:sub.py"),
+            py_class("base1", "Base", "r:base1.py", &[]),
+            py_method("base1_run", "Base", "run", "r:base1.py"),
+            py_class("base2", "Base", "r:base2.py", &[]),
+            py_method("base2_run", "Base", "run", "r:base2.py"),
+        ]);
+        let edge = self_call_edge("e1", "caller", "self.run", "Sub");
+        let result = resolve_edges(&[edge], &index, None);
+        assert!(result.resolved.is_empty());
+        assert_eq!(result.still_unresolved.len(), 1);
+        let meta: serde_json::Value = serde_json::from_str(
+            result.still_unresolved[0]
+                .edge
+                .metadata_json
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            meta.get("mroCandidates").is_none(),
+            "the walk never reached the ambiguous bases — not a same-depth collision"
+        );
+    }
+
+    #[test]
+    fn self_call_malformed_carrier_never_binds() {
+        // `g` is ambiguous globally (C.g + D.g). A VALID carrier binds to the own class; a
+        // MALFORMED carrier (selfCall not a boolean) skips the stage → the ambiguous fallback
+        // leaves it unresolved. The malformed carrier never binds on unreadable evidence.
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &[]),
+            py_method("caller", "C", "f", "r:f.py"),
+            py_method("c_g", "C", "g", "r:f.py"),
+            py_method("d_g", "D", "g", "r:d.py"),
+        ]);
+        let ok = self_call_edge("eok", "caller", "self.g", "C");
+        let r_ok = resolve_edges(&[ok], &index, None);
+        assert_eq!(r_ok.resolved.len(), 1, "valid carrier binds to own class");
+        assert_eq!(r_ok.resolved[0].target_node_uid, "c_g");
+
+        let mut bad = make_edge("ebad", "self.g", EdgeType::Calls);
+        bad.extractor = "python-core:0.1.0".into();
+        bad.source_node_uid = "caller".into();
+        bad.metadata_json = Some(r#"{"selfCall":"yes","enclosingClass":"C"}"#.into());
+        let r_bad = resolve_edges(&[bad], &index, None);
+        assert!(r_bad.resolved.is_empty(), "malformed carrier never binds");
+        assert_eq!(r_bad.still_unresolved.len(), 1);
+    }
+
+    #[test]
+    fn cls_call_binds_like_self() {
+        // `build` is ambiguous globally, so only the hierarchy walk (via the `cls.` carrier) binds.
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &[]),
+            py_method("caller", "C", "make", "r:f.py"),
+            py_method("c_build", "C", "build", "r:f.py"),
+            py_method("d_build", "D", "build", "r:d.py"),
+        ]);
+        let edge = self_call_edge("e1", "caller", "cls.build", "C");
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 1, "cls-call binds like self");
+        assert_eq!(result.resolved[0].target_node_uid, "c_build");
+    }
+
+    #[test]
+    fn superclass_metadata_parses_raw_python_base_lists() {
+        assert_eq!(
+            superclasses_from_metadata(Some(r#"{"superclass":"base.BaseHandler"}"#)),
+            vec!["BaseHandler".to_string()]
+        );
+        assert_eq!(
+            superclasses_from_metadata(Some(r#"{"superclass":"Base, metaclass=ABCMeta"}"#)),
+            vec!["Base".to_string()]
+        );
+        assert_eq!(
+            superclasses_from_metadata(Some(r#"{"superclass":"Generic[T]"}"#)),
+            vec!["Generic".to_string()]
+        );
+        assert_eq!(
+            superclasses_from_metadata(Some(r#"{"superclass":"A, B, C"}"#)),
+            vec!["A".to_string(), "B".to_string(), "C".to_string()]
+        );
+        // Absent / unreadable / non-superclass metadata → empty, never a guess.
+        assert!(superclasses_from_metadata(None).is_empty());
+        assert!(superclasses_from_metadata(Some("not json")).is_empty());
+        assert!(superclasses_from_metadata(Some(r#"{"forward_decl":true}"#)).is_empty());
     }
 
     // ── categorize_unresolved_edge ───────────────────────────
@@ -2724,6 +3266,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -2759,6 +3302,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -2789,6 +3333,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -2976,6 +3521,7 @@ mod tests {
                         subtype: None,
                         file_uid: Some(k.to_string()),
                         forward_decl: false,
+                        superclasses: Vec::new(),
                     },
                 )
             })
@@ -3027,6 +3573,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -3060,6 +3607,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -3099,6 +3647,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -3143,6 +3692,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -3205,6 +3755,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -3271,6 +3822,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),
@@ -3344,6 +3896,7 @@ mod tests {
         let mut index = ResolverIndex {
             nodes_by_stable_key: HashMap::new(),
             nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
             nodes_by_uid: HashMap::new(),
             node_uid_to_file_uid: HashMap::new(),
             file_resolution: HashMap::new(),

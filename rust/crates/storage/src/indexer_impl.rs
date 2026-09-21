@@ -395,6 +395,9 @@ impl NodeStorePort for StorageConnection {
                 forward_decl: repo_graph_indexer::resolver::metadata_forward_decl(
                     metadata_json.as_deref(),
                 ),
+                superclasses: repo_graph_indexer::resolver::superclasses_from_metadata(
+                    metadata_json.as_deref(),
+                ),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -1481,6 +1484,58 @@ mod tests {
         assert_eq!(resolver_nodes[0].name, "foo");
         assert_eq!(resolver_nodes[0].kind, "SYMBOL");
         assert_eq!(resolver_nodes[0].subtype, Some("FUNCTION".to_string()));
+        // No superclass metadata → empty list (byte-stable for non-Python nodes).
+        assert!(resolver_nodes[0].superclasses.is_empty());
+    }
+
+    #[test]
+    fn query_resolver_nodes_carries_python_superclasses_from_metadata() {
+        // PYTHON-SELF-BINDING-1: the stored `superclass` metadata reaches the resolver as parsed
+        // SIMPLE names, through the metadata the resolver read already returns (no query change).
+        let mut storage = setup();
+        let snap_uid = make_snap(&mut storage);
+
+        let class_node = |uid: &str, name: &str, meta: Option<&str>| ixp::ExtractedNode {
+            node_uid: uid.into(),
+            snapshot_uid: snap_uid.clone(),
+            repo_uid: "r1".into(),
+            stable_key: format!("r1:src/a.py#{name}:SYMBOL:CLASS"),
+            kind: repo_graph_indexer::types::NodeKind::Symbol,
+            subtype: Some(repo_graph_indexer::types::NodeSubtype::Class),
+            name: name.into(),
+            qualified_name: Some(name.into()),
+            file_uid: None,
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: meta.map(|m| m.to_string()),
+        };
+
+        NodeStorePort::insert_nodes(
+            &mut storage,
+            &[
+                class_node(
+                    "c1",
+                    "Handler",
+                    Some(r#"{"superclass":"base.BaseHandler"}"#),
+                ),
+                class_node(
+                    "c2",
+                    "Abc",
+                    Some(r#"{"superclass":"Base, metaclass=ABCMeta"}"#),
+                ),
+                class_node("c3", "Plain", None),
+            ],
+        )
+        .unwrap();
+
+        let nodes = NodeStorePort::query_resolver_nodes(&storage, &snap_uid).unwrap();
+        let by_uid = |uid: &str| nodes.iter().find(|n| n.node_uid == uid).unwrap();
+        assert_eq!(by_uid("c1").superclasses, vec!["BaseHandler".to_string()]);
+        assert_eq!(by_uid("c2").superclasses, vec!["Base".to_string()]);
+        assert!(by_uid("c3").superclasses.is_empty());
     }
 
     // ── EdgeStorePort ────────────────────────────────────────

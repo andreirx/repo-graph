@@ -61,6 +61,7 @@ fn method_node(uid: &str, qualified_name: &str) -> ResolverNode {
         subtype: Some("METHOD".into()),
         file_uid: Some("repo:src/f.cpp".into()),
         forward_decl: false,
+        superclasses: Vec::new(),
     }
 }
 
@@ -93,6 +94,7 @@ fn build_index(
     ResolverIndex {
         nodes_by_stable_key: HashMap::new(),
         nodes_by_name,
+        nodes_by_qualified_name: HashMap::new(),
         nodes_by_uid,
         node_uid_to_file_uid: HashMap::new(),
         file_resolution: HashMap::new(),

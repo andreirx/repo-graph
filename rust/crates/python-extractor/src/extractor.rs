@@ -1076,6 +1076,13 @@ fn emit_call_edge(node: &Node, ctx: &mut ExtractionCtx, caller_uid: &str) {
         return;
     }
 
+    // PYTHON-SELF-BINDING-1 (RG-REQ-005-L03/L02): stamp the self/cls call carrier so the
+    // resolver's class-hierarchy walk has the one fact it needs — this is a `self.`/`cls.`
+    // call inside class C. Pure binding EVIDENCE; the target key is NOT rewritten and every
+    // other call (a chained attribute, a module-level self-call) carries nothing, byte-identical
+    // to before.
+    let metadata_json = self_call_carrier(&target_key, ctx.current_class.as_deref());
+
     ctx.edges.push(ExtractedEdge {
         edge_uid: uuid::Uuid::new_v4().to_string(),
         snapshot_uid: ctx.snapshot_uid.into(),
@@ -1086,8 +1093,30 @@ fn emit_call_edge(node: &Node, ctx: &mut ExtractionCtx, caller_uid: &str) {
         resolution: Resolution::Static,
         extractor: EXTRACTOR_NAME.into(),
         location: Some(location_from_node(node)),
-        metadata_json: None,
+        metadata_json,
     });
+}
+
+/// The self/cls call carrier for the resolver's class-hierarchy binding stage.
+///
+/// Returns `{"selfCall":true,"enclosingClass":"C"}` ONLY when `target_key` is exactly
+/// `self.<m>` / `cls.<m>` — a single dot, `<m>` a plain identifier — AND the call is inside a
+/// class (`current_class == Some("C")`). A chained attribute (`self.extra.get` → three parts), a
+/// receiverless/module call, or a self-call outside any class carries `None` (byte-identical to
+/// the pre-slice behaviour). The carrier is EVIDENCE for the resolver (RG-REQ-005-L02); the
+/// target key is never rewritten (the resolver has no qualified-lookup to reach through a rewrite,
+/// so the TS `this.` rewrite buys nothing here).
+fn self_call_carrier(target_key: &str, current_class: Option<&str>) -> Option<String> {
+    let class = current_class?;
+    let (receiver, method) = target_key.split_once('.')?;
+    if receiver != "self" && receiver != "cls" {
+        return None;
+    }
+    // Exactly two parts: a chained attribute (`self.extra.get`) leaves a dot in `method`.
+    if method.contains('.') || method.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({ "selfCall": true, "enclosingClass": class }).to_string())
 }
 
 /// Extract call target name from a function node.
@@ -2143,6 +2172,80 @@ def callee():
         let call_edge = result.edges.iter().find(|e| e.edge_type == EdgeType::Calls);
         assert!(call_edge.is_some());
         assert_eq!(call_edge.unwrap().target_key, "self.bar");
+    }
+
+    // -- Self/cls call carrier (PYTHON-SELF-BINDING-1) --
+
+    fn find_call_edge<'a>(result: &'a ExtractionResult, target_key: &str) -> &'a ExtractedEdge {
+        result
+            .edges
+            .iter()
+            .find(|e| e.edge_type == EdgeType::Calls && e.target_key == target_key)
+            .unwrap_or_else(|| panic!("no CALLS edge for target_key {target_key}"))
+    }
+
+    #[test]
+    fn self_call_in_a_class_carries_the_self_call_carrier() {
+        let result = extract_test(
+            r#"class C:
+    def f(self):
+        self.g()
+
+    def g(self):
+        pass
+"#,
+        );
+        let edge = find_call_edge(&result, "self.g");
+        let meta: serde_json::Value =
+            serde_json::from_str(edge.metadata_json.as_ref().expect("carrier present")).unwrap();
+        assert_eq!(meta["selfCall"], serde_json::json!(true));
+        assert_eq!(meta["enclosingClass"], "C");
+    }
+
+    #[test]
+    fn cls_call_in_a_class_carries_the_self_call_carrier() {
+        let result = extract_test(
+            r#"class C:
+    @classmethod
+    def make(cls):
+        cls.build()
+
+    @classmethod
+    def build(cls):
+        pass
+"#,
+        );
+        let edge = find_call_edge(&result, "cls.build");
+        let meta: serde_json::Value =
+            serde_json::from_str(edge.metadata_json.as_ref().expect("carrier present")).unwrap();
+        assert_eq!(meta["selfCall"], serde_json::json!(true));
+        assert_eq!(meta["enclosingClass"], "C");
+    }
+
+    #[test]
+    fn self_attribute_chain_call_carries_no_carrier() {
+        // `self.extra.get()` is a 3-part key — an attribute chain, not a self-call the resolver
+        // can bind by the class hierarchy. It carries nothing (byte-identical to before).
+        let result = extract_test(
+            r#"class C:
+    def f(self):
+        self.extra.get()
+"#,
+        );
+        let edge = find_call_edge(&result, "self.extra.get");
+        assert!(edge.metadata_json.is_none());
+    }
+
+    #[test]
+    fn self_call_outside_a_class_carries_no_carrier() {
+        // A `self.bar()` call at module level (no enclosing class) carries nothing.
+        let result = extract_test(
+            r#"def foo():
+    self.bar()
+"#,
+        );
+        let edge = find_call_edge(&result, "self.bar");
+        assert!(edge.metadata_json.is_none());
     }
 
     #[test]

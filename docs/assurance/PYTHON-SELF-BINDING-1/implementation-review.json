@@ -1,0 +1,723 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-PYTHON-SELF-BINDING-1-0",
+  "workItemId": "PYTHON-SELF-BINDING-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/PYTHON-SELF-BINDING-1-INPUT-3.json",
+    "sha256": "sha256:4ec12ce1cb577b710bce61dc53c7d0a41ff9b2d228d56d8a33cc61bac30cf304"
+  },
+  "allocation": {
+    "path": "docs/slices/python-self-binding-1.md",
+    "sha256": "sha256:b657167ce5bc00a95a0e56d996c7347341708a9ba8a9b34966595d0109470ca9"
+  },
+  "subject": {
+    "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+    "verification": {
+      "path": "docs/assurance/PYTHON-SELF-BINDING-1/verification.json",
+      "sha256": "sha256:7c8c42b7aff2cd41745c0ff508b65030ce26c5e7121f67242c11fdd258403ddf"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-PYTHON-SELF-BINDING-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/PYTHON-SELF-BINDING-1-INPUT-3.json",
+      "sha256": "sha256:4ec12ce1cb577b710bce61dc53c7d0a41ff9b2d228d56d8a33cc61bac30cf304"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/PYTHON-SELF-BINDING-1-INPUT-3.json",
+        "sha256": "sha256:4ec12ce1cb577b710bce61dc53c7d0a41ff9b2d228d56d8a33cc61bac30cf304",
+        "byteLength": 5533
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+        "sha256": "sha256:01cefeaec408d9ee6c4146da15e27791b37088e8190d9c1c6338dbb6fb3ccb99",
+        "byteLength": 14193
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-005-symbol-relationship-discovery.md",
+        "sha256": "sha256:d0843d13bc003fe4c023ac317f96d8e784aa3a187f8851e6c25241d37cdd28da",
+        "byteLength": 15621
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+        "sha256": "sha256:085d9d5a4a3e0d71421ff1bbe1e45f8c88fc722b354fa7a5b36ca586401b2256",
+        "byteLength": 15920
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/architecture/artifact-contract-model.md",
+        "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332",
+        "byteLength": 13896,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/anchors-everywhere-1.md",
+        "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60",
+        "byteLength": 4803,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-rust-1.md",
+        "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731",
+        "byteLength": 9053,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-java-1.md",
+        "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0",
+        "byteLength": 6166,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/deps-classifier-1.md",
+        "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082",
+        "byteLength": 8808,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-1.md",
+        "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8",
+        "byteLength": 5162,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+        "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965",
+        "byteLength": 48460,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSB-001.md",
+        "sha256": "sha256:4a404b61788887de94665755f855039200af82675311c33f35f8356c364c8562",
+        "byteLength": 3734,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSB-002.md",
+        "sha256": "sha256:4b5860649168cf9dbcf7ea317d9e61c79c05d10a6186abe733be785ebfb9686b",
+        "byteLength": 2642,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/PYTHON-SELF-BINDING-1/oracle-corrections.md",
+        "sha256": "sha256:a7ff352ad8ec093065d980d66408b51cc3ed149c1a56b98d2914ec605295110d",
+        "byteLength": 2239,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/call-binding-receiver-1.md",
+        "sha256": "sha256:0305c1f3267ab625738541ea3ad401cdc55cc66d85240179c65b892f237a19ef",
+        "byteLength": 62178,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e",
+        "byteLength": 12963
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/python-self-binding-1.md",
+        "sha256": "sha256:b657167ce5bc00a95a0e56d996c7347341708a9ba8a9b34966595d0109470ca9",
+        "byteLength": 62924
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/PYTHON-SELF-BINDING-1-INPUT-3/requirements-review.json",
+        "sha256": "sha256:a532f11555699296af3b39a90b61b7e70fa4dd0bf14bcb5993f984d88fa4ff88",
+        "byteLength": 53693
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/PYTHON-SELF-BINDING-1-INPUT-3/baseline-approval.json",
+        "sha256": "sha256:5678a6091c1c396ab65aa3f69a232678045a300d41dc5b040732b3236420c06b",
+        "byteLength": 1393
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:004436c6c7ea7f33b212f36251189f0f513516c75c2d1b94deddbdbc786443fe",
+        "byteLength": 7524
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/PYTHON-SELF-BINDING-1/selection.md",
+        "sha256": "sha256:fbadcab1d4b81b158d12a643845c2fdf5c4062cdbdd1268a6c76dbf95c8ae2a1",
+        "byteLength": 11879
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:7aa5ad1b7594bf7d902cfaf0ba54e1c77ef189fbb6aca099e3d78dce7aa0b04d",
+        "byteLength": 21698
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-0",
+        "sha256": "sha256:5e12c8c3ac6ca62e45f04a162708579424c1ba33a0d0f8391086aa4040d4c4c9",
+        "byteLength": 41401
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:f3b2cd7daf9c76072761410a3ab088f629a35029e2028beffd6b84eb57a09c8f",
+        "byteLength": 4547
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-0",
+        "sha256": "sha256:7c8c42b7aff2cd41745c0ff508b65030ce26c5e7121f67242c11fdd258403ddf",
+        "byteLength": 70247
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-0",
+        "sha256": "sha256:0b4e07b5890a8a2f2d1f73884a292d3e8527372283571fb031a50c50fe13af10",
+        "byteLength": 62932
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:92c76aa5d31ec27b6b341205f2b1ff2c0c27c09692257d3080389a91f2f13544",
+        "byteLength": 35567
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:f8dad56f274dffaf6574f05c8d270d40a7ff29dda07b7a49e6a9fcd6defb39ce",
+        "byteLength": 478441
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-005-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PSB-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PSB-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PSB-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PSB-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PSB-05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "PSB-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-python-extractor --lib` completed: 63 passed, 0 failed, including all four new carrier boundary tests.",
+          "supportingEvidence": [
+            "Reviewer command output, rust/: 63 passed."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "PSB-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-indexer --lib resolver` completed: 122 passed, 0 failed; `cargo test -p repo-graph-indexer --test call_binding_receiver` completed: 1 passed, 0 failed.",
+          "supportingEvidence": [
+            "Reviewer command output confirms own-class, ancestor, collision, malformed-carrier, and C++ receiver tests."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "PSB-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-classification` completed: 266 unit tests and the parity fixture test passed; the new basis-code and malformed-carrier tests passed.",
+          "supportingEvidence": [
+            "Reviewer command output confirms `self_call_ambiguous_mro` round-trip and corpus parity."
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "PSB-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: storage test suite reported green. OBSERVED source inspection confirms `metadata_json` is already selected and only feeds `superclasses_from_metadata`; no SQL/schema change appears in the candidate diff."
+      }
+    },
+    {
+      "checkId": "PSB-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: repo-index integration suite reported 12 passed. OBSERVED diff inspection confirms the unchanged fixture is indexed twice, checks the own-class binding, and checks that the chain is not bound to the private method."
+      }
+    },
+    {
+      "checkId": "PSB-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: whole touched-crate preservation suites reported green. OBSERVED diff/status confirms the protected extractor, trust, enrichment, and category-reader paths are outside the candidate."
+      }
+    },
+    {
+      "checkId": "PSB-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: fmt/clippy reported green. OBSERVED: both staged and unstaged `git diff --check` commands are clean."
+      }
+    },
+    {
+      "checkId": "PSB-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED for the fresh isolated index and seam. OBSERVED existing captures show `Callers (2)` with wsgi.py:120 and client.py:169; OBSERVED after-store row at forms.py:576 has category `calls_obj_method_needs_type_info`, classification `internal_candidate`, basis `self_call_ambiguous_mro`, and both candidate labels."
+      }
+    },
+    {
+      "checkId": "PSB-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: leveldb/FRAKTAG before/after byte-stability proof reported green."
+      }
+    },
+    {
+      "checkId": "PSB-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: trust accounting assertion reported green. OBSERVED `/tmp/psb-dj-trust-after.txt` reports 64,354/140,705 resolved and 46 own-code unresolved references."
+      }
+    },
+    {
+      "checkId": "PSB-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED for registry digest and daemon isolation. OBSERVED current `git status --short` contains exactly the eleven allocated paths; no other repository paths are modified."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/python-extractor/src/extractor.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/resolver.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/tests/call_binding_receiver.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/indexer_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/classification/src/types.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/classification/src/unresolved_classifier.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/attribution.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "classification-parity-fixtures/classify__self-mro-ambiguous/input.json",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "classification-parity-fixtures/classify__self-mro-ambiguous/expected.json",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/repo-index/tests/integration.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-21T05:38:21.779Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nACCEPT. OBSERVED: working-tree status exactly matches the eleven allocated candidate paths (two staged fixtures and nine modified Rust files); staged and unstaged diff checks are clean. The candidate adds no schema, CLI, category-vocabulary, trust, or non-Python extractor change.\n\nOBSERVED implementation: the extractor stamps evidence only for exact two-part `self.<method>`/`cls.<method>` calls inside a class. The resolver requires that carrier, identifies the caller-file class, walks unique superclass nodes breadth-first, binds one first-depth METHOD hit, and returns a terminal unresolved result for multiple first-depth hits. The terminal arm preserves the existing unresolved category while adding sorted `mroCandidates`; classification maps only well-formed candidates to the ratified additive basis and attribution maps that basis to own-code unresolved. This is the intended Layer-0/1 separation: source-derived facts and explicit unresolved evidence, never an invented Python MRO winner.\n\nOBSERVED reviewer reproduction: C01, C02, C03, and the C++ receiver integration test pass. OBSERVED source witnesses: `wsgi.py:124` is `response = self.get_response(request)` in `WSGIHandler(base.BaseHandler)`; `client.py:186` is the corresponding `ClientHandler(BaseHandler)` call. The rendered capture contains exactly their declaration anchors, :120 and :169. `asgi.py:231` calls `self.get_response_async(request)`, so it is correctly absent. `forms.py:576` calls `self.validate_passwords()` on the two-mixin class; the two `validate_passwords` declarations occur at :107 and :166, and the after-store retains the named collision with both candidates. The residual `aggregates.py:34 self.extra.get(...)` remains outside the carrier shape. `test_autoreload.py:447 self.assertIs(...)` remains an external-base unresolved case.\n\nThe change serves the VISION's precise relationship discovery: `BaseHandler.get_response` moves from an unhelpful zero to two evidence-backed callers, while a genuine ambiguity remains counted and explained. The only introduced local sum is `SelfCallResolution`: current user `resolve_call_target`; fixed outcomes requiring different handling are resolved, terminal MRO collision, and ordinary no-hit; simpler `Option<String>` was rejected because it cannot distinguish a collision that must persist candidates from a no-hit that must fall through. `TargetResolution` was an existing sum extended with the same fixed-outcome axis and its exhaustive match was updated.\n\nLIMITATION: C04–C11 execution claims are builder evidence except for the inspected captures/store and diff scope; the operator-owned workspace, smoke, and isolated-dogfood gates remain required after acceptance.\n\nManager interpretation by in-place-manager: The reviewer's message is a complete implementation review whose only off-shape part is the subject block (allocation/candidateCheckpoint echoed instead of the derived candidate/verification identities — subject-mismatch). Interpretation drops the subject and reshapes nothing: result, the 16 obligation, 11 check and 11 path assessments, findings, decisions and report are the reviewer's own text. Source provider run review-PYTHON-SELF-BINDING-1-0; retained output .agent-manager/slices/PYTHON-SELF-BINDING-1/review-0.json sha256:2ef810f28d2058250607683b486444dcff7e36b15f851b4505a27e761424be01. The provider remains the performer; this interpretation is not independent execution evidence."
+}

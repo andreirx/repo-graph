@@ -418,6 +418,13 @@ pub enum UnresolvedEdgeBasisCode {
     /// `this.m()` or `this.x.m()` — receiver is on the current
     /// class.
     ThisReceiverImpliesInternal,
+    /// PYTHON-SELF-BINDING-1 (RG-REQ-005-L03): a Python `self.<m>()` / `cls.<m>()` whose method is
+    /// declared at ONE depth of the caller's own-class superclass closure by two or more ancestors
+    /// — a genuine MRO ambiguity the resolver declined to pick. The collision is inside the
+    /// reader's OWN class hierarchy (an internal candidate); the persisted `mroCandidates` carry
+    /// the competing `<Class>.<method>` labels. Adding this value does NOT bump the classifier
+    /// version (see below).
+    SelfCallAmbiguousMro,
     /// An `imports_file_not_found` observation whose specifier is
     /// path-relative (starts with "." for TS, or crate::/super::
     /// for Rust). Definite internal import.

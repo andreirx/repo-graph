@@ -908,6 +908,7 @@ fn run_pipeline<S: IndexerStoragePort>(
     let mut index = ResolverIndex {
         nodes_by_stable_key: HashMap::new(),
         nodes_by_name: HashMap::new(),
+        nodes_by_qualified_name: HashMap::new(),
         nodes_by_uid: HashMap::new(),
         node_uid_to_file_uid: HashMap::new(),
         file_resolution: file_resolution_map,
@@ -931,6 +932,15 @@ fn run_pipeline<S: IndexerStoragePort>(
             .entry(node.name.clone())
             .or_default()
             .push(node.clone());
+        // PYTHON-SELF-BINDING-1: index by qualified name so the self-call walk can look up
+        // `<Class>.<method>` method nodes directly.
+        if let Some(ref qn) = node.qualified_name {
+            index
+                .nodes_by_qualified_name
+                .entry(qn.clone())
+                .or_default()
+                .push(node.clone());
+        }
         index
             .nodes_by_uid
             .insert(node.node_uid.clone(), node.clone());
@@ -2434,6 +2444,9 @@ mod tests {
                     }),
                     file_uid: n.file_uid.clone(),
                     forward_decl: crate::resolver::metadata_forward_decl(
+                        n.metadata_json.as_deref(),
+                    ),
+                    superclasses: crate::resolver::superclasses_from_metadata(
                         n.metadata_json.as_deref(),
                     ),
                 })

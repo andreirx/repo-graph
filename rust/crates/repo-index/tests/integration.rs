@@ -1182,6 +1182,87 @@ fn index_python_visibility_correct() {
 }
 
 #[test]
+fn index_python_binds_a_self_call_to_the_own_class_method() {
+    // PYTHON-SELF-BINDING-1 (RG-REQ-005-L03) end-to-end on the smallest corpus (unchanged
+    // fixture): `UserService.process` calls `self._process_user(user)` — an own-class unique hit
+    // that now binds; `App.run` calls `self._service.process()` — a 3-part attribute chain that
+    // stays an unresolved row. Indexing twice yields the same CALLS count (RG-REQ-001-L09).
+    let repo_path = python_fixture_path();
+
+    let mut storage = StorageConnection::open_in_memory().unwrap();
+    let result = index_into_storage(
+        &repo_path,
+        &mut storage,
+        "py-self",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
+
+    // The self-call `self._process_user(user)` now binds to UserService._process_user.
+    let bound: i64 = storage
+        .query_scalar(
+            "SELECT COUNT(*) FROM edges e \
+             JOIN nodes s ON e.source_node_uid = s.node_uid AND s.snapshot_uid = e.snapshot_uid \
+             JOIN nodes t ON e.target_node_uid = t.node_uid AND t.snapshot_uid = e.snapshot_uid \
+             WHERE e.type = 'CALLS' \
+               AND s.qualified_name = 'UserService.process' \
+               AND t.qualified_name = 'UserService._process_user'",
+        )
+        .unwrap();
+    assert_eq!(
+        bound, 1,
+        "self._process_user() binds to the own-class method"
+    );
+
+    // The 3-part attribute chain `self._service.process` carries NO self-call carrier, so the new
+    // hierarchy stage never fires for it: it is NEVER bound to the own-class private method, and
+    // it resolves exactly as before this slice — by the pre-existing unique bare-name fallback,
+    // to UserService.process (the sole method named `process`).
+    let chain_to_process = |storage: &StorageConnection, target: &str| -> i64 {
+        storage
+            .query_scalar(&format!(
+                "SELECT COUNT(*) FROM edges e \
+                 JOIN nodes s ON e.source_node_uid = s.node_uid AND s.snapshot_uid = e.snapshot_uid \
+                 JOIN nodes t ON e.target_node_uid = t.node_uid AND t.snapshot_uid = e.snapshot_uid \
+                 WHERE e.type = 'CALLS' AND s.qualified_name = 'App.run' \
+                   AND t.qualified_name = '{target}'"
+            ))
+            .unwrap()
+    };
+    assert_eq!(
+        chain_to_process(&storage, "UserService._process_user"),
+        0,
+        "the 3-part chain is never mis-bound by the self-call hierarchy stage"
+    );
+    assert_eq!(
+        chain_to_process(&storage, "UserService.process"),
+        1,
+        "the chain resolves by the pre-existing bare-name fallback, unchanged"
+    );
+
+    // Determinism (RG-REQ-001-L09): a second index of the same tree yields the same CALLS count.
+    let calls_first: i64 = storage
+        .query_scalar("SELECT COUNT(*) FROM edges WHERE type = 'CALLS'")
+        .unwrap();
+    let mut storage2 = StorageConnection::open_in_memory().unwrap();
+    index_into_storage(
+        &repo_path,
+        &mut storage2,
+        "py-self-2",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    let calls_second: i64 = storage2
+        .query_scalar("SELECT COUNT(*) FROM edges WHERE type = 'CALLS'")
+        .unwrap();
+    assert_eq!(
+        calls_first, calls_second,
+        "indexing the same tree twice yields the same CALLS edge count"
+    );
+}
+
+#[test]
 fn index_python_imports_resolve() {
     // Python import resolution test: verify relative and absolute imports
     // resolve to the correct target files.

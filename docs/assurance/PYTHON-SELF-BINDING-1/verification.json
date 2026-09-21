@@ -1,0 +1,611 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-PYTHON-SELF-BINDING-1-0",
+  "workItemId": "PYTHON-SELF-BINDING-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/PYTHON-SELF-BINDING-1-INPUT-3.json",
+    "sha256": "sha256:4ec12ce1cb577b710bce61dc53c7d0a41ff9b2d228d56d8a33cc61bac30cf304"
+  },
+  "allocation": {
+    "path": "docs/slices/python-self-binding-1.md",
+    "sha256": "sha256:b657167ce5bc00a95a0e56d996c7347341708a9ba8a9b34966595d0109470ca9"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "8b37771da357757db8b1f253d74b968ee4573294",
+    "entries": [
+      {
+        "path": "classification-parity-fixtures/classify__self-mro-ambiguous/expected.json",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:c00e68c43431b7137ce41acc45d413f44d595bb975893c03f664605bb938a569",
+          "byteLength": 87
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c00e68c43431b7137ce41acc45d413f44d595bb975893c03f664605bb938a569",
+          "byteLength": 87
+        }
+      },
+      {
+        "path": "classification-parity-fixtures/classify__self-mro-ambiguous/input.json",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:efb424bd323d3b8cadf962c6e103011c117ec15cbf8d0cc28b01d9cbcc7e6a9c",
+          "byteLength": 584
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:efb424bd323d3b8cadf962c6e103011c117ec15cbf8d0cc28b01d9cbcc7e6a9c",
+          "byteLength": 584
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/attribution.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:12ca25c3d6603a24b8d13c9c8b0366b7d769fad3d3b296e74a80244a0b2348d6",
+          "byteLength": 33927
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fdea3d9fd2c08dc5dd4a7087cf3b6e3336d89d5c6a1febb7d08390520af0d78c",
+          "byteLength": 34520
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/types.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:27cc8c801171e09b5b340f60c3cc4d003d72c3a29ffbafbac0a77e545e104ded",
+          "byteLength": 51413
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:82c29153409264a632a53b12f6ab9c91b1e99fd99634b598c6c59f2fdb4ae757",
+          "byteLength": 51957
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/unresolved_classifier.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:84acc896ba95380e22804d921842c086e1251c7ff42627174a9f4d7ec5812dd1",
+          "byteLength": 52339
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ce4ff6be49759487f924c7eb65f2b56a928ed21a8733799babf2141630b801fb",
+          "byteLength": 56713
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:af3db0635c7e6125fbb0c11735a482324b265c7b524bf2e326249e71b339971b",
+          "byteLength": 174799
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5e354d817c57cf28d044ef7920a93aaee673d8b07d9d365623e0c6206cd11e98",
+          "byteLength": 175370
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/resolver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:be5b55d2f3c5408fa8db71342eaf516288efa806389de9ac321f080d7d792528",
+          "byteLength": 154793
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b24c5a001516e7563b58696873346d0a3548c974144c1067ec6edb6a42fa4e5d",
+          "byteLength": 180781
+        }
+      },
+      {
+        "path": "rust/crates/indexer/tests/call_binding_receiver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fb1d2fcfd31920cd0155f06eb49a06f8d1b2ec0900a277e0bd23f6c5abf42792",
+          "byteLength": 7953
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a8855290b7a882a49fc798b53b845c60b5ea9466caed49eb5002298f3d12d67b",
+          "byteLength": 8036
+        }
+      },
+      {
+        "path": "rust/crates/python-extractor/src/extractor.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fa5ec8d30a91e25c403ff2c96bd9218b14502f90a63d280864baf5261a40a191",
+          "byteLength": 78082
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ce06e7b98664990a371c75cfe3085dbf0d519c310ef4ec3e77057af72cabc80b",
+          "byteLength": 82097
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/integration.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:c9395a420dd39ffb30f51e0460295d80eab68d44f860ae1827396bbee2e326bf",
+          "byteLength": 46365
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d820082e74eca47922ddc7e7ad34ccebfb8fb39121efe75fe6b4b90e04cd6cb1",
+          "byteLength": 49806
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/indexer_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:aa72cab113143718705b169c00e2a4941565781ca9b3c32d3dbf34fe7f157e3c",
+          "byteLength": 79950
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:52319295b6171032edee03ac6328e29b4d9b3c1503a73a6743a12581bd9f60f0",
+          "byteLength": 82251
+        }
+      }
+    ],
+    "sha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "high",
+    "runId": "build-PYTHON-SELF-BINDING-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "PSB-C01",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-python-extractor --lib 2>&1 | tee /tmp/psb-c01.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c01.txt && for t in self_call_in_a_class_carries_the_self_call_carrier cls_call_in_a_class_carries_the_self_call_carrier self_attribute_chain_call_carries_no_carrier self_call_outside_a_class_carries_no_carrier extracts_method_call extracts_class_with_superclass; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c01.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/python-extractor/src/extractor.rs `emit_call_edge` (:1065-1092; `metadata_json: None` at :1089): when `target_key` is exactly `self.<m>` or `cls.<m>` (ONE dot; `<m>` an identifier) AND `ctx.current_class` (:100-101, live during `extract_function` → `extract_calls_from_node` at :951) is `Some(C)`, the edge carries `metadata_json = {\"selfCall\": true, \"enclosingClass\": \"C\"}` (the TS precedent's shape at ts-extractor/src/extractor.rs:2179-2187); the target key is NOT rewritten. A 3+-part key (`self.extra.get`) and a self-call outside any class carry no metadata (byte-identical to today). NEW tests in the file's `mod tests`: `self_call_in_a_class_carries_the_self_call_carrier` (`class C:\\n    def f(self):\\n        self.g()` → target_key `self.g`, metadata selfCall true / enclosingClass `C`), `cls_call_in_a_class_carries_the_self_call_carrier`, `self_attribute_chain_call_carries_no_carrier` (`self.extra.get()` → `metadata_json` None), `self_call_outside_a_class_carries_no_carrier`; the existing `extracts_method_call` (:2136-2147, no class) and `extracts_class_with_superclass` (:2242-2252, metadata key `superclass` raw text) stay green"
+      },
+      "expected": "exit 0: the extractor records the one fact the resolver needs — this is a self/cls call inside class C — as evidence on the edge, and records nothing where the fact is absent (a chained attribute, a module-level function): binding evidence, never a rewrite (RG-REQ-005-L02)",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-python-extractor --lib → `test result: ok. 63 passed; 0 failed`; no FAILED/panicked; all six named tests present (self_call_in_a_class_carries_the_self_call_carrier, cls_call_in_a_class_carries_the_self_call_carrier, self_attribute_chain_call_carries_no_carrier, self_call_outside_a_class_carries_no_carrier, extracts_method_call, extracts_class_with_superclass). Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-c01.txt: `test result: ok. 63 passed; 0 failed; 0 ignored`",
+          "extractor.rs self_call_carrier(): {\"selfCall\":true,\"enclosingClass\":\"C\"} on 2-part self./cls. keys inside a class; None for chains and module-level self-calls; target key never rewritten"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C02",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L02",
+        "RG-REQ-001-L03",
+        "RG-REQ-005-L01",
+        "P-PSB-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer --lib resolver 2>&1 | tee /tmp/psb-c02.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c02.txt && for t in self_call_binds_to_the_own_class_method_in_the_same_file self_call_binds_to_a_unique_ancestor_method self_call_same_depth_ancestor_collision_stays_unresolved_with_mro_candidates self_call_with_no_defining_ancestor_falls_through_unchanged self_call_same_name_ancestor_classes_stop_the_walk self_call_malformed_carrier_never_binds cls_call_binds_like_self superclass_metadata_parses_raw_python_base_lists ambiguous_name_stays_unresolved two_definitions_stay_ambiguous method_call_prototype_plus_definition_resolves_to_definition forward_decl_classification_reads_the_stamped_key categorize_calls_this_method categorize_calls_obj_method categorize_calls_function java_suffix_ambiguous_when_shaded rust_crate_import_leaf_module_file; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-indexer --test call_binding_receiver 2>&1 | tee /tmp/psb-c02b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c02b.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/indexer/src/resolver.rs: `ResolverNode` (:150-166) gains `superclasses: Vec<String>` parsed by a pure function `superclasses_from_metadata(metadata_json) -> Vec<String>` (the raw Python `superclass` text split on `,`, each part trimmed, parts containing `=` dropped, a `[...]` suffix stripped, the LAST dotted segment kept: `base.BaseHandler` → `BaseHandler`; `Base, metaclass=ABCMeta` → [`Base`]; `Generic[T]` → [`Generic`]; absent/unreadable → empty, never a guess); `ResolverIndex` (:173-201) gains `nodes_by_qualified_name: HashMap<String, Vec<ResolverNode>>` (populated at orchestrator.rs:929-933 beside `nodes_by_name`; every literal `ResolverIndex {` site the compiler names — 13 — gains the field). ONE new stage in `resolve_call_target`, inserted BEFORE the dotted fallback (:898) and gated ONLY on the carrier (`metadata_json.selfCall == true` and `enclosingClass` a non-empty string — any other present shape is a MALFORMED carrier: the stage does not run and the edge follows today's path): the own class = the unique CLASS node named `enclosingClass` in the CALLER's file (`node_uid_to_file_uid` of the source node); breadth-first over the superclass closure (depth 0 = the own class; each ancestor = the unique CLASS node of that simple name — 0 or >1 such nodes end that branch, stated; visited set; depth cap 16); at each depth the hits are `nodes_by_qualified_name[\"<Class>.<m>\"]` with subtype METHOD in that class node's file; exactly one hit at the first non-empty depth → `TargetResolution::Resolved`; two or more hits at that depth → the NEW terminal variant `TargetResolution::SelfCallAmbiguousMro(candidates)` (sorted `<Class>.<m>` strings; `resolve_edges`' exhaustive match gains its arm: category via `categorize_unresolved_edge` — `calls_obj_method_needs_type_info`, unchanged — and the cloned edge's `metadata_json` gains `\"mroCandidates\": [...]` beside the carrier, the first resolver-written metadata key, stated in §2.1); no hit at any depth → fall through to today's fallbacks unchanged. Tests in `mod tests` (the `make_node`/`make_qn_node` fixtures :1657/:1678 gain the field): the seven `self_call_*`/`cls_call_*` names + `superclass_metadata_parses_raw_python_base_lists`; the whole existing resolver suite incl. Q1's C++ family and the Gate B tests stays green; the `call_binding_receiver` integration suite stays green (RG-REQ-005-L01: the C-family gate at :1000 is untouched)"
+      },
+      "expected": "exit 0: a self/cls call binds only on hierarchy evidence — the class node in the caller's file and its stored superclass facts — a same-depth collision is declined and NAMED with its candidates (RG-REQ-001-L03), a malformed carrier never binds, and every other language's binding remains byte-identical (no behavior change on the C/C++ gates, TS `this.`, Java, Rust — preserved)",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-indexer --lib resolver → `test result: ok. 122 passed; 0 failed` with all 17 named tests present (the eight self_call/cls_call/superclass tests plus ambiguous_name_stays_unresolved, two_definitions_stay_ambiguous, method_call_prototype_plus_definition_resolves_to_definition, forward_decl_classification_reads_the_stamped_key, categorize_calls_this_method/obj_method/function, java_suffix_ambiguous_when_shaded, rust_crate_import_leaf_module_file). cargo test -p repo-graph-indexer --test call_binding_receiver → `test result: ok. 1 passed; 0 failed` (Q1 C-family receiver gate untouched). Both exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-c02.txt: resolver suite 122 passed; all named tests grep-matched",
+          "/tmp/psb-c02b.txt: call_binding_receiver 1 passed",
+          "resolver.rs resolve_self_call(): BFS over enclosing class + superclass closure; first non-empty depth with one METHOD hit binds; ≥2 hits → TargetResolution::SelfCallAmbiguousMro; malformed carrier via self_call_enclosing_class() → stage does not run"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C03",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-001-L03",
+        "RG-REQ-005-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-classification 2>&1 | tee /tmp/psb-c03.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c03.txt && for t in mro_candidates_carrier_yields_internal_candidate_with_the_self_call_ambiguous_mro_basis malformed_mro_candidates_carrier_falls_through_to_the_existing_rules basis_code_round_trips_self_call_ambiguous_mro; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && test -f ../classification-parity-fixtures/classify__self-mro-ambiguous/input.json && test -f ../classification-parity-fixtures/classify__self-mro-ambiguous/expected.json && grep -q 'self_call_ambiguous_mro' ../classification-parity-fixtures/classify__self-mro-ambiguous/expected.json && cargo test -p repo-graph-agent --lib attribution 2>&1 | tee /tmp/psb-c03b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c03b.txt && for t in every_basis_code_maps_to_its_expected_reader_class self_call_ambiguous_mro_is_own_code_unresolved; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c03b.txt || { echo \"MISSING $t\"; exit 1; }; done && grep -qE 'assert_eq!\\(EXPECTED\\.len\\(\\), 18' crates/agent/src/attribution.rs && grep -qE 'pub const CURRENT_CLASSIFIER_VERSION: u32 = 6;' crates/classification/src/types.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/classification/src/types.rs: `UnresolvedEdgeBasisCode` (:386-436) gains `SelfCallAmbiguousMro` (wire `self_call_ambiguous_mro`; the vocabulary's own contract at :442-445 says additions need no version bump — `CURRENT_CLASSIFIER_VERSION` stays 6); the category vocabulary is UNTOUCHED (D-PSB-001). rust/crates/classification/src/unresolved_classifier.rs `classify_unresolved_edge` (:60-65): a new first rule — when `edge.metadata_json` carries `mroCandidates` as an array of ≥2 strings, return `classification: internal_candidate`, `basis_code: self_call_ambiguous_mro` (the collision is inside the reader's own class hierarchy — the `this`-receiver precedent at :66-71); a present-but-malformed `mroCandidates` (not an array, fewer than two entries, non-string entries) is ignored and the existing rules run (pinned by a test; the key is written and read inside one index run, never across a build boundary — stated). rust/crates/agent/src/attribution.rs: `attribution_class` (:140-173) adds `B::SelfCallAmbiguousMro` to the `OwnCodeUnresolved` arm (:158-165) — the ONE compile-forced site — and `EXPECTED` (:545-614) gains the pair, `EXPECTED.len()` 17 → 18 (:620): RG-REQ-005-L03's own verification criterion. NEW parity fixture classification-parity-fixtures/classify__self-mro-ambiguous/{input,expected}.json in the `classify__this-receiver` shape (metadata `{\"selfCall\":true,\"enclosingClass\":\"AdminPasswordChangeForm\",\"mroCandidates\":[\"SetPasswordMixin.validate_passwords\",\"SetUnusablePasswordMixin.validate_passwords\"]}`, category `calls_obj_method_needs_type_info` → expected `{\"classification\":\"internal_candidate\",\"basisCode\":\"self_call_ambiguous_mro\"}`); the harness (classification/tests/parity.rs) picks it up. `blast_radius.rs:75` (`_ => LocalLike`) and `unresolved_classifier.rs:572` (`_ => None`) are the correct fallbacks for the new basis — stated, not edited"
+      },
+      "expected": "exit 0: a declined MRO collision carries its own named basis, maps to the reader class `your own code (call target not resolved)`, round-trips on the wire, and the parity corpus pins it; the category vocabulary and the reader-class set remain unchanged — no behavior change to the categories and classes RG-REQ-005-L09's zero-state reads (preserved)",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-classification → `ok. 266 passed` + parity + fixture-driven suites, all named tests present (mro_candidates_carrier_yields_internal_candidate_with_the_self_call_ambiguous_mro_basis, malformed_mro_candidates_carrier_falls_through_to_the_existing_rules, basis_code_round_trips_self_call_ambiguous_mro). Fixture files present and expected.json contains self_call_ambiguous_mro. cargo test -p repo-graph-agent --lib attribution → `ok. 15 passed`, every_basis_code_maps_to_its_expected_reader_class + self_call_ambiguous_mro_is_own_code_unresolved present. EXPECTED.len()==18 and CURRENT_CLASSIFIER_VERSION==6 both grep-confirmed. Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-c03.txt, /tmp/psb-c03b.txt",
+          "classification-parity-fixtures/classify__self-mro-ambiguous/{input,expected}.json staged (A )",
+          "types.rs adds UnresolvedEdgeBasisCode::SelfCallAmbiguousMro (wire self_call_ambiguous_mro; version stays 6); unresolved_classifier.rs Rule 0 reads mroCandidates (≥2 strings) → internal_candidate; attribution.rs maps to OwnCodeUnresolved"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C04",
+      "obligationIds": [
+        "RG-REQ-005-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --lib indexer_impl 2>&1 | tee /tmp/psb-c04.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c04.txt && for t in query_resolver_nodes_carries_python_superclasses_from_metadata; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && ! git diff HEAD -- crates/storage/src/indexer_impl.rs | grep -E '^\\+.*(SELECT|FROM nodes)'",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/storage/src/indexer_impl.rs `query_resolver_nodes` (:377-401) already SELECTs `metadata_json` (:382-386) and reads only `forward_decl` from it (:395-397); the same local now also feeds `superclasses: superclasses_from_metadata(metadata_json.as_deref())` — NO SQL change (the negated grep asserts the SELECT is untouched), no schema change. NEW test in the file's `mod tests`: a CLASS node inserted with `{\"superclass\":\"base.BaseHandler\"}` reads back `superclasses == [\"BaseHandler\"]`, one with `{\"superclass\":\"Base, metaclass=ABCMeta\"}` → [`Base`], one with no metadata → [] (the MockStorage literal at orchestrator.rs:2421 gains the field too)"
+      },
+      "expected": "exit 0: the stored superclass fact reaches the resolver through the read that already exists, with no schema or SQL change",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-storage --lib indexer_impl → `ok. 22 passed; 0 failed`; query_resolver_nodes_carries_python_superclasses_from_metadata present. Negated grep confirms no `+`-line adds SELECT or `FROM nodes` — no SQL change. Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-c04.txt: 22 passed",
+          "indexer_impl.rs: superclasses_from_metadata() reads the metadata_json local the SELECT already binds; no query change"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C05",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-001-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-repo-index --test integration 2>&1 | tee /tmp/psb-c05.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c05.txt && for t in index_python_binds_a_self_call_to_the_own_class_method index_python_extracts_symbols; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c05.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet HEAD -- crates/repo-index/tests/fixtures",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the existing Python fixture rust/crates/repo-index/tests/fixtures/python/simple-app/ (UNCHANGED — the diff assertion): `src/service.py` calls `self._process_user(user)` inside `UserService.process` (own-class unique hit) and `src/app.py` calls `self._service.process()` (a 3-part key). NEW test `index_python_binds_a_self_call_to_the_own_class_method` in rust/crates/repo-index/tests/integration.rs beside `index_python_extracts_symbols` (:1003): after `index_into_storage`, a CALLS edge exists from `UserService.process` to `UserService._process_user`, and `self._service.process` is still an `unresolved_edges` row; the existing Python assertions (`>=` bounds at :1218-1229) stay green; a second `index_into_storage` of the same fixture into a fresh store yields the same CALLS edge count (RG-REQ-001-L09 for the new stage)"
+      },
+      "expected": "exit 0: the fix is visible end-to-end on the smallest corpus — one edge that was an unresolved row now binds, the attribute chain stays unresolved, and indexing twice yields the same graph: determinism remains as before (RG-REQ-001-L09 preserved, no behavior change)",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo test -p repo-graph-repo-index --test integration → `ok. 12 passed; 0 failed`; index_python_binds_a_self_call_to_the_own_class_method and index_python_extracts_symbols present. `git diff --quiet HEAD -- crates/repo-index/tests/fixtures` clean (fixture unchanged). The new test asserts self._process_user() binds to UserService._process_user, the 3-part self._service.process chain is never mis-bound, and indexing twice yields the same CALLS count. Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-c05.txt: 12 passed",
+          "determinism (RG-REQ-001-L09): calls_first == calls_second asserted in the test"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C06",
+      "obligationIds": [
+        "P-PSB-01",
+        "P-PSB-02",
+        "P-PSB-03",
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L04",
+        "RG-REQ-005-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-indexer 2>&1 | tee /tmp/psb-c06.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06.txt && for t in rust_crate_import_leaf_module_file java_suffix_resolves_by_package_path java_suffix_ambiguous_when_shaded aliased_named_import_uses_imported_name_for_lookup namespace_import_member_resolves_to_target_module default_import_member_does_not_resolve_by_bare_method_name import_type_only_reads_injected_metadata forward_decl_classification_reads_the_stamped_key; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c06.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-classification 2>&1 | tee /tmp/psb-c06b.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06b.txt && cargo test -p repo-graph-agent 2>&1 | tee /tmp/psb-c06c.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06c.txt && cargo test -p repo-graph-storage --lib 2>&1 | tee /tmp/psb-c06d.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06d.txt && cargo test -p repo-graph-python-extractor 2>&1 | tee /tmp/psb-c06e.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06e.txt && cargo test -p repo-graph-ts-extractor --lib 2>&1 | tee /tmp/psb-c06f.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06f.txt && for t in this_method_rewritten_to_class_name this_property_method_rewritten_via_class_binding; do grep -qE \"^test .*$t .* ok$\" /tmp/psb-c06f.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-trust 2>&1 | tee /tmp/psb-c06g.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06g.txt && cargo test -p repo-graph-rgr --lib presentation::trust 2>&1 | tee /tmp/psb-c06h.txt | grep -E '^test result: ok\\.' && ! grep -E 'FAILED|panicked' /tmp/psb-c06h.txt && git diff --quiet HEAD -- crates/ts-extractor crates/java-extractor crates/cpp-extractor crates/c-extractor crates/trust crates/storage/src/call_resolution_reads.rs crates/enrichment",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the acceptance boundary of every crate the candidate touches, run to completion in the foreground: the whole indexer crate (unit + integration incl. the Q1 C++ family and the Rust/Java/TS import stages), the whole classification and agent crates, the storage lib, the whole python-extractor crate, the ts-extractor lib (the `this.` rewrite tests), the whole trust crate, rgr's trust presentation tests; and the byte-identity of every path this slice must NOT touch: the other extractors, the trust crate, `call_resolution_reads.rs` (`CALLS_CATEGORIES: [_; 4]` unchanged — the category vocabulary is untouched), the enrichment crate"
+      },
+      "expected": "exit 0: every other resolver stage, the C/C++ receiver invariant, the TS `this.` rewrite, forward-declaration handling, the trust computations and the category vocabulary remain exactly as before (no behavior change outside the Python self-call stage)",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Whole suites all green: indexer (434 + 1 + 1 + 4 passed) with rust_crate_import_leaf_module_file, java_suffix_resolves_by_package_path, java_suffix_ambiguous_when_shaded, aliased_named_import_uses_imported_name_for_lookup, namespace_import_member_resolves_to_target_module, default_import_member_does_not_resolve_by_bare_method_name, import_type_only_reads_injected_metadata, forward_decl_classification_reads_the_stamped_key; classification (266+…); agent (314+…); storage --lib (681 passed, 3 ignored); python-extractor (63); ts-extractor --lib (211) with this_method_rewritten_to_class_name + this_property_method_rewritten_via_class_binding; trust (113+1); rgr --lib presentation::trust (37). `git diff --quiet HEAD -- crates/ts-extractor crates/java-extractor crates/cpp-extractor crates/c-extractor crates/trust crates/storage/src/call_resolution_reads.rs crates/enrichment` clean. Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-c06.txt,c06b,c06c,c06d,c06e,c06f,c06g,c06h",
+          "untouched-paths diff --quiet returned 0 — other extractors, trust, call_resolution_reads.rs (CALLS_CATEGORIES), enrichment byte-identical"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C07",
+      "obligationIds": [
+        "P-PSB-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-python-extractor -p repo-graph-indexer -p repo-graph-storage -p repo-graph-classification -p repo-graph-agent -p repo-graph-repo-index && cargo clippy -p repo-graph-python-extractor -p repo-graph-indexer -p repo-graph-storage -p repo-graph-classification -p repo-graph-agent -p repo-graph-repo-index --all-targets -- -D warnings > /tmp/psb-c07.txt 2>&1; rc=$?; tail -3 /tmp/psb-c07.txt; test $rc -eq 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rustfmt and clippy (deny warnings, all targets) over the six touched crates"
+      },
+      "expected": "exit 0: no formatting or lint debt enters with the candidate",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "cargo fmt --check + cargo clippy --all-targets -- -D warnings over the six touched crates → `Finished dev profile in 25.02s`, exit 0. No formatting or lint debt.",
+        "supportingEvidence": [
+          "/tmp/psb-c07.txt: clippy finished with no warnings; rc==0"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C08",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L02",
+        "RG-REQ-001-L03",
+        "P-PSB-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/PYTHON-SELF-BINDING-1-django-after && mkdir -p /private/tmp/PYTHON-SELF-BINDING-1-django-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/psb-dj-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/psb-dj-index.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain BaseHandler.get_response > /tmp/psb-dj-explain-after.txt 2> /tmp/psb-dj-explain-after.txt.err ) || { echo \"RUN-FAILED /tmp/psb-dj-explain-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" callers BaseHandler.get_response > /tmp/psb-dj-callers-after.txt 2> /tmp/psb-dj-callers-after.txt.err ) || { echo \"RUN-FAILED /tmp/psb-dj-callers-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-django-before RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/PYTHON-SELF-BINDING-1-before-bin:$PATH\" \"/private/tmp/PYTHON-SELF-BINDING-1-before-bin/rmap\" explain BaseHandler.get_response > /tmp/psb-dj-explain-before.txt 2> /tmp/psb-dj-explain-before.txt.err ) || { echo \"RUN-FAILED /tmp/psb-dj-explain-before.txt\"; exit 1; } && grep -qE '^Callers \\(0\\)$' /tmp/psb-dj-explain-before.txt && grep -qE '^Callers \\(2\\)$' /tmp/psb-dj-explain-after.txt && grep -qE '^  - __call__ \\([^)]*\\)  django/core/handlers/wsgi\\.py:120$' /tmp/psb-dj-explain-after.txt && grep -qE '^  - __call__ \\([^)]*\\)  django/test/client\\.py:169$' /tmp/psb-dj-explain-after.txt && ! grep -qE 'asgi\\.py|exception\\.py|AsyncClientHandler' /tmp/psb-dj-explain-after.txt && grep -qE '^2 callers found$' /tmp/psb-dj-callers-after.txt && python3 - /private/tmp/PYTHON-SELF-BINDING-1-django-before /private/tmp/PYTHON-SELF-BINDING-1-django-after <<'PY'\nimport sqlite3, glob, json, sys, collections\ndef store(root):\n    db = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\n    snap = k.execute(\"select snapshot_uid from snapshots order by created_at desc limit 1\").fetchone()[0]\n    calls = k.execute(\"select count(*) from edges where snapshot_uid = ? and type = 'CALLS'\", (snap,)).fetchone()[0]\n    rows = collections.Counter(); facts = {}\n    for qn, path, tk, line, cat, basis, cls, md in k.execute(\"select n.qualified_name, f.path, u.target_key, u.line_start, u.category, u.basis_code, u.classification, u.metadata_json from unresolved_edges u join nodes n on u.source_node_uid = n.node_uid and n.snapshot_uid = u.snapshot_uid left join files f on n.file_uid = f.file_uid where u.snapshot_uid = ? and u.type = 'CALLS'\", (snap,)):\n        key = (qn, path, tk, line); rows[key] += 1; facts[key] = (cat, basis, cls, md)\n    callers = sorted(r[0] for r in k.execute(\"select s.qualified_name from edges e join nodes s on e.source_node_uid = s.node_uid and s.snapshot_uid = e.snapshot_uid join nodes t on e.target_node_uid = t.node_uid and t.snapshot_uid = e.snapshot_uid where e.snapshot_uid = ? and e.type = 'CALLS' and t.qualified_name = 'BaseHandler.get_response'\", (snap,)))\n    return calls, rows, facts, callers\nb_calls, b_rows, b_facts, b_callers = store(sys.argv[1]); a_calls, a_rows, a_facts, a_callers = store(sys.argv[2])\nis_self = lambda key: (key[2].startswith('self.') or key[2].startswith('cls.')) and key[2].count('.') == 1\nmoved = b_rows - a_rows; appeared = a_rows - b_rows\nassert all(is_self(k) for k in moved), [k for k in moved if not is_self(k)][:5]\nassert not appeared, 'unresolved rows appeared: ' + str(list(appeared.items())[:5])\nn_moved = sum(moved.values())\nassert a_calls - b_calls == n_moved, (a_calls, b_calls, n_moved)\nchanged_basis = {k for k in a_rows if k in b_facts and a_facts[k][1] != b_facts[k][1]}\nmro = {k for k, v in a_facts.items() if v[1] == 'self_call_ambiguous_mro'}\nassert changed_basis == mro, (len(changed_basis), len(mro))\nassert mro and all(a_facts[k][2] == 'internal_candidate' and a_facts[k][0] == 'calls_obj_method_needs_type_info' for k in mro)\nfor k in mro:\n    c = json.loads(a_facts[k][3])['mroCandidates']; assert isinstance(c, list) and len(c) >= 2 and all(isinstance(x, str) for x in c), (k, c)\nassert any(k[2] == 'self.validate_passwords' and k[1] == 'django/contrib/auth/forms.py' and k[3] == 576 for k in mro), 'forms.py:576 collision missing'\nassert b_callers == [] and sorted(a_callers) == ['ClientHandler.__call__', 'WSGIHandler.__call__'], (b_callers, a_callers)\nprint('seam ok: CALLS', b_calls, '->', a_calls, '| bound', n_moved, '| mro collisions', len(mro), '| unresolved rows', sum(b_rows.values()), '->', sum(a_rows.values()))\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/PYTHON-SELF-BINDING-1-django-before (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django by the base-revision binary on 2026-09-20, 18 s; served by the before binary /private/tmp/PYTHON-SELF-BINDING-1-before-bin/rmap{,d} copied from rust/target/release on the CLEAN tree before any candidate edit) and NEW /private/tmp/PYTHON-SELF-BINDING-1-django-after (fresh index by the candidate); both under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the after root STAYS",
+        "inputs": "django — BEFORE (read from the product 2026-09-20): `explain BaseHandler.get_response` (django/core/handlers/base.py:138) prints `Callers (0)`; the store holds 60,414 resolved CALLS and 91,514 unresolved CALLS of which 26,461 are `self.`/`cls.` keys, every one `calls_obj_method_needs_type_info` / `no_supporting_signal`; both true callers are unresolved rows: `django/core/handlers/wsgi.py:124 response = self.get_response(request)` in `WSGIHandler.__call__` (`class WSGIHandler(base.BaseHandler)` :113 — stored `{\"superclass\":\"base.BaseHandler\"}`) and `django/test/client.py:186` in `ClientHandler.__call__` (`class ClientHandler(BaseHandler)` :158). AFTER: `Callers (2)` with exactly those two rows anchored at the CALLER's DECLARATION line — the row form is `  - <name> (<module>)  <path>:<caller line_start>` (`find_symbol_callers` selects `caller.line_start`, agent_impl.rs:1181-1187; leveldb's `  - Open (db)  db/db_impl.cc:1503` is `Status DB::Open(` declared at :1503): `__call__ … django/core/handlers/wsgi.py:120` (`def __call__(self, environ, start_response)` :120; the call site :124 is the seam's witness) and `__call__ … django/test/client.py:169` (declared :169; call site :186); `asgi.py:231` (`ASGIHandler`, `await self.get_response_async(request)`) and `client.py:241` (`AsyncClientHandler`) are NOT callers; exception.py's closure calls are not callers; `callers BaseHandler.get_response` prints `2 callers found`. The store-derived seam (python over BOTH stores, rows keyed by the caller's qualified_name + file path + target_key + line — identities that survive a reindex, unlike `stable_key`, which embeds each index's own repo_uid — and counted as a MULTISET, since django has 700 rows sharing caller, target and line; OC-1): every unresolved row that left the set is a 2-part `self.`/`cls.` key; no unresolved row appeared; resolved CALLS grew by exactly the number that left; the ONLY basis changes are the rows now carrying `self_call_ambiguous_mro` (classification `internal_candidate`, category unchanged, `mroCandidates` ≥ 2 strings) — among them `django/contrib/auth/forms.py:576 self.validate_passwords()` in `AdminPasswordChangeForm.clean` (`class AdminPasswordChangeForm(SetUnusablePasswordMixin, SetPasswordMixin, forms.Form)` :550; both mixins define `validate_passwords`, :107 and :166 — the L's same-depth rule declines where Python's MRO would pick the first base). The totals are REPORTED (manager simulation, file-scoped own class then same-name ancestors: ~4,020 bound — 2,490 in the own class, 1,530 through ancestors — and 4 same-depth collisions; the candidate's exact numbers come from the seam's print)"
+      },
+      "expected": "exit 0: the audit's witness answers — two real callers, no invented one — every binding is a self/cls row that left the unresolved set on hierarchy evidence (a wrong binding that removed any other row would fail the seam — RG-REQ-001-L03), and the declined collisions are named",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "django fresh index by candidate. explain-before `Callers (0)`; explain-after `Callers (2)` = `__call__ (django/core/handlers)  django/core/handlers/wsgi.py:120` and `__call__ (django/test)  django/test/client.py:169`; no asgi.py/exception.py/AsyncClientHandler; `callers` → `2 callers found`. Store seam (OC-1 multiset keyed by caller qualified_name+file+target_key+line_start): `seam ok: CALLS 60414 -> 64354 | bound 3940 | mro collisions 4 | unresolved rows 91514 -> 87574`. Every moved unresolved row is a 2-part self./cls. key; no unresolved row appeared; resolved CALLS grew by exactly 3940; the only basis change is the 4 self_call_ambiguous_mro rows (internal_candidate, category calls_obj_method_needs_type_info, mroCandidates ≥2 strings); forms.py:576 collision present; callers of BaseHandler.get_response []→[ClientHandler.__call__, WSGIHandler.__call__]. Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-dj-explain-before.txt (Callers (0)), /tmp/psb-dj-explain-after.txt (Callers (2), wsgi.py:120, client.py:169), /tmp/psb-dj-callers-after.txt (2 callers found)",
+          "seam stdout: CALLS 60414->64354, bound 3940, mro 4, unresolved 91514->87574 — matches OC-1 manager verification (+3,940, 4 collisions)"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C09",
+      "obligationIds": [
+        "P-PSB-02",
+        "RG-REQ-006-L04",
+        "RG-REQ-005-L01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "rm -rf /private/tmp/PYTHON-SELF-BINDING-1-leveldb-after && mkdir -p /private/tmp/PYTHON-SELF-BINDING-1-leveldb-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-leveldb-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/psb-lv-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/psb-lv-index.txt\"; exit 1; } && rm -rf /private/tmp/PYTHON-SELF-BINDING-1-fraktag-after && mkdir -p /private/tmp/PYTHON-SELF-BINDING-1-fraktag-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/psb-frk-index.txt 2>&1 ) || { echo \"INDEX-FAILED /tmp/psb-frk-index.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/PYTHON-SELF-BINDING-1-before-bin:$PATH\" \"/private/tmp/PYTHON-SELF-BINDING-1-before-bin/rmap\" trust > /tmp/psb-lv-trust-before.txt 2> /tmp/psb-lv-trust-before.txt.err ) || { echo \"RUN-FAILED /tmp/psb-lv-trust-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-leveldb-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/psb-lv-trust-after.txt 2> /tmp/psb-lv-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/psb-lv-trust-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/PYTHON-SELF-BINDING-1-before-bin:$PATH\" \"/private/tmp/PYTHON-SELF-BINDING-1-before-bin/rmap\" trust > /tmp/psb-frk-trust-before.txt 2> /tmp/psb-frk-trust-before.txt.err ) || { echo \"RUN-FAILED /tmp/psb-frk-trust-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/psb-frk-trust-after.txt 2> /tmp/psb-frk-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/psb-frk-trust-after.txt\"; exit 1; } && grep -v '^Snapshot:' /tmp/psb-lv-trust-before.txt > /tmp/psb-lv-tb.txt && grep -v '^Snapshot:' /tmp/psb-lv-trust-after.txt > /tmp/psb-lv-ta.txt && diff /tmp/psb-lv-tb.txt /tmp/psb-lv-ta.txt && grep -v '^Snapshot:' /tmp/psb-frk-trust-before.txt > /tmp/psb-frk-tb.txt && grep -v '^Snapshot:' /tmp/psb-frk-trust-after.txt > /tmp/psb-frk-ta.txt && diff /tmp/psb-frk-tb.txt /tmp/psb-frk-ta.txt && python3 - /private/tmp/PYTHON-SELF-BINDING-1-leveldb-before /private/tmp/PYTHON-SELF-BINDING-1-leveldb-after /private/tmp/PYTHON-SELF-BINDING-1-fraktag-before /private/tmp/PYTHON-SELF-BINDING-1-fraktag-after <<'PY'\nimport sqlite3, glob, sys\ndef facts(root):\n    db = glob.glob(root + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\n    snap = k.execute(\"select snapshot_uid from snapshots order by created_at desc limit 1\").fetchone()[0]\n    calls = k.execute(\"select count(*) from edges where snapshot_uid = ? and type = 'CALLS'\", (snap,)).fetchone()[0]\n    cats = sorted(k.execute(\"select category, basis_code, count(*) from unresolved_edges where snapshot_uid = ? and type = 'CALLS' group by 1, 2\", (snap,)).fetchall())\n    return calls, cats\nfor name, b, a in (('leveldb', sys.argv[1], sys.argv[2]), ('fraktag', sys.argv[3], sys.argv[4])):\n    fb, fa = facts(b), facts(a)\n    assert fb == fa, (name, fb, fa)\n    print(name, 'byte-stable: CALLS', fa[0], 'unresolved by category/basis', fa[1])\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/PYTHON-SELF-BINDING-1-leveldb-before (1 s) and /private/tmp/PYTHON-SELF-BINDING-1-fraktag-before (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG, 1 s) by the base binary; NEW -after roots by the candidate; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the after roots STAY",
+        "inputs": "leveldb (C++: CALLS 3,488 resolved / 5,925 unresolved, all `calls_function_ambiguous_or_missing`) and FRAKTAG (TypeScript: 446 / 1,658 — obj_method 904, function 499, this_wildcard 146, this_method_needs_class_context 109; the TS `this.` rewrite route) reindexed by the candidate: the resolved CALLS count and the per-category/per-basis unresolved breakdown are identical to the before store, and `trust` is byte-identical apart from the `Snapshot:` line"
+      },
+      "expected": "exit 0: repositories without Python self-calls are byte-stable — the stage is gated on the carrier only Python writes (no behavior change for C++ and TypeScript; the receiver invariant and the TS import/`this.` stages preserved)",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "leveldb (C++) and FRAKTAG (TypeScript) reindexed by candidate. `trust` diff (minus Snapshot line) empty for both. Store facts equal before/after: leveldb `CALLS 3488` with identical category/basis breakdown; FRAKTAG `CALLS 446` with identical breakdown (incl. this_receiver_implies_internal 109/146 — the TS this. route unchanged). Repos without Python self-calls are byte-stable — the stage is gated on the Python-only carrier. Exit 0.",
+        "supportingEvidence": [
+          "diff /tmp/psb-lv-tb.txt /tmp/psb-lv-ta.txt and /tmp/psb-frk-tb.txt /tmp/psb-frk-ta.txt both empty",
+          "facts stdout: leveldb byte-stable CALLS 3488; fraktag byte-stable CALLS 446, full category/basis multiset identical"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C10",
+      "obligationIds": [
+        "RG-REQ-005-L09",
+        "RG-REQ-001-L03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-django-before RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/PYTHON-SELF-BINDING-1-before-bin:$PATH\" \"/private/tmp/PYTHON-SELF-BINDING-1-before-bin/rmap\" trust > /tmp/psb-dj-trust-before.txt 2> /tmp/psb-dj-trust-before.txt.err ) || { echo \"RUN-FAILED /tmp/psb-dj-trust-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SELF-BINDING-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SELF-BINDING-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" trust > /tmp/psb-dj-trust-after.txt 2> /tmp/psb-dj-trust-after.txt.err ) || { echo \"RUN-FAILED /tmp/psb-dj-trust-after.txt\"; exit 1; } && grep -qE \"^  - your code's calls 43% resolved \\(60414 of 140705 in-scope or unclassified\\)$\" /tmp/psb-dj-trust-before.txt && grep -qE '^  - your own code \\(call target not resolved\\): 42 references$' /tmp/psb-dj-trust-before.txt && python3 - /private/tmp/PYTHON-SELF-BINDING-1-django-after <<'PY'\nimport sqlite3, glob, re, sys\ndb = glob.glob(sys.argv[1] + '/databases/*.db')[0]; k = sqlite3.connect('file:' + db + '?mode=ro', uri=True)\nsnap = k.execute(\"select snapshot_uid from snapshots order by created_at desc limit 1\").fetchone()[0]\nmro = k.execute(\"select count(*) from unresolved_edges where snapshot_uid = ? and type = 'CALLS' and basis_code = 'self_call_ambiguous_mro'\", (snap,)).fetchone()[0]\ncalls = k.execute(\"select count(*) from edges where snapshot_uid = ? and type = 'CALLS'\", (snap,)).fetchone()[0]\nt = open('/tmp/psb-dj-trust-after.txt').read()\nown = int(re.search(r\"your own code \\(call target not resolved\\): (\\d+) references\", t).group(1))\nres = re.search(r\"your code's calls (\\d+)% resolved \\((\\d+) of (\\d+) in-scope or unclassified\\)\", t)\nassert own == 42 + mro, (own, mro)\nassert int(res.group(2)) == calls and calls > 60414, (res.group(2), calls)\nprint('trust after: resolved', res.group(1) + '%', res.group(2), 'of', res.group(3), '| own-code unresolved', own, '(+', mro, 'mro collisions)')\nPY",
+        "cwd": ".",
+        "environment": "the two django roots and binaries of PSB-C08",
+        "inputs": "django `trust` BEFORE: `your code's calls 43% resolved (60414 of 140705 in-scope or unclassified)`, `your own code (call target not resolved): 42 references`, `couldn't attribute: 80571 references`. AFTER (REPORTED, seam-checked): the resolved count equals the after store's CALLS edges and exceeds 60,414; the own-code bucket equals 42 + the number of `self_call_ambiguous_mro` rows (the only basis that moved into it); the trust caveat `call-graph resolution is at this build's ceiling for Python (no resolver exists)` still prints — it reads the ENRICHMENT language table (reader_context.rs:300-317, `token_enrichment_language`), which this slice does not change; its wording is a pre-existing residual (TRUST-CEILING-WORDING-1, §8), stated"
+      },
+      "expected": "exit 0: trust's numbers move only where the evidence moved — the resolved share up by the bound rows, the own-code bucket up by the named collisions — and the reader is told which counts changed and why",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "django `trust` before: `your code's calls 43% resolved (60414 of 140705 in-scope or unclassified)`, `your own code (call target not resolved): 42 references`. After (candidate): resolved `46% 64354 of 140705`; own-code bucket `46` == 42 + 4 self_call_ambiguous_mro rows; the resolved count equals the after store's CALLS edges (64354) and exceeds 60414. Trust moves only where evidence moved. Exit 0.",
+        "supportingEvidence": [
+          "/tmp/psb-dj-trust-before.txt grep-confirmed baseline strings",
+          "python assertion stdout: `trust after: resolved 46% 64354 of 140705 | own-code unresolved 46 (+ 4 mro collisions)`; own == 42 + mro asserted"
+        ]
+      }
+    },
+    {
+      "checkId": "PSB-C11",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-PSB-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/PYTHON-SELF-BINDING-1/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && ! test -d /private/tmp/PYTHON-SELF-BINDING-1-before-bin && ls -d /private/tmp/PYTHON-SELF-BINDING-1-django-after /private/tmp/PYTHON-SELF-BINDING-1-leveldb-after /private/tmp/PYTHON-SELF-BINDING-1-fraktag-after >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] (rust/crates/python\\-extractor/src/extractor\\.rs|rust/crates/indexer/src/resolver\\.rs|rust/crates/indexer/src/orchestrator\\.rs|rust/crates/indexer/tests/call_binding_receiver\\.rs|rust/crates/storage/src/indexer_impl\\.rs|rust/crates/classification/src/types\\.rs|rust/crates/classification/src/unresolved_classifier\\.rs|rust/crates/agent/src/attribution\\.rs|classification\\-parity\\-fixtures/classify__self\\-mro\\-ambiguous/input\\.json|classification\\-parity\\-fixtures/classify__self\\-mro\\-ambiguous/expected\\.json|rust/crates/repo\\-index/tests/integration\\.rs)$' | grep -q . && git diff --check && ! grep -nE ' +$' classification-parity-fixtures/classify__self-mro-ambiguous/input.json classification-parity-fixtures/classify__self-mro-ambiguous/expected.json",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in build-progress.md at step 0 equals the current one; no stray isolated daemon; the before-binary directory removed; the three `-after` roots kept for the manager's gate; `git status --short` (porcelain columns ` M`, `A `, `AM`, `??`) names only the 11 candidate paths; no trailing whitespace"
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry byte-identical — no behavior change outside the isolated roots), the tree holds only the allocated paths, and nothing the builder created outlives the run except the three roots the manager sweeps at closeout",
+      "candidateSha256": "sha256:9a98f3fec2ff9e18b1594b4b1e4d9f3950799eb1a5fcde71e754f0636ced5a5b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "registry-before digest in build-progress.md (4762fd94…d64c) equals the current operator registry sha256 — operator registry byte-identical, every proof isolated. No stray non-installed rmapd (only the operator's /.local/bin/rmapd pid 5503, correctly excluded). before-bin directory absent; the three -after roots present (kept for the operator gate). `git status --short` names only the 11 candidate paths (2 staged fixtures A , 9 modified rust paths M). `git diff --check` clean; no trailing whitespace in the fixtures. Exit 0.",
+        "supportingEvidence": [
+          "C11 command exit 0",
+          "git status --short = 2 fixtures + 9 rust paths, no strays"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/python-extractor/src/extractor.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L02"
+      ],
+      "summary": "emit_call_edge stamps the self/cls call carrier {\"selfCall\":true,\"enclosingClass\":\"C\"} on 2-part self./cls. keys inside a class (pure self_call_carrier fn); chains and module-level self-calls carry nothing; target key never rewritten. Binding evidence, not a rewrite. +4 unit tests."
+    },
+    {
+      "path": "rust/crates/indexer/src/resolver.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L02",
+        "RG-REQ-001-L03",
+        "RG-REQ-005-L01"
+      ],
+      "summary": "superclasses_from_metadata (pure parse of raw Python base text to simple names); ResolverNode.superclasses and ResolverIndex.nodes_by_qualified_name fields; one carrier-gated stage before the dotted fallback (resolve_self_call BFS over the class hierarchy); new terminal TargetResolution::SelfCallAmbiguousMro with an exhaustive resolve_edges arm that keeps the category and injects mroCandidates; resolve_call_target return type widened Option→TargetResolution. C-family receiver gate at :1000 untouched (RG-REQ-005-L01). +8 unit tests."
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03"
+      ],
+      "summary": "Populate nodes_by_qualified_name beside nodes_by_name at index build; add the two new ResolverIndex/ResolverNode fields at the run_pipeline literal and the MockStorage test literal (superclasses via superclasses_from_metadata)."
+    },
+    {
+      "path": "rust/crates/indexer/tests/call_binding_receiver.rs",
+      "obligationIds": [
+        "RG-REQ-005-L01"
+      ],
+      "summary": "Add the two new struct fields (superclasses: Vec::new(), nodes_by_qualified_name: HashMap::new()) to the C-family test fixtures; the receiver invariant assertions are unchanged (preservation)."
+    },
+    {
+      "path": "rust/crates/storage/src/indexer_impl.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03"
+      ],
+      "summary": "query_resolver_nodes feeds superclasses from the metadata_json local the SELECT already binds — no SQL and no schema change. +1 unit test (BaseHandler/Abc/Plain)."
+    },
+    {
+      "path": "rust/crates/classification/src/types.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L09"
+      ],
+      "summary": "Add UnresolvedEdgeBasisCode::SelfCallAmbiguousMro (wire self_call_ambiguous_mro); the category vocabulary is untouched and CURRENT_CLASSIFIER_VERSION stays 6 (additive per the vocabulary contract)."
+    },
+    {
+      "path": "rust/crates/classification/src/unresolved_classifier.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-001-L03"
+      ],
+      "summary": "Rule 0: an edge carrying well-formed mroCandidates (array of ≥2 strings) classifies internal_candidate + self_call_ambiguous_mro; a malformed carrier falls through to the existing rules (has_mro_candidates helper). +3 unit tests."
+    },
+    {
+      "path": "rust/crates/agent/src/attribution.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L09"
+      ],
+      "summary": "Map SelfCallAmbiguousMro to AttributionClass::OwnCodeUnresolved (the one compile-forced site); EXPECTED gains the pair, EXPECTED.len() 17→18. +1 unit test."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/integration.rs",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-001-L09"
+      ],
+      "summary": "New end-to-end test index_python_binds_a_self_call_to_the_own_class_method on the unchanged simple-app fixture: own-class self-call binds, 3-part chain stays as before, indexing twice yields the same CALLS count."
+    },
+    {
+      "path": "classification-parity-fixtures/classify__self-mro-ambiguous/input.json",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-001-L03"
+      ],
+      "summary": "New parity-corpus input in the classify__this-receiver shape: the AdminPasswordChangeForm collision edge with mroCandidates."
+    },
+    {
+      "path": "classification-parity-fixtures/classify__self-mro-ambiguous/expected.json",
+      "obligationIds": [
+        "RG-REQ-005-L03",
+        "RG-REQ-001-L03"
+      ],
+      "summary": "New parity-corpus expected verdict: {classification: internal_candidate, basisCode: self_call_ambiguous_mro}."
+    }
+  ],
+  "completedAt": "2026-09-21T05:33:00.662Z",
+  "limitations": [
+    "Per CLAUDE.md 'Gates in a relay run', I did NOT run `cargo test --workspace`, the smoke protocol, or the isolated dogfood — those are the operator's gate after acceptance. Their absence is not a gap in builder evidence.",
+    "The candidate is the first admission's preserved candidate-1.patch, continued unchanged (no code change was required this cycle, per the RESUME NOTE); I re-ran every check PSB-C01..C11 in the foreground on freshly-built before/after binaries and fresh -after indexes.",
+    "Observation (not a defect, within RG-REQ-005-L02): the new hierarchy stage runs before the bare-name fallback, so 36,307 django self/cls CALLS edges carry the carrier and bind on hierarchy evidence; the net +3,940 the seam measures is the movement from the unresolved set, while the remainder were already bound by the pre-existing unique bare-name rule. The stage strengthens binding to hierarchy evidence, never weakens it; the ratified OC-1 seam (unresolved-set movement + callers witness) is the acceptance oracle and passed.",
+    "PSB-C08's per-run RMAP_TRANSPORT=stdio spawns rmapd as a subprocess (no socket bound in this environment); all invocations were confined to /private/tmp/PYTHON-SELF-BINDING-1-* roots and the operator registry sha256 is byte-identical before/after (PSB-C11)."
+  ],
+  "report": "PYTHON-SELF-BINDING-1, second admission under INPUT-3. The candidate (candidate-1.patch) was applied to the clean tree (HEAD 8b37771, rust unchanged since ed78de2), the two new parity fixtures staged (A ), git status = the 11 candidate paths. No code change was required. All eleven checks PSB-C01..C11 pass (EXECUTED, exit 0 each), run in the foreground on this cycle's before-binaries (built from the clean tree before `git apply`), candidate release binaries, and fresh -after indexes.\n\nCODE-UNDER-ANALYSIS (django, quoted from the checkout at /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django and the candidate's store):\n(1) The two real caller sites — before this slice they were unresolved rows, after they are the two rendered callers.\n  - django/core/handlers/wsgi.py:124  `        response = self.get_response(request)` in `__call__` (declared wsgi.py:120), inside `class WSGIHandler(base.BaseHandler):` (wsgi.py:113). BEFORE: explain BaseHandler.get_response → `Callers (0)`. AFTER: row `- __call__ (django/core/handlers)  django/core/handlers/wsgi.py:120` (the row anchors the caller's declaration; the call site is :124). This is an ancestor-depth binding: WSGIHandler's stored superclass BaseHandler → get_response declared in base.py:138.\n  - django/test/client.py:186  `        response = self.get_response(request)` in `__call__` (declared client.py:169), inside `class ClientHandler(BaseHandler):` (client.py:158). AFTER: row `- __call__ (django/test)  django/test/client.py:169`.\n  `callers BaseHandler.get_response` → `2 callers found`: `WSGIHandler.__call__  django/core/handlers/wsgi.py:120` and `ClientHandler.__call__  django/test/client.py:169`.\n(2) Non-caller correctly excluded: django/core/handlers/asgi.py:231  `        response = await self.get_response_async(request)` — a call to get_response_async, NOT get_response; it does not appear in the after callers, and no asgi.py/exception.py/AsyncClientHandler row is present.\n(3) MRO collision, declined and named: django/contrib/auth/forms.py:576  `        self.validate_passwords()` in `AdminPasswordChangeForm.clean`, inside `class AdminPasswordChangeForm(SetUnusablePasswordMixin, SetPasswordMixin, forms.Form):` (forms.py:550). Both mixins define `validate_passwords` at the same BFS depth — SetUnusablePasswordMixin (forms.py:166) and SetPasswordMixin (forms.py:107). The stored unresolved row keeps category calls_obj_method_needs_type_info, gains basis self_call_ambiguous_mro, classification internal_candidate, and mroCandidates [SetPasswordMixin.validate_passwords, SetUnusablePasswordMixin.validate_passwords]. The seam confirms this exact (target_key=self.validate_passwords, file=django/contrib/auth/forms.py, line_start=576) collision is present.\n(4) One own-class binding and one ancestor-depth binding taken from the after store:\n  - own-class: MigrationAutodetector._get_dependencies_for_model (django/db/migrations/autodetector.py:1738) → MigrationAutodetector._get_dependencies_for_foreign_key (autodetector.py:1641).\n  - ancestor-depth: WSGIHandler.__call__ (wsgi.py:124 call site) → BaseHandler.get_response (base.py:138), as in (1).\n(5) Residuals that correctly stay unresolved:\n  - attribute chain: django/contrib/gis/db/models/aggregates.py:34  `            tolerance = self.extra.get(\"tolerance\") or getattr(self, \"tolerance\", 0.05)` — self.extra.get is a 3-part key, no carrier stamped, stays unresolved (never mis-bound).\n  - external base: tests/utils_tests/test_autoreload.py:447  `        self.assertIs(cm.exception.__cause__, urlconf_exc)` in `class TestCheckErrors(SimpleTestCase):` (test_autoreload.py:425) — SimpleTestCase is not indexed, the walk finds no defining ancestor, stays unresolved (no guess).\n(6) Seam numbers (OC-1 corrected multiset over both django stores): CALLS 60,414 → 64,354 (bound 3,940); MRO collisions 4; unresolved CALLS rows 91,514 → 87,574. Every moved unresolved row is a 2-part self./cls. key; no unresolved row appeared; resolved CALLS grew by exactly the number that left; the only basis change is the 4 collision rows. Trust: 43% (60,414/140,705) own-code 42 → 46% (64,354/140,705) own-code 46 (= 42 + 4). This matches the manager's OC-1 verification (+3,940 bound, 4 collisions).\n\nPRESERVATION: leveldb (C++, CALLS 3,488) and FRAKTAG (TypeScript, CALLS 446) are byte-stable — trust output identical apart from the Snapshot line, and the full unresolved category/basis multiset identical before/after (incl. the TS this_receiver_implies_internal route). The other extractors, the trust crate, call_resolution_reads.rs (CALLS_CATEGORIES) and enrichment are byte-identical (git diff --quiet). The C-family receiver gate and the whole Q1 call_binding_receiver suite are green (RG-REQ-005-L01). Rust/Java/TS import stages and forward-decl handling green (RG-REQ-006-L01/L02/L04, RG-REQ-005-L07). Determinism proven by index-twice equality (RG-REQ-001-L09). Isolation proven: operator registry sha256 byte-identical before/after (RG-REQ-011-L06). All within the 11 allocated candidate paths; no category-vocabulary change; no schema/SQL/CLI change; classifier version stays 6."
+}

@@ -161,6 +161,7 @@ pub fn attribution_class(basis: UnresolvedEdgeBasisCode) -> AttributionClass {
         | B::CalleeMatchesSameFileSymbol
         | B::CalleeMatchesInternalImport
         | B::ThisReceiverImpliesInternal
+        | B::SelfCallAmbiguousMro
         | B::RelativeImportTargetUnresolved
         | B::RustCrateInternalModuleHeuristic => AttributionClass::OwnCodeUnresolved,
         // Framework runtime wiring (Express route/middleware registration).
@@ -592,6 +593,10 @@ mod tests {
             AttributionClass::OwnCodeUnresolved,
         ),
         (
+            UnresolvedEdgeBasisCode::SelfCallAmbiguousMro,
+            AttributionClass::OwnCodeUnresolved,
+        ),
+        (
             UnresolvedEdgeBasisCode::RelativeImportTargetUnresolved,
             AttributionClass::OwnCodeUnresolved,
         ),
@@ -615,12 +620,22 @@ mod tests {
 
     #[test]
     fn every_basis_code_maps_to_its_expected_reader_class() {
-        // 17 basis codes → 6 reader classes. The count pins that no variant was
+        // 18 basis codes → 6 reader classes. The count pins that no variant was
         // dropped from EXPECTED when the classifier vocabulary last changed.
-        assert_eq!(EXPECTED.len(), 17, "all 17 basis codes must be covered");
+        assert_eq!(EXPECTED.len(), 18, "all 18 basis codes must be covered");
         for &(basis, expected) in EXPECTED {
             assert_eq!(attribution_class(basis), expected, "basis {basis:?}");
         }
+    }
+
+    #[test]
+    fn self_call_ambiguous_mro_is_own_code_unresolved() {
+        // PYTHON-SELF-BINDING-1: a declined Python self-call MRO collision is the reader's own
+        // code (the call target is in the reader's class hierarchy, just not uniquely resolvable).
+        assert_eq!(
+            attribution_class(UnresolvedEdgeBasisCode::SelfCallAmbiguousMro),
+            AttributionClass::OwnCodeUnresolved
+        );
     }
 
     #[test]
