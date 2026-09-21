@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-SELF-BINDING-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-SELF-BINDING-1-INPUT-3.json",
+    "sha256": "sha256:4ec12ce1cb577b710bce61dc53c7d0a41ff9b2d228d56d8a33cc61bac30cf304"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-SELF-BINDING-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:a532f11555699296af3b39a90b61b7e70fa4dd0bf14bcb5993f984d88fa4ff88"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-21T05:10:57.961Z",
+  "rationale": "Q9 INPUT-3: oracle correction OC-1 (PSB-C08's store seam keyed by reindex-stable identities as a multiset; verified by the manager on the first admission's before/after django stores: +3,940 bound, 4 collisions); allocation unchanged; codex gpt-5.6-terra document review accepted 15/15 at PREP-3 cycle 1 with zero findings; validator ALLOCATION VALID."
+}
