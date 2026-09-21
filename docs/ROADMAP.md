@@ -1201,6 +1201,22 @@ gap, noted).
 NEXT: SEED-DOCUMENT-1 (RG-REQ-010) — one hour after this closeout; Q8 DOCS-DISCOVERY-1 still needs RG-REQ-008-L01 ratified.
 after the standing one-hour wait.
 
+CORRECTION 2026-09-21 (manager; corrects the three NEXT lines above — after the Q7, Q9 and ALIAS-SUSPICION-1 blocks — and the
+`docs-discovery-1.md (awaits RG-REQ-008-L01)` remark below): the statement "Q8 DOCS-DISCOVERY-1 still needs RG-REQ-008-L01
+ratified" was FALSE. The human ratified RG-REQ-008-L01 on 2026-09-14 (commit c1df38d; `docs/requirements/README.md` decisions
+line; the requirement file's own STATUS line: "RATIFIED 2026-09-14 … Queue Q8 DOCS-DISCOVERY-1 is unblocked"). The false claim
+was read from the stale 2026-09-12 status header of `docs/slices/docs-discovery-1.md` ("DEPENDS ON HUMAN RATIFICATION … PROPOSED")
+and never checked against the requirement file; Q8 was skipped in the ratified order for that reason alone. Q8 is next.
+SEED-DOCUMENT-1: the manager's pre-packet mechanism spike (`docs/audits/2026-09-21-seed-document-spike-1.md`) measured the
+ratified composition on the requirement's own query with the product's model: the enclosing type's doc is the whole effect
+(FRAKTAG `ConversationManager.createSession` 0.274 → 0.333…0.372, into the top ten above the unchanged 0.30 floor); the bounded
+identifier summary RG-REQ-010-L10 also names has no measurable benefit and a small cost (−0.016 on the target); the whole class
+doc dilutes precise matches on grpc-java (`AbstractStub.withDeadline` rank 2 → 9) and turns short members into class-doc echoes
+(a logger field at rank 1), the first sentence alone does not. The requirement's wording and the composition bound are the
+human's decision — put to the human 2026-09-21; SEED-DOCUMENT-1 is packeted after the answer.
+NEXT: Q8 DOCS-DISCOVERY-1 (RG-REQ-008-L01/L02/L06/L07, RG-REQ-003-L09); then SEED-DOCUMENT-1 on the human's answer; then the
+release cut (`scripts/cut_release_minor.sh` → v0.19.0).
+
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
 verification criterion and a v0.18.0 evidence reading; independently reviewed (Codex gpt-5.6-terra, REFINE, findings applied;
