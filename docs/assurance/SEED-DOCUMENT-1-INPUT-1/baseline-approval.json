@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "SEED-DOCUMENT-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/SEED-DOCUMENT-1-INPUT-1.json",
+    "sha256": "sha256:8abbcc71394d40ff29d12315b3818ded09276a36fe5facdee3bd18f318ebb336"
+  },
+  "review": {
+    "path": "docs/assurance/SEED-DOCUMENT-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:9099cb55896ae9015bfe981428e39e264b855e711cb90997193fc2db4c2191b0"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-22T21:40:27.955Z",
+  "rationale": "Operator approves SEED-DOCUMENT-1's first admission baseline (RG-REQ-010-L10 as revised by the human's D-SD1-001): the composition adds the first sentence of the enclosing type's doc to METHOD chunks (D-SD1-002 revised per SD-DEC-01, re-measured in the spike addendum), the parent gated to canonical TYPE subtypes (SD-F02), found in the same file first else uniquely corpus-wide over the complete entry collection before the corpus cap (SD-F03, F-SD-001), candidate-created after-roots removed by the builder (SD-F01); three document items (PREP blocked decision-required; PREP-2 two cycles; PREP-3 accepted at cycle 2); authors claude-opus-5-5, reviewer codex gpt-5.6-terra."
+}
