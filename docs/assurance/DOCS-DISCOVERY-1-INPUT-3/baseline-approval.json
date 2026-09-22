@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCS-DISCOVERY-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-3.json",
+    "sha256": "sha256:91c2e764743e2d84ccb156a03c87c52745f2a9ab587c820d0ca2862cf8d5e27c"
+  },
+  "review": {
+    "path": "docs/assurance/DOCS-DISCOVERY-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:d1285945a4df4b03bb39d42eb8ae0dd3312147c41f46870997ccb2a4da1ca24e"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-22T19:23:20.648Z",
+  "rationale": "Operator approves DOCS-DISCOVERY-1's third admission baseline: OC-2 (every cargo check's negated grep matches Rust failure markers, never words — the second implementation admission passed 13/14 with the product complete and DD-C06 failed only on the manager's word-grep; hadoop generated-maps figure corrected to the observed 6,813 in DD-C05); accepted at cycle 2 by codex gpt-5.6-terra (cycle 1: the author had corrected the figure at two sites beyond OC-2's scope — reverted); author claude-opus-5-5."
+}
