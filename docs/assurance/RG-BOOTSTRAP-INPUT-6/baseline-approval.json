@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-6",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-6.json",
+    "sha256": "sha256:f53eccaa01d2f2a3b3faa9264165a8b09d40a7aa340104707729ced967769897"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-6/requirements-review.json",
+    "sha256": "sha256:1a606c3123c86b591dd41bce0a8966b1129d2777d0f000946232f295201dd327"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-22T03:54:40.000Z",
+  "rationale": "Operator approves the sixth bootstrap baseline: the human's revision of RG-REQ-010-L10's wording (D-SD1-001, 'first sentence only', 2026-09-21 \u2014 the enclosing type's first doc sentence under the slice-owned constant MAX_ENCLOSING_SENTENCE_CHARS; the identifier summary dropped as measured harmful), plus the text-only catalog correction CC-8 on RG-REQ-008-L01's verification criterion (measured field numbers over 17 enumerated checkouts, exact moving/byte-stable partition, matching semantics stated, uppercase-extension admission left as an open question for the human); codex gpt-5.6-terra standalone review REFINE (four findings, all applied) then ACCEPT; only the two requirement files' digests move. The human's authority for requirement wording is the ratification itself; the operator records it under docs/assurance/RG-BOOTSTRAP/human-authorization.md."
+}
