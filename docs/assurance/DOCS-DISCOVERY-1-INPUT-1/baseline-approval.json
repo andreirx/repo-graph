@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCS-DISCOVERY-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-1.json",
+    "sha256": "sha256:aee5d14d25491b564515b3c97b3e763b4978d9a6c63a7e2aa9907275fcda4958"
+  },
+  "review": {
+    "path": "docs/assurance/DOCS-DISCOVERY-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:bb6081940f5dbe26f8e8ab29a618039cac2404de64a90857e41627d06ca620f3"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-22T18:01:52.613Z",
+  "rationale": "Operator approves DOCS-DISCOVERY-1's first admission baseline: the specification and allocation (12 checks, 10 candidate paths) grounded on the CC-8 measurement over 17 checkouts under RG-BOOTSTRAP-INPUT-7 (case-insensitive matching, D-DD1-003; debian/install kept as ratified); document item accepted at cycle 1 by codex gpt-5.6-terra after the author corrected two line citations (orient_additive_fields.rs:165, agent_orient_reads.rs:90); D-DD1-001 and D-DD1-002 are operator decisions the human may override."
+}
